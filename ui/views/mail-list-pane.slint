@@ -353,7 +353,9 @@ export component MailListPane inherits Rectangle {
                                 animate opacity { duration: 120ms; }
                                 accessible-role: list-item;
                                 accessible-label: @tr("{}, {}", row.sender, row.subject == "" ? @tr("(No subject)") : row.subject)
-                                    + (row.label_summary == "" ? "" : ", " + row.label_summary);
+                                    + (row.label_summary == "" ? "" : ", " + row.label_summary)
+                                    + (row.has_attachments ? ", " + @tr("Has attachments") : "")
+                                    + (row.has_replied ? ", " + @tr("Replied") : "");
                                 accessible-id: "mail-row-" + row.id;
                                 accessible-item-index: index;
                                 accessible-item-selectable: true;
@@ -384,9 +386,9 @@ export component MailListPane inherits Rectangle {
                                     height: root.dense ? 44px : 80px;
 
                                     sender-time := Text {
-                                        x: parent.width - 72px;
+                                        x: parent.width - self.width;
                                         y: 0px;
-                                        width: 72px;
+                                        width: min(72px, self.preferred-width);
                                         height: root.dense ? 44px : 22px;
                                         text: row.time;
                                         color: root.muted-text;
@@ -395,10 +397,39 @@ export component MailListPane inherits Rectangle {
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
                                     }
+                                    sender-indicators := HorizontalBox {
+                                        x: sender-time.x - self.width - 4px;
+                                        y: 0px;
+                                        width: row.has_attachments && row.has_replied ? 32px
+                                            : row.has_attachments || row.has_replied ? 14px : 0px;
+                                        height: root.dense ? 44px : 22px;
+                                        spacing: 4px;
+                                        cross-axis-alignment: center;
+
+                                        if row.has_attachments : Image {
+                                            width: 14px;
+                                            height: 14px;
+                                            source: @image-url("../icons/phosphor/paperclip.svg");
+                                            colorize: root.muted-text;
+                                            image-fit: contain;
+                                            accessible-role: none;
+                                        }
+                                        if row.has_replied : Image {
+                                            width: 14px;
+                                            height: 14px;
+                                            source: @image-url("../icons/phosphor/arrow-bend-up-left.svg");
+                                            colorize: root.muted-text;
+                                            image-fit: contain;
+                                            accessible-role: none;
+                                        }
+                                    }
                                     sender-title := Text {
                                         x: 0px;
                                         y: 0px;
-                                        width: root.dense ? min(170px, max(0px, parent.width - 190px)) : max(0px, parent.width - 94px);
+                                        width: root.dense ? min(170px, max(0px, parent.width - 190px))
+                                            : row.has_attachments || row.has_replied
+                                                ? max(0px, sender-indicators.x - 4px)
+                                                : max(0px, sender-time.x - 22px);
                                         height: root.dense ? 44px : 22px;
                                         text: row.sender;
                                         color: root.heading;
@@ -411,7 +442,7 @@ export component MailListPane inherits Rectangle {
                                         visible: row.unread;
                                         x: root.dense
                                             ? min(sender-title.preferred-width + 6px, sender-title.width - 9px)
-                                            : min(sender-title.preferred-width + 6px, sender-time.x - 11px);
+                                            : min(sender-title.preferred-width + 6px, sender-title.width - 9px);
                                         y: root.dense ? 18px : 8px;
                                         width: 7px;
                                         height: 7px;

@@ -52,6 +52,8 @@ pub(crate) struct WarmStartMessage {
     pub(crate) starred: bool,
     pub(crate) has_attachments: bool,
     #[serde(default)]
+    pub(crate) has_replied: bool,
+    #[serde(default)]
     pub(crate) labels: Vec<i64>,
     pub(crate) sender_verification: String,
 }
@@ -75,6 +77,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             unread: message.unread,
             starred: message.starred,
             has_attachments: message.has_attachments,
+            has_replied: message.has_replied,
             labels: message.labels.clone(),
             sender_verification: message.sender_verification.clone(),
         }
@@ -101,6 +104,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             unread: message.unread,
             starred: message.starred,
             has_attachments: message.has_attachments,
+            has_replied: message.has_replied,
             labels: message.labels,
             html: None,
             body_pending: true,
@@ -645,6 +649,7 @@ mod warm_start_tests {
             unread: true,
             starred: false,
             has_attachments: false,
+            has_replied: true,
             labels: Vec::new(),
             html: Some("<p>body must not enter warm cache</p>".into()),
             body_pending: false,
@@ -702,6 +707,7 @@ mod warm_start_tests {
         assert_eq!(restored.messages.len(), 1);
         let restored_message = mail::MailMessage::from(restored.messages[0].clone());
         assert_eq!(restored_message.subject, "Cached subject");
+        assert!(restored_message.has_replied);
         assert!(restored_message.html.is_none());
         assert!(restored_message.body_pending);
     }

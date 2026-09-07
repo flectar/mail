@@ -35,6 +35,7 @@
       "unread": true,
       "starred": true,
       "has_attachments": false,
+      "has_replied": true,
       "sender_verification": ""
     },
     {
@@ -53,6 +54,7 @@
       "unread": true,
       "starred": false,
       "has_attachments": true,
+      "has_replied": false,
       "sender_verification": "domain"
     },
     {
@@ -71,6 +73,7 @@
       "unread": false,
       "starred": false,
       "has_attachments": false,
+      "has_replied": false,
       "sender_verification": ""
     }
   ],

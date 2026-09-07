@@ -408,6 +408,7 @@ pub struct ThreadSummary {
     pub unread_count: i64,
     pub is_starred: bool,
     pub has_attachments: bool,
+    pub has_replied: bool,
     pub snoozed_until: Option<i64>,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,

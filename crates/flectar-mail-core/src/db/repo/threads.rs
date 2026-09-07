@@ -17,6 +17,7 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
         unread_count: row.get("unread_count")?,
         is_starred: row.get::<_, i64>("starred_count")? > 0,
         has_attachments: row.get::<_, i64>("attachment_count")? > 0,
+        has_replied: row.get::<_, i64>("has_replied")? > 0,
         snoozed_until: row.get("snoozed_until")?,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
@@ -38,6 +39,13 @@ const SUMMARY_SELECT: &str = "
               FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1) AS subject,
            t.snippet, t.participants_json, t.last_message_at, t.message_count,
            t.unread_count, t.starred_count, t.attachment_count,
+           EXISTS (
+               SELECT 1 FROM messages reply
+               JOIN message_refs mr ON mr.message_id = reply.id
+               WHERE reply.thread_id = t.id
+                 AND reply.is_outgoing = 1
+                 AND reply.is_draft = 0
+           ) AS has_replied,
            s.wake_at AS snoozed_until,
            (SELECT group_concat(DISTINCT ml.label_id) FROM message_labels ml
               JOIN messages ml_m ON ml_m.id = ml.message_id
@@ -440,6 +448,64 @@ pub fn count(conn: &Connection, args: &ListArgs) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_reports_only_sent_replies_as_replied() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let (thread_id, _) =
+            crate::db::testutil::seed_message(&conn, "sender@example.com", "Update", false);
+
+        assert!(!get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+
+        let insert_message = |uid: i64,
+                              message_id: &str,
+                              is_draft: bool,
+                              is_outgoing: bool,
+                              references_original: bool| {
+            let from_addr = if is_outgoing {
+                "me@test.dev"
+            } else {
+                "sender@example.com"
+            };
+            conn.execute(
+                "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+                 from_addr, date, is_read, is_draft, is_outgoing)
+                 VALUES (?1, 1, 1, ?2, ?3, 'Re: Update', ?4, 1100, 1, ?5, ?6)",
+                params![
+                    thread_id,
+                    uid,
+                    message_id,
+                    from_addr,
+                    is_draft as i64,
+                    is_outgoing as i64
+                ],
+            )
+            .unwrap();
+            if references_original {
+                let reply_id = conn.last_insert_rowid();
+                conn.execute(
+                    "INSERT INTO message_refs (message_id, ref_message_id) VALUES (?1, 'mid-1')",
+                    params![reply_id],
+                )
+                .unwrap();
+            }
+        };
+
+        insert_message(2, "incoming-reply-mid", false, false, true);
+        assert!(!get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+
+        insert_message(3, "draft-reply-mid", true, true, true);
+        assert!(!get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+
+        insert_message(4, "sent-new-message-mid", false, true, false);
+        assert!(!get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+
+        insert_message(5, "sent-reply-mid", false, true, true);
+        recompute(&conn, thread_id).unwrap();
+
+        assert!(get_summary(&conn, thread_id).unwrap().unwrap().has_replied);
+    }
 
     #[test]
     fn scalar_count_matches_the_unpaginated_list_filter() {
