@@ -221,7 +221,9 @@ export component MailListPane inherits Rectangle {
                                 title-font-size: root.compact ? TypeScale.title-small : TypeScale.heading-small;
                                 title-weight: 600;
                                 show-leading: true;
-                                leading-icon: @image-url("../icons/phosphor/sidebar-simple-fill.svg");
+                                leading-icon: root.mail_sidebar_collapsed
+                                    ? @image-url("../icons/phosphor/sidebar-simple.svg")
+                                    : @image-url("../icons/phosphor/sidebar-simple-fill.svg");
                                 leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                                 leading-accessible-id: "mail-folders-button";
                                 leading-ghost: true;
@@ -275,17 +277,17 @@ export component MailListPane inherits Rectangle {
                     }
 
                     Rectangle {
-                        height: 32px;
+                        height: 40px;
                         background: root.surface;
                         HorizontalBox {
                             x: 0px;
                             y: 0px;
                             width: parent.width;
                             height: parent.height;
-                            padding-top: 4px;
+                            padding-top: 8px;
                             padding-left: 12px;
                             padding-right: 12px;
-                            padding-bottom: 4px;
+                            padding-bottom: 8px;
                             Text {
                                 height: 24px;
                                 horizontal-stretch: 1;

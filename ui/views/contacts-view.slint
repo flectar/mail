@@ -377,7 +377,9 @@ export component ContactsView inherits Rectangle {
                             title-font-size: root.compact ? TypeScale.title-small : TypeScale.heading-small;
                             title-weight: 600;
                             show-leading: !root.compact;
-                            leading-icon: @image-url("../icons/phosphor/sidebar-simple-fill.svg");
+                            leading-icon: root.sidebar-collapsed
+                                ? @image-url("../icons/phosphor/sidebar-simple.svg")
+                                : @image-url("../icons/phosphor/sidebar-simple-fill.svg");
                             leading-tooltip: root.sidebar-collapsed ? @tr("Show contact groups") : @tr("Hide contact groups");
                             leading-accessible-id: "contacts-sidebar-button";
                             leading-ghost: true;
@@ -410,16 +412,21 @@ export component ContactsView inherits Rectangle {
                 }
 
                 Rectangle {
-                    height: 24px;
-                    Text {
-                        x: 12px;
-                        width: parent.width - 24px;
-                        height: parent.height;
-                        text: root.status;
-                        color: root.muted-text;
-                        font-size: TypeScale.caption;
-                        vertical-alignment: center;
-                        overflow: elide;
+                    height: 40px;
+                    HorizontalBox {
+                        padding-top: 8px;
+                        padding-right: 12px;
+                        padding-bottom: 8px;
+                        padding-left: 12px;
+                        Text {
+                            height: 24px;
+                            horizontal-stretch: 1;
+                            text: root.status;
+                            color: root.muted-text;
+                            font-size: TypeScale.caption;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
                     }
                 }
 
