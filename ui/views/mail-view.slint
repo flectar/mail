@@ -49,6 +49,7 @@ export component MailView inherits Rectangle {
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     in property <int> list_content_revision: 0;
+    in property <int> selection-count: 0;
     in property <bool> has_selected: true;
     in property <int> previous-email-id: -1;
     in property <int> next-email-id: -1;
@@ -104,6 +105,8 @@ export component MailView inherits Rectangle {
     callback sync_mail();
     callback message_action(string);
     callback message_action_for_email(int, string);
+    callback set_email_checked(int, bool);
+    callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
     callback save_mail_label(int, string, color);
     callback search_mail_labels(string);
@@ -186,6 +189,7 @@ export component MailView inherits Rectangle {
                 can_load_more: root.can_load_more;
                 loading_more: root.loading_more;
                 content_revision: root.list_content_revision;
+                selection-count: root.selection-count;
                 mail_sidebar_collapsed <=> root.mail_sidebar_collapsed;
                 accent: root.accent;
                 accent-soft: root.accent-soft;
@@ -212,6 +216,8 @@ export component MailView inherits Rectangle {
                 message_action_for_email(id, action) => {
                     root.message_action_for_email(id, action);
                 }
+                set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
+                set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
 
             Rectangle { width: 1px; background: root.border; }
@@ -382,6 +388,7 @@ export component MailView inherits Rectangle {
                 can_load_more: root.can_load_more;
                 loading_more: root.loading_more;
                 content_revision: root.list_content_revision;
+                selection-count: root.selection-count;
                 mail_sidebar_collapsed <=> root.mail_sidebar_collapsed;
                 accent: root.accent;
                 accent-soft: root.accent-soft;
@@ -413,6 +420,8 @@ export component MailView inherits Rectangle {
                 message_action_for_email(id, action) => {
                     root.message_action_for_email(id, action);
                 }
+                set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
+                set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
 
             compact-reading-pane := MailReadingPane {

@@ -1,7 +1,7 @@
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
 import { EmailRow, MailDragApi } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
-import { FloatingActionButton } from "../components/controls.slint";
+import { FloatingActionButton, SelectionCheckBox } from "../components/controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
@@ -66,6 +66,7 @@ export component MailListPane inherits Rectangle {
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     in property <int> content_revision: 0;
+    in property <int> selection-count: 0;
     in-out property <bool> mail_sidebar_collapsed: false;
     in property <color> accent;
     in property <color> accent-soft;
@@ -91,6 +92,8 @@ export component MailListPane inherits Rectangle {
     callback open_folders();
     callback open_compose();
     callback message_action_for_email(int, string);
+    callback set_email_checked(int, bool);
+    callback set_all_emails_checked(bool);
 
     // Prefetch while several rows remain instead of waiting for the physical
     // bottom. The ListView stays virtualized; this callback only crosses into
@@ -232,24 +235,41 @@ export component MailListPane inherits Rectangle {
                                 Text { height: parent.height; text: root.total_count; color: root.muted-text; font-size: TypeScale.caption; vertical-alignment: center; }
                             }
 
-                            WorkspaceSearchToolbar {
-                                text: root.search_query;
-                                placeholder-text: @tr("Search mail");
-                                filters: [
-                                    { title: @tr("All mail"), value: "All mail" },
-                                    { title: @tr("Unread"), value: "Unread" },
-                                    { title: @tr("Starred"), value: "Starred" },
-                                    { title: @tr("Has attachments"), value: "Has attachments" },
-                                ];
-                                filter-active: root.search_filter != "All mail";
-                                filter-tooltip: @tr("Filter mail");
-                                filter-accessible-id: "mail-filter-button";
-                                refresh-enabled: !root.sync_in_progress;
-                                refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
-                                refresh-accessible-id: "mail-refresh-button";
-                                edited(text) => { root.search_changed(text); }
-                                filter-selected(value) => { root.set_search_filter(value); }
-                                refresh => { root.sync_mail(); }
+                            HorizontalBox {
+                                height: LayoutMetrics.control-height;
+                                padding: 0px;
+                                spacing: 6px;
+
+                                SelectionCheckBox {
+                                    width: LayoutMetrics.control-height;
+                                    height: LayoutMetrics.control-height;
+                                    enabled: root.emails.length > 0;
+                                    checked: root.emails.length > 0 && root.selection-count == root.emails.length;
+                                    indeterminate: root.selection-count > 0 && root.selection-count < root.emails.length;
+                                    accessible-label: self.checked ? @tr("Clear selection") : @tr("Select all messages on this page");
+                                    toggled(checked) => { root.set_all_emails_checked(checked); }
+                                }
+
+                                WorkspaceSearchToolbar {
+                                    horizontal-stretch: 1;
+                                    text: root.search_query;
+                                    placeholder-text: @tr("Search mail");
+                                    filters: [
+                                        { title: @tr("All mail"), value: "All mail" },
+                                        { title: @tr("Unread"), value: "Unread" },
+                                        { title: @tr("Starred"), value: "Starred" },
+                                        { title: @tr("Has attachments"), value: "Has attachments" },
+                                    ];
+                                    filter-active: root.search_filter != "All mail";
+                                    filter-tooltip: @tr("Filter mail");
+                                    filter-accessible-id: "mail-filter-button";
+                                    refresh-enabled: !root.sync_in_progress;
+                                    refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
+                                    refresh-accessible-id: "mail-refresh-button";
+                                    edited(text) => { root.search_changed(text); }
+                                    filter-selected(value) => { root.set_search_filter(value); }
+                                    refresh => { root.sync_mail(); }
+                                }
                             }
                         }
                     }
@@ -269,7 +289,7 @@ export component MailListPane inherits Rectangle {
                             Text {
                                 height: 24px;
                                 horizontal-stretch: 1;
-                                text: root.list_status;
+                                text: root.selection-count > 0 ? @tr("{} selected", root.selection-count) : root.list_status;
                                 color: root.muted-text;
                                 font-size: TypeScale.caption;
                                 vertical-alignment: center;
@@ -299,7 +319,7 @@ export component MailListPane inherits Rectangle {
                                 border-radius: 6px;
                                 clip: true;
                                 opacity: row-drag.dragging ? 0.55 : 1;
-                                background: row.selected ? root.selected-row : root.surface;
+                                background: row.checked ? root.accent-soft : row.selected ? root.selected-row : root.surface;
                                 animate opacity { duration: 120ms; }
                                 accessible-role: list-item;
                                 accessible-label: @tr("{}, {}", row.sender, row.subject == "" ? @tr("(No subject)") : row.subject)
@@ -489,6 +509,21 @@ export component MailListPane inherits Rectangle {
                                                         row-context.show({ x: row-hit.mouse-x, y: row-hit.mouse-y });
                                                     }
                                                 }
+                                            }
+
+                                            row-check := SelectionCheckBox {
+                                                // Keep the control in the keyboard focus order even before hover.
+                                                opacity: root.compact || row.checked || root.selection-count > 0 || row-hit.has-hover || self.has-focus ? 1 : 0;
+                                                x: root.show-avatars ? 14px : 0px;
+                                                y: root.show-avatars ? (root.dense ? 8px : 12px) : (parent.height - self.height) / 2;
+                                                width: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
+                                                height: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
+                                                checked: row.checked;
+                                                avatar-overlay: root.show-avatars;
+                                                accessible-label: row.checked
+                                                    ? @tr("Deselect {}", row.sender)
+                                                    : @tr("Select {}", row.sender);
+                                                toggled(checked) => { root.set_email_checked(row.id, checked); }
                                             }
                                         }
 

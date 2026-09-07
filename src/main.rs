@@ -393,6 +393,7 @@ struct InboxState {
     page: usize,
     next_cursor: Option<ThreadCursor>,
     selected_id: Option<i32>,
+    checked_ids: HashSet<i32>,
     rendered_id: Option<i32>,
     preview_closed: bool,
     favicon_loader: Option<FaviconLoader>,
@@ -419,6 +420,11 @@ struct InboxState {
 
 #[derive(Debug)]
 struct MailDragPayload {
+    items: Vec<MailDragItem>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MailDragItem {
     message_id: i32,
     account_id: i32,
 }
@@ -435,6 +441,22 @@ fn mail_drag_payload(data: &DataTransfer) -> Option<Rc<MailDragPayload>> {
     data.user_data()?.downcast::<MailDragPayload>().ok()
 }
 
+fn mail_operation_ids(
+    messages: &[MailMessage],
+    checked_ids: &HashSet<i32>,
+    trigger_id: i32,
+) -> Vec<i32> {
+    if checked_ids.contains(&trigger_id) {
+        messages
+            .iter()
+            .filter(|message| checked_ids.contains(&message.id))
+            .map(|message| message.id)
+            .collect()
+    } else {
+        vec![trigger_id]
+    }
+}
+
 fn standard_mailbox_folder(state: &InboxState, account_id: i64, label: &str) -> Option<i64> {
     state
         .mailboxes
@@ -449,9 +471,9 @@ fn standard_mailbox_folder(state: &InboxState, account_id: i64, label: &str) -> 
         .map(|mailbox| mailbox.folder_id)
 }
 
-fn resolve_mail_drop(
+fn resolve_single_mail_drop(
     state: &InboxState,
-    payload: &MailDragPayload,
+    item: &MailDragItem,
     target_scope: &str,
     target_account_id: i32,
     target_folder_id: i32,
@@ -462,12 +484,12 @@ fn resolve_mail_drop(
     let message = state
         .messages
         .iter()
-        .find(|message| message.id == payload.message_id)
+        .find(|message| message.id == item.message_id)
         .ok_or_else(|| "message is no longer available".to_owned())?;
     let thread_id = message
         .thread_id
         .ok_or_else(|| "message thread is unavailable".to_owned())?;
-    if message.account_id != i64::from(payload.account_id) {
+    if message.account_id != i64::from(item.account_id) {
         return Err("dragged message account is stale".to_owned());
     }
     if state.scope == target_scope {
@@ -556,6 +578,32 @@ fn resolve_mail_drop(
     Ok((thread_id, destination))
 }
 
+fn resolve_mail_drop(
+    state: &InboxState,
+    payload: &MailDragPayload,
+    target_scope: &str,
+    target_account_id: i32,
+    target_folder_id: i32,
+) -> Result<Vec<(i32, i64, MailDropDestination)>, String> {
+    if payload.items.is_empty() {
+        return Err("no messages were dragged".to_owned());
+    }
+    payload
+        .items
+        .iter()
+        .map(|item| {
+            resolve_single_mail_drop(
+                state,
+                item,
+                target_scope,
+                target_account_id,
+                target_folder_id,
+            )
+            .map(|(thread_id, destination)| (item.message_id, thread_id, destination))
+        })
+        .collect()
+}
+
 fn perform_mail_drop(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -565,9 +613,9 @@ fn perform_mail_drop(
     target_account_id: i32,
     target_folder_id: i32,
 ) -> Result<(), String> {
-    let (core, thread_id, destination) = {
+    let (core, operations) = {
         let state = state.borrow();
-        let (thread_id, destination) = resolve_mail_drop(
+        let operations = resolve_mail_drop(
             &state,
             payload,
             target_scope,
@@ -579,35 +627,131 @@ fn perform_mail_drop(
                 .core
                 .clone()
                 .ok_or_else(|| "mail core is unavailable".to_owned())?,
-            thread_id,
-            destination,
+            operations,
         )
     };
 
-    match &destination {
-        MailDropDestination::Action(action) => {
-            runtime.block_on(core.perform_message_action(thread_id, action))?;
-        }
-        MailDropDestination::Folder(folder_id) => {
-            runtime.block_on(core.move_thread_to_folder(thread_id, *folder_id))?;
-        }
-        MailDropDestination::Label(label_id) => {
-            runtime.block_on(core.perform_label_action(thread_id, *label_id, true))?;
-        }
-        MailDropDestination::Route(target) => {
-            runtime.block_on(core.route_thread_to_tab(thread_id, target.clone()))?;
+    let mut completed_ids = Vec::new();
+    let mut moved_ids = Vec::new();
+    let mut first_error = None;
+    for (message_id, thread_id, destination) in operations {
+        let result = match &destination {
+            MailDropDestination::Action(action) => {
+                runtime.block_on(core.perform_message_action(thread_id, action))
+            }
+            MailDropDestination::Folder(folder_id) => {
+                runtime.block_on(core.move_thread_to_folder(thread_id, *folder_id))
+            }
+            MailDropDestination::Label(label_id) => {
+                runtime.block_on(core.perform_label_action(thread_id, *label_id, true))
+            }
+            MailDropDestination::Route(target) => {
+                runtime.block_on(core.route_thread_to_tab(thread_id, target.clone()))
+            }
+        };
+        match result {
+            Ok(()) => {
+                completed_ids.push(message_id);
+                if matches!(
+                    destination,
+                    MailDropDestination::Action(
+                        "archive" | "spam" | "trash" | "not_spam" | "unarchive"
+                    ) | MailDropDestination::Folder(_)
+                ) {
+                    moved_ids.push(message_id);
+                }
+            }
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
         }
     }
-    let acted_on_id = matches!(
-        destination,
-        MailDropDestination::Action("archive" | "spam" | "trash" | "not_spam" | "unarchive")
-            | MailDropDestination::Folder(_)
-    )
-    .then_some(payload.message_id);
-    if acted_on_id.is_some() {
-        state.borrow_mut().selected_id = None;
+
+    {
+        let mut state = state.borrow_mut();
+        for id in &completed_ids {
+            state.checked_ids.remove(id);
+        }
+        if state.selected_id.is_some_and(|id| moved_ids.contains(&id)) {
+            state.selected_id = None;
+        }
     }
-    refresh_from_source(app, state, runtime, true, acted_on_id)
+    let refresh_result = refresh_from_source(app, state, runtime, true, &moved_ids);
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    refresh_result
+}
+
+fn perform_mail_list_action(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    trigger_id: i32,
+    action: &str,
+) -> Result<(), String> {
+    let (core, operations) = {
+        let state = state.borrow();
+        if !state.using_core {
+            return Err("mail account is not ready".to_owned());
+        }
+        let ids = mail_operation_ids(&state.messages, &state.checked_ids, trigger_id);
+        let operations = ids
+            .into_iter()
+            .map(|id| {
+                let thread_id = state
+                    .messages
+                    .iter()
+                    .find(|message| message.id == id)
+                    .ok_or_else(|| "message is no longer available".to_owned())?
+                    .thread_id
+                    .ok_or_else(|| "message thread is unavailable".to_owned())?;
+                Ok((id, thread_id))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        (
+            state
+                .core
+                .clone()
+                .ok_or_else(|| "mail core is unavailable".to_owned())?,
+            operations,
+        )
+    };
+
+    let mut completed_ids = Vec::new();
+    let mut first_error = None;
+    for (id, thread_id) in operations {
+        match runtime.block_on(core.perform_message_action(thread_id, action)) {
+            Ok(()) => completed_ids.push(id),
+            Err(error) if first_error.is_none() => first_error = Some(error),
+            Err(_) => {}
+        }
+    }
+
+    {
+        let mut state = state.borrow_mut();
+        for id in &completed_ids {
+            state.checked_ids.remove(id);
+        }
+        if completed_ids.len() == 1 {
+            state.selected_id = completed_ids.first().copied();
+        }
+    }
+    let had_completed = !completed_ids.is_empty();
+    let moved_ids = if matches!(action, "archive" | "spam" | "trash") {
+        completed_ids
+    } else {
+        Vec::new()
+    };
+    let refresh_result = if !had_completed && first_error.is_some() {
+        refresh_rows_only(app, state, runtime);
+        Ok(())
+    } else {
+        refresh_from_source(app, state, runtime, true, &moved_ids)
+    };
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    refresh_result
 }
 
 #[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
@@ -683,6 +827,7 @@ impl InboxState {
             page: 1,
             next_cursor: None,
             selected_id: None,
+            checked_ids: HashSet::new(),
             rendered_id: None,
             preview_closed: false,
             favicon_loader,
@@ -1101,13 +1246,31 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_emails(Rc::clone(&initial_state.email_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
 
+    let state_for_mail_drag = Rc::clone(&state);
     app.global::<MailDragApi>()
-        .on_make_transfer(|message_id, account_id| {
+        .on_make_transfer(move |message_id, account_id| {
+            let items = {
+                let state = state_for_mail_drag.borrow();
+                mail_operation_ids(&state.messages, &state.checked_ids, message_id)
+                    .into_iter()
+                    .map(|id| {
+                        state
+                            .messages
+                            .iter()
+                            .find(|message| message.id == id)
+                            .map(|message| MailDragItem {
+                                message_id: message.id,
+                                account_id: i32::try_from(message.account_id).unwrap_or(-1),
+                            })
+                            .unwrap_or(MailDragItem {
+                                message_id: id,
+                                account_id,
+                            })
+                    })
+                    .collect()
+            };
             let mut transfer = DataTransfer::default();
-            transfer.set_user_data(Rc::new(MailDragPayload {
-                message_id,
-                account_id,
-            }));
+            transfer.set_user_data(Rc::new(MailDragPayload { items }));
             transfer
         });
     let state_for_mail_drop_check = Rc::clone(&state);
@@ -2123,15 +2286,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 state.inbox_count = metadata.inbox_count;
                 state.total_count = metadata.scope_total;
                 drop(state);
-                if let Err(error) =
-                    refresh_from_source(
-                        &app,
-                        &folder_update_state,
-                        &folder_update_runtime,
-                        false,
-                        None,
-                    )
-                {
+                if let Err(error) = refresh_from_source(
+                    &app,
+                    &folder_update_state,
+                    &folder_update_runtime,
+                    false,
+                    &[],
+                ) {
                     app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
                 }
             }
@@ -2301,7 +2462,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 &mail_update_state,
                                 &mail_update_runtime,
                                 page,
-                                None,
+                                &[],
                             ),
                             Err(error) => app.set_render_status(UiMessage::detail(
                                 "Background mail refresh failed: {}",
@@ -3326,7 +3487,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         }
                     }
                     if let Err(error) =
-                        refresh_from_source(&app, &sync_state, &sync_runtime, true, None)
+                        refresh_from_source(&app, &sync_state, &sync_runtime, true, &[])
                     {
                         app.set_sync_status(UiMessage::detail(
                             "Sync finished, refresh failed: {}",
@@ -3378,6 +3539,53 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_check = Rc::clone(&state);
+    let runtime_for_check = Rc::clone(&runtime);
+    app.on_set_email_checked(move |id, checked| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let rows = Rc::clone(&state_for_check.borrow().email_rows);
+        let is_visible = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .any(|row| row.id == id);
+        if !is_visible {
+            return;
+        }
+        if checked {
+            state_for_check.borrow_mut().checked_ids.insert(id);
+        } else {
+            state_for_check.borrow_mut().checked_ids.remove(&id);
+        }
+        refresh_rows_only(&app, &state_for_check, &runtime_for_check);
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_check_all = Rc::clone(&state);
+    let runtime_for_check_all = Rc::clone(&runtime);
+    app.on_set_all_emails_checked(move |checked| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let rows = Rc::clone(&state_for_check_all.borrow().email_rows);
+        let visible_ids = (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .map(|row| row.id)
+            .collect::<Vec<_>>();
+        {
+            let mut state = state_for_check_all.borrow_mut();
+            if checked {
+                state.checked_ids.extend(visible_ids);
+            } else {
+                for id in visible_ids {
+                    state.checked_ids.remove(&id);
+                }
+            }
+        }
+        refresh_rows_only(&app, &state_for_check_all, &runtime_for_check_all);
+    });
+
+    let app_weak = app.as_weak();
     let state_for_action = Rc::clone(&state);
     let runtime_for_action = Rc::clone(&runtime);
     app.on_message_action(move |action| {
@@ -3399,22 +3607,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let exists = state_for_row_action
-            .borrow()
-            .messages
-            .iter()
-            .any(|message| message.id == id);
-        if !exists {
-            app.set_render_status(UiMessage::plain(
-                "Message action failed: message is no longer available",
-            ));
-            return;
-        }
-        state_for_row_action.borrow_mut().selected_id = Some(id);
-        match perform_selected_action(
+        match perform_mail_list_action(
             &app,
             &state_for_row_action,
             &runtime_for_row_action,
+            id,
             &action,
         ) {
             Ok(()) => app.set_render_status(UiMessage::plain("Message action completed.")),
@@ -3447,7 +3644,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 i64::from(label_id),
                 applied,
             ))?;
-            refresh_from_source(&app, &state_for_label, &runtime_for_label, true, None)
+            refresh_from_source(&app, &state_for_label, &runtime_for_label, true, &[])
         })();
         match result {
             Ok(()) if applied => app.set_render_status(UiMessage::plain("Label added.")),
@@ -3497,7 +3694,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 &state_for_save_label,
                 &runtime_for_save_label,
                 true,
-                None,
+                &[],
             )?;
             Ok(existing_id.is_some())
         })();
@@ -3550,7 +3747,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 &state_for_delete_label,
                 &runtime_for_delete_label,
                 true,
-                None,
+                &[],
             )
         })();
         match result {
@@ -4283,7 +4480,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 *intent_for_save.borrow_mut() = ComposeIntent::default();
                 app.set_sync_status(message);
                 let _ =
-                    refresh_from_source(&app, &state_for_compose, &runtime_for_compose, true, None);
+                    refresh_from_source(&app, &state_for_compose, &runtime_for_compose, true, &[]);
             }
             Err(error) => {
                 let message = UiMessage::detail("Compose failed: {}", error);
@@ -4754,10 +4951,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             state.page = 1;
             state.next_cursor = None;
             state.selected_id = None;
+            state.checked_ids.clear();
             state.preview_closed = false;
         }
         if let Err(error) =
-            refresh_from_source(&app, &state_for_search, &runtime_for_search, false, None)
+            refresh_from_source(&app, &state_for_search, &runtime_for_search, false, &[])
         {
             app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
         }
@@ -4775,6 +4973,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             state.search_filter = filter.to_string();
             state.page = 1;
             state.selected_id = None;
+            state.checked_ids.clear();
         }
         if let Err(error) = render_current(&app, &state_for_filter, &runtime_for_filter) {
             app.set_render_status(UiMessage::detail("Mail filter failed: {}", error));
@@ -4801,10 +5000,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             state.page = 1;
             state.next_cursor = None;
             state.selected_id = None;
+            state.checked_ids.clear();
             state.preview_closed = false;
         }
         if let Err(error) =
-            refresh_from_source(&app, &state_for_scope, &runtime_for_scope, false, None)
+            refresh_from_source(&app, &state_for_scope, &runtime_for_scope, false, &[])
         {
             app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
         }
@@ -5010,6 +5210,28 @@ mod tests {
 
         reconcile_model_rows(&model, vec![0, 2, 3, 4], |value| *value);
         assert_eq!(model_values(&model), [0, 2, 3, 4]);
+    }
+
+    #[test]
+    fn checked_trigger_expands_mail_operations_in_visible_order() {
+        let messages = fixture_messages();
+        let checked = HashSet::from([messages[2].id, messages[0].id]);
+
+        assert_eq!(
+            mail_operation_ids(&messages, &checked, messages[0].id),
+            [messages[0].id, messages[2].id]
+        );
+    }
+
+    #[test]
+    fn unchecked_trigger_keeps_mail_operation_single() {
+        let messages = fixture_messages();
+        let checked = HashSet::from([messages[0].id, messages[1].id]);
+
+        assert_eq!(
+            mail_operation_ids(&messages, &checked, messages[2].id),
+            [messages[2].id]
+        );
     }
 
     #[test]

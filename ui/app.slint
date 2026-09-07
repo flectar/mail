@@ -413,6 +413,8 @@ export component AppWindow inherits Window {
     callback sync_mail();
     callback message_action(string);
     callback message_action_for_email(int, string);
+    callback set_email_checked(int, bool);
+    callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
     callback save_mail_label(int, string, color);
     callback delete_mail_label(int);
@@ -616,6 +618,7 @@ export component AppWindow inherits Window {
     in property <bool> can_load_more: false;
     in property <bool> mail_loading_more: false;
     in property <int> mail_list_revision: 0;
+    in property <int> mail_selection_count: 0;
     in property <bool> has_selected: true;
     in property <int> previous_email_id: -1;
     in property <int> next_email_id: -1;
@@ -926,6 +929,7 @@ export component AppWindow inherits Window {
             can_load_more: root.can_load_more;
             loading_more: root.mail_loading_more;
             list_content_revision: root.mail_list_revision;
+            selection-count: root.mail_selection_count;
             has_selected: root.startup_ready && root.has_selected;
             previous-email-id: root.previous_email_id;
             next-email-id: root.next_email_id;
@@ -975,6 +979,8 @@ export component AppWindow inherits Window {
             sync_mail => { root.sync_mail(); }
             message_action(action) => { root.message_action(action); }
             message_action_for_email(id, action) => { root.message_action_for_email(id, action); }
+            set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
+            set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
             save_mail_label(id, name, color) => { root.save_mail_label(id, name, color); }
             search_mail_labels(query) => { root.search_mail_labels(query); }

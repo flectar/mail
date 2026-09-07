@@ -217,10 +217,12 @@ pub(super) fn perform_selected_action(
     // unstar, mark-read, and mark-unread never do, so passing `selected_id`
     // for those would risk wrongly dropping an unrelated message that simply
     // sits deep in the tail and was never re-fetched by the head refresh.
-    let acted_on_id = matches!(action, "archive" | "spam" | "trash")
+    let acted_on_ids = matches!(action, "archive" | "spam" | "trash")
         .then_some(selected_id)
-        .flatten();
-    refresh_from_source(app, state, runtime, true, acted_on_id)
+        .flatten()
+        .into_iter()
+        .collect::<Vec<_>>();
+    refresh_from_source(app, state, runtime, true, &acted_on_ids)
 }
 
 pub(super) fn format_file_size(size: u64) -> String {

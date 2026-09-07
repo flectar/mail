@@ -166,6 +166,85 @@ export component Switch inherits Rectangle {
     }
 }
 
+// Shared tri-state control for list selection. The component owns its hit
+// target and accessibility contract while callers decide when it is visible.
+export component SelectionCheckBox inherits FocusScope {
+    in property <bool> checked: false;
+    in property <bool> indeterminate: false;
+    in property <bool> avatar-overlay: false;
+    callback toggled(bool);
+
+    width: 32px;
+    height: 32px;
+    opacity: root.enabled ? 1 : 0.45;
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: checkbox;
+    accessible-label: root.checked ? @tr("Clear selection") : @tr("Select");
+    accessible-checked: root.checked;
+    accessible-action-default => {
+        if root.enabled {
+            root.toggled(!root.checked);
+        }
+    }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.toggled(!root.checked);
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        x: (parent.width - 24px) / 2;
+        y: (parent.height - 24px) / 2;
+        width: 24px;
+        height: 24px;
+        border-radius: root.avatar-overlay ? self.width / 2 : 6px;
+        border-width: root.has-focus ? 2px : 0px;
+        border-color: AppTheme.accent;
+        background: root.avatar-overlay ? AppTheme.surface.with-alpha(0.72) : transparent;
+        drop-shadow-blur: root.avatar-overlay ? 7px : 0px;
+        drop-shadow-offset-y: root.avatar-overlay ? 1px : 0px;
+        drop-shadow-color: root.avatar-overlay ? #00000038 : transparent;
+
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 18px;
+            height: 18px;
+            border-radius: 4px;
+            border-width: root.checked || root.indeterminate ? 0px : 1px;
+            border-color: AppTheme.secondary;
+            background: root.checked || root.indeterminate ? AppTheme.accent : AppTheme.input-bg;
+
+            Image {
+                visible: root.checked || root.indeterminate;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 12px;
+                height: 12px;
+                source: root.indeterminate
+                    ? @image-url("../icons/phosphor/minus.svg")
+                    : @image-url("../icons/phosphor/check.svg");
+                colorize: white;
+                image-fit: contain;
+                accessible-role: none;
+            }
+        }
+    }
+
+    TouchArea {
+        x: (parent.width - max(parent.width, 44px)) / 2;
+        y: (parent.height - max(parent.height, 44px)) / 2;
+        width: max(parent.width, 44px);
+        height: max(parent.height, 44px);
+        enabled: root.enabled;
+        clicked => { root.toggled(!root.checked); }
+        mouse-cursor: pointer;
+    }
+}
+
 export component RadioButton inherits Rectangle {
     in property <string> text;
     in property <bool> checked: false;

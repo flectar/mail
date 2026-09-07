@@ -7,7 +7,7 @@ pub(super) fn refresh_from_source(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
     preserve_loaded_rows: bool,
-    acted_on_id: Option<i32>,
+    acted_on_ids: &[i32],
 ) -> Result<(), String> {
     let (using_core, core, scope, query) = {
         let state = state.borrow();
@@ -27,7 +27,7 @@ pub(super) fn refresh_from_source(
         let page =
             runtime.block_on(core.load_page(&scope, &query, None, PAGE_SIZE as i64, false))?;
         if preserve_loaded_rows {
-            apply_background_mail_page(app, state, runtime, page, acted_on_id);
+            apply_background_mail_page(app, state, runtime, page, acted_on_ids);
             return Ok(());
         }
         let mut state = state.borrow_mut();
@@ -49,18 +49,17 @@ pub(super) fn refresh_from_source(
 /// thread and avoid repeated body preparation.
 ///
 /// The retained tail (everything beyond the refreshed head) is kept as-is
-/// without re-querying it, so it can go stale relative to the backend. `drop_id`
-/// names one message known to no longer belong in the current view (e.g. one
-/// the user just archived/spammed/trashed) — the only staleness this function
-/// actively corrects rather than a general tail re-sync, which a background
-/// refresh has no cheap way to verify. Pass `None` when no such message is
-/// known, i.e. for a refresh that isn't following up on an action taken on a
-/// specific message.
+/// without re-querying it, so it can go stale relative to the backend.
+/// `drop_ids` names messages known to no longer belong in the current view
+/// (e.g. messages the user just archived/spammed/trashed) — the only staleness
+/// this function actively corrects rather than a general tail re-sync, which a
+/// background refresh has no cheap way to verify. Pass an empty slice when the
+/// refresh does not follow a message-moving action.
 fn merge_refreshed_mail_head(
     current: &[MailMessage],
     refreshed: Vec<MailMessage>,
     next_cursor: Option<ThreadCursor>,
-    drop_id: Option<i32>,
+    drop_ids: &[i32],
 ) -> (Vec<MailMessage>, bool) {
     if next_cursor.is_none() || current.len() <= PAGE_SIZE {
         return (refreshed, false);
@@ -86,7 +85,7 @@ fn merge_refreshed_mail_head(
         current[tail_start..]
             .iter()
             .filter(|message| known.insert(message.id))
-            .filter(|message| Some(message.id) != drop_id)
+            .filter(|message| !drop_ids.contains(&message.id))
             .cloned(),
     );
     let retained_tail = merged.len() > refreshed_len;
@@ -98,7 +97,7 @@ pub(super) fn apply_background_mail_page(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
     page: mail::MailPage,
-    acted_on_id: Option<i32>,
+    acted_on_ids: &[i32],
 ) {
     let mail::MailPage {
         mut messages,
@@ -141,7 +140,7 @@ pub(super) fn apply_background_mail_page(
 
         let old_next_cursor = state.next_cursor;
         let (merged, retained_tail) =
-            merge_refreshed_mail_head(&state.messages, messages, next_cursor, acted_on_id);
+            merge_refreshed_mail_head(&state.messages, messages, next_cursor, acted_on_ids);
         state.messages = merged;
         state.mailboxes = mailboxes;
         state.next_cursor = if retained_tail {
@@ -340,14 +339,21 @@ pub(super) fn render_current(
     let selected_email =
         selected_id.and_then(|id| visible.iter().find(|email| email.id == id).cloned());
 
-    let (selection_changed, allow_remote_images) = {
+    let (selection_changed, allow_remote_images, checked_ids) = {
         let mut state = state.borrow_mut();
         let selection_changed = state.rendered_id != selected_id;
         state.selected_id = selected_id;
         state.rendered_id = selected_id;
+        state
+            .checked_ids
+            .retain(|id| visible.iter().any(|message| message.id == *id));
         let allow_remote_images = state.remote_images_enabled
             || selected_id.is_some_and(|id| state.remote_images_override_id == Some(id));
-        (selection_changed, allow_remote_images)
+        (
+            selection_changed,
+            allow_remote_images,
+            state.checked_ids.clone(),
+        )
     };
     if selection_changed {
         // "View plain text" is a message action, not a global display mode.
@@ -359,9 +365,10 @@ pub(super) fn render_current(
     let email_rows = Rc::clone(&state.borrow().email_rows);
     reconcile_model_rows(
         &email_rows,
-        make_rows(visible, selected_id, &favicon_icons, &labels),
+        make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
         |row| row.id,
     );
+    app.set_mail_selection_count(checked_ids.len() as i32);
     app.set_mailboxes(ModelRc::new(VecModel::from(make_mailbox_rows(
         &mailboxes,
         &profile_avatar_images,
@@ -692,6 +699,7 @@ pub(super) fn list_status(
 pub(super) fn make_rows(
     messages: &[MailMessage],
     selected_id: Option<i32>,
+    checked_ids: &HashSet<i32>,
     favicon_icons: &HashMap<String, FaviconImages>,
     labels: &[flectar_mail_core::models::Label],
 ) -> Vec<EmailRow> {
@@ -722,6 +730,7 @@ pub(super) fn make_rows(
                 label_summary: label_summary(&email.labels, labels).into(),
                 labels: ModelRc::new(VecModel::from(applied_label_rows(labels, &email.labels))),
                 selected: Some(email.id) == selected_id,
+                checked: checked_ids.contains(&email.id),
             }
         })
         .collect()
@@ -785,7 +794,14 @@ pub(super) fn refresh_rows_only(
             .filter(|id| visible.iter().any(|email| email.id == *id))
             .or_else(|| visible.first().map(|email| email.id))
     };
-    state.borrow_mut().selected_id = selected_id;
+    let checked_ids = {
+        let mut state = state.borrow_mut();
+        state.selected_id = selected_id;
+        state
+            .checked_ids
+            .retain(|id| visible.iter().any(|message| message.id == *id));
+        state.checked_ids.clone()
+    };
     let selected_email = selected_id.and_then(|id| visible.iter().find(|email| email.id == id));
     let (email_rows, labels) = {
         let state = state.borrow();
@@ -793,9 +809,10 @@ pub(super) fn refresh_rows_only(
     };
     reconcile_model_rows(
         &email_rows,
-        make_rows(visible, selected_id, &favicon_icons, &labels),
+        make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
         |row| row.id,
     );
+    app.set_mail_selection_count(checked_ids.len() as i32);
     apply_label_rows(app, &labels, selected_email);
     let selected_icon = selected_id
         .and_then(|id| visible.iter().find(|email| email.id == id))
@@ -1048,8 +1065,7 @@ pub(super) fn schedule_profile_avatar_fetches(
 fn contains_emoji(text: &str) -> bool {
     use unicode_properties::UnicodeEmoji as _;
 
-    text
-        .chars()
+    text.chars()
         .any(|character| character.is_emoji_char() && !character.is_ascii())
 }
 
@@ -1203,7 +1219,7 @@ mod tests {
                 last_message_at: 0,
                 thread_id: 23,
             }),
-            None,
+            &[],
         );
 
         assert!(retained_tail);
@@ -1226,7 +1242,7 @@ mod tests {
     fn exhausted_head_refresh_replaces_the_old_tail() {
         let current = (1..=50).map(message).collect::<Vec<_>>();
         let refreshed = (1..=12).map(message).collect::<Vec<_>>();
-        let (merged, retained_tail) = merge_refreshed_mail_head(&current, refreshed, None, None);
+        let (merged, retained_tail) = merge_refreshed_mail_head(&current, refreshed, None, &[]);
         assert!(!retained_tail);
         assert_eq!(merged.len(), 12);
     }
@@ -1244,7 +1260,7 @@ mod tests {
                 last_message_at: 0,
                 thread_id: 23,
             }),
-            Some(40),
+            &[40],
         );
 
         assert!(retained_tail);
@@ -1269,7 +1285,7 @@ mod tests {
                 last_message_at: 0,
                 thread_id: 23,
             }),
-            Some(10),
+            &[10],
         );
 
         assert!(merged.iter().any(|row| row.id == 10));
@@ -1362,7 +1378,7 @@ mod tests {
             },
         ];
 
-        let rows = make_rows(&[email], None, &HashMap::new(), &labels);
+        let rows = make_rows(&[email], None, &HashSet::new(), &HashMap::new(), &labels);
         assert_eq!(rows[0].labels.row_count(), 1);
         let label = rows[0].labels.row_data(0).expect("projected label");
         assert_eq!(label.name, "Viaje");
