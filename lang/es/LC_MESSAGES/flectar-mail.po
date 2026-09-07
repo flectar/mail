@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-07 13:17+0000\n"
+"POT-Creation-Date: 2026-09-07 14:46+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -1534,7 +1534,7 @@ msgstr "Renombrar etiqueta"
 msgid "Delete label"
 msgstr "Eliminar etiqueta"
 
-#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:590
+#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:580
 msgid "New email"
 msgstr "Nuevo correo"
 
@@ -2432,7 +2432,7 @@ msgstr "Marcar como spam"
 msgid "!"
 msgstr "!"
 
-#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:550
+#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:540
 #: ui/views/mail-reading-pane.slint:526
 msgid "Move to trash"
 msgstr "Mover a la papelera"
@@ -2820,63 +2820,63 @@ msgstr "No leídos"
 msgid "Starred"
 msgstr "Destacados"
 
-#: ui/views/mail-list-pane.slint:277 ui/views/mail-list-pane.slint:357
+#: ui/views/mail-list-pane.slint:277 ui/views/mail-list-pane.slint:347
 msgid "Has attachments"
 msgstr "Con adjuntos"
 
-#: ui/views/mail-list-pane.slint:289
+#: ui/views/mail-list-pane.slint:290
 msgid "Synchronizing mail"
 msgstr "Sincronizando correo"
 
-#: ui/views/mail-list-pane.slint:289
+#: ui/views/mail-list-pane.slint:290
 msgid "Reload mail"
 msgstr "Recargar correo"
 
-#: ui/views/mail-list-pane.slint:355
+#: ui/views/mail-list-pane.slint:345
 msgid "{}, {}"
 msgstr "{}, {}"
 
-#: ui/views/mail-list-pane.slint:355 ui/views/mail-list-pane.slint:457
+#: ui/views/mail-list-pane.slint:345 ui/views/mail-list-pane.slint:447
 msgid "(No subject)"
 msgstr "(Sin asunto)"
 
-#: ui/views/mail-list-pane.slint:358
+#: ui/views/mail-list-pane.slint:348
 msgid "Replied"
 msgstr "Respondido"
 
-#: ui/views/mail-list-pane.slint:546 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:536 ui/views/mail-reading-pane.slint:265
 msgid "Remove star"
 msgstr "Quitar destacado"
 
-#: ui/views/mail-list-pane.slint:546 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:536 ui/views/mail-reading-pane.slint:265
 msgid "Star message"
 msgstr "Destacar mensaje"
 
-#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:537 ui/views/mail-reading-pane.slint:278
 msgid "Mark as read"
 msgstr "Marcar como leído"
 
-#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:537 ui/views/mail-reading-pane.slint:278
 msgid "Mark as unread"
 msgstr "Marcar como no leído"
 
-#: ui/views/mail-list-pane.slint:548 ui/views/mail-reading-pane.slint:524
+#: ui/views/mail-list-pane.slint:538 ui/views/mail-reading-pane.slint:524
 msgid "Archive"
 msgstr "Archivar"
 
-#: ui/views/mail-list-pane.slint:549 ui/views/mail-reading-pane.slint:287
+#: ui/views/mail-list-pane.slint:539 ui/views/mail-reading-pane.slint:287
 msgid "Move to spam"
 msgstr "Mover a spam"
 
-#: ui/views/mail-list-pane.slint:567 ui/views/onboarding-view.slint:80
+#: ui/views/mail-list-pane.slint:557 ui/views/onboarding-view.slint:80
 msgid "Opening your mailbox…"
 msgstr "Abriendo tu buzón…"
 
-#: ui/views/mail-list-pane.slint:567
+#: ui/views/mail-list-pane.slint:557
 msgid "Nothing here"
 msgstr "No hay nada aquí"
 
-#: ui/views/mail-list-pane.slint:568
+#: ui/views/mail-list-pane.slint:558
 msgid "Try another folder or search term."
 msgstr "Prueba otra carpeta o término de búsqueda."
 
