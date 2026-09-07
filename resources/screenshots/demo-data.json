@@ -233,6 +233,7 @@
       "unread": true,
       "starred": true,
       "has_attachments": true,
+      "has_replied": true,
       "label_summary": "Reports · Marketing",
       "labels": [
         { "id": 1, "name": "Reports", "name_has_emoji": false, "color": "#4a86e8", "applied": true, "is_auto": false },

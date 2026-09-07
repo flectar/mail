@@ -77,7 +77,8 @@ render() {
       | .selected_favicon = favicon_path(.selected_address)
       | .selected_has_favicon = true
       | .emails |= map(
-          .favicon = favicon_path(.address)
+          .has_replied = (.has_replied // false)
+          | .favicon = favicon_path(.address)
           | .favicon_small = favicon_path(.address)
           | .has_favicon = true
         )
