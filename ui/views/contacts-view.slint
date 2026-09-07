@@ -193,7 +193,7 @@ export component ContactsView inherits Rectangle {
             VerticalBox {
                 padding-top: LayoutMetrics.sidebar-action-top;
                 padding-right: LayoutMetrics.sidebar-inset;
-                padding-bottom: 12px;
+                padding-bottom: 0px;
                 padding-left: LayoutMetrics.sidebar-inset;
                 spacing: 8px;
 
@@ -209,116 +209,135 @@ export component ContactsView inherits Rectangle {
                     }
                 }
 
-                contact-nav-scroll := ScrollView {
+                Rectangle {
                     vertical-stretch: 1;
-                    viewport-width: self.visible-width;
-                    horizontal-scrollbar-policy: always-off;
+                    background: transparent;
 
-                    VerticalBox {
+                    contact-nav-scroll := ScrollView {
                         x: 0px;
-                        width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                        padding: 0px;
-                        spacing: 8px;
-                        alignment: start;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-width: self.visible-width;
+                        horizontal-scrollbar-policy: always-off;
 
-                Rectangle { height: 8px; }
-                WorkspaceMiniHeading {
-                    label: @tr("UNIFIED");
-                    label-color: root.muted-text;
-                }
+                        VerticalBox {
+                            x: 0px;
+                            width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
+                            padding: 0px;
+                            spacing: 8px;
+                            alignment: start;
 
-                unified-section := SidebarSectionHeader {
-                    label: @tr("Unified contacts");
-                    icon: @image-url("../icons/phosphor/users-fill.svg");
-                    sidebar-background: root.sidebar-bg;
-                    body-color: root.body-text;
-                    muted-color: root.muted-text;
-                    hover-background: root.muted-control-bg;
-                    icon-color: root.secondary-text;
-                }
+                            Rectangle { height: 8px; }
+                            WorkspaceMiniHeading {
+                                label: @tr("UNIFIED");
+                                label-color: root.muted-text;
+                            }
 
-                if unified-section.open : VerticalBox {
-                    padding: 0px;
-                    spacing: 3px;
+                            unified-section := SidebarSectionHeader {
+                                label: @tr("Unified contacts");
+                                icon: @image-url("../icons/phosphor/users-fill.svg");
+                                sidebar-background: root.sidebar-bg;
+                                body-color: root.body-text;
+                                muted-color: root.muted-text;
+                                hover-background: root.muted-control-bg;
+                                icon-color: root.secondary-text;
+                            }
 
-                    SidebarItem {
-                        label: @tr("All contacts");
-                        count: root.total-count > 0 ? root.total-count : "";
-                        scope: "all";
-                        icon: @image-url("../icons/phosphor/users-fill.svg");
-                        selected: root.selected-scope == "All contacts";
-                        prominent: true;
-                        sidebar-background: root.sidebar-bg;
-                        selection-background: root.accent-soft;
-                        accent-color: root.accent;
-                        body-color: root.body-text;
-                        muted-color: root.muted-text;
-                        clicked(scope) => { root.open-filter(scope); }
+                            if unified-section.open : VerticalBox {
+                                padding: 0px;
+                                spacing: 3px;
+
+                                SidebarItem {
+                                    label: @tr("All contacts");
+                                    count: root.total-count > 0 ? root.total-count : "";
+                                    scope: "all";
+                                    icon: @image-url("../icons/phosphor/users-fill.svg");
+                                    selected: root.selected-scope == "All contacts";
+                                    prominent: true;
+                                    sidebar-background: root.sidebar-bg;
+                                    selection-background: root.accent-soft;
+                                    accent-color: root.accent;
+                                    body-color: root.body-text;
+                                    muted-color: root.muted-text;
+                                    clicked(scope) => { root.open-filter(scope); }
+                                }
+
+                                SidebarItem {
+                                    label: @tr("Favorites");
+                                    count: root.favorite-count > 0 ? root.favorite-count : "";
+                                    scope: "favorites";
+                                    icon: @image-url("../icons/phosphor/star-fill.svg");
+                                    selected: root.selected-scope == "Favorites";
+                                    sidebar-background: root.sidebar-bg;
+                                    selection-background: root.accent-soft;
+                                    accent-color: root.accent;
+                                    body-color: root.body-text;
+                                    muted-color: root.muted-text;
+                                    clicked(scope) => { root.open-filter(scope); }
+                                }
+                            }
+
+                            WorkspaceMiniHeading {
+                                visible: root.account-contacts.length > 0;
+                                label: @tr("ACCOUNTS");
+                                label-color: root.muted-text;
+                            }
+
+                            for account in root.account-contacts : VerticalBox {
+                                padding: 0px;
+                                spacing: 3px;
+                                vertical-stretch: 0;
+
+                                account-section := SidebarSectionHeader {
+                                    label: account.name;
+                                    detail: account.email;
+                                    avatar: account.initials;
+                                    avatar-image: account.avatar;
+                                    has-avatar-image: account.has-avatar;
+                                    has-avatar: true;
+                                    sidebar-background: root.sidebar-bg;
+                                    hover-background: root.muted-control-bg;
+                                    body-color: root.body-text;
+                                    muted-color: root.muted-text;
+                                    icon-color: root.secondary-text;
+                                }
+
+                                if account-section.open : SidebarItem {
+                                    label: @tr("Contacts");
+                                    count: account.count;
+                                    scope: "Account:" + account.id;
+                                    icon: @image-url("../icons/phosphor/users-fill.svg");
+                                    selected: account.selected;
+                                    prominent: true;
+                                    sidebar-background: root.sidebar-bg;
+                                    selection-background: root.accent-soft;
+                                    accent-color: root.accent;
+                                    body-color: root.body-text;
+                                    muted-color: root.muted-text;
+                                    clicked(scope) => { root.open-filter(scope); }
+                                }
+                            }
+
+                            Text {
+                                height: 54px;
+                                text: @tr("People discovered from your conversations appear here automatically.");
+                                color: root.muted-text;
+                                font-size: TypeScale.caption;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
 
-                    SidebarItem {
-                        label: @tr("Favorites");
-                        count: root.favorite-count > 0 ? root.favorite-count : "";
-                        scope: "favorites";
-                        icon: @image-url("../icons/phosphor/star-fill.svg");
-                        selected: root.selected-scope == "Favorites";
-                        sidebar-background: root.sidebar-bg;
-                        selection-background: root.accent-soft;
-                        accent-color: root.accent;
-                        body-color: root.body-text;
-                        muted-color: root.muted-text;
-                        clicked(scope) => { root.open-filter(scope); }
-                    }
-                }
-
-                WorkspaceMiniHeading {
-                    visible: root.account-contacts.length > 0;
-                    label: @tr("ACCOUNTS");
-                    label-color: root.muted-text;
-                }
-
-                for account in root.account-contacts : VerticalBox {
-                    padding: 0px;
-                    spacing: 3px;
-                    vertical-stretch: 0;
-
-                    account-section := SidebarSectionHeader {
-                        label: account.name;
-                        detail: account.email;
-                        avatar: account.initials;
-                        avatar-image: account.avatar;
-                        has-avatar-image: account.has-avatar;
-                        has-avatar: true;
-                        sidebar-background: root.sidebar-bg;
-                        hover-background: root.muted-control-bg;
-                        body-color: root.body-text;
-                        muted-color: root.muted-text;
-                        icon-color: root.secondary-text;
-                    }
-
-                    if account-section.open : SidebarItem {
-                        label: @tr("Contacts");
-                        count: account.count;
-                        scope: "Account:" + account.id;
-                        icon: @image-url("../icons/phosphor/users-fill.svg");
-                        selected: account.selected;
-                        prominent: true;
-                        sidebar-background: root.sidebar-bg;
-                        selection-background: root.accent-soft;
-                        accent-color: root.accent;
-                        body-color: root.body-text;
-                        muted-color: root.muted-text;
-                        clicked(scope) => { root.open-filter(scope); }
-                    }
-                }
-
-                Text {
-                    height: 54px;
-                    text: @tr("People discovered from your conversations appear here automatically.");
-                    color: root.muted-text;
-                    font-size: TypeScale.caption;
-                    wrap: word-wrap;
-                }
+                    ScrollFade {
+                        x: contact-nav-scroll.x;
+                        y: contact-nav-scroll.y;
+                        width: contact-nav-scroll.visible-width;
+                        height: contact-nav-scroll.visible-height;
+                        surface-color: root.sidebar-bg;
+                        viewport-y: contact-nav-scroll.viewport-y;
+                        viewport-height: contact-nav-scroll.viewport-height;
+                        visible-height: contact-nav-scroll.visible-height;
                     }
                 }
             }

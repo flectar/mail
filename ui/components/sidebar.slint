@@ -4,6 +4,7 @@ import { Avatar } from "avatar.slint";
 import { Button } from "button.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading } from "workspace-layout.slint";
 import { LayoutMetrics } from "../design-system.slint";
+import { ScrollFade } from "scroll-fade.slint";
 import { TypeScale } from "../typography.slint";
 
 component SidebarIcon {
@@ -374,7 +375,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
         x: LayoutMetrics.sidebar-inset;
         y: LayoutMetrics.sidebar-action-top;
         width: parent.width - 2 * LayoutMetrics.sidebar-inset;
-        height: parent.height - LayoutMetrics.sidebar-action-top - LayoutMetrics.compact-inset;
+        height: parent.height - LayoutMetrics.sidebar-action-top;
         padding: 0px;
         spacing: 8px;
 
@@ -388,174 +389,102 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
             clicked => { root.compose(); }
         }
 
-        mailbox-scroll := ScrollView {
+        Rectangle {
             vertical-stretch: 1;
             width: parent.width;
-            viewport-width: self.visible-width;
-            horizontal-scrollbar-policy: always-off;
-            mouse-drag-pan-enabled: root.touch-mode;
+            background: transparent;
 
-            VerticalBox {
+            mailbox-scroll := ScrollView {
                 x: 0px;
-                width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                padding: 0px;
-                spacing: 3px;
-                alignment: start;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.visible-width;
+                horizontal-scrollbar-policy: always-off;
+                mouse-drag-pan-enabled: root.touch-mode;
 
-                WorkspaceMiniHeading {
-                    label: @tr("UNIFIED");
-                    label-color: root.muted-color;
-                }
-
-                unified-section := SidebarSectionHeader {
-                    label: @tr("All Inboxes");
-                    icon: @image-url("../icons/phosphor/stack-fill.svg");
-                    sidebar-background: root.background-color;
-                    hover-background: root.hover-background;
-                    body-color: root.title-color;
-                    muted-color: root.muted-color;
-                    icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
-                }
-
-                if unified-section.open : VerticalBox {
-                    vertical-stretch: 0;
+                VerticalBox {
+                    x: 0px;
+                    width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                     padding: 0px;
                     spacing: 3px;
                     alignment: start;
 
-                    SidebarItem {
-                        label: @tr("Inbox");
-                        count: root.unified-count;
-                        scope: "Unified Inbox";
-                        account-id: 0;
-                        folder-id: -1;
-                        mail-drop-enabled: true;
-                        icon: @image-url("../icons/phosphor/tray-fill.svg");
-                        selected: root.selected-scope == "Unified Inbox";
-                        prominent: true;
-                        row-height: 32px;
-                        sidebar-background: root.background-color;
-                        selection-background: root.selection-background;
-                        accent-color: root.accent-color;
-                        body-color: root.body-color;
-                        muted-color: root.muted-color;
-                        icon-color: root.monochrome-icons ? (root.selected-scope == "Unified Inbox" ? root.accent-color : root.muted-color) : #2f9cf4;
-                        clicked(scope) => { root.select-scope(scope); }
+                    WorkspaceMiniHeading {
+                        label: @tr("UNIFIED");
+                        label-color: root.muted-color;
                     }
 
-                    for mailbox in root.unified-mailboxes : SidebarItem {
-                        label: mailbox.label;
-                        count: mailbox.count;
-                        scope: mailbox.scope;
-                        account-id: mailbox.account_id;
-                        folder-id: mailbox.folder_id;
-                        mail-drop-enabled: mailbox.scope == "Unified Starred"
-                            || mailbox.scope == "Unified Archive"
-                            || mailbox.scope == "Unified Spam"
-                            || mailbox.scope == "Unified Trash";
-                        mail-drop-copies: mailbox.scope == "Unified Starred";
-                        icon: mailbox.scope == "Unified Starred" ? @image-url("../icons/phosphor/star-fill.svg")
-                            : mailbox.scope == "Unified Sent" ? @image-url("../icons/phosphor/paper-plane-tilt-fill.svg")
-                            : mailbox.scope == "Unified Spam" ? @image-url("../icons/phosphor/warning-fill.svg")
-                            : mailbox.scope == "Unified Trash" ? @image-url("../icons/phosphor/trash-fill.svg")
-                            : mailbox.scope == "Unified Archive" ? @image-url("../icons/phosphor/archive-fill.svg")
-                            : @image-url("../icons/phosphor/file-plus-fill.svg");
-                        selected: mailbox.scope == root.selected-scope;
+                    unified-section := SidebarSectionHeader {
+                        label: @tr("All Inboxes");
+                        icon: @image-url("../icons/phosphor/stack-fill.svg");
                         sidebar-background: root.background-color;
-                        selection-background: root.selection-background;
-                        accent-color: root.accent-color;
-                        body-color: root.body-color;
+                        hover-background: root.hover-background;
+                        body-color: root.title-color;
                         muted-color: root.muted-color;
-                        icon-color: root.monochrome-icons ? (mailbox.scope == root.selected-scope ? root.accent-color : root.muted-color)
-                            : mailbox.scope == "Unified Starred" ? #f5b301
-                            : mailbox.scope == "Unified Sent" ? #00a8f3
-                            : mailbox.scope == "Unified Spam" ? #f59e0b
-                            : mailbox.scope == "Unified Trash" ? #ff5b4d
-                            : mailbox.scope == "Unified Archive" ? #8b5cf6
-                            : #d946ef;
-                        clicked(scope) => { root.select-scope(scope); }
-                    }
-                categories-section := SidebarSectionHeader {
-                    label: @tr("Categories");
-                    open: false;
-                    label-font-weight: 500;
-                    folder-row-style: true;
-                    sidebar-background: root.background-color;
-                    hover-background: root.hover-background;
-                    body-color: root.body-color;
-                    muted-color: root.muted-color;
-                    icon: @image-url("../icons/phosphor/tag-simple-fill.svg");
-                    icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
-                }
-
-                if categories-section.open : VerticalBox {
-                    vertical-stretch: 0;
-                    padding: 0px;
-                    spacing: 3px;
-                    alignment: start;
-
-                    SidebarItem {
-                        label: @tr("Important");
-                        left-padding: 42px;
-                        scope: "Important";
-                        mail-drop-enabled: true;
-                        icon: @image-url("../icons/phosphor/envelope-fill.svg");
-                        selected: root.selected-scope == "Important";
-                        sidebar-background: root.background-color;
-                        selection-background: root.selection-background;
-                        accent-color: root.accent-color;
-                        body-color: root.body-color;
-                        muted-color: root.muted-color;
-                        icon-color: root.monochrome-icons ? (root.selected-scope == "Important" ? root.accent-color : root.muted-color) : #2f9cf4;
-                        clicked(scope) => { root.select-scope(scope); }
+                        icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
                     }
 
-                    SidebarItem {
-                        label: @tr("Other");
-                        left-padding: 42px;
-                        scope: "Other";
-                        mail-drop-enabled: true;
-                        icon: @image-url("../icons/phosphor/envelope-simple-fill.svg");
-                        selected: root.selected-scope == "Other";
-                        sidebar-background: root.background-color;
-                        selection-background: root.selection-background;
-                        accent-color: root.accent-color;
-                        body-color: root.body-color;
-                        muted-color: root.muted-color;
-                        icon-color: root.monochrome-icons ? (root.selected-scope == "Other" ? root.accent-color : root.muted-color) : #64748b;
-                        clicked(scope) => { root.select-scope(scope); }
-                    }
+                    if unified-section.open : VerticalBox {
+                        vertical-stretch: 0;
+                        padding: 0px;
+                        spacing: 3px;
+                        alignment: start;
 
-                    for category in root.mail-categories : SidebarItem {
-                        label: category.name;
-                        label-has-emoji: category.name_has_emoji;
-                        left-padding: 42px;
-                        scope: "Label:" + category.id;
-                        mail-drop-enabled: true;
-                        icon: root.selected-scope == "Label:" + category.id
-                            ? @image-url("../icons/phosphor/folder-open-fill.svg")
-                            : @image-url("../icons/phosphor/folder-simple-fill.svg");
-                        selected: root.selected-scope == "Label:" + category.id;
-                        sidebar-background: root.background-color;
-                        selection-background: root.selection-background;
-                        accent-color: root.accent-color;
-                        body-color: root.body-color;
-                        muted-color: root.muted-color;
-                        icon-color: root.monochrome-icons
-                            ? (root.selected-scope == "Label:" + category.id ? root.accent-color : root.muted-color)
-                            : category.color;
-                        clicked(scope) => { root.select-scope(scope); }
-                    }
-                }
+                        SidebarItem {
+                            label: @tr("Inbox");
+                            count: root.unified-count;
+                            scope: "Unified Inbox";
+                            account-id: 0;
+                            folder-id: -1;
+                            mail-drop-enabled: true;
+                            icon: @image-url("../icons/phosphor/tray-fill.svg");
+                            selected: root.selected-scope == "Unified Inbox";
+                            prominent: true;
+                            row-height: 32px;
+                            sidebar-background: root.background-color;
+                            selection-background: root.selection-background;
+                            accent-color: root.accent-color;
+                            body-color: root.body-color;
+                            muted-color: root.muted-color;
+                            icon-color: root.monochrome-icons ? (root.selected-scope == "Unified Inbox" ? root.accent-color : root.muted-color) : #2f9cf4;
+                            clicked(scope) => { root.select-scope(scope); }
+                        }
 
-                if root.mail-labels.length > 0 : VerticalBox {
-                    vertical-stretch: 0;
-                    padding: 0px;
-                    spacing: 3px;
-                    alignment: start;
-
-                    labels-section := SidebarSectionHeader {
-                        label: @tr("Labels");
+                        for mailbox in root.unified-mailboxes : SidebarItem {
+                            label: mailbox.label;
+                            count: mailbox.count;
+                            scope: mailbox.scope;
+                            account-id: mailbox.account_id;
+                            folder-id: mailbox.folder_id;
+                            mail-drop-enabled: mailbox.scope == "Unified Starred"
+                                || mailbox.scope == "Unified Archive"
+                                || mailbox.scope == "Unified Spam"
+                                || mailbox.scope == "Unified Trash";
+                            mail-drop-copies: mailbox.scope == "Unified Starred";
+                            icon: mailbox.scope == "Unified Starred" ? @image-url("../icons/phosphor/star-fill.svg")
+                                : mailbox.scope == "Unified Sent" ? @image-url("../icons/phosphor/paper-plane-tilt-fill.svg")
+                                : mailbox.scope == "Unified Spam" ? @image-url("../icons/phosphor/warning-fill.svg")
+                                : mailbox.scope == "Unified Trash" ? @image-url("../icons/phosphor/trash-fill.svg")
+                                : mailbox.scope == "Unified Archive" ? @image-url("../icons/phosphor/archive-fill.svg")
+                                : @image-url("../icons/phosphor/file-plus-fill.svg");
+                            selected: mailbox.scope == root.selected-scope;
+                            sidebar-background: root.background-color;
+                            selection-background: root.selection-background;
+                            accent-color: root.accent-color;
+                            body-color: root.body-color;
+                            muted-color: root.muted-color;
+                            icon-color: root.monochrome-icons ? (mailbox.scope == root.selected-scope ? root.accent-color : root.muted-color)
+                                : mailbox.scope == "Unified Starred" ? #f5b301
+                                : mailbox.scope == "Unified Sent" ? #00a8f3
+                                : mailbox.scope == "Unified Spam" ? #f59e0b
+                                : mailbox.scope == "Unified Trash" ? #ff5b4d
+                                : mailbox.scope == "Unified Archive" ? #8b5cf6
+                                : #d946ef;
+                            clicked(scope) => { root.select-scope(scope); }
+                        }
+                    categories-section := SidebarSectionHeader {
+                        label: @tr("Categories");
                         open: false;
                         label-font-weight: 500;
                         folder-row-style: true;
@@ -563,193 +492,284 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         hover-background: root.hover-background;
                         body-color: root.body-color;
                         muted-color: root.muted-color;
-                        icon: @image-url("../icons/phosphor/folders-fill.svg");
-                        icon-color: root.monochrome-icons ? root.body-color : #22a06b;
+                        icon: @image-url("../icons/phosphor/tag-simple-fill.svg");
+                        icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
                     }
 
-                    if labels-section.open : VerticalBox {
+                    if categories-section.open : VerticalBox {
                         vertical-stretch: 0;
                         padding: 0px;
                         spacing: 3px;
                         alignment: start;
 
-                        for label in root.mail-labels : SidebarItem {
-                            label: label.name;
-                            label-has-emoji: label.name_has_emoji;
+                        SidebarItem {
+                            label: @tr("Important");
                             left-padding: 42px;
-                            label-id: label.id;
-                            editable-color: label.color;
-                            scope: "Label:" + label.id;
-                            label-manageable: true;
+                            scope: "Important";
                             mail-drop-enabled: true;
-                            mail-drop-copies: true;
-                            icon: root.selected-scope == "Label:" + label.id
+                            icon: @image-url("../icons/phosphor/envelope-fill.svg");
+                            selected: root.selected-scope == "Important";
+                            sidebar-background: root.background-color;
+                            selection-background: root.selection-background;
+                            accent-color: root.accent-color;
+                            body-color: root.body-color;
+                            muted-color: root.muted-color;
+                            icon-color: root.monochrome-icons ? (root.selected-scope == "Important" ? root.accent-color : root.muted-color) : #2f9cf4;
+                            clicked(scope) => { root.select-scope(scope); }
+                        }
+
+                        SidebarItem {
+                            label: @tr("Other");
+                            left-padding: 42px;
+                            scope: "Other";
+                            mail-drop-enabled: true;
+                            icon: @image-url("../icons/phosphor/envelope-simple-fill.svg");
+                            selected: root.selected-scope == "Other";
+                            sidebar-background: root.background-color;
+                            selection-background: root.selection-background;
+                            accent-color: root.accent-color;
+                            body-color: root.body-color;
+                            muted-color: root.muted-color;
+                            icon-color: root.monochrome-icons ? (root.selected-scope == "Other" ? root.accent-color : root.muted-color) : #64748b;
+                            clicked(scope) => { root.select-scope(scope); }
+                        }
+
+                        for category in root.mail-categories : SidebarItem {
+                            label: category.name;
+                            label-has-emoji: category.name_has_emoji;
+                            left-padding: 42px;
+                            scope: "Label:" + category.id;
+                            mail-drop-enabled: true;
+                            icon: root.selected-scope == "Label:" + category.id
                                 ? @image-url("../icons/phosphor/folder-open-fill.svg")
                                 : @image-url("../icons/phosphor/folder-simple-fill.svg");
-                            selected: root.selected-scope == "Label:" + label.id;
+                            selected: root.selected-scope == "Label:" + category.id;
                             sidebar-background: root.background-color;
                             selection-background: root.selection-background;
                             accent-color: root.accent-color;
                             body-color: root.body-color;
                             muted-color: root.muted-color;
                             icon-color: root.monochrome-icons
-                                ? (root.selected-scope == "Label:" + label.id ? root.accent-color : root.muted-color)
-                                : label.color;
+                                ? (root.selected-scope == "Label:" + category.id ? root.accent-color : root.muted-color)
+                                : category.color;
                             clicked(scope) => { root.select-scope(scope); }
-                            rename-label(id, name, color) => { root.request-rename-label(id, name, color); }
-                            delete-label(id, name) => { root.request-delete-label(id, name); }
                         }
                     }
-                }
-                }
 
-                WorkspaceMiniHeading {
-                    height: 22px;
-                    label: @tr("ACCOUNTS");
-                    label-color: root.muted-color;
-                    vertical-alignment: bottom;
-                }
+                    if root.mail-labels.length > 0 : VerticalBox {
+                        vertical-stretch: 0;
+                        padding: 0px;
+                        spacing: 3px;
+                        alignment: start;
 
-                for account in root.account-mailboxes : VerticalBox {
-                    width: parent.width;
-                    horizontal-stretch: 1;
-                    vertical-stretch: 0;
-                    // This structural wrapper must not add the themed
-                    // VerticalBox padding a second time. Account headers now
-                    // share the same left edge as the unified header.
-                    padding: 0px;
-                    spacing: 3px;
-                    alignment: start;
+                        labels-section := SidebarSectionHeader {
+                            label: @tr("Labels");
+                            open: false;
+                            label-font-weight: 500;
+                            folder-row-style: true;
+                            sidebar-background: root.background-color;
+                            hover-background: root.hover-background;
+                            body-color: root.body-color;
+                            muted-color: root.muted-color;
+                            icon: @image-url("../icons/phosphor/folders-fill.svg");
+                            icon-color: root.monochrome-icons ? root.body-color : #22a06b;
+                        }
 
-                    account-section := SidebarSectionHeader {
-                        label: account.label;
-                        detail: account.detail;
-                        avatar: account.avatar;
-                        avatar-image: account.avatar_image;
-                        has-avatar-image: account.has_avatar;
-                        has-avatar: true;
-                        sidebar-background: root.background-color;
-                        hover-background: root.hover-background;
-                        body-color: root.title-color;
-                        muted-color: root.muted-color;
-                        icon-color: root.body-color;
+                        if labels-section.open : VerticalBox {
+                            vertical-stretch: 0;
+                            padding: 0px;
+                            spacing: 3px;
+                            alignment: start;
+
+                            for label in root.mail-labels : SidebarItem {
+                                label: label.name;
+                                label-has-emoji: label.name_has_emoji;
+                                left-padding: 42px;
+                                label-id: label.id;
+                                editable-color: label.color;
+                                scope: "Label:" + label.id;
+                                label-manageable: true;
+                                mail-drop-enabled: true;
+                                mail-drop-copies: true;
+                                icon: root.selected-scope == "Label:" + label.id
+                                    ? @image-url("../icons/phosphor/folder-open-fill.svg")
+                                    : @image-url("../icons/phosphor/folder-simple-fill.svg");
+                                selected: root.selected-scope == "Label:" + label.id;
+                                sidebar-background: root.background-color;
+                                selection-background: root.selection-background;
+                                accent-color: root.accent-color;
+                                body-color: root.body-color;
+                                muted-color: root.muted-color;
+                                icon-color: root.monochrome-icons
+                                    ? (root.selected-scope == "Label:" + label.id ? root.accent-color : root.muted-color)
+                                    : label.color;
+                                clicked(scope) => { root.select-scope(scope); }
+                                rename-label(id, name, color) => { root.request-rename-label(id, name, color); }
+                                delete-label(id, name) => { root.request-delete-label(id, name); }
+                            }
+                        }
+                    }
                     }
 
-                    if account-section.open : VerticalBox {
+                    WorkspaceMiniHeading {
+                        height: 22px;
+                        label: @tr("ACCOUNTS");
+                        label-color: root.muted-color;
+                        vertical-alignment: bottom;
+                    }
+
+                    for account in root.account-mailboxes : VerticalBox {
                         width: parent.width;
                         horizontal-stretch: 1;
                         vertical-stretch: 0;
+                        // This structural wrapper must not add the themed
+                        // VerticalBox padding a second time. Account headers now
+                        // share the same left edge as the unified header.
                         padding: 0px;
-                        // This loop also visits folders from other accounts.
-                        // Zero spacing ensures hidden zero-height rows cannot
-                        // create large blank gaps between visible sections.
-                        spacing: 0px;
+                        spacing: 3px;
                         alignment: start;
 
-                        for mailbox in root.mailboxes : SidebarItem {
-                            visible: !mailbox.is_account && mailbox.context == account.context;
-                            label: mailbox.label;
-                            label-has-emoji: mailbox.label_has_emoji;
-                            count: mailbox.count;
-                            scope: mailbox.scope;
-                            account-id: mailbox.account_id;
-                            folder-id: mailbox.folder_id;
-                            has-children: mailbox.has_children;
-                            expanded: mailbox.expanded;
-                            manageable: !mailbox.is_standard && mailbox.folder_id >= 0;
-                            mail-drop-enabled: (mailbox.folder_id >= 0
-                                && mailbox.label != "Sent"
-                                && mailbox.label != "Drafts")
-                                || mailbox.label == "Starred";
-                            mail-drop-copies: mailbox.label == "Starred";
-                            left-padding: 26px + mailbox.depth * 16px;
-                            icon: mailbox.label == "Inbox" ? @image-url("../icons/phosphor/tray-fill.svg")
-                                : mailbox.label == "Starred" ? @image-url("../icons/phosphor/star-fill.svg")
-                                : mailbox.label == "Sent" ? @image-url("../icons/phosphor/paper-plane-tilt-fill.svg")
-                                : mailbox.label == "Archive" ? @image-url("../icons/phosphor/archive-fill.svg")
-                                : mailbox.label == "Spam" ? @image-url("../icons/phosphor/warning-fill.svg")
-                                : mailbox.label == "Trash" ? @image-url("../icons/phosphor/trash-fill.svg")
-                                : mailbox.label == "Drafts" ? @image-url("../icons/phosphor/file-plus-fill.svg")
-                                : mailbox.scope == root.selected-scope ? @image-url("../icons/phosphor/folder-open-fill.svg")
-                                : @image-url("../icons/phosphor/folder-simple-fill.svg");
-                            selected: mailbox.scope == root.selected-scope;
-                            prominent: mailbox.label == "Inbox";
-                            // Include the 3px inter-row gap in the row pitch so
-                            // visible rows retain their spacing while
-                            // hidden rows contribute exactly zero height.
-                            row-height: mailbox.label == "Inbox" ? 35px : 31px;
+                        account-section := SidebarSectionHeader {
+                            label: account.label;
+                            detail: account.detail;
+                            avatar: account.avatar;
+                            avatar-image: account.avatar_image;
+                            has-avatar-image: account.has_avatar;
+                            has-avatar: true;
                             sidebar-background: root.background-color;
-                            selection-background: root.selection-background;
-                            accent-color: root.accent-color;
-                            body-color: root.body-color;
+                            hover-background: root.hover-background;
+                            body-color: root.title-color;
                             muted-color: root.muted-color;
-                            icon-color: root.monochrome-icons ? (mailbox.scope == root.selected-scope ? root.accent-color : root.muted-color)
-                                : mailbox.label == "Inbox" ? #2f9cf4
-                                : mailbox.label == "Starred" ? #f5b301
-                                : mailbox.label == "Sent" ? #00a8f3
-                                : mailbox.label == "Archive" ? #8b5cf6
-                                : mailbox.label == "Spam" ? #f59e0b
-                                : mailbox.label == "Trash" ? #ff5b4d
-                                : mailbox.label == "Drafts" ? #d946ef
-                                : mailbox.has_custom_color ? mailbox.color
-                                : #22a06b;
-                            clicked(scope) => { root.select-scope(scope); }
-                            toggled(folder-id, expanded) => { root.toggle-folder(folder-id, expanded); }
-                            new-subfolder(account-id, folder-id, name) => {
-                                root.request-create-folder(account-id, folder-id, name);
+                            icon-color: root.body-color;
+                        }
+
+                        if account-section.open : VerticalBox {
+                            width: parent.width;
+                            horizontal-stretch: 1;
+                            vertical-stretch: 0;
+                            padding: 0px;
+                            // This loop also visits folders from other accounts.
+                            // Zero spacing ensures hidden zero-height rows cannot
+                            // create large blank gaps between visible sections.
+                            spacing: 0px;
+                            alignment: start;
+
+                            for mailbox in root.mailboxes : SidebarItem {
+                                visible: !mailbox.is_account && mailbox.context == account.context;
+                                label: mailbox.label;
+                                label-has-emoji: mailbox.label_has_emoji;
+                                count: mailbox.count;
+                                scope: mailbox.scope;
+                                account-id: mailbox.account_id;
+                                folder-id: mailbox.folder_id;
+                                has-children: mailbox.has_children;
+                                expanded: mailbox.expanded;
+                                manageable: !mailbox.is_standard && mailbox.folder_id >= 0;
+                                mail-drop-enabled: (mailbox.folder_id >= 0
+                                    && mailbox.label != "Sent"
+                                    && mailbox.label != "Drafts")
+                                    || mailbox.label == "Starred";
+                                mail-drop-copies: mailbox.label == "Starred";
+                                left-padding: 26px + mailbox.depth * 16px;
+                                icon: mailbox.label == "Inbox" ? @image-url("../icons/phosphor/tray-fill.svg")
+                                    : mailbox.label == "Starred" ? @image-url("../icons/phosphor/star-fill.svg")
+                                    : mailbox.label == "Sent" ? @image-url("../icons/phosphor/paper-plane-tilt-fill.svg")
+                                    : mailbox.label == "Archive" ? @image-url("../icons/phosphor/archive-fill.svg")
+                                    : mailbox.label == "Spam" ? @image-url("../icons/phosphor/warning-fill.svg")
+                                    : mailbox.label == "Trash" ? @image-url("../icons/phosphor/trash-fill.svg")
+                                    : mailbox.label == "Drafts" ? @image-url("../icons/phosphor/file-plus-fill.svg")
+                                    : mailbox.scope == root.selected-scope ? @image-url("../icons/phosphor/folder-open-fill.svg")
+                                    : @image-url("../icons/phosphor/folder-simple-fill.svg");
+                                selected: mailbox.scope == root.selected-scope;
+                                prominent: mailbox.label == "Inbox";
+                                // Include the 3px inter-row gap in the row pitch so
+                                // visible rows retain their spacing while
+                                // hidden rows contribute exactly zero height.
+                                row-height: mailbox.label == "Inbox" ? 35px : 31px;
+                                sidebar-background: root.background-color;
+                                selection-background: root.selection-background;
+                                accent-color: root.accent-color;
+                                body-color: root.body-color;
+                                muted-color: root.muted-color;
+                                icon-color: root.monochrome-icons ? (mailbox.scope == root.selected-scope ? root.accent-color : root.muted-color)
+                                    : mailbox.label == "Inbox" ? #2f9cf4
+                                    : mailbox.label == "Starred" ? #f5b301
+                                    : mailbox.label == "Sent" ? #00a8f3
+                                    : mailbox.label == "Archive" ? #8b5cf6
+                                    : mailbox.label == "Spam" ? #f59e0b
+                                    : mailbox.label == "Trash" ? #ff5b4d
+                                    : mailbox.label == "Drafts" ? #d946ef
+                                    : mailbox.has_custom_color ? mailbox.color
+                                    : #22a06b;
+                                clicked(scope) => { root.select-scope(scope); }
+                                toggled(folder-id, expanded) => { root.toggle-folder(folder-id, expanded); }
+                                new-subfolder(account-id, folder-id, name) => {
+                                    root.request-create-folder(account-id, folder-id, name);
+                                }
+                                rename-folder(folder-id, name) => { root.request-rename-folder(folder-id, name); }
+                                delete-folder(folder-id, name) => { root.request-delete-folder(folder-id, name); }
                             }
-                            rename-folder(folder-id, name) => { root.request-rename-folder(folder-id, name); }
-                            delete-folder(folder-id, name) => { root.request-delete-folder(folder-id, name); }
+
+                            SidebarItem {
+                                label: @tr("New folder");
+                                scope: "";
+                                icon: @image-url("../icons/phosphor/plus.svg");
+                                sidebar-background: root.background-color;
+                                selection-background: root.selection-background;
+                                accent-color: root.accent-color;
+                                body-color: root.body-color;
+                                muted-color: root.muted-color;
+                                icon-color: root.muted-color;
+                                clicked(scope) => { root.request-create-folder(account.account_id, -1, ""); }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        height: 34px;
+                        background: transparent;
+
+                        Text {
+                            x: 26px;
+                            width: parent.width - 26px;
+                            height: parent.height;
+                            text: @tr("Add account");
+                            color: root.muted-color;
+                            font-size: TypeScale.caption;
+                            vertical-alignment: center;
                         }
 
-                        SidebarItem {
-                            label: @tr("New folder");
-                            scope: "";
-                            icon: @image-url("../icons/phosphor/plus.svg");
-                            sidebar-background: root.background-color;
-                            selection-background: root.selection-background;
-                            accent-color: root.accent-color;
-                            body-color: root.body-color;
-                            muted-color: root.muted-color;
-                            icon-color: root.muted-color;
-                            clicked(scope) => { root.request-create-folder(account.account_id, -1, ""); }
+                        Image {
+                            x: 5px;
+                            y: 10px;
+                            width: 14px;
+                            height: 14px;
+                            source: @image-url("../icons/phosphor/plus.svg");
+                            colorize: root.muted-color;
+                            image-fit: contain;
+                            accessible-role: none;
+                        }
+
+                        add-account-hit := TouchArea {
+                            accessible-role: button;
+                            accessible-label: @tr("Add account");
+                            accessible-action-default => { root.manage-accounts(); }
+                            clicked => { root.manage-accounts(); }
+                            mouse-cursor: pointer;
                         }
                     }
                 }
+            }
 
-                Rectangle {
-                    height: 34px;
-                    background: transparent;
-
-                    Text {
-                        x: 26px;
-                        width: parent.width - 26px;
-                        height: parent.height;
-                        text: @tr("Add account");
-                        color: root.muted-color;
-                        font-size: TypeScale.caption;
-                        vertical-alignment: center;
-                    }
-
-                    Image {
-                        x: 5px;
-                        y: 10px;
-                        width: 14px;
-                        height: 14px;
-                        source: @image-url("../icons/phosphor/plus.svg");
-                        colorize: root.muted-color;
-                        image-fit: contain;
-                        accessible-role: none;
-                    }
-
-                    add-account-hit := TouchArea {
-                        accessible-role: button;
-                        accessible-label: @tr("Add account");
-                        accessible-action-default => { root.manage-accounts(); }
-                        clicked => { root.manage-accounts(); }
-                        mouse-cursor: pointer;
-                    }
-                }
+            ScrollFade {
+                x: mailbox-scroll.x;
+                y: mailbox-scroll.y;
+                width: mailbox-scroll.visible-width;
+                height: mailbox-scroll.visible-height;
+                surface-color: root.background-color;
+                viewport-y: mailbox-scroll.viewport-y;
+                viewport-height: mailbox-scroll.viewport-height;
+                visible-height: mailbox-scroll.visible-height;
             }
         }
     }

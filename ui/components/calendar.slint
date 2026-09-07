@@ -7,6 +7,7 @@ import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { CollapsibleWorkspaceSidebar, CompactPageHeader, WorkspaceMiniHeading } from "workspace-layout.slint";
+import { ScrollFade } from "scroll-fade.slint";
 
 export component CalendarEvent inherits Rectangle {
     in property <string> title;
@@ -169,7 +170,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
         x: 0px;
         y: 330px;
         width: parent.width - LayoutMetrics.divider-width;
-        height: max(0px, parent.height - 338px);
+        height: max(0px, parent.height - self.y);
         viewport-width: self.visible-width;
         horizontal-scrollbar-policy: always-off;
 
@@ -280,6 +281,17 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                 }
             }
         }
+    }
+
+    ScrollFade {
+        x: source-scroll.x;
+        y: source-scroll.y;
+        width: source-scroll.visible-width;
+        height: source-scroll.visible-height;
+        surface-color: root.surface-color;
+        viewport-y: source-scroll.viewport-y;
+        viewport-height: source-scroll.viewport-height;
+        visible-height: source-scroll.visible-height;
     }
 
 }
