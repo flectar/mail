@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-06 16:00+0000\n"
+"POT-Creation-Date: 2026-09-07 13:17+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -104,31 +104,31 @@ msgstr ""
 msgid "December"
 msgstr ""
 
-#: ui/app.slint:73 ui/components/calendar.slint:561
+#: ui/app.slint:73 ui/components/calendar.slint:573
 msgid "Mon"
 msgstr ""
 
-#: ui/app.slint:74 ui/components/calendar.slint:561
+#: ui/app.slint:74 ui/components/calendar.slint:573
 msgid "Tue"
 msgstr ""
 
-#: ui/app.slint:75 ui/components/calendar.slint:561
+#: ui/app.slint:75 ui/components/calendar.slint:573
 msgid "Wed"
 msgstr ""
 
-#: ui/app.slint:76 ui/components/calendar.slint:561
+#: ui/app.slint:76 ui/components/calendar.slint:573
 msgid "Thu"
 msgstr ""
 
-#: ui/app.slint:77 ui/components/calendar.slint:561
+#: ui/app.slint:77 ui/components/calendar.slint:573
 msgid "Fri"
 msgstr ""
 
-#: ui/app.slint:78 ui/components/calendar.slint:561
+#: ui/app.slint:78 ui/components/calendar.slint:573
 msgid "Sat"
 msgstr ""
 
-#: ui/app.slint:79 ui/components/calendar.slint:561
+#: ui/app.slint:79 ui/components/calendar.slint:573
 msgid "Sun"
 msgstr ""
 
@@ -1071,186 +1071,186 @@ msgstr ""
 msgid "Copy diagnostics"
 msgstr ""
 
-#: ui/components/calendar.slint:58 ui/components/calendar.slint:209
-#: ui/components/calendar.slint:58 ui/components/calendar.slint:209 ui/components/calendar.slint:698
+#: ui/components/calendar.slint:59 ui/components/calendar.slint:210
+#: ui/components/calendar.slint:59 ui/components/calendar.slint:210 ui/components/calendar.slint:710
 msgid "View details for {}"
 msgstr ""
 
-#: ui/components/calendar.slint:100 ui/components/calendar.slint:465
-#: ui/components/calendar.slint:100 ui/components/calendar.slint:465 ui/dialogs/calendar-event-dialog.slint:48
+#: ui/components/calendar.slint:101 ui/components/calendar.slint:477
+#: ui/components/calendar.slint:101 ui/components/calendar.slint:477 ui/dialogs/calendar-event-dialog.slint:48
 msgid "New event"
 msgstr ""
 
-#: ui/components/calendar.slint:108 ui/components/calendar.slint:621
+#: ui/components/calendar.slint:109 ui/components/calendar.slint:633
 msgid "Previous month"
 msgstr ""
 
-#: ui/components/calendar.slint:109 ui/components/calendar.slint:622
+#: ui/components/calendar.slint:110 ui/components/calendar.slint:634
 msgid "Next month"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Monday initial"
 msgid "M"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Tuesday initial"
 msgid "T"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Wednesday initial"
 msgid "W"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Thursday initial"
 msgid "T"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Friday initial"
 msgid "F"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Saturday initial"
 msgid "S"
 msgstr ""
 
-#: ui/components/calendar.slint:111 ui/components/calendar.slint:631
+#: ui/components/calendar.slint:112 ui/components/calendar.slint:643
 msgctxt "Sunday initial"
 msgid "S"
 msgstr ""
 
-#: ui/components/calendar.slint:156 ui/components/calendar.slint:497
-#: ui/components/calendar.slint:156 ui/components/calendar.slint:497 ui/components/calendar.slint:661
-#: ui/components/calendar.slint:156 ui/components/calendar.slint:497 ui/components/calendar.slint:661
+#: ui/components/calendar.slint:157 ui/components/calendar.slint:509
+#: ui/components/calendar.slint:157 ui/components/calendar.slint:509 ui/components/calendar.slint:673
+#: ui/components/calendar.slint:157 ui/components/calendar.slint:509 ui/components/calendar.slint:673
 msgid "Select {}"
 msgstr ""
 
-#: ui/components/calendar.slint:166
+#: ui/components/calendar.slint:167
 msgid "MY CALENDARS"
 msgstr ""
 
-#: ui/components/calendar.slint:209 ui/components/calendar.slint:219
-#: ui/components/calendar.slint:209 ui/components/calendar.slint:219 ui/components/calendar.slint:258
-#: ui/components/calendar.slint:209 ui/components/calendar.slint:219 ui/components/calendar.slint:258 ui/components/product-rail.slint:109
-#: ui/components/calendar.slint:209 ui/components/calendar.slint:219 ui/components/calendar.slint:258 ui/components/product-rail.slint:109 ui/dialogs/settings-dialog.slint:706
+#: ui/components/calendar.slint:210 ui/components/calendar.slint:220
+#: ui/components/calendar.slint:210 ui/components/calendar.slint:220 ui/components/calendar.slint:259
+#: ui/components/calendar.slint:210 ui/components/calendar.slint:220 ui/components/calendar.slint:259 ui/components/product-rail.slint:109
+#: ui/components/calendar.slint:210 ui/components/calendar.slint:220 ui/components/calendar.slint:259 ui/components/product-rail.slint:109 ui/dialogs/settings-dialog.slint:706
 msgid "Calendar"
 msgstr ""
 
-#: ui/components/calendar.slint:257
+#: ui/components/calendar.slint:258
 msgid "Hide {}"
 msgstr ""
 
-#: ui/components/calendar.slint:258
+#: ui/components/calendar.slint:259
 msgid "Show {}"
 msgstr ""
 
-#: ui/components/calendar.slint:274
+#: ui/components/calendar.slint:275
 msgid ""
 "No provider calendars yet. Connect Google Calendar or Outlook in Settings."
 msgstr ""
 
-#: ui/components/calendar.slint:357
+#: ui/components/calendar.slint:369
 msgid "Read only"
 msgstr ""
 
-#: ui/components/calendar.slint:357
+#: ui/components/calendar.slint:369
 msgid "Read and write"
 msgstr ""
 
-#: ui/components/calendar.slint:358
+#: ui/components/calendar.slint:370
 msgid "Last synced {}"
 msgstr ""
 
-#: ui/components/calendar.slint:358
+#: ui/components/calendar.slint:370
 msgid "Not synced yet"
 msgstr ""
 
-#: ui/components/calendar.slint:359
+#: ui/components/calendar.slint:371
 msgid "Enabled"
 msgstr ""
 
-#: ui/components/calendar.slint:359
+#: ui/components/calendar.slint:371
 msgid "Paused"
 msgstr ""
 
-#: ui/components/calendar.slint:360 ui/components/calendar.slint:378
+#: ui/components/calendar.slint:372 ui/components/calendar.slint:390
 msgid "Default calendar"
 msgstr ""
 
-#: ui/components/calendar.slint:375
+#: ui/components/calendar.slint:387
 msgid "Created in Flectar Mail"
 msgstr ""
 
-#: ui/components/calendar.slint:375
+#: ui/components/calendar.slint:387
 msgid "Synced provider event"
 msgstr ""
 
-#: ui/components/calendar.slint:454
+#: ui/components/calendar.slint:466
 msgid "Show calendars"
 msgstr ""
 
-#: ui/components/calendar.slint:454
+#: ui/components/calendar.slint:466
 msgid "Hide calendars"
 msgstr ""
 
-#: ui/components/calendar.slint:469
+#: ui/components/calendar.slint:481
 msgid "Previous period"
 msgstr ""
 
-#: ui/components/calendar.slint:470
+#: ui/components/calendar.slint:482
 msgid "Next period"
 msgstr ""
 
-#: ui/components/calendar.slint:471
+#: ui/components/calendar.slint:483
 msgid "Week"
 msgstr ""
 
-#: ui/components/calendar.slint:472
+#: ui/components/calendar.slint:484
 msgid "Month"
 msgstr ""
 
-#: ui/components/calendar.slint:473
+#: ui/components/calendar.slint:485
 msgid "Today"
 msgstr ""
 
-#: ui/components/calendar.slint:490
+#: ui/components/calendar.slint:502
 msgid "LOCAL"
 msgstr ""
 
-#: ui/components/calendar.slint:506
+#: ui/components/calendar.slint:518
 msgid "ALL DAY"
 msgstr ""
 
-#: ui/components/calendar.slint:672
+#: ui/components/calendar.slint:684
 msgid "Agenda · {}"
 msgstr ""
 
-#: ui/components/calendar.slint:707
+#: ui/components/calendar.slint:719
 msgid "No events for this date"
 msgstr ""
 
-#: ui/components/calendar.slint:757
+#: ui/components/calendar.slint:769
 msgid "Delete this event?"
 msgstr ""
 
-#: ui/components/calendar.slint:758
+#: ui/components/calendar.slint:770
 msgid "This event will be removed from your calendar."
 msgstr ""
 
-#: ui/components/calendar.slint:759 ui/components/confirmation-dialog.slint:11
+#: ui/components/calendar.slint:771 ui/components/confirmation-dialog.slint:11
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/components/calendar.slint:760
+#: ui/components/calendar.slint:772
 msgid "Delete event"
 msgstr ""
 
-#: ui/components/calendar.slint:761
+#: ui/components/calendar.slint:773
 msgid "Keep event"
 msgstr ""
 
@@ -1336,7 +1336,7 @@ msgstr ""
 msgid "The selected text will open this address."
 msgstr ""
 
-#: ui/components/composer-actions.slint:348 ui/views/contacts-view.slint:751
+#: ui/components/composer-actions.slint:348 ui/views/contacts-view.slint:770
 msgid "https://example.com"
 msgstr ""
 
@@ -1482,78 +1482,78 @@ msgstr ""
 msgid "Primary navigation"
 msgstr ""
 
-#: ui/components/sidebar.slint:161
+#: ui/components/sidebar.slint:162
 msgid "Collapse folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:161
+#: ui/components/sidebar.slint:162
 msgid "Expand folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:176
+#: ui/components/sidebar.slint:177
 msgid "New subfolder"
 msgstr ""
 
-#: ui/components/sidebar.slint:180 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:180 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:181 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:181 ui/dialogs/folder-dialog.slint:27
 msgid "Rename folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:184
+#: ui/components/sidebar.slint:185
 msgid "Delete folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:196 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:196 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:197 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:197 ui/dialogs/folder-dialog.slint:26
 msgid "Rename label"
 msgstr ""
 
-#: ui/components/sidebar.slint:200
+#: ui/components/sidebar.slint:201
 msgid "Delete label"
 msgstr ""
 
-#: ui/components/sidebar.slint:384 ui/views/mail-list-pane.slint:559
+#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:590
 msgid "New email"
 msgstr ""
 
-#: ui/components/sidebar.slint:406 ui/views/contacts-view.slint:226
+#: ui/components/sidebar.slint:414 ui/views/contacts-view.slint:233
 msgid "UNIFIED"
 msgstr ""
 
-#: ui/components/sidebar.slint:411
+#: ui/components/sidebar.slint:419
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:427
+#: ui/components/sidebar.slint:435
 msgid "Inbox"
 msgstr ""
 
-#: ui/components/sidebar.slint:479
+#: ui/components/sidebar.slint:487
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:498
+#: ui/components/sidebar.slint:506
 msgid "Important"
 msgstr ""
 
-#: ui/components/sidebar.slint:514
+#: ui/components/sidebar.slint:522
 msgid "Other"
 msgstr ""
 
-#: ui/components/sidebar.slint:558 ui/views/mail-reading-pane.slint:348
+#: ui/components/sidebar.slint:566 ui/views/mail-reading-pane.slint:348
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:608 ui/views/contacts-view.slint:276
+#: ui/components/sidebar.slint:616 ui/views/contacts-view.slint:283
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:706 ui/dialogs/folder-dialog.slint:25
-#: ui/components/sidebar.slint:706 ui/dialogs/folder-dialog.slint:25
+#: ui/components/sidebar.slint:714 ui/dialogs/folder-dialog.slint:25
+#: ui/components/sidebar.slint:714 ui/dialogs/folder-dialog.slint:25
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:728 ui/components/sidebar.slint:747
+#: ui/components/sidebar.slint:736 ui/components/sidebar.slint:755
 msgid "Add account"
 msgstr ""
 
@@ -1767,7 +1767,7 @@ msgid "Open meeting link"
 msgstr ""
 
 #: ui/dialogs/calendar-details-dialog.slint:209
-#: ui/dialogs/calendar-details-dialog.slint:209 ui/views/contacts-view.slint:651
+#: ui/dialogs/calendar-details-dialog.slint:209 ui/views/contacts-view.slint:670
 msgid "Delete"
 msgstr ""
 
@@ -1804,7 +1804,7 @@ msgstr ""
 msgid "START TIME"
 msgstr ""
 
-#: ui/dialogs/calendar-event-dialog.slint:53 ui/views/contacts-view.slint:732
+#: ui/dialogs/calendar-event-dialog.slint:53 ui/views/contacts-view.slint:751
 msgid "YYYY-MM-DD"
 msgstr ""
 
@@ -2382,8 +2382,8 @@ msgstr ""
 msgid "!"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:519
-#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:519 ui/views/mail-reading-pane.slint:526
+#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:550
+#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:550 ui/views/mail-reading-pane.slint:526
 msgid "Move to trash"
 msgstr ""
 
@@ -2582,167 +2582,167 @@ msgstr ""
 msgid "Quit"
 msgstr ""
 
-#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:570
-#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:570 ui/views/contacts-view.slint:699
-#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:570 ui/views/contacts-view.slint:699
+#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:589
+#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:589 ui/views/contacts-view.slint:718
+#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:589 ui/views/contacts-view.slint:718
 msgid "New contact"
 msgstr ""
 
-#: ui/views/contacts-view.slint:231
+#: ui/views/contacts-view.slint:238
 msgid "Unified contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:245 ui/views/contacts-view.slint:355
-#: ui/views/contacts-view.slint:245 ui/views/contacts-view.slint:355
+#: ui/views/contacts-view.slint:252 ui/views/contacts-view.slint:374
+#: ui/views/contacts-view.slint:252 ui/views/contacts-view.slint:374
 msgid "All contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:260 ui/views/contacts-view.slint:356
-#: ui/views/contacts-view.slint:260 ui/views/contacts-view.slint:356
+#: ui/views/contacts-view.slint:267 ui/views/contacts-view.slint:375
+#: ui/views/contacts-view.slint:267 ui/views/contacts-view.slint:375
 msgid "Favorites"
 msgstr ""
 
-#: ui/views/contacts-view.slint:317
+#: ui/views/contacts-view.slint:324
 msgid "People discovered from your conversations appear here automatically."
 msgstr ""
 
-#: ui/views/contacts-view.slint:362
+#: ui/views/contacts-view.slint:381
 msgid "Show contact groups"
 msgstr ""
 
-#: ui/views/contacts-view.slint:362
+#: ui/views/contacts-view.slint:381
 msgid "Hide contact groups"
 msgstr ""
 
-#: ui/views/contacts-view.slint:385
+#: ui/views/contacts-view.slint:404
 msgid "Search contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:405
+#: ui/views/contacts-view.slint:424
 msgid "Filter contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:423
+#: ui/views/contacts-view.slint:442
 msgid "Reload contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:529
+#: ui/views/contacts-view.slint:548
 msgid "Open {}"
 msgstr ""
 
-#: ui/views/contacts-view.slint:544
+#: ui/views/contacts-view.slint:563
 msgid "No contacts yet. Create one or sync some mail."
 msgstr ""
 
-#: ui/views/contacts-view.slint:544
+#: ui/views/contacts-view.slint:563
 msgid "No contacts match this search."
 msgstr ""
 
-#: ui/views/contacts-view.slint:614
+#: ui/views/contacts-view.slint:633
 msgid "Back to contacts"
 msgstr ""
 
-#: ui/views/contacts-view.slint:622
+#: ui/views/contacts-view.slint:641
 msgid "Contact details"
 msgstr ""
 
-#: ui/views/contacts-view.slint:636
+#: ui/views/contacts-view.slint:655
 msgid "Remove from favorites"
 msgstr ""
 
-#: ui/views/contacts-view.slint:636
+#: ui/views/contacts-view.slint:655
 msgid "Add to favorites"
 msgstr ""
 
-#: ui/views/contacts-view.slint:640
+#: ui/views/contacts-view.slint:659
 msgid "Delete this contact?"
 msgstr ""
 
-#: ui/views/contacts-view.slint:663
+#: ui/views/contacts-view.slint:682
 msgid "Delete contact"
 msgstr ""
 
-#: ui/views/contacts-view.slint:717
+#: ui/views/contacts-view.slint:736
 msgid "NAME"
 msgstr ""
 
-#: ui/views/contacts-view.slint:718
+#: ui/views/contacts-view.slint:737
 msgid "Full name"
 msgstr ""
 
-#: ui/views/contacts-view.slint:719
+#: ui/views/contacts-view.slint:738
 msgid "EMAIL"
 msgstr ""
 
-#: ui/views/contacts-view.slint:726
+#: ui/views/contacts-view.slint:745
 msgid "PHONE"
 msgstr ""
 
-#: ui/views/contacts-view.slint:727
+#: ui/views/contacts-view.slint:746
 msgid "+1 555 0100"
 msgstr ""
 
-#: ui/views/contacts-view.slint:731
+#: ui/views/contacts-view.slint:750
 msgid "BIRTHDAY"
 msgstr ""
 
-#: ui/views/contacts-view.slint:740
+#: ui/views/contacts-view.slint:759
 msgid "COMPANY"
 msgstr ""
 
-#: ui/views/contacts-view.slint:741
+#: ui/views/contacts-view.slint:760
 msgid "Company"
 msgstr ""
 
-#: ui/views/contacts-view.slint:745
+#: ui/views/contacts-view.slint:764
 msgid "JOB TITLE"
 msgstr ""
 
-#: ui/views/contacts-view.slint:746
+#: ui/views/contacts-view.slint:765
 msgid "Role"
 msgstr ""
 
-#: ui/views/contacts-view.slint:750
+#: ui/views/contacts-view.slint:769
 msgid "WEBSITE"
 msgstr ""
 
-#: ui/views/contacts-view.slint:752
+#: ui/views/contacts-view.slint:771
 msgid "ADDRESS"
 msgstr ""
 
-#: ui/views/contacts-view.slint:753
+#: ui/views/contacts-view.slint:772
 msgid "Postal address"
 msgstr ""
 
-#: ui/views/contacts-view.slint:754
+#: ui/views/contacts-view.slint:773
 msgid "TAGS"
 msgstr ""
 
-#: ui/views/contacts-view.slint:755
+#: ui/views/contacts-view.slint:774
 msgid "customer, design, london"
 msgstr ""
 
-#: ui/views/contacts-view.slint:756
+#: ui/views/contacts-view.slint:775
 msgid "NOTES"
 msgstr ""
 
-#: ui/views/contacts-view.slint:757
+#: ui/views/contacts-view.slint:776
 msgid "Notes about this contact"
 msgstr ""
 
-#: ui/views/contacts-view.slint:765
+#: ui/views/contacts-view.slint:784
 msgid "Send email"
 msgstr ""
 
-#: ui/views/contacts-view.slint:772
+#: ui/views/contacts-view.slint:791
 msgid "Save contact"
 msgstr ""
 
-#: ui/views/contacts-view.slint:802
+#: ui/views/contacts-view.slint:821
 msgid "Select a contact"
 msgstr ""
 
-#: ui/views/contacts-view.slint:803
+#: ui/views/contacts-view.slint:822
 msgid "View and edit contact details here."
 msgstr ""
 
@@ -2766,7 +2766,7 @@ msgstr ""
 msgid "Starred"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:277
+#: ui/views/mail-list-pane.slint:277 ui/views/mail-list-pane.slint:357
 msgid "Has attachments"
 msgstr ""
 
@@ -2782,47 +2782,51 @@ msgstr ""
 msgid "{}, {}"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:355 ui/views/mail-list-pane.slint:426
-#: ui/views/mail-list-pane.slint:355 ui/views/mail-list-pane.slint:426
+#: ui/views/mail-list-pane.slint:355 ui/views/mail-list-pane.slint:457
+#: ui/views/mail-list-pane.slint:355 ui/views/mail-list-pane.slint:457
 msgid "(No subject)"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:515 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:358
+msgid "Replied"
+msgstr ""
+
+#: ui/views/mail-list-pane.slint:546 ui/views/mail-reading-pane.slint:265
 msgid "Remove star"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:515 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:546 ui/views/mail-reading-pane.slint:265
 msgid "Star message"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:516 ui/views/mail-reading-pane.slint:278
-#: ui/views/mail-list-pane.slint:516 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
 msgid "Mark as read"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:516 ui/views/mail-reading-pane.slint:278
-#: ui/views/mail-list-pane.slint:516 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:547 ui/views/mail-reading-pane.slint:278
 msgid "Mark as unread"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:517 ui/views/mail-reading-pane.slint:524
+#: ui/views/mail-list-pane.slint:548 ui/views/mail-reading-pane.slint:524
 msgid "Archive"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:518 ui/views/mail-reading-pane.slint:287
-#: ui/views/mail-list-pane.slint:518 ui/views/mail-reading-pane.slint:287
+#: ui/views/mail-list-pane.slint:549 ui/views/mail-reading-pane.slint:287
+#: ui/views/mail-list-pane.slint:549 ui/views/mail-reading-pane.slint:287
 msgid "Move to spam"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:536 ui/views/onboarding-view.slint:80
+#: ui/views/mail-list-pane.slint:567 ui/views/onboarding-view.slint:80
 msgid "Opening your mailbox…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:536
+#: ui/views/mail-list-pane.slint:567
 msgid "Nothing here"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:537
+#: ui/views/mail-list-pane.slint:568
 msgid "Try another folder or search term."
 msgstr ""
 
