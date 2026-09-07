@@ -284,23 +284,13 @@ export component MailListPane inherits Rectangle {
                                     interactive: !root.sync_in_progress;
                                     icon: @image-url("../icons/phosphor/arrow-clockwise.svg");
                                     icon-color: root.secondary-text;
+                                    ghost: true;
                                     idle-background: root.control-bg;
                                     hover-background: root.muted-control-bg;
                                     tooltip-text: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
                                     clicked => { root.sync_mail(); }
                                 }
                             }
-                        }
-                    }
-
-                    Rectangle {
-                        height: 1px;
-                        background: transparent;
-                        Rectangle {
-                            x: 12px;
-                            width: parent.width - 24px;
-                            height: 1px;
-                            background: root.border-subtle;
                         }
                     }
 
@@ -398,7 +388,7 @@ export component MailListPane inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     sender-indicators := HorizontalBox {
-                                        x: sender-time.x - self.width - 4px;
+                                        x: sender-time.x - self.width - 8px;
                                         y: 0px;
                                         width: row.has_attachments && row.has_replied ? 32px
                                             : row.has_attachments || row.has_replied ? 14px : 0px;
@@ -428,7 +418,7 @@ export component MailListPane inherits Rectangle {
                                         y: 0px;
                                         width: root.dense ? min(170px, max(0px, parent.width - 190px))
                                             : row.has_attachments || row.has_replied
-                                                ? max(0px, sender-indicators.x - 4px)
+                                                ? max(0px, sender-indicators.x - 8px)
                                                 : max(0px, sender-time.x - 22px);
                                         height: root.dense ? 44px : 22px;
                                         text: row.sender;
