@@ -1,11 +1,11 @@
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
 import { EmailRow, MailDragApi } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
-import { FloatingActionButton, IconButton, LineEdit } from "../components/controls.slint";
+import { FloatingActionButton } from "../components/controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
-import { WorkspaceTitleRow } from "../components/workspace-layout.slint";
+import { WorkspaceSearchToolbar, WorkspaceTitleRow } from "../components/workspace-layout.slint";
 
 component MailListLabelChip inherits Rectangle {
     in property <string> name;
@@ -232,64 +232,24 @@ export component MailListPane inherits Rectangle {
                                 Text { height: parent.height; text: root.total_count; color: root.muted-text; font-size: TypeScale.caption; vertical-alignment: center; }
                             }
 
-                            HorizontalBox {
-                                height: 40px;
-                                padding-top: 0px;
-                                padding-right: 0px;
-                                padding-bottom: 0px;
-                                padding-left: 0px;
-                                spacing: 6px;
-                                search-field := Rectangle {
-                                    height: 40px;
-                                    horizontal-stretch: 1;
-                                    LineEdit {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        text: root.search_query;
-                                        placeholder-text: @tr("Search mail");
-                                        show-leading-icon: true;
-                                        leading-icon: @image-url("../icons/phosphor/magnifying-glass.svg");
-                                        leading-icon-color: root.secondary-text;
-                                        trailing-content-width: 40px;
-                                        edited(text) => { root.search_changed(text); }
-                                    }
-                                    filter-menu := ContextMenuArea {
-                                        x: parent.width - 40px;
-                                        width: 40px;
-                                        height: 40px;
-                                        IconButton {
-                                            width: 40px;
-                                            height: 40px;
-                                            icon: @image-url("../icons/phosphor/funnel.svg");
-                                            icon-color: root.search_filter == "All mail" ? root.secondary-text : root.accent;
-                                            ghost: true;
-                                            hover-background: root.muted-control-bg;
-                                            active: root.search_filter != "All mail";
-                                            active-background: root.accent-soft;
-                                            tooltip-text: @tr("Filter mail");
-                                            accessible-id: "mail-filter-button";
-                                            clicked => { filter-menu.show({ x: 0px, y: 40px }); }
-                                        }
-                                        Menu {
-                                            MenuItem { title: @tr("All mail"); activated => { root.set_search_filter("All mail"); } }
-                                            MenuItem { title: @tr("Unread"); activated => { root.set_search_filter("Unread"); } }
-                                            MenuItem { title: @tr("Starred"); activated => { root.set_search_filter("Starred"); } }
-                                            MenuItem { title: @tr("Has attachments"); activated => { root.set_search_filter("Has attachments"); } }
-                                        }
-                                    }
-                                }
-                                IconButton {
-                                    width: 40px;
-                                    height: 40px;
-                                    interactive: !root.sync_in_progress;
-                                    icon: @image-url("../icons/phosphor/arrow-clockwise.svg");
-                                    icon-color: root.secondary-text;
-                                    ghost: true;
-                                    idle-background: root.control-bg;
-                                    hover-background: root.muted-control-bg;
-                                    tooltip-text: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
-                                    clicked => { root.sync_mail(); }
-                                }
+                            WorkspaceSearchToolbar {
+                                text: root.search_query;
+                                placeholder-text: @tr("Search mail");
+                                filters: [
+                                    { title: @tr("All mail"), value: "All mail" },
+                                    { title: @tr("Unread"), value: "Unread" },
+                                    { title: @tr("Starred"), value: "Starred" },
+                                    { title: @tr("Has attachments"), value: "Has attachments" },
+                                ];
+                                filter-active: root.search_filter != "All mail";
+                                filter-tooltip: @tr("Filter mail");
+                                filter-accessible-id: "mail-filter-button";
+                                refresh-enabled: !root.sync_in_progress;
+                                refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
+                                refresh-accessible-id: "mail-refresh-button";
+                                edited(text) => { root.search_changed(text); }
+                                filter-selected(value) => { root.set_search_filter(value); }
+                                refresh => { root.sync_mail(); }
                             }
                         }
                     }

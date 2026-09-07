@@ -1,7 +1,12 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
-import { ToolbarIconButton } from "controls.slint";
+import { LineEdit, ToolbarIconButton } from "controls.slint";
+
+export struct WorkspaceSearchFilter {
+    title: string,
+    value: string,
+}
 
 // All top-level workspaces are placed by this component. This prevents a view
 // from silently adding the product-rail offset or mobile navigation allowance
@@ -123,6 +128,83 @@ export component WorkspaceTitleRow inherits Rectangle {
         }
 
         @children
+    }
+}
+
+// Mail and contacts share one search, filter, and refresh contract. Feature
+// views provide only their text, filter choices, and callbacks so visual state
+// and control geometry cannot drift between otherwise identical list headers.
+export component WorkspaceSearchToolbar inherits Rectangle {
+    in property <string> text;
+    in property <string> placeholder-text;
+    in property <[WorkspaceSearchFilter]> filters: [];
+    in property <bool> filter-active: false;
+    in property <string> filter-tooltip;
+    in property <string> filter-accessible-id;
+    in property <bool> refresh-enabled: true;
+    in property <string> refresh-tooltip;
+    in property <string> refresh-accessible-id;
+    callback edited(string);
+    callback filter-selected(string);
+    callback refresh;
+
+    height: LayoutMetrics.control-height;
+    background: transparent;
+
+    HorizontalBox {
+        padding: 0px;
+        spacing: 6px;
+
+        search-field := Rectangle {
+            height: LayoutMetrics.control-height;
+            horizontal-stretch: 1;
+
+            LineEdit {
+                width: parent.width;
+                height: parent.height;
+                text: root.text;
+                placeholder-text: root.placeholder-text;
+                show-leading-icon: true;
+                leading-icon: @image-url("../icons/phosphor/magnifying-glass.svg");
+                leading-icon-color: AppTheme.secondary;
+                trailing-content-width: LayoutMetrics.control-height;
+                edited(value) => { root.edited(value); }
+            }
+
+            filter-menu := ContextMenuArea {
+                x: parent.width - LayoutMetrics.control-height;
+                width: LayoutMetrics.control-height;
+                height: LayoutMetrics.control-height;
+
+                ToolbarIconButton {
+                    icon: @image-url("../icons/phosphor/funnel.svg");
+                    icon-color: root.filter-active ? AppTheme.accent : AppTheme.secondary;
+                    hover-background: AppTheme.muted-control-bg;
+                    active: root.filter-active;
+                    active-background: AppTheme.accent-soft;
+                    tooltip-text: root.filter-tooltip;
+                    accessible-id: root.filter-accessible-id;
+                    clicked => { filter-menu.show({ x: 0px, y: parent.height }); }
+                }
+
+                Menu {
+                    for option in root.filters : MenuItem {
+                        title: option.title;
+                        activated => { root.filter-selected(option.value); }
+                    }
+                }
+            }
+        }
+
+        ToolbarIconButton {
+            interactive: root.refresh-enabled;
+            icon: @image-url("../icons/phosphor/arrow-clockwise.svg");
+            icon-color: AppTheme.secondary;
+            hover-background: AppTheme.muted-control-bg;
+            tooltip-text: root.refresh-tooltip;
+            accessible-id: root.refresh-accessible-id;
+            clicked => { root.refresh(); }
+        }
     }
 }
 

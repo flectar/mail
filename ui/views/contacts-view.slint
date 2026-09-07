@@ -2,12 +2,12 @@ import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.sl
 import { ContactAccountRow, ContactRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
-import { FloatingActionButton, IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
+import { FloatingActionButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { SidebarItem, SidebarSectionHeader } from "../components/sidebar.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceTitleRow } from "../components/workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceSearchToolbar, WorkspaceTitleRow } from "../components/workspace-layout.slint";
 
 component FieldLabel inherits Text {
     in property <string> label;
@@ -390,64 +390,25 @@ export component ContactsView inherits Rectangle {
                             }
                         }
 
-                        HorizontalBox {
-                            height: 40px;
-                            padding: 0px;
-                            spacing: 6px;
-
-                            search-field := Rectangle {
-                                horizontal-stretch: 1;
-                                LineEdit {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    text: root.query;
-                                    placeholder-text: @tr("Search contacts");
-                                    show-leading-icon: true;
-                                    leading-icon: @image-url("../icons/phosphor/magnifying-glass.svg");
-                                    leading-icon-color: root.secondary-text;
-                                    trailing-content-width: 40px;
-                                    edited(value) => { root.search(value); }
-                                }
-                                filter-menu := ContextMenuArea {
-                                    x: parent.width - 40px;
-                                    width: 40px;
-                                    height: 40px;
-                                    IconButton {
-                                        width: 40px;
-                                        height: 40px;
-                                        icon: @image-url("../icons/phosphor/funnel.svg");
-                                        icon-color: root.filter == "all" ? root.secondary-text : root.accent;
-                                        ghost: true;
-                                        hover-background: root.muted-control-bg;
-                                        active: root.filter != "all";
-                                        active-background: root.accent-soft;
-                                        tooltip-text: @tr("Filter contacts");
-                                        accessible-id: "contacts-filter-button";
-                                        clicked => { filter-menu.show({ x: 0px, y: 40px }); }
-                                    }
-                                    Menu {
-                                        MenuItem { title: @tr("All contacts"); activated => { root.open-filter("all"); } }
-                                        MenuItem { title: @tr("Favorites"); activated => { root.open-filter("favorites"); } }
-                                    }
-                                }
-                            }
-
-                            IconButton {
-                                width: 40px;
-                                height: 40px;
-                                icon: @image-url("../icons/phosphor/arrow-clockwise.svg");
-                                icon-color: root.secondary-text;
-                                idle-background: root.control-bg;
-                                hover-background: root.muted-control-bg;
-                                tooltip-text: @tr("Reload contacts");
-                                accessible-id: "contacts-refresh-button";
-                                clicked => { root.refresh(); }
-                            }
+                        WorkspaceSearchToolbar {
+                            text: root.query;
+                            placeholder-text: @tr("Search contacts");
+                            filters: [
+                                { title: @tr("All contacts"), value: "all" },
+                                { title: @tr("Favorites"), value: "favorites" },
+                            ];
+                            filter-active: root.filter != "all";
+                            filter-tooltip: @tr("Filter contacts");
+                            filter-accessible-id: "contacts-filter-button";
+                            refresh-tooltip: @tr("Reload contacts");
+                            refresh-accessible-id: "contacts-refresh-button";
+                            edited(value) => { root.search(value); }
+                            filter-selected(value) => { root.open-filter(value); }
+                            refresh => { root.refresh(); }
                         }
                     }
                 }
 
-                Rectangle { height: 1px; background: root.border-subtle; }
                 Rectangle {
                     height: 24px;
                     Text {
