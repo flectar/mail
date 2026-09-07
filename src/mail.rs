@@ -379,11 +379,12 @@ impl CoreMailSource {
                 .map_err(|error| error.to_string())?;
             (page.threads, page.next_cursor)
         } else {
-            // Core's search engine handles FTS and optional semantic ranking.
-            // It currently returns one bounded result page without a cursor.
+            // The mail list is a timeline: search narrows it, then presents
+            // the newest matching threads first. Relevance-ranked retrieval
+            // remains available to non-UI core consumers.
             let results = self
                 .core
-                .search(query.trim().to_owned(), resolved.account_id, limit)
+                .search_chronological(query.trim().to_owned(), resolved.account_id, limit)
                 .await
                 .map_err(|error| error.to_string())?;
             (results, None)

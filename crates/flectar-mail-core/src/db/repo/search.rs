@@ -110,27 +110,44 @@ fn append_operator_clauses(
     }
 }
 
-/// Lexical branch: thread ids ranked by bm25 + recency (or, when the query is
-/// operators-only, by recency), best first, capped at `cap`.
-fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result<Vec<i64>> {
+/// Lexical branch: thread ids ranked by bm25 + recency or ordered strictly by
+/// newest match for timeline callers, capped at `cap`.
+fn structured_thread_ids_ordered(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cap: i64,
+    chronological: bool,
+) -> Result<Vec<i64>> {
+    if cap <= 0 {
+        return Ok(Vec::new());
+    }
+
     let mut where_clauses: Vec<String> = Vec::new();
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     // bm25() may only be evaluated in a query directly over the FTS table, so
-    // rank inside a subquery and join the results to messages. The CTE must be
-    // MATERIALIZED: if the planner flattens it into the outer join, bm25()
-    // loses its full-text context and the query fails.
+    // rank inside a subquery and join the results to messages. Chronological
+    // callers must retain every FTS match; applying the relevance candidate
+    // cap first could hide a newer, weaker match. They can join FTS directly
+    // because they do not evaluate bm25(). The ranked CTE must be MATERIALIZED:
+    // if the planner flattens it into the outer join, bm25() loses its
+    // full-text context and the query fails.
     let (cte, fts_join) = if q.fts.is_empty() {
         ("", "")
     } else {
         bind.push(Box::new(q.fts.clone()));
-        (
-            "WITH f AS MATERIALIZED (
-                SELECT rowid AS mid, bm25(messages_fts, 4.0, 2.0, 2.0, 1.0) AS fts_rank
-                FROM messages_fts WHERE messages_fts MATCH ?1
-                ORDER BY fts_rank LIMIT 2000)",
-            "JOIN f ON f.mid = m.id",
-        )
+        if chronological {
+            where_clauses.push("messages_fts MATCH ?1".into());
+            ("", "JOIN messages_fts ON messages_fts.rowid = m.id")
+        } else {
+            (
+                "WITH f AS MATERIALIZED (
+                    SELECT rowid AS mid, bm25(messages_fts, 4.0, 2.0, 2.0, 1.0) AS fts_rank
+                    FROM messages_fts WHERE messages_fts MATCH ?1
+                    ORDER BY fts_rank LIMIT 2000)",
+                "JOIN f ON f.mid = m.id",
+            )
+        }
     };
 
     append_operator_clauses(q, &mut where_clauses, &mut bind);
@@ -139,7 +156,7 @@ fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result
         return Ok(Vec::new());
     }
 
-    let rank_expr = if q.fts.is_empty() {
+    let rank_expr = if q.fts.is_empty() || chronological {
         "0.0"
     } else {
         "f.fts_rank"
@@ -149,25 +166,50 @@ fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result
     } else {
         format!("AND {}", where_clauses.join(" AND "))
     };
-
-    let sql = format!(
-        "{cte}
-         SELECT m.thread_id, MIN({rank_expr}) AS rank, MAX(m.date) AS d
-         FROM messages m {fts_join}
-         WHERE m.thread_id IS NOT NULL {where_sql}
-         GROUP BY m.thread_id
-         ORDER BY rank ASC, d DESC
-         LIMIT {cap}"
-    );
+    let sql = if chronological {
+        // Walking matches newest-first and de-duplicating below avoids a
+        // GROUP BY/MAX temporary table. The first occurrence of each thread
+        // is necessarily its newest matching message.
+        format!(
+            "{cte}
+             SELECT m.thread_id
+             FROM messages m {fts_join}
+             WHERE m.thread_id IS NOT NULL {where_sql}
+             ORDER BY m.date DESC, m.thread_id DESC"
+        )
+    } else {
+        format!(
+            "{cte}
+             SELECT m.thread_id, MIN({rank_expr}) AS rank, MAX(m.date) AS d
+             FROM messages m {fts_join}
+             WHERE m.thread_id IS NOT NULL {where_sql}
+             GROUP BY m.thread_id
+             ORDER BY rank ASC, d DESC
+             LIMIT {cap}"
+        )
+    };
 
     // prepare_cached: the SQL text repeats across keystrokes (only binds
     // change), so skip re-planning on every call.
     let mut stmt = conn.prepare_cached(&sql)?;
     let params_ref: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
-    let ids = stmt
-        .query_map(params_ref.as_slice(), |r| r.get::<_, i64>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut rows = stmt.query(params_ref.as_slice())?;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while let Some(row) = rows.next()? {
+        let id = row.get::<_, i64>(0)?;
+        if seen.insert(id) {
+            ids.push(id);
+            if ids.len() >= cap as usize {
+                break;
+            }
+        }
+    }
     Ok(ids)
+}
+
+fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result<Vec<i64>> {
+    structured_thread_ids_ordered(conn, q, cap, false)
 }
 
 /// Lexical branch at message granularity: message ids ranked by bm25 + recency
@@ -469,6 +511,18 @@ fn apply_personal_boosts(
 /// Retained for callers that don't have a vector index.
 pub fn search(conn: &Connection, q: &ParsedQuery, limit: i64) -> Result<Vec<ThreadSummary>> {
     let thread_ids = structured_thread_ids(conn, q, limit)?;
+    hydrate(conn, &thread_ids)
+}
+
+/// Timeline search for mail-list UIs. Matching semantics stay identical to
+/// lexical search, but the newest matching thread is always presented first.
+pub fn chronological(conn: &Connection, q: &ParsedQuery, limit: i64) -> Result<Vec<ThreadSummary>> {
+    let mut thread_ids = structured_thread_ids_ordered(conn, q, limit, true)?;
+    if thread_ids.is_empty() && !q.fts.is_empty() && q.fts_or != q.fts {
+        let mut relaxed = q.clone();
+        relaxed.fts = q.fts_or.clone();
+        thread_ids = structured_thread_ids_ordered(conn, &relaxed, limit, true)?;
+    }
     hydrate(conn, &thread_ids)
 }
 

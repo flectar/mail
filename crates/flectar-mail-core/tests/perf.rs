@@ -219,7 +219,21 @@ async fn hundred_k_messages_stay_instant() {
     let search_ms = t0.elapsed().as_millis();
     assert!(!hits.is_empty(), "search should hit");
 
-    // 5. Search with operator filter.
+    // 5. Chronological FTS across the complete result set, matching the mail
+    // list UI path. "update" appears in every subject, so this guards the
+    // worst-case cost of ordering all matching threads by newest message.
+    let t0 = Instant::now();
+    let chronological = db
+        .read(|conn| {
+            let q = flectar_mail_core::search::parse("update");
+            repo::search::chronological(conn, &q, 50)
+        })
+        .await
+        .unwrap();
+    let chronological_ms = t0.elapsed().as_millis();
+    assert_eq!(chronological.len(), 50);
+
+    // 6. Search with operator filter.
     let t0 = Instant::now();
     let hits2 = db
         .read(|conn| {
@@ -231,7 +245,7 @@ async fn hundred_k_messages_stay_instant() {
     let op_ms = t0.elapsed().as_millis();
     let _ = hits2;
 
-    // 6. Full hybrid pipeline (lexical + OR fallback + RRF + personal boosts
+    // 7. Full hybrid pipeline (lexical + OR fallback + RRF + personal boosts
     //    + hydration) - the path the search screen hits per keystroke.
     let t0 = Instant::now();
     let hits3 = db
@@ -246,7 +260,7 @@ async fn hundred_k_messages_stay_instant() {
     assert!(!hits3.is_empty());
 
     eprintln!(
-        "perf: inbox page {list_ms}ms · inbox count {count_ms}ms · live badges {badge_ms}ms · deep page {deep_ms}ms · fts {search_ms}ms · fts+operator {op_ms}ms · hybrid {hybrid_ms}ms"
+        "perf: inbox page {list_ms}ms · inbox count {count_ms}ms · live badges {badge_ms}ms · deep page {deep_ms}ms · fts {search_ms}ms · chronological fts {chronological_ms}ms · fts+operator {op_ms}ms · hybrid {hybrid_ms}ms"
     );
     assert!(list_ms < 50, "inbox page took {list_ms}ms (budget 50ms)");
     assert!(
@@ -259,6 +273,10 @@ async fn hundred_k_messages_stay_instant() {
     );
     assert!(deep_ms < 50, "deep page took {deep_ms}ms (budget 50ms)");
     assert!(search_ms < 100, "search took {search_ms}ms (budget 100ms)");
+    assert!(
+        chronological_ms < 150,
+        "chronological search took {chronological_ms}ms (budget 150ms)"
+    );
     assert!(op_ms < 150, "operator search took {op_ms}ms (budget 150ms)");
     assert!(
         hybrid_ms < 150,

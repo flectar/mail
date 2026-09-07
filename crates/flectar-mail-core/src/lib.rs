@@ -4968,6 +4968,23 @@ impl Core {
         out
     }
 
+    /// Search for a chronological mail timeline. This keeps relevance-ranked
+    /// search available to assistants and retrieval callers while giving the
+    /// interactive mail list the newest matching threads first.
+    pub async fn search_chronological(
+        &self,
+        query: String,
+        account_id: Option<i64>,
+        limit: i64,
+    ) -> Result<Vec<ThreadSummary>> {
+        let mut parsed = search::parse(&query);
+        parsed.account_id = account_id;
+        let limit = limit.clamp(1, 100);
+        self.db
+            .read(move |conn| repo::search::chronological(conn, &parsed, limit))
+            .await
+    }
+
     /// Embed `text` as a query and return the top-`k` (message_id, score) hits
     /// from the in-memory index. Empty when no local model is loaded. Query
     /// embeddings are cached, so repeated or backspaced-over queries skip the

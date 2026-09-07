@@ -176,6 +176,55 @@ fn sender_name_match_outranks_body_only_match() {
 }
 
 #[test]
+fn chronological_search_puts_newer_body_match_before_older_subject_match() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+    insert_message(&conn, 100, 10, "Quarterly report", &sender, 1_000);
+    insert_message(&conn, 101, 20, "Status update", &sender, 2_000);
+    conn.execute(
+        "UPDATE messages SET snippet='Quarterly report attached' WHERE id=101",
+        [],
+    )
+    .unwrap();
+    repo::search::index_message(&conn, 101).unwrap();
+
+    let q = search::parse("quarterly report");
+    let ranked = repo::search::hybrid(&conn, &q, &[], 10).unwrap();
+    assert_eq!(ranked[0].id, 10, "subject weighting drives relevance order");
+
+    let timeline = repo::search::chronological(&conn, &q, 10).unwrap();
+    assert_eq!(
+        timeline.iter().map(|thread| thread.id).collect::<Vec<_>>(),
+        [20, 10]
+    );
+}
+
+#[test]
+fn chronological_search_considers_matches_beyond_the_relevance_candidate_cap() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+
+    // More than the relevance branch's 2,000-candidate cap have a strongly
+    // weighted subject match. A newer body-only match must still lead the
+    // chronological timeline.
+    for offset in 0..2_001_i64 {
+        let id = 10_000 + offset;
+        insert_message(&conn, id, id, "Needle report", &sender, 1_000 + offset);
+    }
+    insert_message(&conn, 50_000, 50_000, "Status update", &sender, 100_000);
+    conn.execute(
+        "UPDATE messages SET snippet='Needle details attached' WHERE id=50000",
+        [],
+    )
+    .unwrap();
+    repo::search::index_message(&conn, 50_000).unwrap();
+
+    let q = search::parse("needle");
+    let timeline = repo::search::chronological(&conn, &q, 1).unwrap();
+    assert_eq!(timeline[0].id, 50_000);
+}
+
+#[test]
 fn exclude_operator_drops_matching_threads() {
     let conn = db();
     let be = addr("BE GROUP", "hi@begroup.vn");
