@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-07 14:46+0000\n"
+"POT-Creation-Date: 2026-09-07 15:06+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -1370,7 +1370,7 @@ msgstr "Añadir enlace"
 msgid "The selected text will open this address."
 msgstr "El texto seleccionado abrirá esta dirección."
 
-#: ui/components/composer-actions.slint:348 ui/views/contacts-view.slint:770
+#: ui/components/composer-actions.slint:348 ui/views/contacts-view.slint:731
 msgid "https://example.com"
 msgstr "https://ejemplo.com"
 
@@ -1534,7 +1534,7 @@ msgstr "Renombrar etiqueta"
 msgid "Delete label"
 msgstr "Eliminar etiqueta"
 
-#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:580
+#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:540
 msgid "New email"
 msgstr "Nuevo correo"
 
@@ -1782,7 +1782,7 @@ msgid "Open meeting link"
 msgstr "Abrir enlace de la reunión"
 
 #: ui/dialogs/calendar-details-dialog.slint:209
-#: ui/views/contacts-view.slint:670
+#: ui/views/contacts-view.slint:631
 msgid "Delete"
 msgstr "Eliminar"
 
@@ -1818,7 +1818,7 @@ msgstr "FECHA"
 msgid "START TIME"
 msgstr "HORA DE INICIO"
 
-#: ui/dialogs/calendar-event-dialog.slint:53 ui/views/contacts-view.slint:751
+#: ui/dialogs/calendar-event-dialog.slint:53 ui/views/contacts-view.slint:712
 msgid "YYYY-MM-DD"
 msgstr "AAAA-MM-DD"
 
@@ -1953,7 +1953,7 @@ msgstr "6 meses · Recomendado"
 msgid "1 year"
 msgstr "1 año"
 
-#: ui/dialogs/settings-dialog.slint:120 ui/views/mail-list-pane.slint:274
+#: ui/dialogs/settings-dialog.slint:120 ui/views/mail-list-pane.slint:239
 msgid "All mail"
 msgstr "Todo el correo"
 
@@ -2408,7 +2408,7 @@ msgstr "Redactar un mensaje nuevo"
 msgid "C"
 msgstr "C"
 
-#: ui/dialogs/settings-dialog.slint:898 ui/views/mail-list-pane.slint:249
+#: ui/dialogs/settings-dialog.slint:898 ui/views/mail-list-pane.slint:237
 msgid "Search mail"
 msgstr "Buscar correo"
 
@@ -2432,7 +2432,7 @@ msgstr "Marcar como spam"
 msgid "!"
 msgstr "!"
 
-#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:540
+#: ui/dialogs/settings-dialog.slint:901 ui/views/mail-list-pane.slint:500
 #: ui/views/mail-reading-pane.slint:526
 msgid "Move to trash"
 msgstr "Mover a la papelera"
@@ -2638,8 +2638,8 @@ msgstr "Mostrar Flectar Mail"
 msgid "Quit"
 msgstr "Salir"
 
-#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:589
-#: ui/views/contacts-view.slint:718
+#: ui/views/contacts-view.slint:202 ui/views/contacts-view.slint:550
+#: ui/views/contacts-view.slint:679
 msgid "New contact"
 msgstr "Nuevo contacto"
 
@@ -2668,135 +2668,135 @@ msgstr "Mostrar grupos de contactos"
 msgid "Hide contact groups"
 msgstr "Ocultar grupos de contactos"
 
-#: ui/views/contacts-view.slint:404
+#: ui/views/contacts-view.slint:395
 msgid "Search contacts"
 msgstr "Buscar contactos"
 
-#: ui/views/contacts-view.slint:424
+#: ui/views/contacts-view.slint:401
 msgid "Filter contacts"
 msgstr "Filtrar contactos"
 
-#: ui/views/contacts-view.slint:442
+#: ui/views/contacts-view.slint:403
 msgid "Reload contacts"
 msgstr "Recargar contactos"
 
-#: ui/views/contacts-view.slint:548
+#: ui/views/contacts-view.slint:509
 msgid "Open {}"
 msgstr "Abrir {}"
 
-#: ui/views/contacts-view.slint:563
+#: ui/views/contacts-view.slint:524
 msgid "No contacts yet. Create one or sync some mail."
 msgstr "Aún no hay contactos. Crea uno o sincroniza el correo."
 
-#: ui/views/contacts-view.slint:563
+#: ui/views/contacts-view.slint:524
 msgid "No contacts match this search."
 msgstr "Ningún contacto coincide con esta búsqueda."
 
-#: ui/views/contacts-view.slint:633
+#: ui/views/contacts-view.slint:594
 msgid "Back to contacts"
 msgstr "Volver a contactos"
 
-#: ui/views/contacts-view.slint:641
+#: ui/views/contacts-view.slint:602
 msgid "Contact details"
 msgstr "Detalles del contacto"
 
-#: ui/views/contacts-view.slint:655
+#: ui/views/contacts-view.slint:616
 msgid "Remove from favorites"
 msgstr "Quitar de favoritos"
 
-#: ui/views/contacts-view.slint:655
+#: ui/views/contacts-view.slint:616
 msgid "Add to favorites"
 msgstr "Añadir a favoritos"
 
-#: ui/views/contacts-view.slint:659
+#: ui/views/contacts-view.slint:620
 msgid "Delete this contact?"
 msgstr "¿Eliminar este contacto?"
 
-#: ui/views/contacts-view.slint:682
+#: ui/views/contacts-view.slint:643
 msgid "Delete contact"
 msgstr "Eliminar contacto"
 
-#: ui/views/contacts-view.slint:736
+#: ui/views/contacts-view.slint:697
 msgid "NAME"
 msgstr "NOMBRE"
 
-#: ui/views/contacts-view.slint:737
+#: ui/views/contacts-view.slint:698
 msgid "Full name"
 msgstr "Nombre completo"
 
-#: ui/views/contacts-view.slint:738
+#: ui/views/contacts-view.slint:699
 msgid "EMAIL"
 msgstr "CORREO"
 
-#: ui/views/contacts-view.slint:745
+#: ui/views/contacts-view.slint:706
 msgid "PHONE"
 msgstr "TELÉFONO"
 
-#: ui/views/contacts-view.slint:746
+#: ui/views/contacts-view.slint:707
 msgid "+1 555 0100"
 msgstr "+34 600 000 000"
 
-#: ui/views/contacts-view.slint:750
+#: ui/views/contacts-view.slint:711
 msgid "BIRTHDAY"
 msgstr "CUMPLEAÑOS"
 
-#: ui/views/contacts-view.slint:759
+#: ui/views/contacts-view.slint:720
 msgid "COMPANY"
 msgstr "EMPRESA"
 
-#: ui/views/contacts-view.slint:760
+#: ui/views/contacts-view.slint:721
 msgid "Company"
 msgstr "Empresa"
 
-#: ui/views/contacts-view.slint:764
+#: ui/views/contacts-view.slint:725
 msgid "JOB TITLE"
 msgstr "CARGO"
 
-#: ui/views/contacts-view.slint:765
+#: ui/views/contacts-view.slint:726
 msgid "Role"
 msgstr "Cargo"
 
-#: ui/views/contacts-view.slint:769
+#: ui/views/contacts-view.slint:730
 msgid "WEBSITE"
 msgstr "SITIO WEB"
 
-#: ui/views/contacts-view.slint:771
+#: ui/views/contacts-view.slint:732
 msgid "ADDRESS"
 msgstr "DIRECCIÓN"
 
-#: ui/views/contacts-view.slint:772
+#: ui/views/contacts-view.slint:733
 msgid "Postal address"
 msgstr "Dirección postal"
 
-#: ui/views/contacts-view.slint:773
+#: ui/views/contacts-view.slint:734
 msgid "TAGS"
 msgstr "ETIQUETAS"
 
-#: ui/views/contacts-view.slint:774
+#: ui/views/contacts-view.slint:735
 msgid "customer, design, london"
 msgstr "cliente, diseño, madrid"
 
-#: ui/views/contacts-view.slint:775
+#: ui/views/contacts-view.slint:736
 msgid "NOTES"
 msgstr "NOTAS"
 
-#: ui/views/contacts-view.slint:776
+#: ui/views/contacts-view.slint:737
 msgid "Notes about this contact"
 msgstr "Notas sobre este contacto"
 
-#: ui/views/contacts-view.slint:784
+#: ui/views/contacts-view.slint:745
 msgid "Send email"
 msgstr "Enviar correo"
 
-#: ui/views/contacts-view.slint:791
+#: ui/views/contacts-view.slint:752
 msgid "Save contact"
 msgstr "Guardar contacto"
 
-#: ui/views/contacts-view.slint:821
+#: ui/views/contacts-view.slint:782
 msgid "Select a contact"
 msgstr "Selecciona un contacto"
 
-#: ui/views/contacts-view.slint:822
+#: ui/views/contacts-view.slint:783
 msgid "View and edit contact details here."
 msgstr "Consulta y edita aquí los detalles del contacto."
 
@@ -2808,75 +2808,75 @@ msgstr "Mostrar carpetas"
 msgid "Hide folders"
 msgstr "Ocultar carpetas"
 
-#: ui/views/mail-list-pane.slint:269
-msgid "Filter mail"
-msgstr "Filtrar correo"
-
-#: ui/views/mail-list-pane.slint:275
+#: ui/views/mail-list-pane.slint:240
 msgid "Unread"
 msgstr "No leídos"
 
-#: ui/views/mail-list-pane.slint:276
+#: ui/views/mail-list-pane.slint:241
 msgid "Starred"
 msgstr "Destacados"
 
-#: ui/views/mail-list-pane.slint:277 ui/views/mail-list-pane.slint:347
+#: ui/views/mail-list-pane.slint:242 ui/views/mail-list-pane.slint:307
 msgid "Has attachments"
 msgstr "Con adjuntos"
 
-#: ui/views/mail-list-pane.slint:290
+#: ui/views/mail-list-pane.slint:245
+msgid "Filter mail"
+msgstr "Filtrar correo"
+
+#: ui/views/mail-list-pane.slint:248
 msgid "Synchronizing mail"
 msgstr "Sincronizando correo"
 
-#: ui/views/mail-list-pane.slint:290
+#: ui/views/mail-list-pane.slint:248
 msgid "Reload mail"
 msgstr "Recargar correo"
 
-#: ui/views/mail-list-pane.slint:345
+#: ui/views/mail-list-pane.slint:305
 msgid "{}, {}"
 msgstr "{}, {}"
 
-#: ui/views/mail-list-pane.slint:345 ui/views/mail-list-pane.slint:447
+#: ui/views/mail-list-pane.slint:305 ui/views/mail-list-pane.slint:407
 msgid "(No subject)"
 msgstr "(Sin asunto)"
 
-#: ui/views/mail-list-pane.slint:348
+#: ui/views/mail-list-pane.slint:308
 msgid "Replied"
 msgstr "Respondido"
 
-#: ui/views/mail-list-pane.slint:536 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:496 ui/views/mail-reading-pane.slint:265
 msgid "Remove star"
 msgstr "Quitar destacado"
 
-#: ui/views/mail-list-pane.slint:536 ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-list-pane.slint:496 ui/views/mail-reading-pane.slint:265
 msgid "Star message"
 msgstr "Destacar mensaje"
 
-#: ui/views/mail-list-pane.slint:537 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:497 ui/views/mail-reading-pane.slint:278
 msgid "Mark as read"
 msgstr "Marcar como leído"
 
-#: ui/views/mail-list-pane.slint:537 ui/views/mail-reading-pane.slint:278
+#: ui/views/mail-list-pane.slint:497 ui/views/mail-reading-pane.slint:278
 msgid "Mark as unread"
 msgstr "Marcar como no leído"
 
-#: ui/views/mail-list-pane.slint:538 ui/views/mail-reading-pane.slint:524
+#: ui/views/mail-list-pane.slint:498 ui/views/mail-reading-pane.slint:524
 msgid "Archive"
 msgstr "Archivar"
 
-#: ui/views/mail-list-pane.slint:539 ui/views/mail-reading-pane.slint:287
+#: ui/views/mail-list-pane.slint:499 ui/views/mail-reading-pane.slint:287
 msgid "Move to spam"
 msgstr "Mover a spam"
 
-#: ui/views/mail-list-pane.slint:557 ui/views/onboarding-view.slint:80
+#: ui/views/mail-list-pane.slint:517 ui/views/onboarding-view.slint:80
 msgid "Opening your mailbox…"
 msgstr "Abriendo tu buzón…"
 
-#: ui/views/mail-list-pane.slint:557
+#: ui/views/mail-list-pane.slint:517
 msgid "Nothing here"
 msgstr "No hay nada aquí"
 
-#: ui/views/mail-list-pane.slint:558
+#: ui/views/mail-list-pane.slint:518
 msgid "Try another folder or search term."
 msgstr "Prueba otra carpeta o término de búsqueda."
 
