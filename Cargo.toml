@@ -18,7 +18,7 @@ blitz-paint = { path = "crates/blitz-paint" }
 
 [package]
 name = "flectar-mail"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 description = "A native email client built with Rust, Slint, and Blitz"
 license = "AGPL-3.0-only"
 repository = "https://github.com/flectar/mail"
