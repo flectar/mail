@@ -6,7 +6,7 @@ build_dir="$project_dir/target/deb"
 package_root="$build_dir/debian/flectar-mail"
 version="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n 1)"
 # Debian sorts ~beta before the final version. A hyphen means a Debian revision.
-version="${version/-/~}"
+version="${version/-/\~}"
 output_path="$build_dir/flectar-mail_${version}_amd64.deb"
 
 if [[ -z "$version" ]]; then
