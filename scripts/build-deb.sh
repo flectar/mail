@@ -33,14 +33,11 @@ mkdir -p \
 
 install -m755 "$project_dir/target/release/flectar-mail" \
   "$package_root/usr/bin/flectar-mail"
-install -m644 "$project_dir/resources/com.flectar.mail.desktop" \
-  "$package_root/usr/share/applications/com.flectar.mail.desktop"
+python3 "$project_dir/scripts/stage-linux-metadata.py" "$package_root"
 install -m644 "$project_dir/resources/app-icon/flectar-mail-masked-512.png" \
   "$package_root/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
 install -m644 "$project_dir/resources/app-icon/flectar-mail-masked.svg" \
   "$package_root/usr/share/icons/hicolor/scalable/apps/com.flectar.mail.svg"
-install -m644 "$project_dir/resources/com.flectar.mail.metainfo.xml" \
-  "$package_root/usr/share/metainfo/com.flectar.mail.metainfo.xml"
 install -m644 "$project_dir/LICENSE" \
   "$package_root/usr/share/doc/flectar-mail/LICENSE"
 cp -R "$project_dir/LICENSES" "$package_root/usr/share/doc/flectar-mail/LICENSES"

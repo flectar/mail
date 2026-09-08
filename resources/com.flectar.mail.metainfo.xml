@@ -51,7 +51,8 @@
     <binary>flectar-mail</binary>
   </provides>
   <releases>
-    <release version="0.1.0" date="2026-08-27">
+    <!-- Packaging stamps the first release with the Cargo version and build date. -->
+    <release version="0.1.0-alpha.4" date="2026-09-08" type="development">
       <description>
         <p>Initial native desktop and mobile preview release.</p>
       </description>

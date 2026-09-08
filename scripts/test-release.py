@@ -9,7 +9,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.dont_write_bytecode = True
@@ -27,6 +29,7 @@ release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
 android_signing = load_script("verify-android-signing")
 verify_android_signing = android_signing.verify
+stage_linux_metadata = load_script("stage-linux-metadata").stage
 
 
 class ReleaseTests(unittest.TestCase):
@@ -86,13 +89,36 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             verify_android_signing(production.replace("CN=Flectar", "CN=Android Debug"), "production")
 
-    def test_debian_prerelease_package(self):
+    def test_linux_metadata_versions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "resources").mkdir()
+            for name in ("com.flectar.mail.desktop", "com.flectar.mail.metainfo.xml"):
+                shutil.copyfile(SCRIPTS.parent / "resources" / name, root / "resources" / name)
+            for version in ("0.2.0-alpha.1", "0.2.0-beta.2", "0.2.0-rc.3", "0.2.0"):
+                with self.subTest(version=version):
+                    (root / "Cargo.toml").write_text(f'[package]\nversion = "{version}"\n')
+                    destination = root / version
+                    with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
+                        stage_linux_metadata(root, destination)
+                    desktop = (destination / "usr/share/applications/com.flectar.mail.desktop").read_text()
+                    self.assertIn(f"X-AppImage-Version={version}\n", desktop)
+                    release = ET.parse(destination / "usr/share/metainfo/com.flectar.mail.metainfo.xml").find("./releases/release")
+                    self.assertEqual(release.get("version"), version)
+                    self.assertEqual(release.get("date"), "2026-01-01")
+                    self.assertEqual(release.get("type"), "development" if "-" in version else "stable")
+            for name in ("com.flectar.mail.desktop", "com.flectar.mail.metainfo.xml"):
+                self.assertEqual((root / "resources" / name).read_bytes(), (SCRIPTS.parent / "resources" / name).read_bytes())
+
+    def test_linux_package_metadata(self):
         # Exercise the actual shell packager and dpkg with a tiny existing ELF,
         # so shell expansion bugs cannot hide behind Python-only asset tests.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             paths = (
-                "scripts/build-deb.sh", "LICENSE", "THIRD_PARTY_NOTICES.md",
+                "scripts/build-deb.sh", "scripts/build-appimage.sh",
+                "scripts/stage-linux-metadata.py", "resources/AppRun",
+                "LICENSE", "THIRD_PARTY_NOTICES.md",
                 "resources/com.flectar.mail.desktop", "resources/com.flectar.mail.metainfo.xml",
                 "resources/app-icon/flectar-mail-masked-512.png",
                 "resources/app-icon/flectar-mail-masked.svg",
@@ -122,6 +148,48 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(package.is_file())
             version = subprocess.check_output(["dpkg-deb", "--field", str(package), "Version"], text=True)
             self.assertEqual(version.strip(), "0.1.0~alpha.1")
+            extracted = root / "extracted"
+            subprocess.run(["dpkg-deb", "--extract", str(package), str(extracted)], check=True)
+            desktop_path = "usr/share/applications/com.flectar.mail.desktop"
+            metainfo_path = "usr/share/metainfo/com.flectar.mail.metainfo.xml"
+            self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", (extracted / desktop_path).read_text())
+            release = ET.parse(extracted / metainfo_path).find("./releases/release")
+            self.assertEqual(release.get("version"), "0.1.0-alpha.1")
+            self.assertEqual(release.get("type"), "development")
+
+            # Exercise the AppImage shell packager up to its tool boundary,
+            # without downloading deployment tools or compiling the application.
+            deploy = root / "bin/linuxdeploy"
+            deploy.write_text('''#!/usr/bin/env python3
+import pathlib, sys
+appdir = pathlib.Path(sys.argv[sys.argv.index("--appdir") + 1])
+(appdir / "com.flectar.mail.desktop").symlink_to("usr/share/applications/com.flectar.mail.desktop")
+''')
+            pack = root / "bin/appimagetool"
+            pack.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+appdir = pathlib.Path(sys.argv[1])
+pathlib.Path(sys.argv[2]).write_text(json.dumps({
+    "version": os.environ.get("VERSION"),
+    "desktop": (appdir / "com.flectar.mail.desktop").read_text(),
+    "metainfo": (appdir / "usr/share/metainfo/com.flectar.mail.metainfo.xml").read_text(),
+}))
+''')
+            deploy.chmod(0o755)
+            pack.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
+                env={**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
+                     "LINUXDEPLOY": str(deploy), "APPIMAGETOOL": str(pack), "VERSION": "stale"},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            packaged = json.loads((root / "target/appimage/flectar-mail.AppImage").read_text())
+            self.assertEqual(packaged["version"], "0.1.0-alpha.1")
+            self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", packaged["desktop"])
+            release = ET.fromstring(packaged["metainfo"]).find("./releases/release")
+            self.assertEqual(release.get("version"), "0.1.0-alpha.1")
+            self.assertEqual(release.get("type"), "development")
 
     def test_versions_and_tags(self):
         for version in ("0.1.0", "1.2.3-alpha.1", "1.2.3-beta.2", "1.2.3-rc.3"):

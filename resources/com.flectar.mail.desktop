@@ -10,5 +10,6 @@ Keywords=Mail;Email;IMAP;Gmail;Outlook;Calendar;
 Terminal=false
 StartupNotify=true
 X-AppImage-Name=Flectar Mail
-X-AppImage-Version=0.1.0
+# Packaging replaces this with the Cargo.toml version.
+X-AppImage-Version=0.1.0-alpha.4
 X-AppImage-Arch=x86_64

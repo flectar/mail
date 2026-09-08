@@ -54,11 +54,9 @@ mkdir -p \
   "$app_dir/usr/share/icons/hicolor/scalable/apps" \
   "$app_dir/usr/share/metainfo"
 cp "$project_dir/target/release/flectar-mail" "$app_dir/usr/bin/flectar-mail"
-cp "$project_dir/resources/com.flectar.mail.desktop" "$app_dir/usr/share/applications/com.flectar.mail.desktop"
+app_version="$(python3 "$project_dir/scripts/stage-linux-metadata.py" "$app_dir")"
 cp "$project_dir/resources/app-icon/flectar-mail-masked-512.png" "$app_dir/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
 cp "$project_dir/resources/app-icon/flectar-mail-masked.svg" "$app_dir/usr/share/icons/hicolor/scalable/apps/com.flectar.mail.svg"
-cp "$project_dir/resources/com.flectar.mail.metainfo.xml" \
-  "$app_dir/usr/share/metainfo/com.flectar.mail.metainfo.xml"
 cp "$project_dir/LICENSE" "$app_dir/usr/share/doc/flectar-mail/LICENSE"
 cp -R "$project_dir/LICENSES" "$app_dir/usr/share/doc/flectar-mail/LICENSES"
 cp "$project_dir/THIRD_PARTY_NOTICES.md" "$app_dir/usr/share/doc/flectar-mail/THIRD_PARTY_NOTICES.md"
@@ -80,7 +78,7 @@ download_tool \
 
 # Deploy ordinary ELF dependencies. Winit uses the host Wayland/X11 client
 # libraries through its normal backend discovery rather than a toolkit plugin.
-APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
+VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
   "$linuxdeploy" \
   --appdir "$app_dir" \
   --executable "$app_dir/usr/bin/flectar-mail"
@@ -97,7 +95,7 @@ ln -sfn flectar-mail.png "$app_dir/.DirIcon"
 
 mkdir -p "$(dirname "$output_path")"
 rm -f "$staged_output"
-APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
+VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
   "$appimagetool" "$app_dir" "$staged_output"
 # Renaming over an executing AppImage is atomic on Linux; the running process
 # keeps its old inode while new launches receive the freshly packaged build.
