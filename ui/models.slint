@@ -246,6 +246,14 @@ export struct ContactAccountRow {
     selected: bool,
 }
 
+export enum ContactSidebarRowKind { unified-heading, unified-section, all, favorites, accounts-heading, account, contacts, hint }
+export struct ContactSidebarRow {
+    key: string,
+    kind: ContactSidebarRowKind,
+    account: ContactAccountRow,
+    open: bool,
+}
+
 // Email document controls are shared directly with the native renderer.
 export struct ReaderItem { name: string, url: string, kind: string, y: float }
 export struct ReaderImage { x: float, y: float, width: float, height: float, alt: string, state: string }

@@ -122,9 +122,147 @@
   "contact_last_interacted": "Last contacted Sep 4, 2026",
   "contact_total_count": 6,
   "contact_favorite_count": 2,
-  "contact_accounts": [
-    { "id": 1, "name": "Flectar", "email": "alex@flectar.com", "initials": "FL", "has_avatar": false, "count": "4", "selected": false },
-    { "id": 2, "name": "Flectar Support", "email": "support@flectar.com", "initials": "FS", "has_avatar": false, "count": "2", "selected": false }
+  "contact_sidebar_rows": [
+    {
+      "kind": "unified-heading",
+      "key": "unified-heading",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "unified-section",
+      "key": "unified",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "all",
+      "key": "all",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "favorites",
+      "key": "favorites",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "accounts-heading",
+      "key": "accounts-heading",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "account",
+      "key": "account:1",
+      "account": {
+        "id": 1,
+        "name": "Flectar",
+        "email": "alex@flectar.com",
+        "initials": "FL",
+        "has_avatar": false,
+        "count": "4",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "contacts",
+      "key": "contacts:account:1",
+      "account": {
+        "id": 1,
+        "name": "Flectar",
+        "email": "alex@flectar.com",
+        "initials": "FL",
+        "has_avatar": false,
+        "count": "4",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "account",
+      "key": "account:2",
+      "account": {
+        "id": 2,
+        "name": "Flectar Support",
+        "email": "support@flectar.com",
+        "initials": "FS",
+        "has_avatar": false,
+        "count": "2",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "contacts",
+      "key": "contacts:account:2",
+      "account": {
+        "id": 2,
+        "name": "Flectar Support",
+        "email": "support@flectar.com",
+        "initials": "FS",
+        "has_avatar": false,
+        "count": "2",
+        "selected": false
+      },
+      "open": true
+    },
+    {
+      "kind": "hint",
+      "key": "hint",
+      "account": {
+        "id": 0,
+        "name": "",
+        "email": "",
+        "initials": "",
+        "has_avatar": false,
+        "count": "",
+        "selected": false
+      },
+      "open": true
+    }
   ],
   "contacts": [
     { "id": 1, "name": "Alex Morgan", "email": "alex@flectar.com", "initials": "AM", "avatar_tone": 0, "company": "Flectar", "detail": "Flectar · Product designer", "last_contacted": "Sep 4", "favorite": true, "selected": true },

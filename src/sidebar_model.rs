@@ -1,67 +1,11 @@
 //! Visible sidebar projection and batched, retained Slint model updates.
 use super::*;
 
-/// Keep one model for all responsive presentations. A splice emits range
-/// notifications so expanding thousands of descendants moves the tail once,
-/// without resetting the ListView or doing one Vec insertion per folder.
-#[derive(Default)]
-pub(super) struct SidebarModel {
-    rows: RefCell<Vec<SidebarRow>>,
-    notify: slint::ModelNotify,
-}
-
-impl Model for SidebarModel {
-    type Data = SidebarRow;
-
-    fn row_count(&self) -> usize {
-        self.rows.borrow().len()
-    }
-
-    fn row_data(&self, row: usize) -> Option<SidebarRow> {
-        self.rows.borrow().get(row).cloned()
-    }
-
-    fn model_tracker(&self) -> &dyn slint::ModelTracker {
-        &self.notify
-    }
-}
+pub(super) type SidebarModel = crate::retained_model::RetainedModel<SidebarRow>;
 
 impl SidebarModel {
     fn reconcile(&self, rows: Vec<SidebarRow>) {
-        let current = self.rows.borrow();
-        let prefix = current
-            .iter()
-            .zip(&rows)
-            .take_while(|(a, b)| a.key == b.key)
-            .count();
-        let suffix = current[prefix..]
-            .iter()
-            .rev()
-            .zip(rows[prefix..].iter().rev())
-            .take_while(|(a, b)| a.key == b.key)
-            .count();
-        let removed = current.len() - prefix - suffix;
-        let added = rows.len() - prefix - suffix;
-        drop(current);
-        if removed > 0 {
-            self.rows.borrow_mut().drain(prefix..prefix + removed);
-            self.notify.row_removed(prefix, removed);
-        }
-        if added > 0 {
-            self.rows
-                .borrow_mut()
-                .splice(prefix..prefix, rows[prefix..prefix + added].iter().cloned());
-            self.notify.row_added(prefix, added);
-        }
-        for (index, row) in rows.into_iter().enumerate() {
-            if (prefix..prefix + added).contains(&index) {
-                continue;
-            }
-            if !same_row(&self.rows.borrow()[index], &row) {
-                self.rows.borrow_mut()[index] = row;
-                self.notify.row_changed(index);
-            }
-        }
+        self.reconcile_by(rows, |row| row.key.clone(), same_row);
     }
 }
 
@@ -499,7 +443,7 @@ mod interaction_tests {
     }
 
     #[test]
-    fn sidebar_sections_survive_scrolling_and_layout_recreation() {
+    fn workspace_sidebars_survive_scrolling_and_layout_recreation() {
         let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
         let clock = Rc::new(Cell::new(Duration::ZERO));
         slint::platform::set_platform(Box::new(Headless(window.clone(), clock.clone()))).unwrap();
@@ -630,6 +574,122 @@ mod interaction_tests {
         click(31., 29.);
         click(140., 220.);
         assert!(collapsed.borrow().contains("account:1"));
+        // Contacts uses the same retained update machinery and shared row controls.
+        app.window().set_size(slint::PhysicalSize::new(1320, 800));
+        app.set_active_view("contacts".into());
+        app.set_connected_accounts(ModelRc::new(VecModel::from(
+            (1..=750)
+                .map(|id| AccountRow {
+                    id,
+                    name: format!("Account {id}").into(),
+                    email: format!("account{id}@example.com").into(),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        )));
+        let contacts = Rc::new(RefCell::new(contacts::ContactDirectoryState::new(
+            vec![],
+            false,
+        )));
+        app.set_contact_sidebar_rows(contacts.borrow().sidebar_rows.clone().into());
+        contacts::apply_contact_rows(&app, &contacts);
+        let contacts_for_click = contacts.clone();
+        let weak = app.as_weak();
+        app.on_toggle_contact_section(move |key, open| {
+            if open {
+                contacts_for_click
+                    .borrow_mut()
+                    .collapsed_sections
+                    .remove(key.as_str());
+            } else {
+                contacts_for_click
+                    .borrow_mut()
+                    .collapsed_sections
+                    .insert(key.to_string());
+            }
+            contacts::refresh_contact_sidebar(&weak.unwrap(), &contacts_for_click);
+        });
+        let selected_scope = Rc::new(RefCell::new(String::new()));
+        let selected_for_click = selected_scope.clone();
+        app.on_select_contact_scope(move |scope| {
+            *selected_for_click.borrow_mut() = scope.to_string()
+        });
+        draw();
+        click(140., 182.);
+        assert_eq!(*selected_scope.borrow(), "Favorites");
+        click(140., 250.);
+        assert!(contacts.borrow().collapsed_sections.contains("account:1"));
+        for delta_y in [-10_000., 1_000_000.] {
+            app.window().dispatch_event(WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(140., 500.),
+                delta_x: 0.,
+                delta_y,
+            });
+            draw();
+        }
+        app.set_contacts_sidebar_collapsed(true);
+        draw();
+        app.set_contacts_sidebar_collapsed(false);
+        draw();
+        assert!(contacts.borrow().collapsed_sections.contains("account:1"));
+        click(140., 250.);
+        assert!(!contacts.borrow().collapsed_sections.contains("account:1"));
+
+        // Calendar source toggles survive recycling and unrelated date changes.
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 8).unwrap();
+        let mut calendar = calendar::LocalCalendarState::new(today);
+        calendar.sources = (1..=750)
+            .map(|id| calendar::LocalCalendarSource {
+                id,
+                account_id: 1,
+                name: format!("Calendar {id}"),
+                color: String::new(),
+                read_only: false,
+                enabled: true,
+                is_default: id == 1,
+                last_synced_at: None,
+            })
+            .collect();
+        let calendar = Rc::new(RefCell::new(calendar));
+        app.set_calendar_sources(calendar.borrow().source_rows.clone().into());
+        calendar::apply_calendar(&app, &calendar.borrow(), today);
+        app.set_active_view("calendar".into());
+        let calendar_for_click = calendar.clone();
+        let weak = app.as_weak();
+        app.on_calendar_set_source_enabled(move |id, enabled| {
+            let mut state = calendar_for_click.borrow_mut();
+            state
+                .sources
+                .iter_mut()
+                .find(|source| source.id == i64::from(id))
+                .unwrap()
+                .enabled = enabled;
+            calendar::apply_calendar(&weak.unwrap(), &state, today);
+        });
+        draw();
+        click(82., 372.);
+        assert!(!calendar.borrow().sources[0].enabled);
+        for delta_y in [-10_000., 1_000_000.] {
+            app.window().dispatch_event(WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(140., 500.),
+                delta_x: 0.,
+                delta_y,
+            });
+            draw();
+        }
+        calendar.borrow_mut().selected_date += chrono::Duration::days(1);
+        calendar::apply_calendar(&app, &calendar.borrow(), today);
+        app.set_calendar_sidebar_collapsed(true);
+        draw();
+        app.set_calendar_sidebar_collapsed(false);
+        draw();
+        app.set_active_view("contacts".into());
+        draw();
+        app.set_active_view("calendar".into());
+        draw();
+        assert!(!calendar.borrow().source_rows.row_data(0).unwrap().enabled);
+        click(82., 372.);
+        assert!(calendar.borrow().sources[0].enabled);
         app.hide().unwrap();
     }
 }

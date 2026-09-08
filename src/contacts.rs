@@ -1,14 +1,23 @@
 //! Contact directory view-model and Slint model projection.
 
-use crate::{AppWindow, ContactAccountRow, ContactRow, I18n, paged_visible_count};
+use crate::{
+    AppWindow, ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, I18n,
+    paged_visible_count,
+};
 use chrono::{Datelike, Local, TimeZone};
 use flectar_mail_core::models::{ContactRecord, ContactRecordCursor, ContactRecordPage};
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use slint::{ComponentHandle, Model, VecModel};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 pub(crate) struct ContactDirectoryState {
     pub(crate) contacts: Vec<ContactRecord>,
     pub(crate) rows: Rc<VecModel<ContactRow>>,
+    pub(crate) sidebar_rows: Rc<crate::retained_model::RetainedModel<ContactSidebarRow>>,
+    pub(crate) collapsed_sections: HashSet<String>,
     pub(crate) selected_id: Option<i64>,
     pub(crate) query: String,
     pub(crate) scope: String,
@@ -28,6 +37,8 @@ impl ContactDirectoryState {
             selected_id: contacts.first().map(|contact| contact.id),
             contacts,
             rows: Rc::new(VecModel::default()),
+            sidebar_rows: Rc::default(),
+            collapsed_sections: HashSet::new(),
             query: String::new(),
             scope: "All contacts".to_owned(),
             page: 1,
@@ -219,49 +230,7 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
         })
         .collect::<Vec<_>>();
     crate::reconcile_model_rows(&directory.rows, rows, |row| row.id);
-    let connected_accounts = app.get_connected_accounts();
-    let mut selected_scope_label = directory.scope.clone();
-    let account_rows = (0..connected_accounts.row_count())
-        .filter_map(|index| connected_accounts.row_data(index))
-        .map(|account| {
-            let selected = directory.scope == format!("Account:{}", account.id);
-            if selected {
-                selected_scope_label = if account.name.is_empty() {
-                    account.email.to_string()
-                } else {
-                    account.name.to_string()
-                };
-            }
-            let count = if directory.using_core {
-                directory
-                    .account_counts
-                    .get(&i64::from(account.id))
-                    .copied()
-                    .unwrap_or_default()
-            } else {
-                directory
-                    .contacts
-                    .iter()
-                    .filter(|contact| contact_belongs_to_account(contact, i64::from(account.id)))
-                    .count()
-            };
-            ContactAccountRow {
-                id: account.id,
-                name: account.name,
-                email: account.email,
-                initials: account.initials,
-                avatar: account.avatar_small,
-                has_avatar: account.has_avatar,
-                count: if count == 0 {
-                    "".into()
-                } else {
-                    count.to_string().into()
-                },
-                selected,
-            }
-        })
-        .collect::<Vec<_>>();
-    app.set_contact_accounts(ModelRc::new(VecModel::from(account_rows)));
+    let (account_rows, selected_scope_label) = contact_account_rows(app, &directory);
     app.set_contact_scope(directory.scope.clone().into());
     app.set_contact_scope_label(selected_scope_label.into());
     app.set_contact_search_query(directory.query.clone().into());
@@ -293,6 +262,10 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
     } else {
         shown_count < visible.len()
     });
+    let sidebar_rows = make_contact_sidebar_rows(account_rows, &directory.collapsed_sections);
+    let sidebar_model = Rc::clone(&directory.sidebar_rows);
+    drop(directory);
+    sidebar_model.reconcile_by(sidebar_rows, |row| row.key.clone(), same_sidebar_row);
 }
 
 pub(crate) fn clear_contact_form(app: &AppWindow) {
@@ -365,6 +338,143 @@ pub(crate) fn apply_contact_directory(app: &AppWindow, state: &Rc<RefCell<Contac
     }
 }
 
+fn contact_account_rows(
+    app: &AppWindow,
+    directory: &ContactDirectoryState,
+) -> (Vec<ContactAccountRow>, String) {
+    // Index local counts once, rather than scanning all contacts per account.
+    let mut local_counts = HashMap::<i64, usize>::new();
+    let mut managed_count = 0;
+    if !directory.using_core {
+        for contact in &directory.contacts {
+            if contact.is_managed {
+                managed_count += 1;
+            } else {
+                for id in contact.account_ids.iter().copied().collect::<HashSet<_>>() {
+                    *local_counts.entry(id).or_default() += 1;
+                }
+            }
+        }
+    }
+    let connected_accounts = app.get_connected_accounts();
+    let mut selected_scope_label = directory.scope.clone();
+    let account_rows = (0..connected_accounts.row_count())
+        .filter_map(|index| connected_accounts.row_data(index))
+        .map(|account| {
+            let selected = directory.scope == format!("Account:{}", account.id);
+            if selected {
+                selected_scope_label = if account.name.is_empty() {
+                    account.email.to_string()
+                } else {
+                    account.name.to_string()
+                };
+            }
+            let count = if directory.using_core {
+                directory
+                    .account_counts
+                    .get(&i64::from(account.id))
+                    .copied()
+                    .unwrap_or_default()
+            } else {
+                local_counts
+                    .get(&i64::from(account.id))
+                    .copied()
+                    .unwrap_or_default()
+                    + managed_count
+            };
+            ContactAccountRow {
+                id: account.id,
+                name: account.name,
+                email: account.email,
+                initials: account.initials,
+                avatar: account.avatar_small,
+                has_avatar: account.has_avatar,
+                count: if count == 0 {
+                    "".into()
+                } else {
+                    count.to_string().into()
+                },
+                selected,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    (account_rows, selected_scope_label)
+}
+
+pub(crate) fn refresh_contact_sidebar(app: &AppWindow, state: &Rc<RefCell<ContactDirectoryState>>) {
+    let directory = state.borrow();
+    let accounts = contact_account_rows(app, &directory).0;
+    let rows = make_contact_sidebar_rows(accounts, &directory.collapsed_sections);
+    let model = Rc::clone(&directory.sidebar_rows);
+    drop(directory);
+    model.reconcile_by(rows, |row| row.key.clone(), same_sidebar_row);
+}
+
+fn make_contact_sidebar_rows(
+    accounts: Vec<ContactAccountRow>,
+    collapsed: &HashSet<String>,
+) -> Vec<ContactSidebarRow> {
+    use ContactSidebarRowKind as Kind;
+    let row = |kind, key: &str| ContactSidebarRow {
+        kind,
+        key: key.into(),
+        open: !collapsed.contains(key),
+        ..Default::default()
+    };
+    let mut rows = vec![
+        row(Kind::UnifiedHeading, "unified-heading"),
+        row(Kind::UnifiedSection, "unified"),
+    ];
+    if !collapsed.contains("unified") {
+        rows.extend([row(Kind::All, "all"), row(Kind::Favorites, "favorites")]);
+    }
+    if !accounts.is_empty() {
+        rows.push(row(Kind::AccountsHeading, "accounts-heading"));
+    }
+    for account in accounts {
+        let key = format!("account:{}", account.id);
+        let open = !collapsed.contains(&key);
+        rows.push(ContactSidebarRow {
+            account: account.clone(),
+            ..row(Kind::Account, &key)
+        });
+        if open {
+            rows.push(ContactSidebarRow {
+                account,
+                ..row(Kind::Contacts, &format!("contacts:{}", key))
+            });
+        }
+    }
+    rows.push(row(Kind::Hint, "hint"));
+    rows
+}
+
+fn same_sidebar_row(a: &ContactSidebarRow, b: &ContactSidebarRow) -> bool {
+    let ContactAccountRow {
+        id,
+        name,
+        email,
+        initials,
+        avatar,
+        has_avatar,
+        count,
+        selected,
+    } = &a.account;
+    let other = &b.account;
+    a.key == b.key
+        && a.kind == b.kind
+        && a.open == b.open
+        && *id == other.id
+        && *name == other.name
+        && *email == other.email
+        && *initials == other.initials
+        && *has_avatar == other.has_avatar
+        && *count == other.count
+        && *selected == other.selected
+        && (!has_avatar || *avatar == other.avatar)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +527,48 @@ mod tests {
     }
 
     #[test]
+    fn sidebar_expansion_uses_account_ids_and_ignores_missing_avatar_images() {
+        use ContactSidebarRowKind as Kind;
+        let accounts = vec![
+            ContactAccountRow {
+                id: 1,
+                name: "Same name".into(),
+                ..Default::default()
+            },
+            ContactAccountRow {
+                id: 2,
+                name: "Same name".into(),
+                ..Default::default()
+            },
+        ];
+        let collapsed = HashSet::from(["account:1".to_owned(), "unified".to_owned()]);
+        let rows = make_contact_sidebar_rows(accounts.clone(), &collapsed);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| matches!(row.kind, Kind::All | Kind::Favorites))
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.kind == Kind::Contacts && row.account.id == 1)
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.kind == Kind::Contacts && row.account.id == 2)
+        );
+        let rebuilt = make_contact_sidebar_rows(accounts, &collapsed);
+        assert!(
+            rows.iter()
+                .zip(&rebuilt)
+                .all(|(a, b)| same_sidebar_row(a, b))
+        );
+        let mut changed = rebuilt[2].clone();
+        changed.account.count = "5".into();
+        assert!(!same_sidebar_row(&rows[2], &changed));
+    }
+
+    #[test]
     fn avatar_tone_is_stable_for_normalized_email() {
         let lower = contact("person@example.com");
         let mixed = contact("  Person@Example.COM  ");
@@ -430,16 +582,10 @@ mod tests {
         directory.begin_core_query();
         assert!(directory.apply_core_page(None, page(1, 25, Some(cursor(25)))));
         let first_cursor = directory.next_cursor.clone().unwrap();
-        assert!(directory.apply_core_page(
-            Some(&first_cursor),
-            page(26, 25, Some(cursor(50)))
-        ));
+        assert!(directory.apply_core_page(Some(&first_cursor), page(26, 25, Some(cursor(50)))));
         assert_eq!(directory.contacts.len(), 50);
         assert_eq!(directory.next_cursor, Some(cursor(50)));
-        assert!(!directory.apply_core_page(
-            Some(&first_cursor),
-            page(26, 25, Some(cursor(50)))
-        ));
+        assert!(!directory.apply_core_page(Some(&first_cursor), page(26, 25, Some(cursor(50)))));
         assert_eq!(directory.contacts.len(), 50);
     }
 }

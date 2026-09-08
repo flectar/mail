@@ -1,9 +1,10 @@
+import { SidebarRowSurface } from "sidebar-row.slint";
 import { CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, ToolbarIconButton } from "controls.slint";
 import { CalendarDetailsDialog } from "../dialogs/calendar-details-dialog.slint";
 import { ConfirmationDialog } from "confirmation-dialog.slint";
-import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { CollapsibleWorkspaceSidebar, CompactPageHeader, WorkspaceMiniHeading } from "workspace-layout.slint";
@@ -66,6 +67,8 @@ export component CalendarEvent inherits Rectangle {
 // Data-driven calendar surface. Dates and event placement come from Rust's
 // chrono-backed local state; the UI is intentionally service-agnostic.
 export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar {
+    in property <bool> active: true;
+    private property <length> source-scroll-y: 0px;
     in property <[CalendarDay]> days: [];
     in property <[CalendarSourceRow]> sources: [];
     in property <string> month-title;
@@ -93,98 +96,155 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
 
     divider-color: root.subtle-border-color;
 
-    Button {
-        x: LayoutMetrics.sidebar-inset;
-        y: LayoutMetrics.sidebar-action-top;
-        width: max(0px, parent.width - 2 * LayoutMetrics.sidebar-inset);
-        height: LayoutMetrics.sidebar-action-height;
-        text: @tr("New event");
-        icon: @image-url("../icons/phosphor/calendar-plus-fill.svg");
-        has-icon: true;
-        primary: true;
-        clicked => { root.new-event(); }
-    }
+    if root.active && !root.collapsed: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        Button {
+            x: LayoutMetrics.sidebar-inset;
+            y: LayoutMetrics.sidebar-action-top;
+            width: max(0px, parent.width - 2 * LayoutMetrics.sidebar-inset);
+            height: LayoutMetrics.sidebar-action-height;
+            text: @tr("New event");
+            icon: @image-url("../icons/phosphor/calendar-plus-fill.svg");
+            has-icon: true;
+            primary: true;
+            clicked => { root.new-event(); }
+        }
 
-    Text { x: LayoutMetrics.sidebar-inset; y: 60px; width: parent.width - 84px; height: 30px; text: root.month-title; color: root.title-color; font-size: TypeScale.body-large; font-weight: 700; vertical-alignment: center; }
-    IconButton { x: parent.width - 72px; y: 69px; width: 28px; height: 28px; icon-size: 14px; icon: @image-url("../icons/phosphor/caret-left.svg"); icon-color: root.secondary-color; idle-background: transparent; hover-background: root.control-hover-color; tooltip-text: @tr("Previous month"); clicked => { root.navigate-month(-1); } }
-    IconButton { x: parent.width - 42px; y: 69px; width: 28px; height: 28px; icon-size: 14px; icon: @image-url("../icons/phosphor/caret-right.svg"); icon-color: root.secondary-color; idle-background: transparent; hover-background: root.control-hover-color; tooltip-text: @tr("Next month"); clicked => { root.navigate-month(1); } }
+        Text {
+            x: LayoutMetrics.sidebar-inset;
+            y: 60px;
+            width: parent.width - 84px;
+            height: 30px;
+            text: root.month-title;
+            color: root.title-color;
+            font-size: TypeScale.body-large;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
 
-    for name[index] in [@tr("Monday initial" => "M"), @tr("Tuesday initial" => "T"), @tr("Wednesday initial" => "W"), @tr("Thursday initial" => "T"), @tr("Friday initial" => "F"), @tr("Saturday initial" => "S"), @tr("Sunday initial" => "S")] : Text {
-        x: LayoutMetrics.sidebar-inset + index * ((root.width - 2 * LayoutMetrics.sidebar-inset) / 7);
-        y: 94px;
-        width: (root.width - 2 * LayoutMetrics.sidebar-inset) / 7;
-        height: 18px;
-        text: name;
-        color: root.muted-color;
-        font-size: TypeScale.caption;
-        font-weight: 700;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
+        IconButton {
+            x: parent.width - 72px;
+            y: 69px;
+            width: 28px;
+            height: 28px;
+            icon-size: 14px;
+            icon: @image-url("../icons/phosphor/caret-left.svg");
+            icon-color: root.secondary-color;
+            idle-background: transparent;
+            hover-background: root.control-hover-color;
+            tooltip-text: @tr("Previous month");
+            clicked => { root.navigate-month(-1); }
+        }
 
-    for day[index] in root.days : Rectangle {
-        x: LayoutMetrics.sidebar-inset + mod(index, 7) * ((root.width - 2 * LayoutMetrics.sidebar-inset) / 7);
-        y: 114px + floor(index / 7) * 28px;
-        width: (root.width - 2 * LayoutMetrics.sidebar-inset) / 7;
-        height: 26px;
-        background: transparent;
+        IconButton {
+            x: parent.width - 42px;
+            y: 69px;
+            width: 28px;
+            height: 28px;
+            icon-size: 14px;
+            icon: @image-url("../icons/phosphor/caret-right.svg");
+            icon-color: root.secondary-color;
+            idle-background: transparent;
+            hover-background: root.control-hover-color;
+            tooltip-text: @tr("Next month");
+            clicked => { root.navigate-month(1); }
+        }
 
-        Rectangle {
-            x: (parent.width - 26px) / 2;
-            width: 26px;
+        for name[index] in [
+            @tr("Monday initial" => "M"),
+            @tr("Tuesday initial" => "T"),
+            @tr("Wednesday initial" => "W"),
+            @tr("Thursday initial" => "T"),
+            @tr("Friday initial" => "F"),
+            @tr("Saturday initial" => "S"),
+            @tr("Sunday initial" => "S")
+        ]: Text {
+            x: LayoutMetrics.sidebar-inset + index * ((root.width - 2 * LayoutMetrics.sidebar-inset) / 7);
+            y: 94px;
+            width: (root.width - 2 * LayoutMetrics.sidebar-inset) / 7;
+            height: 18px;
+            text: name;
+            color: root.muted-color;
+            font-size: TypeScale.caption;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        for day[index] in root.days: Rectangle {
+            x: LayoutMetrics.sidebar-inset + mod(index, 7) * ((root.width - 2 * LayoutMetrics.sidebar-inset) / 7);
+            y: 114px + floor(index / 7) * 28px;
+            width: (root.width - 2 * LayoutMetrics.sidebar-inset) / 7;
             height: 26px;
-            border-radius: 13px;
-            background: day.is-selected ? root.accent-color : mini-day-hit.has-hover ? root.accent-background : transparent;
-            Text {
-                text: day.day;
-                color: day.is-selected ? white : day.outside-month ? root.muted-color : root.body-color;
-                font-size: TypeScale.caption;
-                font-weight: day.is-today || day.is-selected ? 700 : 500;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
+            background: transparent;
             Rectangle {
-                visible: day.has-events && !day.is-selected;
-                x: (parent.width - 3px) / 2;
-                y: parent.height - 4px;
-                width: 3px;
-                height: 3px;
-                border-radius: 2px;
-                background: root.accent-color;
-            }
-            mini-day-hit := TouchArea {
-                accessible-role: button;
-                accessible-label: @tr("Select {}", day.iso-date);
-                accessible-checked: day.is-selected;
-                accessible-action-default => { root.select-date(day.iso-date); }
-                clicked => { root.select-date(day.iso-date); }
-                mouse-cursor: pointer;
+                x: (parent.width - 26px) / 2;
+                width: 26px;
+                height: 26px;
+                border-radius: 13px;
+                background: day.is-selected ? root.accent-color : mini-day-hit.has-hover ? root.accent-background : transparent;
+                Text {
+                    text: day.day;
+                    color: day.is-selected ? white : day.outside-month ? root.muted-color : root.body-color;
+                    font-size: TypeScale.caption;
+                    font-weight: day.is-today || day.is-selected ? 700 : 500;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    visible: day.has-events && !day.is-selected;
+                    x: (parent.width - 3px) / 2;
+                    y: parent.height - 4px;
+                    width: 3px;
+                    height: 3px;
+                    border-radius: 2px;
+                    background: root.accent-color;
+                }
+
+                mini-day-hit := TouchArea {
+                    accessible-role: button;
+                    accessible-label: @tr("Select {}", day.iso-date);
+                    accessible-checked: day.is-selected;
+                    accessible-action-default => { root.select-date(day.iso-date); }
+                    clicked => { root.select-date(day.iso-date); }
+                    mouse-cursor: pointer;
+                }
             }
         }
-    }
+        Rectangle {
+            x: LayoutMetrics.sidebar-inset;
+            y: 292px;
+            width: parent.width - 2 * LayoutMetrics.sidebar-inset;
+            height: 1px;
+            background: root.subtle-border-color;
+        }
 
-    Rectangle { x: LayoutMetrics.sidebar-inset; y: 292px; width: parent.width - 2 * LayoutMetrics.sidebar-inset; height: 1px; background: root.subtle-border-color; }
-    WorkspaceMiniHeading { x: LayoutMetrics.sidebar-inset; y: 308px; width: parent.width - 2 * LayoutMetrics.sidebar-inset; label: @tr("MY CALENDARS"); label-color: root.muted-color; }
+        WorkspaceMiniHeading {
+            x: LayoutMetrics.sidebar-inset;
+            y: 308px;
+            width: parent.width - 2 * LayoutMetrics.sidebar-inset;
+            label: @tr("MY CALENDARS");
+            label-color: root.muted-color;
+        }
 
-    source-scroll := ScrollView {
-        x: 0px;
-        y: 330px;
-        width: parent.width - LayoutMetrics.divider-width;
-        height: max(0px, parent.height - self.y);
-        viewport-width: self.visible-width;
-        horizontal-scrollbar-policy: always-off;
-
-        VerticalBox {
-            width: source-scroll.visible-width;
-            padding: 0px;
-            spacing: 0px;
-            alignment: start;
-
-            for calendar in root.sources : Rectangle {
+        source-scroll := ListView {
+            // Keep a direct ListView repeater; Slint 1.17 does not
+            // virtualize through a wrapper or inherited ListView.
+            viewport-width: self.visible-width;
+            horizontal-scrollbar-policy: always-off;
+            x: 0px;
+            y: 330px;
+            width: parent.width - LayoutMetrics.divider-width;
+            height: max(0px, parent.height - self.y);
+            viewport-y <=> root.source-scroll-y;
+            for calendar in root.sources: Rectangle {
+                width: max(0px, source-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                 private property <length> row-y: calendar.group-start ? 26px : 0px;
                 height: row-y + 34px;
-
-                if calendar.group-start : Text {
+                if calendar.group-start: Text {
                     x: 12px;
                     y: 3px;
                     width: parent.width - 24px;
@@ -196,15 +256,13 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                     overflow: elide;
                     vertical-alignment: center;
                 }
-
-                row-background := Rectangle {
+                row-background := SidebarRowSurface {
                     x: 4px;
                     y: parent.row-y;
                     width: parent.width - 8px;
                     height: 32px;
-                    border-radius: 7px;
-                    background: calendar-hit.has-hover ? root.control-hover-color : transparent;
-
+                    hover-background: root.control-hover-color;
+                    hovered: calendar-hit.has-hover;
                     calendar-hit := TouchArea {
                         accessible-role: button;
                         accessible-label: @tr("View details for {}", calendar.name != "" ? calendar.name : @tr("Calendar"));
@@ -264,39 +322,42 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                     }
                 }
             }
+        }
 
-            Rectangle {
-                visible: root.sources.length == 0;
-                height: root.sources.length == 0 ? 88px : 0px;
-                Text {
-                    x: 14px;
-                    width: parent.width - 28px;
-                    height: parent.height;
-                    text: @tr("No provider calendars yet. Connect Google Calendar or Outlook in Settings.");
-                    color: root.muted-color;
-                    font-size: TypeScale.secondary;
-                    wrap: word-wrap;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+        ScrollFade {
+            x: source-scroll.x;
+            y: source-scroll.y;
+            width: source-scroll.visible-width;
+            height: source-scroll.visible-height;
+            surface-color: root.surface-color;
+            viewport-y: source-scroll.viewport-y;
+            viewport-height: source-scroll.viewport-height;
+            visible-height: source-scroll.visible-height;
+        }
+
+        Rectangle {
+            x: 0px;
+            y: 330px;
+            width: parent.width;
+            visible: root.sources.length == 0;
+            height: root.sources.length == 0 ? 88px : 0px;
+            Text {
+                x: 14px;
+                width: parent.width - 28px;
+                height: parent.height;
+                text: @tr("No provider calendars yet. Connect Google Calendar or Outlook in Settings.");
+                color: root.muted-color;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
     }
-
-    ScrollFade {
-        x: source-scroll.x;
-        y: source-scroll.y;
-        width: source-scroll.visible-width;
-        height: source-scroll.visible-height;
-        surface-color: root.surface-color;
-        viewport-y: source-scroll.viewport-y;
-        viewport-height: source-scroll.viewport-height;
-        visible-height: source-scroll.visible-height;
-    }
-
 }
 
 export component FunctionalCalendarView inherits Rectangle {
+    in property <bool> active: true;
     in property <bool> compact: false;
     in-out property <bool> sidebar-collapsed: false;
     in property <bool> dark-mode: false;
@@ -413,6 +474,7 @@ export component FunctionalCalendarView inherits Rectangle {
     background: root.background-color;
 
     calendar-sidebar := FunctionalCalendarSidebar {
+        active: root.active && !root.compact;
         visible: !root.compact;
         x: 0px;
         y: 0px;

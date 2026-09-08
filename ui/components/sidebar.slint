@@ -1,350 +1,15 @@
-import { ListView, VerticalBox } from "std-widgets.slint";
-import { SidebarRow, SidebarRowKind, MailDragApi } from "../models.slint";
-import { Avatar } from "avatar.slint";
-import { Button } from "button.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading } from "workspace-layout.slint";
-import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "scroll-fade.slint";
+import { ListView, VerticalBox } from "std-widgets.slint";
+import { SidebarRow, SidebarRowKind } from "../models.slint";
+import { SidebarItem, SidebarSectionHeader } from "sidebar-controls.slint";
+import { Button } from "button.slint";
+import {
+    CollapsibleWorkspaceSidebar,
+    WorkspaceMiniHeading,
+} from "workspace-layout.slint";
+import { LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
-component SidebarIcon {
-    in property <image> icon;
-    in property <color> color;
-    in property <length> icon-size: 16px;
-
-    width: 18px;
-    height: 28px;
-
-    Image {
-        x: (parent.width - root.icon-size) / 2;
-        y: (parent.height - root.icon-size) / 2;
-        width: root.icon-size;
-        height: root.icon-size;
-        source: root.icon;
-        colorize: root.color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-}
-
-// Counts are compact status badges rather than loose right-aligned text. This
-// keeps large unread values visually grouped and gives selected rows a clear
-// accent treatment without changing the row's geometry.
-component SidebarCountBadge inherits Rectangle {
-    in property <string> count;
-    in property <bool> selected: false;
-    in property <color> accent-color;
-    in property <color> muted-color;
-
-    visible: root.count != "";
-    width: min(52px, max(24px, count-label.preferred-width + 12px));
-    height: 20px;
-    border-radius: 7px;
-    background: root.selected
-        ? root.accent-color.transparentize(0.78)
-        : root.muted-color.transparentize(0.86);
-
-    count-label := Text {
-        text: root.count;
-        color: root.selected ? root.accent-color : root.muted-color;
-        font-size: TypeScale.caption;
-        font-weight: 600;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-    }
-}
-
-// A folder row is shared by unified and account sections so indentation,
-// selection, hover, and counts remain consistent throughout the tree.
-export component SidebarItem inherits Rectangle {
-    in property <string> label;
-    in property <string> count;
-    in property <string> scope;
-    in property <image> icon;
-    in property <bool> selected: false;
-    in property <bool> prominent: false;
-    in property <bool> label-has-emoji: false;
-    in property <length> row-height: 28px;
-    in property <length> left-padding: 26px;
-    in property <int> account-id: -1;
-    in property <int> folder-id: -1;
-    in property <int> label-id: -1;
-    in property <bool> has-children: false;
-    in property <bool> expanded: true;
-    in property <bool> manageable: false;
-    in property <bool> label-manageable: false;
-    in property <bool> mail-drop-enabled: false;
-    in property <bool> mail-drop-copies: false;
-    in property <color> sidebar-background;
-    in property <color> selection-background;
-    in property <color> accent-color;
-    in property <color> body-color;
-    in property <color> muted-color;
-    in property <color> icon-color: muted-color;
-    in property <color> editable-color: icon-color;
-    callback clicked(string);
-    callback toggled(int, bool);
-    callback new-subfolder(int, int, string);
-    callback rename-folder(int, string);
-    callback delete-folder(int, string);
-    callback rename-label(int, string, color);
-    callback delete-label(int, string);
-
-    height: root.visible ? root.row-height : 0px;
-    border-radius: 6px;
-    background: mail-drop-target.has-drag
-        ? root.selection-background
-        : root.selected || row-hit.has-hover ? root.selection-background : root.sidebar-background;
-    border-width: mail-drop-target.has-drag ? 2px : 0px;
-    border-color: root.accent-color;
-    animate background { duration: 120ms; }
-
-    SidebarIcon {
-        x: root.left-padding;
-        y: 0px;
-        height: root.row-height;
-        icon: root.icon;
-        color: root.icon-color;
-    }
-
-    if root.has-children : Image {
-        x: root.left-padding - 17px;
-        y: (root.row-height - 11px) / 2;
-        width: 11px;
-        height: 11px;
-        source: root.expanded
-            ? @image-url("../icons/phosphor/caret-down.svg")
-            : @image-url("../icons/phosphor/caret-right.svg");
-        colorize: root.muted-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-
-    Text {
-        x: root.left-padding + 26px;
-        y: 0px;
-        width: max(0px, parent.width - self.x - 60px);
-        height: root.row-height;
-        text: root.label;
-        color: root.selected ? root.accent-color : root.body-color;
-        font-size: root.prominent ? TypeScale.body : TypeScale.secondary;
-        font-weight: root.selected ? 700 : 500;
-        font-family: root.label-has-emoji ? "Noto Emoji" : "";
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    SidebarCountBadge {
-        x: parent.width - self.width - 6px;
-        y: (root.row-height - self.height) / 2;
-        count: root.count;
-        selected: root.selected;
-        accent-color: root.accent-color;
-        muted-color: root.muted-color;
-    }
-
-    row-hit := TouchArea {
-        accessible-role: button;
-        accessible-label: root.label;
-        accessible-checked: root.selected;
-        accessible-action-default => { root.clicked(root.scope); }
-        clicked => { root.clicked(root.scope); }
-        mouse-cursor: pointer;
-    }
-
-
-    if root.has-children : TouchArea {
-        x: max(0px, root.left-padding - 22px);
-        y: 0px;
-        width: 22px;
-        height: root.row-height;
-        accessible-role: button;
-        accessible-label: root.expanded ? @tr("Collapse folder") : @tr("Expand folder");
-        accessible-expanded: root.expanded;
-        accessible-action-default => {
-            root.toggled(root.folder-id, !root.expanded);
-        }
-        clicked => { root.toggled(root.folder-id, !root.expanded); }
-        mouse-cursor: pointer;
-    }
-
-    if root.manageable : ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: @tr("New subfolder");
-                activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
-            }
-            MenuItem {
-                title: @tr("Rename folder");
-                activated => { root.rename-folder(root.folder-id, root.label); }
-            }
-            MenuItem {
-                title: @tr("Delete folder");
-                activated => { root.delete-folder(root.folder-id, root.label); }
-            }
-        }
-    }
-
-    if root.label-manageable : ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: @tr("Rename label");
-                activated => { root.rename-label(root.label-id, root.label, root.editable-color); }
-            }
-            MenuItem {
-                title: @tr("Delete label");
-                activated => { root.delete-label(root.label-id, root.label); }
-            }
-        }
-    }
-
-    mail-drop-target := DropArea {
-        width: parent.width;
-        height: parent.height;
-        enabled: root.mail-drop-enabled;
-        can-drop(event) => {
-            MailDragApi.can-drop-on-mailbox(
-                event.data,
-                root.scope,
-                root.account-id,
-                root.folder-id,
-            ) ? (root.mail-drop-copies ? DragAction.copy : DragAction.move) : DragAction.none
-        }
-        dropped(event) => {
-            if !MailDragApi.can-drop-on-mailbox(
-                event.data,
-                root.scope,
-                root.account-id,
-                root.folder-id,
-            ) {
-                return DragAction.none;
-            }
-            if MailDragApi.drop-on-mailbox(
-                event.data,
-                root.scope,
-                root.account-id,
-                root.folder-id,
-            ) {
-                return root.mail-drop-copies ? DragAction.copy : DragAction.move;
-            }
-            return DragAction.none;
-        }
-    }
-}
-
-// Mail sections use externally owned expansion state; contacts can keep local state.
-export component SidebarSectionHeader inherits Rectangle {
-    in property <string> label;
-    in property <string> detail;
-    in property <string> avatar;
-    in property <image> avatar-image;
-    in property <bool> has-avatar-image: false;
-    in property <image> icon;
-    in property <bool> has-avatar: false;
-    in-out property <bool> open: true;
-    in property <bool> controlled: false;
-    in property <color> sidebar-background;
-    in property <color> hover-background;
-    in property <color> body-color;
-    in property <color> muted-color;
-    in property <color> icon-color;
-    in property <int> label-font-weight: 600;
-    in property <length> left-padding: 4px;
-    in property <bool> folder-row-style: false;
-    callback toggled(bool);
-
-    height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 42px;
-    border-radius: 6px;
-    background: header-hit.has-hover ? root.hover-background : root.sidebar-background;
-
-    Image {
-        x: root.folder-row-style ? 9px : root.left-padding;
-        y: (parent.height - self.height) / 2;
-        width: 12px;
-        height: 12px;
-        source: root.open
-            ? @image-url("../icons/phosphor/caret-down.svg")
-            : @image-url("../icons/phosphor/caret-right.svg");
-        colorize: root.muted-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-
-    if root.has-avatar : Avatar {
-        x: root.folder-row-style ? 26px : root.left-padding + 18px;
-        y: (parent.height - self.height) / 2;
-        size: 22px;
-        source: root.avatar-image;
-        has-source: root.has-avatar-image;
-        fallback: root.avatar;
-        background-color: root.has-avatar-image ? #ffffff : root.hover-background;
-        foreground-color: root.body-color;
-    }
-
-    if !root.has-avatar : SidebarIcon {
-        x: root.folder-row-style ? 26px : root.left-padding + 18px;
-        y: (parent.height - self.height) / 2;
-        height: 22px;
-        icon: root.icon;
-        color: root.icon-color;
-    }
-
-    Text {
-        x: root.folder-row-style ? 52px : root.left-padding + 48px;
-        y: root.detail == "" ? 0px : 4px;
-        width: parent.width - self.x - 8px;
-        height: root.detail == "" ? parent.height : 20px;
-        text: root.label;
-        color: root.body-color;
-        font-size: TypeScale.secondary;
-        font-weight: root.label-font-weight;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    if root.detail != "" : Text {
-        x: 52px;
-        y: 22px;
-        width: parent.width - self.x - 8px;
-        height: 15px;
-        text: root.detail;
-        color: root.muted-color;
-        font-size: TypeScale.caption;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    function toggle() {
-        if root.controlled {
-            root.toggled(!root.open);
-        } else {
-            root.open = !root.open;
-            root.toggled(root.open);
-        }
-    }
-
-    header-hit := TouchArea {
-        accessible-role: button;
-        accessible-label: root.label;
-        accessible-expanded: root.open;
-        accessible-action-default => {
-            root.toggle();
-        }
-        clicked => {
-            root.toggle();
-        }
-        mouse-cursor: pointer;
-    }
-}
-
-// Feature-level mail navigation. app.slint only provides state and handles the
-// callbacks; tree layout and interaction stay encapsulated here.
 export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     in property <bool> touch-mode: false;
     in property <[SidebarRow]> rows: [];
@@ -373,7 +38,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     surface-color: root.background-color;
     clip: true;
 
-    if !root.collapsed : VerticalBox {
+    if !root.collapsed: VerticalBox {
         x: LayoutMetrics.sidebar-inset;
         y: LayoutMetrics.sidebar-action-top;
         width: parent.width - 2 * LayoutMetrics.sidebar-inset;
@@ -397,18 +62,21 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
             background: transparent;
 
             mailbox-scroll := ListView {
+                // Keep a direct ListView repeater; Slint 1.17 does not
+                // virtualize through a wrapper or inherited ListView.
+                viewport-width: self.visible-width;
+                horizontal-scrollbar-policy: always-off;
                 x: 0px;
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
-                viewport-width: self.visible-width;
                 viewport-y <=> root.scroll-y;
-                horizontal-scrollbar-policy: always-off;
+
                 mouse-drag-pan-enabled: root.touch-mode;
 
                 // The repeater must be a direct ListView child: nesting it in
                 // a layout disables virtualization. Rust supplies only expanded rows.
-                for entry in root.rows : Rectangle {
+                for entry in root.rows: Rectangle {
                     width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                     height: entry.kind == SidebarRowKind.unified-heading ? 21px
                         : entry.kind == SidebarRowKind.accounts-heading ? 25px
@@ -418,7 +86,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         : entry.kind == SidebarRowKind.add-account ? 37px : 31px;
                     background: transparent;
 
-                    if entry.kind == SidebarRowKind.unified-heading : WorkspaceMiniHeading {
+                    if entry.kind == SidebarRowKind.unified-heading: WorkspaceMiniHeading {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -426,7 +94,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label-color: root.muted-color;
                     }
 
-                    if entry.kind == SidebarRowKind.unified-section : SidebarSectionHeader {
+                    if entry.kind == SidebarRowKind.unified-section: SidebarSectionHeader {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -437,12 +105,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.title-color;
                         muted-color: root.muted-color;
                         icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
-                        controlled: true;
                         open: entry.open;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                     }
 
-                    if entry.kind == SidebarRowKind.unified-inbox : SidebarItem {
+                    if entry.kind == SidebarRowKind.unified-inbox: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -465,7 +132,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
-                    if entry.kind == SidebarRowKind.unified-mailbox : SidebarItem {
+                    if entry.kind == SidebarRowKind.unified-mailbox: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -501,7 +168,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
-                    if entry.kind == SidebarRowKind.categories-section : SidebarSectionHeader {
+                    if entry.kind == SidebarRowKind.categories-section: SidebarSectionHeader {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -514,12 +181,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         muted-color: root.muted-color;
                         icon: @image-url("../icons/phosphor/tag-simple-fill.svg");
                         icon-color: root.monochrome-icons ? root.body-color : #2f9cf4;
-                        controlled: true;
                         open: entry.open;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                     }
 
-                    if entry.kind == SidebarRowKind.important : SidebarItem {
+                    if entry.kind == SidebarRowKind.important: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -538,7 +204,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
-                    if entry.kind == SidebarRowKind.other : SidebarItem {
+                    if entry.kind == SidebarRowKind.other: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -557,7 +223,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
-                    if entry.kind == SidebarRowKind.category : SidebarItem {
+                    if entry.kind == SidebarRowKind.category: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -581,7 +247,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.select-scope(scope); }
                     }
 
-                    if entry.kind == SidebarRowKind.labels-section : SidebarSectionHeader {
+                    if entry.kind == SidebarRowKind.labels-section: SidebarSectionHeader {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -594,12 +260,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         muted-color: root.muted-color;
                         icon: @image-url("../icons/phosphor/folders-fill.svg");
                         icon-color: root.monochrome-icons ? root.body-color : #22a06b;
-                        controlled: true;
                         open: entry.open;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                     }
 
-                    if entry.kind == SidebarRowKind.label : SidebarItem {
+                    if entry.kind == SidebarRowKind.label: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -629,7 +294,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         delete-label(id, name) => { root.request-delete-label(id, name); }
                     }
 
-                    if entry.kind == SidebarRowKind.accounts-heading : WorkspaceMiniHeading {
+                    if entry.kind == SidebarRowKind.accounts-heading: WorkspaceMiniHeading {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -639,7 +304,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         vertical-alignment: bottom;
                     }
 
-                    if entry.kind == SidebarRowKind.account : SidebarSectionHeader {
+                    if entry.kind == SidebarRowKind.account: SidebarSectionHeader {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -654,12 +319,11 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         body-color: root.title-color;
                         muted-color: root.muted-color;
                         icon-color: root.body-color;
-                        controlled: true;
                         open: entry.open;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                     }
 
-                    if entry.kind == SidebarRowKind.folder : SidebarItem {
+                    if entry.kind == SidebarRowKind.folder: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -715,7 +379,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         delete-folder(folder-id, name) => { root.request-delete-folder(folder-id, name); }
                     }
 
-                    if entry.kind == SidebarRowKind.new-folder : SidebarItem {
+                    if entry.kind == SidebarRowKind.new-folder: SidebarItem {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -731,7 +395,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.request-create-folder(entry.mailbox.account_id, -1, ""); }
                     }
 
-                    if entry.kind == SidebarRowKind.add-account : Rectangle {
+                    if entry.kind == SidebarRowKind.add-account: Rectangle {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
@@ -782,5 +446,4 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
             }
         }
     }
-
 }

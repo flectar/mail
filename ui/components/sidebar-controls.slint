@@ -1,0 +1,331 @@
+import { SidebarRowSurface } from "sidebar-row.slint";
+import { MailDragApi } from "../models.slint";
+import { Avatar } from "avatar.slint";
+import { TypeScale } from "../typography.slint";
+
+component SidebarIcon {
+    in property <image> icon;
+    in property <color> color;
+    in property <length> icon-size: 16px;
+
+    width: 18px;
+    height: 28px;
+
+    Image {
+        x: (parent.width - root.icon-size) / 2;
+        y: (parent.height - root.icon-size) / 2;
+        width: root.icon-size;
+        height: root.icon-size;
+        source: root.icon;
+        colorize: root.color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+}
+
+// Counts are compact status badges rather than loose right-aligned text. This
+// keeps large unread values visually grouped and gives selected rows a clear
+// accent treatment without changing the row's geometry.
+component SidebarCountBadge inherits Rectangle {
+    in property <string> count;
+    in property <bool> selected: false;
+    in property <color> accent-color;
+    in property <color> muted-color;
+
+    visible: root.count != "";
+    width: min(52px, max(24px, count-label.preferred-width + 12px));
+    height: 20px;
+    border-radius: 7px;
+    background: root.selected
+        ? root.accent-color.transparentize(0.78)
+        : root.muted-color.transparentize(0.86);
+
+    count-label := Text {
+        text: root.count;
+        color: root.selected ? root.accent-color : root.muted-color;
+        font-size: TypeScale.caption;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// A folder row is shared by unified and account sections so indentation,
+// selection, hover, and counts remain consistent throughout the tree.
+export component SidebarItem inherits SidebarRowSurface {
+    in property <string> label;
+    in property <string> count;
+    in property <string> scope;
+    in property <image> icon;
+    in property <bool> selected: false;
+    in property <bool> prominent: false;
+    in property <bool> label-has-emoji: false;
+    in property <length> row-height: 28px;
+    in property <length> left-padding: 26px;
+    in property <int> account-id: -1;
+    in property <int> folder-id: -1;
+    in property <int> label-id: -1;
+    in property <bool> has-children: false;
+    in property <bool> expanded: true;
+    in property <bool> manageable: false;
+    in property <bool> label-manageable: false;
+    in property <bool> mail-drop-enabled: false;
+    in property <bool> mail-drop-copies: false;
+    in property <color> sidebar-background;
+    in property <color> selection-background;
+    in property <color> accent-color;
+    in property <color> body-color;
+    in property <color> muted-color;
+    in property <color> icon-color: muted-color;
+    in property <color> editable-color: icon-color;
+    callback clicked(string);
+    callback toggled(int, bool);
+    callback new-subfolder(int, int, string);
+    callback rename-folder(int, string);
+    callback delete-folder(int, string);
+    callback rename-label(int, string, color);
+    callback delete-label(int, string);
+
+    height: root.visible ? root.row-height : 0px;
+    idle-background: root.sidebar-background;
+    hover-background: root.selection-background;
+    hovered: row-hit.has-hover;
+    active: root.selected || mail-drop-target.has-drag;
+    border-width: mail-drop-target.has-drag ? 2px : 0px;
+    border-color: root.accent-color;
+
+    SidebarIcon {
+        x: root.left-padding;
+        y: 0px;
+        height: root.row-height;
+        icon: root.icon;
+        color: root.icon-color;
+    }
+
+    if root.has-children: Image {
+        x: root.left-padding - 17px;
+        y: (root.row-height - 11px) / 2;
+        width: 11px;
+        height: 11px;
+        source: root.expanded
+            ? @image-url("../icons/phosphor/caret-down.svg")
+            : @image-url("../icons/phosphor/caret-right.svg");
+        colorize: root.muted-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    Text {
+        x: root.left-padding + 26px;
+        y: 0px;
+        width: max(0px, parent.width - self.x - (root.count == "" ? 6px : count-badge.width + 12px));
+        height: root.row-height;
+        text: root.label;
+        color: root.selected ? root.accent-color : root.body-color;
+        font-size: root.prominent ? TypeScale.body : TypeScale.secondary;
+        font-weight: root.selected ? 700 : 500;
+        font-family: root.label-has-emoji ? "Noto Emoji" : "";
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    count-badge := SidebarCountBadge {
+        x: parent.width - self.width - 6px;
+        y: (root.row-height - self.height) / 2;
+        count: root.count;
+        selected: root.selected;
+        accent-color: root.accent-color;
+        muted-color: root.muted-color;
+    }
+
+    row-hit := TouchArea {
+        accessible-role: button;
+        accessible-label: root.label;
+        accessible-checked: root.selected;
+        accessible-action-default => { root.clicked(root.scope); }
+        clicked => { root.clicked(root.scope); }
+        mouse-cursor: pointer;
+    }
+
+    if root.has-children: TouchArea {
+        x: max(0px, root.left-padding - 22px);
+        y: 0px;
+        width: 22px;
+        height: root.row-height;
+        accessible-role: button;
+        accessible-label: root.expanded ? @tr("Collapse folder") : @tr("Expand folder");
+        accessible-expanded: root.expanded;
+        accessible-action-default => {
+            root.toggled(root.folder-id, !root.expanded);
+        }
+        clicked => { root.toggled(root.folder-id, !root.expanded); }
+        mouse-cursor: pointer;
+    }
+
+    if root.manageable: ContextMenuArea {
+        x: 22px;
+        width: parent.width - 22px;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("New subfolder");
+                activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
+            }
+
+            MenuItem {
+                title: @tr("Rename folder");
+                activated => { root.rename-folder(root.folder-id, root.label); }
+            }
+
+            MenuItem {
+                title: @tr("Delete folder");
+                activated => { root.delete-folder(root.folder-id, root.label); }
+            }
+        }
+    }
+
+    if root.label-manageable: ContextMenuArea {
+        x: 22px;
+        width: parent.width - 22px;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("Rename label");
+                activated => { root.rename-label(root.label-id, root.label, root.editable-color); }
+            }
+
+            MenuItem {
+                title: @tr("Delete label");
+                activated => { root.delete-label(root.label-id, root.label); }
+            }
+        }
+    }
+
+    mail-drop-target := DropArea {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.mail-drop-enabled;
+        can-drop(event) => {
+            MailDragApi.can-drop-on-mailbox(
+                event.data,
+                root.scope,
+                root.account-id,
+                root.folder-id,
+            ) ? (root.mail-drop-copies ? DragAction.copy : DragAction.move) : DragAction.none
+        }
+        dropped(event) => {
+            if !MailDragApi.can-drop-on-mailbox(
+                event.data,
+                root.scope,
+                root.account-id,
+                root.folder-id,
+            ) {
+                return DragAction.none;
+            }
+            if MailDragApi.drop-on-mailbox(
+                event.data,
+                root.scope,
+                root.account-id,
+                root.folder-id,
+            ) {
+                return root.mail-drop-copies ? DragAction.copy : DragAction.move;
+            }
+            return DragAction.none;
+        }
+    }
+}
+
+// Expansion belongs to the host model so recycled headers retain their state.
+export component SidebarSectionHeader inherits SidebarRowSurface {
+    in property <string> label;
+    in property <string> detail;
+    in property <string> avatar;
+    in property <image> avatar-image;
+    in property <bool> has-avatar-image: false;
+    in property <image> icon;
+    in property <bool> has-avatar: false;
+    in property <bool> open: true;
+    in property <color> sidebar-background;
+    in property <color> body-color;
+    in property <color> muted-color;
+    in property <color> icon-color;
+    in property <int> label-font-weight: 600;
+    in property <length> left-padding: 4px;
+    in property <bool> folder-row-style: false;
+    callback toggled(bool);
+
+    height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 42px;
+    idle-background: root.sidebar-background;
+    hovered: header-hit.has-hover;
+
+    Image {
+        x: root.folder-row-style ? 9px : root.left-padding;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        source: root.open
+            ? @image-url("../icons/phosphor/caret-down.svg")
+            : @image-url("../icons/phosphor/caret-right.svg");
+        colorize: root.muted-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    if root.has-avatar: Avatar {
+        x: root.folder-row-style ? 26px : root.left-padding + 18px;
+        y: (parent.height - self.height) / 2;
+        size: 22px;
+        source: root.avatar-image;
+        has-source: root.has-avatar-image;
+        fallback: root.avatar;
+        background-color: root.has-avatar-image ? #ffffff : root.hover-background;
+        foreground-color: root.body-color;
+    }
+
+    if !root.has-avatar: SidebarIcon {
+        x: root.folder-row-style ? 26px : root.left-padding + 18px;
+        y: (parent.height - self.height) / 2;
+        height: 22px;
+        icon: root.icon;
+        color: root.icon-color;
+    }
+
+    Text {
+        x: root.folder-row-style ? 52px : root.left-padding + 48px;
+        y: root.detail == "" ? 0px : 4px;
+        width: parent.width - self.x - 8px;
+        height: root.detail == "" ? parent.height : 20px;
+        text: root.label;
+        color: root.body-color;
+        font-size: TypeScale.secondary;
+        font-weight: root.label-font-weight;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    if root.detail != "": Text {
+        x: 52px;
+        y: 22px;
+        width: parent.width - self.x - 8px;
+        height: 15px;
+        text: root.detail;
+        color: root.muted-color;
+        font-size: TypeScale.caption;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+
+    header-hit := TouchArea {
+        accessible-role: button;
+        accessible-label: root.label;
+        accessible-expanded: root.open;
+        accessible-action-default => {
+            root.toggled(!root.open);
+        }
+        clicked => {
+            root.toggled(!root.open);
+        }
+        mouse-cursor: pointer;
+    }
+}

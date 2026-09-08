@@ -1,9 +1,9 @@
 import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { ContactAccountRow, ContactRow } from "../models.slint";
+import { ContactSidebarRow, ContactSidebarRowKind, ContactRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { FloatingActionButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
-import { SidebarItem, SidebarSectionHeader } from "../components/sidebar.slint";
+import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
@@ -22,11 +22,14 @@ component FieldLabel inherits Text {
 // Contacts deliberately follows the mail workspace's three-column rhythm:
 // scope navigation, searchable rows, and a focused detail/editor surface.
 export component ContactsView inherits Rectangle {
+    in property <bool> active: true;
     in property <bool> compact: false;
+    private property <length> sidebar-scroll-y: 0px;
+    callback toggle-section(string, bool);
     in property <string> layout-mode: "default";
     in property <bool> dark-mode: false;
     in property <[ContactRow]> contacts: [];
-    in property <[ContactAccountRow]> account-contacts: [];
+    in property <[ContactSidebarRow]> sidebar-rows: [];
     in property <string> query: "";
     in-out property <string> filter: "all";
     in property <string> selected-scope: "All contacts";
@@ -190,7 +193,7 @@ export component ContactsView inherits Rectangle {
             surface-color: root.sidebar-bg;
             divider-color: root.border;
 
-            VerticalBox {
+            if root.active && !root.compact && !root.sidebar-collapsed: VerticalBox {
                 padding-top: LayoutMetrics.sidebar-action-top;
                 padding-right: LayoutMetrics.sidebar-inset;
                 padding-bottom: 0px;
@@ -213,113 +216,72 @@ export component ContactsView inherits Rectangle {
                     vertical-stretch: 1;
                     background: transparent;
 
-                    contact-nav-scroll := ScrollView {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: parent.height;
+                    contact-nav-scroll := ListView {
+                        // Keep a direct ListView repeater; Slint 1.17 does not
+                        // virtualize through a wrapper or inherited ListView.
                         viewport-width: self.visible-width;
                         horizontal-scrollbar-policy: always-off;
 
-                        VerticalBox {
-                            x: 0px;
+                        viewport-y <=> root.sidebar-scroll-y;
+                        for entry in root.sidebar-rows: Rectangle {
                             width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                            padding: 0px;
-                            spacing: 8px;
-                            alignment: start;
+                            height: entry.kind == ContactSidebarRowKind.unified-heading ? 34px
+                                : entry.kind == ContactSidebarRowKind.accounts-heading ? 26px
+                                : entry.kind == ContactSidebarRowKind.account ? (entry.account.email == "" ? 35px : 45px)
+                                : entry.kind == ContactSidebarRowKind.unified-section ? 40px
+                                : entry.kind == ContactSidebarRowKind.hint ? 62px : 39px;
 
-                            Rectangle { height: 8px; }
-                            WorkspaceMiniHeading {
-                                label: @tr("UNIFIED");
+                            if entry.kind == ContactSidebarRowKind.unified-heading || entry.kind == ContactSidebarRowKind.accounts-heading: WorkspaceMiniHeading {
+                                x: 0px;
+                                y: entry.kind == ContactSidebarRowKind.unified-heading ? 8px : 0px;
+                                width: parent.width;
+                                label: entry.kind == ContactSidebarRowKind.unified-heading ? @tr("UNIFIED") : @tr("ACCOUNTS");
                                 label-color: root.muted-text;
                             }
-
-                            unified-section := SidebarSectionHeader {
-                                label: @tr("Unified contacts");
+                            if entry.kind == ContactSidebarRowKind.unified-section || entry.kind == ContactSidebarRowKind.account: SidebarSectionHeader {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                label: entry.kind == ContactSidebarRowKind.account ? entry.account.name : @tr("Unified contacts");
+                                detail: entry.account.email;
+                                avatar: entry.account.initials;
+                                avatar-image: entry.account.avatar;
+                                has-avatar-image: entry.account.has-avatar;
+                                has-avatar: entry.kind == ContactSidebarRowKind.account;
                                 icon: @image-url("../icons/phosphor/users-fill.svg");
                                 sidebar-background: root.sidebar-bg;
                                 body-color: root.body-text;
                                 muted-color: root.muted-text;
                                 hover-background: root.muted-control-bg;
                                 icon-color: root.secondary-text;
+                                open: entry.open;
+                                toggled(open) => { root.toggle-section(entry.key, open); }
                             }
-
-                            if unified-section.open : VerticalBox {
-                                padding: 0px;
-                                spacing: 3px;
-
-                                SidebarItem {
-                                    label: @tr("All contacts");
-                                    count: root.total-count > 0 ? root.total-count : "";
-                                    scope: "all";
-                                    icon: @image-url("../icons/phosphor/users-fill.svg");
-                                    selected: root.selected-scope == "All contacts";
-                                    prominent: true;
-                                    sidebar-background: root.sidebar-bg;
-                                    selection-background: root.accent-soft;
-                                    accent-color: root.accent;
-                                    body-color: root.body-text;
-                                    muted-color: root.muted-text;
-                                    clicked(scope) => { root.open-filter(scope); }
-                                }
-
-                                SidebarItem {
-                                    label: @tr("Favorites");
-                                    count: root.favorite-count > 0 ? root.favorite-count : "";
-                                    scope: "favorites";
-                                    icon: @image-url("../icons/phosphor/star-fill.svg");
-                                    selected: root.selected-scope == "Favorites";
-                                    sidebar-background: root.sidebar-bg;
-                                    selection-background: root.accent-soft;
-                                    accent-color: root.accent;
-                                    body-color: root.body-text;
-                                    muted-color: root.muted-text;
-                                    clicked(scope) => { root.open-filter(scope); }
-                                }
+                            if entry.kind == ContactSidebarRowKind.all || entry.kind == ContactSidebarRowKind.favorites || entry.kind == ContactSidebarRowKind.contacts: SidebarItem {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
+                                label: entry.kind == ContactSidebarRowKind.all ? @tr("All contacts")
+                                    : entry.kind == ContactSidebarRowKind.favorites ? @tr("Favorites") : @tr("Contacts");
+                                count: entry.kind == ContactSidebarRowKind.all ? (root.total-count > 0 ? root.total-count : "")
+                                    : entry.kind == ContactSidebarRowKind.favorites ? (root.favorite-count > 0 ? root.favorite-count : "") : entry.account.count;
+                                scope: entry.kind == ContactSidebarRowKind.all ? "all"
+                                    : entry.kind == ContactSidebarRowKind.favorites ? "favorites" : "Account:" + entry.account.id;
+                                icon: entry.kind == ContactSidebarRowKind.favorites ? @image-url("../icons/phosphor/star-fill.svg") : @image-url("../icons/phosphor/users-fill.svg");
+                                selected: entry.kind == ContactSidebarRowKind.all ? root.selected-scope == "All contacts"
+                                    : entry.kind == ContactSidebarRowKind.favorites ? root.selected-scope == "Favorites" : entry.account.selected;
+                                prominent: entry.kind != ContactSidebarRowKind.favorites;
+                                sidebar-background: root.sidebar-bg;
+                                selection-background: root.accent-soft;
+                                accent-color: root.accent;
+                                body-color: root.body-text;
+                                muted-color: root.muted-text;
+                                clicked(scope) => { root.open-filter(scope); }
                             }
-
-                            WorkspaceMiniHeading {
-                                visible: root.account-contacts.length > 0;
-                                label: @tr("ACCOUNTS");
-                                label-color: root.muted-text;
-                            }
-
-                            for account in root.account-contacts : VerticalBox {
-                                padding: 0px;
-                                spacing: 3px;
-                                vertical-stretch: 0;
-
-                                account-section := SidebarSectionHeader {
-                                    label: account.name;
-                                    detail: account.email;
-                                    avatar: account.initials;
-                                    avatar-image: account.avatar;
-                                    has-avatar-image: account.has-avatar;
-                                    has-avatar: true;
-                                    sidebar-background: root.sidebar-bg;
-                                    hover-background: root.muted-control-bg;
-                                    body-color: root.body-text;
-                                    muted-color: root.muted-text;
-                                    icon-color: root.secondary-text;
-                                }
-
-                                if account-section.open : SidebarItem {
-                                    label: @tr("Contacts");
-                                    count: account.count;
-                                    scope: "Account:" + account.id;
-                                    icon: @image-url("../icons/phosphor/users-fill.svg");
-                                    selected: account.selected;
-                                    prominent: true;
-                                    sidebar-background: root.sidebar-bg;
-                                    selection-background: root.accent-soft;
-                                    accent-color: root.accent;
-                                    body-color: root.body-text;
-                                    muted-color: root.muted-text;
-                                    clicked(scope) => { root.open-filter(scope); }
-                                }
-                            }
-
-                            Text {
+                            if entry.kind == ContactSidebarRowKind.hint: Text {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width;
                                 height: 54px;
                                 text: @tr("People discovered from your conversations appear here automatically.");
                                 color: root.muted-text;

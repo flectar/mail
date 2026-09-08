@@ -68,6 +68,13 @@ def main():
     source = re.sub(r'"((?:\.\./|\./)[^"\n]+)"', lambda m: json.dumps(str((REPO / "ui/components" / m[1]).resolve())), source)
     with tempfile.TemporaryDirectory(prefix="sidebar-bench-") as directory:
         directory = Path(directory)
+        if not args.baseline_ref and (REPO / "ui/components/sidebar-controls.slint").exists():
+            controls = (REPO / "ui/components/sidebar-controls.slint").read_text()
+            for component in ("SidebarItem", "SidebarSectionHeader"):
+                controls = controls.replace(f"export component {component} inherits SidebarRowSurface {{",
+                                            f'export component {component} inherits SidebarRowSurface {{\n    init => {{ debug("sidebar-delegate-created"); }}')
+            controls = re.sub(r'"((?:\.\./|\./)[^"\n]+)"', lambda m: json.dumps(str((REPO / "ui/components" / m[1]).resolve())), controls)
+            (directory / "sidebar-controls.slint").write_text(controls)
         (directory / "sidebar.slint").write_text(source)
         model_type = "SidebarRow" if flat else "MailboxRow"
         account_property = "" if flat else "in property <[MailboxRow]> account-mailboxes;"

@@ -6,6 +6,7 @@ use chrono::{
 };
 use flectar_mail_core::models::{Account, Address, Calendar, CalendarEvent};
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::{collections::HashMap, rc::Rc};
 
 #[derive(Clone)]
 pub(crate) struct LocalCalendarEvent {
@@ -57,6 +58,7 @@ pub(crate) struct LocalCalendarState {
     pub(crate) events: Vec<LocalCalendarEvent>,
     pub(crate) accounts: Vec<LocalCalendarAccount>,
     pub(crate) sources: Vec<LocalCalendarSource>,
+    pub(crate) source_rows: Rc<crate::retained_model::RetainedModel<CalendarSourceRow>>,
 }
 
 impl LocalCalendarState {
@@ -68,6 +70,7 @@ impl LocalCalendarState {
             events: Vec::new(),
             accounts: Vec::new(),
             sources: Vec::new(),
+            source_rows: Rc::default(),
         }
     }
 }
@@ -348,6 +351,11 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
     } else {
         (week_start, week_start + ChronoDuration::days(6))
     };
+    let accounts: HashMap<_, _> = state
+        .accounts
+        .iter()
+        .map(|account| (account.id, account))
+        .collect();
     let mut previous_source_account_id = None;
     let source_rows = state
         .sources
@@ -355,10 +363,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         .map(|source| {
             let group_start = previous_source_account_id != Some(source.account_id);
             previous_source_account_id = Some(source.account_id);
-            let account = state
-                .accounts
-                .iter()
-                .find(|account| account.id == source.account_id);
+            let account = accounts.get(&source.account_id);
             CalendarSourceRow {
                 id: i32::try_from(source.id).unwrap_or(i32::MAX),
                 account_id: i32::try_from(source.account_id).unwrap_or(i32::MAX),
@@ -472,7 +477,9 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
 
     app.set_calendar_month_days(ModelRc::new(VecModel::from(month_days)));
     app.set_calendar_week_days(ModelRc::new(VecModel::from(week_days)));
-    app.set_calendar_sources(ModelRc::new(VecModel::from(source_rows)));
+    state
+        .source_rows
+        .reconcile_by(source_rows, |row| row.id, PartialEq::eq);
     app.set_calendar_events(ModelRc::new(VecModel::from(events)));
     app.set_calendar_month_title(
         format!(

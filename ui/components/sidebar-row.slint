@@ -1,0 +1,14 @@
+// Shared row surface for mail, contact scopes and calendar sources.
+export component SidebarRowSurface inherits Rectangle {
+    in property <color> idle-background: transparent;
+    in property <color> hover-background;
+    in property <color> active-background: hover-background;
+    in property <bool> hovered: false;
+    in property <bool> active: false;
+
+    height: 32px;
+    border-radius: 6px;
+    background: root.active ? root.active-background
+        : root.hovered ? root.hover-background : root.idle-background;
+    animate background { duration: 120ms; }
+}

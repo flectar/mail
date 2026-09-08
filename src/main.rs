@@ -17,6 +17,7 @@ mod reader_validation;
 mod remote;
 mod renderer;
 mod renderer_input_controller;
+mod retained_model;
 mod rich_compose;
 mod settings_controller;
 mod sidebar_model;
@@ -1298,6 +1299,23 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let contact_state = Rc::new(RefCell::new(ContactDirectoryState::new(Vec::new(), false)));
     app.set_contacts(Rc::clone(&contact_state.borrow().rows).into());
+    app.set_contact_sidebar_rows(Rc::clone(&contact_state.borrow().sidebar_rows).into());
+    let sidebar_contacts = Rc::clone(&contact_state);
+    let sidebar_app = app.as_weak();
+    app.on_toggle_contact_section(move |key, open| {
+        let Some(app) = sidebar_app.upgrade() else {
+            return;
+        };
+        {
+            let mut directory = sidebar_contacts.borrow_mut();
+            if open {
+                directory.collapsed_sections.remove(key.as_str());
+            } else {
+                directory.collapsed_sections.insert(key.to_string());
+            }
+        }
+        contacts::refresh_contact_sidebar(&app, &sidebar_contacts);
+    });
     let contacts_loaded = Rc::new(Cell::new(false));
     let contacts_loading = Rc::new(Cell::new(false));
     apply_contact_directory(&app, &contact_state);
@@ -1792,6 +1810,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // Provider sync enriches the same store but is never required to use it.
     let calendar_today = Local::now().date_naive();
     let calendar_state = Rc::new(RefCell::new(LocalCalendarState::new(calendar_today)));
+    app.set_calendar_sources(Rc::clone(&calendar_state.borrow().source_rows).into());
     let calendar_editing_event_id = Rc::new(Cell::new(None::<i64>));
     apply_calendar(&app, &calendar_state.borrow(), calendar_today);
 

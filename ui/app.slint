@@ -7,7 +7,7 @@ import { TypeScale } from "typography.slint";
 export { AppTheme, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
-import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactAccountRow, ContactRow, EmailLink, EmailRow, EmailTile, LocalizedMessage, SidebarRow, MailLabelRow } from "models.slint";
+import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTile, LocalizedMessage, SidebarRow, MailLabelRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail } from "components/product-rail.slint";
@@ -486,6 +486,7 @@ export component AppWindow inherits Window {
     callback select-contact(int);
     callback search-contacts(string);
     callback select-contact-scope(string);
+    callback toggle-contact-section(string, bool);
     callback new-contact();
     callback save-contact(int, string, string, string, string, string, string, string, string, string, string, bool);
     callback delete-contact(int);
@@ -534,7 +535,7 @@ export component AppWindow inherits Window {
     in property <[CalendarEventRow]> calendar_events: [];
     in property <[CalendarSourceRow]> calendar_sources: [];
     in property <[ContactRow]> contacts: [];
-    in property <[ContactAccountRow]> contact_accounts: [];
+    in property <[ContactSidebarRow]> contact_sidebar_rows: [];
     in-out property <string> contact_scope: "All contacts";
     in property <string> contact_scope_label: "All contacts";
     in-out property <string> contact_search_query: "";
@@ -1009,6 +1010,7 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         FunctionalCalendarView {
+            active: root.active_view == "calendar";
             x: 0px;
             y: 0px;
             width: parent.width;
@@ -1059,6 +1061,7 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         contacts-view := ContactsView {
+            active: root.active_view == "contacts";
             x: 0px;
             y: 0px;
             width: parent.width;
@@ -1068,7 +1071,8 @@ export component AppWindow inherits Window {
             dark-mode: root.dark-mode;
             sidebar-collapsed <=> root.contacts_sidebar_collapsed;
             contacts: root.contacts;
-            account-contacts: root.contact_accounts;
+            sidebar-rows: root.contact_sidebar_rows;
+            toggle-section(key, open) => { root.toggle-contact-section(key, open); }
             query: root.contact_search_query;
             filter: root.contact_scope == "Favorites" ? "favorites" : "all";
             selected-scope: root.contact_scope;
