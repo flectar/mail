@@ -214,7 +214,7 @@ pub(super) fn register_renderer_input_callbacks(
                 .filter(|value| value.is_finite())
                 .map(|value| value / 100.0)
         });
-        let command = if requested_zoom.is_some() {
+        let command = if command.starts_with("zoom-set:") {
             "zoom-set"
         } else {
             command.as_str()
@@ -232,6 +232,7 @@ pub(super) fn register_renderer_input_callbacks(
                 .clamp(0.5, 3.0);
                 r.borrow_mut().set_zoom(zoom);
                 reader.set_zoom(zoom);
+                reader.set_zoom_revision(reader.get_zoom_revision().wrapping_add(1));
                 let banner = banner_height(&app);
                 let scroll = -app.get_email_scroll_y();
                 let scroll = if scroll < banner {

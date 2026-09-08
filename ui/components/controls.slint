@@ -46,7 +46,7 @@ export component LineEdit inherits Rectangle {
         x: root.text-inset;
         width: max(0px, parent.width - root.text-inset - 12px - root.trailing-content-width);
         height: parent.height;
-        text: root.text;
+        text <=> root.text;
         color: AppTheme.heading;
         selection-background-color: AppTheme.accent;
         selection-foreground-color: white;

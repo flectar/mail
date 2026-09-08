@@ -92,6 +92,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     );
     app.global::<EmailReader>().set_body_pending(false);
     let draw = |name: &str, width: u32, height: u32| {
+        slint::platform::update_timers_and_animations();
         app.window()
             .set_size(slint::PhysicalSize::new(width, height));
         app.window().request_redraw();
@@ -179,6 +180,62 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert_eq!(renderer.borrow().zoom, 1.25);
     app.global::<EmailReader>()
         .invoke_command("zoom-set:100%".into());
+    // Edit the real percentage field, then exercise buttons after its initial
+    // text binding has been overwritten. Clipboard observes the displayed value.
+    let shortcut = |letter: &str| {
+        key(slint::platform::Key::Control.into(), true);
+        key(letter.into(), true);
+        key(letter.into(), false);
+        key(slint::platform::Key::Control.into(), false);
+    };
+    let copy_zoom = || {
+        pointer(820.0, 222.0);
+        shortcut("a");
+        shortcut("c");
+        clipboard.borrow().clone()
+    };
+    pointer(820.0, 222.0);
+    shortcut("a");
+    key("21%".into(), true);
+    key("21%".into(), false);
+    key(slint::platform::Key::Return.into(), true);
+    key(slint::platform::Key::Return.into(), false);
+    draw("zoom-clamped", 1280, 900);
+    assert_eq!(renderer.borrow().zoom, 0.5);
+    assert_eq!(
+        copy_zoom(),
+        "50%",
+        "typed values must show the applied clamp"
+    );
+    pointer(874.0, 222.0);
+    draw("zoom-in", 1280, 900);
+    assert_eq!(copy_zoom(), "60%");
+    pointer(721.0, 222.0);
+    draw("zoom-out", 1280, 900);
+    assert_eq!(copy_zoom(), "50%");
+    // Fit may leave zoom unchanged; it must still discard an unsubmitted draft.
+    shortcut("a");
+    key("21%".into(), true);
+    key("21%".into(), false);
+    pointer(919.0, 222.0);
+    draw("zoom-fit", 1280, 900);
+    assert_eq!(
+        copy_zoom(),
+        format!(
+            "{}%",
+            (app.global::<EmailReader>().get_zoom() * 100.0).round()
+        )
+    );
+    pointer(764.0, 222.0);
+    draw("zoom-reset", 1280, 900);
+    assert_eq!(copy_zoom(), "100%");
+    shortcut("a");
+    key("NaN".into(), true);
+    key("NaN".into(), false);
+    key(slint::platform::Key::Return.into(), true);
+    key(slint::platform::Key::Return.into(), false);
+    draw("zoom-invalid", 1280, 900);
+    assert_eq!(copy_zoom(), "100%");
     draw("desktop-tooltip", 1280, 900);
     pointer(750.0, 390.0);
     key(slint::platform::Key::Control.into(), true);

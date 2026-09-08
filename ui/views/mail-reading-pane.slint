@@ -690,6 +690,10 @@ export component MailReadingPane inherits Rectangle {
                             ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass-minus.svg"); tooltip-text: @tr("Zoom out"); tooltip-align-left: true; interactive: EmailReader.available && EmailReader.zoom > 0.5; clicked => { EmailReader.command("zoom-out"); } }
                             if !root.compact : ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrow-counter-clockwise.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(EmailReader.zoom * 100)); tooltip-align-left: true; clicked => { EmailReader.command("zoom-reset"); } }
                             zoom-input := LineEdit {
+                                in property <float> applied-zoom: EmailReader.zoom;
+                                in property <int> zoom-revision: EmailReader.zoom-revision;
+                                changed applied-zoom => { self.text = "\{round(self.applied-zoom * 100)}%"; }
+                                changed zoom-revision => { self.text = "\{round(self.applied-zoom * 100)}%"; }
                                 min-width: 62px; max-width: 62px;
                                 height: root.compact ? 44px : 32px;
                                 enabled: EmailReader.available;
