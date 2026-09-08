@@ -1,5 +1,6 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { EmailLink, EmailRow, EmailTile, MailboxRow, MailLabelRow } from "../models.slint";
+import { EmailLink, EmailRow, EmailTile, SidebarRow, MailLabelRow } from "../models.slint";
+import { LayoutMetrics } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
@@ -8,16 +9,16 @@ import { MailReadingPane } from "mail-reading-pane.slint";
 // component owns the feature layout, interaction wiring, and clipboard bridge.
 export component MailView inherits Rectangle {
     in property <bool> compact: false;
+    // Keep the animated geometry outside conditionally instantiated sidebars.
+    private property <length> desktop-sidebar-width: root.mail_sidebar_collapsed ? 0px : LayoutMetrics.sidebar-width;
+    animate desktop-sidebar-width { duration: 160ms; easing: ease-in-out; }
     in property <string> layout-mode: "default";
     in property <bool> show-avatars: true;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
-    in property <[MailboxRow]> mailboxes: [];
-    in property <[MailboxRow]> account_mailboxes: [];
-    in property <[MailboxRow]> unified_mailboxes: [];
+    in property <[SidebarRow]> sidebar_rows: [];
+    private property <length> sidebar-scroll-y: 0px;
     in property <[MailLabelRow]> mail_labels: [];
-    in property <[MailLabelRow]> sidebar_mail_categories: [];
-    in property <[MailLabelRow]> sidebar_mail_labels: [];
     in property <[MailLabelRow]> mail_label_results: [];
     in property <int> selected_mail_label_count: 0;
     in property <[EmailTile]> email_tiles: [];
@@ -96,6 +97,7 @@ export component MailView inherits Rectangle {
     callback set_search_filter(string);
     callback select_scope(string);
     callback toggle_folder(int, bool);
+    callback toggle_sidebar_section(string, bool);
     callback request_folder_create(int, int, string);
     callback request_folder_rename(int, string);
     callback request_folder_delete(int, string);
@@ -142,14 +144,11 @@ export component MailView inherits Rectangle {
             padding-left: 0px;
             spacing: 0px;
 
-            MailSidebar {
+            if root.active_view == "mail" && !root.single-pane : MailSidebar {
                 height: parent.height;
                 touch-mode: false;
-                mailboxes: root.mailboxes;
-                account-mailboxes: root.account_mailboxes;
-                unified-mailboxes: root.unified_mailboxes;
-                mail-categories: root.sidebar_mail_categories;
-                mail-labels: root.sidebar_mail_labels;
+                rows: root.sidebar_rows;
+                scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
                 selected-scope: root.selected_scope;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -162,6 +161,7 @@ export component MailView inherits Rectangle {
                 body-color: root.body-text;
                 muted-color: root.muted-text;
                 select-scope(scope) => { root.select_scope(scope); }
+                toggle-section(key, open) => { root.toggle_sidebar_section(key, open); }
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
@@ -318,17 +318,13 @@ export component MailView inherits Rectangle {
             // Minimal changes the mail content presentation, not desktop
             // navigation. The Default collapsible sidebar remains, with the
             // list/reader stack consuming its animated remainder.
-            minimal-sidebar := MailSidebar {
-                visible: !root.compact;
+            if root.active_view == "mail" && root.single-pane && !root.compact : MailSidebar {
                 x: 0px;
                 y: 0px;
                 height: parent.height;
                 touch-mode: false;
-                mailboxes: root.mailboxes;
-                account-mailboxes: root.account_mailboxes;
-                unified-mailboxes: root.unified_mailboxes;
-                mail-categories: root.sidebar_mail_categories;
-                mail-labels: root.sidebar_mail_labels;
+                rows: root.sidebar_rows;
+                scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
                 selected-scope: root.selected_scope;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -344,6 +340,7 @@ export component MailView inherits Rectangle {
                     root.select_scope(scope);
                     root.compact-page = "list";
                 }
+                toggle-section(key, open) => { root.toggle_sidebar_section(key, open); }
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
@@ -359,7 +356,7 @@ export component MailView inherits Rectangle {
 
             Rectangle {
                 visible: !root.compact;
-                x: minimal-sidebar.current-width;
+                x: root.desktop-sidebar-width;
                 y: 0px;
                 width: 1px;
                 height: parent.height;
@@ -369,7 +366,7 @@ export component MailView inherits Rectangle {
             compact-list-pane := MailListPane {
                 loading: root.loading;
                 visible: root.compact-page == "list";
-                x: root.compact ? 0px : minimal-sidebar.current-width + 1px;
+                x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
                 y: 0px;
                 width: max(0px, parent.width - self.x);
                 height: parent.height;
@@ -429,7 +426,7 @@ export component MailView inherits Rectangle {
                 full-width: true;
                 show-avatars: root.show-avatars;
                 visible: root.compact-page == "message";
-                x: root.compact ? 0px : minimal-sidebar.current-width + 1px;
+                x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
                 y: 0px;
                 width: max(0px, parent.width - self.x);
                 height: parent.height;
@@ -522,19 +519,15 @@ export component MailView inherits Rectangle {
                     clicked => { root.folders-open = false; }
                 }
             }
-            MailSidebar {
-                visible: root.compact && root.folders-open;
+            if root.active_view == "mail" && root.compact && root.folders-open : MailSidebar {
                 x: 0px;
                 y: 0px;
                 width: min(300px, parent.width - 48px);
                 height: parent.height;
                 z: 101;
                 touch-mode: true;
-                mailboxes: root.mailboxes;
-                account-mailboxes: root.account_mailboxes;
-                unified-mailboxes: root.unified_mailboxes;
-                mail-categories: root.sidebar_mail_categories;
-                mail-labels: root.sidebar_mail_labels;
+                rows: root.sidebar_rows;
+                scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
                 selected-scope: root.selected_scope;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -551,6 +544,7 @@ export component MailView inherits Rectangle {
                     root.folders-open = false;
                     root.compact-page = "list";
                 }
+                toggle-section(key, open) => { root.toggle_sidebar_section(key, open); }
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }

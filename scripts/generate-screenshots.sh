@@ -55,21 +55,9 @@ render() {
     --arg active_view "$active_view" \
     --arg favicon_dir "$favicon_dir" \
     '
-      def complete_mailbox:
-        .account_id = (.account_id // 0)
-        | .folder_id = (.folder_id // -1)
-        | .parent_folder_id = (.parent_folder_id // -1)
-        | .depth = (.depth // 0)
-        | .has_children = (.has_children // false)
-        | .expanded = (.expanded // true)
-        | .is_standard = (.is_standard // true)
-        | .label_has_emoji = (.label_has_emoji // false);
       def favicon_path(address):
         ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
-      .mailboxes |= map(complete_mailbox)
-      | .account_mailboxes |= map(complete_mailbox)
-      | .unified_mailboxes |= map(complete_mailbox)
-      | .theme_mode = $theme
+      .theme_mode = $theme
       | .workspace_layout = $workspace_layout
       | .screenshot_theme_preset = $theme_preset
       | .active_view = $active_view
@@ -78,6 +66,8 @@ render() {
       | .selected_has_favicon = true
       | .emails |= map(
           .has_replied = (.has_replied // false)
+          | .checked = (.checked // false)
+          | .account_id = (.account_id // 0)
           | .favicon = favicon_path(.address)
           | .favicon_small = favicon_path(.address)
           | .has_favicon = true

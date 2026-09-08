@@ -7,7 +7,7 @@ import { TypeScale } from "typography.slint";
 export { AppTheme, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
-import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactAccountRow, ContactRow, EmailLink, EmailRow, EmailTile, LocalizedMessage, MailboxRow, MailLabelRow } from "models.slint";
+import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactAccountRow, ContactRow, EmailLink, EmailRow, EmailTile, LocalizedMessage, SidebarRow, MailLabelRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail } from "components/product-rail.slint";
@@ -405,6 +405,7 @@ export component AppWindow inherits Window {
     callback set_search_filter(string);
     callback select_scope(string);
     callback toggle_folder(int, bool);
+    callback toggle_sidebar_section(string, bool);
     callback create_folder(int, int, string);
     callback rename_folder(int, string);
     callback delete_folder(int);
@@ -511,12 +512,8 @@ export component AppWindow inherits Window {
     callback refresh-email-resources();
 
     in property <[EmailRow]> emails: [];
-    in property <[MailboxRow]> mailboxes: [];
-    in property <[MailboxRow]> account_mailboxes: [];
-    in property <[MailboxRow]> unified_mailboxes: [];
+    in property <[SidebarRow]> sidebar_rows: [];
     in property <[MailLabelRow]> mail_labels: [];
-    in property <[MailLabelRow]> sidebar_mail_categories: [];
-    in property <[MailLabelRow]> sidebar_mail_labels: [];
     in property <[MailLabelRow]> mail_label_results: [];
     in property <int> selected_mail_label_count: 0;
     in property <[AccountRow]> connected_accounts: [];
@@ -892,12 +889,8 @@ export component AppWindow inherits Window {
             layout-mode: root.workspace_layout;
             show-avatars: root.show_avatars;
             emails: root.emails;
-            mailboxes: root.mailboxes;
-            account_mailboxes: root.account_mailboxes;
-            unified_mailboxes: root.unified_mailboxes;
+            sidebar_rows: root.sidebar_rows;
             mail_labels: root.mail_labels;
-            sidebar_mail_categories: root.sidebar_mail_categories;
-            sidebar_mail_labels: root.sidebar_mail_labels;
             mail_label_results: root.mail_label_results;
             selected_mail_label_count: root.selected_mail_label_count;
             email_tiles: root.email_tiles;
@@ -970,6 +963,7 @@ export component AppWindow inherits Window {
             search_changed(query) => { root.search_changed(query); }
             set_search_filter(filter) => { root.set_search_filter(filter); }
             select_scope(scope) => { root.select_scope(scope); }
+            toggle_sidebar_section(key, open) => { root.toggle_sidebar_section(key, open); }
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
             request_folder_create(account-id, parent-id, parent-name) => { root.open-folder-create(account-id, parent-id, parent-name); }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }

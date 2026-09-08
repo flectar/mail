@@ -56,6 +56,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
             "<body style='margin:0;padding:20px'><h2>Reader verification {i}</h2><p>Selectable <b>bold text</b> and <a href='https://example.com'>a working link</a>.</p><p><a style='display:inline-block;padding:16px;background:#e8ecff' href='https://example.com/shop'>Open details</a></p><img src='https://example.com/image.png' width='220' height='75' alt='A blocked image with an alternative'><p>Use Find, zoom, or the accessible Reader view.</p></body>"
         ));
     }
+    state.mailboxes = fixture_mailboxes(&state.messages);
     let ids: Vec<_> = state.messages.iter().map(|m| m.id).collect();
     let renderer = state.email_renderer.clone();
     renderer
@@ -68,9 +69,18 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.global::<EmailReader>()
         .on_ensure_body(move |id| requests2.borrow_mut().push(id));
     app.set_emails(state.email_rows.clone().into());
+    app.set_sidebar_rows(Rc::clone(&state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(state));
     render_current(&app, &state, &runtime).unwrap();
     assert_eq!(requests.borrow().last(), Some(&ids[0]));
+    let sidebar = app.get_sidebar_rows();
+    assert!(sidebar.row_count() > 0);
+    render_current(&app, &state, &runtime).unwrap();
+    assert_eq!(
+        sidebar,
+        app.get_sidebar_rows(),
+        "selecting a message must not rebuild unchanged folders"
+    );
     // Archive removes the current row, and render_current chooses the next.
     state.borrow_mut().messages.remove(0);
     render_current(&app, &state, &runtime).unwrap();

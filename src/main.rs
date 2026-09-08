@@ -18,6 +18,7 @@ mod renderer;
 mod renderer_input_controller;
 mod rich_compose;
 mod settings_controller;
+mod sidebar_model;
 mod startup;
 mod startup_metrics;
 mod theme;
@@ -65,6 +66,7 @@ use renderer::{GpuEmailRenderer, RenderedEmail};
 use renderer_input_controller::register_renderer_input_callbacks;
 use rich_compose::{ComposeSelection, RichComposeDocument};
 use settings_controller::register_settings_preference_callbacks;
+use sidebar_model::{SidebarModel, refresh_sidebar};
 use slint::{DataTransfer, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, VecModel};
 use startup::{
     PendingCoreUpdates, StartupCalendarSnapshot, StartupSnapshot, StartupUpdate,
@@ -400,6 +402,8 @@ struct InboxState {
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
     collapsed_folder_ids: HashSet<i64>,
+    collapsed_sidebar_sections: HashSet<String>,
+    sidebar_rows: Rc<SidebarModel>,
     scope: String,
     query: String,
     search_filter: String,
@@ -831,6 +835,8 @@ impl InboxState {
             mailboxes: Vec::new(),
             unified_mailboxes: Vec::new(),
             collapsed_folder_ids: HashSet::new(),
+            collapsed_sidebar_sections: HashSet::from(["categories".into(), "labels".into()]),
+            sidebar_rows: Rc::new(SidebarModel::default()),
             total_count: 0,
             inbox_count: 0,
             messages: Vec::new(),
@@ -1274,6 +1280,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     app.set_emails(Rc::clone(&initial_state.email_rows).into());
+    app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
 
     let state_for_mail_drag = Rc::clone(&state);
@@ -2392,8 +2399,23 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    let section_toggle_state = Rc::clone(&state);
+    app.on_toggle_sidebar_section(move |key, open| {
+        if open {
+            section_toggle_state
+                .borrow_mut()
+                .collapsed_sidebar_sections
+                .remove(key.as_str());
+        } else {
+            section_toggle_state
+                .borrow_mut()
+                .collapsed_sidebar_sections
+                .insert(key.to_string());
+        }
+        refresh_sidebar(&section_toggle_state);
+    });
+
     let folder_toggle_state = Rc::clone(&state);
-    let folder_toggle_app = app.as_weak();
     app.on_toggle_folder(move |folder_id, expanded| {
         let folder_id = i64::from(folder_id);
         if expanded {
@@ -2407,9 +2429,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .collapsed_folder_ids
                 .insert(folder_id);
         }
-        if let Some(app) = folder_toggle_app.upgrade() {
-            refresh_list_metadata(&app, &folder_toggle_state);
-        }
+        refresh_sidebar(&folder_toggle_state);
     });
 
     let create_folder_state = Rc::clone(&state);

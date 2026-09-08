@@ -52,6 +52,21 @@ export struct MailLabelRow {
     is_auto: bool,
 }
 
+// One visible navigation entry per list row; stable keys also identify sections.
+export enum SidebarRowKind {
+    unified-heading, unified-section, unified-inbox, unified-mailbox,
+    categories-section, important, other, category, labels-section, label,
+    accounts-heading, account, folder, new-folder, add-account,
+}
+
+export struct SidebarRow {
+    key: string,
+    kind: SidebarRowKind,
+    mailbox: MailboxRow,
+    label: MailLabelRow,
+    open: bool,
+}
+
 export struct EmailRow {
     id: int,
     account_id: int,
