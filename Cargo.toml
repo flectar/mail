@@ -59,7 +59,9 @@ ios = ["slint/renderer-skia"]
 anyrender = "0.13"
 anyrender_vello = { version = "0.14", optional = true }
 anyrender_vello_cpu = "0.17"
-blitz-dom = "=0.3.0-beta.2"
+# Email templates use CSS floats and legacy table/image align attributes.
+# Keep float layout enabled on every platform, including minimal builds.
+blitz-dom = { version = "=0.3.0-beta.2", features = ["floats"] }
 blitz-html = "=0.3.0-beta.2"
 blitz-paint = "=0.3.0-beta.2"
 blitz-traits = "=0.3.0-beta.2"

@@ -178,6 +178,9 @@ verify_manifest_wiring() {
 
     for crate in blitz-dom blitz-html blitz-paint blitz-traits; do
         requirement="${crate} = \"=${version}\""
+        if [[ "$crate" == blitz-dom ]]; then
+            requirement="${crate} = { version = \"=${version}\", features = [\"floats\"] }"
+        fi
         if ! grep -Fqx "$requirement" "$REPO_ROOT/Cargo.toml"; then
             printf 'Root Cargo.toml must contain: %s\n' "$requirement" >&2
             return 1

@@ -1154,7 +1154,11 @@ pub(crate) fn build_inline_layout_into(
                 let float = style.map(|s| s.clone_float()).unwrap_or(Float::None);
                 let box_kind = if position.is_absolutely_positioned() {
                     InlineBoxKind::OutOfFlow
-                } else if float.is_floating() {
+                } else if cfg!(feature = "floats") && float.is_floating() {
+                    // Custom boxes yield until the caller places them. Only the
+                    // float-aware line breaker handles that yield; break_all_lines
+                    // would keep retrying the same box forever. Without floats,
+                    // measure and place these boxes in flow like other inline boxes.
                     InlineBoxKind::CustomOutOfFlow
                 } else {
                     InlineBoxKind::InFlow

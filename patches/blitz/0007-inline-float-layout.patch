@@ -1,0 +1,53 @@
+diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
+index 9449d21..9c0e136 100644
+--- a/crates/blitz-dom/src/layout/inline.rs
++++ b/crates/blitz-dom/src/layout/inline.rs
+@@ -12,7 +12,7 @@ use taffy::{
+ #[cfg(feature = "floats")]
+ use parley::YieldData;
+ #[cfg(feature = "floats")]
+-use taffy::{Clear, Float, prelude::TaffyMaxContent};
++use taffy::{Clear, Float};
+ 
+ use super::resolve_calc_value;
+ use crate::BaseDocument;
+@@ -284,7 +284,13 @@ impl BaseDocument {
+         };
+         #[cfg(feature = "floats")]
+         let float_child_inputs = taffy::tree::LayoutInput {
+-            available_space: Size::MAX_CONTENT,
++            // Auto-width floats shrink to the available inline width. Asking
++            // for max-content here lets long text force a newsletter wider
++            // than its containing cell, even though that text could wrap.
++            available_space: Size {
++                width: available_space.width,
++                height: AvailableSpace::MaxContent,
++            },
+             ..child_inputs
+         };
+ 
+@@ -528,9 +534,12 @@ impl BaseDocument {
+ 
+                         continue;
+                     }
+-                    YieldData::MaxHeightExceeded(_data) => {
+-                        // TODO
+-                        continue;
++                    YieldData::MaxHeightExceeded(_) => {
++                        // We never constrain line height, so this means the
++                        // measured content is unrepresentable. Retrying without
++                        // changing breaker state would loop forever. Let the
++                        // embedding application recover from the layout failure.
++                        panic!("Inline content exceeded the line breaker's height limit");
+                     }
+                     YieldData::InlineBoxBreak(box_break_data) => {
+                         let state = breaker.state_mut();
+@@ -547,7 +556,7 @@ impl BaseDocument {
+                         let margin = node
+                             .style()
+                             .margin
+-                            .resolve_or_zero(inputs.parent_size, resolve_calc_value);
++                            .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
+ 
+                         let margin_sum = margin.sum_axes();
+ 

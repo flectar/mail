@@ -3,3 +3,5 @@
 0003-inline-ancestor-backgrounds.patch
 0004-repository-integration.patch
 0005-reader-selection-and-resource-integration.patch
+0006-float-disabled-line-breaking.patch
+0007-inline-float-layout.patch
