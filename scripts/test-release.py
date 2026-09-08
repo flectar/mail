@@ -160,6 +160,11 @@ class ReleaseTests(unittest.TestCase):
             prepare(source, dist, "0.1.0-beta.1")
             self.assertEqual(len(list(dist.iterdir())), 8)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64-test.apk").is_file())
+            # GitHub must not rewrite a download name after we checksum it.
+            deb = dist / "flectar-mail_0.1.0.beta.1_amd64.deb"
+            self.assertEqual(deb.read_bytes(), (source / names[1]).read_bytes())
+            for path in dist.iterdir():
+                self.assertRegex(path.name, r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
             result = subprocess.run(
                 ["sha256sum", "--check", "SHA256SUMS"], cwd=dist,
                 capture_output=True, text=True,
@@ -186,6 +191,7 @@ class ReleaseTests(unittest.TestCase):
             stable_dist = root / "stable"
             prepare(source, stable_dist, "0.1.0")
             self.assertEqual(len(list(stable_dist.iterdir())), 7)
+            self.assertTrue((stable_dist / "flectar-mail_0.1.0_amd64.deb").is_file())
             self.assertFalse(list(stable_dist.glob("*.apk")))
 
     def test_notes_distinguish_android_preview(self):

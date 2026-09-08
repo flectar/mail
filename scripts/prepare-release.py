@@ -9,9 +9,12 @@ from pathlib import Path
 
 def prepare(source: Path, destination: Path, version: str) -> None:
     deb_version = version.replace("-", "~", 1)
+    # GitHub rewrites '~' in asset filenames. Normalize before checksumming;
+    # the package's internal Debian version keeps '~' for prerelease ordering.
+    deb_filename_version = deb_version.replace("~", ".")
     packages = {
         "flectar-mail.AppImage": f"flectar-mail-{version}-linux-x64.AppImage",
-        f"flectar-mail_{deb_version}_amd64.deb": f"flectar-mail_{deb_version}_amd64.deb",
+        f"flectar-mail_{deb_version}_amd64.deb": f"flectar-mail_{deb_filename_version}_amd64.deb",
         "flectar-mail-windows-x64.zip": f"flectar-mail-{version}-windows-x64.zip",
         "flectar-mail-windows-x64-setup.exe": f"flectar-mail-{version}-windows-x64-setup.exe",
         "flectar-mail-macos-arm64.zip": f"flectar-mail-{version}-macos-arm64.zip",
