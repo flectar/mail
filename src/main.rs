@@ -184,6 +184,15 @@ fn reconcile_model_rows<T>(model: &VecModel<T>, rows: Vec<T>, key: impl Fn(&T) -
 where
     T: Clone + PartialEq + 'static,
 {
+    reconcile_model_rows_by(model, rows, key, PartialEq::eq);
+}
+
+fn reconcile_model_rows_by<T: Clone + 'static>(
+    model: &VecModel<T>,
+    rows: Vec<T>,
+    key: impl Fn(&T) -> i32,
+    same: impl Fn(&T, &T) -> bool,
+) {
     let mut current = model.iter().collect::<Vec<_>>();
 
     if rows.is_empty() {
@@ -204,7 +213,7 @@ where
         .count();
     if shared_prefix == current.len().min(rows.len()) {
         for index in 0..shared_prefix {
-            if current[index] != rows[index] {
+            if !same(&current[index], &rows[index]) {
                 model.set_row_data(index, rows[index].clone());
             }
         }
@@ -239,7 +248,7 @@ where
             break;
         }
         if key(&current[index]) == key(&rows[index]) {
-            if current[index] != rows[index] {
+            if !same(&current[index], &rows[index]) {
                 model.set_row_data(index, rows[index].clone());
                 current[index] = rows[index].clone();
             }

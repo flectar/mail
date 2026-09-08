@@ -360,10 +360,11 @@ pub(super) fn render_current(
     }
 
     let email_rows = Rc::clone(&state.borrow().email_rows);
-    reconcile_model_rows(
+    reconcile_model_rows_by(
         &email_rows,
         make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
         |row| row.id,
+        same_email_row,
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
     app.set_mailboxes(ModelRc::new(VecModel::from(make_mailbox_rows(
@@ -709,6 +710,31 @@ pub(super) fn list_status(
     }
 }
 
+// Compare visible contents: empty Slint images are not reflexively equal,
+// and freshly projected label models have different identities.
+fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
+    a.id == b.id
+        && a.account_id == b.account_id
+        && a.account == b.account
+        && a.folder == b.folder
+        && a.sender == b.sender
+        && a.address == b.address
+        && a.initials == b.initials
+        && a.has_favicon == b.has_favicon
+        && a.subject == b.subject
+        && a.preview == b.preview
+        && a.time == b.time
+        && a.unread == b.unread
+        && a.starred == b.starred
+        && a.has_attachments == b.has_attachments
+        && a.has_replied == b.has_replied
+        && a.label_summary == b.label_summary
+        && a.selected == b.selected
+        && a.checked == b.checked
+        && (!a.has_favicon || (a.favicon == b.favicon && a.favicon_small == b.favicon_small))
+        && a.labels.iter().eq(b.labels.iter())
+}
+
 pub(super) fn make_rows(
     messages: &[MailMessage],
     selected_id: Option<i32>,
@@ -863,10 +889,11 @@ pub(super) fn refresh_rows_only(
         let state = state.borrow();
         (Rc::clone(&state.email_rows), state.labels.clone())
     };
-    reconcile_model_rows(
+    reconcile_model_rows_by(
         &email_rows,
         make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
         |row| row.id,
+        same_email_row,
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
     apply_label_rows(app, &labels, selected_email);
@@ -1232,6 +1259,53 @@ pub(super) fn make_account_mailbox_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_mail_rows_do_not_emit_updates() {
+        use slint::private_unstable_api::re_exports::{
+            ModelChangeListener, ModelChangeListenerContainer,
+        };
+        use std::pin::Pin;
+        #[derive(Default)]
+        struct Listener(Rc<RefCell<Vec<usize>>>);
+        impl ModelChangeListener for Listener {
+            fn row_changed(self: Pin<&Self>, row: usize) {
+                self.0.borrow_mut().push(row);
+            }
+            fn row_added(self: Pin<&Self>, _: usize, _: usize) {
+                panic!("unexpected insertion");
+            }
+            fn row_removed(self: Pin<&Self>, _: usize, _: usize) {
+                panic!("unexpected removal");
+            }
+            fn reset(self: Pin<&Self>) {
+                panic!("unexpected reset");
+            }
+        }
+        let messages = vec![message(1), message(2), message(3)];
+        let project = |selected| {
+            make_rows(
+                &messages,
+                Some(selected),
+                &HashSet::new(),
+                &HashMap::new(),
+                &[],
+            )
+        };
+        let model = VecModel::from(project(1));
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let listener = Box::pin(ModelChangeListenerContainer::new(Listener(changes.clone())));
+        model
+            .model_tracker()
+            .attach_peer(listener.as_ref().model_peer());
+        reconcile_model_rows_by(&model, project(1), |row| row.id, same_email_row);
+        assert!(changes.borrow().is_empty());
+        reconcile_model_rows_by(&model, project(2), |row| row.id, same_email_row);
+        assert_eq!(*changes.borrow(), vec![0, 1]);
+        let mut updated = project(2);
+        updated[2].unread = !updated[2].unread;
+        assert!(!same_email_row(&model.row_data(2).unwrap(), &updated[2]));
+    }
 
     #[test]
     fn unchanged_images_keep_their_identity() {
