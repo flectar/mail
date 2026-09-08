@@ -142,3 +142,6 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
     }
     ctx
 }
+
+// Host integrations use computed visibility when projecting native semantics.
+pub use style::computed_values::visibility::T as Visibility;

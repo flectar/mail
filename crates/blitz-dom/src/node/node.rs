@@ -1172,6 +1172,26 @@ impl Node {
     ///
     /// TODO: z-index
     /// (If multiple children are positioned at the position then a random one will be recursed into)
+    /// Match the content clipping boundary used by the painter. The root
+    /// element propagates its overflow to the host viewport.
+    pub fn clips_content(&self) -> bool {
+        use style::values::specified::box_::{Contain, Overflow};
+        let Some(styles) = self.primary_styles() else {
+            return false;
+        };
+        if self.data.is_element_with_tag_name(&local_name!("html")) {
+            return false;
+        }
+        let display = styles.clone_display();
+        let containment = styles.get_box().clone_contain().contains(Contain::PAINT)
+            && !display.is_inline_flow()
+            && !(display.outside() == DisplayOutside::InternalTable
+                && display.inside() != DisplayInside::TableCell);
+        containment
+            || !matches!(styles.get_box().overflow_x, Overflow::Visible)
+            || !matches!(styles.get_box().overflow_y, Overflow::Visible)
+    }
+
     pub fn hit(&self, x: f32, y: f32, scale: f64) -> Option<HitResult> {
         self.hit_inner(x, y, scale, &mut None)
     }
@@ -1215,7 +1235,18 @@ impl Node {
             y = (p.y / scale) as f32;
         }
 
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
         let size = self.final_layout().size;
+        if self.clips_content()
+            && (x < self.scroll_offset().x as f32
+                || y < self.scroll_offset().y as f32
+                || x > size.width + self.scroll_offset().x as f32
+                || y > size.height + self.scroll_offset().y as f32)
+        {
+            return None;
+        }
         let matches_self = !(x < 0.0
             || x > size.width + self.scroll_offset().x as f32
             || y < 0.0

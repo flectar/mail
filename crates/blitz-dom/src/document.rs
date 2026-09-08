@@ -1243,16 +1243,24 @@ impl BaseDocument {
     }
 
     pub fn handle_messages(&mut self) {
+        self.drain_pending_messages();
+    }
+
+    /// Drain resource events, reporting whether layout may have changed.
+    pub fn drain_pending_messages(&mut self) -> bool {
+        let mut changed = false;
         // Remove event Reciever from the Document so that we can process events
         // without holding a borrow to the Document
         let rx = self.rx.take().unwrap();
 
         while let Ok(msg) = rx.try_recv() {
+            changed = true;
             self.handle_message(msg);
         }
 
         // Put Reciever back
         self.rx = Some(rx);
+        changed
     }
 
     pub fn handle_message(&mut self, msg: DocumentEvent) {
@@ -2566,9 +2574,11 @@ impl BaseDocument {
             }
 
             if !result.is_empty() {
-                result.push(' ');
+                result.push('\n');
             }
-            result.push_str(&inline_layout.text[*start..*end]);
+            if let Some(text) = inline_layout.text.get(*start..*end) {
+                result.push_str(text);
+            }
         }
 
         if result.is_empty() {

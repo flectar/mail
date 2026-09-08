@@ -1,0 +1,124 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index 0d9a509..6341aa3 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -1243,16 +1243,24 @@ impl BaseDocument {
+     }
+ 
+     pub fn handle_messages(&mut self) {
++        self.drain_pending_messages();
++    }
++
++    /// Drain resource events, reporting whether layout may have changed.
++    pub fn drain_pending_messages(&mut self) -> bool {
++        let mut changed = false;
+         // Remove event Reciever from the Document so that we can process events
+         // without holding a borrow to the Document
+         let rx = self.rx.take().unwrap();
+ 
+         while let Ok(msg) = rx.try_recv() {
++            changed = true;
+             self.handle_message(msg);
+         }
+ 
+         // Put Reciever back
+         self.rx = Some(rx);
++        changed
+     }
+ 
+     pub fn handle_message(&mut self, msg: DocumentEvent) {
+@@ -2566,9 +2574,11 @@ impl BaseDocument {
+             }
+ 
+             if !result.is_empty() {
+-                result.push(' ');
++                result.push('\n');
++            }
++            if let Some(text) = inline_layout.text.get(*start..*end) {
++                result.push_str(text);
+             }
+-            result.push_str(&inline_layout.text[*start..*end]);
+         }
+ 
+         if result.is_empty() {
+diff --git a/crates/blitz-dom/src/lib.rs b/crates/blitz-dom/src/lib.rs
+index ee60a30..617e77e 100644
+--- a/crates/blitz-dom/src/lib.rs
++++ b/crates/blitz-dom/src/lib.rs
+@@ -142,3 +142,6 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
+     }
+     ctx
+ }
++
++// Host integrations use computed visibility when projecting native semantics.
++pub use style::computed_values::visibility::T as Visibility;
+diff --git a/crates/blitz-dom/src/net.rs b/crates/blitz-dom/src/net.rs
+index d5c4f67..15f5be0 100644
+--- a/crates/blitz-dom/src/net.rs
++++ b/crates/blitz-dom/src/net.rs
+@@ -538,11 +538,12 @@ impl ImageHandler {
+             .decode()
+         {
+             Ok(image) => {
+-                let raw_rgba8_data = image.clone().into_rgba8().into_raw();
++                let (width, height) = (image.width(), image.height());
++                let raw_rgba8_data = image.into_rgba8().into_raw();
+                 return Ok(Resource::Image(
+                     self.kind,
+-                    image.width(),
+-                    image.height(),
++                    width,
++                    height,
+                     Arc::new(raw_rgba8_data),
+                 ));
+             }
+diff --git a/crates/blitz-dom/src/node/node.rs b/crates/blitz-dom/src/node/node.rs
+index a29c9ee..70d0561 100644
+--- a/crates/blitz-dom/src/node/node.rs
++++ b/crates/blitz-dom/src/node/node.rs
+@@ -1172,6 +1172,26 @@ impl Node {
+     ///
+     /// TODO: z-index
+     /// (If multiple children are positioned at the position then a random one will be recursed into)
++    /// Match the content clipping boundary used by the painter. The root
++    /// element propagates its overflow to the host viewport.
++    pub fn clips_content(&self) -> bool {
++        use style::values::specified::box_::{Contain, Overflow};
++        let Some(styles) = self.primary_styles() else {
++            return false;
++        };
++        if self.data.is_element_with_tag_name(&local_name!("html")) {
++            return false;
++        }
++        let display = styles.clone_display();
++        let containment = styles.get_box().clone_contain().contains(Contain::PAINT)
++            && !display.is_inline_flow()
++            && !(display.outside() == DisplayOutside::InternalTable
++                && display.inside() != DisplayInside::TableCell);
++        containment
++            || !matches!(styles.get_box().overflow_x, Overflow::Visible)
++            || !matches!(styles.get_box().overflow_y, Overflow::Visible)
++    }
++
+     pub fn hit(&self, x: f32, y: f32, scale: f64) -> Option<HitResult> {
+         self.hit_inner(x, y, scale, &mut None)
+     }
+@@ -1215,7 +1235,18 @@ impl Node {
+             y = (p.y / scale) as f32;
+         }
+ 
++        if !x.is_finite() || !y.is_finite() {
++            return None;
++        }
+         let size = self.final_layout().size;
++        if self.clips_content()
++            && (x < self.scroll_offset().x as f32
++                || y < self.scroll_offset().y as f32
++                || x > size.width + self.scroll_offset().x as f32
++                || y > size.height + self.scroll_offset().y as f32)
++        {
++            return None;
++        }
+         let matches_self = !(x < 0.0
+             || x > size.width + self.scroll_offset().x as f32
+             || y < 0.0
