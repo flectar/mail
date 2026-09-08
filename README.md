@@ -125,8 +125,9 @@ Flectar Mail is currently in development and is not yet stable.
 
 > [!NOTE]
 > We are waiting for Google and Microsoft to complete OAuth app verification
-> before publishing the first preview release with Gmail, Outlook, and
-> Microsoft 365 OAuth configured by default.
+> before the first stable release with Gmail, Outlook, and Microsoft 365 OAuth
+> configured by default. Earlier GitHub prereleases are intended for testers
+> using their own OAuth registrations or IMAP/JMAP accounts.
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 **Sign-in settings** cog on the welcome screen to save your own Google or
@@ -135,13 +136,21 @@ shared with Settings and take precedence over bundled keys; clearing a custom
 client ID restores the defaults when available. Each provider enables separately
 once its configuration is saved.
 
-Once the first preview is available, download the latest build from
-[GitHub Releases](https://github.com/flectar/mail/releases/latest):
+When preview builds are published, download them from
+[GitHub Releases](https://github.com/flectar/mail/releases) and look for the
+**Pre-release** badge:
 
 - **Linux x64:** AppImage or Debian/Ubuntu `.deb` package
-- **Windows x64:** Portable ZIP
-- **macOS Apple silicon:** Application ZIP
-- **Android:** Work in progress and coming soon
+- **Windows x64:** Setup `.exe` or portable ZIP
+- **macOS Apple silicon (macOS 14+):** DMG or application ZIP
+- **Android arm64 (Android 8.0+):** Experimental test APK in prereleases
+
+Windows previews are unsigned; macOS previews are ad-hoc signed and not
+notarized, so operating-system security prompts are expected. Install updates
+manually.
+
+Android APK updates require the same signing key; builds without a persistent
+test key may require uninstalling the previous app, which deletes local app data.
 
 You can also build Flectar Mail from source with the
 [Rust toolchain](https://rustup.rs/):
