@@ -3333,18 +3333,3 @@ msgstr ""
 #: ui/views/onboarding-view.slint:301
 msgid "Back"
 msgstr "Atrás"
-
-#~ msgid "Reset zoom"
-#~ msgstr "Restablecer zoom"
-
-#~ msgid "Fit"
-#~ msgstr "Ajustar"
-
-#~ msgid "Find"
-#~ msgstr "Buscar"
-
-#~ msgid "HTML"
-#~ msgstr "HTML"
-
-#~ msgid "Reader"
-#~ msgstr "Lectura"
