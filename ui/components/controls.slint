@@ -4,6 +4,7 @@ import { TypeScale } from "../typography.slint";
 export component LineEdit inherits Rectangle {
     in-out property <string> text;
     in property <string> placeholder-text;
+    in property <string> input-label;
     in property <InputType> input-type: InputType.text;
     in property <bool> enabled: true;
     in property <bool> read-only: false;
@@ -53,6 +54,7 @@ export component LineEdit inherits Rectangle {
         single-line: true;
         vertical-alignment: center;
         input-type: root.input-type;
+        accessible-label: root.input-label;
         enabled: root.enabled;
         read-only: root.read-only;
         edited => {
@@ -316,6 +318,7 @@ export component IconButton inherits Rectangle {
     in property <length> icon-size: 18px;
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
+    in property <bool> tooltip-align-left: false;
     callback clicked;
 
     width: 32px;
@@ -326,6 +329,9 @@ export component IconButton inherits Rectangle {
         : root.ghost
             ? (hit-area.pressed || root.active ? root.active-background : hit-area.has-hover ? root.hover-background : transparent)
             : root.active ? root.active-background : hit-area.has-hover ? root.hover-background : root.idle-background;
+    forward-focus: keyboard;
+    border-width: keyboard.has-focus ? 2px : 0px;
+    border-color: AppTheme.accent;
     opacity: root.interactive ? 1 : 0.42;
     accessible-role: button;
     accessible-label: root.tooltip-text;
@@ -346,9 +352,22 @@ export component IconButton inherits Rectangle {
         accessible-role: none;
     }
 
+    keyboard := FocusScope {
+        enabled: root.interactive;
+        focus-on-tab-navigation: true;
+        accessible-role: none;
+        key-pressed(event) => {
+            if root.interactive && (event.text == Key.Return || event.text == Key.Space) {
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+    }
+
     hit-area := TouchArea {
         enabled: root.interactive;
-        clicked => { root.clicked(); }
+        clicked => { keyboard.focus(); root.clicked(); }
         mouse-cursor: pointer;
     }
 
@@ -356,8 +375,8 @@ export component IconButton inherits Rectangle {
     // surface, which is not consistently presented by every AppImage/Wayland
     // compositor combination.
     Rectangle {
-        visible: root.tooltip-text != "" && hit-area.has-hover;
-        x: parent.width - self.width;
+        visible: root.tooltip-text != "" && (hit-area.has-hover || keyboard.has-focus);
+        x: root.tooltip-align-left ? 0px : parent.width - self.width;
         y: root.tooltip-above ? -self.height - 6px : parent.height + 6px;
         width: tooltip-label.preferred-width + 16px;
         height: 28px;
