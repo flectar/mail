@@ -300,6 +300,12 @@ export component RadioButton inherits Rectangle {
 
 // A single geometry for compact toolbar actions keeps every SVG optically
 // centered regardless of the host platform's native Button padding.
+// Show help for one input modality at a time, so keyboard focus does not
+// overlap the tooltip beneath a stationary pointer on another button.
+global IconButtonInput {
+    in-out property <bool> keyboard: false;
+}
+
 export component IconButton inherits Rectangle {
     in property <image> icon;
     in property <color> icon-color;
@@ -354,9 +360,11 @@ export component IconButton inherits Rectangle {
 
     keyboard := FocusScope {
         enabled: root.interactive;
+        changed has-focus => { if self.has-focus { IconButtonInput.keyboard = true; } }
         focus-on-tab-navigation: true;
         accessible-role: none;
         key-pressed(event) => {
+            IconButtonInput.keyboard = true;
             if root.interactive && (event.text == Key.Return || event.text == Key.Space) {
                 root.clicked();
                 return accept;
@@ -367,7 +375,8 @@ export component IconButton inherits Rectangle {
 
     hit-area := TouchArea {
         enabled: root.interactive;
-        clicked => { keyboard.focus(); root.clicked(); }
+        moved => { IconButtonInput.keyboard = false; }
+        clicked => { keyboard.focus(); IconButtonInput.keyboard = false; root.clicked(); }
         mouse-cursor: pointer;
     }
 
@@ -375,7 +384,7 @@ export component IconButton inherits Rectangle {
     // surface, which is not consistently presented by every AppImage/Wayland
     // compositor combination.
     Rectangle {
-        visible: root.tooltip-text != "" && (hit-area.has-hover || keyboard.has-focus);
+        visible: root.tooltip-text != "" && (IconButtonInput.keyboard ? keyboard.has-focus : hit-area.has-hover);
         x: root.tooltip-align-left ? 0px : parent.width - self.width;
         y: root.tooltip-above ? -self.height - 6px : parent.height + 6px;
         width: tooltip-label.preferred-width + 16px;
