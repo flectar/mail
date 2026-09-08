@@ -148,7 +148,20 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
-        run: cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail
+        run: |
+          mkdir -p target
+          if cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail 2>&1 | tee target/windows-build.log; then
+            exit 0
+          fi
+          # Keep the compiler's final diagnostics available in the check result,
+          # including when a maintainer cannot download authenticated run logs.
+          python - <<'PY'
+          from pathlib import Path
+          details = "\n".join(Path("target/windows-build.log").read_text(errors="replace").splitlines()[-80:])
+          details = details[-16000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Windows compilation failed::{details}")
+          PY
+          exit 1
 
       - name: Package executable
         shell: pwsh
