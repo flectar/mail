@@ -175,36 +175,92 @@ fn excessive_css(css: &str) -> bool {
     if css.len() > 512 * 1024 {
         return true;
     }
-    let mut nesting = 0usize;
-    let mut digits = 0usize;
-    for c in css.chars() {
-        match c {
-            '{' | '(' | '[' => {
-                nesting += 1;
-                if nesting > 64 {
+    let mut input = cssparser::ParserInput::new(css);
+    css_tokens_excessive(&mut cssparser::Parser::new(&mut input), 0)
+}
+
+fn css_tokens_excessive(parser: &mut cssparser::Parser<'_, '_>, depth: usize) -> bool {
+    use cssparser::Token as CssToken;
+    if depth > 64 {
+        return true;
+    }
+    while let Ok(token) = parser.next().cloned() {
+        match token {
+            // Bound numeric magnitude, not decimal precision or digits in URLs,
+            // selectors, comments, strings, and colors. Marketing generators
+            // routinely emit widths such as 172.89473684210526px.
+            CssToken::Number { value, .. } | CssToken::Dimension { value, .. }
+                if !value.is_finite() || value.abs() >= 100_000_000.0 =>
+            {
+                return true;
+            }
+            CssToken::Percentage { unit_value, .. }
+                if !unit_value.is_finite() || unit_value.abs() >= 1_000_000.0 =>
+            {
+                return true;
+            }
+            CssToken::Function(ref name) if name.eq_ignore_ascii_case("url") => {
+                // Contents are resource identifiers, not layout expressions.
+            }
+            CssToken::Function(ref name) => {
+                let repeat = name.eq_ignore_ascii_case("repeat");
+                let mut excessive = false;
+                let _: Result<(), cssparser::ParseError<'_, ()>> =
+                    parser.parse_nested_block(|nested| {
+                        if repeat
+                            && nested
+                                .try_parse(|p| p.expect_number())
+                                .is_ok_and(|n| n > 512.0)
+                        {
+                            excessive = true;
+                        }
+                        excessive |= css_tokens_excessive(nested, depth + 1);
+                        Ok(())
+                    });
+                if excessive {
                     return true;
                 }
             }
-            '}' | ')' | ']' => nesting = nesting.saturating_sub(1),
+            CssToken::ParenthesisBlock
+            | CssToken::CurlyBracketBlock
+            | CssToken::SquareBracketBlock => {
+                let mut excessive = false;
+                let _: Result<(), cssparser::ParseError<'_, ()>> =
+                    parser.parse_nested_block(|nested| {
+                        excessive = css_tokens_excessive(nested, depth + 1);
+                        Ok(())
+                    });
+                if excessive {
+                    return true;
+                }
+            }
             _ => {}
         }
-        if c.is_ascii_digit() {
-            digits += 1;
-            if digits > 8 {
-                return true;
+    }
+    false
+}
+
+// HTML templates contain indentation and empty spacer rows. Preserve paragraph
+// separation and preformatted indentation without making recovery text start
+// thousands of blank lines below the viewport.
+fn readable_fallback(text: &str) -> String {
+    let mut result = String::new();
+    let mut blank = false;
+    for line in text.trim().lines() {
+        if line.trim().is_empty() {
+            if !blank {
+                result.push('\n');
             }
+            blank = true;
         } else {
-            digits = 0;
+            result.push_str(line.trim_end());
+            result.push('\n');
+            blank = false;
         }
     }
-    // Grid repetition can allocate far more tracks than there are DOM nodes.
-    let lower = css.to_ascii_lowercase();
-    lower.split("repeat(").skip(1).any(|tail| {
-        tail.split(',')
-            .next()
-            .is_some_and(|count| count.trim().parse::<u64>().is_ok_and(|n| n > 512))
-    })
+    result.trim_end().to_owned()
 }
+
 fn is_remote(value: &str) -> bool {
     let value = value.trim().to_ascii_lowercase();
     value.starts_with("https:") || value.starts_with("http:") || value.starts_with("//")
@@ -233,8 +289,8 @@ pub fn bounded_html(html: &str) -> (String, Option<String>) {
     if s.excessive {
         return (
             format!(
-                "<pre style='white-space:pre-wrap'>{}</pre>",
-                escape(&s.text)
+                "<pre style='margin:16px;white-space:pre-wrap;overflow-wrap:anywhere;color:#111;background:#fff'>{}</pre>",
+                escape(&readable_fallback(&s.text))
             ),
             Some(if s.truncated { "Message text exceeds the display limit. Full content is available in the original source." } else { "Complex message shown as plain text." }.into()),
         );
@@ -242,11 +298,13 @@ pub fn bounded_html(html: &str) -> (String, Option<String>) {
     (html.into(), None)
 }
 pub fn fallback(html: &str) -> String {
-    scan(
-        &html[..html.floor_char_boundary(html.len().min(MAX_HTML_BYTES))],
-        false,
+    readable_fallback(
+        &scan(
+            &html[..html.floor_char_boundary(html.len().min(MAX_HTML_BYTES))],
+            false,
+        )
+        .text,
     )
-    .text
 }
 
 pub fn export_html(html: &str, print: bool) -> String {
@@ -277,6 +335,60 @@ pub fn export_html(html: &str, print: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_css_precision_and_identifiers_are_not_complexity() {
+        for css in [
+            "width:33.333333333333336%;max-width:172.89473684210526px",
+            ".mj-column-per-33-333333333333336 { width:33.333333333333336% !important }",
+            "background:url(https://example.test/12345678901234567890.png)",
+            "background:url('https://example.test/12345678901234567890.png')",
+            "content:'12345678901234567890'; /* ((([[[ 999999999999999 */",
+            "max-width:NaNpx;padding:auto;font-size:max(16px,1rem)",
+        ] {
+            assert!(!excessive_css(css), "{css}");
+        }
+        for css in [
+            "width:100000000px",
+            "width:1e12px",
+            "width:1e999px",
+            "width:100000000%",
+            "grid-template-columns:repeat(513,1px)",
+            "@media screen { .grid {grid-template-columns:RePeAt(1000000,1px)} }",
+        ] {
+            assert!(excessive_css(css), "{css}");
+        }
+        assert!(excessive_css(&format!(
+            "width:{}1px{}",
+            "calc(".repeat(70),
+            ")".repeat(70)
+        )));
+    }
+
+    #[test]
+    fn marketing_templates_keep_html_and_recovery_starts_with_content() {
+        for html in [
+            include_str!("../resources/test-emails/revolut-precision.html"),
+            include_str!("../resources/test-emails/mailersend-precision.html"),
+        ] {
+            let (bounded, notice) = bounded_html(html);
+            assert!(notice.is_none(), "{notice:?}");
+            assert_eq!(bounded, html);
+        }
+        let html = format!(
+            "<body>{}<div style='width:1e12px'>Visible recovery</div>{}<p>Second paragraph</p></body>",
+            "\n ".repeat(500),
+            "\n ".repeat(500)
+        );
+        let (bounded, notice) = bounded_html(&html);
+        assert!(notice.is_some());
+        assert!(
+            bounded.contains(">Visible recovery\n\n Second paragraph"),
+            "{bounded}"
+        );
+        assert!(bounded.len() < 250);
+        assert!(fallback(&html).starts_with("Visible recovery"));
+    }
+
     #[test]
     fn limits_and_export_policy() {
         let html = format!("{}text{}", "<div>".repeat(100), "</div>".repeat(100));

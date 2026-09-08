@@ -310,3 +310,91 @@ fn repeated_open_memory_probe() {
     assert!(renderer.tiles.is_empty());
     assert!(renderer.resources.lock().unwrap().is_empty());
 }
+
+#[test]
+fn marketing_precision_templates_render_text_and_links_without_fallback() {
+    for (name, html, phrase) in [
+        (
+            "revolut",
+            include_str!("../../resources/test-emails/revolut-precision.html"),
+            "Te quedan 7 días",
+        ),
+        (
+            "mailersend",
+            include_str!("../../resources/test-emails/mailersend-precision.html"),
+            "Dear customer",
+        ),
+    ] {
+        let prepared = prepare_email_html(html).unwrap();
+        assert!(prepared.notice.is_none(), "{name}: {:?}", prepared.notice);
+        assert!(
+            prepared.plain_text.contains(phrase),
+            "{name}: {}",
+            prepared.plain_text
+        );
+        assert!(!prepared.links.is_empty(), "{name} needs actionable links");
+        let mut renderer = GpuEmailRenderer::default();
+        renderer.set_email(prepared);
+        let frame = renderer
+            .render_cpu_if_needed(700, 700, 1.0)
+            .unwrap()
+            .unwrap();
+        let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+        let ink = pixels
+            .as_slice()
+            .iter()
+            .filter(|p| p.a > 0 && (p.r < 200 || p.g < 200 || p.b < 200))
+            .count();
+        assert!(ink > 100, "{name}: first viewport must not be blank");
+        std::fs::create_dir_all("tmp/render-followup").unwrap();
+        image::save_buffer(
+            format!("tmp/render-followup/{name}.png"),
+            pixels.as_bytes(),
+            pixels.width(),
+            pixels.height(),
+            image::ColorType::Rgba8,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn complex_template_recovery_paints_text_in_the_first_viewport() {
+    let html = format!(
+        "<html><body>{}<div style='width:1e12px'>Readable recovery text</div>{}<p>Next paragraph</p></body></html>",
+        "\n ".repeat(500),
+        "\n ".repeat(500)
+    );
+    let mut renderer = renderer(&html);
+    assert!(renderer.notice.is_some());
+    let frame = renderer
+        .render_cpu_if_needed(700, 700, 1.0)
+        .unwrap()
+        .unwrap();
+    let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+    assert!(
+        pixels
+            .as_slice()
+            .iter()
+            .filter(|p| p.a > 0 && p.r < 200)
+            .count()
+            > 100
+    );
+    assert!(
+        renderer
+            .email
+            .as_ref()
+            .unwrap()
+            .plain_text
+            .contains("Readable recovery text")
+    );
+    std::fs::create_dir_all("tmp/render-followup").unwrap();
+    image::save_buffer(
+        "tmp/render-followup/fallback.png",
+        pixels.as_bytes(),
+        pixels.width(),
+        pixels.height(),
+        image::ColorType::Rgba8,
+    )
+    .unwrap();
+}
