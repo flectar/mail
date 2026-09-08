@@ -861,6 +861,16 @@ pub fn take_draft_attachment_paths(conn: &Connection, draft_id: i64) -> Result<V
     Ok(paths)
 }
 
+pub fn latest_in_thread(conn: &Connection, thread_id: i64) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM messages WHERE thread_id = ?1 ORDER BY date DESC, id DESC LIMIT 1",
+            params![thread_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub fn list_for_thread(conn: &Connection, thread_id: i64) -> Result<Vec<MessageDetail>> {
     let sql = format!(
         "SELECT {DETAIL_MESSAGE_COLS}, b.text_body, b.html_body, {SEND_STATE_COLS}
@@ -1018,6 +1028,34 @@ fn missing_bodies_at(
 mod tests {
     use super::*;
     use crate::db::{repo::sync_failures, testutil};
+
+    #[test]
+    fn preview_selects_only_the_newest_message_without_fetching_history() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let (thread, old) = testutil::seed_message(&conn, "sender@example.com", "Subject", false);
+        conn.execute("UPDATE messages SET date = 1 WHERE id = ?1", [old])
+            .unwrap();
+        for uid in 100..200 {
+            conn.execute(
+                "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject, from_addr, date)
+                 VALUES (?1, 1, 1, ?2, 'preview-' || ?2, 'Subject', 'sender@example.com', 2)",
+                params![thread, uid],
+            ).unwrap();
+        }
+        let newest = conn.last_insert_rowid();
+        assert_eq!(latest_in_thread(&conn, thread).unwrap(), Some(newest));
+        assert_eq!(latest_in_thread(&conn, -1).unwrap(), None);
+        assert!(begin_body_fetch(&conn, newest).unwrap());
+        let claimed: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE body_state = 'fetching'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(claimed, 1);
+    }
 
     #[test]
     fn body_fetch_claim_deduplicates_and_can_be_released() {

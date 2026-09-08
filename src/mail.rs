@@ -411,16 +411,12 @@ impl CoreMailSource {
         let thread_id = row
             .thread_id
             .ok_or_else(|| "message is not backed by a core thread".to_owned())?;
-        let detail = self
+        let message = self
             .core
-            .get_thread(thread_id)
+            .get_latest_thread_body(thread_id)
             .await
             .map_err(|error| error.to_string())?;
-        let message = detail
-            .messages
-            .last()
-            .ok_or_else(|| "thread has no messages".to_owned())?;
-        Ok(detail_to_message(row, message))
+        Ok(detail_to_message(row, &message))
     }
 
     pub async fn load_compose_source(&self, row: &MailMessage) -> Result<ComposeSource, String> {

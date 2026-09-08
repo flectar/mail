@@ -1809,6 +1809,17 @@ impl Core {
             .await
     }
 
+    /// Load only the message displayed by a single-message thread preview.
+    /// Conversation consumers can still request the complete thread separately.
+    pub async fn get_latest_thread_body(&self, thread_id: i64) -> Result<MessageDetail> {
+        let id = self
+            .db
+            .read(move |conn| repo::messages::latest_in_thread(conn, thread_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound(format!("thread {thread_id}")))?;
+        self.load_body(id, Some(thread_id)).await
+    }
+
     pub async fn get_thread(&self, thread_id: i64) -> Result<ThreadDetail> {
         let t0 = std::time::Instant::now();
         let mut detail = self
@@ -1881,6 +1892,14 @@ impl Core {
     }
 
     pub async fn get_body(&self, message_id: i64) -> Result<MessageDetail> {
+        self.load_body(message_id, None).await
+    }
+
+    async fn load_body(
+        &self,
+        message_id: i64,
+        preview_thread: Option<i64>,
+    ) -> Result<MessageDetail> {
         let (mut detail, cached_raw_path) = self
             .db
             .read(move |conn| {
@@ -1915,7 +1934,15 @@ impl Core {
             self.request_body(detail.account_id, message_id).await;
         }
         if let Some(html) = detail.html_body.take() {
-            detail.html_body = Some(self.inline_cid_images(message_id, html).await);
+            detail.html_body = if let Some(thread_id) = preview_thread {
+                // Render cached content immediately; missing inline attachments
+                // arrive through MailUpdated instead of delaying text on network I/O.
+                self.inline_cid_images_batch(thread_id, vec![(message_id, html)])
+                    .await
+                    .remove(&message_id)
+            } else {
+                Some(self.inline_cid_images(message_id, html).await)
+            };
         }
         Ok(detail)
     }
