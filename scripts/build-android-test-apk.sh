@@ -4,6 +4,7 @@ set -euo pipefail
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 target_dir="$project_dir/target"
 android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+android_ndk="${ANDROID_NDK_ROOT:-${ANDROID_NDK_HOME:-}}"
 
 if [[ -z "$android_sdk" || ! -d "$android_sdk" ]]; then
   printf 'Android SDK not found. Set ANDROID_HOME to your Android SDK directory.\n' >&2
@@ -24,6 +25,20 @@ if [[ -z "$gradle_command" || ! -x "$gradle_command" ]]; then
   printf 'Gradle wrapper not found. Restore platform/android/gradle/gradlew or set GRADLE_CMD.\n' >&2
   exit 1
 fi
+
+if [[ -z "$android_ndk" || ! -d "$android_ndk/toolchains/llvm/prebuilt" ]]; then
+  printf 'Android NDK not found. Set ANDROID_NDK_HOME to an installed NDK directory.\n' >&2
+  exit 1
+fi
+toolchain="$(find "$android_ndk/toolchains/llvm/prebuilt" -mindepth 1 -maxdepth 1 -type d -print | head -n 1)/bin"
+if [[ ! -x "$toolchain/aarch64-linux-android26-clang" ]]; then
+  printf 'Android ARM64 API 26 compiler not found under %s.\n' "$toolchain" >&2
+  exit 1
+fi
+export CC_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang"
+export CXX_aarch64_linux_android="$toolchain/aarch64-linux-android26-clang++"
+export AR_aarch64_linux_android="$toolchain/llvm-ar"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$toolchain/aarch64-linux-android26-clang"
 
 # Gradle signs the final package with this app-specific test key, keeping
 # production signing credentials out of the test build.

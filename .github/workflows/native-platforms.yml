@@ -3,6 +3,22 @@ name: Native platform artifacts
 on:
   workflow_dispatch:
     inputs:
+      include_linux:
+        description: Build Linux packages
+        type: boolean
+        default: true
+      include_windows:
+        description: Build Windows packages
+        type: boolean
+        default: true
+      include_macos:
+        description: Build macOS packages
+        type: boolean
+        default: true
+      run_quality:
+        description: Run the full quality suite (disable only for manual packaging checks)
+        type: boolean
+        default: true
       include_android:
         description: Build the experimental Android test APK
         type: boolean
@@ -27,31 +43,41 @@ env:
 
 jobs:
   quality:
+    needs: metadata
+    if: github.event_name == 'push' || inputs.run_quality
     name: Release quality gate
     uses: ./.github/workflows/quality.yml
 
   metadata:
-    name: Validate release version
-    runs-on: ubuntu-24.04
+    name: Release preflight
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       native_version: ${{ steps.version.outputs.native_version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Read version and check pushed tag
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install preflight tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils dpkg-dev
+      - name: Check release metadata and packaging
         id: version
         env:
           IS_TAG_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
         run: |
           if [[ "$IS_TAG_PUSH" == true ]]; then
-            python3 scripts/release-metadata.py --tag "$GITHUB_REF_NAME"
+            bash scripts/check-release.sh --tag "$GITHUB_REF_NAME"
           else
-            python3 scripts/release-metadata.py
+            bash scripts/check-release.sh
           fi
 
   linux:
     needs: metadata
+    if: github.event_name == 'push' || inputs.include_linux
     name: Linux packages (x64)
     runs-on: ubuntu-22.04
     steps:
@@ -85,7 +111,15 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          cache-on-failure: true
           key: native-linux-x64
+
+      - name: Validate desktop metadata
+        run: |
+          desktop-file-validate resources/com.flectar.mail.desktop
+          # Network checks make private pre-publication repositories look like
+          # broken URLs. Flathub performs its own online validation on submit.
+          appstreamcli validate --no-net resources/com.flectar.mail.metainfo.xml
 
       - name: Build AppImage
         env:
@@ -101,13 +135,6 @@ jobs:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
         run: ./scripts/build-deb.sh
-
-      - name: Validate desktop metadata
-        run: |
-          desktop-file-validate resources/com.flectar.mail.desktop
-          # Network checks make private pre-publication repositories look like
-          # broken URLs. Flathub performs its own online validation on submit.
-          appstreamcli validate --no-net resources/com.flectar.mail.metainfo.xml
 
       - name: Benchmark startup and idle resources
         run: |
@@ -128,6 +155,7 @@ jobs:
 
   windows:
     needs: metadata
+    if: github.event_name == 'push' || inputs.include_windows
     name: Windows installer and portable executable (x64)
     runs-on: windows-2025
     steps:
@@ -137,6 +165,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          cache-on-failure: true
           key: native-windows-x64
 
       - name: Build release executable
@@ -224,6 +253,7 @@ jobs:
 
   macos:
     needs: metadata
+    if: github.event_name == 'push' || inputs.include_macos
     name: macOS application (Apple Silicon)
     runs-on: macos-15
     steps:
@@ -233,6 +263,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          cache-on-failure: true
           key: native-macos-arm64
 
       - name: Build release application
@@ -273,6 +304,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: platform/android -> ../../target
+          cache-on-failure: true
           key: native-android-arm64
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
@@ -332,6 +364,7 @@ jobs:
           if-no-files-found: error
 
   ios:
+    needs: metadata
     if: github.event_name == 'workflow_dispatch' && inputs.include_ios
     name: iOS unsigned archive (arm64)
     runs-on: macos-15
@@ -343,6 +376,7 @@ jobs:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          cache-on-failure: true
           key: native-ios-arm64
 
       - name: Install Xcode project generator
