@@ -25,9 +25,35 @@ def load_script(name):
 metadata = load_script("release-metadata").metadata
 release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
+verify_android_signing = load_script("verify-android-signing").verify
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_android_signing_uses_certificate_not_display_name(self):
+        digest = "ab" * 32
+        for subject in ("CN=Flectar Mail Test, O=Android, C=US", "C=US,O=Android,CN=Flectar Mail Test"):
+            signing = (
+                "Verified using v2 scheme (APK Signature Scheme v2): true\n"
+                "Number of signers: 1\n"
+                f"Signer #1 certificate DN: {subject}\n"
+                f"Signer #1 certificate SHA-256 digest: {digest}\n"
+            )
+            with self.subTest(subject=subject):
+                verify_android_signing(signing, "test", digest.upper())
+                for expected in (None, "", "invalid", "cd" * 32):
+                    with self.assertRaises(ValueError):
+                        verify_android_signing(signing, "test", expected)
+                with self.assertRaises(ValueError):
+                    verify_android_signing(signing, "production")
+                with self.assertRaises(ValueError):
+                    verify_android_signing(signing.replace("signers: 1", "signers: 2"), "test", digest)
+                with self.assertRaises(ValueError):
+                    verify_android_signing(signing.replace(": true", ": false"), "test", digest)
+        production = signing.replace("CN=Flectar Mail Test", "CN=Flectar")
+        verify_android_signing(production, "production")
+        with self.assertRaises(ValueError):
+            verify_android_signing(production.replace("CN=Flectar", "CN=Android Debug"), "production")
+
     def test_debian_prerelease_package(self):
         # Exercise the actual shell packager and dpkg with a tiny existing ELF,
         # so shell expansion bugs cannot hide behind Python-only asset tests.

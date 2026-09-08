@@ -72,14 +72,19 @@ if [[ "$archive_listing" != *'classes.dex'* ]]; then
 fi
 
 signing="$($apksigner verify --verbose --print-certs "$apk")"
-assert_contains "$signing" 'Verified using v2 scheme (APK Signature Scheme v2): true' 'APK v2 signature'
-if [[ "$signing_mode" == production ]]; then
-  if [[ "$signing" == *'CN=Flectar Mail Test, O=Android, C=US'* || "$signing" == *'CN=Android Debug'* ]]; then
-    printf 'APK verification failed: a test/debug signing identity was used for production\n' >&2
+printf '%s\n' "$signing"
+signing_args=("$signing_mode")
+if [[ "$signing_mode" == test ]]; then
+  data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
+  keystore="${FLECTAR_ANDROID_TEST_KEYSTORE:-$data_home/flectar-mail/android/test-signing.keystore}"
+  if [[ ! -f "$keystore" ]]; then
+    printf 'Expected test keystore not found: %s\n' "$keystore" >&2
     exit 1
   fi
-else
-  assert_contains "$signing" 'Signer #1 certificate DN: CN=Flectar Mail Test, O=Android, C=US' 'test signing identity'
+  # Export only the public certificate. A subject string is not a signing
+  # identity, and SDK/JDK versions format that string differently.
+  expected_sha256="$(keytool -exportcert -keystore "$keystore" -alias androiddebugkey -storepass android | sha256sum)"
+  signing_args+=(--expected-sha256 "${expected_sha256%% *}")
 fi
-printf '%s\n' "$signing"
+printf '%s\n' "$signing" | python3 "$project_dir/scripts/verify-android-signing.py" "${signing_args[@]}"
 printf 'Verified Android package metadata, arm64 ABI, TLS policy, and signing: %s\n' "$apk"
