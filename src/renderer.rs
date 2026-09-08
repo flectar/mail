@@ -1,3 +1,7 @@
+mod interaction;
+#[cfg(test)]
+mod regression;
+mod semantics;
 use anyrender::ImageRenderer;
 #[cfg(test)]
 use anyrender::render_to_buffer;
@@ -7,23 +11,20 @@ use blitz_paint::paint_scene;
 use blitz_traits::net::NetWaker;
 use blitz_traits::{
     SmolStr,
-    events::{
-        BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, KeyState as BlitzKeyState,
-        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails, UiEvent,
-    },
     net::NetProvider,
     node_id::NodeId,
     shell::{ColorScheme, Viewport},
 };
-use keyboard_types::{Code, Key, Location, Modifiers};
+use keyboard_types::Key;
 use parley::layout::PositionedLayoutItem;
+use semantics::*;
 #[cfg(feature = "gpu-renderer")]
 use slint::wgpu_29::wgpu;
 use std::{
     collections::BTreeMap,
     sync::{
         Arc,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -50,12 +51,6 @@ const EMAIL_FONT_FALLBACK_STYLE: &str = r#"
   pre, code, kbd, samp {
     font-family: "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", monospace;
   }
-  /* Blitz currently drops table-cell layout when email templates force a
-     semantic td/th to display:block. Preserve the cell box so CTA background,
-     padding, nested label, and spacer cells all receive real geometry. */
-  td, th {
-    display: table-cell !important;
-  }
 </style>
 "#;
 
@@ -68,6 +63,7 @@ pub struct EmailLink {
     pub width: f32,
     pub height: f32,
     pub url: String,
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -93,6 +89,17 @@ pub struct PreparedEmail {
     document: HtmlDocument,
     pub links: Vec<EmailLink>,
     pub plain_text: String,
+    pub notice: Option<String>,
+    abort: Option<blitz_traits::net::AbortController>,
+    resolved_size: (u32, u32, u32, u32, u32),
+}
+
+impl Drop for PreparedEmail {
+    fn drop(&mut self) {
+        if let Some(abort) = self.abort.take() {
+            abort.abort();
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -118,6 +125,30 @@ pub struct GpuEmailRenderer {
     scene: vello::Scene,
     last_size: Option<(u32, u32, u32, u32, u32)>,
     dirty: bool,
+    paint_dirty: bool,
+    painted_selection: Vec<(NodeId, usize, usize)>,
+    cpu_painter: Option<VelloCpuImageRenderer>,
+    cpu_size: (u32, u32),
+    pub preparation_viewport: (u32, u32, f32),
+    pub loaded_key: Option<(u64, bool)>,
+    pub zoom: f32,
+    pub layout_width: f32,
+    pub notice: Option<String>,
+    pub metadata_revision: u64,
+    pub layout_count: u64,
+    pub tile_count: u64,
+    active_document: Arc<AtomicUsize>,
+    resources: crate::remote::ResourceLedger,
+    pub(crate) press_link: Option<(f32, f32, String)>,
+    pub(crate) activation: Option<String>,
+    pub(crate) selection_anchor: Option<(NodeId, usize)>,
+    pub(crate) selection_focus: Option<(NodeId, usize)>,
+    pub(crate) click_count: u8,
+    pub(crate) find_matches: Vec<(NodeId, usize, usize)>,
+    pub(crate) find_index: usize,
+    pub(crate) find_query: String,
+    pub(crate) find_revision: u64,
+
     region_dirty: bool,
     content_height: f32,
     visible_scroll_y: f32,
@@ -143,6 +174,29 @@ impl Default for GpuEmailRenderer {
             scene: vello::Scene::new(),
             last_size: None,
             dirty: false,
+            paint_dirty: false,
+            painted_selection: Vec::new(),
+            cpu_painter: None,
+            cpu_size: (0, 0),
+            preparation_viewport: (INITIAL_WIDTH, INITIAL_HEIGHT, 1.0),
+            loaded_key: None,
+            zoom: 1.0,
+            layout_width: 520.0,
+            notice: None,
+            metadata_revision: 0,
+            layout_count: 0,
+            tile_count: 0,
+            active_document: Arc::new(AtomicUsize::new(usize::MAX)),
+            resources: Arc::default(),
+            press_link: None,
+            activation: None,
+            selection_anchor: None,
+            selection_focus: None,
+            click_count: 0,
+            find_matches: Vec::new(),
+            find_index: 0,
+            find_query: String::new(),
+            find_revision: 0,
             region_dirty: false,
             content_height: MIN_EMAIL_SURFACE_HEIGHT,
             visible_scroll_y: 0.0,
@@ -178,15 +232,20 @@ impl GpuEmailRenderer {
     ) -> Result<(), String> {
         let poll_ticks = Arc::clone(&self.resource_poll_ticks);
         let notifier = self.resource_notifier.clone();
-        let waker: Arc<dyn NetWaker> = Arc::new(move |_document_id| {
+        let active = self.active_document.clone();
+        let waker: Arc<dyn NetWaker> = Arc::new(move |document_id| {
+            if active.load(Ordering::Acquire) != document_id {
+                return;
+            }
             poll_ticks.store(1, Ordering::Release);
             if let Some(notifier) = notifier.as_ref() {
                 notifier();
             }
         });
-        self.net_provider = Some(crate::remote::email_image_provider(
+        self.net_provider = Some(crate::remote::email_image_provider_tracked(
             Arc::clone(&waker),
             allow_remote,
+            self.resources.clone(),
         )?);
         self.net_waker = Some(waker);
         self.remote_resources_enabled = allow_remote;
@@ -206,12 +265,29 @@ impl GpuEmailRenderer {
         let provider = if allow_remote_override && !self.remote_resources_enabled {
             self.net_waker
                 .as_ref()
-                .map(|waker| crate::remote::email_image_provider(Arc::clone(waker), true))
+                .map(|waker| {
+                    crate::remote::email_image_provider_tracked(
+                        Arc::clone(waker),
+                        true,
+                        self.resources.clone(),
+                    )
+                })
                 .transpose()?
         } else {
             self.net_provider.clone()
         };
-        prepare_email_html_with_provider(html, provider)
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prepare_email_html_at(
+                html,
+                provider,
+                self.preparation_viewport.0,
+                self.preparation_viewport.1,
+                self.preparation_viewport.2 * self.zoom,
+            )
+        }))
+        .unwrap_or_else(|_| {
+            Err("This message could not be laid out. Use the plain text view.".into())
+        })
     }
 
     /// Incorporate completed image/font requests into the retained DOM.
@@ -232,32 +308,89 @@ impl GpuEmailRenderer {
             .as_ref()
             .map(tokio::runtime::Handle::enter);
         if let Some(email) = self.email.as_mut() {
-            email.document.handle_messages();
-            self.last_size = None;
-            self.dirty = true;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                email.document.drain_pending_messages()
+            }));
+            match result {
+                Ok(changed) => {
+                    self.dirty |= changed;
+                    self.metadata_revision += 1;
+                }
+                Err(_) => {
+                    self.clear();
+                    self.notice = Some("Image processing failed. Use the plain text view.".into());
+                }
+            }
         }
         true
     }
 
     pub fn set_email(&mut self, email: PreparedEmail) {
+        self.resources
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(id, _), _| *id == email.document.id());
+        self.active_document
+            .store(email.document.id(), Ordering::Release);
+        self.notice = email.notice.clone();
+        self.last_size = Some(email.resolved_size);
+        self.content_height = content_surface_height(&email.document);
+        self.layout_width =
+            content_surface_width(&email.document, f32::from_bits(email.resolved_size.3))
+                * self.zoom;
+        if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
+            || self.layout_width / self.zoom >= 4096.0
+        {
+            self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+        }
         self.email = Some(email);
-        self.last_size = None;
-        self.dirty = true;
+        self.layout_count += 1;
+        self.metadata_revision += 1;
+        self.selection_anchor = None;
+        self.selection_focus = None;
+        self.painted_selection.clear();
+        self.find_matches.clear();
+        self.find_query.clear();
+        self.cpu_painter = None;
+        // Completions may have arrived while the document was being prepared.
+        self.resource_poll_ticks.store(1, Ordering::Release);
+        self.dirty = false;
+        self.paint_dirty = false;
         self.region_dirty = true;
-        self.content_height = MIN_EMAIL_SURFACE_HEIGHT;
         self.visible_scroll_y = 0.0;
         self.tiles.clear();
         self.pointer_down = false;
+        self.press_link = None;
+        self.activation = None;
+        self.click_count = 0;
         self.last_pointer_down = None;
     }
 
     pub fn clear(&mut self) {
+        self.active_document.store(usize::MAX, Ordering::Release);
         self.email = None;
+        self.resources
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        self.find_matches.clear();
+        self.find_query.clear();
+        self.loaded_key = None;
+        self.paint_dirty = false;
+        self.painted_selection.clear();
+        self.selection_anchor = None;
+        self.selection_focus = None;
+        self.metadata_revision += 1;
+        self.resource_poll_ticks.store(0, Ordering::Release);
+        self.cpu_painter = None;
         self.last_size = None;
         self.dirty = false;
         self.region_dirty = false;
         self.tiles.clear();
         self.pointer_down = false;
+        self.press_link = None;
+        self.activation = None;
+        self.click_count = 0;
         self.last_pointer_down = None;
     }
 
@@ -276,8 +409,8 @@ impl GpuEmailRenderer {
     /// Update the Slint scroll window. Rendering is requested only when the
     /// viewport crosses into a tile that is not already in the bounded cache.
     pub fn set_visible_region(&mut self, scroll_y: f32, viewport_height: f32) -> bool {
-        let scroll_y = scroll_y.max(0.0);
-        let viewport_height = viewport_height.max(1.0);
+        let scroll_y = (scroll_y / self.zoom).max(0.0);
+        let viewport_height = (viewport_height / self.zoom).max(1.0);
         self.visible_scroll_y = scroll_y;
         self.visible_height = viewport_height;
 
@@ -303,89 +436,7 @@ impl GpuEmailRenderer {
         kind: &str,
         input_modifiers: InputModifiers,
     ) -> bool {
-        // Link hit areas are native Slint items, so Blitz only needs move
-        // events while a text-selection drag is active. Passive mouse motion
-        // must never invalidate and repaint the email tiles.
-        if kind == "move" && !self.pointer_down {
-            return false;
-        }
-        let Some(email) = self.email.as_mut() else {
-            return false;
-        };
-
-        let mut mods = Modifiers::empty();
-        if input_modifiers.control {
-            mods.insert(Modifiers::CONTROL);
-        }
-        if input_modifiers.shift {
-            mods.insert(Modifiers::SHIFT);
-        }
-        if input_modifiers.alt {
-            mods.insert(Modifiers::ALT);
-        }
-        if input_modifiers.meta {
-            mods.insert(Modifiers::META);
-        }
-
-        let is_down = kind == "down";
-        let is_up = kind == "up";
-        if is_down {
-            self.pointer_down = true;
-        }
-
-        let buttons = if self.pointer_down {
-            MouseEventButtons::Primary
-        } else {
-            MouseEventButtons::None
-        };
-        let event = BlitzPointerEvent {
-            id: BlitzPointerId::Mouse,
-            is_primary: true,
-            coords: PointerCoords {
-                page_x: x,
-                page_y: y,
-                screen_x: x,
-                screen_y: y,
-                client_x: x,
-                client_y: y,
-            },
-            button: MouseEventButton::Main,
-            buttons,
-            mods,
-            details: PointerDetails::default(),
-            element: Point { x, y },
-            active_pointers: Default::default(),
-        };
-
-        match kind {
-            "down" => email.document.handle_ui_event(UiEvent::PointerDown(event)),
-            "move" => email.document.handle_ui_event(UiEvent::PointerMove(event)),
-            "up" => email.document.handle_ui_event(UiEvent::PointerUp(event)),
-            "cancel" => email
-                .document
-                .handle_ui_event(UiEvent::PointerCancel(event)),
-            _ => return false,
-        }
-
-        if is_down {
-            let now = Instant::now();
-            let is_double_click = self.last_pointer_down.is_some_and(|(then, old_x, old_y)| {
-                now.duration_since(then) < Duration::from_millis(500)
-                    && (old_x - x).abs() <= 4.0
-                    && (old_y - y).abs() <= 4.0
-            });
-            self.last_pointer_down = Some((now, x, y));
-            if is_double_click {
-                select_word_at_point(&mut email.document, x, y);
-            }
-        }
-
-        if is_up || kind == "cancel" {
-            self.pointer_down = false;
-        }
-        let changed_selection = is_down || (kind == "move" && self.pointer_down);
-        self.dirty |= changed_selection;
-        changed_selection
+        self.pointer_input(x / self.zoom, y / self.zoom, kind, input_modifiers)
     }
 
     /// Forward a Slint keyboard event. Returns selected text when the DOM's
@@ -395,72 +446,24 @@ impl GpuEmailRenderer {
         &mut self,
         text: &str,
         pressed: bool,
-        repeat: bool,
+        _repeat: bool,
         input_modifiers: InputModifiers,
     ) -> Option<String> {
-        let email = self.email.as_mut()?;
-
-        let mut modifiers = Modifiers::empty();
-        if input_modifiers.control {
-            modifiers.insert(Modifiers::CONTROL);
+        if !pressed {
+            return None;
         }
-        if input_modifiers.shift {
-            modifiers.insert(Modifiers::SHIFT);
+        let (key, _) = slint_key_to_blitz_key(text);
+        if input_modifiers.control || input_modifiers.meta {
+            if text.eq_ignore_ascii_case("a") {
+                self.select_all();
+                return None;
+            }
+            if text.eq_ignore_ascii_case("c") {
+                return self.selected_text();
+            }
         }
-        if input_modifiers.alt {
-            modifiers.insert(Modifiers::ALT);
-        }
-        if input_modifiers.meta {
-            modifiers.insert(Modifiers::META);
-        }
-
-        let (key, text_value) = slint_key_to_blitz_key(text);
-        let copy_shortcut = pressed
-            && (input_modifiers.control || input_modifiers.meta)
-            && matches!(&key, Key::Character(value) if value.eq_ignore_ascii_case("c"));
-        let select_all_shortcut = pressed
-            && (input_modifiers.control || input_modifiers.meta)
-            && matches!(&key, Key::Character(value) if value.eq_ignore_ascii_case("a"));
-        let may_change_selection = select_all_shortcut
-            || (pressed
-                && matches!(
-                    &key,
-                    Key::ArrowUp
-                        | Key::ArrowDown
-                        | Key::ArrowLeft
-                        | Key::ArrowRight
-                        | Key::Home
-                        | Key::End
-                        | Key::PageUp
-                        | Key::PageDown
-                ));
-        let event = BlitzKeyEvent {
-            key,
-            code: Code::Unidentified,
-            modifiers,
-            location: Location::Standard,
-            is_auto_repeating: repeat,
-            is_composing: false,
-            state: if pressed {
-                BlitzKeyState::Pressed
-            } else {
-                BlitzKeyState::Released
-            },
-            text: text_value,
-        };
-
-        if pressed {
-            email.document.handle_ui_event(UiEvent::KeyDown(event));
-        } else {
-            email.document.handle_ui_event(UiEvent::KeyUp(event));
-        }
-        self.dirty |= may_change_selection;
-
-        if copy_shortcut {
-            email.document.get_selected_text()
-        } else {
-            None
-        }
+        self.move_selection(key, input_modifiers);
+        None
     }
 
     /// Select all inline text in the retained Blitz document.
@@ -491,7 +494,9 @@ impl GpuEmailRenderer {
         email
             .document
             .set_text_selection(first_node, 0, last_node, last_len);
-        self.dirty = true;
+        self.selection_anchor = Some((first_node, 0));
+        self.selection_focus = Some((last_node, last_len));
+        self.paint_dirty = true;
         true
     }
 
@@ -507,14 +512,37 @@ impl GpuEmailRenderer {
             .is_some_and(|email| email.document.has_text_selection())
     }
 
+    pub fn has_document(&self) -> bool {
+        self.email.is_some()
+    }
+
     pub fn needs_repaint(&self) -> bool {
-        self.dirty || self.region_dirty
+        self.dirty || self.paint_dirty || self.region_dirty
     }
 
     /// Render the retained document through the compatibility CPU painter.
     /// This is used only when Slint could not create a WGPU device, but it
     /// shares the same DOM and selection state as the GPU path.
     pub fn render_cpu_if_needed(
+        &mut self,
+        width: u32,
+        height: u32,
+        scale: f32,
+    ) -> Result<Option<RenderedEmail>, String> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.render_cpu_inner(width, height, scale)
+        })) {
+            Ok(result) => result,
+            Err(_) => {
+                self.clear();
+                self.notice =
+                    Some("This message could not be rendered. Use the plain text view.".into());
+                Err(self.notice.clone().unwrap())
+            }
+        }
+    }
+
+    fn render_cpu_inner(
         &mut self,
         logical_width: u32,
         logical_height: u32,
@@ -527,10 +555,12 @@ impl GpuEmailRenderer {
         let Some(email) = self.email.as_mut() else {
             return Ok(None);
         };
-        email.document.handle_messages();
+        self.dirty |= email.document.drain_pending_messages();
 
-        let scale_factor = scale_factor.max(1.0);
-        let physical_width = ((logical_width.max(1) as f32) * scale_factor).ceil() as u32;
+        let logical_width = ((logical_width as f32 / self.zoom).max(1.0)).ceil() as u32;
+        let logical_height = ((logical_height as f32 / self.zoom).max(1.0)).ceil() as u32;
+        let scale_factor = scale_factor.clamp(0.5, 4.0) * self.zoom;
+        let mut physical_width = ((logical_width.max(1) as f32) * scale_factor).ceil() as u32;
         let physical_height = ((logical_height.max(1) as f32) * scale_factor).ceil() as u32;
         let size = (
             physical_width,
@@ -539,12 +569,18 @@ impl GpuEmailRenderer {
             (logical_width as f32).to_bits(),
             (logical_height as f32).to_bits(),
         );
+        self.dirty |= email.document.drain_pending_messages();
         let needs_layout = self.dirty || self.last_size != Some(size);
-        if !needs_layout && !self.region_dirty {
+        if !needs_layout && !self.paint_dirty && !self.region_dirty {
             return Ok(None);
         }
 
+        if self.paint_dirty {
+            invalidate_selection_tiles(&email.document, &self.painted_selection, &mut self.tiles);
+        }
         if needs_layout {
+            self.layout_count += 1;
+            self.metadata_revision += 1;
             email.document.set_viewport(Viewport::new(
                 physical_width,
                 physical_height,
@@ -554,9 +590,18 @@ impl GpuEmailRenderer {
             email.document.resolve(0.0);
             email.links = collect_email_links(&email.document, logical_width.max(1) as f32);
             self.content_height = content_surface_height(&email.document);
+            self.layout_width =
+                content_surface_width(&email.document, logical_width as f32) * self.zoom;
+            if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
+                || self.layout_width / self.zoom >= 4096.0
+            {
+                self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+            }
             self.tiles.clear();
         }
 
+        let canvas_width = (self.layout_width / self.zoom).max(logical_width as f32);
+        physical_width = (canvas_width * scale_factor).ceil() as u32;
         let wanted = desired_tile_range(
             self.visible_scroll_y,
             self.visible_height.min(logical_height.max(1) as f32),
@@ -568,18 +613,23 @@ impl GpuEmailRenderer {
             if self.tiles.contains_key(&index) {
                 continue;
             }
-            let tile = render_cpu_tile(
+            let tile = render_cpu_tile_cached(
+                &mut self.cpu_painter,
+                &mut self.cpu_size,
                 email,
-                logical_width.max(1) as f32,
+                canvas_width,
                 self.content_height,
                 index,
                 scale_factor,
             )?;
+            self.tile_count += 1;
             self.tiles.insert(index, tile);
         }
 
         self.last_size = Some(size);
         self.dirty = false;
+        self.paint_dirty = false;
+        self.painted_selection = email.document.get_text_selection_ranges();
         self.region_dirty = false;
         Ok(Some(RenderedEmail {
             tiles: self.tiles.values().cloned().collect(),
@@ -594,6 +644,28 @@ impl GpuEmailRenderer {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        width: f32,
+        height: f32,
+        scale: f32,
+    ) -> Result<Option<RenderedEmail>, String> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.render_gpu_inner(device, queue, width, height, scale)
+        })) {
+            Ok(result) => result,
+            Err(_) => {
+                self.clear();
+                self.notice =
+                    Some("This message could not be rendered. Use the plain text view.".into());
+                Err(self.notice.clone().unwrap())
+            }
+        }
+    }
+
+    #[cfg(feature = "gpu-renderer")]
+    fn render_gpu_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         logical_width: f32,
         logical_height: f32,
         scale_factor: f32,
@@ -602,10 +674,10 @@ impl GpuEmailRenderer {
             return Ok(None);
         };
 
-        let logical_width = logical_width.max(1.0);
-        let logical_height = logical_height.max(1.0);
-        let scale_factor = scale_factor.max(1.0);
-        let physical_width = (logical_width * scale_factor).ceil() as u32;
+        let logical_width = (logical_width / self.zoom).max(1.0);
+        let logical_height = (logical_height / self.zoom).max(1.0);
+        let scale_factor = scale_factor.clamp(0.5, 4.0) * self.zoom;
+        let mut physical_width = (logical_width * scale_factor).ceil() as u32;
         let physical_height = (logical_height * scale_factor).ceil() as u32;
         let size = (
             physical_width,
@@ -615,16 +687,21 @@ impl GpuEmailRenderer {
             logical_height.to_bits(),
         );
 
+        self.dirty |= email.document.drain_pending_messages();
         let needs_layout = self.dirty || self.last_size != Some(size);
-        if !needs_layout && !self.region_dirty {
+        if !needs_layout && !self.paint_dirty && !self.region_dirty {
             return Ok(None);
         }
         let _runtime = self
             .resource_runtime
             .as_ref()
             .map(tokio::runtime::Handle::enter);
-        email.document.handle_messages();
+        if self.paint_dirty {
+            invalidate_selection_tiles(&email.document, &self.painted_selection, &mut self.tiles);
+        }
         if needs_layout {
+            self.layout_count += 1;
+            self.metadata_revision += 1;
             email.document.set_viewport(Viewport::new(
                 physical_width,
                 physical_height,
@@ -634,9 +711,17 @@ impl GpuEmailRenderer {
             email.document.resolve(0.0);
             email.links = collect_email_links(&email.document, logical_width);
             self.content_height = content_surface_height(&email.document);
+            self.layout_width = content_surface_width(&email.document, logical_width) * self.zoom;
+            if self.content_height >= MAX_EMAIL_SURFACE_HEIGHT
+                || self.layout_width / self.zoom >= 4096.0
+            {
+                self.notice = Some("Large message surface limited. Reader or plain text view contains the complete text.".into());
+            }
             self.tiles.clear();
         }
 
+        let logical_width = (self.layout_width / self.zoom).max(logical_width);
+        physical_width = (logical_width * scale_factor).ceil() as u32;
         if self.renderer.is_none() {
             self.renderer = Some(
                 vello::Renderer::new(
@@ -669,6 +754,12 @@ impl GpuEmailRenderer {
             let logical_tile_height =
                 (self.content_height - logical_y).clamp(1.0, EMAIL_TILE_HEIGHT);
             let physical_tile_height = (logical_tile_height * scale_factor).ceil() as u32;
+            let limit = device.limits().max_texture_dimension_2d;
+            if physical_width > limit || physical_tile_height > limit {
+                return Err(
+                    "Email surface exceeds GPU limits. Use reader or plain text view.".into(),
+                );
+            }
             let texture = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("flectar-mail-email-tile"),
                 size: wgpu::Extent3d {
@@ -737,6 +828,8 @@ impl GpuEmailRenderer {
         }
         self.last_size = Some(size);
         self.dirty = false;
+        self.paint_dirty = false;
+        self.painted_selection = email.document.get_text_selection_ranges();
         self.region_dirty = false;
 
         Ok(Some(RenderedEmail {
@@ -776,66 +869,6 @@ fn slint_key_to_blitz_key(text: &str) -> (Key, Option<SmolStr>) {
     (key, text_value)
 }
 
-fn select_word_at_point(document: &mut HtmlDocument, x: f32, y: f32) -> bool {
-    let Some((node_id, byte_offset)) = document.find_text_position(x, y) else {
-        return false;
-    };
-    let Some(text) = document
-        .get_node(node_id)
-        .and_then(|node| node.element_data())
-        .and_then(|element| element.inline_layout_data.as_deref())
-        .map(|layout| layout.text.clone())
-    else {
-        return false;
-    };
-    if text.is_empty() {
-        return false;
-    }
-
-    let chars: Vec<(usize, char)> = text.char_indices().collect();
-    let mut index = chars
-        .iter()
-        .position(|(offset, _)| *offset >= byte_offset)
-        .unwrap_or(chars.len().saturating_sub(1));
-    if chars[index].0 > byte_offset {
-        index = index.saturating_sub(1);
-    }
-
-    let class = |character: char| {
-        if character.is_alphanumeric() || matches!(character, '_' | '\'' | '’' | '-') {
-            1
-        } else if character.is_whitespace() {
-            2
-        } else {
-            3
-        }
-    };
-    // A caret at the trailing edge of a word can resolve to the following
-    // space. Native editors still select the word in that case.
-    if class(chars[index].1) == 2 && index > 0 && chars[index].0 == byte_offset {
-        index -= 1;
-    }
-    let target_class = class(chars[index].1);
-    let mut start_index = index;
-    while start_index > 0 && class(chars[start_index - 1].1) == target_class {
-        start_index -= 1;
-    }
-    let mut end_index = index + 1;
-    while end_index < chars.len() && class(chars[end_index].1) == target_class {
-        end_index += 1;
-    }
-
-    let start = chars[start_index].0;
-    let end = chars
-        .get(end_index)
-        .map_or(text.len(), |(offset, _)| *offset);
-    document.set_text_selection(node_id, start, node_id, end);
-    true
-}
-
-/// Software-only fallback for machines where WGPU cannot find a usable GPU
-/// adapter. It is intentionally outside the normal path: GPU builds retain
-/// the DOM and upload only a shared WGPU texture to Slint.
 #[cfg(test)]
 pub fn render_prepared_cpu(
     email: &mut PreparedEmail,
@@ -876,7 +909,28 @@ pub fn render_prepared_cpu(
     })
 }
 
+#[cfg(test)]
 fn render_cpu_tile(
+    email: &mut PreparedEmail,
+    logical_width: f32,
+    content_height: f32,
+    index: u32,
+    scale_factor: f32,
+) -> Result<RenderedEmailTile, String> {
+    render_cpu_tile_cached(
+        &mut None,
+        &mut (0, 0),
+        email,
+        logical_width,
+        content_height,
+        index,
+        scale_factor,
+    )
+}
+
+fn render_cpu_tile_cached(
+    painter: &mut Option<VelloCpuImageRenderer>,
+    size: &mut (u32, u32),
     email: &mut PreparedEmail,
     logical_width: f32,
     content_height: f32,
@@ -887,9 +941,20 @@ fn render_cpu_tile(
     let logical_tile_height = (content_height - logical_y).clamp(1.0, EMAIL_TILE_HEIGHT);
     let physical_width = (logical_width * scale_factor).ceil().max(1.0) as u32;
     let physical_tile_height = (logical_tile_height * scale_factor).ceil().max(1.0) as u32;
+    if physical_width > 16384 || physical_tile_height > 8192 {
+        return Err("Email surface exceeds rendering limits".into());
+    }
     let mut pixels =
         slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(physical_width, physical_tile_height);
-    let mut renderer = VelloCpuImageRenderer::new(physical_width, physical_tile_height);
+    if painter.is_none() || *size != (physical_width, physical_tile_height) {
+        *painter = Some(VelloCpuImageRenderer::new(
+            physical_width,
+            physical_tile_height,
+        ));
+        *size = (physical_width, physical_tile_height);
+    }
+    let renderer = painter.as_mut().unwrap();
+    renderer.reset();
 
     email.document.set_viewport_scroll(DomPoint {
         x: 0.0,
@@ -921,6 +986,30 @@ fn render_cpu_tile(
     })
 }
 
+fn invalidate_selection_tiles(
+    document: &HtmlDocument,
+    previous: &[(NodeId, usize, usize)],
+    tiles: &mut BTreeMap<u32, RenderedEmailTile>,
+) {
+    let current = document.get_text_selection_ranges();
+    let changed = previous
+        .iter()
+        .filter(|r| !current.contains(r))
+        .chain(current.iter().filter(|r| !previous.contains(r)));
+    for &(id, _, _) in changed {
+        let Some(node) = document.get_node(id) else {
+            tiles.clear();
+            return;
+        };
+        let y = node.absolute_position(0.0, 0.0).y;
+        let end = y + node.final_layout().size.height;
+        tiles.retain(|index, _| {
+            let top = *index as f32 * EMAIL_TILE_HEIGHT;
+            top + EMAIL_TILE_HEIGHT < y || top > end
+        });
+    }
+}
+
 fn desired_tile_range(
     scroll_y: f32,
     viewport_height: f32,
@@ -942,6 +1031,21 @@ fn desired_tile_range(
 /// extent; that extent determines the scroll range and tile count. Remote
 /// resources invalidate the layout and recalculate this bound when their
 /// intrinsic dimensions arrive.
+fn content_surface_width(document: &HtmlDocument, viewport: f32) -> f32 {
+    let mut width = viewport;
+    document.visit(|_, node| {
+        if node.stylo_element_data_opt().is_some() && visible(node) {
+            let layout = node.final_layout();
+            let right = node.absolute_position(0.0, 0.0).x
+                + layout.size.width.max(layout.scrollable_overflow_rect.right);
+            if right.is_finite() {
+                width = width.max(right);
+            }
+        }
+    });
+    width.clamp(viewport, viewport.max(4096.0))
+}
+
 fn content_surface_height(document: &HtmlDocument) -> f32 {
     let mut content_bottom = 0.0_f32;
 
@@ -970,8 +1074,9 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
         {
             let inline_origin = origin.y + layout.border.top + layout.padding.top;
             for line in inline.layout.lines() {
-                content_bottom =
-                    content_bottom.max(inline_origin + line.metrics().block_max_coord.max(0.0));
+                content_bottom = content_bottom.max(
+                    inline_origin + line.metrics().block_max_coord.max(0.0) / inline.layout.scale(),
+                );
             }
         }
     });
@@ -986,22 +1091,10 @@ fn composite_over_white(rgba: &mut [u8]) {
         if alpha < 255 {
             let inverse = 255 - alpha;
             for channel in &mut pixel[..3] {
-                *channel = ((u16::from(*channel) * alpha + 255 * inverse + 127) / 255) as u8;
+                *channel = (u16::from(*channel) + inverse).min(255) as u8;
             }
             pixel[3] = 255;
         }
-    }
-}
-
-/// Return renderer scratch pages to the OS after switching messages. Keep
-/// this out of pointer/selection repaint paths: `malloc_trim` is process-wide
-/// and is useful after a large one-shot raster, not on every interaction.
-pub fn trim_unused_heap() {
-    #[cfg(all(target_os = "linux", target_env = "gnu"))]
-    // SAFETY: `malloc_trim` takes no pointers and only asks glibc's allocator
-    // to release completely unused pages. Live Rust allocations remain valid.
-    unsafe {
-        libc::malloc_trim(0);
     }
 }
 
@@ -1029,6 +1122,10 @@ pub fn prepare_email_html(html: &str) -> Result<PreparedEmail, String> {
 /// wholesale-replaced on updates, so the logic can't be shared by extracting
 /// a helper there. Keep the two in sync by hand if either changes.
 fn build_email_font_ctx() -> parley::FontContext {
+    thread_local! { static FONTS: parley::FontContext = create_email_font_ctx(); }
+    FONTS.with(Clone::clone)
+}
+fn create_email_font_ctx() -> parley::FontContext {
     use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 
     let mut font_ctx = parley::FontContext {
@@ -1056,114 +1153,82 @@ fn build_email_font_ctx() -> parley::FontContext {
     font_ctx
 }
 
+#[cfg(test)]
 fn prepare_email_html_with_provider(
     html: &str,
     net_provider: Option<Arc<dyn NetProvider>>,
 ) -> Result<PreparedEmail, String> {
-    let html = with_email_font_fallback(html);
+    prepare_email_html_at(html, net_provider, INITIAL_WIDTH, INITIAL_HEIGHT, 1.0)
+}
+fn prepare_email_html_at(
+    html: &str,
+    net_provider: Option<Arc<dyn NetProvider>>,
+    width: u32,
+    height: u32,
+    scale: f32,
+) -> Result<PreparedEmail, String> {
+    let (html, notice) = crate::email_document::bounded_html(html);
+    let html = with_email_font_fallback(&html);
+    struct PreparationAbort(Option<blitz_traits::net::AbortController>);
+    impl Drop for PreparationAbort {
+        fn drop(&mut self) {
+            if let Some(abort) = self.0.take() {
+                abort.abort();
+            }
+        }
+    }
+    let mut abort = PreparationAbort(Some(blitz_traits::net::AbortController::default()));
     let mut document = HtmlDocument::from_html(
         &html,
         DocumentConfig {
-            viewport: Some(Viewport::new(
-                INITIAL_WIDTH,
-                INITIAL_HEIGHT,
-                1.0,
-                ColorScheme::Light,
-            )),
+            viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
             net_provider,
+            abort_signal: Some(abort.0.as_ref().unwrap().signal.clone()),
             font_ctx: Some(build_email_font_ctx()),
             ..Default::default()
         },
     );
 
+    let mut stack = vec![(document.root_node().id, 0usize)];
+    let mut count = 0usize;
+    while let Some((id, depth)) = stack.pop() {
+        count += 1;
+        if depth > 96 || count > 30_000 {
+            return Err("Message structure exceeds rendering limits. Use plain text.".into());
+        }
+        if let Some(node) = document.get_node(id) {
+            stack.extend(node.children.iter().map(|id| (*id, depth + 1)));
+        }
+    }
     document.resolve(0.0);
-    let links = collect_email_links(&document, INITIAL_WIDTH as f32);
+    let links = collect_email_links(&document, width as f32 / scale);
     let plain_text = collect_plain_text(&document);
 
     Ok(PreparedEmail {
         document,
         links,
         plain_text,
+        notice,
+        abort: abort.0.take(),
+        resolved_size: (
+            width,
+            height,
+            scale.to_bits(),
+            (width as f32 / scale).to_bits(),
+            (height as f32 / scale).to_bits(),
+        ),
     })
 }
 
 fn collect_plain_text(document: &HtmlDocument) -> String {
-    let mut raw = String::new();
-
-    document.visit(|node_id, node| {
-        let Some(text) = node.text_data() else {
-            return;
-        };
-
-        // Head metadata, CSS, and scripts are represented as text nodes too.
-        // They should never end up in the text a user copies from an email.
-        let is_non_content = document.node_chain(node_id).into_iter().any(|ancestor_id| {
-            document.get_node(ancestor_id).is_some_and(|ancestor| {
-                ancestor.data.is_element_with_tag_name(&local_name!("head"))
-                    || ancestor
-                        .data
-                        .is_element_with_tag_name(&local_name!("title"))
-                    || ancestor
-                        .data
-                        .is_element_with_tag_name(&local_name!("style"))
-                    || ancestor
-                        .data
-                        .is_element_with_tag_name(&local_name!("script"))
-            })
-        });
-        if !is_non_content {
-            raw.push_str(&text.content);
-            raw.push(' ');
-        }
-    });
-
-    let mut output = String::with_capacity(raw.len());
-    let mut pending_space = false;
-    for character in raw.chars() {
-        if character.is_whitespace() {
-            pending_space = !output.is_empty();
-        } else {
-            if pending_space {
-                output.push(' ');
-                pending_space = false;
-            }
-            output.push(character);
-        }
-    }
-    output
+    semantics::plain_text(document)
 }
 
 /// Detect network-backed image references without treating ordinary links as
 /// blocked content. This drives the privacy banner; the provider remains the
 /// authoritative enforcement boundary.
 pub fn has_remote_images(html: &str) -> bool {
-    let lower = html.to_ascii_lowercase();
-    let mut rest = lower.as_str();
-    while let Some(start) = rest.find("<img") {
-        let tag = &rest[start
-            ..rest[start..]
-                .find('>')
-                .map_or(rest.len(), |end| start + end + 1)];
-        if tag.contains("http://") || tag.contains("https://") {
-            return true;
-        }
-        rest = &rest[(start + 4).min(rest.len())..];
-    }
-
-    let compact: String = lower
-        .chars()
-        .filter(|character| !character.is_whitespace())
-        .collect();
-    [
-        "url(http://",
-        "url(https://",
-        "url('http://",
-        "url('https://",
-        "url(\"http://",
-        "url(\"https://",
-    ]
-    .iter()
-    .any(|needle| compact.contains(needle))
+    crate::email_document::has_remote_images(html)
 }
 
 fn with_email_font_fallback(html: &str) -> String {
@@ -1198,10 +1263,15 @@ fn with_email_font_fallback(html: &str) -> String {
 
 fn browser_url(href: &str) -> Option<String> {
     let href = href.trim();
+    if href.starts_with('#') {
+        return Some(href.into());
+    }
     let (scheme, _) = href.split_once(':')?;
     let scheme = scheme.to_ascii_lowercase();
     match scheme.as_str() {
-        "http" | "https" | "mailto" | "tel" => Some(href.to_owned()),
+        "http" | "https" | "mailto" | "tel" => {
+            url::Url::parse(href).ok().map(|url| url.to_string())
+        }
         _ => None,
     }
 }
@@ -1217,49 +1287,158 @@ fn anchor_url_for_node(document: &HtmlDocument, mut node_id: NodeId) -> Option<S
 }
 
 fn collect_email_links(document: &HtmlDocument, logical_width: f32) -> Vec<EmailLink> {
-    let mut links = Vec::new();
-    let logical_width = logical_width.max(1.0);
-
-    document.visit(|_, node| {
+    let mut boxes: BTreeMap<NodeId, (f32, f32, f32, f32)> = BTreeMap::new();
+    let anchor = |mut id| -> Option<NodeId> {
+        loop {
+            let node = document.get_node(id)?;
+            if !visible(node) {
+                return None;
+            }
+            if node.data.is_element_with_tag_name(&local_name!("a"))
+                && node
+                    .data
+                    .attr(local_name!("href"))
+                    .and_then(browser_url)
+                    .is_some()
+            {
+                return Some(id);
+            }
+            id = node.parent?;
+        }
+    };
+    let mut add = |id: NodeId, source: NodeId, x: f32, y: f32, w: f32, h: f32| {
+        if w <= 0.5 || h <= 0.5 {
+            return;
+        }
+        let corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)]
+            .map(|(x, y)| painted_point(document, source, x, y));
+        let mut rect = corners.iter().fold(
+            (
+                f32::INFINITY,
+                f32::INFINITY,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            ),
+            |(x0, y0, x1, y1), &(x, y)| (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+        );
+        for ancestor in document.node_chain(source) {
+            let Some(node) = document.get_node(ancestor) else {
+                continue;
+            };
+            if !node.clips_content() {
+                continue;
+            }
+            let size = node.final_layout().size;
+            let a = painted_point(document, ancestor, 0.0, 0.0);
+            let b = painted_point(document, ancestor, size.width, size.height);
+            rect = (
+                rect.0.max(a.0.min(b.0)),
+                rect.1.max(a.1.min(b.1)),
+                rect.2.min(a.0.max(b.0)),
+                rect.3.min(a.1.max(b.1)),
+            );
+        }
+        if rect.2 <= rect.0
+            || rect.3 <= rect.1
+            || ![rect.0, rect.1, rect.2, rect.3]
+                .iter()
+                .all(|n| n.is_finite())
+        {
+            return;
+        }
+        boxes
+            .entry(id)
+            .and_modify(|r| {
+                r.0 = r.0.min(rect.0);
+                r.1 = r.1.min(rect.1);
+                r.2 = r.2.max(rect.2);
+                r.3 = r.3.max(rect.3);
+            })
+            .or_insert(rect);
+    };
+    document.visit(|id, node| {
+        if !visible(node)
+            || document
+                .node_chain(id)
+                .iter()
+                .any(|id| document.get_node(*id).is_some_and(|n| !visible(n)))
+        {
+            return;
+        }
         let Some(element) = node.element_data() else {
             return;
         };
-        let Some(text_layout) = element.inline_layout_data.as_deref() else {
-            return;
-        };
-        let origin = node.absolute_position(0.0, 0.0);
-        let content_origin_x =
-            origin.x + node.final_layout().padding.left + node.final_layout().border.left;
-        let content_origin_y =
-            origin.y + node.final_layout().padding.top + node.final_layout().border.top;
-
-        for line in text_layout.layout.lines() {
-            let metrics = *line.metrics();
-            for item in line.items() {
-                let PositionedLayoutItem::GlyphRun(run) = item else {
-                    continue;
-                };
-                let Some(url) = anchor_url_for_node(document, run.style().brush.id) else {
-                    continue;
-                };
-                let width = run.advance();
-                let height = metrics.block_max_coord - metrics.block_min_coord;
-                if width <= 0.5 || height <= 0.5 {
-                    continue;
+        if let Some(anchor_id) = anchor(id) {
+            let size = node.final_layout().size;
+            add(anchor_id, id, 0.0, 0.0, size.width, size.height);
+        }
+        if let Some(inline) = &element.inline_layout_data {
+            let layout = node.final_layout();
+            for line in inline.layout.lines() {
+                for item in line.items() {
+                    if let PositionedLayoutItem::GlyphRun(run) = item
+                        && let Some(id) = anchor(run.style().brush.id)
+                    {
+                        add(
+                            id,
+                            node.id,
+                            layout.padding.left
+                                + layout.border.left
+                                + run.offset() / inline.layout.scale(),
+                            layout.padding.top
+                                + layout.border.top
+                                + line.metrics().block_min_coord / inline.layout.scale(),
+                            run.advance() / inline.layout.scale(),
+                            (line.metrics().block_max_coord - line.metrics().block_min_coord)
+                                / inline.layout.scale(),
+                        );
+                    }
                 }
-
-                links.push(EmailLink {
-                    x: (content_origin_x + run.offset()) / logical_width,
-                    y: (content_origin_y + metrics.block_min_coord) / logical_width,
-                    width: width / logical_width,
-                    height: height / logical_width,
-                    url,
-                });
             }
         }
     });
-
-    links
+    boxes
+        .into_iter()
+        .filter_map(|(id, (x0, y0, x1, y1))| {
+            let node = document.get_node(id)?;
+            let url = node.data.attr(local_name!("href")).and_then(browser_url)?;
+            let name = node
+                .data
+                .attr(local_name!("aria-label"))
+                .map(str::to_owned)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| subtree_text(document, id));
+            Some(EmailLink {
+                x: x0 / logical_width,
+                y: y0 / logical_width,
+                width: (x1 - x0) / logical_width,
+                height: (y1 - y0) / logical_width,
+                name: if name.is_empty() { url.clone() } else { name },
+                url,
+            })
+        })
+        .collect()
+}
+fn painted_point(document: &HtmlDocument, mut id: NodeId, mut x: f32, mut y: f32) -> (f32, f32) {
+    while let Some(node) = document.get_node(id) {
+        if let Some(t) = node.transform() {
+            let [a, b, c, d, e, f] = t.as_coeffs();
+            let scale = document.viewport().scale() as f64;
+            let px = x as f64;
+            let py = y as f64;
+            x = (a * px + c * py + e / scale) as f32;
+            y = (b * px + d * py + f / scale) as f32;
+        }
+        if node.stylo_element_data_opt().is_some() {
+            x += node.final_layout().location.x - node.scroll_offset().x as f32;
+            y += node.final_layout().location.y - node.scroll_offset().y as f32;
+        }
+        let Some(parent) = node.layout_parent.get() else {
+            break;
+        };
+        id = parent;
+    }
+    (x, y)
 }
 
 #[cfg(test)]
@@ -1305,7 +1484,7 @@ mod tests {
         .expect("link should parse");
 
         assert_eq!(rendered.links.len(), 1);
-        assert_eq!(rendered.links[0].url, "https://example.com");
+        assert_eq!(rendered.links[0].url, "https://example.com/");
         assert!(rendered.links[0].width > 0.0);
         assert!(rendered.links[0].height > 0.0);
         assert!(rendered.links[0].x >= 0.0 && rendered.links[0].x < 1.0);
@@ -1623,8 +1802,7 @@ mod tests {
             )
             .expect("second CSS table cell node should exist");
         assert!(
-            cell.final_layout().size.height > 10.0
-                && second_cell.final_layout().size.height > 10.0,
+            cell.final_layout().size.height > 10.0 && second_cell.final_layout().size.height > 10.0,
             "a direct table-cell child needs a browser-generated anonymous row"
         );
         let first_origin = cell.absolute_position(0.0, 0.0);
@@ -1798,7 +1976,7 @@ mod tests {
 
     #[test]
     #[cfg(feature = "remote-content")]
-    fn blitz_resource_provider_fetches_http_images() {
+    fn blitz_resource_provider_rejects_loopback_images() {
         use std::{
             io::{Cursor, Read, Write},
             net::TcpListener,
@@ -1820,7 +1998,7 @@ mod tests {
             .local_addr()
             .expect("test server should have an address");
         let server = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_millis(200);
             while Instant::now() < deadline {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
@@ -1868,7 +2046,7 @@ mod tests {
         renderer.set_email(prepared);
 
         let mut loaded = false;
-        for _ in 0..100 {
+        for _ in 0..20 {
             runtime.block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
             renderer.poll_resources();
             let email = renderer.email.as_ref().expect("email retained");
@@ -1888,8 +2066,11 @@ mod tests {
             }
         }
 
-        assert!(server.join().expect("test server should finish"));
-        assert!(loaded, "HTTP image should decode into a raster image");
+        assert!(!server.join().expect("test server should finish"));
+        assert!(
+            !loaded,
+            "Loopback images must remain blocked in production and tests"
+        );
     }
 
     #[test]

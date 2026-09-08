@@ -59,6 +59,7 @@ pub struct MailMessage {
     pub has_replied: bool,
     pub labels: Vec<i64>,
     pub html: Option<String>,
+    pub text: Option<String>,
     /// The row is showing its snippet while the core fetches the real MIME
     /// body. The shell uses this to retry a missed/late MailUpdated event.
     pub body_pending: bool,
@@ -91,6 +92,7 @@ impl MailMessage {
             has_replied: false,
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
+            text: None,
             body_pending: false,
             sender_verification: String::new(),
         }
@@ -1604,6 +1606,7 @@ fn summary_to_message(
         has_replied: thread.has_replied,
         labels: thread.labels,
         html: None,
+        text: None,
         body_pending: true,
         sender_verification: String::new(),
     })
@@ -1655,6 +1658,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail) -> MailMessage 
         has_replied: row.has_replied,
         labels: row.labels.clone(),
         html,
+        text: message.text_body.clone(),
         body_pending: message.body_state != "cached",
         sender_verification: message.sender_verification.as_str().to_owned(),
     }

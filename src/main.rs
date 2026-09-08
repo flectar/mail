@@ -9,6 +9,9 @@ pub mod favicon;
 mod mail;
 mod mail_render_projection;
 mod mail_view_model;
+mod reader_clipboard;
+#[cfg(test)]
+mod reader_validation;
 mod remote;
 mod renderer;
 mod renderer_input_controller;
@@ -1217,29 +1220,45 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     scale_factor,
                 );
                 match result {
-                    Ok(Some(frame)) => apply_gpu_frame(&app, frame),
+                    Ok(Some(frame)) => {
+                        apply_gpu_frame(&app, frame);
+                        sync_reader_metadata(&app, &email_renderer_for_notifier);
+                    }
                     Ok(None) => {}
-                    Err(gpu_error) => match email_renderer_for_notifier
-                        .borrow_mut()
-                        .render_cpu_if_needed(
-                            logical_width.max(1.0).ceil() as u32,
-                            logical_height.max(1.0).ceil() as u32,
-                            scale_factor,
-                        ) {
-                        Ok(Some(frame)) => {
-                            apply_cpu_frame(&app, frame);
-                            app.set_render_status(UiMessage::detail(
-                                "Rendered with software fallback after GPU error: {}",
-                                gpu_error,
-                            ));
+                    Err(gpu_error) => {
+                        let fallback = email_renderer_for_notifier
+                            .borrow_mut()
+                            .render_cpu_if_needed(
+                                logical_width.max(1.0).ceil() as u32,
+                                logical_height.max(1.0).ceil() as u32,
+                                scale_factor,
+                            );
+                        match fallback {
+                            Ok(Some(frame)) => {
+                                apply_cpu_frame(&app, frame);
+                                sync_reader_metadata(&app, &email_renderer_for_notifier);
+                                app.set_render_status(UiMessage::detail(
+                                    "Rendered with software fallback after GPU error: {}",
+                                    gpu_error,
+                                ));
+                            }
+                            Ok(None) => {
+                                sync_reader_metadata(&app, &email_renderer_for_notifier);
+                            }
+                            Err(cpu_error) => {
+                                app.global::<EmailReader>()
+                                    .set_notice(cpu_error.clone().into());
+                                app.global::<EmailReader>().set_reader_mode(false);
+                                app.set_text_mode(true);
+                                app.set_email_tiles(ModelRc::default());
+                                app.set_render_status(UiMessage::arguments(
+                                    "Blitz render failed (GPU: {}; software: {})",
+                                    gpu_error,
+                                    cpu_error,
+                                ));
+                            }
                         }
-                        Ok(None) => {}
-                        Err(cpu_error) => app.set_render_status(UiMessage::arguments(
-                            "Blitz render failed (GPU: {}; software: {})",
-                            gpu_error,
-                            cpu_error,
-                        )),
-                    },
+                    }
                 }
             })?;
     }
@@ -2224,12 +2243,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 ) {
                     Ok(Some(frame)) => apply_cpu_frame(&app, frame),
                     Ok(None) => {}
-                    Err(error) => app.set_render_status(UiMessage::detail(
-                        "Email resource render failed: {}",
-                        error,
-                    )),
+                    Err(error) => {
+                        app.global::<EmailReader>().set_notice(error.clone().into());
+                        app.set_text_mode(true);
+                        app.set_render_status(UiMessage::detail(
+                            "Email resource render failed: {}",
+                            error,
+                        ));
+                    }
                 }
             }
+            sync_reader_metadata(&app, &renderer);
             app.window().request_redraw();
         });
     });
@@ -2245,6 +2269,34 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         UiWake::new(app.as_weak(), |app| app.invoke_drain_message_load_updates()),
     );
     let message_load_pending = Rc::new(RefCell::new(HashSet::<i32>::new()));
+    // Every selection route (including archive/delete and initial selection)
+    // requests full detail through the same bounded, deduplicated loader.
+    let body_state = Rc::clone(&state);
+    let body_runtime = Rc::clone(&runtime);
+    let body_pending = Rc::clone(&message_load_pending);
+    let body_updates = message_load_tx.clone();
+    app.global::<EmailReader>().on_ensure_body(move |id| {
+        let load = {
+            let state = body_state.borrow();
+            state.core.clone().zip(
+                state
+                    .messages
+                    .iter()
+                    .find(|row| row.id == id && row.body_pending && row.thread_id.is_some())
+                    .cloned(),
+            )
+        };
+        if let Some((core, row)) = load {
+            if !body_pending.borrow_mut().insert(id) {
+                return;
+            }
+            let updates = body_updates.clone();
+            body_runtime.spawn(async move {
+                let result = core.load_message(&row).await;
+                let _ = updates.send(MessageLoadUpdate { id, result }).await;
+            });
+        }
+    });
     let (mail_list_raw_tx, mail_list_rx) = bounded_ui_channel::<MailListUpdate>();
     let mail_list_tx = UiSender::new(
         mail_list_raw_tx,
@@ -3427,6 +3479,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    let retry_app = app.as_weak();
+    let retry_state = Rc::clone(&state);
+    let retry_runtime = Rc::clone(&runtime);
+    app.global::<EmailReader>().on_retry_images(move || {
+        let Some(app) = retry_app.upgrade() else {
+            return;
+        };
+        retry_state.borrow().email_renderer.borrow_mut().loaded_key = None;
+        if let Err(error) = render_current(&app, &retry_state, &retry_runtime) {
+            app.set_render_status(UiMessage::detail(
+                "Could not load message images: {}",
+                error,
+            ));
+        }
+    });
+
     let app_weak = app.as_weak();
     let state_for_message_images = Rc::clone(&state);
     let runtime_for_message_images = Rc::clone(&runtime);
@@ -3439,6 +3507,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             return;
         }
         {
+            state_for_message_images
+                .borrow()
+                .email_renderer
+                .borrow_mut()
+                .loaded_key = None;
             let mut state = state_for_message_images.borrow_mut();
             state.remote_images_override_id = state.selected_id;
         }

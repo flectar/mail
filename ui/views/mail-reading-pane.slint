@@ -1,12 +1,20 @@
-import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { EmailLink, EmailTile, MailLabelRow } from "../models.slint";
+import { Button as ReaderButton, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
+import { EmailReader, EmailLink, EmailTile, MailLabelRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+
+component ReaderControl inherits ToolbarIconButton {
+    tooltip-above: true;
+    interactive: EmailReader.available;
+    icon-color: AppTheme.body;
+    hover-background: AppTheme.control-bg;
+    active-background: AppTheme.accent-soft;
+}
 
 component MailLabelChip inherits Rectangle {
     in property <string> name;
@@ -130,7 +138,7 @@ export component MailReadingPane inherits Rectangle {
     in-out property <bool> rendering_info_open: false;
     in-out property <float> email-content-aspect: 900 / 520;
     in-out property <length> email-scroll-y: 0px;
-    out property <length> email-viewport-width: email-surface.width;
+    out property <length> email-viewport-width: email-scroll.visible-width;
     out property <length> email-viewport-height: email-surface.height;
     in property <color> accent;
     in property <color> accent-soft;
@@ -161,6 +169,36 @@ export component MailReadingPane inherits Rectangle {
     callback select-email-text();
     callback load-remote-images-for-message();
 
+    private property <bool> selecting: false;
+    private property <bool> touch-pending: false;
+    private property <float> touch-x: 0;
+    private property <float> touch-y: 0;
+    Timer {
+        interval: 550ms;
+        running: root.touch-pending;
+        triggered => {
+            root.touch-pending = false; root.selecting = true;
+            root.email-pointer-event(root.touch-x,root.touch-y,"long-press",false,false,false,false);
+        }
+    }
+    private property <string> drag-kind: "move";
+    private property <float> drag-x: 0;
+    private property <float> drag-y: 0;
+    Timer {
+        interval: 40ms;
+        running: root.selecting;
+        triggered => {
+            let screen-y = root.drag-y * 1px + root.email-scroll-y;
+            if screen-y < 28px || screen-y > email-surface.height - 28px {
+                let step = screen-y < 28px ? 16px : -16px;
+                let old = root.email-scroll-y;
+                root.email-scroll-y = max(-max(0px,email-scroll.viewport-height - email-scroll.visible-height), min(0px,old + step));
+                root.drag-y += (old - root.email-scroll-y) / 1px;
+                root.email-pointer-event(root.drag-x,root.drag-y,root.drag-kind,false,false,false,false);
+                root.email-scroll(-root.email-scroll-y / 1px,email-scroll.visible-height / 1px);
+            }
+        }
+    }
     private property <string> display-subject: root.selected_subject == "" ? @tr("(No subject)") : root.selected_subject;
     private property <bool> label-editor-open: false;
     private property <string> label-search-query: "";
@@ -371,7 +409,7 @@ export component MailReadingPane inherits Rectangle {
                                                 label-list := ListView {
                                                     width: parent.width;
                                                     height: parent.height;
-                                                    horizontal-scrollbar-policy: always-off;
+                                                    horizontal-scrollbar-policy: as-needed;
                                                     accessible-label: @tr("Available labels");
                                                     accessible-item-count: root.mail-label-results.length;
 
@@ -510,14 +548,14 @@ export component MailReadingPane inherits Rectangle {
                                         title: root.source_mode ? @tr("Show rendered message") : @tr("Show source");
                                         activated => {
                                             root.source_mode = !root.source_mode;
-                                            if root.source_mode { root.text_mode = false; }
+                                            if root.source_mode { root.text_mode = false; EmailReader.reader-mode = false; }
                                         }
                                     }
                                     MenuItem {
                                         title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text");
                                         activated => {
                                             root.text_mode = !root.text_mode;
-                                            if root.text_mode { root.source_mode = false; }
+                                            if root.text_mode { root.source_mode = false; EmailReader.reader-mode = false; }
                                         }
                                     }
                                     if !root.selected_is_draft : MenuItem { title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action(root.selected_unread ? "mark_read" : "mark_unread"); } }
@@ -647,6 +685,51 @@ export component MailReadingPane inherits Rectangle {
                         Rectangle { height: 1px; background: root.border-subtle; }
                         Rectangle { height: 12px; }
 
+                        HorizontalBox {
+                            height: root.compact ? 44px : 32px; padding: 0px; spacing: 4px;
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass-minus.svg"); tooltip-text: @tr("Zoom out"); tooltip-align-left: true; interactive: EmailReader.available && EmailReader.zoom > 0.5; clicked => { EmailReader.command("zoom-out"); } }
+                            if !root.compact : ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrow-counter-clockwise.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(EmailReader.zoom * 100)); tooltip-align-left: true; clicked => { EmailReader.command("zoom-reset"); } }
+                            zoom-input := LineEdit {
+                                min-width: 62px; max-width: 62px;
+                                height: root.compact ? 44px : 32px;
+                                enabled: EmailReader.available;
+                                input-label: @tr("Zoom percentage");
+                                text: "\{round(EmailReader.zoom * 100)}%";
+                                accepted(value) => {
+                                    EmailReader.command("zoom-set:" + value);
+                                    self.text = "\{round(EmailReader.zoom * 100)}%";
+                                }
+                            }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass-plus.svg"); tooltip-text: @tr("Zoom in"); interactive: EmailReader.available && EmailReader.zoom < 3; clicked => { EmailReader.command("zoom-in"); } }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrows-out-line-horizontal.svg"); tooltip-text: @tr("Fit to width"); clicked => { EmailReader.command("fit"); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass.svg"); tooltip-text: @tr("Find in message"); active: EmailReader.find-open; clicked => { EmailReader.find-open = !EmailReader.find-open; if EmailReader.find-open { EmailReader.reader-mode = false; root.text_mode = false; root.source_mode = false; find-input.focus(); } } }
+                            ReaderControl { compact: root.compact; icon: EmailReader.reader-mode ? @image-url("../icons/phosphor/code.svg") : @image-url("../icons/phosphor/book-open-text.svg"); tooltip-text: EmailReader.reader-mode ? @tr("Show original layout") : @tr("Reader mode"); active: EmailReader.reader-mode; clicked => { EmailReader.reader-mode = !EmailReader.reader-mode; if EmailReader.reader-mode { root.text_mode = false; root.source_mode = false; EmailReader.find-open = false; } } }
+                        }
+                        HorizontalBox {
+                            visible: EmailReader.find-open;
+                            height: EmailReader.find-open ? (root.compact ? 44px : 32px) : 0px; padding: 0px; spacing: 4px;
+                            find-input := LineEdit { enabled: EmailReader.find-open; text <=> EmailReader.query; placeholder-text: @tr("Find in message"); edited => { EmailReader.find(EmailReader.query, 0); } accepted => { EmailReader.find(EmailReader.query, 1); } }
+                            Text { text: EmailReader.find-status; color: root.secondary-text; vertical-alignment: center; }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/caret-up.svg"); tooltip-text: @tr("Previous match"); clicked => { EmailReader.find(EmailReader.query, -1); } }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/caret-down.svg"); tooltip-text: @tr("Next match"); clicked => { EmailReader.find(EmailReader.query, 1); } }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/x.svg"); tooltip-text: @tr("Close find"); clicked => { EmailReader.find-open = false; } }
+                        }
+                        if EmailReader.failed-images > 0 && !root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : HorizontalBox {
+                            height: root.compact ? 44px : 32px; padding: 0px; spacing: 6px;
+                            Text { text: @tr("Some images could not be loaded."); overflow: elide; color: root.secondary-text; vertical-alignment: center; horizontal-stretch: 1; }
+                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrow-clockwise.svg"); tooltip-text: @tr("Retry images"); clicked => { EmailReader.retry-images(); } }
+                        }
+                        if EmailReader.body-pending : HorizontalBox {
+                            padding: 0px; spacing: 8px;
+                            Text { text: @tr("Loading message…"); color: root.secondary-text; vertical-alignment: center; horizontal-stretch: 1; }
+                            ReaderControl { compact: root.compact; interactive: true; icon: @image-url("../icons/phosphor/arrow-clockwise.svg"); tooltip-text: @tr("Reload message"); clicked => { EmailReader.ensure-body(EmailReader.message-id); } }
+                        }
+                        if EmailReader.notice != "" : Text {
+                            text: EmailReader.notice; wrap: word-wrap; color: root.secondary-text; font-size: TypeScale.secondary;
+                            accessible-role: text;
+                        }
+                        Rectangle { height: 12px; }
                         email-surface := Rectangle {
                             horizontal-stretch: 1;
                             vertical-stretch: 1;
@@ -659,11 +742,11 @@ export component MailReadingPane inherits Rectangle {
                                 email-scroll := ScrollView {
                                     width: parent.width;
                                     height: parent.height;
-                                    viewport-width: email-surface.width;
-                                    viewport-height: max(parent.height, email-surface.width * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px));
+                                    viewport-width: root.email-viewport-width * EmailReader.width-ratio;
+                                    viewport-height: max(parent.height, root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px));
                                     viewport-y <=> root.email-scroll-y;
-                                    horizontal-scrollbar-policy: always-off;
-                                    mouse-drag-pan-enabled: root.compact;
+                                    horizontal-scrollbar-policy: EmailReader.width-ratio > 1.01 ? as-needed : always-off;
+                                    mouse-drag-pan-enabled: root.compact && !root.selecting;
                                     scrolled => {
                                         root.email-scroll(-self.viewport-y / 1px, self.visible-height / 1px);
                                     }
@@ -672,15 +755,15 @@ export component MailReadingPane inherits Rectangle {
                                 // menu for the rendered mail. Link hit areas
                                 // below add the link-specific native actions.
                                 email-context := ContextMenuArea {
-                                    width: email-surface.width;
-                                    height: max(email-surface.height, email-surface.width * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px));
+                                    width: root.email-viewport-width * EmailReader.width-ratio;
+                                    height: max(email-surface.height, root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px));
                                     // Keep the parent enabled in plain-text
                                     // mode as well; otherwise Slint propagates
                                     // the disabled state into the read-only
                                     // TextEdit and its text cannot be selected.
                                     enabled: root.has_selected;
 
-                                    if root.remote-images-blocked && !root.text_mode && !root.source_mode : Rectangle {
+                                    if root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : Rectangle {
                                         x: 12px;
                                         y: 12px;
                                         width: parent.width - 24px;
@@ -713,10 +796,10 @@ export component MailReadingPane inherits Rectangle {
                                     for tile in root.email_tiles : Image {
                                         source: tile.image;
                                         x: 0px;
-                                        y: tile.y * email-surface.width + (root.remote-images-blocked ? 60px : 0px);
+                                        y: tile.y * root.email-viewport-width * EmailReader.width-ratio + (root.remote-images-blocked ? 60px : 0px);
                                         width: parent.width;
-                                        height: tile.height * email-surface.width;
-                                        visible: !root.text_mode && !root.source_mode;
+                                        height: tile.height * root.email-viewport-width * EmailReader.width-ratio;
+                                        visible: !root.text_mode && !root.source_mode && !EmailReader.reader-mode;
                                         vertical-alignment: top;
                                         image-fit: fill;
                                         // One message is rasterized into many
@@ -726,6 +809,19 @@ export component MailReadingPane inherits Rectangle {
                                         accessible-role: none;
                                     }
 
+                                    for missing in EmailReader.images : Rectangle {
+                                        visible: !root.text_mode && !root.source_mode && !EmailReader.reader-mode;
+                                        x: missing.x * 1px; y: missing.y * 1px + (root.remote-images-blocked ? 60px : 0px);
+                                        width: missing.width * 1px; height: missing.height * 1px;
+                                        background: root.control-bg; border-width: 1px; border-color: root.border;
+                                        clip: true; accessible-role: image; accessible-label: missing.alt;
+                                        Text {
+                                            x: 4px; y: 2px; width: max(0px,parent.width - 8px); height: max(0px,parent.height - 4px);
+                                            text: missing.alt != "" ? missing.alt : missing.state == "loading" ? @tr("Loading image…") : missing.state == "blocked" ? @tr("Blocked image") : missing.state == "limited" ? @tr("Image exceeds limits") : @tr("Image unavailable");
+                                            wrap: word-wrap; color: root.secondary-text; font-size: TypeScale.caption;
+                                        }
+                                    }
+
                                     // The tiles remain the visual renderer, but
                                     // input is forwarded into the retained Blitz
                                     // document so its native text-selection state
@@ -733,10 +829,10 @@ export component MailReadingPane inherits Rectangle {
                                     email-focus := FocusScope {
                                         y: root.remote-images-blocked ? 60px : 0px;
                                         width: parent.width;
-                                        height: email-surface.width * root.email-content-aspect;
-                                        enabled: root.has_selected && !root.text_mode && !root.source_mode;
+                                        height: root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect;
+                                        enabled: root.has_selected && !root.text_mode && !root.source_mode && !EmailReader.reader-mode;
                                         focus-on-click: true;
-                                        focus-on-tab-navigation: false;
+                                        focus-on-tab-navigation: true;
                                         accessible-role: text;
                                         accessible-label: root.selected_plain_text;
 
@@ -744,16 +840,35 @@ export component MailReadingPane inherits Rectangle {
                                             width: parent.width;
                                             height: parent.height;
                                             enabled: parent.enabled;
-                                            mouse-cursor: text;
+                                            mouse-cursor: EmailReader.destination != "" ? pointer : text;
 
+                                            changed has-hover => { if !self.has-hover { EmailReader.destination = ""; } }
+                                            moved => {
+                                                EmailReader.destination = EmailReader.link-at(self.mouse-x / 1px, self.mouse-y / 1px);
+                                            }
                                             pointer-event(event) => {
+                                                root.drag-x = email-input.mouse-x / 1px; root.drag-y = email-input.mouse-y / 1px;
+                                                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                                                    root.drag-kind = "move";
+                                                    if root.compact {
+                                                        root.touch-x = root.drag-x; root.touch-y = root.drag-y; root.touch-pending = true;
+                                                    } else { root.selecting = true; }
+                                                }
+                                                if event.kind == PointerEventKind.move && root.touch-pending && (abs(root.drag-x - root.touch-x) > 8 || abs(root.drag-y - root.touch-y) > 8) { root.touch-pending = false; }
+                                                if event.kind == PointerEventKind.down {
+                                                    EmailReader.context-link = EmailReader.link-at(email-input.mouse-x / 1px, email-input.mouse-y / 1px);
+                                                }
                                                 if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
-                                                    email-context.show({ x: email-input.mouse-x, y: email-input.mouse-y });
+                                                    email-context.show({ x: email-input.mouse-x, y: email-input.mouse-y + (root.remote-images-blocked ? 60px : 0px) });
                                                 } else if (event.button == PointerEventButton.left || event.kind == PointerEventKind.move || event.kind == PointerEventKind.cancel) {
                                                     if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
                                                         email-focus.focus();
                                                     }
-                                                    root.email-pointer-event(
+                                                    if root.compact && event.kind == PointerEventKind.up && root.touch-pending {
+                                                        root.email-pointer-event(root.touch-x,root.touch-y,"down",false,false,false,false);
+                                                        root.email-pointer-event(root.drag-x,root.drag-y,"up",false,false,false,false);
+                                                    }
+                                                    if !root.compact || root.selecting || event.kind == PointerEventKind.cancel { root.email-pointer-event(
                                                         email-input.mouse-x / 1px,
                                                         email-input.mouse-y / 1px,
                                                         event.kind == PointerEventKind.down ? "down" : event.kind == PointerEventKind.move ? "move" : event.kind == PointerEventKind.up ? "up" : "cancel",
@@ -761,19 +876,66 @@ export component MailReadingPane inherits Rectangle {
                                                         event.modifiers.shift,
                                                         event.modifiers.alt,
                                                         event.modifiers.meta
-                                                    );
+                                                    ); }
+                                                    if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { root.selecting = false; root.touch-pending = false; }
                                                 }
                                             }
                                         }
 
                                         key-pressed(event) => {
-                                            root.email-key-event(event.text, true, event.repeat, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
-                                            accept
+                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "f" { EmailReader.find-open = true; EmailReader.reader-mode = false; find-input.focus(); return accept; }
+                                            if (event.modifiers.control || event.modifiers.meta) && (event.text == "+" || event.text == "=") { EmailReader.command("zoom-in"); return accept; }
+                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "-" { EmailReader.command("zoom-out"); return accept; }
+                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "0" { EmailReader.command("zoom-reset"); return accept; }
+                                            if event.text == Key.F7 { EmailReader.caret-mode = !EmailReader.caret-mode; return accept; }
+                                            if event.text == Key.Escape { EmailReader.command("clear-selection"); return accept; }
+                                            if !event.modifiers.shift && !EmailReader.caret-mode {
+                                                if event.text == Key.LeftArrow { email-scroll.viewport-x = min(0px,email-scroll.viewport-x + 40px); return accept; }
+                                                if event.text == Key.RightArrow { email-scroll.viewport-x = max(-max(0px,email-scroll.viewport-width - email-scroll.visible-width),email-scroll.viewport-x - 40px); return accept; }
+                                                if event.text == Key.DownArrow { EmailReader.command("down"); return accept; }
+                                                if event.text == Key.UpArrow { EmailReader.command("up"); return accept; }
+                                                if event.text == Key.PageDown || event.text == " " { EmailReader.command("page-down"); return accept; }
+                                                if event.text == Key.PageUp { EmailReader.command("page-up"); return accept; }
+                                                if event.text == Key.Home { EmailReader.command("home"); return accept; }
+                                                if event.text == Key.End { EmailReader.command("end"); return accept; }
+                                            }
+                                            if ((event.modifiers.control || event.modifiers.meta) && (event.text == "a" || event.text == "c")) || ((event.modifiers.shift || EmailReader.caret-mode) && (event.text == Key.LeftArrow || event.text == Key.RightArrow || event.text == Key.UpArrow || event.text == Key.DownArrow || event.text == Key.Home || event.text == Key.End || event.text == Key.PageUp || event.text == Key.PageDown)) {
+                                                root.email-key-event(event.text, true, event.repeat, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
+                                                return accept;
+                                            }
+                                            reject
                                         }
+                                        key-released(event) => { reject }
+                                    }
 
-                                        key-released(event) => {
-                                            root.email-key-event(event.text, false, event.repeat, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
-                                            accept
+                                    if EmailReader.caret-mode && EmailReader.selection-end.valid && !root.has_selection && !root.text_mode && !root.source_mode : Rectangle {
+                                        x: EmailReader.selection-end.x * 1px;
+                                        y: EmailReader.selection-end.y * 1px + (root.remote-images-blocked ? 60px : 0px);
+                                        width: 2px; height: EmailReader.selection-end.height * 1px;
+                                        background: root.accent; accessible-role: none;
+                                    }
+                                    for caret[index] in [EmailReader.selection-start,EmailReader.selection-end] : Rectangle {
+                                        visible: root.compact && root.has_selection && caret.valid && !root.text_mode && !root.source_mode;
+                                        x: caret.x * 1px - 18px;
+                                        y: (caret.y + caret.height) * 1px + (root.remote-images-blocked ? 60px : 0px) - 4px;
+                                        width: 36px; height: 36px;
+                                        Rectangle { x: 11px; y: 4px; width: 14px; height: 18px; border-radius: 7px; background: root.accent; }
+                                        TouchArea {
+                                            private property <float> origin-x;
+                                            private property <float> origin-y;
+                                            pointer-event(event) => {
+                                                if event.kind == PointerEventKind.down {
+                                                    root.drag-kind = index == 0 ? "extend-start" : "extend-end";
+                                                    self.origin-x = self.mouse-x / 1px; self.origin-y = self.mouse-y / 1px;
+                                                    root.selecting = true;
+                                                }
+                                                if event.kind == PointerEventKind.move && self.pressed {
+                                                    root.drag-x = caret.x + self.mouse-x / 1px - self.origin-x;
+                                                    root.drag-y = caret.y + self.mouse-y / 1px - self.origin-y;
+                                                    root.email-pointer-event(root.drag-x,root.drag-y,index == 0 ? "extend-start" : "extend-end",false,false,false,false);
+                                                }
+                                                if event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel { root.selecting = false; root.email-pointer-event(0,0,"up",false,false,false,false); }
+                                            }
                                         }
                                     }
 
@@ -782,7 +944,7 @@ export component MailReadingPane inherits Rectangle {
                                         y: 54px;
                                         width: parent.width - 32px;
                                         height: parent.height - 70px;
-                                        text: root.selected_plain_text;
+                                        text: EmailReader.use-authored-text && EmailReader.authored-text != "" ? EmailReader.authored-text : root.selected_plain_text;
                                         read-only: true;
                                         font-size: TypeScale.body-large;
                                     }
@@ -837,6 +999,15 @@ export component MailReadingPane inherits Rectangle {
                                     }
 
                                     Menu {
+                                        MenuItem { title: @tr("Open link"); enabled: EmailReader.context-link != ""; activated => { root.open_email_link(EmailReader.context-link); } }
+                                        MenuItem { title: @tr("Copy link"); enabled: EmailReader.context-link != ""; activated => {
+                                            clipboard-source.text = EmailReader.context-link; clipboard-source.select-all(); clipboard-source.copy();
+                                        } }
+                                        MenuItem { title: @tr("View original plain text"); enabled: EmailReader.authored-text != ""; activated => { EmailReader.use-authored-text = true; root.text_mode = true; EmailReader.reader-mode = false; } }
+                                        MenuItem { title: @tr("Retry images"); activated => { EmailReader.retry-images(); } }
+                                        MenuItem { title: @tr("Copy formatted selection"); enabled: root.has_selection; activated => { EmailReader.command("copy-rich"); } }
+                                        MenuItem { title: @tr("Caret browsing"); checkable: true; checked: EmailReader.caret-mode; activated => { EmailReader.caret-mode = !EmailReader.caret-mode; } }
+                                        MenuItem { title: @tr("Use dark reader"); checkable: true; checked: EmailReader.dark-reader; activated => { EmailReader.dark-reader = !EmailReader.dark-reader; EmailReader.reader-mode = true; } }
                                         MenuItem {
                                             title: @tr("Copy selected text");
                                             enabled: root.has_selection;
@@ -865,29 +1036,66 @@ export component MailReadingPane inherits Rectangle {
                                     }
                                 }
 
-                                // Keep link menus as siblings above the
-                                // document-wide menu area. ContextMenuArea is
-                                // an input item, so nesting it under another
-                                // context area would let the parent consume a
-                                // right-click before the link can inspect it.
-                                for link in root.email_links : EmailLinkContextArea {
-                                    x: link.x * email-surface.width;
-                                    y: link.y * email-surface.width + (root.remote-images-blocked ? 60px : 0px);
-                                    width: link.width * email-surface.width;
-                                    height: link.height * email-surface.width;
-                                    enabled: !root.text_mode && !root.source_mode;
-                                    url: link.url;
-                                    open-link => { root.open_email_link(link.url); }
-                                    copy-link => {
-                                        clipboard-source.text = link.url;
-                                        clipboard-source.select-all();
-                                        clipboard-source.copy();
-                                        root.copy_email_status("Copied link");
+                                // Keyboard/accessibility targets never intercept pointer drags.
+                                for link in root.email_links : FocusScope {
+                                    x: link.x * root.email-viewport-width;
+                                    y: link.y * root.email-viewport-width + (root.remote-images-blocked ? 60px : 0px);
+                                    width: link.width * root.email-viewport-width;
+                                    height: link.height * root.email-viewport-width;
+                                    enabled: !root.text_mode && !root.source_mode && !EmailReader.reader-mode;
+                                    focus-on-click: false;
+                                    accessible-role: button;
+                                    accessible-label: @tr("Link: {}", link.name);
+                                    accessible-description: link.url;
+                                    accessible-action-default => { root.open_email_link(link.url); }
+                                    changed has-focus => {
+                                        if self.has-focus {
+                                            EmailReader.destination = link.url; EmailReader.context-link = link.url;
+                                            let top = self.y + root.email-scroll-y;
+                                            if top < 0px { root.email-scroll-y = -self.y; }
+                                            if top + self.height > email-scroll.visible-height { root.email-scroll-y = min(0px,email-scroll.visible-height - self.y - self.height); }
+                                            root.email-scroll(-root.email-scroll-y / 1px,email-scroll.visible-height / 1px);
+                                        }
+                                    }
+                                    key-pressed(event) => {
+                                        if event.text == Key.Return || event.text == " " { root.open_email_link(link.url); return accept; }
+                                        reject
+                                    }
+                                    Rectangle { width: parent.width; height: parent.height; border-width: parent.has-focus ? 2px : 0px; border-color: root.accent; background: transparent; }
+                                }
+
+                            }
+                            if EmailReader.reader-mode : Rectangle {
+                                width: parent.width; height: parent.height;
+                                background: EmailReader.dark-reader ? #171a21 : root.surface;
+                                reader-list := ListView {
+                                    width: parent.width; height: parent.height;
+                                    viewport-width: self.visible-width;
+                                    for item in EmailReader.items : VerticalBox {
+                                            width: reader-list.visible-width;
+                                            padding: 16px; spacing: 0px;
+                                            if item.url != "" : ReaderButton {
+                                                text: item.name; accessible-label: item.name;
+                                                clicked => { root.open_email_link(item.url); }
+                                            }
+                                            if item.url == "" : Text {
+                                                text: item.name; wrap: word-wrap;
+                                                font-size: item.kind == "heading" ? 22px * EmailReader.zoom : 16px * EmailReader.zoom;
+                                                font-weight: item.kind == "heading" ? 700 : 400;
+                                                color: EmailReader.dark-reader ? #f0f1f4 : root.heading;
+                                                accessible-role: text;
+                                                accessible-label: item.kind == "heading" ? @tr("Heading: {}", item.name) : item.name;
+                                            }
                                     }
                                 }
                             }
+
                         }
 
+                        Text {
+                            height: EmailReader.destination == "" ? 0px : 20px;
+                            text: EmailReader.destination; overflow: elide; color: root.secondary-text; font-size: TypeScale.caption;
+                        }
                         Rectangle { height: root.compact ? 10px : 12px; }
 
                     }
@@ -1052,9 +1260,10 @@ export component MailReadingPane inherits Rectangle {
                     y: -10000px;
                     width: 1px;
                     height: 1px;
-                    visible: true;
-                    enabled: true;
+                    visible: false;
+                    enabled: false;
                     read-only: true;
+                    accessible-role: none;
                     text: "";
                 }
 

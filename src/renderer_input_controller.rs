@@ -1,184 +1,292 @@
-//! Native email-document pointer, scrolling, keyboard, link, and clipboard
-//! callback wiring.
-
+//! One document input route for links, selection and reader controls.
 use super::*;
 use crate::renderer::InputModifiers;
+fn banner_height(app: &AppWindow) -> f32 {
+    if app.get_remote_images_blocked() {
+        60.0
+    } else {
+        0.0
+    }
+}
+
+fn repaint_reader(app: &AppWindow, renderer: &Rc<RefCell<GpuEmailRenderer>>, gpu: bool) {
+    if !gpu {
+        let (width, height) = email_viewport_size(app);
+        let result =
+            renderer
+                .borrow_mut()
+                .render_cpu_if_needed(width, height, app.window().scale_factor());
+        match result {
+            Ok(Some(frame)) => apply_cpu_frame(app, frame),
+            Ok(None) => {}
+            Err(error) => {
+                app.global::<EmailReader>().set_notice(error.into());
+                app.global::<EmailReader>().set_reader_mode(false);
+                app.set_text_mode(true);
+            }
+        }
+    }
+    sync_reader_metadata(app, renderer);
+    if !renderer.borrow().selection_active() {
+        update_email_selection(app, renderer);
+    }
+    app.window().request_redraw();
+}
 
 pub(super) fn register_renderer_input_callbacks(
     app: &AppWindow,
-    email_renderer: &Rc<RefCell<GpuEmailRenderer>>,
-    use_wgpu: bool,
+    renderer: &Rc<RefCell<GpuEmailRenderer>>,
+    gpu: bool,
 ) {
-    let app_weak = app.as_weak();
+    let weak = app.as_weak();
+    let r = renderer.clone();
     app.on_open_email_link(move |url| {
-        let Some(app) = app_weak.upgrade() else {
+        let Some(app) = weak.upgrade() else {
             return;
         };
-        match open_email_link(url.as_str()) {
-            Ok(()) => app.set_render_status(UiMessage::detail("Opened {}", url)),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not open link: {}", error))
+        if url.starts_with('#') {
+            if let Some(y) = r.borrow().fragment_y(&url) {
+                let y = y + banner_height(&app);
+                app.set_email_scroll_y(-y);
+                app.invoke_email_scroll(y, app.get_email_viewport_height());
             }
+            return;
         }
-    });
-
-    let app_weak = app.as_weak();
-    app.on_copy_email_status(move |status| {
-        if let Some(app) = app_weak.upgrade() {
-            let message = match status.as_str() {
-                "Copied HTML source" => UiMessage::plain("Copied HTML source"),
-                "Copied selected text" => UiMessage::plain("Copied selected text"),
-                "Copied email text" => UiMessage::plain("Copied email text"),
-                "Copied link" => UiMessage::plain("Copied link"),
-                _ => {
-                    tracing::warn!(key = %status, "ignored unknown copy-status message key");
-                    return;
+        if let Ok(parsed) = url::Url::parse(&url)
+            && parsed.scheme() == "mailto"
+        {
+            app.invoke_open_compose();
+            // Form decoding also handles UTF-8 and percent escapes in addresses.
+            let address = percent_encoding::percent_decode_str(parsed.path())
+                .decode_utf8_lossy()
+                .into_owned();
+            app.set_compose_to(address.into());
+            for (key, value) in parsed.query_pairs() {
+                match key.as_ref() {
+                    "subject" => app.set_compose_subject(value.into_owned().into()),
+                    "cc" => app.set_compose_cc(value.into_owned().into()),
+                    "bcc" => app.set_compose_bcc(value.into_owned().into()),
+                    "body" => app.invoke_edit_compose_body(value.into_owned().into(), 0, 0),
+                    _ => {}
                 }
-            };
-            app.set_render_status(message);
+            }
+            return;
+        }
+        if let Err(error) = open_email_link(&url) {
+            app.set_render_status(UiMessage::detail("Could not open link: {}", error));
         }
     });
+    let r = renderer.clone();
+    app.global::<EmailReader>()
+        .on_link_at(move |x, y| r.borrow().link_at(x, y).unwrap_or_default().into());
 
-    let app_weak = app.as_weak();
-    let renderer_for_pointer = Rc::clone(email_renderer);
-    let use_wgpu_for_pointer = use_wgpu;
+    let weak = app.as_weak();
+    let r = renderer.clone();
+    let pending = Rc::new(Cell::new(false));
     app.on_email_pointer_event(move |x, y, kind, control, shift, alt, meta| {
-        let selection_changed = renderer_for_pointer.borrow_mut().handle_pointer_event(
+        let changed = r.borrow_mut().handle_pointer_event(
             x,
             y,
-            kind.as_str(),
+            &kind,
             InputModifiers::new(control, shift, alt, meta),
         );
-        let selection_finished = kind.as_str() == "up" || kind.as_str() == "cancel";
-        if !selection_changed && !selection_finished {
-            return;
-        }
-        let Some(app) = app_weak.upgrade() else {
+        let activation = r.borrow_mut().take_activation();
+        let Some(app) = weak.upgrade() else {
             return;
         };
-        if !use_wgpu_for_pointer {
-            let (width, height) = email_viewport_size(&app);
-            match renderer_for_pointer.borrow_mut().render_cpu_if_needed(
-                width,
-                height,
-                app.window().scale_factor(),
-            ) {
-                Ok(Some(frame)) => apply_cpu_frame(&app, frame),
-                Ok(None) => {}
-                Err(error) => app.set_render_status(UiMessage::detail(
-                    "Blitz software selection render failed: {}",
-                    error,
-                )),
-            }
+        if let Some(url) = activation {
+            app.invoke_open_email_link(url.into());
         }
-        // Extracting the complete selected string on every drag sample is
-        // linear in the selection size. The DOM highlight still repaints on
-        // moves; clipboard state is published once the gesture finishes.
-        if selection_finished || kind.as_str() == "down" {
-            update_email_selection(&app, &renderer_for_pointer);
+        if kind == "up" || kind == "cancel" {
+            update_email_selection(&app, &r);
         }
-        if selection_changed {
-            app.window().request_redraw();
+        if changed && !pending.replace(true) {
+            let weak = app.as_weak();
+            let r = r.clone();
+            let pending = pending.clone();
+            Timer::single_shot(Duration::from_millis(16), move || {
+                pending.set(false);
+                if let Some(app) = weak.upgrade() {
+                    repaint_reader(&app, &r, gpu);
+                }
+            });
         }
     });
-
-    let app_weak = app.as_weak();
-    let renderer_for_scroll = Rc::clone(email_renderer);
-    let use_wgpu_for_scroll = use_wgpu;
-    app.on_email_scroll(move |scroll_y, viewport_height| {
-        let needs_frame = renderer_for_scroll
+    let weak = app.as_weak();
+    let r = renderer.clone();
+    app.on_email_scroll(move |y, height| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let dirty = r
             .borrow_mut()
-            .set_visible_region(scroll_y, viewport_height);
-        if !needs_frame {
-            return;
+            .set_visible_region((y - banner_height(&app)).max(0.0), height);
+        if dirty {
+            repaint_reader(&app, &r, gpu);
         }
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if !use_wgpu_for_scroll {
-            let (width, height) = email_viewport_size(&app);
-            match renderer_for_scroll.borrow_mut().render_cpu_if_needed(
-                width,
-                height,
-                app.window().scale_factor(),
-            ) {
-                Ok(Some(frame)) => apply_cpu_frame(&app, frame),
-                Ok(None) => {}
-                Err(error) => app.set_render_status(UiMessage::detail(
-                    "Blitz software tile render failed: {}",
-                    error,
-                )),
-            }
-        }
-        app.window().request_redraw();
     });
-
-    let app_weak = app.as_weak();
-    let renderer_for_keyboard = Rc::clone(email_renderer);
-    let use_wgpu_for_keyboard = use_wgpu;
+    let weak = app.as_weak();
+    let r = renderer.clone();
     app.on_email_key_event(move |text, pressed, repeat, control, shift, alt, meta| {
-        let copied = renderer_for_keyboard.borrow_mut().handle_key_event(
-            text.as_str(),
+        let copied = r.borrow_mut().handle_key_event(
+            &text,
             pressed,
             repeat,
             InputModifiers::new(control, shift, alt, meta),
         );
-        let needs_repaint = renderer_for_keyboard.borrow().needs_repaint();
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if !use_wgpu_for_keyboard && needs_repaint {
-            let (width, height) = email_viewport_size(&app);
-            match renderer_for_keyboard.borrow_mut().render_cpu_if_needed(
-                width,
-                height,
-                app.window().scale_factor(),
-            ) {
-                Ok(Some(frame)) => apply_cpu_frame(&app, frame),
-                Ok(None) => {}
-                Err(error) => app.set_render_status(UiMessage::detail(
-                    "Blitz software selection render failed: {}",
-                    error,
-                )),
+        if let Some(app) = weak.upgrade() {
+            if let Some(text) = copied {
+                copy_text(&app, text);
+            }
+            if r.borrow().needs_repaint() {
+                let (_, caret) = r.borrow().selection_carets();
+                if caret.valid {
+                    let top = (-app.get_email_scroll_y() - banner_height(&app)).max(0.0);
+                    let height = app.get_email_viewport_height();
+                    let y = if caret.y < top {
+                        caret.y
+                    } else if caret.y + caret.height > top + height {
+                        caret.y + caret.height - height
+                    } else {
+                        top
+                    };
+                    app.set_email_scroll_y(-y - banner_height(&app));
+                    r.borrow_mut().set_visible_region(y, height);
+                }
+                repaint_reader(&app, &r, gpu);
             }
         }
-        if needs_repaint {
-            update_email_selection(&app, &renderer_for_keyboard);
-        }
-        if let Some(text) = copied {
-            app.set_clipboard_request(text.into());
-            app.set_clipboard_request_id(app.get_clipboard_request_id() + 1);
-            app.set_render_status(UiMessage::plain("Copied selected text"));
-        }
-        if needs_repaint {
-            app.window().request_redraw();
-        }
     });
-
-    let app_weak = app.as_weak();
-    let renderer_for_select_all = Rc::clone(email_renderer);
-    let use_wgpu_for_select_all = use_wgpu;
+    let weak = app.as_weak();
+    let r = renderer.clone();
     app.on_select_email_text(move || {
-        renderer_for_select_all.borrow_mut().select_all();
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if !use_wgpu_for_select_all {
-            let (width, height) = email_viewport_size(&app);
-            match renderer_for_select_all.borrow_mut().render_cpu_if_needed(
-                width,
-                height,
-                app.window().scale_factor(),
-            ) {
-                Ok(Some(frame)) => apply_cpu_frame(&app, frame),
-                Ok(None) => {}
-                Err(error) => app.set_render_status(UiMessage::detail(
-                    "Blitz software selection render failed: {}",
-                    error,
-                )),
+        r.borrow_mut().select_all();
+        if let Some(app) = weak.upgrade() {
+            repaint_reader(&app, &r, gpu);
+        }
+    });
+    let weak = app.as_weak();
+    app.on_copy_email_status(move |status| {
+        if let Some(app) = weak.upgrade() {
+            match status.as_str() {
+                "Copied HTML source" => {
+                    app.set_render_status(UiMessage::plain("Copied HTML source"))
+                }
+                "Copied selected text" => {
+                    app.set_render_status(UiMessage::plain("Copied selected text"))
+                }
+                "Copied email text" => app.set_render_status(UiMessage::plain("Copied email text")),
+                "Copied link" => app.set_render_status(UiMessage::plain("Copied link")),
+                _ => {}
             }
         }
-        update_email_selection(&app, &renderer_for_select_all);
-        app.window().request_redraw();
     });
+    let weak = app.as_weak();
+    let r = renderer.clone();
+    app.global::<EmailReader>()
+        .on_find(move |query, direction| {
+            let (index, count, y) = r.borrow_mut().find(&query, direction);
+            if let Some(app) = weak.upgrade() {
+                app.global::<EmailReader>()
+                    .set_find_status(format!("{index} / {count}").into());
+                if let Some(y) = y {
+                    app.set_email_scroll_y(-y - banner_height(&app));
+                    r.borrow_mut()
+                        .set_visible_region(y, app.get_email_viewport_height());
+                }
+                repaint_reader(&app, &r, gpu);
+            }
+        });
+    let weak = app.as_weak();
+    let r = renderer.clone();
+    app.global::<EmailReader>().on_command(move |command| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let reader = app.global::<EmailReader>();
+        let requested_zoom = command.strip_prefix("zoom-set:").and_then(|value| {
+            value
+                .trim()
+                .trim_end_matches('%')
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .map(|value| value / 100.0)
+        });
+        let command = if requested_zoom.is_some() {
+            "zoom-set"
+        } else {
+            command.as_str()
+        };
+        match command {
+            "zoom-set" | "zoom-in" | "zoom-out" | "zoom-reset" | "fit" => {
+                let old = r.borrow().zoom;
+                let zoom = match command {
+                    "zoom-set" => requested_zoom.unwrap_or(old),
+                    "zoom-in" => old * 1.2,
+                    "zoom-out" => old / 1.2,
+                    "fit" => old / reader.get_width_ratio().max(1.0),
+                    _ => 1.0,
+                }
+                .clamp(0.5, 3.0);
+                r.borrow_mut().set_zoom(zoom);
+                reader.set_zoom(zoom);
+                let banner = banner_height(&app);
+                let scroll = -app.get_email_scroll_y();
+                let scroll = if scroll < banner {
+                    scroll
+                } else {
+                    banner + (scroll - banner) * zoom / old
+                };
+                app.set_email_scroll_y(-scroll);
+                r.borrow_mut().set_visible_region(
+                    (scroll - banner).max(0.0),
+                    app.get_email_viewport_height(),
+                );
+                repaint_reader(&app, &r, gpu);
+            }
+            "clear-selection" => {
+                r.borrow_mut().clear_selection();
+                repaint_reader(&app, &r, gpu);
+            }
+            "copy-rich" => {
+                let renderer = r.borrow();
+                let text = renderer.selected_text().unwrap_or_default();
+                let html = renderer.selected_html();
+                if !crate::reader_clipboard::set_html(&html, &text) {
+                    copy_text(&app, text);
+                }
+            }
+            "copy-all" => copy_text(&app, r.borrow().plain_text()),
+            "page-up" | "page-down" | "up" | "down" | "home" | "end" => {
+                let height = app.get_email_viewport_height();
+                let current = -app.get_email_scroll_y();
+                let bottom = (app.get_email_content_aspect()
+                    * app.get_email_viewport_width()
+                    * reader.get_width_ratio()
+                    + banner_height(&app)
+                    - height)
+                    .max(0.0);
+                let y = match command {
+                    "page-up" => current - height * 0.85,
+                    "page-down" => current + height * 0.85,
+                    "up" => current - 40.0,
+                    "down" => current + 40.0,
+                    "home" => 0.0,
+                    _ => bottom,
+                }
+                .clamp(0.0, bottom);
+                app.set_email_scroll_y(-y);
+                r.borrow_mut()
+                    .set_visible_region((y - banner_height(&app)).max(0.0), height);
+                repaint_reader(&app, &r, gpu);
+            }
+            _ => {}
+        }
+    });
+}
+fn copy_text(app: &AppWindow, text: String) {
+    app.set_clipboard_request(text.into());
+    app.set_clipboard_request_id(app.get_clipboard_request_id().wrapping_add(1));
 }

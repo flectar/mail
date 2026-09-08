@@ -107,6 +107,7 @@ export struct EmailLink {
     width: float,
     height: float,
     url: string,
+    name: string
 }
 
 // Email HTML is rasterized into bounded vertical tiles. Coordinates are
@@ -228,4 +229,38 @@ export struct ContactAccountRow {
     has_avatar: bool,
     count: string,
     selected: bool,
+}
+
+// Email document controls are shared directly with the native renderer.
+export struct ReaderItem { name: string, url: string, kind: string, y: float }
+export struct ReaderImage { x: float, y: float, width: float, height: float, alt: string, state: string }
+export struct ReaderCaret { x: float, y: float, height: float, valid: bool }
+export global EmailReader {
+    in-out property <bool> available: false;
+    in-out property <bool> body-pending: false;
+    in-out property <ReaderCaret> selection-start;
+    in-out property <ReaderCaret> selection-end;
+    in-out property <[ReaderImage]> images;
+    in-out property <int> revision: -1;
+    in-out property <int> message-id: -1;
+    callback ensure-body(int);
+    callback retry-images();
+    in-out property <int> failed-images;
+    pure callback link-at(float, float) -> string;
+    callback command(string);
+    callback find(string, int);
+    in-out property <float> zoom: 1;
+    in-out property <float> width-ratio: 1;
+    in-out property <string> destination;
+    in-out property <string> context-link;
+    in-out property <string> query;
+    in-out property <string> find-status;
+    in-out property <string> notice;
+    in-out property <bool> find-open: false;
+    in-out property <bool> reader-mode: false;
+    in-out property <bool> dark-reader: false;
+    in-out property <bool> caret-mode: false;
+    in-out property <[ReaderItem]> items;
+    in-out property <string> authored-text;
+    in-out property <bool> use-authored-text: false;
 }

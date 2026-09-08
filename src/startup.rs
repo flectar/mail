@@ -107,6 +107,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             has_replied: message.has_replied,
             labels: message.labels,
             html: None,
+            text: None,
             body_pending: true,
             sender_verification: message.sender_verification,
         }
@@ -652,6 +653,7 @@ mod warm_start_tests {
             has_replied: true,
             labels: Vec::new(),
             html: Some("<p>body must not enter warm cache</p>".into()),
+            text: Some("Plain body must not enter warm cache".into()),
             body_pending: false,
             sender_verification: "domain".into(),
         }

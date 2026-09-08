@@ -1069,7 +1069,7 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
     .add_tag_attributes("font", ["face", "size", "color"])
     .add_tag_attributes("a", ["href", "title"])
     .url_schemes(std::collections::HashSet::from([
-        "http", "https", "mailto", "cid", "data",
+        "http", "https", "mailto", "tel", "cid", "data",
     ]))
     // CSS is needed by the native Blitz renderer for email typography and
     // layout. It is still inert here because executable script content stays

@@ -122,6 +122,7 @@ pub(super) fn apply_background_mail_page(
                 .find(|message| message.id == selected_detail.id)
         {
             summary.html = selected_detail.html;
+            summary.text = selected_detail.text;
             summary.to = selected_detail.to;
             summary.body_pending = false;
         }
@@ -416,9 +417,11 @@ pub(super) fn render_current(
     schedule_favicon_fetches(app, state, runtime, visible);
 
     if let Some(email) = selected_email {
+        app.global::<EmailReader>().invoke_ensure_body(email.id);
         apply_selected_favicon(app, favicon_icons.get(&email.domain));
         apply_email(app, email, &email_renderer, use_wgpu, allow_remote_images)
     } else {
+        app.global::<EmailReader>().invoke_ensure_body(-1);
         email_renderer.borrow_mut().clear();
         app.set_selected_sender("".into());
         app.set_selected_address("".into());
@@ -440,6 +443,10 @@ pub(super) fn render_current(
         app.set_email_scroll_y(0.0);
         app.set_email_content_aspect(900.0 / 520.0);
         app.set_email_links(ModelRc::new(VecModel::default()));
+        clear_reader_projection(app);
+        app.global::<EmailReader>().set_message_id(-1);
+        app.global::<EmailReader>().set_authored_text("".into());
+        app.global::<EmailReader>().set_notice("".into());
         app.set_selected_plain_text("".into());
         app.set_selected_source("".into());
         app.set_selected_text("".into());
@@ -1199,6 +1206,7 @@ mod tests {
             has_replied: false,
             labels: Vec::new(),
             html: None,
+            text: None,
             body_pending: true,
             sender_verification: String::new(),
         }
