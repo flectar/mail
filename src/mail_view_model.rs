@@ -759,9 +759,52 @@ fn label_summary(ids: &[i64], labels: &[flectar_mail_core::models::Label]) -> St
 }
 
 pub(super) fn slint_image(icon: &FaviconImage) -> Image {
-    let pixels =
-        SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&icon.pixels, icon.width, icon.height);
-    Image::from_rgba8(pixels)
+    // Cloning source RGBA and reconstructing Slint images on every selection
+    // invalidates otherwise identical model rows and repeats texture uploads.
+    type Entry = (std::sync::Weak<[u8]>, u32, u32, Image, usize);
+    thread_local! { static IMAGES: RefCell<std::collections::VecDeque<Entry>> = const { RefCell::new(std::collections::VecDeque::new()) }; }
+    IMAGES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.retain(|entry| entry.0.strong_count() > 0);
+        if let Some(index) = cache.iter().position(|entry| {
+            entry.1 == icon.width
+                && entry.2 == icon.height
+                && entry
+                    .0
+                    .upgrade()
+                    .is_some_and(|pixels| Arc::ptr_eq(&pixels, &icon.pixels))
+        }) {
+            let entry = cache.remove(index).unwrap();
+            let image = entry.3.clone();
+            cache.push_back(entry);
+            return image;
+        }
+        let pixels = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+            &icon.pixels,
+            icon.width,
+            icon.height,
+        );
+        let image = Image::from_rgba8(pixels);
+        const BUDGET: usize = 4 * 1024 * 1024;
+        if icon.pixels.len() <= BUDGET {
+            let mut bytes = cache.iter().map(|entry| entry.4).sum::<usize>();
+            while cache.len() >= 128 || bytes + icon.pixels.len() > BUDGET {
+                if let Some(entry) = cache.pop_front() {
+                    bytes -= entry.4;
+                } else {
+                    break;
+                }
+            }
+            cache.push_back((
+                Arc::downgrade(&icon.pixels),
+                icon.width,
+                icon.height,
+                image.clone(),
+                icon.pixels.len(),
+            ));
+        }
+        image
+    })
 }
 
 pub(super) fn apply_selected_favicon(app: &AppWindow, icons: Option<&FaviconImages>) {
@@ -1189,6 +1232,17 @@ pub(super) fn make_account_mailbox_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unchanged_images_keep_their_identity() {
+        let icon = FaviconImage {
+            width: 1,
+            height: 1,
+            pixels: vec![0, 0, 0, 255].into(),
+        };
+        let image = slint_image(&icon);
+        assert_eq!(image, slint_image(&icon.clone()));
+    }
 
     #[test]
     fn browsing_keeps_only_the_selected_body_in_memory() {

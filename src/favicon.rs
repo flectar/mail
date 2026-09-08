@@ -30,7 +30,7 @@ const MISSING_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 pub struct FaviconImage {
     pub width: u32,
     pub height: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: std::sync::Arc<[u8]>,
 }
 
 #[derive(Clone, Debug)]
@@ -368,7 +368,7 @@ fn render_brand_icon(flattened: &DynamicImage, pixel_side: u32) -> FaviconImage 
     FaviconImage {
         width: pixel_side,
         height: pixel_side,
-        pixels: canvas.into_raw(),
+        pixels: canvas.into_raw().into(),
     }
 }
 
@@ -466,7 +466,7 @@ fn resize_profile(image: &DynamicImage, pixel_side: u32) -> FaviconImage {
     FaviconImage {
         width: pixel_side,
         height: pixel_side,
-        pixels: image.into_raw(),
+        pixels: image.into_raw().into(),
     }
 }
 

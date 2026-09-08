@@ -5464,12 +5464,12 @@ mod tests {
                 small: FaviconImage {
                     width: 1,
                     height: 1,
-                    pixels: vec![0; bytes / 2],
+                    pixels: vec![0; bytes / 2].into(),
                 },
                 regular: FaviconImage {
                     width: 1,
                     height: 1,
-                    pixels: vec![0; bytes - bytes / 2],
+                    pixels: vec![0; bytes - bytes / 2].into(),
                 },
             }
         }
