@@ -2626,6 +2626,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         if mail_metadata_refresh_requested_for_core.get()
             && !mail_metadata_refresh_in_progress_for_core.get()
+            && !mail_work::actions_pending(&mail_update_state.borrow())
         {
             let (using_core, core, scope) = {
                 let state = mail_update_state.borrow();
@@ -2643,6 +2644,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         if mail_list_refresh_requested_for_core.get()
             && !mail_list_refresh_in_progress_for_core.get()
+            && !mail_work::actions_pending(&mail_update_state.borrow())
         {
             let (using_core, core, scope, query) = {
                 let state = mail_update_state.borrow();

@@ -225,6 +225,8 @@ pub(super) fn register(
                 None => app.set_render_status(UiMessage::plain("Message action completed.")),
             }
         }
+        // Core events accumulated during a batch need only one metadata/list refresh.
+        app.invoke_drain_core_updates();
     });
 }
 
@@ -358,6 +360,12 @@ fn enqueue_batch<T>(
     Ok(())
 }
 
+pub(super) fn actions_pending(state: &InboxState) -> bool {
+    state
+        .mail_work
+        .as_ref()
+        .is_some_and(|work| !work.pending.is_empty())
+}
 
 #[cfg(test)]
 mod tests {
