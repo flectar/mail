@@ -10,6 +10,7 @@ mod latest_load;
 mod mail;
 mod mail_render_projection;
 mod mail_view_model;
+mod mail_work;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -313,6 +314,7 @@ struct SyncUpdate {
 }
 
 struct MailListUpdate {
+    view_generation: u64,
     scope: String,
     query: String,
     kind: MailListUpdateKind,
@@ -401,6 +403,7 @@ struct InboxState {
     email_rows: Rc<VecModel<EmailRow>>,
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
+    mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
     sidebar_rows: Rc<SidebarModel>,
@@ -624,9 +627,9 @@ fn resolve_mail_drop(
 }
 
 fn perform_mail_drop(
-    app: &AppWindow,
+    _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Runtime,
     payload: &MailDragPayload,
     target_scope: &str,
     target_account_id: i32,
@@ -650,61 +653,20 @@ fn perform_mail_drop(
         )
     };
 
-    let mut completed_ids = Vec::new();
-    let mut moved_ids = Vec::new();
-    let mut first_error = None;
-    for (message_id, thread_id, destination) in operations {
-        let result = match &destination {
-            MailDropDestination::Action(action) => {
-                runtime.block_on(core.perform_message_action(thread_id, action))
-            }
-            MailDropDestination::Folder(folder_id) => {
-                runtime.block_on(core.move_thread_to_folder(thread_id, *folder_id))
-            }
-            MailDropDestination::Label(label_id) => {
-                runtime.block_on(core.perform_label_action(thread_id, *label_id, true))
-            }
-            MailDropDestination::Route(target) => {
-                runtime.block_on(core.route_thread_to_tab(thread_id, target.clone()))
-            }
-        };
-        match result {
-            Ok(()) => {
-                completed_ids.push(message_id);
-                if matches!(
-                    destination,
-                    MailDropDestination::Action(
-                        "archive" | "spam" | "trash" | "not_spam" | "unarchive"
-                    ) | MailDropDestination::Folder(_)
-                ) {
-                    moved_ids.push(message_id);
-                }
-            }
-            Err(error) if first_error.is_none() => first_error = Some(error),
-            Err(_) => {}
-        }
-    }
-
-    {
-        let mut state = state.borrow_mut();
-        for id in &completed_ids {
-            state.checked_ids.remove(id);
-        }
-        if state.selected_id.is_some_and(|id| moved_ids.contains(&id)) {
-            state.selected_id = None;
-        }
-    }
-    let refresh_result = refresh_from_source(app, state, runtime, true, &moved_ids);
-    if let Some(error) = first_error {
-        return Err(error);
-    }
-    refresh_result
+    mail_work::enqueue(
+        state,
+        core,
+        operations
+            .into_iter()
+            .map(|(id, thread, destination)| (id, thread, mail_work::Operation::Drop(destination)))
+            .collect(),
+    )
 }
 
 fn perform_mail_list_action(
-    app: &AppWindow,
+    _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Runtime,
     trigger_id: i32,
     action: &str,
 ) -> Result<(), String> {
@@ -736,41 +698,14 @@ fn perform_mail_list_action(
         )
     };
 
-    let mut completed_ids = Vec::new();
-    let mut first_error = None;
-    for (id, thread_id) in operations {
-        match runtime.block_on(core.perform_message_action(thread_id, action)) {
-            Ok(()) => completed_ids.push(id),
-            Err(error) if first_error.is_none() => first_error = Some(error),
-            Err(_) => {}
-        }
-    }
-
-    {
-        let mut state = state.borrow_mut();
-        for id in &completed_ids {
-            state.checked_ids.remove(id);
-        }
-        if completed_ids.len() == 1 {
-            state.selected_id = completed_ids.first().copied();
-        }
-    }
-    let had_completed = !completed_ids.is_empty();
-    let moved_ids = if matches!(action, "archive" | "spam" | "trash") {
-        completed_ids
-    } else {
-        Vec::new()
-    };
-    let refresh_result = if !had_completed && first_error.is_some() {
-        refresh_rows_only(app, state, runtime);
-        Ok(())
-    } else {
-        refresh_from_source(app, state, runtime, true, &moved_ids)
-    };
-    if let Some(error) = first_error {
-        return Err(error);
-    }
-    refresh_result
+    mail_work::enqueue(
+        state,
+        core,
+        operations
+            .into_iter()
+            .map(|(id, thread)| (id, thread, mail_work::Operation::Action(action.to_owned())))
+            .collect(),
+    )
 }
 
 #[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
@@ -834,6 +769,7 @@ impl InboxState {
             using_core: false,
             mailboxes: Vec::new(),
             unified_mailboxes: Vec::new(),
+            mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from(["categories".into(), "labels".into()]),
             sidebar_rows: Rc::new(SidebarModel::default()),
@@ -1282,6 +1218,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_emails(Rc::clone(&initial_state.email_rows).into());
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
+    mail_work::register(&app, &state, &runtime);
 
     let state_for_mail_drag = Rc::clone(&state);
     app.global::<MailDragApi>()
@@ -1350,10 +1287,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 target_account_id,
                 target_folder_id,
             ) {
-                Ok(()) => {
-                    app.set_render_status(UiMessage::plain("Message action completed."));
-                    true
-                }
+                Ok(()) => true,
                 Err(error) => {
                     app.set_render_status(UiMessage::detail("Message action failed: {}", error));
                     false
@@ -2565,7 +2499,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             match update.kind {
                 MailListUpdateKind::Refresh => {
                     mail_list_refresh_in_progress_for_result.set(false);
-                    if update.scope == current_scope && update.query == current_query {
+                    if update.scope == current_scope
+                        && update.query == current_query
+                        && mail_work::accepts_background(
+                            &mail_update_state.borrow(),
+                            update.view_generation,
+                        )
+                    {
                         match update.result {
                             Ok(page) => apply_background_mail_page(
                                 &app,
@@ -2586,7 +2526,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         continue;
                     }
                     mail_pagination_in_progress_for_result.set(false);
-                    let still_current = update.scope == current_scope
+                    let still_current = mail_work::accepts_background(
+                        &mail_update_state.borrow(),
+                        update.view_generation,
+                    ) && update.scope == current_scope
                         && update.query == current_query
                         && mail_update_state.borrow().next_cursor == Some(cursor);
                     if still_current {
@@ -2713,6 +2656,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             if using_core && let Some(core) = core {
                 mail_list_refresh_requested_for_core.set(false);
                 mail_list_refresh_in_progress_for_core.set(true);
+                let view_generation = mail_work::generation(&mail_update_state.borrow());
                 let updates = mail_list_tx_for_core.clone();
                 mail_update_runtime.spawn(async move {
                     let result = core
@@ -2720,6 +2664,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         .await;
                     let _ = updates
                         .send(MailListUpdate {
+                            view_generation,
                             scope,
                             query,
                             kind: MailListUpdateKind::Refresh,
@@ -3709,11 +3654,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        match perform_selected_action(&app, &state_for_action, &runtime_for_action, &action) {
-            Ok(()) => app.set_render_status(UiMessage::plain("Message action completed.")),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Message action failed: {}", error))
-            }
+        if let Err(error) =
+            perform_selected_action(&app, &state_for_action, &runtime_for_action, &action)
+        {
+            app.set_render_status(UiMessage::detail("Message action failed: {}", error));
         }
     });
 
@@ -3724,51 +3668,46 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        match perform_mail_list_action(
+        if let Err(error) = perform_mail_list_action(
             &app,
             &state_for_row_action,
             &runtime_for_row_action,
             id,
             &action,
         ) {
-            Ok(()) => app.set_render_status(UiMessage::plain("Message action completed.")),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Message action failed: {}", error))
-            }
+            app.set_render_status(UiMessage::detail("Message action failed: {}", error));
         }
     });
 
     let app_weak = app.as_weak();
     let state_for_label = Rc::clone(&state);
-    let runtime_for_label = Rc::clone(&runtime);
     app.on_toggle_mail_label(move |label_id, applied| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let (core, thread_id) = {
+        let (core, selected_id, thread_id) = {
             let state = state_for_label.borrow();
             let thread_id = state
                 .selected_id
                 .and_then(|id| state.messages.iter().find(|message| message.id == id))
                 .and_then(|message| message.thread_id);
-            (state.core.clone(), thread_id)
+            (state.core.clone(), state.selected_id, thread_id)
         };
         let result = (|| {
             let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
             let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
-            runtime_for_label.block_on(core.perform_label_action(
-                thread_id,
-                i64::from(label_id),
-                applied,
-            ))?;
-            refresh_from_source(&app, &state_for_label, &runtime_for_label, true, &[])
+            mail_work::enqueue(
+                &state_for_label,
+                core,
+                vec![(
+                    selected_id.unwrap(),
+                    thread_id,
+                    mail_work::Operation::Label(i64::from(label_id), applied),
+                )],
+            )
         })();
-        match result {
-            Ok(()) if applied => app.set_render_status(UiMessage::plain("Label added.")),
-            Ok(()) => app.set_render_status(UiMessage::plain("Label removed.")),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not update label: {}", error))
-            }
+        if let Err(error) = result {
+            app.set_render_status(UiMessage::detail("Could not update label: {}", error));
         }
     });
 
@@ -5171,6 +5110,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
         let generation = mail_pagination_generation_for_more.get();
         app.set_mail_loading_more(true);
+        let view_generation = mail_work::generation(&state_for_more.borrow());
         let updates = mail_list_tx_for_more.clone();
         runtime_for_more.spawn(async move {
             let result = core
@@ -5178,6 +5118,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .await;
             let _ = updates
                 .send(MailListUpdate {
+                    view_generation,
                     scope,
                     query,
                     kind: MailListUpdateKind::Pagination { cursor, generation },

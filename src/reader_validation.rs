@@ -124,6 +124,12 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         .unwrap();
     };
     app.set_theme_mode("light".into());
+    let loaded_rows = app.get_emails();
+    app.set_emails(ModelRc::default());
+    app.set_mail_page_loading(true);
+    draw("navigation-loading", 1280, 900);
+    app.set_mail_page_loading(false);
+    app.set_emails(loaded_rows);
     draw("desktop", 1280, 900);
     let pointer = |x: f32, y: f32| {
         app.window()

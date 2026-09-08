@@ -503,6 +503,8 @@ export component AppWindow inherits Window {
     callback drain-folder-updates();
     callback drain-message-load-updates();
     callback drain-read-updates();
+    callback drain-navigation-updates();
+    callback drain-action-updates();
     callback drain-favicon-updates();
     callback drain-profile-avatar-updates();
     callback drain-ui-task-updates();
@@ -615,6 +617,7 @@ export component AppWindow inherits Window {
     in-out property <bool> rendering_info_open: false;
     in property <bool> can_load_more: false;
     in property <bool> mail_loading_more: false;
+    in property <bool> mail_page_loading: false;
     in property <int> mail_list_revision: 0;
     in property <int> mail_selection_count: 0;
     in property <bool> has_selected: true;
@@ -880,7 +883,7 @@ export component AppWindow inherits Window {
             available-height: parent.height;
 
         mail-view := MailView {
-            loading: !root.startup_hydrated;
+            loading: !root.startup_hydrated || root.mail_page_loading;
             x: 0px;
             y: 0px;
             width: parent.width;

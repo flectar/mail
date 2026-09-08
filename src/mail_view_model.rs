@@ -9,35 +9,10 @@ pub(super) fn refresh_from_source(
     preserve_loaded_rows: bool,
     acted_on_ids: &[i32],
 ) -> Result<(), String> {
-    let (using_core, core, scope, query) = {
-        let state = state.borrow();
-        (
-            state.using_core,
-            state.core.clone(),
-            state.scope.clone(),
-            state.query.clone(),
-        )
-    };
+    let using_core = state.borrow().using_core;
 
     if using_core {
-        let core = core.ok_or_else(|| "core backend was not initialized".to_owned())?;
-        // Folder navigation is latency-sensitive. Sidebar totals are already
-        // cached in InboxState and are refreshed after sync on a worker; do not
-        // recount every mailbox while the Slint event loop is handling a click.
-        let page =
-            runtime.block_on(core.load_page(&scope, &query, None, PAGE_SIZE as i64, false))?;
-        if preserve_loaded_rows {
-            apply_background_mail_page(app, state, runtime, page, acted_on_ids);
-            return Ok(());
-        }
-        let mut state = state.borrow_mut();
-        state.messages = page.messages;
-        state.labels = page.labels;
-        // Exact folder totals arrive on the independent metadata worker. Use
-        // the bounded page size immediately instead of blocking navigation on
-        // a potentially large COUNT query.
-        state.total_count = state.messages.len();
-        state.next_cursor = page.next_cursor;
+        return mail_work::refresh(app, state, runtime, preserve_loaded_rows, acted_on_ids);
     }
 
     render_current(app, state, runtime)

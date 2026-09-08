@@ -109,9 +109,7 @@ pub(super) fn prepare_message_compose(
     })
 }
 
-pub(super) fn compose_addresses(
-    addresses: &[flectar_mail_core::models::Address],
-) -> String {
+pub(super) fn compose_addresses(addresses: &[flectar_mail_core::models::Address]) -> String {
     join_addresses(addresses)
 }
 
@@ -181,9 +179,9 @@ fn prefixed_subject(subject: &str, prefix: &str) -> String {
 }
 
 pub(super) fn perform_selected_action(
-    app: &AppWindow,
+    _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Runtime,
     action: &str,
 ) -> Result<(), String> {
     let (selected_id, thread_id, core, using_core) = {
@@ -203,26 +201,15 @@ pub(super) fn perform_selected_action(
     }
     let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
     let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
-    runtime.block_on(core.perform_message_action(thread_id, action))?;
-    // Don't clear `selected_id` here: if the message is still visible after
-    // the action (e.g. archiving a starred message while viewing "Starred"),
-    // leaving it selected keeps the reading pane and the highlighted row in
-    // sync. `refresh_from_source` below repaints the pane on its own once it
-    // sees the message actually left the reloaded page — including dropping
-    // it from a retained pagination tail (see `merge_refreshed_mail_head`)
-    // when the message was beyond the first page.
-    //
-    // Only archive/spam/trash actually move a message to a different folder,
-    // so only they can make it leave the current (folder-scoped) view. Star,
-    // unstar, mark-read, and mark-unread never do, so passing `selected_id`
-    // for those would risk wrongly dropping an unrelated message that simply
-    // sits deep in the tail and was never re-fetched by the head refresh.
-    let acted_on_ids = matches!(action, "archive" | "spam" | "trash")
-        .then_some(selected_id)
-        .flatten()
-        .into_iter()
-        .collect::<Vec<_>>();
-    refresh_from_source(app, state, runtime, true, &acted_on_ids)
+    mail_work::enqueue(
+        state,
+        core,
+        vec![(
+            selected_id.unwrap(),
+            thread_id,
+            mail_work::Operation::Action(action.to_owned()),
+        )],
+    )
 }
 
 pub(super) fn format_file_size(size: u64) -> String {
