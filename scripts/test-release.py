@@ -4,6 +4,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,43 @@ prepare = release_assets.prepare
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_debian_prerelease_package(self):
+        # Exercise the actual shell packager and dpkg with a tiny existing ELF,
+        # so shell expansion bugs cannot hide behind Python-only asset tests.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = (
+                "scripts/build-deb.sh", "LICENSE", "THIRD_PARTY_NOTICES.md",
+                "resources/com.flectar.mail.desktop", "resources/com.flectar.mail.metainfo.xml",
+                "resources/app-icon/flectar-mail-masked-512.png",
+                "resources/app-icon/flectar-mail-masked.svg",
+                "resources/fonts/google-sans-flex/OFL.txt",
+                "resources/fonts/google-sans-flex/README.md",
+                "resources/debian/source-control.in", "resources/debian/control.in",
+            )
+            for name in paths:
+                destination = root / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(SCRIPTS.parent / name, destination)
+            shutil.copytree(SCRIPTS.parent / "LICENSES", root / "LICENSES")
+            (root / "Cargo.toml").write_text('[package]\nversion = "0.1.0-alpha.1"\n')
+            (root / "target/release").mkdir(parents=True)
+            shutil.copyfile("/bin/true", root / "target/release/flectar-mail")
+            (root / "bin").mkdir()
+            cargo = root / "bin/cargo"
+            cargo.write_text("#!/bin/sh\nexit 0\n")
+            cargo.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(root / "scripts/build-deb.sh")], cwd=root,
+                env={**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}"},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            package = root / "target/deb/flectar-mail_0.1.0~alpha.1_amd64.deb"
+            self.assertTrue(package.is_file())
+            version = subprocess.check_output(["dpkg-deb", "--field", str(package), "Version"], text=True)
+            self.assertEqual(version.strip(), "0.1.0~alpha.1")
+
     def test_versions_and_tags(self):
         for version in ("0.1.0", "1.2.3-alpha.1", "1.2.3-beta.2", "1.2.3-rc.3"):
             with self.subTest(version=version):
