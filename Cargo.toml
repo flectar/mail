@@ -63,7 +63,11 @@ blitz-dom = "=0.3.0-beta.2"
 blitz-html = "=0.3.0-beta.2"
 blitz-paint = "=0.3.0-beta.2"
 blitz-traits = "=0.3.0-beta.2"
+base64 = "0.22"
+percent-encoding = "2"
 data-url = "0.3"
+html5ever = "0.39"
+unicode-segmentation = "1.13"
 parley = "0.11"
 pulldown-cmark = "0.13.4"
 vello = { version = "0.10", optional = true }
@@ -112,6 +116,7 @@ slint = { version = "1.17", default-features = false, features = ["backend-winit
 slint = { version = "1.17", default-features = false, features = ["backend-winit"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.16", default-features = false, features = ["tokio", "xdg-portal"] }
 
 [package.metadata.appimage]
@@ -145,7 +150,7 @@ winresource = "0.1"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"
 strip = "symbols"
 
 # Full DWARF for this renderer/protocol dependency graph consumes many GiB and

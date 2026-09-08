@@ -21,6 +21,21 @@ checksums, and patch order are recorded in
 [`upstream.toml`](patches/blitz/upstream.toml) and
 [`series`](patches/blitz/series).
 
+## Reader integration dependencies
+
+The reader integration uses these Rust packages under their Apache-2.0
+license option. Their source distributions retain the authors' copyright
+notices and license texts; the Apache-2.0 license is also included in
+[`LICENSES/Apache-2.0.txt`](LICENSES/Apache-2.0.txt).
+
+| Package | Locked version | Upstream source | Purpose |
+| --- | --- | --- | --- |
+| arboard | 3.6.1 | [1Password/arboard](https://github.com/1Password/arboard) | Desktop HTML and primary-selection clipboard |
+| html5ever | 0.39.0 | [servo/html5ever](https://github.com/servo/html5ever) | HTML preflight and export tokenization |
+| unicode-segmentation | 1.13.3 | [unicode-rs/unicode-segmentation](https://github.com/unicode-rs/unicode-segmentation) | Unicode word selection |
+| percent-encoding | 2.3.2 | [servo/rust-url](https://github.com/servo/rust-url/) | Fragment and mailto decoding |
+| base64 | 0.22.1 | [marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) | Export CSP hash encoding |
+
 ## Phosphor Icons
 
 The bundled SVG icons in `ui/icons/phosphor` are sourced from
