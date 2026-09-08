@@ -1,0 +1,18 @@
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): false
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v3.2 scheme (APK Signature Scheme v3.2): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+V2 Signer: certificate DN: CN=Flectar Mail Test, O=Android, C=US
+V2 Signer: certificate SHA-256 digest: 6f269ab047ca5d5eae7317758a265251e3d5645c5307633a5b92d192b8646280
+V2 Signer: certificate SHA-1 digest: ce48c46e4aa046ef007c1f965f8797691ba40e9f
+V2 Signer: certificate MD5 digest: 1c0c441fbc5a50c2baa4bb18e20404c8
+V2 Signer: key algorithm: RSA
+V2 Signer: key size (bits): 2048
+V2 Signer: public key SHA-256 digest: 6548747b5a72a4a7fdcdb44db9511aa29cb0c658cc43d46290172219942640e1
+V2 Signer: public key SHA-1 digest: a5d03b92769a8ff81b9bfb97698cf32137ef93f1
+V2 Signer: public key MD5 digest: ab1b7d0e4f160d8c444527406dc7f2c0

@@ -6,9 +6,8 @@
   <project_license>AGPL-3.0-only</project_license>
   <name>Flectar Mail</name>
   <summary>Native, offline-first email client</summary>
-  <developer id="com.flectar">
-    <name>Flectar</name>
-  </developer>
+  <!-- Keep compatibility with AppStream 0.15 on the Ubuntu 22.04 build host. -->
+  <developer_name>Flectar</developer_name>
   <description>
     <p>
       Flectar Mail is a native Rust and Slint mail client with offline-first
@@ -22,7 +21,6 @@
   <launchable type="desktop-id">com.flectar.mail.desktop</launchable>
   <url type="homepage">https://flectar.com</url>
   <url type="bugtracker">https://github.com/flectar/mail/issues</url>
-  <url type="vcs-browser">https://github.com/flectar/mail</url>
   <screenshots>
     <screenshot type="default">
       <image type="source" width="2640" height="1600">https://raw.githubusercontent.com/flectar/mail/main/resources/screenshots/desktop-light.png</image>

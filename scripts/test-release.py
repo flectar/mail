@@ -25,10 +25,42 @@ def load_script(name):
 metadata = load_script("release-metadata").metadata
 release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
-verify_android_signing = load_script("verify-android-signing").verify
+android_signing = load_script("verify-android-signing")
+verify_android_signing = android_signing.verify
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_android_ci_output_and_oauth_fingerprints(self):
+        signing = (SCRIPTS / "fixtures/apksigner-v2.txt").read_text()
+        expected = "6f269ab047ca5d5eae7317758a265251e3d5645c5307633a5b92d192b8646280"
+        for output in (signing, signing.replace("V2 Signer:", "Signer #1")):
+            verify_android_signing(output, "test", expected)
+            with self.assertRaises(ValueError):
+                verify_android_signing(output, "test", "00" * 32)
+            with self.assertRaises(ValueError):
+                verify_android_signing(output, "production")
+            self.assertEqual(android_signing.certificate_digest(output, "SHA-1"), "ce48c46e4aa046ef007c1f965f8797691ba40e9f")
+        with self.assertRaisesRegex(ValueError, "unsupported output format"):
+            verify_android_signing(signing.replace("V2 Signer:", "Unknown Signer:"), "test", expected)
+
+        # The subsequent OAuth identity-export step must support the same SDK
+        # format as APK verification, or a valid package would still fail CI.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            build_tools = root / "build-tools/36.0.0"
+            build_tools.mkdir(parents=True)
+            signer = build_tools / "apksigner"
+            signer.write_text(f"#!/usr/bin/env python3\nprint({signing!r})\n")
+            signer.chmod(0o755)
+            apk = root / "app.apk"
+            apk.write_bytes(b"fixture")
+            output = subprocess.check_output(
+                ["bash", str(SCRIPTS / "android-signing-identities.sh"), str(apk)],
+                env={**os.environ, "ANDROID_HOME": str(root)}, text=True,
+            )
+            self.assertIn("Google Android OAuth SHA-1: CE:48:C4:6E:4A:A0:46:EF:00:7C:1F:96:5F:87:97:69:1B:A4:0E:9F", output)
+            self.assertIn("Microsoft redirect URI: msauth://com.flectar.mail/", output)
+
     def test_android_signing_uses_certificate_not_display_name(self):
         digest = "ab" * 32
         for subject in ("CN=Flectar Mail Test, O=Android, C=US", "C=US,O=Android,CN=Flectar Mail Test"):

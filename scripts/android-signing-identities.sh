@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 apk="${1:-}"
 android_sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
 
@@ -21,11 +22,7 @@ if [[ ! -x "$apksigner" ]]; then
 fi
 
 signing="$($apksigner verify --print-certs "$apk")"
-sha1_line="$(printf '%s\n' "$signing" | sed -n 's/^Signer #1 certificate SHA-1 digest: //p' | head -n 1)"
-if [[ -z "$sha1_line" ]]; then
-  printf 'Could not read the APK signing certificate.\n' >&2
-  exit 1
-fi
+sha1_line="$(printf '%s\n' "$signing" | python3 "$project_dir/scripts/verify-android-signing.py" sha1)"
 
 google_sha1="$(printf '%s' "$sha1_line" | sed 's/../&:/g; s/:$//' | tr '[:lower:]' '[:upper:]')"
 sha1_escaped="$(printf '%s' "$sha1_line" | sed 's/../\\x&/g')"
