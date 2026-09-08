@@ -2292,7 +2292,6 @@ dependencies = [
  "html5ever",
  "image",
  "keyboard-types",
- "libc",
  "parley 0.11.1",
  "percent-encoding",
  "pulldown-cmark",

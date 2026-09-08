@@ -86,7 +86,6 @@ chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 keyboard-types = "0.7"
-libc = "0.2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 sha2 = "0.10"
 serde.workspace = true

@@ -13,10 +13,6 @@ if ! command -v keytool >/dev/null 2>&1; then
   printf 'keytool not found. Install a JDK (Java 17 or newer is recommended).\n' >&2
   exit 1
 fi
-if ! cargo apk --help >/dev/null 2>&1; then
-  printf 'cargo-apk not found. Install it with: cargo install cargo-apk --locked --version 0.10.0\n' >&2
-  exit 1
-fi
 gradle_command="${GRADLE_CMD:-}"
 if [[ -z "$gradle_command" && -x "$project_dir/platform/android/gradle/gradlew" ]]; then
   gradle_command="$project_dir/platform/android/gradle/gradlew"
@@ -29,9 +25,8 @@ if [[ -z "$gradle_command" || ! -x "$gradle_command" ]]; then
   exit 1
 fi
 
-# cargo-apk deliberately requires an explicit key for optimized profiles. This
-# app-specific debug key makes a small, installable test APK without storing a
-# production signing credential in the repository.
+# Gradle signs the final package with this app-specific test key, keeping
+# production signing credentials out of the test build.
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 keystore_dir="$data_home/flectar-mail/android"
 keystore="${FLECTAR_ANDROID_TEST_KEYSTORE:-$keystore_dir/test-signing.keystore}"
@@ -57,8 +52,6 @@ fi
 
 export ANDROID_HOME="$android_sdk"
 export CARGO_TARGET_DIR="$target_dir"
-export CARGO_APK_RELEASE_KEYSTORE="$keystore"
-export CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android
 
 # Test builds have deterministic provider placeholders so static packaging and
 # device startup can be exercised without borrowing production registrations.
@@ -68,7 +61,7 @@ export FLECTAR_GOOGLE_ANDROID_CLIENT_ID="${FLECTAR_GOOGLE_ANDROID_CLIENT_ID:-tes
 export FLECTAR_MICROSOFT_ANDROID_CLIENT_ID="${FLECTAR_MICROSOFT_ANDROID_CLIENT_ID:-00000000-0000-0000-0000-000000000000}"
 export FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI="${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-msauth://com.flectar.mail/test-signature-hash}"
 
-cargo apk build \
+cargo build \
   --locked \
   --manifest-path "$project_dir/platform/android/Cargo.toml" \
   --target aarch64-linux-android \

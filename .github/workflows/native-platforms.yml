@@ -264,9 +264,6 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
-      - name: Install Android packager
-        run: cargo install cargo-apk --locked --version 0.10.0
-
       - name: Configure Android NDK compiler
         run: |
           toolchain="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
