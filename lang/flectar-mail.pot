@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-08 02:07+0000\n"
+"POT-Creation-Date: 2026-09-08 02:40+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -152,8 +152,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:87 ui/app.slint:663 ui/components/composer-fields.slint:63
-#: ui/app.slint:87 ui/app.slint:663 ui/components/composer-fields.slint:63 ui/dialogs/compose-dialog.slint:34
+#: ui/app.slint:87 ui/app.slint:661 ui/components/composer-fields.slint:63
+#: ui/app.slint:87 ui/app.slint:661 ui/components/composer-fields.slint:63 ui/dialogs/compose-dialog.slint:34
 msgid "No connected account"
 msgstr ""
 
@@ -1043,31 +1043,31 @@ msgstr ""
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1079
+#: ui/app.slint:1074
 msgid "Showing {} of {} contacts"
 msgstr ""
 
-#: ui/app.slint:1522
+#: ui/app.slint:1517
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:1528
+#: ui/app.slint:1523
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:1541
+#: ui/app.slint:1536
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:1544
+#: ui/app.slint:1539
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:1549
+#: ui/app.slint:1544
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:1557
+#: ui/app.slint:1552
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -1523,48 +1523,48 @@ msgstr ""
 msgid "Delete label"
 msgstr ""
 
-#: ui/components/sidebar.slint:385 ui/views/mail-list-pane.slint:577
+#: ui/components/sidebar.slint:387 ui/views/mail-list-pane.slint:577
 msgid "New email"
 msgstr ""
 
-#: ui/components/sidebar.slint:414 ui/views/contacts-view.slint:233
+#: ui/components/sidebar.slint:425 ui/views/contacts-view.slint:233
 msgid "UNIFIED"
 msgstr ""
 
-#: ui/components/sidebar.slint:419
+#: ui/components/sidebar.slint:433
 msgid "All Inboxes"
 msgstr ""
 
-#: ui/components/sidebar.slint:435
+#: ui/components/sidebar.slint:449
 msgid "Inbox"
 msgstr ""
 
-#: ui/components/sidebar.slint:487
+#: ui/components/sidebar.slint:508
 msgid "Categories"
 msgstr ""
 
-#: ui/components/sidebar.slint:506
+#: ui/components/sidebar.slint:526
 msgid "Important"
 msgstr ""
 
-#: ui/components/sidebar.slint:522
+#: ui/components/sidebar.slint:545
 msgid "Other"
 msgstr ""
 
-#: ui/components/sidebar.slint:566 ui/views/mail-reading-pane.slint:386
+#: ui/components/sidebar.slint:588 ui/views/mail-reading-pane.slint:386
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:616 ui/views/contacts-view.slint:283
+#: ui/components/sidebar.slint:637 ui/views/contacts-view.slint:283
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:714 ui/dialogs/folder-dialog.slint:25
-#: ui/components/sidebar.slint:714 ui/dialogs/folder-dialog.slint:25
+#: ui/components/sidebar.slint:722 ui/dialogs/folder-dialog.slint:25
+#: ui/components/sidebar.slint:722 ui/dialogs/folder-dialog.slint:25
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:736 ui/components/sidebar.slint:755
+#: ui/components/sidebar.slint:745 ui/components/sidebar.slint:764
 msgid "Add account"
 msgstr ""
 
@@ -3110,7 +3110,7 @@ msgstr ""
 msgid "Slate"
 msgstr ""
 
-#: ui/views/mail-view.slint:521
+#: ui/views/mail-view.slint:518
 msgid "Close folders"
 msgstr ""
 
