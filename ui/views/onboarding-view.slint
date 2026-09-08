@@ -1,10 +1,22 @@
-import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+import { HorizontalBox, ScrollView, VerticalBox, Button as NativeButton } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
 import { ProviderButton } from "../components/provider-button.slint";
+import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
 import { TypeScale } from "../typography.slint";
 
 export component OnboardingView inherits Rectangle {
+    in property <bool> google-available: false;
+    in property <bool> microsoft-available: false;
+    in property <bool> google-bundled: false;
+    in property <bool> microsoft-bundled: false;
+    in property <string> google-client-id;
+    in property <string> google-client-secret;
+    in property <string> ms-client-id;
+    in-out property <bool> oauth-setup-open: false;
+    callback save-oauth-apps(string, string, string);
+    in property <bool> oauth-settings-saving: false;
+    in-out property <string> oauth-settings-error: "";
     in property <bool> startup-ready: false;
     in property <bool> oauth-in-progress: false;
     in property <string> status: "";
@@ -97,7 +109,7 @@ export component OnboardingView inherits Rectangle {
                 ProviderButton {
                     text: @tr("Continue with Gmail");
                     icon: @image-url("../icons/brand/gmail.svg");
-                    enabled: !root.oauth-in-progress;
+                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving && root.google-available;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -108,7 +120,7 @@ export component OnboardingView inherits Rectangle {
                 ProviderButton {
                     text: @tr("Continue with Outlook");
                     icon: @image-url("../icons/brand/outlook.svg");
-                    enabled: !root.oauth-in-progress;
+                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving && root.microsoft-available;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -122,13 +134,31 @@ export component OnboardingView inherits Rectangle {
                     colorize-icon: true;
                     // Optical correction for the asymmetric mail-outline glyph.
                     icon-offset-x: 1px;
-                    enabled: !root.oauth-in-progress;
+                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
                     hover-surface: root.hover-surface;
                     button-border: root.ui-border;
                     clicked => { root.imap-form-open = true; }
+                }
+                if !root.google-available || !root.microsoft-available : Text {
+                    text: !root.google-available && !root.microsoft-available
+                        ? @tr("Add your own app keys to enable Gmail and Outlook.")
+                        : !root.google-available ? @tr("Add your own app keys to enable Gmail.")
+                        : @tr("Add your own app key to enable Outlook.");
+                    color: root.muted-text;
+                    font-size: TypeScale.caption;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                oauth-settings := NativeButton {
+                    height: 36px;
+                    text: @tr("Sign-in settings");
+                    icon: @image-url("../icons/solar-icons/settings-outline.svg");
+                    colorize-icon: true;
+                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
+                    clicked => { root.oauth-setup-open = true; }
                 }
                 Rectangle { height: 8px; }
                 Text {
@@ -142,7 +172,7 @@ export component OnboardingView inherits Rectangle {
                     text: @tr("Import a backup");
                     icon: @image-url("../icons/phosphor/tray-arrow-down.svg");
                     has-icon: true;
-                    enabled: !root.oauth-in-progress;
+                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.import-account-backup(); }
                 }
                 if root.oauth-in-progress : Button {
@@ -283,6 +313,22 @@ export component OnboardingView inherits Rectangle {
                 vertical-alignment: center;
                 wrap: word-wrap;
             }
+        }
+    }
+
+    OAuthSetupDialog {
+        open <=> root.oauth-setup-open;
+        saving: root.oauth-settings-saving;
+        save-error <=> root.oauth-settings-error;
+        google-available: root.google-available;
+        microsoft-available: root.microsoft-available;
+        google-bundled: root.google-bundled;
+        microsoft-bundled: root.microsoft-bundled;
+        google-client-id: root.google-client-id;
+        google-client-secret: root.google-client-secret;
+        ms-client-id: root.ms-client-id;
+        save(google-id, google-secret, microsoft-id) => {
+            root.save-oauth-apps(google-id, google-secret, microsoft-id);
         }
     }
 }

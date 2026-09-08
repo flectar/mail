@@ -15,12 +15,15 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> compact: false;
     in property <[AccountRow]> connected_accounts: [];
     in property <bool> custom_oauth_configured: false;
+    in property <bool> google_oauth_available: false;
+    in property <bool> microsoft_oauth_available: false;
     in property <bool> google_oauth_bundled: false;
     in property <bool> microsoft_oauth_bundled: false;
     in property <bool> remote-images-available: true;
     in property <bool> account-transfer-supported: true;
     in property <bool> sync_in_progress: false;
     in property <bool> oauth_in_progress: false;
+    in property <bool> oauth_settings_saving: false;
     in property <string> sync_status: "";
     in property <color> accent;
     in property <color> accent-soft;
@@ -559,7 +562,7 @@ export component SettingsDialog inherits Rectangle {
                                         horizontal-stretch: 1;
                                         text: @tr("Add Gmail");
                                         icon: @image-url("../icons/brand/gmail.svg");
-                                        enabled: !root.oauth_in_progress;
+                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -571,7 +574,7 @@ export component SettingsDialog inherits Rectangle {
                                         horizontal-stretch: 1;
                                         text: @tr("Add Outlook");
                                         icon: @image-url("../icons/brand/outlook.svg");
-                                        enabled: !root.oauth_in_progress;
+                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -584,7 +587,7 @@ export component SettingsDialog inherits Rectangle {
                                         text: @tr("Add mail account");
                                         icon: @image-url("../icons/phosphor/envelope.svg");
                                         colorize-icon: true;
-                                        enabled: !root.oauth_in_progress;
+                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -601,9 +604,9 @@ export component SettingsDialog inherits Rectangle {
                                 if root.compact : VerticalBox {
                                     padding: 14px;
                                     spacing: 8px;
-                                    ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.oauth_in_progress; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
-                                    ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.oauth_in_progress; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
-                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/phosphor/envelope.svg"); colorize-icon: true; enabled: !root.oauth_in_progress; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
+                                    ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
+                                    ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
+                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/phosphor/envelope.svg"); colorize-icon: true; enabled: !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
                                     if root.oauth_in_progress : Button { height: 44px; text: @tr("Cancel sign-in"); clicked => { root.cancel_oauth(); } }
                                 }
                             }
@@ -681,7 +684,7 @@ export component SettingsDialog inherits Rectangle {
                                             width: account.provider == "imap" ? 58px : 82px;
                                             height: 30px;
                                             text: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
-                                            enabled: account.provider == "imap" || !root.oauth_in_progress;
+                                            enabled: (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
                                             clicked => {
                                                 if account.provider == "imap" {
                                                     root.account_email = account.email;
@@ -711,7 +714,7 @@ export component SettingsDialog inherits Rectangle {
                                             width: 128px;
                                             height: 30px;
                                             text: account.calendar_status == "" ? @tr("Add calendar") : @tr("Retry calendar");
-                                            enabled: !root.oauth_in_progress;
+                                            enabled: !root.oauth_in_progress && !root.oauth_settings_saving;
                                             clicked => { root.connect_account_calendar(account.id); }
                                         }
                                         if !root.compact && !account.calendar_connected && account.provider == "imap" : Button {
@@ -751,12 +754,12 @@ export component SettingsDialog inherits Rectangle {
                             Rectangle {
                                 height: root.custom_oauth_open ? (root.compact ? 354px : 276px) : 118px;
                                 SettingsCard { title: @tr("OAuth app credentials"); description: root.custom_oauth_configured ? @tr("Custom desktop app credentials are configured.") : @tr("Advanced: use your own Gmail or Microsoft desktop app registration."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                Button { x: parent.width - self.width - 20px; y: 70px; width: 110px; height: 32px; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.custom_oauth_open = !root.custom_oauth_open; } }
+                                Button { x: parent.width - self.width - 20px; y: 70px; width: 110px; height: 32px; enabled: !root.oauth_settings_saving; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.custom_oauth_open = !root.custom_oauth_open; } }
                                 if root.custom_oauth_open : VerticalBox {
                                     x: 20px; y: 116px; width: parent.width - 40px; height: parent.height - 132px; spacing: 8px;
-                                    if !root.compact : HorizontalBox { spacing: 8px; LineEdit { text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    if root.compact : VerticalBox { spacing: 8px; LineEdit { text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    HorizontalBox { spacing: 8px; LineEdit { text: root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); edited(text) => { root.ms_client_id = text; } } Button { text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
+                                    if !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    if root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    HorizontalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); edited(text) => { root.ms_client_id = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
                                     Text { text: @tr("Outlook public desktop clients use PKCE and do not need a client secret."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                 }
                             }

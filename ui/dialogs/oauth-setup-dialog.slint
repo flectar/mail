@@ -1,0 +1,138 @@
+import { HorizontalBox, VerticalBox, ScrollView, Button as NativeButton } from "std-widgets.slint";
+import { LineEdit } from "../components/controls.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// Drafts stay local until the host confirms that settings were persisted.
+export component OAuthSetupDialog inherits Rectangle {
+    in-out property <bool> open: false;
+    in property <bool> google-available;
+    in property <bool> microsoft-available;
+    in property <bool> google-bundled;
+    in property <bool> microsoft-bundled;
+    in property <string> google-client-id;
+    in property <string> google-client-secret;
+    in property <string> ms-client-id;
+    callback save(string, string, string);
+    in property <bool> saving: false;
+    in-out property <string> save-error: "";
+    private property <bool> google: true;
+    private property <string> draft-google-id;
+    private property <string> draft-google-secret;
+    private property <string> draft-ms-id;
+
+    visible: root.open;
+    background: #00000066;
+    accessible-role: groupbox;
+    accessible-label: @tr("Sign-in settings");
+    changed open => {
+        if root.open {
+            root.draft-google-id = root.google-client-id;
+            root.draft-google-secret = root.google-client-secret;
+            root.draft-ms-id = root.ms-client-id;
+            root.save-error = "";
+            dialog-focus.focus();
+        } else {
+            root.draft-google-secret = "";
+        }
+    }
+    TouchArea { }
+    panel := Rectangle {
+        width: min(480px, parent.width - 32px);
+        height: min(560px, parent.height - 32px);
+        border-radius: 14px;
+        border-width: 1px;
+        border-color: AppTheme.control-border;
+        background: AppTheme.surface;
+        clip: true;
+        dialog-focus := FocusScope {
+            capture-key-pressed(event) => {
+                if event.text == Key.Escape && !root.saving {
+                    root.open = false;
+                    return accept;
+                }
+                reject
+            }
+            VerticalBox {
+                padding: 24px;
+                spacing: 16px;
+                Text { text: @tr("Sign-in settings"); color: AppTheme.heading; font-size: TypeScale.title-large; font-weight: 600; }
+                Text {
+                    text: @tr("Use your own OAuth app registration for Gmail or Outlook.");
+                    color: AppTheme.secondary; font-size: TypeScale.body; wrap: word-wrap;
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    NativeButton { text: @tr("Google"); primary: root.google; enabled: !root.saving; clicked => { root.google = true; root.save-error = ""; } }
+                    NativeButton { text: @tr("Microsoft"); primary: !root.google; enabled: !root.saving; clicked => { root.google = false; root.save-error = ""; } }
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalBox {
+                        padding: 0px;
+                        padding-right: 12px;
+                        spacing: 12px;
+                        Text {
+                            text: root.google
+                                ? (root.google-client-id != "" ? @tr("Using your saved Google app keys") : root.google-bundled ? @tr("Using the app’s built-in Google keys") : root.google-available ? @tr("Using Google keys from the environment") : @tr("Google sign-in needs app keys"))
+                                : (root.ms-client-id != "" ? @tr("Using your saved Microsoft app key") : root.microsoft-bundled ? @tr("Using the app’s built-in Microsoft key") : root.microsoft-available ? @tr("Using a Microsoft key from the environment") : @tr("Microsoft sign-in needs an app key"));
+                            color: AppTheme.heading; font-size: TypeScale.body; font-weight: 600; wrap: word-wrap;
+                        }
+                        Text { text: @tr("Client ID"); color: AppTheme.heading; font-size: TypeScale.body; }
+                        if root.google : LineEdit {
+                            height: 40px;
+                            enabled: !root.saving;
+                            input-label: @tr("Google client ID");
+                            text <=> root.draft-google-id;
+                            placeholder-text: @tr("Google desktop client ID");
+                            edited(value) => { root.save-error = ""; }
+                        }
+                        if !root.google : LineEdit {
+                            height: 40px;
+                            enabled: !root.saving;
+                            input-label: @tr("Microsoft client ID");
+                            text <=> root.draft-ms-id;
+                            placeholder-text: @tr("Microsoft Entra desktop client ID");
+                            edited(value) => { root.save-error = ""; }
+                        }
+                        if root.google : Text { text: @tr("Client secret (if provided)"); color: AppTheme.heading; font-size: TypeScale.body; }
+                        if root.google : LineEdit {
+                            height: 40px;
+                            enabled: !root.saving;
+                            input-label: @tr("Google client secret");
+                            input-type: password;
+                            text <=> root.draft-google-secret;
+                            placeholder-text: @tr("Paste your client secret");
+                            edited(value) => { root.save-error = ""; }
+                        }
+                        Text {
+                            text: root.google ? @tr("Create a Desktop app client in Google Cloud and enable the Gmail API.") : @tr("Use a public desktop app registration in Microsoft Entra. No client secret is needed.");
+                            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
+                        }
+                        Text {
+                            text: @tr("Leave the client ID blank to use default keys, if available. Keys are shared with Settings.");
+                            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap;
+                        }
+                        if root.save-error != "" : Text {
+                            text: root.save-error;
+                            color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    NativeButton { text: @tr("Cancel"); enabled: !root.saving; clicked => { root.open = false; } }
+                    save-button := NativeButton {
+                        text: root.saving ? @tr("Saving…") : @tr("Save settings");
+                        primary: true;
+                        enabled: !root.saving;
+                        clicked => {
+                            root.save(root.draft-google-id, root.draft-google-secret, root.draft-ms-id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

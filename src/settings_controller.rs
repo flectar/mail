@@ -280,3 +280,102 @@ pub(super) fn register_settings_preference_callbacks(
         }
     });
 }
+
+/// Both entry points share one asynchronous persistence path and busy state.
+pub(super) fn register_oauth_settings_callbacks(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &Rc<tokio::runtime::Runtime>,
+) {
+    let weak = app.as_weak();
+    let single_state = Rc::clone(state);
+    let single_runtime = Rc::clone(runtime);
+    app.on_save_oauth_app(move |provider, client_id, client_secret| {
+        let Some(app) = weak.upgrade() else { return };
+        let (google, microsoft) = match provider.as_str() {
+            "gmail" => (
+                Some((client_id.to_string(), client_secret.to_string())),
+                None,
+            ),
+            "microsoft" => (None, Some(client_id.to_string())),
+            _ => return,
+        };
+        save_oauth_settings(
+            &app,
+            &single_state,
+            &single_runtime,
+            google,
+            microsoft,
+            false,
+        );
+    });
+
+    let weak = app.as_weak();
+    let state = Rc::clone(state);
+    let runtime = Rc::clone(runtime);
+    app.on_save_oauth_apps(move |google_id, google_secret, microsoft_id| {
+        let Some(app) = weak.upgrade() else { return };
+        save_oauth_settings(
+            &app,
+            &state,
+            &runtime,
+            Some((google_id.to_string(), google_secret.to_string())),
+            Some(microsoft_id.to_string()),
+            true,
+        );
+    });
+}
+
+fn save_oauth_settings(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    google: Option<(String, String)>,
+    microsoft: Option<String>,
+    close_dialog: bool,
+) {
+    if app.get_oauth_settings_saving() || app.get_oauth_in_progress() {
+        return;
+    }
+    let Some(core) = state.borrow().core.clone() else {
+        let message = UiMessage::plain("Local mail data is unavailable. Retry startup.");
+        app.set_sync_status(message.clone());
+        app.set_oauth_settings_error(ui_message::translated(app, &message));
+        return;
+    };
+    let update_google = google.is_some();
+    let update_microsoft = microsoft.is_some();
+    app.set_oauth_settings_error("".into());
+    app.set_oauth_settings_saving(true);
+    let weak = app.as_weak();
+    runtime.spawn(async move {
+        let result = core.set_oauth_apps(google, microsoft).await;
+        let _ = weak.upgrade_in_event_loop(move |app| {
+            app.set_oauth_settings_saving(false);
+            match result {
+                Ok(settings) => {
+                    if update_google {
+                        app.set_google_client_id(settings.google_client_id.clone().into());
+                        app.set_google_client_secret(settings.google_client_secret.clone().into());
+                    }
+                    if update_microsoft {
+                        app.set_ms_client_id(settings.ms_client_id.clone().into());
+                    }
+                    app.set_custom_oauth_configured(
+                        !settings.google_client_id.is_empty() || !settings.ms_client_id.is_empty(),
+                    );
+                    startup::refresh_oauth_availability(&app);
+                    app.set_sync_status(UiMessage::plain("OAuth app keys saved."));
+                    if close_dialog {
+                        app.set_oauth_setup_open(false);
+                    }
+                }
+                Err(error) => {
+                    let message = UiMessage::detail("OAuth settings failed: {}", error);
+                    app.set_sync_status(message.clone());
+                    app.set_oauth_settings_error(ui_message::translated(&app, &message));
+                }
+            }
+        });
+    });
+}

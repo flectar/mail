@@ -1044,33 +1044,13 @@ impl CoreMailSource {
         self.core.cancel_oauth();
     }
 
-    pub async fn set_oauth_app(
+    pub async fn set_oauth_apps(
         &self,
-        provider: Provider,
-        client_id: &str,
-        client_secret: &str,
-    ) -> Result<(), String> {
-        let mut settings = self
-            .core
-            .get_settings()
-            .await
-            .map_err(|error| error.to_string())?;
-        match provider {
-            Provider::Gmail => {
-                settings.google_client_id = client_id.trim().to_owned();
-                settings.google_client_secret = client_secret.trim().to_owned();
-            }
-            Provider::Microsoft => {
-                settings.ms_client_id = client_id.trim().to_owned();
-                // Entra public desktop applications authenticate with PKCE;
-                // putting a secret in a distributed desktop binary adds no
-                // security and makes the public-client token exchange fail.
-                settings.ms_client_secret.clear();
-            }
-            Provider::Imap => return Err("IMAP does not use OAuth app credentials".to_owned()),
-        }
+        google: Option<(String, String)>,
+        microsoft: Option<String>,
+    ) -> Result<flectar_mail_core::models::Settings, String> {
         self.core
-            .set_settings(settings)
+            .set_oauth_apps(google, microsoft)
             .await
             .map_err(|error| error.to_string())
     }

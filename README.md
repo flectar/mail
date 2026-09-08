@@ -128,6 +128,13 @@ Flectar Mail is currently in development and is not yet stable.
 > before publishing the first preview release with Gmail, Outlook, and
 > Microsoft 365 OAuth configured by default.
 
+Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
+**Sign-in settings** cog on the welcome screen to save your own Google or
+Microsoft app registration, or connect an IMAP/JMAP account. Custom keys are
+shared with Settings and take precedence over bundled keys; clearing a custom
+client ID restores the defaults when available. Each provider enables separately
+once its configuration is saved.
+
 Once the first preview is available, download the latest build from
 [GitHub Releases](https://github.com/flectar/mail/releases/latest):
 

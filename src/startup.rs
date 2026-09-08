@@ -556,7 +556,14 @@ pub(crate) fn spawn_core_event_listener(
     });
 }
 
+pub(crate) fn refresh_oauth_availability(app: &AppWindow) {
+    use flectar_mail_core::{models::Provider, oauth::providers::resolve_credentials};
+    app.set_google_oauth_available(resolve_credentials(Provider::Gmail).is_ok());
+    app.set_microsoft_oauth_available(resolve_credentials(Provider::Microsoft).is_ok());
+}
+
 pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
+    refresh_oauth_availability(app);
     crate::apply_language(app, &settings.language);
     app.set_custom_oauth_configured(
         !settings.google_client_id.trim().is_empty() || !settings.ms_client_id.trim().is_empty(),

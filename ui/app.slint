@@ -373,12 +373,14 @@ export global I18n {
 
     ui-message-oauth(key, argument, second-argument, third-argument) => {
         if (key == "Another browser authorization is already in progress; finish it or choose Cancel.") { return @tr("Another browser authorization is already in progress; finish it or choose Cancel."); }
+        if (key == "Add app keys in Sign-in settings to enable this provider.") { return @tr("Add app keys in Sign-in settings to enable this provider."); }
         if (key == "Choose Gmail or Outlook OAuth.") { return @tr("Choose Gmail or Outlook OAuth."); }
         if (key == "Complete sign-in in your browser, or choose Cancel here.") { return @tr("Complete sign-in in your browser, or choose Cancel here."); }
         if (key == "Cancelling browser sign-in…") { return @tr("Cancelling browser sign-in…"); }
         if (key == "Calendar core is unavailable.") { return @tr("Calendar core is unavailable."); }
         if (key == "Account no longer exists.") { return @tr("Account no longer exists."); }
         if (key == "Authorize calendar access in your browser.") { return @tr("Authorize calendar access in your browser."); }
+        if (key == "OAuth app keys saved.") { return @tr("OAuth app keys saved."); }
         if (key == "{} OAuth settings saved.") { return @tr("{} OAuth settings saved.", argument); }
         if (key == "OAuth settings failed: {}") { return @tr("OAuth settings failed: {}", argument); }
         if (key == "Mail refresh failed: {}") { return @tr("Mail refresh failed: {}", argument); }
@@ -455,6 +457,7 @@ export component AppWindow inherits Window {
     callback reauth_account(int);
     callback cancel_oauth();
     callback save_oauth_app(string, string, string);
+    callback save_oauth_apps(string, string, string);
     pure callback make_account_transfer(string) -> data-transfer;
     pure callback read_account_transfer(data-transfer) -> string;
     callback reorder_account(string, int, bool);
@@ -706,6 +709,11 @@ export component AppWindow inherits Window {
     in-out property <string> ms_client_id: "";
     in-out property <bool> custom_oauth_open: false;
     in property <bool> custom_oauth_configured: false;
+    in property <bool> google_oauth_available: false;
+    in property <bool> microsoft_oauth_available: false;
+    in-out property <bool> oauth_setup_open: false;
+    in property <bool> oauth_settings_saving: false;
+    in-out property <string> oauth_settings_error: "";
     in property <bool> google_oauth_bundled: false;
     in property <bool> microsoft_oauth_bundled: false;
     // Android/iOS must use their native print frameworks; until those hosts
@@ -1201,12 +1209,15 @@ export component AppWindow inherits Window {
             height: parent.height;
             connected_accounts: root.connected_accounts;
             custom_oauth_configured: root.custom_oauth_configured;
+            google_oauth_available: root.google_oauth_available;
+            microsoft_oauth_available: root.microsoft_oauth_available;
             google_oauth_bundled: root.google_oauth_bundled;
             microsoft_oauth_bundled: root.microsoft_oauth_bundled;
             remote-images-available: root.remote-images-available;
             account-transfer-supported: root.document_apis_supported;
             sync_in_progress: root.sync_in_progress;
             oauth_in_progress: root.oauth_in_progress;
+            oauth_settings_saving: root.oauth_settings_saving;
             sync_status: root.sync_status;
             accent: root.accent;
             accent-soft: root.accent-soft;
@@ -1459,6 +1470,19 @@ export component AppWindow inherits Window {
         height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
         startup-ready: root.startup_ready;
         oauth-in-progress: root.oauth_in_progress;
+        oauth-settings-saving: root.oauth_settings_saving;
+        oauth-settings-error <=> root.oauth_settings_error;
+        google-available: root.google_oauth_available;
+        microsoft-available: root.microsoft_oauth_available;
+        google-bundled: root.google_oauth_bundled;
+        microsoft-bundled: root.microsoft_oauth_bundled;
+        google-client-id: root.google_client_id;
+        google-client-secret: root.google_client_secret;
+        ms-client-id: root.ms_client_id;
+        oauth-setup-open <=> root.oauth_setup_open;
+        save-oauth-apps(google-id, google-secret, microsoft-id) => {
+            root.save_oauth_apps(google-id, google-secret, microsoft-id);
+        }
         status: root.sync_status;
         page-bg: root.page-bg;
         surface: root.surface;

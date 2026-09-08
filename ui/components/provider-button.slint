@@ -24,6 +24,7 @@ export component ProviderButton inherits Rectangle {
     opacity: root.enabled ? 1 : 0.5;
     accessible-role: button;
     accessible-label: root.text;
+    accessible-enabled: root.enabled;
     accessible-action-default => {
         if root.enabled {
             root.clicked();

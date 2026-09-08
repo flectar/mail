@@ -5929,9 +5929,44 @@ impl Core {
     }
 
     pub async fn set_settings(&self, settings: Settings) -> Result<()> {
-        apply_oauth_settings(&settings);
         self.db
-            .write(move |conn| repo::settings::set(conn, &settings))
+            .write(move |conn| {
+                repo::settings::set(conn, &settings)?;
+                // Keep the resolver in the same order as persisted writes.
+                apply_oauth_settings(&settings);
+                Ok(())
+            })
+            .await
+    }
+
+    /// Persist one or both OAuth registrations in a single settings write.
+    /// Read on the writer thread so unrelated preferences aren't overwritten
+    /// by a stale settings snapshot while this operation waits for the DB.
+    pub async fn set_oauth_apps(
+        &self,
+        google: Option<(String, String)>,
+        microsoft: Option<String>,
+    ) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                if let Some((id, secret)) = google {
+                    settings.google_client_id = id.trim().to_owned();
+                    settings.google_client_secret = if settings.google_client_id.is_empty() {
+                        String::new()
+                    } else {
+                        secret.trim().to_owned()
+                    };
+                }
+                if let Some(id) = microsoft {
+                    settings.ms_client_id = id.trim().to_owned();
+                    // Public desktop clients use PKCE, without a secret.
+                    settings.ms_client_secret.clear();
+                }
+                repo::settings::set(conn, &settings)?;
+                apply_oauth_settings(&settings);
+                Ok(settings)
+            })
             .await
     }
 

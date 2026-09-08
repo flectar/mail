@@ -4681,6 +4681,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        if app.get_oauth_settings_saving() {
+            return;
+        }
         if app.get_oauth_in_progress() {
             app.set_sync_status(UiMessage::plain(
                 "Another browser authorization is already in progress; finish it or choose Cancel.",
@@ -4698,6 +4701,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             ));
             return;
         };
+        startup::refresh_oauth_availability(&app);
+        if flectar_mail_core::oauth::providers::resolve_credentials(provider).is_err() {
+            app.set_sync_status(UiMessage::plain(
+                "Add app keys in Sign-in settings to enable this provider.",
+            ));
+            return;
+        }
         app.set_oauth_in_progress(true);
         let connect_calendar = app.get_connect_calendar_on_add();
         app.set_sync_status(UiMessage::plain(
@@ -4754,6 +4764,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        if app.get_oauth_settings_saving() {
+            return;
+        }
         if app.get_oauth_in_progress() {
             app.set_sync_status(UiMessage::plain(
                 "Another browser authorization is already in progress; finish it or choose Cancel.",
@@ -4833,6 +4846,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        if app.get_oauth_settings_saving() {
+            return;
+        }
         if app.get_oauth_in_progress() {
             app.set_sync_status(UiMessage::plain(
                 "Another browser authorization is already in progress; finish it or choose Cancel.",
@@ -4960,40 +4976,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
-    let app_weak = app.as_weak();
-    let state_for_oauth_settings = Rc::clone(&state);
-    let runtime_for_oauth_settings = Rc::clone(&runtime);
-    app.on_save_oauth_app(move |provider, client_id, client_secret| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        let provider = Provider::from_storage(provider.as_str());
-        let Some(core) = state_for_oauth_settings.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Local mail data is unavailable. Retry startup.",
-            ));
-            return;
-        };
-        match runtime_for_oauth_settings.block_on(core.set_oauth_app(
-            provider,
-            client_id.as_str(),
-            client_secret.as_str(),
-        )) {
-            Ok(()) => {
-                app.set_custom_oauth_configured(
-                    !app.get_google_client_id().as_str().trim().is_empty()
-                        || !app.get_ms_client_id().as_str().trim().is_empty(),
-                );
-                app.set_sync_status(UiMessage::detail(
-                    "{} OAuth settings saved.",
-                    provider.as_str(),
-                ))
-            }
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail("OAuth settings failed: {}", error))
-            }
-        }
-    });
+    settings_controller::register_oauth_settings_callbacks(&app, &state, &runtime);
 
     register_data_management_callbacks(
         &app,
