@@ -6,6 +6,7 @@ mod contacts;
 mod data_controller;
 mod email_document;
 pub mod favicon;
+mod latest_load;
 mod mail;
 mod mail_render_projection;
 mod mail_view_model;
@@ -326,6 +327,7 @@ struct FolderMutationUpdate {
 }
 
 struct MessageLoadUpdate {
+    generation: u64,
     id: i32,
     result: Result<MailMessage, String>,
 }
@@ -1248,9 +1250,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             Err(cpu_error) => {
                                 app.global::<EmailReader>()
                                     .set_notice(cpu_error.clone().into());
-                                app.global::<EmailReader>().set_reader_mode(false);
+                                clear_reader_projection(&app);
                                 app.set_text_mode(true);
-                                app.set_email_tiles(ModelRc::default());
                                 app.set_render_status(UiMessage::arguments(
                                     "Blitz render failed (GPU: {}; software: {})",
                                     gpu_error,
@@ -2268,13 +2269,37 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         message_load_raw_tx,
         UiWake::new(app.as_weak(), |app| app.invoke_drain_message_load_updates()),
     );
-    let message_load_pending = Rc::new(RefCell::new(HashSet::<i32>::new()));
-    // Every selection route (including archive/delete and initial selection)
-    // requests full detail through the same bounded, deduplicated loader.
-    let body_state = Rc::clone(&state);
-    let body_runtime = Rc::clone(&runtime);
-    let body_pending = Rc::clone(&message_load_pending);
+    // One active read and one replaceable pending selection. Never build a
+    // queue of expanded bodies while the user moves quickly through the list.
+    let (body_requests, body_request_rx) =
+        tokio::sync::watch::channel(None::<(u64, (CoreMailSource, MailMessage))>);
+    let body_requests = Rc::new(body_requests);
+    let body_generation = Rc::new(Cell::new(0_u64));
+    let body_pending = Rc::new(Cell::new(None::<(i32, u64)>));
     let body_updates = message_load_tx.clone();
+    runtime.spawn(latest_load::run(
+        body_request_rx,
+        |(core, row)| async move {
+            let result = core.load_message(&row).await;
+            (row.id, result)
+        },
+        move |generation, (id, result)| {
+            let updates = body_updates.clone();
+            async move {
+                let _ = updates
+                    .send(MessageLoadUpdate {
+                        generation,
+                        id,
+                        result,
+                    })
+                    .await;
+            }
+        },
+    ));
+    let body_state = Rc::clone(&state);
+    let pending = body_pending.clone();
+    let generation = body_generation.clone();
+    let requests = body_requests.clone();
     app.global::<EmailReader>().on_ensure_body(move |id| {
         let load = {
             let state = body_state.borrow();
@@ -2286,15 +2311,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     .cloned(),
             )
         };
-        if let Some((core, row)) = load {
-            if !body_pending.borrow_mut().insert(id) {
+        if let Some((core, mut row)) = load {
+            if pending.get().is_some_and(|(active, _)| active == id) {
                 return;
             }
-            let updates = body_updates.clone();
-            body_runtime.spawn(async move {
-                let result = core.load_message(&row).await;
-                let _ = updates.send(MessageLoadUpdate { id, result }).await;
-            });
+            let next = generation.get().wrapping_add(1);
+            generation.set(next);
+            pending.set(Some((id, next)));
+            row.html = None;
+            row.text = None;
+            requests.send_replace(Some((next, (core, row))));
+        } else if pending.get().is_some_and(|(active, _)| active != id) {
+            generation.set(generation.get().wrapping_add(1));
+            pending.set(None);
+            requests.send_replace(None);
         }
     });
     let (mail_list_raw_tx, mail_list_rx) = bounded_ui_channel::<MailListUpdate>();
@@ -2492,8 +2522,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let mail_update_app = app.as_weak();
     let pending_core_updates_for_ui = Arc::clone(&pending_core_updates);
     let calendar_for_core_updates = Rc::clone(&calendar_state);
-    let message_load_tx_for_updates = message_load_tx.clone();
-    let message_load_pending_for_updates = Rc::clone(&message_load_pending);
     let mail_list_app = app.as_weak();
     let mail_list_refresh_in_progress_for_result = Rc::clone(&mail_list_refresh_in_progress);
     let mail_pagination_generation_for_result = Rc::clone(&mail_pagination_generation);
@@ -2612,6 +2640,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let mail_list_tx_for_core = mail_list_tx.clone();
     let mail_metadata_refresh_requested_for_core = Rc::clone(&mail_metadata_refresh_requested);
     let mail_metadata_refresh_in_progress_for_core = Rc::clone(&mail_metadata_refresh_in_progress);
+    let pending_body_for_events = body_pending.clone();
     app.on_drain_core_updates(move || {
         let pending = {
             let mut pending = pending_core_updates_for_ui
@@ -2714,54 +2743,39 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if mail_update_app.upgrade().is_none() {
             return;
         }
-        let (core, selected_id, row) = {
-            let state = mail_update_state.borrow();
-            let selected_id = state.selected_id;
-            (
-                state.core.clone(),
-                selected_id,
-                selected_id.and_then(|id| {
-                    state
-                        .messages
-                        .iter()
-                        .find(|message| message.id == id)
-                        .cloned()
-                }),
-            )
+        let id = {
+            let mut state = mail_update_state.borrow_mut();
+            let id = state.selected_id;
+            if let Some(row) = state.messages.iter_mut().find(|row| Some(row.id) == id) {
+                row.body_pending = true;
+            }
+            id
         };
-        let (Some(core), Some(selected_id), Some(row)) = (core, selected_id, row) else {
-            return;
-        };
-
-        if !message_load_pending_for_updates
-            .borrow_mut()
-            .insert(selected_id)
+        if let Some(id) = id
+            && let Some(app) = mail_update_app.upgrade()
         {
-            return;
+            // A completion may arrive while the previous database read is
+            // still returning its pending snapshot. Queue a fresh read rather
+            // than losing that only body-ready notification to deduplication.
+            pending_body_for_events.set(None);
+            app.global::<EmailReader>().invoke_ensure_body(id);
         }
-        let updates = message_load_tx_for_updates.clone();
-        mail_update_runtime.spawn(async move {
-            let result = core.load_message(&row).await;
-            let _ = updates
-                .send(MessageLoadUpdate {
-                    id: selected_id,
-                    result,
-                })
-                .await;
-        });
     });
 
-    // Loading a large historical thread includes database reads, CID image
+    // Loading the selected message includes database reads, CID image
     // expansion, and body-fetch scheduling. Apply its result on the UI thread,
     // but keep all of that work on Tokio so list input remains responsive.
     let message_load_rx = Rc::new(RefCell::new(message_load_rx));
     let message_load_state = Rc::clone(&state);
     let message_load_runtime = Rc::clone(&runtime);
-    let message_load_pending_for_ui = Rc::clone(&message_load_pending);
+    let message_load_pending_for_ui = body_pending.clone();
     let message_load_app = app.as_weak();
     app.on_drain_message_load_updates(move || {
         while let Ok(update) = message_load_rx.borrow_mut().try_recv() {
-            message_load_pending_for_ui.borrow_mut().remove(&update.id);
+            if message_load_pending_for_ui.get() != Some((update.id, update.generation)) {
+                continue;
+            }
+            message_load_pending_for_ui.set(None);
             let Some(app) = message_load_app.upgrade() else {
                 return;
             };
@@ -2772,18 +2786,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         let mut state = message_load_state.borrow_mut();
                         let is_selected =
                             state.selected_id == Some(update.id) && !state.preview_closed;
-                        if let Some(current) = state
-                            .messages
-                            .iter_mut()
-                            .find(|current| current.id == update.id)
+                        if is_selected
+                            && let Some(current) = state
+                                .messages
+                                .iter_mut()
+                                .find(|current| current.id == update.id)
                         {
                             *current = message;
                         }
                         is_selected
                     };
                     // A user may select another row while this load is in flight.
-                    // Cache the completed detail, but never overwrite that newer
-                    // selection in the reading pane.
+                    // Discard superseded bodies instead of caching them in list rows.
                     if is_selected
                         && !body_pending
                         && let Err(error) =
@@ -5147,8 +5161,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let state_for_selection = Rc::clone(&state);
     let runtime_for_selection = Rc::clone(&runtime);
-    let message_load_tx_for_selection = message_load_tx.clone();
-    let message_load_pending_for_selection = Rc::clone(&message_load_pending);
     app.on_select_email(move |id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5161,8 +5173,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     message.id == id && message.unread && message.thread_id.is_some()
                 })
         };
-        let load = match select_message(&app, &state_for_selection, &runtime_for_selection, id) {
-            Ok(load) => load,
+        match select_message(&app, &state_for_selection, &runtime_for_selection, id) {
+            Ok(_) => {}
             Err(error) => {
                 app.set_render_status(UiMessage::detail("Message load failed: {}", error));
                 return;
@@ -5181,18 +5193,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 error,
             ));
         }
-        let Some((core, row)) = load else {
-            return;
-        };
-        if !message_load_pending_for_selection.borrow_mut().insert(id) {
-            return;
-        }
-        app.set_render_status(UiMessage::plain("Loading message…"));
-        let updates = message_load_tx_for_selection.clone();
-        runtime_for_selection.spawn(async move {
-            let result = core.load_message(&row).await;
-            let _ = updates.send(MessageLoadUpdate { id, result }).await;
-        });
     });
 
     // The main window is already shown above and the independently compiled

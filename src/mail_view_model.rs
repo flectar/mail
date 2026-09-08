@@ -269,6 +269,14 @@ pub(super) fn render_current(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
 ) -> Result<(), String> {
+    // Keep list rows lightweight. SQLite already owns the durable body cache.
+    {
+        let mut state = state.borrow_mut();
+        if state.using_core {
+            let selected = state.selected_id.filter(|_| !state.preview_closed);
+            release_unselected_bodies(&mut state.messages, selected);
+        }
+    }
     let (email_renderer, use_wgpu) = {
         let state = state.borrow();
         (Rc::clone(&state.email_renderer), state.use_wgpu)
@@ -553,6 +561,16 @@ fn label_color(value: &str) -> slint::Color {
             )
         })
         .unwrap_or_else(|| slint::Color::from_rgb_u8(107, 114, 128))
+}
+
+pub(super) fn release_unselected_bodies(messages: &mut [MailMessage], selected: Option<i32>) {
+    for message in messages {
+        if Some(message.id) != selected {
+            message.html = None;
+            message.text = None;
+            message.body_pending = true;
+        }
+    }
 }
 
 pub(super) fn filtered_messages(
@@ -1183,6 +1201,22 @@ pub(super) fn make_account_mailbox_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browsing_keeps_only_the_selected_body_in_memory() {
+        let mut rows: Vec<_> = (0..100).map(message).collect();
+        for id in 0..100 {
+            rows[id].html = Some("<p>Large cached body</p>".repeat(10_000));
+            rows[id].text = Some("Large cached body".repeat(10_000));
+            rows[id].body_pending = false;
+            release_unselected_bodies(&mut rows, Some(id as i32));
+            assert_eq!(rows.iter().filter(|r| r.html.is_some()).count(), 1);
+            assert_eq!(rows.iter().filter(|r| r.text.is_some()).count(), 1);
+            assert!(rows.iter().all(|r| r.id == id as i32 || r.body_pending));
+        }
+        release_unselected_bodies(&mut rows, None);
+        assert!(rows.iter().all(|r| r.html.is_none() && r.text.is_none()));
+    }
 
     fn message(id: i32) -> MailMessage {
         MailMessage {
