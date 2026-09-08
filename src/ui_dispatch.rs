@@ -81,10 +81,41 @@ impl<T> UiSender<T> {
     }
 }
 
+/// Enqueue UI-triggered work without blocking, deduplicating outstanding IDs.
+/// The caller removes IDs when completions arrive; rejection releases them here.
+pub(crate) fn enqueue_once<T>(
+    sender: &mpsc::Sender<T>,
+    pending: &std::cell::RefCell<std::collections::HashSet<i64>>,
+    id: i64,
+    request: T,
+) -> Result<(), ()> {
+    if !pending.borrow_mut().insert(id) {
+        return Ok(());
+    }
+    if sender.try_send(request).is_err() {
+        pending.borrow_mut().remove(&id);
+        return Err(());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UI_UPDATE_QUEUE_CAPACITY, bounded_ui_channel};
     use tokio::sync::mpsc::error::TrySendError;
+
+    #[test]
+    fn queued_work_deduplicates_and_full_queues_release_retry_ids() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+        let pending = Default::default();
+        assert!(super::enqueue_once(&sender, &pending, 1, "first").is_ok());
+        assert!(super::enqueue_once(&sender, &pending, 1, "duplicate").is_ok());
+        assert!(super::enqueue_once(&sender, &pending, 2, "next").is_err());
+        assert!(!pending.borrow().contains(&2));
+        assert_eq!(receiver.try_recv().unwrap(), "first");
+        assert!(super::enqueue_once(&sender, &pending, 2, "retry").is_ok());
+        assert_eq!(receiver.try_recv().unwrap(), "retry");
+    }
 
     #[test]
     fn ui_update_queue_has_a_hard_capacity() {

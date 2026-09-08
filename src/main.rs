@@ -5158,6 +5158,40 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
+    // Automatic read marking must never wait for SQLite or a page refresh
+    // inside the pointer callback. A bounded, serial worker preserves requests.
+    let (mark_read_tx, mut mark_read_rx) = tokio::sync::mpsc::channel::<(CoreMailSource, i64)>(64);
+    let (read_result_tx, read_result_rx) = bounded_ui_channel::<(i64, Result<(), String>)>();
+    let read_results = UiSender::new(
+        read_result_tx,
+        UiWake::new(app.as_weak(), |app| app.invoke_drain_read_updates()),
+    );
+    runtime.spawn(async move {
+        while let Some((core, thread_id)) = mark_read_rx.recv().await {
+            let result = core.perform_message_action(thread_id, "mark_read").await;
+            let _ = read_results.send((thread_id, result)).await;
+        }
+    });
+    let pending_reads = Rc::new(RefCell::new(HashSet::new()));
+    let pending_reads_for_results = pending_reads.clone();
+    let read_result_rx = Rc::new(RefCell::new(read_result_rx));
+    let read_app = app.as_weak();
+    app.on_drain_read_updates(move || {
+        while let Ok((thread_id, result)) = read_result_rx.borrow_mut().try_recv() {
+            pending_reads_for_results.borrow_mut().remove(&thread_id);
+            // Successful mutations publish CoreEvent updates, which use the
+            // existing asynchronous list refresh and preserve the current selection.
+            if let Err(error) = result
+                && let Some(app) = read_app.upgrade()
+            {
+                app.set_render_status(UiMessage::detail(
+                    "Could not mark message as read: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
     let app_weak = app.as_weak();
     let state_for_selection = Rc::clone(&state);
     let runtime_for_selection = Rc::clone(&runtime);
@@ -5165,13 +5199,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let should_mark_read = {
+        let read_target = {
             let state = state_for_selection.borrow();
-            state.mark_read_on_open
-                && state.using_core
-                && state.messages.iter().any(|message| {
-                    message.id == id && message.unread && message.thread_id.is_some()
-                })
+            state
+                .core
+                .clone()
+                .filter(|_| state.mark_read_on_open && state.using_core)
+                .zip(
+                    state
+                        .messages
+                        .iter()
+                        .find(|row| row.id == id && row.unread)
+                        .and_then(|row| row.thread_id),
+                )
         };
         match select_message(&app, &state_for_selection, &runtime_for_selection, id) {
             Ok(_) => {}
@@ -5180,17 +5220,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 return;
             }
         };
-        if should_mark_read
-            && let Err(error) = perform_selected_action(
-                &app,
-                &state_for_selection,
-                &runtime_for_selection,
-                "mark_read",
+        if let Some((core, thread_id)) = read_target
+            && ui_dispatch::enqueue_once(
+                &mark_read_tx,
+                &pending_reads,
+                thread_id,
+                (core, thread_id),
             )
+            .is_err()
         {
             app.set_render_status(UiMessage::detail(
                 "Could not mark message as read: {}",
-                error,
+                "read queue is busy; reopen the message to retry",
             ));
         }
     });

@@ -222,28 +222,16 @@ pub(super) fn select_message(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
     id: i32,
-) -> Result<Option<(CoreMailSource, MailMessage)>, String> {
-    let (core, row) = {
-        let state = state.borrow();
-        (
-            state.core.clone(),
-            state.messages.iter().find(|email| email.id == id).cloned(),
-        )
-    };
-    let Some(row) = row else {
-        return Ok(None);
-    };
-
+) -> Result<(), String> {
     {
         let mut state = state.borrow_mut();
+        if !state.messages.iter().any(|row| row.id == id) {
+            return Ok(());
+        }
         state.selected_id = Some(id);
         state.preview_closed = false;
     }
-    render_current(app, state, runtime)?;
-
-    Ok(core
-        .filter(|_| row.thread_id.is_some() && row.body_pending)
-        .map(|core| (core, row)))
+    render_current(app, state, runtime)
 }
 
 fn adjacent_message_ids(messages: &[MailMessage], selected_id: Option<i32>) -> (i32, i32) {
