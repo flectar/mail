@@ -37,6 +37,12 @@ assert_contains() {
 }
 
 assert_contains "$badging" "package: name='com.flectar.mail'" 'package identity'
+if [[ -n "${FLECTAR_ANDROID_VERSION_NAME:-}" ]]; then
+  assert_contains "$badging" "versionName='$FLECTAR_ANDROID_VERSION_NAME'" 'release version name'
+fi
+if [[ -n "${FLECTAR_ANDROID_VERSION_CODE:-}" ]]; then
+  assert_contains "$badging" "versionCode='$FLECTAR_ANDROID_VERSION_CODE'" 'release version code'
+fi
 assert_contains "$badging" "sdkVersion:'26'" 'minimum SDK'
 assert_contains "$badging" "targetSdkVersion:'36'" 'target SDK'
 assert_contains "$badging" "uses-permission: name='android.permission.INTERNET'" 'network permission'

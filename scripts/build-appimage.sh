@@ -33,7 +33,7 @@ mkdir -p "$build_dir"
 # can opt into the GPU renderer explicitly:
 # FLECTAR_APP_FEATURES=gpu-renderer ./scripts/build-appimage.sh
 app_features="${FLECTAR_APP_FEATURES:-}"
-build_args=(--manifest-path "$project_dir/Cargo.toml" --release --no-default-features --features remote-content)
+build_args=(--locked --bin flectar-mail --manifest-path "$project_dir/Cargo.toml" --release --no-default-features --features remote-content)
 if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi

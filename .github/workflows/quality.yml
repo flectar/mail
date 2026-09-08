@@ -8,6 +8,7 @@ on:
   schedule:
     - cron: "17 4 * * *"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -75,6 +76,8 @@ jobs:
           PY
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
+      - name: Test release validation and publication
+        run: python3 scripts/test-release.py
       - name: Reject unused direct dependencies
         run: |
           cargo install cargo-machete --locked --version 0.9.2

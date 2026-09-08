@@ -34,9 +34,13 @@ fi
 # production signing credential in the repository.
 data_home="${XDG_DATA_HOME:-$HOME/.local/share}"
 keystore_dir="$data_home/flectar-mail/android"
-keystore="$keystore_dir/test-signing.keystore"
+keystore="${FLECTAR_ANDROID_TEST_KEYSTORE:-$keystore_dir/test-signing.keystore}"
 mkdir -p "$keystore_dir"
 
+if [[ -n "${FLECTAR_ANDROID_TEST_KEYSTORE:-}" && ! -f "$keystore" ]]; then
+  printf 'Configured Android test keystore does not exist: %s\n' "$keystore" >&2
+  exit 1
+fi
 if [[ ! -f "$keystore" ]]; then
   keytool \
     -genkeypair \
@@ -65,6 +69,7 @@ export FLECTAR_MICROSOFT_ANDROID_CLIENT_ID="${FLECTAR_MICROSOFT_ANDROID_CLIENT_I
 export FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI="${FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI:-msauth://com.flectar.mail/test-signature-hash}"
 
 cargo apk build \
+  --locked \
   --manifest-path "$project_dir/platform/android/Cargo.toml" \
   --target aarch64-linux-android \
   --release \

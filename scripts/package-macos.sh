@@ -50,8 +50,9 @@ cp "$project_dir/resources/fonts/noto-emoji/README.md" \
   "$app_dir/Contents/Resources/Licenses/Noto Emoji/README.md"
 
 version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -1)"
+native_version="${version%%-*}"
 sed \
-  -e "s/@VERSION@/$version/g" \
+  -e "s/@VERSION@/$native_version/g" \
   "$project_dir/platform/macos/Info.plist.in" > "$app_dir/Contents/Info.plist"
 
 # An ad-hoc signature makes the CI artifact internally consistent. Distribution
@@ -61,3 +62,17 @@ codesign --force --deep --sign - "$app_dir"
 mkdir -p "$output_dir"
 ditto -c -k --sequesterRsrc --keepParent "$app_dir" "$output_dir/flectar-mail-macos-arm64.zip"
 printf 'Built %s\n' "$output_dir/flectar-mail-macos-arm64.zip"
+
+# Use a separate source folder so the disk image contains only the app and the
+# usual Applications shortcut, not the ZIP or a previous disk image.
+staging="$output_dir/dmg-staging"
+rm -rf "$staging"
+mkdir -p "$staging"
+ditto "$app_dir" "$staging/Flectar Mail.app"
+ln -s /Applications "$staging/Applications"
+hdiutil create -volname "Flectar Mail" -srcfolder "$staging" -ov -format UDZO \
+  "$output_dir/flectar-mail-macos-arm64.dmg"
+hdiutil verify "$output_dir/flectar-mail-macos-arm64.dmg"
+codesign --verify --deep --strict "$app_dir"
+rm -rf "$staging"
+printf 'Built %s\n' "$output_dir/flectar-mail-macos-arm64.dmg"

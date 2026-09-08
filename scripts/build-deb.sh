@@ -5,6 +5,8 @@ project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 build_dir="$project_dir/target/deb"
 package_root="$build_dir/debian/flectar-mail"
 version="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n 1)"
+# Debian sorts ~beta before the final version. A hyphen means a Debian revision.
+version="${version/-/~}"
 output_path="$build_dir/flectar-mail_${version}_amd64.deb"
 
 if [[ -z "$version" ]]; then
@@ -13,7 +15,7 @@ if [[ -z "$version" ]]; then
 fi
 
 app_features="${FLECTAR_APP_FEATURES:-}"
-build_args=(--manifest-path "$project_dir/Cargo.toml" --release --no-default-features --features remote-content)
+build_args=(--locked --bin flectar-mail --manifest-path "$project_dir/Cargo.toml" --release --no-default-features --features remote-content)
 if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi

@@ -2,6 +2,15 @@ name: Native platform artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      include_android:
+        description: Build the experimental Android test APK
+        type: boolean
+        default: true
+      include_ios:
+        description: Also build an experimental unsigned iOS archive
+        type: boolean
+        default: false
   push:
     tags:
       - "v*.*.*"
@@ -9,11 +18,40 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: native-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  quality:
+    name: Release quality gate
+    uses: ./.github/workflows/quality.yml
+
+  metadata:
+    name: Validate release version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      native_version: ${{ steps.version.outputs.native_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Read version and check pushed tag
+        id: version
+        env:
+          IS_TAG_PUSH: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+        run: |
+          if [[ "$IS_TAG_PUSH" == true ]]; then
+            python3 scripts/release-metadata.py --tag "$GITHUB_REF_NAME"
+          else
+            python3 scripts/release-metadata.py
+          fi
+
   linux:
+    needs: metadata
     name: Linux packages (x64)
     runs-on: ubuntu-22.04
     steps:
@@ -89,7 +127,8 @@ jobs:
           if-no-files-found: error
 
   windows:
-    name: Windows executable (x64)
+    needs: metadata
+    name: Windows installer and portable executable (x64)
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -103,6 +142,9 @@ jobs:
       - name: Build release executable
         shell: bash
         env:
+          # Keep the portable build independent of an installed VC++ runtime.
+          # RUSTFLAGS replaces .cargo/config.toml, so retain its stack setting.
+          RUSTFLAGS: "-C target-feature=+crt-static -C link-arg=/STACK:8000000"
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
@@ -125,13 +167,50 @@ jobs:
           Copy-Item resources/fonts/noto-emoji/README.md "target/package/windows/Licenses/Noto Emoji/"
           Compress-Archive -Path target/package/windows/* -DestinationPath target/flectar-mail-windows-x64.zip -Force
 
+      - name: Install pinned Inno Setup compiler
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_5_4/innosetup-6.5.4.exe' -OutFile $installer
+          $expected = 'fa73bf47a4da250d185d07561c2bfda387e5e20db77e4570004cf6a133cc10b1'
+          if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $expected) { throw 'Inno Setup checksum mismatch' }
+          $process = Start-Process $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup install failed: $($process.ExitCode)" }
+
+      - name: Build per-user Windows installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.metadata.outputs.version }}
+          NATIVE_VERSION: ${{ needs.metadata.outputs.native_version }}
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $compiler)) { throw "Inno Setup 6 is missing from the runner" }
+          & $compiler "/DAppVersion=$env:APP_VERSION" "/DNativeVersion=$env:NATIVE_VERSION" platform/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
+
+      - name: Verify unattended installation and uninstall
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'Flectar Mail install test'
+          $installer = (Resolve-Path target/flectar-mail-windows-x64-setup.exe).Path
+          $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"")
+          $process = Start-Process $installer -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installation failed: $($process.ExitCode)" }
+          if (-not (Test-Path "$destination/flectar-mail.exe")) { throw 'Installed executable is missing' }
+          $process = Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
+          if (Test-Path "$destination/flectar-mail.exe") { throw 'Uninstall left the executable behind' }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flectar-mail-windows-x64
-          path: target/flectar-mail-windows-x64.zip
+          path: |
+            target/flectar-mail-windows-x64.zip
+            target/flectar-mail-windows-x64-setup.exe
           if-no-files-found: error
 
   macos:
+    needs: metadata
     name: macOS application (Apple Silicon)
     runs-on: macos-15
     steps:
@@ -156,10 +235,16 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flectar-mail-macos-arm64
-          path: target/macos/flectar-mail-macos-arm64.zip
+          path: |
+            target/macos/flectar-mail-macos-arm64.zip
+            target/macos/flectar-mail-macos-arm64.dmg
           if-no-files-found: error
 
   android:
+    needs: metadata
+    if: >-
+      (github.event_name == 'push' && needs.metadata.outputs.prerelease == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.include_android)
     name: Android test-signed APK (arm64)
     runs-on: ubuntu-24.04
     steps:
@@ -193,23 +278,51 @@ jobs:
             echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$toolchain/aarch64-linux-android26-clang"
           } >> "$GITHUB_ENV"
 
+      - name: Restore persistent test signing key when configured
+        env:
+          TEST_KEYSTORE_BASE64: ${{ secrets.FLECTAR_ANDROID_TEST_KEYSTORE_BASE64 }}
+        run: |
+          if [[ -n "$TEST_KEYSTORE_BASE64" ]]; then
+            keystore="$RUNNER_TEMP/flectar-android-test.keystore"
+            umask 077
+            printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+            echo "FLECTAR_ANDROID_TEST_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+          else
+            echo '::warning::No persistent Android test key configured. This APK will not update installations signed by a previous CI run.'
+          fi
+
       - name: Build test-signed release APK
         env:
+          FLECTAR_ANDROID_VERSION_NAME: ${{ needs.metadata.outputs.version }}
+          FLECTAR_ANDROID_VERSION_CODE: ${{ github.run_number }}
           FLECTAR_GOOGLE_ANDROID_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_ANDROID_CLIENT_ID }}
           FLECTAR_MICROSOFT_ANDROID_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_CLIENT_ID }}
           FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_REDIRECT_URI }}
         run: ./scripts/build-android-test-apk.sh
 
       - name: Verify release APK manifest, ABI, and signature
+        env:
+          FLECTAR_ANDROID_VERSION_NAME: ${{ needs.metadata.outputs.version }}
+          FLECTAR_ANDROID_VERSION_CODE: ${{ github.run_number }}
         run: ./scripts/verify-android-apk.sh
+
+      - name: Record public test signing identity
+        run: ./scripts/android-signing-identities.sh target/android/release/apk/flectar-mail.apk > target/android/release/apk/signing-identities.txt
+
+      - name: Remove restored signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/flectar-android-test.keystore"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flectar-mail-android-test-signed-arm64
-          path: target/android/**/*.apk
+          path: |
+            target/android/release/apk/flectar-mail.apk
+            target/android/release/apk/signing-identities.txt
           if-no-files-found: error
 
   ios:
+    if: github.event_name == 'workflow_dispatch' && inputs.include_ios
     name: iOS unsigned archive (arm64)
     runs-on: macos-15
     steps:
@@ -257,13 +370,23 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, macos]
+    # Explicit results let stable releases proceed with Android skipped while
+    # requiring a successful Android build for every prerelease.
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
+      needs.metadata.result == 'success' && needs.quality.result == 'success' &&
+      needs.linux.result == 'success' && needs.windows.result == 'success' &&
+      needs.macos.result == 'success' &&
+      (needs.android.result == 'success' ||
+       (needs.metadata.outputs.prerelease == 'false' && needs.android.result == 'skipped'))
+    needs: [metadata, quality, linux, windows, macos, android]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: write
     steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
       - name: Download Linux packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -282,28 +405,21 @@ jobs:
           name: flectar-mail-macos-arm64
           path: release-assets/macos
 
+      - name: Download Android test APK
+        if: needs.metadata.outputs.prerelease == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flectar-mail-android-test-signed-arm64
+          path: release-assets/android
+
       - name: Prepare release downloads
-        run: |
-          mkdir -p dist
-          find release-assets -type f \( \
-            -name '*.AppImage' -o \
-            -name '*.deb' -o \
-            -name '*.zip' \
-          \) -exec cp '{}' dist/ \;
-          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
-          cd dist
-          sha256sum ./* > SHA256SUMS
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: python3 scripts/prepare-release.py
 
       - name: Publish tagged release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
-          else
-            gh release create "$GITHUB_REF_NAME" dist/* \
-              --verify-tag \
-              --title "Flectar Mail ${GITHUB_REF_NAME#v}" \
-              --generate-notes
-          fi
+          RELEASE_PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
+        run: bash scripts/publish-release.sh
