@@ -4,6 +4,7 @@ mod compose_controller;
 mod compose_editor;
 mod contacts;
 mod data_controller;
+mod email_document;
 pub mod favicon;
 mod mail;
 mod mail_render_projection;

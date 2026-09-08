@@ -201,15 +201,7 @@ pub(super) fn print_selected_message(state: &Rc<RefCell<InboxState>>) -> Result<
             .and_then(|message| message.html.clone())
             .ok_or_else(|| "message body is not ready".to_owned())?
     };
-    let printable = if html.contains("</body>") {
-        html.replacen(
-            "</body>",
-            "<script>window.addEventListener('load',()=>window.print())</script></body>",
-            1,
-        )
-    } else {
-        format!("{html}<script>window.addEventListener('load',()=>window.print())</script>")
-    };
+    let printable = crate::email_document::export_html(&html, true);
     open_temporary_html("flectar-mail-print-", &printable)
 }
 
@@ -233,7 +225,10 @@ pub(super) fn open_selected_message_in_browser(
             )
         })
     };
-    open_temporary_html("flectar-mail-message-", &html)
+    open_temporary_html(
+        "flectar-mail-message-",
+        &crate::email_document::export_html(&html, false),
+    )
 }
 
 /// Materialize browser/print HTML without a predictable path or permissive
