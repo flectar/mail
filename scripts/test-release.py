@@ -29,7 +29,8 @@ release_assets = load_script("prepare-release")
 prepare = release_assets.prepare
 android_signing = load_script("verify-android-signing")
 verify_android_signing = android_signing.verify
-stage_linux_metadata = load_script("stage-linux-metadata").stage
+linux_metadata = load_script("stage-linux-metadata")
+stage_linux_metadata = linux_metadata.stage
 
 
 class ReleaseTests(unittest.TestCase):
@@ -107,6 +108,16 @@ class ReleaseTests(unittest.TestCase):
                     self.assertEqual(release.get("version"), version)
                     self.assertEqual(release.get("date"), "2026-01-01")
                     self.assertEqual(release.get("type"), "development" if "-" in version else "stable")
+                    # Repackaging the same source must produce identical metadata
+                    # without consulting the current date.
+                    repeated = root / f"{version}-repeated"
+                    with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
+                        with patch.object(linux_metadata, "datetime", wraps=linux_metadata.datetime) as clock:
+                            clock.now.side_effect = AssertionError("Metadata must use the source date")
+                            stage_linux_metadata(root, repeated)
+                    for path in destination.rglob("*"):
+                        if path.is_file():
+                            self.assertEqual(path.read_bytes(), (repeated / path.relative_to(destination)).read_bytes())
             for name in ("com.flectar.mail.desktop", "com.flectar.mail.metainfo.xml"):
                 self.assertEqual((root / "resources" / name).read_bytes(), (SCRIPTS.parent / "resources" / name).read_bytes())
 

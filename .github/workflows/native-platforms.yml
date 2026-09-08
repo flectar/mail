@@ -55,8 +55,15 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       native_version: ${{ steps.version.outputs.native_version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      source_date_epoch: ${{ steps.source.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Use the source commit timestamp
+        id: source
+        run: |
+          epoch="$(git show -s --format=%ct HEAD)"
+          echo "SOURCE_DATE_EPOCH=$epoch" >> "$GITHUB_ENV"
+          echo "source_date_epoch=$epoch" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -80,6 +87,8 @@ jobs:
     if: github.event_name == 'push' || inputs.include_linux
     name: Linux packages (x64)
     runs-on: ubuntu-22.04
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
