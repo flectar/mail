@@ -50,6 +50,21 @@ fraction of the memory of a typical web-based mail client.
 - **Native and open source.** Built from the ground up with Rust. It is not a
   browser wrapped in a window, and it is released under the AGPLv3.
 
+## Files and attachments
+
+Browse JMAP/WebDAV storage, search mail attachments, keep files offline, and
+preview PDFs, images and text.
+
+## Account signatures and OpenPGP
+
+Settings → Accounts → Signatures & OpenPGP provides named signatures, separate
+new-message and reply defaults, and a composer signature selector. Desktop
+OpenPGP/MIME signing and encryption use installed GnuPG 2.x with pinentry for
+private-key passphrases. Required encryption blocks delivery when recipient keys
+are missing or invalid; protected drafts remain local until Send.
+
+S/MIME and mobile OpenPGP are not currently supported.
+
 ## Experimental HTML rendering
 
 > [!WARNING]
@@ -108,7 +123,7 @@ inbox more room when you need it.
 
 | Calendar | Contacts | Files (WebDAV/JMAP) |
 | --- | --- | --- |
-| ![Flectar Mail calendar](resources/screenshots/desktop-calendar-light.png) | ![Flectar Mail contacts](resources/screenshots/desktop-contacts-light.png) | **Coming soon** |
+| ![Flectar Mail calendar](resources/screenshots/desktop-calendar-light.png) | ![Flectar Mail contacts](resources/screenshots/desktop-contacts-light.png) | ![Flectar Mail files](resources/screenshots/desktop-files-light.png) |
 
 ### Made for smaller screens
 
