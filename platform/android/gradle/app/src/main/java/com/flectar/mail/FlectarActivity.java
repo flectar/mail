@@ -1,5 +1,6 @@
 package com.flectar.mail;
 
+import java.io.File;
 import android.app.NativeActivity;
 import android.content.Intent;
 import android.content.IntentSender;
@@ -24,6 +25,110 @@ import java.security.NoSuchAlgorithmException;
 
 /** NativeActivity host plus the supported Google AuthorizationClient bridge. */
 public final class FlectarActivity extends NativeActivity {
+    private static native void nativeSuspendPdfPreview();
+
+    @Override
+    protected void onStop() {
+        nativeSuspendPdfPreview();
+        super.onStop();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            nativeSuspendPdfPreview();
+        }
+    }
+
+    private static final int FILE_DOCUMENT_REQUEST = 0xF11E;
+    private long pendingDocumentRequest = -1;
+    private String pendingDocumentExport = "";
+    private static native void nativeDocumentResult(long requestId, String path, String error);
+    private static native boolean nativeDocumentRequestActive(long requestId);
+
+    public void cancelDocumentRequest(long requestId) {
+        runOnUiThread(() -> {
+            if (pendingDocumentRequest == requestId) {
+                // Retain the request ID until its result arrives. Reusing the
+                // activity result code earlier could misroute a late result.
+                finishActivity(FILE_DOCUMENT_REQUEST);
+            }
+        });
+    }
+
+    public void releaseImportedDocument(String path) {
+        try {
+            File root=new File(getCacheDir(),"file-imports").getCanonicalFile();
+            File file=new File(path).getCanonicalFile();
+            File folder=file.getParentFile();
+            if(folder!=null && root.equals(folder.getParentFile()) && file.isFile()) {
+                if(file.delete())folder.delete();
+            }
+        } catch(java.io.IOException ignored) { }
+    }
+    public void chooseDocument(long requestId, String exportPath, String name) {
+        runOnUiThread(() -> {
+            if (!nativeDocumentRequestActive(requestId)) return;
+            if (pendingDocumentRequest >= 0) {nativeDocumentResult(requestId, "", "Another document picker is open."); return;}
+            pendingDocumentRequest = requestId;
+            pendingDocumentExport = exportPath;
+            Intent intent = new Intent(exportPath.isEmpty() ? Intent.ACTION_OPEN_DOCUMENT : Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(exportPath.isEmpty() ? "*/*" : "application/octet-stream");
+            if (!exportPath.isEmpty()) intent.putExtra(Intent.EXTRA_TITLE, name);
+            try {startActivityForResult(intent, FILE_DOCUMENT_REQUEST);}
+            catch (RuntimeException error) {pendingDocumentRequest=-1;pendingDocumentExport="";nativeDocumentResult(requestId,"","Could not open the system document picker.");}
+        });
+    }
+
+    private void finishDocument(int resultCode, Intent data) {
+        final long id=pendingDocumentRequest;
+        final String exportPath=pendingDocumentExport;
+        pendingDocumentRequest=-1;pendingDocumentExport="";
+        if(id<0)return;
+        if(resultCode!=RESULT_OK||data==null||data.getData()==null){nativeDocumentResult(id,"","");return;}
+        final Uri uri=data.getData();
+        new Thread(() -> {
+            java.io.File imported=null;
+            java.io.File importDirectory=null;
+            try {
+                if (!nativeDocumentRequestActive(id)) throw new java.io.IOException("Document transfer cancelled");
+                if(exportPath.isEmpty()) {
+                    String name="upload";
+                    try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)) {
+                        if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);
+                    }
+                    if(name==null||name.isEmpty()||name.equals(".")||name.equals("..")||name.contains("/")||name.contains("\\"))name="upload";
+                    java.io.File dir=new java.io.File(getCacheDir(),"file-imports/"+java.util.UUID.randomUUID());
+                    importDirectory=dir;
+                    if(!dir.mkdirs())throw new java.io.IOException("Cannot create import directory");
+                    imported=new java.io.File(dir,name);
+                    try(java.io.InputStream in=getContentResolver().openInputStream(uri);java.io.OutputStream out=new java.io.FileOutputStream(imported)) {copyDocument(id,in,out);}
+                    nativeDocumentResult(id,imported.getAbsolutePath(),"");
+                } else {
+                    java.io.File source=new java.io.File(exportPath).getCanonicalFile();
+                    // Only private application paths supplied by our Rust host.
+                    if(!source.toPath().startsWith(getCacheDir().getCanonicalFile().toPath()) && !source.toPath().startsWith(getFilesDir().getCanonicalFile().toPath()))throw new java.io.IOException("Invalid export source");
+                    try(java.io.InputStream in=new java.io.FileInputStream(source);java.io.OutputStream out=getContentResolver().openOutputStream(uri,"w")){copyDocument(id,in,out);}
+                    nativeDocumentResult(id,exportPath,"");
+                }
+            } catch(Exception error) {
+                if(imported!=null)imported.delete();
+                if(importDirectory!=null)importDirectory.delete();
+                if(!exportPath.isEmpty()) {try {android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);} catch(Exception ignored) {}}
+                nativeDocumentResult(id,"","The document could not be transferred: "+error.getMessage());
+            }
+        },"flectar-documents").start();
+    }
+    private static void copyDocument(long id,java.io.InputStream in,java.io.OutputStream out) throws java.io.IOException {
+        if(in==null||out==null)throw new java.io.IOException("Document provider did not open a stream");
+        byte[] buffer=new byte[65536];long total=0;int count;
+        while((count=in.read(buffer))!=-1){if(!nativeDocumentRequestActive(id))throw new java.io.IOException("Document transfer cancelled");total+=count;if(total>512L*1024*1024)throw new java.io.IOException("File exceeds the transfer limit");out.write(buffer,0,count);}
+        if(!nativeDocumentRequestActive(id))throw new java.io.IOException("Document transfer cancelled");
+        out.flush();
+    }
+
     private static final int GOOGLE_AUTHORIZATION_REQUEST = 0xF1EC;
     private long pendingGoogleRequest = -1;
 
@@ -39,12 +144,16 @@ public final class FlectarActivity extends NativeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         if (savedInstanceState != null) {
+            pendingDocumentRequest=savedInstanceState.getLong("pendingDocumentRequest",-1);
+            pendingDocumentExport=savedInstanceState.getString("pendingDocumentExport","");
             pendingGoogleRequest = savedInstanceState.getLong("pendingGoogleRequest", -1);
         }
     }
 
     @Override
     protected void onSaveInstanceState(Bundle state) {
+        state.putLong("pendingDocumentRequest",pendingDocumentRequest);
+        state.putString("pendingDocumentExport",pendingDocumentExport);
         state.putLong("pendingGoogleRequest", pendingGoogleRequest);
         super.onSaveInstanceState(state);
     }
@@ -134,6 +243,7 @@ public final class FlectarActivity extends NativeActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_DOCUMENT_REQUEST) {finishDocument(resultCode,data);return;}
         if (requestCode != GOOGLE_AUTHORIZATION_REQUEST) {
             return;
         }

@@ -1,0 +1,47 @@
+import { HorizontalBox, VerticalBox, ScrollView } from "std-widgets.slint";
+import { MailAttachments } from "../models.slint";
+import { DocumentPreview } from "../components/document-preview.slint";
+import { Button } from "../components/button.slint";
+import { ToolbarIconButton } from "../components/controls.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+export component AttachmentPreviewDialog inherits Rectangle {
+    in property <bool> compact: false;
+    visible: MailAttachments.open;
+    background: #00000088; z: 2000;
+    accessible-role: groupbox; accessible-label: MailAttachments.name;
+    changed visible => { if root.visible { keys.focus(); } }
+    TouchArea {}
+    panel := Rectangle {
+        x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+        width: root.compact ? parent.width : min(1000px, parent.width - 48px);
+        height: root.compact ? parent.height : parent.height - 48px;
+        background: AppTheme.surface; border-radius: root.compact ? 0px : 12px;
+        keys := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape { MailAttachments.command("close", ""); return accept; }
+                return reject;
+            }
+            VerticalBox {
+                padding: root.compact ? 12px : 20px; spacing: 12px;
+                HorizontalBox {
+                    Text { text: MailAttachments.name; color: AppTheme.heading; font-size: TypeScale.title; overflow: elide; horizontal-stretch: 1; }
+                    Button { text: @tr("Download"); enabled: !MailAttachments.busy; clicked => { MailAttachments.command("download-current", ""); } }
+                    ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/phosphor/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { MailAttachments.command("close", ""); } }
+                }
+                if MailAttachments.is-image : DocumentPreview {
+                    compact: root.compact; source: MailAttachments.image; busy: MailAttachments.busy;
+                    page: MailAttachments.page; pages: MailAttachments.pages;
+                    raster-zoom: MailAttachments.pages > 0 ? 2 : 1; document-revision: MailAttachments.revision;
+                    render-page(page, zoom) => { MailAttachments.command("page", "" + page); }
+                }
+                if !MailAttachments.is-image : ScrollView {
+                    viewport-width: self.visible-width;
+                    Text { width: parent.visible-width; text: MailAttachments.text; wrap: word-wrap; color: AppTheme.body; }
+                }
+                Text { text: MailAttachments.busy ? @tr("Loading preview…") : MailAttachments.status; wrap: word-wrap; color: AppTheme.secondary; }
+            }
+        }
+    }
+}

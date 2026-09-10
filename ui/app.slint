@@ -1,3 +1,9 @@
+export { AccountMailPreferences, SignatureChoice } from "components/account-mail-preferences.slint";
+import { OpenPgpReader } from "components/account-mail-preferences.slint";
+import { MailAttachments } from "models.slint";
+import { AttachmentPreviewDialog } from "dialogs/attachment-preview-dialog.slint";
+export { MailAttachments, MailAttachment } from "models.slint";
+export { ZoomApi } from "components/zoom-controls.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
 import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf";
@@ -17,6 +23,8 @@ import { ComposeDialog } from "dialogs/compose-dialog.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { MailView } from "views/mail-view.slint";
+export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
+import { FilesView, FilesUi } from "views/files-view.slint";
 import { ContactsView } from "views/contacts-view.slint";
 import { OnboardingView } from "views/onboarding-view.slint";
 
@@ -363,11 +371,16 @@ export global I18n {
         if (key == "Message queued for delivery (action {}).") { return @tr("Message queued for delivery (action {}).", argument); }
         if (key == "Draft saved locally (#{}).") { return @tr("Draft saved locally (#{}).", argument); }
         if (key == "Compose failed: {}") { return @tr("Compose failed: {}", argument); }
-        if (key == "IMAP port must be a number.") { return @tr("IMAP port must be a number."); }
-        if (key == "SMTP port must be a number.") { return @tr("SMTP port must be a number."); }
+        if (key == "IMAP port must be between 1 and 65535.") { return @tr("IMAP port must be between 1 and 65535."); }
+        if (key == "SMTP port must be between 1 and 65535.") { return @tr("SMTP port must be between 1 and 65535."); }
         if (key == "Local mail data is unavailable. Retry startup.") { return @tr("Local mail data is unavailable. Retry startup."); }
         if (key == "Discovering JMAP and checking capabilities…") { return @tr("Discovering JMAP and checking capabilities…"); }
-        if (key == "Testing IMAP connection…") { return @tr("Testing IMAP connection…"); }
+        if (key == "Certificate imported. Connect to verify the server.") { return @tr("Certificate imported. Connect to verify the server."); }
+        if (key == "Could not load account preferences: {}") { return @tr("Could not load account preferences: {}", argument); }
+        if (key == "Your edited signature was preserved. Choose No signature to keep it as message text before inserting another.") { return @tr("Your edited signature was preserved. Choose No signature to keep it as message text before inserting another."); }
+        if (key == "Certificate import failed: {}") { return @tr("Certificate import failed: {}", argument); }
+        if (key == "Paste the PEM certificate into the certificate field.") { return @tr("Paste the PEM certificate into the certificate field."); }
+        if (key == "Testing IMAP and SMTP connections…") { return @tr("Testing IMAP and SMTP connections…"); }
         return "";
     }
 
@@ -638,6 +651,7 @@ export component AppWindow inherits Window {
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
     in-out property <string> active_view: "mail";
+    changed active_view => { if root.active_view != "mail" { MailAttachments.command("close", ""); } }
     in-out property <string> settings_tab: "General";
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
@@ -650,6 +664,8 @@ export component AppWindow inherits Window {
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> close_to_tray: false;
+    in-out property <bool> account_setup_in_progress: false;
+    in-out property <bool> account_form_open: false;
     in-out property <bool> oauth_in_progress: false;
     in property <bool> remote-images-available: true;
     in-out property <bool> remote-images-enabled: false;
@@ -700,6 +716,28 @@ export component AppWindow inherits Window {
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
+    in-out property <string> imap_security: "auto";
+    in-out property <string> smtp_security: "auto";
+    in-out property <string> trusted_certificate_pem;
+    in property <string> oauth_authorization_url;
+    in property <bool> oauth_browser_error;
+    callback retry_oauth_browser();
+    callback copy_oauth_link();
+    callback copy_oauth_authorization_url();
+    copy_oauth_authorization_url => {
+        if root.oauth_in_progress && root.oauth_authorization_url != "" {
+            oauth-clipboard.text = root.oauth_authorization_url;
+            oauth-clipboard.select-all();
+            oauth-clipboard.copy();
+        }
+    }
+    oauth-clipboard := TextInput {
+        x: -10000px; y: -10000px; width: 1px; height: 1px;
+        visible: false; enabled: false; read-only: true;
+        accessible-role: none;
+    }
+
+    callback import_mail_certificate();
     in-out property <string> imap_host: "";
     in-out property <string> imap_port: "993";
     in-out property <string> smtp_host: "";
@@ -752,7 +790,8 @@ export component AppWindow inherits Window {
     private property <bool> compact-primary-nav-visible: root.compact-layout
         && !root.compose_open && !root.calendar_editor_open
         && !(root.active_view == "mail" && mail-view.compact-page == "message")
-        && !(root.active_view == "contacts" && contacts-view.detail-page-visible);
+        && !(root.active_view == "contacts" && contacts-view.detail-page-visible)
+        && !(root.active_view == "files" && FilesUi.preview-open);
     private property <length> compact-primary-nav-height: LayoutMetrics.compact-navigation-height;
     private property <bool> folder-dialog-open: false;
     private property <string> folder-dialog-item-kind: "folder";
@@ -810,6 +849,12 @@ export component AppWindow inherits Window {
     }
 
     system-back-requested => {
+        if MailAttachments.open { MailAttachments.command("close", ""); return true; }
+        if root.active_view == "files" && FilesUi.transfers-open {FilesUi.transfers-open=false;return true;}
+        if root.active_view == "files" && FilesUi.dialog != "" { FilesUi.dialog = ""; return true; }
+        if root.active_view == "files" && files-view.close-navigation() { return true; }
+        if root.active_view == "files" && FilesUi.preview-open { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); return true; }
+        if root.active_view == "files" && FilesUi.can-up && !FilesUi.busy { FilesUi.command("up", "", ""); return true; }
         if (root.folder-dialog-open) {
             root.folder-dialog-open = false;
             return true;
@@ -881,6 +926,7 @@ export component AppWindow inherits Window {
                 root.active_view = view;
                 root.settings_open = false;
                 if (view == "contacts") { root.load-contacts(); }
+                if (view == "files") { FilesUi.command("load", "", ""); }
             }
         }
 
@@ -1147,6 +1193,15 @@ export component AppWindow inherits Window {
         }
         }
 
+        WorkspaceFrame {
+            visible: root.active_view == "files";
+            compact: root.compact-layout;
+            reserve-compact-navigation: root.compact-primary-nav-visible;
+            available-width: parent.width;
+            available-height: parent.height;
+            files-view := FilesView { active: root.active_view == "files"; width: parent.width; height: parent.height; compact: root.compact-layout; layout-mode: root.workspace_layout; account-model: root.connected_accounts; }
+        }
+
         CompactProductNav {
             visible: root.compact-primary-nav-visible;
             x: 0px;
@@ -1165,6 +1220,7 @@ export component AppWindow inherits Window {
                 root.active_view = view;
                 root.settings_open = false;
                 if (view == "contacts") { root.load-contacts(); }
+                if (view == "files") { FilesUi.command("load", "", ""); }
             }
         }
 
@@ -1216,6 +1272,8 @@ export component AppWindow inherits Window {
             remote-images-available: root.remote-images-available;
             account-transfer-supported: root.document_apis_supported;
             sync_in_progress: root.sync_in_progress;
+            account_setup_in_progress: root.account_setup_in_progress;
+            imap_form_open <=> root.account_form_open;
             oauth_in_progress: root.oauth_in_progress;
             oauth_settings_saving: root.oauth_settings_saving;
             sync_status: root.sync_status;
@@ -1256,6 +1314,14 @@ export component AppWindow inherits Window {
             caldav_url <=> root.caldav_url;
             caldav_username <=> root.caldav_username;
             caldav_password <=> root.caldav_password;
+            imap_security <=> root.imap_security;
+            smtp_security <=> root.smtp_security;
+            trusted_certificate_pem <=> root.trusted_certificate_pem;
+            oauth_authorization_url: root.oauth_authorization_url;
+            oauth_browser_error: root.oauth_browser_error;
+            retry_oauth_browser => { root.retry_oauth_browser(); }
+            copy_oauth_link => { root.copy_oauth_link(); }
+            import_mail_certificate => { root.import_mail_certificate(); }
             imap_host <=> root.imap_host;
             imap_port <=> root.imap_port;
             smtp_host <=> root.smtp_host;
@@ -1469,6 +1535,7 @@ export component AppWindow inherits Window {
         width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
         height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
         startup-ready: root.startup_ready;
+        account-setup-in-progress: root.account_setup_in_progress;
         oauth-in-progress: root.oauth_in_progress;
         oauth-settings-saving: root.oauth_settings_saving;
         oauth-settings-error <=> root.oauth_settings_error;
@@ -1495,6 +1562,15 @@ export component AppWindow inherits Window {
         account-password <=> root.account_password;
         account-protocol <=> root.account_protocol;
         jmap-url <=> root.jmap_url;
+        imap-security <=> root.imap_security;
+        smtp-security <=> root.smtp_security;
+        trusted-certificate-pem <=> root.trusted_certificate_pem;
+        account-username <=> root.account_username;
+        oauth-authorization-url: root.oauth_authorization_url;
+        oauth-browser-error: root.oauth_browser_error;
+        retry-oauth-browser => { root.retry_oauth_browser(); }
+        copy-oauth-link => { root.copy_oauth_link(); }
+        import-mail-certificate => { root.import_mail_certificate(); }
         imap-host <=> root.imap_host;
         imap-port <=> root.imap_port;
         smtp-host <=> root.smtp_host;
@@ -1597,4 +1673,13 @@ export component AppWindow inherits Window {
             }
         }
     }
+    AttachmentPreviewDialog {
+        x: root.safe-area-insets.left; y: root.safe-area-insets.top;
+        width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+        height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
+        compact: root.compact-layout;
+    }
+
+    OpenPgpReader { width: parent.width; height: parent.height; }
+
 }

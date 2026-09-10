@@ -1,3 +1,4 @@
+import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
 import { ContactSidebarRow, ContactSidebarRowKind, ContactRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
@@ -90,46 +91,19 @@ export component ContactsView inherits Rectangle {
     callback delete-contact(int);
     callback compose-to-contact(string);
 
-    private property <length> pagination-prefetch-distance: 246px;
-    private property <bool> pagination-armed: true;
-    private property <int> pagination-request-row-count: -1;
-    private property <int> pagination-request-revision: -1;
-    private property <length> pagination-request-height: -1px;
-    private property <int> pagination-row-count: root.contacts.length;
-    private property <length> pagination-content-height: contact-list.viewport-height;
-
-    function maybe-load-more() {
-        if (root.can-load-more
-            && !root.loading-more
-            && root.pagination-armed
-            && contact-list.viewport-height + contact-list.viewport-y
-                - contact-list.visible-height <= root.pagination-prefetch-distance) {
-            root.pagination-armed = false;
-            root.pagination-request-row-count = root.pagination-row-count;
-            root.pagination-request-revision = root.content-revision;
-            root.pagination-request-height = root.pagination-content-height;
-            root.load-more();
-        }
+    pagination := InfiniteScrollController {
+        active: root.active;
+        can-load-more: root.can-load-more; loading: root.loading-more;
+        row-count: root.contacts.length; revision: root.content-revision;
+        content-height: contact-list.viewport-height;
+        viewport-y: contact-list.viewport-y; visible-height: contact-list.visible-height;
+        prefetch-distance: 246px;
+        load-more => { root.load-more(); }
     }
-
     function reset-pagination() {
-        root.pagination-armed = true;
-        root.pagination-request-row-count = -1;
-        root.pagination-request-revision = -1;
-        root.pagination-request-height = -1px;
         contact-list.viewport-y = 0px;
-        pagination-check.restart();
+        pagination.reset();
     }
-
-    function user-scrolled() {
-        if (!root.loading-more
-            && !root.pagination-armed
-            && root.content-revision == root.pagination-request-revision) {
-            root.pagination-armed = true;
-        }
-        root.maybe-load-more();
-    }
-
     changed selected-id => { root.delete-confirming = false; }
     changed query => {
         root.reset-pagination();
@@ -140,29 +114,6 @@ export component ContactsView inherits Rectangle {
     changed selected-scope => {
         root.reset-pagination();
     }
-    changed pagination-content-height => {
-        if (!root.pagination-armed
-            && root.content-revision != root.pagination-request-revision
-            && root.pagination-content-height != root.pagination-request-height) {
-            root.pagination-armed = true;
-        }
-        pagination-check.restart();
-    }
-    changed content-revision => {
-        if (!root.pagination-armed
-            && root.content-revision != root.pagination-request-revision
-            && (root.pagination-row-count == root.pagination-request-row-count
-                || root.pagination-content-height != root.pagination-request-height)) {
-            root.pagination-armed = true;
-        }
-        pagination-check.restart();
-    }
-    changed can-load-more => { pagination-check.restart(); }
-    changed loading-more => {
-        if (!root.loading-more) {
-            pagination-check.restart();
-        }
-    }
     changed layout-mode => {
         if (root.layout-mode == "minimal") {
             root.detail-page-visible = false;
@@ -172,15 +123,6 @@ export component ContactsView inherits Rectangle {
     function open-filter(scope: string) {
         root.detail-page-visible = false;
         root.select-filter(scope);
-    }
-
-    pagination-check := Timer {
-        interval: 1ms;
-        running: true;
-        triggered => {
-            self.stop();
-            root.maybe-load-more();
-        }
     }
 
     HorizontalBox {
@@ -401,7 +343,7 @@ export component ContactsView inherits Rectangle {
                         height: parent.height;
                         horizontal-scrollbar-policy: always-off;
                         mouse-drag-pan-enabled: root.compact;
-                        scrolled => { root.user-scrolled(); }
+                        scrolled => { pagination.user-scrolled(); }
 
                             for contact in root.contacts : Rectangle {
                                 x: 12px;

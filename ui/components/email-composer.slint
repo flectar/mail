@@ -1,3 +1,5 @@
+import { AccountMailPreferences } from "account-mail-preferences.slint";
+import { SettingsSelectRow } from "settings-components.slint";
 import { ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile } from "../models.slint";
 import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } from "composer-fields.slint";
@@ -84,7 +86,7 @@ export component EmailComposer inherits Rectangle {
     private property <length> input-caret-y: 0px;
     private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
         || root.subject != "" || root.body != "" || root.attachments.length > 0;
-    private property <bool> can-send: root.selected-account-id > 0 && root.to != "" && root.body != "";
+    private property <bool> can-send: root.selected-account-id > 0 && root.to != "" && root.body != "" && AccountMailPreferences.composer-preferences-ready;
 
     function apply-format(kind: string) {
         if (kind == "link") {
@@ -214,9 +216,19 @@ export component EmailComposer inherits Rectangle {
             title-color: root.title-color;
             changed(account-id) => {
                 root.search-contacts(root.to, account-id);
+                AccountMailPreferences.composer-account-changed(account-id);
             }
         }
 
+        SettingsSelectRow {
+            compact: root.compact;
+            title: @tr("Signature");
+            description: AccountMailPreferences.composer-security;
+            choices: AccountMailPreferences.composer-signature-names;
+            selected-index: AccountMailPreferences.composer-signature-index;
+            title-color: root.title-color; description-color: root.secondary-color;
+            selected(index, value) => { if AccountMailPreferences.composer-preferences-ready { AccountMailPreferences.composer-signature(index); } }
+        }
         recipients := ComposerRecipients {
             open: root.open;
             to <=> root.to;

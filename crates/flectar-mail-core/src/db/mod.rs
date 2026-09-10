@@ -4,6 +4,7 @@
 //! plain synchronous rusqlite.
 
 pub mod calendar_migrations;
+pub mod files_migrations;
 pub mod migrations;
 pub mod repo;
 pub mod snapshot;
@@ -26,6 +27,7 @@ const JOB_QUEUE_CAPACITY: usize = 128;
 enum StoreKind {
     Mail,
     Calendar,
+    Files,
 }
 
 #[derive(Clone)]
@@ -75,6 +77,7 @@ fn open_connection(path: &Path, kind: StoreKind) -> Result<Connection> {
         // Calendar queries touch a tiny working set compared with mailbox/FTS
         // scans. A smaller cache avoids paying the mail profile twice.
         StoreKind::Calendar => (16_777_216i64, 2_048i64),
+        StoreKind::Files => (33_554_432i64, 4_096i64),
     };
     conn.pragma_update(None, "mmap_size", mmap_size)?;
     conn.pragma_update(None, "cache_size", -cache_size_kib)?;
@@ -161,6 +164,18 @@ impl Db {
             read_tx: write_tx.clone(),
             write_tx,
         })
+    }
+
+    pub fn open_files(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        prepare_store(path, StoreKind::Files, "files", files_migrations::run)?;
+        let write_tx =
+            spawn_conn_thread(path.to_path_buf(), "files-writer", StoreKind::Files, false)?;
+        let read_tx =
+            spawn_conn_thread(path.to_path_buf(), "files-reader", StoreKind::Files, true)?;
+        Ok(Self { write_tx, read_tx })
     }
 
     async fn call<T, F>(&self, tx: &mpsc::Sender<Job>, f: F) -> Result<T>

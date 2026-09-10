@@ -1,7 +1,7 @@
-//! Coherent online snapshots of the physically separate mail and calendar
-//! stores. Both writer queues are held at the same coordinated gate while
+//! Coherent online snapshots of the physically separate mail, calendar and files
+//! stores. All three writer queues are held at the same coordinated gate while
 //! SQLite's online-backup API copies committed pages, so no application write
-//! can land between the two captured database states.
+//! can land between the captured database states.
 
 use super::Db;
 use crate::error::{CoreError, Result};
@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 const SNAPSHOT_FORMAT: &str = "flectar-mail-database-snapshot";
-const SNAPSHOT_VERSION: u32 = 1;
+const SNAPSHOT_VERSION: u32 = 2;
 const MAIL_FILE: &str = "mail.sqlite3";
 const CALENDAR_FILE: &str = "calendar.sqlite3";
+const FILES_FILE: &str = "files.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const BACKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -43,6 +44,10 @@ pub struct DatabaseSnapshotManifest {
     pub core_version: String,
     pub mail: DatabaseSnapshotStore,
     pub calendar: DatabaseSnapshotStore,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<DatabaseSnapshotStore>,
+    #[serde(default)]
+    pub file_transfer_payloads: bool,
 }
 
 fn snapshot_store(
@@ -134,11 +139,43 @@ fn restrict_permissions(_directory: &Path, _files: &[&Path]) -> Result<()> {
     Ok(())
 }
 
+fn publish_snapshot(staging: &Path, destination: &Path) -> Result<()> {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
+    {
+        rustix::fs::renameat_with(
+            rustix::fs::CWD,
+            staging,
+            rustix::fs::CWD,
+            destination,
+            rustix::fs::RenameFlags::NOREPLACE,
+        )
+        .map_err(std::io::Error::from)?;
+    }
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    )))]
+    {
+        // Windows directory rename fails if the destination already exists.
+        std::fs::rename(staging, destination)?;
+    }
+    Ok(())
+}
+
 /// Create a new snapshot directory atomically. The destination must not
 /// already exist, which prevents an export from overwriting an older backup.
 pub async fn create(
     mail_db: &Db,
     calendar_db: &Db,
+    files_db: &Db,
+    payload_root: Option<PathBuf>,
     destination: &Path,
 ) -> Result<DatabaseSnapshotManifest> {
     if destination.exists() {
@@ -160,85 +197,75 @@ pub async fn create(
 
     let mail_path = staging.join(MAIL_FILE);
     let calendar_path = staging.join(CALENDAR_FILE);
+    let files_path = staging.join(FILES_FILE);
     let (ready_tx, ready_rx) = mpsc::channel::<()>();
-    let mail_ready = ready_tx.clone();
-    let calendar_ready = ready_tx;
     let (done_tx, done_rx) = mpsc::channel::<()>();
-    let mail_done = done_tx.clone();
-    let calendar_done = done_tx;
-    let (mail_start_tx, mail_start_rx) = mpsc::sync_channel::<()>(0);
-    let (calendar_start_tx, calendar_start_rx) = mpsc::sync_channel::<()>(0);
-    let (mail_release_tx, mail_release_rx) = mpsc::sync_channel::<()>(0);
-    let (calendar_release_tx, calendar_release_rx) = mpsc::sync_channel::<()>(0);
-    let mail_destination = mail_path.clone();
-    let calendar_destination = calendar_path.clone();
-
+    let mut starts = Vec::new();
+    let mut releases = Vec::new();
+    let mut jobs = Vec::new();
+    for (db, path, name) in [
+        (mail_db.clone(), mail_path.clone(), MAIL_FILE),
+        (calendar_db.clone(), calendar_path.clone(), CALENDAR_FILE),
+        (files_db.clone(), files_path.clone(), FILES_FILE),
+    ] {
+        let ready = ready_tx.clone();
+        let done = done_tx.clone();
+        let (start_tx, start_rx) = mpsc::sync_channel::<()>(0);
+        let (release_tx, release_rx) = mpsc::sync_channel::<()>(0);
+        starts.push(start_tx);
+        releases.push(release_tx);
+        jobs.push(async move {
+            db.write(move |conn| {
+                ready.send(()).map_err(|e| coordination_error("ready", e))?;
+                start_rx
+                    .recv_timeout(GATE_TIMEOUT)
+                    .map_err(|e| coordination_error("start", e))?;
+                let result = snapshot_store(conn, &path, name);
+                done.send(())
+                    .map_err(|e| coordination_error("completion", e))?;
+                release_rx
+                    .recv_timeout(BACKUP_TIMEOUT)
+                    .map_err(|e| coordination_error("release", e))?;
+                result
+            })
+            .await
+        });
+    }
+    drop(ready_tx);
+    drop(done_tx);
     let coordinator = tokio::task::spawn_blocking(move || -> Result<()> {
-        for _ in 0..2 {
+        for _ in 0..3 {
             ready_rx
                 .recv_timeout(GATE_TIMEOUT)
-                .map_err(|error| coordination_error("ready", error))?;
+                .map_err(|e| coordination_error("ready", e))?;
         }
-        mail_start_tx
-            .send(())
-            .map_err(|error| coordination_error("mail start", error))?;
-        calendar_start_tx
-            .send(())
-            .map_err(|error| coordination_error("calendar start", error))?;
-        for _ in 0..2 {
+        for start in starts {
+            start.send(()).map_err(|e| coordination_error("start", e))?;
+        }
+        for _ in 0..3 {
             done_rx
                 .recv_timeout(BACKUP_TIMEOUT)
-                .map_err(|error| coordination_error("completion", error))?;
+                .map_err(|e| coordination_error("completion", e))?;
         }
-        mail_release_tx
-            .send(())
-            .map_err(|error| coordination_error("mail release", error))?;
-        calendar_release_tx
-            .send(())
-            .map_err(|error| coordination_error("calendar release", error))?;
+        for release in releases {
+            release
+                .send(())
+                .map_err(|e| coordination_error("release", e))?;
+        }
         Ok(())
     });
-
-    let (mail, calendar, coordination) = tokio::join!(
-        mail_db.write(move |conn| {
-            mail_ready
-                .send(())
-                .map_err(|error| coordination_error("mail ready", error))?;
-            mail_start_rx
-                .recv_timeout(GATE_TIMEOUT)
-                .map_err(|error| coordination_error("mail start", error))?;
-            let result = snapshot_store(conn, &mail_destination, MAIL_FILE);
-            mail_done
-                .send(())
-                .map_err(|error| coordination_error("mail completion", error))?;
-            mail_release_rx
-                .recv_timeout(BACKUP_TIMEOUT)
-                .map_err(|error| coordination_error("mail release", error))?;
-            result
-        }),
-        calendar_db.write(move |conn| {
-            calendar_ready
-                .send(())
-                .map_err(|error| coordination_error("calendar ready", error))?;
-            calendar_start_rx
-                .recv_timeout(GATE_TIMEOUT)
-                .map_err(|error| coordination_error("calendar start", error))?;
-            let result = snapshot_store(conn, &calendar_destination, CALENDAR_FILE);
-            calendar_done
-                .send(())
-                .map_err(|error| coordination_error("calendar completion", error))?;
-            calendar_release_rx
-                .recv_timeout(BACKUP_TIMEOUT)
-                .map_err(|error| coordination_error("calendar release", error))?;
-            result
-        }),
-        coordinator
-    );
+    let (stores, coordination) = tokio::join!(futures::future::join_all(jobs), coordinator);
+    let mut stores = stores.into_iter();
+    let mail = stores.next().unwrap();
+    let calendar = stores.next().unwrap();
+    let files = stores.next().unwrap();
 
     let result = async {
         coordination.map_err(|error| coordination_error("task", error))??;
         let mail = mail?;
         let calendar = calendar?;
+        let files = files?;
+        verify_store(&files_path, &files, "files")?;
         verify_store(&mail_path, &mail, "mail")?;
         verify_store(&calendar_path, &calendar, "calendar")?;
         let manifest = DatabaseSnapshotManifest {
@@ -248,11 +275,48 @@ pub async fn create(
             core_version: env!("CARGO_PKG_VERSION").to_owned(),
             mail,
             calendar,
+            files: Some(files),
+            file_transfer_payloads: payload_root.is_some(),
         };
+        if let Some(source) = payload_root
+            && tokio::fs::try_exists(&source).await?
+        {
+            let mut queue = std::collections::VecDeque::from([(
+                source,
+                staging.join("file_transfers"),
+                0usize,
+            )]);
+            while let Some((source, target, depth)) = queue.pop_front() {
+                if depth > 3 {
+                    return Err(CoreError::Other(
+                        "Invalid transfer staging hierarchy.".into(),
+                    ));
+                }
+                tokio::fs::create_dir_all(&target).await?;
+                restrict_permissions(&target, &[])?;
+                let mut entries = tokio::fs::read_dir(source).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let kind = entry.file_type().await?;
+                    let path = target.join(entry.file_name());
+                    if kind.is_dir() {
+                        queue.push_back((entry.path(), path, depth + 1));
+                    } else if kind.is_file() {
+                        crate::files::save_cached_file(&entry.path(), &path).await?;
+                    } else {
+                        return Err(CoreError::Other(
+                            "Unexpected link in transfer staging.".into(),
+                        ));
+                    }
+                }
+            }
+        }
         let manifest_path = staging.join(MANIFEST_FILE);
         tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;
-        restrict_permissions(&staging, &[&mail_path, &calendar_path, &manifest_path])?;
-        tokio::fs::rename(&staging, destination).await?;
+        restrict_permissions(
+            &staging,
+            &[&mail_path, &calendar_path, &files_path, &manifest_path],
+        )?;
+        publish_snapshot(&staging, destination)?;
         Ok(manifest)
     }
     .await;
@@ -299,9 +363,16 @@ mod tests {
             .await
             .unwrap();
 
+        let files = Db::open_files(&source.path().join("files.db")).unwrap();
         let destination = output.path().join("snapshot");
-        let manifest = create(&mail, &calendar, &destination).await.unwrap();
+        let manifest = create(&mail, &calendar, &files, None, &destination)
+            .await
+            .unwrap();
         assert_eq!(manifest.mail.schema_version, migrations::LATEST_VERSION);
+        assert_eq!(
+            manifest.files.as_ref().unwrap().schema_version,
+            crate::db::files_migrations::LATEST_VERSION
+        );
         assert_eq!(
             manifest.calendar.schema_version,
             calendar_migrations::LATEST_VERSION
@@ -328,7 +399,7 @@ mod tests {
             1
         );
 
-        let error = create(&mail, &calendar, &destination)
+        let error = create(&mail, &calendar, &files, None, &destination)
             .await
             .unwrap_err()
             .to_string();

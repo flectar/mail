@@ -117,6 +117,7 @@ pub(super) fn register_window_preference_callbacks(
                     calendar_error: None,
                     clear_account_form: false,
                     finishes_oauth: false,
+                    finishes_account_setup: false,
                     close_to_tray: None,
                 },
                 Err(error) => UiTaskUpdate {
@@ -126,6 +127,7 @@ pub(super) fn register_window_preference_callbacks(
                     calendar_error: None,
                     clear_account_form: false,
                     finishes_oauth: false,
+                    finishes_account_setup: false,
                     // Restore both the setting and tray visibility if the
                     // preference could not be persisted.
                     close_to_tray: Some(!enabled),

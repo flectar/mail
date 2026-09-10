@@ -1,0 +1,617 @@
+import { DocumentPreview } from "../components/document-preview.slint";
+import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
+import { ScrollFade } from "../components/scroll-fade.slint";
+import { HorizontalBox, VerticalBox, ListView, ScrollView, ComboBox, CheckBox } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { Button } from "../components/button.slint";
+import { AccountRow } from "../models.slint";
+import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
+import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
+import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
+
+export struct FileRow {
+    identity: string, name: string, detail: string, size: string, date: string, directory: bool,
+    attachment: bool, readable: bool, writable: bool, renameable: bool,
+    deletable: bool, shareable: bool, locked: bool, owns-lock: bool,
+    created: string, modified: string, accessed: string, executable: bool, subscribed: bool,
+}
+export struct OperationRow {id:string,action:string,state:string,error:string,bytes:string}
+export global FilesUi {
+    callback context-changed;
+    in-out property <[OperationRow]> operations;
+    in-out property <bool> transfers-open: false;
+    in-out property <int> collision:0;
+    in-out property <int> file-kind:0;
+    in-out property <int> file-sort:0;
+    in-out property <bool> descending:false;
+    in-out property <string> min-size;
+    in-out property <string> max-size;
+    in-out property <bool> case-insensitive:false;
+    in-out property <[FileRow]> rows;
+    in-out property <[string]> accounts: [@tr("All accounts")];
+    in-out property <int> account: 0;
+    in-out property <int> selected-account-id: -1;
+    in-out property <[string]> storage-accounts;
+    in-out property <int> storage-account: 0;
+    in-out property <bool> server-attachments: false;
+    in-out property <bool> attachments: true;
+    in-out property <bool> connected: false;
+    in-out property <int> connection-revision: 0;
+    in-out property <bool> busy: false;
+    in-out property <string> transfer-status;
+    in-out property <bool> can-create: false;
+    in-out property <bool> can-lock: false;
+    in-out property <int> content-revision: 0;
+    in-out property <bool> pagination-failed: false;
+    in-out property <bool> can-more: false;
+    in-out property <bool> can-up: false;
+    in-out property <bool> webdav: false;
+    in-out property <string> endpoint;
+    in-out property <string> path: @tr("Email attachments");
+    in-out property <string> query;
+    in-out property <string> status;
+    in-out property <string> quota;
+    in-out property <int> selected: -1;
+    in-out property <string> preview-text;
+    in-out property <bool> pdf-supported: true;
+    in-out property <int> pdf-page: 0;
+    in-out property <int> pdf-pages: 0;
+    in-out property <int> pdf-zoom: 100;
+    in-out property <image> preview-image;
+    in-out property <bool> preview-is-image: false;
+    in-out property <bool> preview-open: false;
+    in-out property <bool> activity-open: false;
+    in-out property <string> dialog;
+    callback command(string, string, string);
+}
+
+// Keep feature navigation on the same shared row surface as Mail and Contacts.
+component FilesSidebarItem inherits SidebarItem {
+    sidebar-background: AppTheme.sidebar-bg;
+    selection-background: AppTheme.accent-soft;
+    accent-color: AppTheme.accent;
+    body-color: AppTheme.body;
+    muted-color: AppTheme.muted;
+    icon-color: root.selected ? AppTheme.accent : AppTheme.secondary;
+    row-height: 32px;
+}
+
+component FilesNavigation inherits Rectangle {
+    in property <[AccountRow]> account-model;
+    callback navigate(string, string, string);
+    callback setup;
+            VerticalBox {
+                padding-top: LayoutMetrics.sidebar-action-top;
+                padding-left: LayoutMetrics.sidebar-inset;
+                padding-right: LayoutMetrics.sidebar-inset;
+                padding-bottom: 12px;
+                spacing: 8px;
+                Button {
+                    height: LayoutMetrics.sidebar-action-height;
+                    text: @tr("Connect storage"); primary: true; has-icon: true;
+                    icon: @image-url("../icons/phosphor/plus.svg");
+                    enabled: !FilesUi.busy; clicked => { root.setup(); }
+                }
+                ScrollView {
+                    vertical-stretch: 1; viewport-width: self.visible-width;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalBox {
+                        padding: 0px; spacing: 6px;
+                        WorkspaceMiniHeading { label: @tr("UNIFIED"); }
+                        FilesSidebarItem {
+                            label: @tr("Email attachments"); left-padding: 12px;
+                            icon: @image-url("../icons/phosphor/paperclip.svg");
+                            selected: FilesUi.attachments && FilesUi.account == 0;
+                            clicked(scope) => { root.navigate("account", "0", "attachments"); }
+                        }
+                        WorkspaceMiniHeading { label: @tr("ACCOUNTS"); }
+                        for account in root.account-model : VerticalBox {
+                            padding: 0px; spacing: 3px;
+                            private property <bool> expanded: true;
+                            SidebarSectionHeader {
+                                label: account.name; detail: account.email;
+                                avatar: account.initials; avatar-image: account.avatar-small;
+                                has-avatar: true; has-avatar-image: account.has-avatar;
+                                open: parent.expanded;
+                                sidebar-background: AppTheme.sidebar-bg;
+                                body-color: AppTheme.body; muted-color: AppTheme.muted;
+                                icon-color: AppTheme.secondary; hover-background: AppTheme.muted-control-bg;
+                                toggled(open) => { parent.expanded = open; }
+                            }
+                            if self.expanded : FilesSidebarItem {
+                                label: @tr("Email attachments");
+                                icon: @image-url("../icons/phosphor/paperclip.svg");
+                                selected: FilesUi.attachments && FilesUi.selected-account-id == account.id;
+                                clicked(scope) => { root.navigate("account-id", "" + account.id, "attachments"); }
+                            }
+                            if self.expanded : FilesSidebarItem {
+                                label: @tr("Server storage");
+                                icon: @image-url("../icons/phosphor/files.svg");
+                                selected: !FilesUi.attachments && FilesUi.selected-account-id == account.id;
+                                clicked(scope) => { root.navigate("account-id", "" + account.id, "storage"); }
+                            }
+                        }
+                        if !FilesUi.attachments && FilesUi.storage-accounts.length > 0 : WorkspaceMiniHeading { label: @tr("STORAGE SPACE"); }
+                        for space[index] in FilesUi.storage-accounts : FilesSidebarItem {
+                            visible: !FilesUi.attachments;
+                            label: space; icon: @image-url("../icons/phosphor/folder-simple.svg");
+                            selected: index == FilesUi.storage-account;
+                            clicked(scope) => { root.navigate("space", "" + index, ""); }
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                if !FilesUi.attachments : Text { text: FilesUi.quota; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
+                if !FilesUi.attachments && FilesUi.connected && !FilesUi.webdav : Button { text: @tr("Sharing activity"); enabled: !FilesUi.busy; clicked => { root.navigate("notifications", "", ""); } }
+                if !FilesUi.attachments : Button { text: @tr("Transfers"); enabled: !FilesUi.busy; clicked => { root.navigate("transfers", "", ""); } }
+
+            }
+}
+
+export component FilesView inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> active: true;
+    in property <string> layout-mode: "default";
+    in property <[AccountRow]> account-model;
+    in-out property <bool> sidebar-collapsed: false;
+    private property <bool> navigation-open: false;
+    private property <bool> single-surface: root.compact || root.layout-mode == "minimal";
+    private property <bool> list-visible: !root.single-surface || !FilesUi.preview-open;
+    private property <bool> detail-visible: !root.single-surface || FilesUi.preview-open;
+    private property <string> search-text: FilesUi.query;
+    private property <bool> search-pending: false;
+    changed active => { if !root.active { root.search-pending = false; FilesUi.command("release-preview", "", ""); FilesUi.preview-open = false; } }
+    public function close-navigation() -> bool {
+        if root.setup { root.setup = false; return true; }
+        if root.navigation-open { root.navigation-open = false; return true; }
+        return false;
+    }
+    function navigate(action: string, value: string, scope: string) {
+        if !FilesUi.busy {
+            root.navigation-open = false;
+            root.search-pending = false;
+            if action == "account" || action == "account-id" || action == "space" || action == "up" || action == "attachment-source" { root.search-text = ""; }
+            FilesUi.command(action, value, scope);
+        }
+    }
+    pagination := InfiniteScrollController {
+        active: root.active && root.list-visible && !root.setup && !root.search-pending;
+        can-load-more: FilesUi.can-more; loading: FilesUi.busy;
+        row-count: FilesUi.rows.length; revision: FilesUi.content-revision;
+        content-height: file-list.viewport-height;
+        viewport-y: file-list.viewport-y; visible-height: file-list.visible-height;
+        prefetch-distance: 246px;
+        load-more => { FilesUi.command("more", "", ""); }
+    }
+    function reset-pagination() {
+        file-list.viewport-y = 0px;
+        pagination.reset();
+    }
+    private property <string> list-scope: "\{FilesUi.account}:\{FilesUi.attachments ? 1 : 0}:\{FilesUi.storage-account}:\{FilesUi.path}:\{FilesUi.query}:\{FilesUi.server-attachments ? 1 : 0}";
+    changed list-scope => { root.reset-pagination(); }
+    search-delay := Timer {
+        interval: 300ms;
+        running: root.search-pending && !FilesUi.busy && root.active;
+        triggered => { if !FilesUi.busy { root.search-pending = false; FilesUi.command("search", root.search-text, ""); } }
+    }
+
+    Timer { interval: 60s; running: root.active && FilesUi.connected && !FilesUi.attachments && !FilesUi.busy && FilesUi.dialog == "" && !FilesUi.preview-open; triggered => { FilesUi.command("poll", "", ""); } }
+    in-out property <bool> setup: false;
+    private property <bool> connection-attempted: false;
+    changed setup => { root.connection-attempted = false; }
+    private property <int> connection-revision: FilesUi.connection-revision;
+    changed connection-revision => { root.setup = false; }
+
+    private property <string> value;
+    private property <string> destination;
+    private property <int> copy-space;
+    private property <bool> allow-write: false;
+    private property <bool> allow-add: false;
+    private property <bool> allow-rename: false;
+    private property <bool> allow-delete: false;
+    private property <bool> allow-share: false;
+    private property <bool> allow-properties:false;
+    private property <string> property-namespace:"urn:flectar:files";
+    private property <string> property-name:"description";
+    private property <bool> shared-lock:false;
+    private property <bool> recursive-lock:false;
+    private property <string> created;
+    private property <string> modified;
+    private property <string> accessed;
+    private property <bool> executable;
+    private property <bool> subscribed;
+    private property <FileRow> selected-row: FilesUi.selected >= 0 && FilesUi.selected < FilesUi.rows.length ? FilesUi.rows[FilesUi.selected] : {name: ""};
+    background: AppTheme.surface;
+    forward-focus: files-focus;
+    files-focus := FocusScope {
+        width: parent.width; height: parent.height;
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                if root.navigation-open { root.navigation-open = false; return accept; }
+                if FilesUi.preview-open { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); return accept; }
+                if FilesUi.transfers-open { FilesUi.transfers-open = false; return accept; }
+                if FilesUi.dialog != "" { FilesUi.dialog = ""; return accept; }
+                if root.setup { root.setup = false; return accept; }
+            }
+            return reject;
+        }
+    HorizontalBox {
+        width: parent.width; height: parent.height;
+        padding: 0px; spacing: 0px;
+        CollapsibleWorkspaceSidebar {
+            visible: !root.compact;
+            collapsed: root.compact || root.sidebar-collapsed;
+            if !root.compact && !root.sidebar-collapsed : FilesNavigation {
+                width: parent.width; height: parent.height;
+                account-model: root.account-model;
+                navigate(action, value, scope) => { root.navigate(action, value, scope); }
+                setup => { root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
+            }
+        }
+        Rectangle {
+            visible: root.list-visible;
+            min-width: 0px;
+            preferred-width: root.single-surface ? 0px : LayoutMetrics.list-pane-width;
+            max-width: !root.list-visible ? 0px : root.single-surface ? root.width : LayoutMetrics.list-pane-width;
+            horizontal-stretch: root.list-visible && root.single-surface ? 1 : 0;
+            VerticalBox {
+                padding: 0px; spacing: 0px;
+                Rectangle {
+                    height: root.compact ? 116px : 102px;
+                    VerticalBox {
+                        padding-top: root.compact ? 8px : LayoutMetrics.workspace-action-center-y - 20px;
+                        padding-left: 12px; padding-right: 12px; padding-bottom: root.compact ? 8px : 2px; spacing: 8px;
+                        WorkspaceTitleRow {
+                            height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
+                            title: FilesUi.attachments ? @tr("Email attachments") : @tr("Server storage");
+                            title-font-size: root.compact ? TypeScale.title-small : TypeScale.heading-small;
+                            title-weight: 600; show-leading: true; leading-ghost: true;
+                            leading-icon: root.compact || root.sidebar-collapsed ? @image-url("../icons/phosphor/sidebar-simple.svg") : @image-url("../icons/phosphor/sidebar-simple-fill.svg");
+                            leading-tooltip: @tr("File sources"); leading-accessible-id: "files-sidebar-button";
+                            leading-clicked => { if root.compact { root.navigation-open = true; } else { root.sidebar-collapsed = !root.sidebar-collapsed; } }
+                            if !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary;
+                                icon: @image-url("../icons/phosphor/upload-simple.svg"); tooltip-text: @tr("Upload");
+                                interactive: FilesUi.can-create && !FilesUi.busy; clicked => { root.navigate("upload", "", ""); }
+                            }
+                            if !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary;
+                                icon: @image-url("../icons/phosphor/folder-plus.svg");
+                                tooltip-text: @tr("New folder"); interactive: FilesUi.can-create && !FilesUi.busy;
+                                clicked => { root.value = ""; FilesUi.collision = 0; FilesUi.case-insensitive = false; FilesUi.dialog = "folder"; }
+                            }
+                        }
+                        WorkspaceSearchToolbar {
+                            text: root.search-text;
+                            placeholder-text: @tr("Search files");
+                            refresh-enabled: !FilesUi.busy;
+                            refresh-tooltip: @tr("Refresh"); refresh-accessible-id: "files-refresh-button";
+                            filter-tooltip: @tr("Filter and sort files"); filter-accessible-id: "files-filter-button";
+                            filter-active: FilesUi.attachments ? FilesUi.server-attachments : FilesUi.file-kind != 0 || FilesUi.file-sort != 0 || FilesUi.descending || FilesUi.min-size != "" || FilesUi.max-size != "";
+                            private property <[WorkspaceSearchFilter]> attachment-filters: [
+                                {title: @tr("Synchronized mail"), value: "local"},
+                                {title: @tr("All mail on server (JMAP)"), value: "server"},
+                                {title: @tr("Index cached text"), value: "index"}
+                            ];
+                            private property <[WorkspaceSearchFilter]> storage-filters: [{title: @tr("Filter and sort files"), value: "filter"}];
+                            filters: FilesUi.attachments ? self.attachment-filters : self.storage-filters;
+                            edited(value) => { root.search-text = value; root.search-pending = true; search-delay.restart(); }
+                            submitted(value) => { root.search-text = value; root.search-pending = false; if !FilesUi.busy { FilesUi.command("search", value, ""); } else { root.search-pending = true; } }
+                            refresh => { if !root.search-pending { FilesUi.command("refresh", "", ""); } }
+                            filter-selected(value) => {
+                                if !FilesUi.busy {
+                                    if value == "filter" { FilesUi.dialog = "filter"; }
+                                    else if value == "index" { FilesUi.command("index-text", "", ""); }
+                                    else { root.navigate("attachment-source", value, ""); }
+                                }
+                            }
+                        }
+                    }
+                }
+                Rectangle {
+                    height: 40px;
+                    HorizontalBox {
+                        padding-left: 12px; padding-right: 12px; padding-top: 4px; padding-bottom: 4px; spacing: 6px;
+                        if FilesUi.can-up : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/arrow-left.svg"); tooltip-text: @tr("Back"); interactive: !FilesUi.busy; clicked => { root.navigate("up", "", ""); } }
+                        Text { text: FilesUi.attachments ? (FilesUi.server-attachments ? @tr("All mail on server (JMAP)") : @tr("Synchronized mail")) : FilesUi.path; color: AppTheme.muted; font-size: TypeScale.caption; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                    }
+                }
+            Rectangle {
+                vertical-stretch: 1;
+                if FilesUi.rows.length == 0 : VerticalBox {
+                    alignment: center; padding: 24px; spacing: 12px;
+                    Image { source: @image-url("../icons/phosphor/files.svg"); width: 40px; height: 40px; colorize: AppTheme.muted; horizontal-stretch: 0; }
+                    Text { text: FilesUi.busy ? @tr("Loading files…") : @tr("No files to show"); color: AppTheme.heading; font-weight: 600; font-size: TypeScale.body; horizontal-alignment: center; }
+                    Text { text: FilesUi.attachments ? @tr("Attachments from synchronized messages will appear here.") : FilesUi.connected ? @tr("Upload a file or create a folder to get started.") : @tr("Select an account and connect its storage."); color: AppTheme.secondary; wrap: word-wrap; horizontal-alignment: center; }
+                }
+                file-list := ListView {
+                    x: 0px; y: 0px; width: parent.width; height: parent.height;
+                    mouse-drag-pan-enabled: root.compact;
+                    accessible-label: @tr("Files"); accessible-item-count: FilesUi.rows.length;
+                    scrolled => { pagination.user-scrolled(); }
+                    visible: FilesUi.rows.length > 0;
+                    horizontal-scrollbar-policy: always-off;
+                    viewport-width: self.visible-width;
+                    for row[index] in FilesUi.rows : Rectangle {
+                        x: 12px; width: max(0px, parent.visible-width - 16px); height: 82px; border-radius: 6px; background: FilesUi.selected == index ? AppTheme.accent-soft : hit.has-hover ? AppTheme.sidebar-bg : transparent;
+                        HorizontalBox {
+                            padding: 12px; spacing: 12px;
+                            Image { width: 24px; height: 24px; source: row.directory ? @image-url("../icons/phosphor/folder-simple.svg") : row.attachment ? @image-url("../icons/phosphor/paperclip.svg") : @image-url("../icons/phosphor/file.svg"); colorize: row.directory ? AppTheme.accent : AppTheme.secondary; }
+                            VerticalBox {
+                                padding: 0px; spacing: 4px;
+                                Text { text: row.name; color: AppTheme.heading; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
+                                Text { text: row.detail; color: AppTheme.secondary; font-size: TypeScale.caption; overflow: elide; }
+                            }
+
+                            Text { text: row.size; color: AppTheme.secondary; font-size: TypeScale.caption; width: 70px; horizontal-alignment: right; }
+                            if row.locked : Image { width: 16px; height: 16px; source: @image-url("../icons/phosphor/lock-key.svg"); colorize: AppTheme.muted; }
+                        }
+                        row-focus := FocusScope {
+                            enabled: !FilesUi.busy;
+                            key-pressed(event) => {
+                                if event.text == Key.Return { FilesUi.selected = index; FilesUi.command(row.directory ? "enter" : "preview", "" + index, ""); return accept; }
+                                if event.text == " " { FilesUi.selected = index; return accept; }
+                                return reject;
+                            }
+                        hit := TouchArea {
+                            enabled: !FilesUi.busy; mouse-cursor: pointer; accessible-role: button; accessible-label: row.name + ", " + row.detail; accessible-checked: FilesUi.selected == index;
+                            clicked => { row-focus.focus(); FilesUi.selected = index; FilesUi.command(row.directory ? "details" : "preview", "" + index, ""); }
+                            double-clicked => { FilesUi.selected = index; FilesUi.command(row.directory ? "enter" : "preview", "" + index, ""); }
+                            accessible-action-default => { row-focus.focus(); FilesUi.selected = index; FilesUi.command(row.directory ? "details" : "preview", "" + index, ""); }
+                        }
+                        }
+                    }
+                }
+                ScrollFade {
+                    x: file-list.x; y: file-list.y; width: file-list.visible-width; height: file-list.visible-height;
+                    surface-color: AppTheme.surface; viewport-y: file-list.viewport-y;
+                    viewport-height: file-list.viewport-height; visible-height: file-list.visible-height;
+                }
+            }
+            HorizontalBox {
+                padding: 12px;
+                Text { text: FilesUi.busy ? (FilesUi.transfer-status!="" ? FilesUi.transfer-status : @tr("Working…")) : FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; horizontal-stretch: 1; }
+                if FilesUi.busy : Button { text: @tr("Cancel"); clicked => { FilesUi.command("cancel", "", ""); } }
+                if FilesUi.can-more && !FilesUi.busy && FilesUi.pagination-failed : Button { text: @tr("Load more"); clicked => { pagination.user-scrolled(); } }
+            }
+        }
+        }
+        if root.detail-visible : Rectangle {
+            horizontal-stretch: 1; min-width: 0px; background: AppTheme.surface;
+            Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: AppTheme.border; }
+            VerticalBox {
+                width: parent.width; height: parent.height;
+                padding: root.compact ? 12px : 24px; spacing: 16px; cross-axis-alignment: stretch;
+                if FilesUi.preview-open : WorkspaceTitleRow {
+                    title: FilesUi.activity-open ? @tr("Sharing activity") : root.selected-row.name;
+                    show-leading: root.single-surface;
+                    leading-icon: @image-url("../icons/phosphor/arrow-left.svg");
+                    leading-tooltip: @tr("Back to files");
+                    leading-clicked => { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); }
+                    if !root.single-surface : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/x.svg"); tooltip-text: @tr("Close"); clicked => { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); } }
+                }
+                if FilesUi.preview-open && !FilesUi.activity-open : VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    Text { text: root.selected-row.detail; wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
+                    HorizontalBox {
+                        padding: 0px; spacing: 8px;
+                        Button { text: root.selected-row.directory ? @tr("Open folder") : @tr("Download"); enabled: !FilesUi.busy && root.selected-row.readable; clicked => { FilesUi.command(root.selected-row.directory ? "enter" : "download", "", ""); } }
+                        if !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/dots-three.svg"); tooltip-text: @tr("Manage"); interactive: !FilesUi.busy; clicked => { FilesUi.dialog = "manage"; } }
+                        if !root.selected-row.directory : Button { text: @tr("Preview"); enabled: !FilesUi.busy; clicked => { FilesUi.command("preview", "", ""); } }
+                        if FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/info-fill.svg"); tooltip-text: @tr("Details"); interactive: !FilesUi.busy; clicked => { FilesUi.command("details", "", ""); } }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+                if !FilesUi.preview-open : VerticalBox {
+                    alignment: center; spacing: 12px;
+                    Image { source: @image-url("../icons/phosphor/files.svg"); width: 40px; height: 40px; colorize: AppTheme.muted; }
+                    Text { text: @tr("Select a file to preview"); color: AppTheme.heading; horizontal-alignment: center; font-size: TypeScale.title-small; }
+                    Text { text: FilesUi.pdf-supported ? @tr("PDFs, images and text appear here. Other formats can be downloaded.") : @tr("Images and text appear here. Other formats can be downloaded."); wrap: word-wrap; color: AppTheme.secondary; horizontal-alignment: center; }
+                }
+                if FilesUi.preview-open && FilesUi.busy : Text { text: FilesUi.transfer-status != "" ? FilesUi.transfer-status : @tr("Loading preview…"); color: AppTheme.secondary; wrap: word-wrap; }
+                if FilesUi.preview-open && FilesUi.activity-open : Button { text: @tr("Clear displayed activity"); enabled: !FilesUi.busy; clicked => { FilesUi.command("clear-notifications", "", ""); } }
+                if FilesUi.preview-open && FilesUi.preview-is-image : DocumentPreview {
+                    compact: root.compact; busy: FilesUi.busy; source: FilesUi.preview-image;
+                    page: FilesUi.pdf-page; pages: FilesUi.pdf-pages;
+                    raster-zoom: FilesUi.pdf-pages > 0 ? 2 : 1;
+                    document-revision: FilesUi.selected;
+                    render-page(page, zoom) => { FilesUi.command("pdf-page", "" + page, "200"); }
+                }
+                if FilesUi.preview-open && !FilesUi.preview-is-image : ScrollView { vertical-stretch: 1; viewport-width: self.visible-width; Text { x: 0px; y: 0px; width: parent.width; height: self.preferred-height; text: FilesUi.preview-text; wrap: word-wrap; color: AppTheme.body; font-size: TypeScale.body; } }
+                if FilesUi.preview-open && FilesUi.status != "" : Text { text: FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
+            }
+        }
+    }
+    if root.compact && root.navigation-open : Rectangle {
+        background: #00000060;
+        TouchArea { clicked => { root.navigation-open = false; } }
+        Rectangle {
+            x: 0px; y: 0px;
+            width: min(LayoutMetrics.sidebar-width + 40px, parent.width - 24px);
+            height: parent.height; background: AppTheme.sidebar-bg;
+            VerticalBox {
+                padding: 0px; spacing: 0px;
+                WorkspaceTitleRow { title: @tr("File sources"); horizontal-inset: 12px; Button { text: @tr("Close"); clicked => { root.navigation-open = false; } } }
+                FilesNavigation { vertical-stretch: 1; account-model: root.account-model;
+                    navigate(action, value, scope) => { root.navigate(action, value, scope); }
+                    setup => { root.navigation-open = false; root.setup = !root.setup; FilesUi.preview-open = false; FilesUi.command("release-preview", "", ""); }
+                }
+            }
+        }
+    }
+
+    if FilesUi.dialog != "" : Rectangle {
+        background: #00000060;
+        TouchArea { }
+        Rectangle {
+            x: (parent.width - self.width) / 2; y: max(16px, (parent.height - self.height) / 2);
+            width: min(440px, parent.width - 24px); height: min(dialog-layout.preferred-height, parent.height - 32px);
+            background: AppTheme.surface; border-radius: 12px; border-width: 1px; border-color: AppTheme.border;
+            ScrollView {
+            viewport-width: self.width;
+            dialog-layout := VerticalBox {
+                padding: 24px; spacing: 12px;
+                Text { text: FilesUi.dialog == "delete" ? @tr("Delete permanently?") : FilesUi.dialog == "share" ? @tr("Share file or folder") : FilesUi.dialog == "folder" ? @tr("New folder") : FilesUi.dialog == "rename" ? @tr("Rename") : FilesUi.dialog == "move" ? @tr("Move to folder") : FilesUi.dialog == "copy" ? @tr("Copy to folder") : FilesUi.dialog == "metadata" ? @tr("File properties") : FilesUi.dialog == "lock" ? @tr("Lock file or folder") : FilesUi.dialog == "filter" ? @tr("Filter and sort files") : @tr("Manage file"); color: AppTheme.heading; font-size: TypeScale.title; font-weight: 700; }
+                if FilesUi.dialog == "filter" : VerticalBox {
+                    padding:0px;spacing:8px;
+                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Files and folders"),@tr("Files"),@tr("Folders")];current-index <=> FilesUi.file-kind;}
+                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Name"),@tr("Size"),@tr("Kind")];current-index <=> FilesUi.file-sort;}
+                    CheckBox {text:@tr("Descending order");checked <=> FilesUi.descending;}
+                    if FilesUi.file-kind!=2 : LineEdit {input-label:@tr("Minimum bytes");placeholder-text:@tr("Minimum bytes (optional)");text <=> FilesUi.min-size;}
+                    if FilesUi.file-kind!=2 : LineEdit {input-label:@tr("Maximum bytes");placeholder-text:@tr("Maximum bytes (optional)");text <=> FilesUi.max-size;}
+                    Button {text:@tr("Reset filters");clicked=>{FilesUi.file-kind=0;FilesUi.file-sort=0;FilesUi.descending=false;FilesUi.min-size="";FilesUi.max-size="";}}
+                }
+                if FilesUi.dialog == "manage" : VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    if !root.selected-row.directory : Button {text:@tr("Keep offline");clicked=>{FilesUi.dialog="";FilesUi.command("keep-offline","","");}}
+                    if !root.selected-row.directory : Button {text:@tr("Release offline copy");clicked=>{FilesUi.dialog="";FilesUi.command("release-offline","","");}}
+                    Button { text: @tr("Rename"); enabled: root.selected-row.renameable; clicked => { root.value = root.selected-row.name; FilesUi.collision = 0; FilesUi.case-insensitive = false; FilesUi.dialog = "rename"; } }
+                    Button { text: @tr("Move…"); enabled: root.selected-row.renameable; clicked => { root.value = root.selected-row.name; root.destination = ""; FilesUi.collision = 0; FilesUi.case-insensitive = false; FilesUi.dialog = "move"; } }
+                    Button { text: @tr("Copy…"); enabled: root.selected-row.readable; clicked => { root.value = root.selected-row.name; root.destination = ""; root.copy-space = FilesUi.storage-account; FilesUi.collision = 0; FilesUi.case-insensitive = false; FilesUi.dialog = "copy"; } }
+                    if !root.selected-row.directory : Button { text: @tr("Replace content…"); enabled: root.selected-row.writable; clicked => { FilesUi.dialog = ""; FilesUi.command("replace", "" + FilesUi.selected, ""); } }
+                    Button { text: @tr("Properties…"); enabled: root.selected-row.writable; clicked => { root.created = root.selected-row.created; root.modified = root.selected-row.modified; root.accessed = root.selected-row.accessed; root.executable = root.selected-row.executable; root.subscribed = root.selected-row.subscribed; root.value = ""; FilesUi.dialog = "metadata"; } }
+                    Button { text: @tr("Sharing…"); has-icon: true; icon: @image-url("../icons/phosphor/share-network.svg"); enabled: root.selected-row.shareable; clicked => { root.value = ""; root.allow-write = false; root.allow-properties=false; root.allow-add = false; root.allow-rename = false; root.allow-delete = false; root.allow-share = false; FilesUi.dialog = "share"; } }
+                    if FilesUi.can-lock : Button { text: root.selected-row.owns-lock ? @tr("Release lock") : @tr("Lock…"); enabled: root.selected-row.writable; clicked => { if root.selected-row.owns-lock {FilesUi.dialog="";FilesUi.command("unlock","","");}else{FilesUi.dialog="lock";} } }
+                    if FilesUi.can-lock && root.selected-row.owns-lock : Button { text: @tr("Renew lock for 5 minutes"); enabled: root.selected-row.writable; clicked => { FilesUi.dialog = ""; FilesUi.command("lock", "300", ""); } }
+                    Button { text: @tr("Delete…"); destructive: true; enabled: root.selected-row.deletable; clicked => { FilesUi.dialog = "delete"; } }
+                }
+                if FilesUi.dialog == "delete" : Text { text: @tr("This permanently deletes “{}” and all of its contents from storage. This cannot be undone.", root.selected-row.name); wrap: word-wrap; color: AppTheme.body; }
+                if FilesUi.dialog == "folder" || FilesUi.dialog == "rename" || FilesUi.dialog == "move" || FilesUi.dialog == "copy" : LineEdit { text <=> root.value; input-label: @tr("Name"); placeholder-text: @tr("Name"); }
+                if FilesUi.dialog == "move" || FilesUi.dialog == "copy" : VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    if FilesUi.dialog == "copy" && !FilesUi.webdav : ComboBox { height: 36px; vertical-stretch: 0; model: FilesUi.storage-accounts; current-index <=> root.copy-space; }
+                    Text { text: @tr("Destination folder path (for example /Documents). Leave empty for the current folder, or the root of another storage space."); wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
+                    LineEdit { text <=> root.destination; input-label: @tr("Destination folder"); placeholder-text: "/Documents"; }
+                }
+                if FilesUi.dialog == "share" : VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    Text { text: FilesUi.webdav ? @tr("Enter the recipient’s principal URL on this server.") : @tr("Enter the recipient’s email or principal ID on this server."); wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
+                    LineEdit { text <=> root.value; input-label: @tr("Recipient"); placeholder-text: @tr("Recipient"); }
+                    CheckBox { text: FilesUi.webdav ? @tr("Allow editing") : @tr("Modify content"); checked <=> root.allow-write; }
+                    VerticalBox {
+                        padding: 0px; spacing: 4px;
+                        if FilesUi.webdav : CheckBox {text:@tr("Modify properties");checked <=> root.allow-properties;}
+                        CheckBox { text: @tr("Add children"); checked <=> root.allow-add; }
+                        if !FilesUi.webdav : CheckBox { text: @tr("Rename and move"); checked <=> root.allow-rename; }
+                        CheckBox { text: @tr("Delete"); checked <=> root.allow-delete; }
+                        CheckBox { text: @tr("Manage sharing"); checked <=> root.allow-share; }
+                    }
+                    Button { text: @tr("Remove recipient’s access"); enabled: root.value != ""; clicked => { FilesUi.command("unshare", root.value, ""); FilesUi.dialog = ""; } }
+                }
+                if FilesUi.dialog == "lock" : VerticalBox {
+                    padding:0px;spacing:8px;
+                    CheckBox {text:@tr("Shared lock");checked <=> root.shared-lock;}
+                    if root.selected-row.directory : CheckBox {text:@tr("Include folder contents");checked <=> root.recursive-lock;}
+                    Text {text:@tr("Locks expire after 5 minutes unless renewed.");color:AppTheme.secondary;wrap:word-wrap;}
+                }
+                if FilesUi.dialog=="copy" || FilesUi.dialog=="move" || FilesUi.dialog=="rename" || (FilesUi.dialog=="folder" && !FilesUi.webdav) : VerticalBox {
+                    padding:0px;spacing:8px;
+                    Text {text:@tr("If a name already exists");color:AppTheme.secondary;}
+                    ComboBox {height:36px;vertical-stretch:0;model:[@tr("Stop and report conflict"),@tr("Keep both with a new name"),@tr("Replace existing"),@tr("Keep newest")];current-index <=> FilesUi.collision;}
+                    if FilesUi.collision>=2 : Text {text:@tr("This can replace existing content at the destination.");color:AppTheme.secondary;wrap:word-wrap;}
+                    if !FilesUi.webdav : CheckBox {text:@tr("Compare names without case");checked <=> FilesUi.case-insensitive;}
+                }
+                if FilesUi.dialog == "metadata" : VerticalBox {
+                    padding: 0px; spacing: 8px;
+                    if FilesUi.webdav : VerticalBox {
+                        padding:0px;spacing:8px;
+                        LineEdit {text <=> root.property-namespace;input-label:@tr("Property namespace");}
+                        LineEdit {text <=> root.property-name;input-label:@tr("Property name");}
+                        LineEdit {text <=> root.value;input-label:@tr("Value");}
+                        Button {text:@tr("Remove property");clicked=>{FilesUi.command("remove-property","",root.property-namespace+"|"+root.property-name);FilesUi.dialog="";}}
+                    }
+                    if !FilesUi.webdav : VerticalBox {
+                        padding: 0px; spacing: 8px;
+                        Text { text: @tr("Dates use UTC, for example 2026-09-09T12:00:00Z."); wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
+                        LineEdit { text <=> root.created; input-label: @tr("Created"); placeholder-text: @tr("Created"); }
+                        LineEdit { text <=> root.modified; input-label: @tr("Modified"); placeholder-text: @tr("Modified"); }
+                        LineEdit { text <=> root.accessed; input-label: @tr("Accessed"); placeholder-text: @tr("Accessed"); }
+                        if !root.selected-row.directory : CheckBox { text: @tr("Executable"); checked <=> root.executable; }
+                        Text {text:@tr("Subscription changes are unavailable on this server version.");wrap:word-wrap;color:AppTheme.secondary;}
+                    }
+                }
+                HorizontalBox {
+                    padding: 0px;
+                    Button { text: @tr("Cancel"); clicked => { FilesUi.dialog = ""; } }
+                    if FilesUi.dialog != "manage" : Button { text: FilesUi.dialog == "delete" ? @tr("Delete permanently") : @tr("Save"); primary: FilesUi.dialog != "delete"; destructive: FilesUi.dialog == "delete"; enabled: !FilesUi.busy && (FilesUi.dialog == "delete" || FilesUi.dialog == "metadata" || FilesUi.dialog == "lock" || FilesUi.dialog == "filter" || root.value != ""); clicked => { if FilesUi.dialog == "metadata" && !FilesUi.webdav {
+                        FilesUi.command("metadata", root.created + "|" + root.modified + "|" + root.accessed, (root.executable ? "x" : "") + (root.subscribed ? "s" : ""));
+                    } else if FilesUi.dialog=="filter" {
+                        FilesUi.command("filter","","");
+                    } else if FilesUi.dialog=="lock" {
+                        FilesUi.command("lock","300",(root.shared-lock?"s":"")+(root.recursive-lock?"r":""));
+                    } else if FilesUi.dialog=="metadata" && FilesUi.webdav {
+                        FilesUi.command("metadata",root.value,root.property-namespace+"|"+root.property-name);
+                    } else if FilesUi.dialog == "copy" && !FilesUi.webdav {
+                        FilesUi.command("copy-space", root.value, "" + root.copy-space + "|" + root.destination);
+                    } else {
+                        FilesUi.command(FilesUi.dialog, root.value, FilesUi.dialog == "share" ? (root.allow-write ? "w" : "") + (root.allow-add ? "a" : "") + (root.allow-rename ? "r" : "") + (root.allow-delete ? "d" : "") + (root.allow-share ? "s" : "") + (root.allow-properties ? "p" : "") : root.destination);
+                    } FilesUi.dialog = ""; } }
+                }
+            }
+            }
+        }
+    }
+    if root.setup : Rectangle {
+        background: #00000088; z: 100;
+        TouchArea {}
+        Rectangle {
+            x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
+            width: min(480px, parent.width - 24px); height: min(300px + root.account-model.length * 42px + (root.connection-attempted ? 48px : 0px), parent.height - 24px);
+            background: AppTheme.surface; border-radius: 12px; border-width: 1px; border-color: AppTheme.border;
+            FocusScope {
+                init => { self.focus(); }
+                key-pressed(event) => {
+                    if event.text == Key.Escape { root.setup = false; files-focus.focus(); return accept; }
+                    reject
+                }
+            VerticalBox {
+                padding: 16px; spacing: 12px;
+                HorizontalBox { height: 40px; vertical-stretch: 0;
+                    Text { text: @tr("Connect storage"); color: AppTheme.heading; font-size: TypeScale.title; horizontal-stretch: 1; }
+                    ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/phosphor/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { root.setup = false; } }
+                }
+                ScrollView { viewport-width: self.visible-width; viewport-height: storage-form.preferred-height;
+            storage-form := VerticalBox {
+                width: parent.visible-width; height: self.preferred-height;
+                alignment: start; padding: 0px; spacing: 10px;
+                Text { text: @tr("Account"); color: AppTheme.secondary; }
+                for account in root.account-model : FilesSidebarItem {
+                    label: account.email; selected: FilesUi.selected-account-id == account.id;
+                    clicked(scope) => { root.navigate("account-id", "" + account.id, "attachments"); }
+                }
+                Text { text: @tr("Uses the selected account’s saved credentials."); color: AppTheme.secondary; font-size: TypeScale.caption; }
+                VerticalBox {
+                    alignment: start; padding: 0px; spacing: 8px;
+                    ComboBox { height: 36px; vertical-stretch: 0; model: ["JMAP", "WebDAV"]; current-index: FilesUi.webdav ? 1 : 0; enabled: !FilesUi.busy; selected(value) => { FilesUi.webdav = self.current-index == 1; } }
+                    LineEdit { text <=> FilesUi.endpoint; input-label: @tr("Storage URL"); placeholder-text: FilesUi.webdav ? "https://mail.example.com/dav/file/username/" : "https://mail.example.com"; enabled: !FilesUi.busy; horizontal-stretch: 1; }
+                    Button { text: @tr("Connect"); primary: true; enabled: FilesUi.account > 0 && !FilesUi.busy; clicked => { root.connection-attempted = true; FilesUi.command("connect", FilesUi.endpoint, FilesUi.webdav ? "dav" : "jmap"); } }
+                }
+            }
+                }
+                Text { visible: root.connection-attempted; height: root.connection-attempted ? self.preferred-height : 0px; text: FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; }
+            }
+        }
+    }
+    }
+    if FilesUi.transfers-open : Rectangle {
+        background: AppTheme.surface;
+        VerticalBox {
+            padding: 16px; spacing: 12px;
+            HorizontalBox {Text {text:@tr("Transfers and operations");color:AppTheme.heading;font-size:TypeScale.title;} Button {text:@tr("Close");clicked=>{FilesUi.transfers-open=false;}}}
+            Text {text:@tr("Interrupted changes need review before retrying. Refresh storage and inspect the destination first.");wrap:word-wrap;color:AppTheme.secondary;}
+            ListView {
+                for operation in FilesUi.operations : VerticalBox {
+                    padding: 8px; spacing: 8px;
+                    Text {text:operation.action + " · " + operation.state + (operation.bytes!="" ? " · " + operation.bytes : "");color:AppTheme.heading;wrap:word-wrap;}
+                    Text {text:operation.error;wrap:word-wrap;color:AppTheme.secondary;}
+                    HorizontalBox {
+                        if operation.state=="queued" : Button {text:@tr("Resume");enabled:!FilesUi.busy;clicked=>{FilesUi.command("retry-operation",operation.id,"");}}
+                        if operation.state=="queued" || operation.state=="uncertain" : Button {text:@tr("Dismiss");enabled:!FilesUi.busy;clicked=>{FilesUi.command("cancel-operation",operation.id,"");}}
+                        if operation.state=="uncertain" : Button {text:@tr("Reviewed as completed");enabled:!FilesUi.busy;clicked=>{FilesUi.command("resolve-operation",operation.id,"");}}
+                    }
+                }
+            }
+            Text {text:FilesUi.status;wrap:word-wrap;color:AppTheme.secondary;}
+        }
+    }
+    }
+}

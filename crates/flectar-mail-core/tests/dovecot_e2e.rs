@@ -200,6 +200,7 @@ async fn full_sync_triage_and_search() {
     // 1. Add the account (verifies IMAP login on the way in).
     let account = core
         .add_account_password(AddPasswordAccountArgs {
+            connection: Default::default(),
             email: "testuser@example.com".into(),
             display_name: Some("Test User".into()),
             username: "testuser".into(),

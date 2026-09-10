@@ -56,6 +56,7 @@ remote-content = []
 ios = ["slint/renderer-skia"]
 
 [dependencies]
+pdfium-render = { version = "=0.9.4", default-features = false, features = ["pdfium_7881", "thread_safe"] }
 anyrender = "0.13"
 anyrender_vello = { version = "0.14", optional = true }
 anyrender_vello_cpu = "0.17"
@@ -105,13 +106,21 @@ slint = { version = "1.17", default-features = false, features = [
     "unstable-fontique-010",
     "compat-1-2",
 ] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "fs", "process"] }
 tracing.workspace = true
 unicode-properties = { version = "0.1", default-features = false, features = ["emoji"] }
 url = "2"
 webbrowser = "1.2"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
+seccompiler = "0.5"
 slint = { version = "1.17", default-features = false, features = ["backend-winit"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
@@ -138,13 +147,14 @@ auto_link_exclude_list = [
 
 # The Fontique aliases deliberately align a feature across Slint's and Blitz's
 # transitive font stacks.
-# `slint-build` and the Windows-only `winresource` are consumed by build.rs.
+# `slint-build`, iOS-only `cc`, and Windows-only `winresource` are consumed by build.rs.
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_10", "fontique_0_11", "slint-build", "winresource"]
+ignored = ["fontique_0_10", "fontique_0_11", "slint-build", "winresource", "cc"]
 
 [build-dependencies]
+cc = "1"
 slint-build = "1.17"
 winresource = "0.1"
 

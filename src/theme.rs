@@ -7,13 +7,16 @@ pub(crate) fn register_theme_utilities(app: &AppWindow) {
     let utilities = app.global::<ThemeUtilities>();
     utilities.on_color_to_hex(|color| color_to_hex(color).into());
     utilities.on_valid_color(|value| parse_hex_color(value.as_str()).is_some());
-    utilities.on_parse_color(|value, fallback| {
-        parse_hex_color(value.as_str()).unwrap_or(fallback)
-    });
+    utilities.on_parse_color(|value, fallback| parse_hex_color(value.as_str()).unwrap_or(fallback));
 }
 
 pub(crate) fn color_to_hex(color: Color) -> String {
-    format!("#{:02X}{:02X}{:02X}", color.red(), color.green(), color.blue())
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        color.red(),
+        color.green(),
+        color.blue()
+    )
 }
 
 pub(crate) fn parse_hex_color(value: &str) -> Option<Color> {

@@ -1,0 +1,23 @@
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button } from "button.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+export component OAuthBrowserHelp inherits VerticalBox {
+    in property <bool> launch-failed: false;
+    callback retry();
+    callback copy-link();
+    padding: 0px;
+    spacing: 8px;
+    Text {
+        text: root.launch-failed ? @tr("The browser could not be opened. Try again, or copy the link and paste it into a browser on this device.") : @tr("Browser didn’t open? Try again or copy the sign-in link into a browser on this device.");
+        color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+    }
+    HorizontalBox {
+        height: 36px;
+        padding: 0px;
+        spacing: 8px;
+        Button { text: @tr("Open browser"); clicked => { root.retry(); } }
+        Button { text: @tr("Copy sign-in link"); clicked => { root.copy-link(); } }
+    }
+}

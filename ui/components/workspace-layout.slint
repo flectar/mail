@@ -145,6 +145,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     in property <string> refresh-tooltip;
     in property <string> refresh-accessible-id;
     callback edited(string);
+    callback submitted(string);
     callback filter-selected(string);
     callback refresh;
 
@@ -169,6 +170,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 leading-icon-color: AppTheme.secondary;
                 trailing-content-width: LayoutMetrics.control-height;
                 edited(value) => { root.edited(value); }
+                accepted(value) => { root.submitted(value); }
             }
 
             filter-menu := ContextMenuArea {

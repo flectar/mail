@@ -1,0 +1,61 @@
+// Shared by Mail, Contacts and Files. Wait for the next committed revision and
+// settled ListView geometry before requesting another page. Errors retry only
+// after a fresh user gesture, preventing an automatic request loop.
+export component InfiniteScrollController inherits Rectangle {
+    width: 0px; height: 0px;
+    in property <bool> active: true;
+    in property <bool> can-load-more;
+    in property <bool> loading;
+    in property <int> row-count;
+    in property <int> revision;
+    in property <length> content-height;
+    in property <length> viewport-y;
+    in property <length> visible-height;
+    in property <length> prefetch-distance: 246px;
+    callback load-more;
+    private property <bool> armed: true;
+    private property <int> request-rows: -1;
+    private property <int> request-revision: -1;
+    private property <length> request-height: -1px;
+    function check() {
+        if root.active && root.visible-height > 0px && root.can-load-more
+            && !root.loading && root.armed
+            && root.content-height + root.viewport-y - root.visible-height <= root.prefetch-distance {
+            root.armed = false;
+            root.request-rows = root.row-count;
+            root.request-revision = root.revision;
+            root.request-height = root.content-height;
+            root.load-more();
+        }
+    }
+    public function reset() {
+        root.armed = true;
+        root.request-rows = -1;
+        root.request-revision = -1;
+        root.request-height = -1px;
+        check-timer.restart();
+    }
+    public function user-scrolled() {
+        if !root.loading && !root.armed && root.revision == root.request-revision {
+            root.armed = true;
+        }
+        root.check();
+    }
+    changed content-height => {
+        if !root.armed && root.revision != root.request-revision && root.content-height != root.request-height { root.armed = true; }
+        check-timer.restart();
+    }
+    changed revision => {
+        if !root.armed && root.revision != root.request-revision
+            && (root.row-count == root.request-rows || root.content-height != root.request-height) { root.armed = true; }
+        check-timer.restart();
+    }
+    changed can-load-more => { check-timer.restart(); }
+    changed loading => { if !root.loading { check-timer.restart(); } }
+    changed active => { check-timer.restart(); }
+    changed visible-height => { check-timer.restart(); }
+    check-timer := Timer {
+        interval: 1ms; running: true;
+        triggered => { self.stop(); root.check(); }
+    }
+}

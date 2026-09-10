@@ -47,6 +47,14 @@ pub(super) fn apply_connected_accounts(
                 has_avatar: avatar.is_some(),
                 username: config.username.clone().into(),
                 jmap_url: config.jmap_url.clone().into(),
+                imap_security: config.settings.connection.imap_security.as_str().into(),
+                smtp_security: config.settings.connection.smtp_security.as_str().into(),
+                trusted_certificate_pem: config
+                    .settings
+                    .connection
+                    .trusted_certificate_pem
+                    .clone()
+                    .into(),
                 imap_host: config.imap_host.clone().into(),
                 imap_port: config.imap_port.to_string().into(),
                 smtp_host: config.smtp_host.clone().into(),
@@ -75,6 +83,9 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
         &state.calendar_errors,
         &state.profile_avatar_images,
     );
+    drop(state);
+    app.global::<AccountMailPreferences>().invoke_context_changed();
+    app.global::<FilesUi>().invoke_context_changed();
 }
 
 pub(super) fn update_connected_accounts(

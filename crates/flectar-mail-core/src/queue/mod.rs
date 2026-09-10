@@ -429,6 +429,19 @@ async fn send_action(
         attachments,
     };
     let (msg_id, raw) = crate::mime::build_message(&out)?;
+    let raw = crate::mail_security::protect_draft(
+        &ctx.db,
+        config.id,
+        draft_id,
+        raw,
+        out.to
+            .iter()
+            .chain(out.cc)
+            .chain(out.bcc)
+            .cloned()
+            .collect(),
+    )
+    .await?;
     // Persist before SMTP. If the relay accepts the message but the response
     // is lost, action recovery rebuilds the exact same Message-ID instead of
     // producing an avoidable duplicate with a fresh identity.

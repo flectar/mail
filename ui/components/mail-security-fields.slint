@@ -1,0 +1,77 @@
+import { VerticalBox, HorizontalBox, ComboBox, TextEdit } from "std-widgets.slint";
+import { Button } from "button.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// The same account-scoped transport settings are used during setup and edits.
+export component MailSecurityFields inherits VerticalBox {
+    in-out property <string> imap-security: "auto";
+    in-out property <string> smtp-security: "auto";
+    in-out property <string> certificate-pem;
+    in property <bool> enabled: true;
+    callback import-certificate();
+    private property <bool> certificate-expanded: false;
+    spacing: 8px;
+    padding: 0px;
+    vertical-stretch: 0;
+    Text { text: @tr("Connection security"); color: AppTheme.heading; font-size: TypeScale.secondary; font-weight: 600; }
+    HorizontalBox {
+        height: 58px;
+        min-width: 0px;
+        padding: 0px;
+        spacing: 8px;
+        VerticalBox {
+            min-width: 0px;
+            padding: 0px;
+            spacing: 4px;
+            Text { text: @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+            ComboBox {
+                height: 36px;
+                min-width: 0px;
+                enabled: root.enabled;
+                model: [@tr("Automatic"), "SSL/TLS", "STARTTLS"];
+                current-index: root.imap-security == "tls" ? 1 : root.imap-security == "starttls" ? 2 : 0;
+                selected(value) => { root.imap-security = self.current-index == 1 ? "tls" : self.current-index == 2 ? "starttls" : "auto"; }
+            }
+        }
+        VerticalBox {
+            min-width: 0px;
+            padding: 0px;
+            spacing: 4px;
+            Text { text: @tr("SMTP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+            ComboBox {
+                height: 36px;
+                min-width: 0px;
+                enabled: root.enabled;
+                model: [@tr("Automatic"), "SSL/TLS", "STARTTLS"];
+                current-index: root.smtp-security == "tls" ? 1 : root.smtp-security == "starttls" ? 2 : 0;
+                selected(value) => { root.smtp-security = self.current-index == 1 ? "tls" : self.current-index == 2 ? "starttls" : "auto"; }
+            }
+        }
+    }
+    Text {
+        text: @tr("Automatic: IMAP uses STARTTLS on 143, SSL/TLS otherwise. SMTP uses SSL/TLS on 465, STARTTLS otherwise.");
+        color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+    }
+    Button {
+        height: 36px;
+        text: root.certificate-pem != "" ? @tr("Manage trusted certificate") : @tr("Custom server certificate…");
+        enabled: root.enabled;
+        clicked => { root.certificate-expanded = !root.certificate-expanded; }
+    }
+    if root.certificate-expanded : VerticalBox {
+        padding: 0px;
+        spacing: 8px;
+        Text {
+            text: @tr("For Proton Bridge, export its certificate from Bridge settings and import it here. Only trust certificates from your server administrator. Server names and expiry dates are still checked.");
+            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+        }
+        Button { height: 36px; text: @tr("Import certificate file"); enabled: root.enabled; clicked => { root.import-certificate(); } }
+        TextEdit { height: 90px; enabled: root.enabled; text <=> root.certificate-pem; wrap: word-wrap; }
+        Text { text: @tr("PEM certificate only. Do not paste a private key."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
+        if root.certificate-pem != "" : Button { height: 36px; text: @tr("Remove certificate"); enabled: root.enabled; clicked => { root.certificate-pem = ""; } }
+    }
+    if root.certificate-pem != "" && !root.certificate-expanded : Text {
+        text: @tr("Custom certificate added for this account."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+    }
+}

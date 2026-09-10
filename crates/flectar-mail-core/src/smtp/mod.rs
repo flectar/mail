@@ -16,30 +16,33 @@ fn build_transport(
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
     use lettre::transport::smtp::client::{Tls, TlsParameters};
 
-    let mut builder = if cfg.smtp_port == 465 {
-        // Implicit TLS
-        AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
-            .map_err(|e| CoreError::Smtp(e.to_string()))?
-            .port(cfg.smtp_port)
-    } else {
-        // STARTTLS (587 and friends)
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
-            .map_err(|e| CoreError::Smtp(e.to_string()))?
-            .port(cfg.smtp_port)
+    use crate::models::ConnectionSecurity;
+    let implicit = match cfg.settings.connection.smtp_security {
+        ConnectionSecurity::Tls => true,
+        ConnectionSecurity::Starttls => false,
+        ConnectionSecurity::Auto => cfg.smtp_port == 465,
     };
-
-    if crate::imap::tls_insecure() {
-        let params = TlsParameters::builder(cfg.smtp_host.clone())
-            .dangerous_accept_invalid_certs(true)
-            .dangerous_accept_invalid_hostnames(true)
-            .build()
-            .map_err(|e| CoreError::Smtp(e.to_string()))?;
-        builder = if cfg.smtp_port == 465 {
-            builder.tls(Tls::Wrapper(params))
-        } else {
-            builder.tls(Tls::Required(params))
-        };
+    let mut params = TlsParameters::builder(cfg.smtp_host.clone());
+    for cert in crate::imap::trusted_certificates(&cfg.settings.connection.trusted_certificate_pem)?
+    {
+        params = params.add_root_certificate(
+            lettre::transport::smtp::client::Certificate::from_der(cert.as_ref().to_vec())
+                .map_err(|e| CoreError::Tls(e.to_string()))?,
+        );
     }
+    if crate::imap::tls_insecure() && cfg.settings.connection.trusted_certificate_pem.is_empty() {
+        params = params
+            .dangerous_accept_invalid_certs(true)
+            .dangerous_accept_invalid_hostnames(true);
+    }
+    let params = params.build().map_err(|e| CoreError::Tls(e.to_string()))?;
+    let builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.smtp_host)
+        .port(cfg.smtp_port)
+        .tls(if implicit {
+            Tls::Wrapper(params)
+        } else {
+            Tls::Required(params)
+        });
 
     let builder = match auth {
         SmtpAuth::Password(pw) => builder
@@ -77,8 +80,8 @@ pub async fn send_raw(
                 .map_err(|e| CoreError::Smtp(format!("bad recipient {r}: {e}")))?,
         );
     }
-    let envelope =
-        Envelope::new(Some(from_addr), tos).map_err(|e| CoreError::Smtp(e.to_string()))?;
+    let envelope = Envelope::new(Some(from_addr), tos)
+        .map_err(|e| CoreError::Smtp(format!("Invalid message envelope: {e}")))?;
 
     let transport = build_transport(cfg, auth)?;
     tracing::debug!(
@@ -92,14 +95,17 @@ pub async fn send_raw(
         recipients = recipients.len(),
         "smtp send_raw: connecting to relay",
     );
-    transport.send_raw(&envelope, raw).await.map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("535") || msg.to_lowercase().contains("auth") {
-            CoreError::Auth(format!("smtp auth: {msg}"))
-        } else {
-            CoreError::Smtp(msg)
-        }
-    })?;
+    transport
+        .send_raw(&envelope, &crate::mail_security::without_bcc(raw)?)
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("535") || msg.to_lowercase().contains("auth") {
+                CoreError::Auth(format!("smtp auth: {msg}"))
+            } else {
+                CoreError::Smtp(msg)
+            }
+        })?;
     Ok(())
 }
 
@@ -109,7 +115,13 @@ pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()>
     let ok = transport
         .test_connection()
         .await
-        .map_err(|e| CoreError::Smtp(e.to_string()))?;
+        .map_err(|e| {
+            if e.is_tls() {
+                CoreError::Tls(format!("SMTP {}:{}: {e}. Check SSL/TLS versus STARTTLS and the server certificate. For Proton Bridge, import its exported certificate.", cfg.smtp_host, cfg.smtp_port))
+            } else {
+                CoreError::Smtp(format!("{}:{}: {e}", cfg.smtp_host, cfg.smtp_port))
+            }
+        })?;
     if ok {
         Ok(())
     } else {

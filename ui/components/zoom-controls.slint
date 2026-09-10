@@ -1,0 +1,33 @@
+import { HorizontalBox } from "std-widgets.slint";
+import { LineEdit, ToolbarIconButton } from "controls.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+
+export global ZoomApi { pure callback resolve(string, float, float, float) -> float; }
+
+// One command vocabulary for email bodies and document previews.
+export component ZoomControls inherits HorizontalBox {
+    in property <bool> compact: false;
+    in property <bool> available: true;
+    in property <bool> fitting: false;
+    in property <float> zoom: 1;
+    in property <float> minimum: 0.5;
+    in property <float> maximum: 3;
+    in property <int> revision: 0;
+    callback command(string);
+    padding: 0px; spacing: 4px; horizontal-stretch: 0; cross-axis-alignment: center;
+    height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/magnifying-glass-minus.svg"); tooltip-text: @tr("Zoom out"); tooltip-above: true; tooltip-align-left: true; interactive: root.available && root.zoom > root.minimum; clicked => { root.command("zoom-out"); } }
+    if !root.compact : ToolbarIconButton { icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/arrow-counter-clockwise.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(root.zoom * 100)); tooltip-above: true; interactive: root.available; clicked => { root.command("zoom-reset"); } }
+    editor := LineEdit {
+        in property <float> applied: root.zoom;
+        in property <int> revision: root.revision;
+        changed applied => { self.text = "\{round(root.zoom * 100)}%"; }
+        changed revision => { self.text = "\{round(root.zoom * 100)}%"; }
+        min-width: 62px; max-width: 62px; height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
+        enabled: root.available; input-label: @tr("Zoom percentage");
+        text: "\{round(root.zoom * 100)}%";
+        accepted(value) => { root.command("zoom-set:" + value); self.text = "\{round(root.zoom * 100)}%"; }
+    }
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/magnifying-glass-plus.svg"); tooltip-text: @tr("Zoom in"); tooltip-above: true; interactive: root.available && root.zoom < root.maximum; clicked => { root.command("zoom-in"); } }
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/arrows-out-line-horizontal.svg"); tooltip-text: @tr("Fit to width"); tooltip-above: true; active: root.fitting; interactive: root.available; clicked => { root.command("fit"); } }
+}

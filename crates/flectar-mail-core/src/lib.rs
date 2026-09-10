@@ -13,12 +13,14 @@ pub mod embed;
 pub mod error;
 pub mod events;
 mod file_io;
+pub mod files;
 pub mod googlecal;
 pub mod graph;
 pub mod graphcal;
 mod http_body;
 pub mod imap;
 pub mod jmap;
+pub mod mail_security;
 pub mod mime;
 pub mod models;
 pub mod oauth;
@@ -26,6 +28,7 @@ pub mod queue;
 pub mod route;
 pub mod scheduler;
 pub mod search;
+pub mod signatures;
 pub mod smtp;
 pub mod sync;
 pub mod unsubscribe;
@@ -220,6 +223,9 @@ pub struct Core {
     /// Events and provider calendar sync state. Kept physically separate from
     /// the mail store so mailbox backfills cannot block the calendar UI.
     pub calendar_db: Db,
+    /// Remote files, sync cursors and durable transfer operations.
+    pub files_db: Db,
+    pub(crate) file_work_lock: Arc<tokio::sync::Mutex<()>>,
     pub bus: EventBus,
     paths: Arc<Paths>,
     tokens: TokenProvider,
@@ -317,11 +323,14 @@ impl Core {
                 calendar_db_path.display()
             ))
         })?;
+        let files_db = Db::open_files(&paths.files_db_file())?;
         tracing::info!("core startup: databases opened and migrated");
         let bus = EventBus::new();
         let core = Core {
             db,
             calendar_db,
+            files_db,
+            file_work_lock: Arc::new(tokio::sync::Mutex::new(())),
             bus,
             paths: Arc::new(paths),
             tokens: TokenProvider::new(credentials.clone(), oauth_redirects.clone()),
@@ -341,6 +350,7 @@ impl Core {
         // calendar stores, then remove calendar rows that predate the durable
         // operation journal and no longer have a mail account owner.
         core.recover_cross_store_state().await?;
+        core.recover_files().await?;
         let removed_staged_files = core.cleanup_orphaned_draft_files().await?;
         if removed_staged_files > 0 {
             tracing::info!(removed_staged_files, "removed orphaned draft staging files");
@@ -621,6 +631,7 @@ impl Core {
         configs: Vec<PortableAccountConfig>,
     ) -> Result<usize> {
         for config in &configs {
+            imap::trusted_certificates(&config.settings.connection.trusted_certificate_pem)?;
             let email = config.email.trim();
             if email.len() > 320 || !email.contains('@') {
                 return Err(CoreError::Other(format!(
@@ -784,26 +795,52 @@ impl Core {
                 },
             };
         }
-        let creds = imap::ImapCredentials::Password {
-            user: args.username.clone(),
-            password: args.password.clone(),
-        };
-        match imap::connect(&args.imap_host, args.imap_port, creds).await {
-            Ok(session) => {
-                imap::logout(session).await;
-                ConnectionTestResult {
-                    ok: true,
-                    error: None,
-                }
-            }
+        match self.check_imap_smtp(args).await {
+            Ok(()) => ConnectionTestResult {
+                ok: true,
+                error: None,
+            },
             Err(e) => ConnectionTestResult {
                 ok: false,
-                error: Some(e.to_client_json()),
+                error: Some(e.to_string()),
             },
         }
     }
 
+    async fn check_imap_smtp(&self, args: &AddPasswordAccountArgs) -> Result<()> {
+        let creds = imap::ImapCredentials::Password {
+            user: args.username.clone(),
+            password: args.password.clone(),
+        };
+        let session =
+            imap::connect_with_settings(&args.imap_host, args.imap_port, creds, &args.connection)
+                .await?;
+        imap::logout(session).await;
+        let config = AccountConfig {
+            id: 0,
+            email: args.email.clone(),
+            display_name: None,
+            avatar_url: None,
+            provider: Provider::Imap,
+            auth_kind: AuthKind::Password,
+            mail_protocol: MailProtocol::Imap,
+            username: args.username.clone(),
+            jmap_url: String::new(),
+            jmap_account_id: None,
+            imap_host: args.imap_host.clone(),
+            imap_port: args.imap_port,
+            smtp_host: args.smtp_host.clone(),
+            smtp_port: args.smtp_port,
+            settings: AccountSettings {
+                connection: args.connection.clone(),
+                ..Default::default()
+            },
+        };
+        smtp::test_connection(&config, &smtp::SmtpAuth::Password(args.password.clone())).await
+    }
+
     pub async fn add_account_password(&self, args: AddPasswordAccountArgs) -> Result<Account> {
+        imap::trusted_certificates(&args.connection.trusted_certificate_pem)?;
         let email = normalize_account_email(&args.email)
             .ok_or_else(|| CoreError::Auth("enter a valid email address".into()))?;
         let mut args = AddPasswordAccountArgs {
@@ -820,6 +857,7 @@ impl Core {
             imap_port: args.imap_port,
             smtp_host: args.smtp_host.trim().to_owned(),
             smtp_port: args.smtp_port,
+            connection: args.connection,
         };
         if args.username.is_empty() {
             args.username = args.email.clone();
@@ -869,12 +907,7 @@ impl Core {
                 .account_id,
             )
         } else {
-            let probe = self.test_connection(&args).await;
-            if !probe.ok {
-                return Err(CoreError::Auth(
-                    probe.error.unwrap_or_else(|| "connection failed".into()),
-                ));
-            }
+            self.check_imap_smtp(&args).await?;
             None
         };
 
@@ -929,6 +962,11 @@ impl Core {
                             smtp_port: a.smtp_port,
                         },
                     )?;
+                    let mut settings = repo::accounts::get_config(&transaction, id)?
+                        .ok_or_else(|| CoreError::NotFound("account".into()))?
+                        .settings;
+                    settings.connection = a.connection.clone();
+                    repo::accounts::set_settings(&transaction, id, &settings)?;
                     transaction.commit()?;
                     Ok(())
                 })
@@ -950,8 +988,9 @@ impl Core {
             let remote_account = jmap_account_id.clone();
             self.db
                 .write(move |conn| {
-                    repo::accounts::insert(
-                        conn,
+                    let transaction = conn.transaction()?;
+                    let id = repo::accounts::insert(
+                        &transaction,
                         &repo::accounts::NewAccount {
                             email: &a.email,
                             display_name: a.display_name.as_deref(),
@@ -967,7 +1006,14 @@ impl Core {
                             smtp_host: &a.smtp_host,
                             smtp_port: a.smtp_port,
                         },
-                    )
+                    )?;
+                    let settings = AccountSettings {
+                        connection: a.connection.clone(),
+                        ..Default::default()
+                    };
+                    repo::accounts::set_settings(&transaction, id, &settings)?;
+                    transaction.commit()?;
+                    Ok(id)
                 })
                 .await?
         };
@@ -1411,19 +1457,34 @@ impl Core {
     }
 
     async fn complete_account_removal(&self, account_id: i64) -> Result<()> {
+        let _files_guard = self.file_work_lock.lock().await;
         if let Some(h) = self.handles.write().await.remove(&account_id) {
             h.abort();
         }
         self.cal_handles.write().await.remove(&account_id);
         self.tokens.forget_account(account_id).await;
         self.purge_calendar_account(account_id).await?;
+        self.files_db
+            .write(move |conn| {
+                conn.execute("DELETE FROM connections WHERE account_id=?1", [account_id])?;
+                Ok(())
+            })
+            .await?;
         credentials::delete_all_async(self.credentials.clone(), account_id).await?;
         self.db
-            .write(move |conn| repo::accounts::delete(conn, account_id))
+            .write(move |conn| {
+                conn.execute(
+                    "DELETE FROM app_settings WHERE key = ?1",
+                    [format!("files:{account_id}")],
+                )?;
+                repo::accounts::delete(conn, account_id)
+            })
             .await?;
         for directory in [
             self.paths.mail_dir(account_id),
             self.paths.attachments_dir(account_id),
+            self.paths.files_cache_dir(account_id),
+            self.paths.files_staging_dir(account_id),
         ] {
             match tokio::fs::remove_dir_all(directory).await {
                 Ok(()) => {}
@@ -1489,6 +1550,12 @@ impl Core {
             if !valid_accounts.contains(&account_id) {
                 tracing::warn!(account_id, "removing orphaned calendar account data");
                 self.purge_calendar_account(account_id).await?;
+                self.files_db
+                    .write(move |conn| {
+                        conn.execute("DELETE FROM connections WHERE account_id=?1", [account_id])?;
+                        Ok(())
+                    })
+                    .await?;
             }
         }
         let detached = self.detach_orphaned_calendar_message_links().await?;
@@ -1633,6 +1700,12 @@ impl Core {
             })
             .await?;
 
+        self.files_db
+            .write(|c| {
+                c.execute("DELETE FROM connections", [])?;
+                Ok(())
+            })
+            .await?;
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;
         let _ = tokio::fs::remove_dir_all(self.paths.draft_attachments_dir()).await;
@@ -1642,7 +1715,7 @@ impl Core {
         Ok(())
     }
 
-    /// Export coherent, integrity-checked copies of both SQLite stores plus a
+    /// Export coherent, integrity-checked copies of all three SQLite stores plus a
     /// versioned manifest. Credentials remain in the platform keyring and are
     /// intentionally outside this database snapshot.
     pub async fn create_database_snapshot(
@@ -1666,7 +1739,15 @@ impl Core {
                     .into(),
             ));
         }
-        db::snapshot::create(&self.db, &self.calendar_db, &destination).await
+        let _files_guard = self.file_work_lock.lock().await;
+        db::snapshot::create(
+            &self.db,
+            &self.calendar_db,
+            &self.files_db,
+            Some(self.paths.data_dir.join("file_transfers")),
+            &destination,
+        )
+        .await
     }
 
     pub async fn sync_now(&self, account_id: Option<i64>) -> Result<()> {
@@ -2087,6 +2168,9 @@ impl Core {
             attachments: Vec::new(),
         };
         let (_msg_id, raw) = crate::mime::build_message(&out)?;
+        let raw = crate::mail_security::Gpg::default()
+            .protect(&raw, &cfg.settings.security, &cfg.email, out.to)
+            .await?;
         let auth = match cfg.auth_kind {
             AuthKind::Password => crate::smtp::SmtpAuth::Password(
                 credentials::load_async(self.credentials.clone(), cfg.id, Slot::Password).await?,
@@ -2633,7 +2717,13 @@ impl Core {
                 access_token: self.tokens.access_token(config.id, config.provider).await?,
             },
         };
-        imap::connect(&config.imap_host, config.imap_port, credentials).await
+        imap::connect_with_settings(
+            &config.imap_host,
+            config.imap_port,
+            credentials,
+            &config.settings.connection,
+        )
+        .await
     }
 
     pub async fn perform_action(&self, args: PerformActionArgs) -> Result<ActionResult> {
@@ -2979,7 +3069,10 @@ impl Core {
                     repo::threads::recompute(&tx, tid)?;
                 }
                 repo::search::index_message(&tx, draft_id)?;
-                let sync_remote_account = if provider == "gmail" || mail_protocol == "jmap" {
+                let security = repo::accounts::get_config(&tx, args.account_id)?.ok_or_else(|| CoreError::NotFound("account".into()))?.settings.security;
+                // Protected drafts stay local until explicit Send. Even incomplete
+                // recipient lists must never cause a plaintext server upload.
+                let sync_remote_account = if !security.enabled() && (provider == "gmail" || mail_protocol == "jmap") {
                     tx.execute(
                         "UPDATE pending_actions SET state='cancelled',finished_at=?2
                          WHERE message_id=?1 AND kind='save_draft' AND state='pending'",
@@ -3271,6 +3364,27 @@ impl Core {
     }
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
+        let draft_id = args.draft_id;
+        let (policy, sender, recipients) = self
+            .db
+            .read(move |conn| {
+                let detail = repo::messages::detail(conn, draft_id)?;
+                let config = repo::accounts::get_config(conn, detail.account_id)?
+                    .ok_or_else(|| CoreError::NotFound("account".into()))?;
+                let bcc: String = conn.query_row(
+                    "SELECT bcc_json FROM messages WHERE id=?1 AND is_draft=1",
+                    [draft_id],
+                    |r| r.get(0),
+                )?;
+                let mut recipients = detail.to;
+                recipients.extend(detail.cc);
+                recipients.extend(serde_json::from_str::<Vec<Address>>(&bcc)?);
+                Ok((config.settings.security, config.email, recipients))
+            })
+            .await?;
+        crate::mail_security::Gpg::default()
+            .preflight(&policy, &sender, &recipients)
+            .await?;
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
         let dispatch_at = args
             .send_at
@@ -3287,7 +3401,7 @@ impl Core {
                      WHERE message_id = ?1 AND kind = 'save_draft' AND state = 'pending'",
                     rusqlite::params![draft_id, now_ms()],
                 )?;
-                let payload = serde_json::json!({ "draftId": draft_id });
+                let payload = serde_json::json!({ "draftId": draft_id, "mailSecurity": policy });
                 let aid = repo::actions::enqueue(
                     conn,
                     row.account_id,
@@ -3343,11 +3457,11 @@ impl Core {
 
         // This check deliberately happens after acquiring the single-flight
         // lock: a concurrent caller may just have populated `file_path`.
-        let (message_id, part_id, imap_section, filename, mime_type, file_path) = self
+        let (message_id, part_id, imap_section, filename, mime_type, file_path, jmap_blob_id) = self
             .db
             .read(move |conn| {
                 conn.query_row(
-                    "SELECT message_id, part_id, imap_section, filename, mime_type, file_path
+                    "SELECT message_id, part_id, imap_section, filename, mime_type, file_path, jmap_blob_id
                      FROM attachments WHERE id = ?1",
                     rusqlite::params![attachment_id],
                     |r| {
@@ -3358,6 +3472,7 @@ impl Core {
                             r.get::<_, Option<String>>(3)?,
                             r.get::<_, Option<String>>(4)?,
                             r.get::<_, Option<String>>(5)?,
+                            r.get::<_, Option<String>>(6)?,
                         ))
                     },
                 )
@@ -3368,6 +3483,12 @@ impl Core {
         if let Some(path) = file_path
             && tokio::fs::metadata(&path).await.is_ok()
         {
+            if let Err(error) = self
+                .index_attachment_text(attachment_id, std::path::Path::new(&path))
+                .await
+            {
+                tracing::debug!(%error,"attachment text indexing deferred");
+            }
             return Ok(path);
         }
 
@@ -3381,7 +3502,10 @@ impl Core {
         // removed/corrupted but this row also has an IMAP section, safely fall
         // through to the remote section instead of making the attachment
         // permanently inaccessible because of a stale `raw_path`.
-        let legacy = match (row.raw_path.as_ref(), part_id.as_deref()) {
+        let legacy = match (
+            row.raw_path.as_ref().filter(|_| jmap_blob_id.is_none()),
+            part_id.as_deref(),
+        ) {
             (Some(raw_path), Some(part_id)) => {
                 match crate::file_io::read(raw_path, MAX_CACHED_MESSAGE_BYTES, "cached message")
                     .await
@@ -3448,6 +3572,9 @@ impl Core {
                 Ok(())
             })
             .await?;
+        if let Err(error) = self.index_attachment_text(attachment_id, &path).await {
+            tracing::debug!(%error,"attachment text indexing deferred");
+        }
         Ok(path_str)
     }
 
@@ -7152,7 +7279,15 @@ mod thread_read_tests {
             })
             .await
             .unwrap();
-        assert_eq!(mail_contract, (1, 1, false, "ok".to_owned()));
+        assert_eq!(
+            mail_contract,
+            (
+                crate::db::migrations::LATEST_VERSION,
+                1,
+                false,
+                "ok".to_owned()
+            )
+        );
 
         let calendar_contract = core
             .calendar_db

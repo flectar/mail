@@ -2605,6 +2605,20 @@ async fn prepare_draft(
         attachments,
     };
     let (message_id, raw) = crate::mime::build_message(&outgoing)?;
+    let raw = crate::mail_security::protect_draft(
+        &ctx.db,
+        config.id,
+        draft_id,
+        raw,
+        outgoing
+            .to
+            .iter()
+            .chain(outgoing.cc)
+            .chain(outgoing.bcc)
+            .cloned()
+            .collect(),
+    )
+    .await?;
     let bare_message_id = message_id.trim_matches(['<', '>']).to_owned();
     if stored_message_id.as_deref() != Some(bare_message_id.as_str()) {
         let stable_id = bare_message_id.clone();

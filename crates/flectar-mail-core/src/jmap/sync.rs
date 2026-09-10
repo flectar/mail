@@ -458,6 +458,7 @@ fn header_properties() -> Vec<EmailProperty> {
         EmailProperty::Subject,
         EmailProperty::SentAt,
         EmailProperty::HasAttachment,
+        EmailProperty::Attachments,
         EmailProperty::Preview,
     ]
 }
@@ -780,6 +781,11 @@ async fn persist_emails(
                         blob_id.as_deref(),
                     )?;
                 }
+                // Populate Files without downloading the message or changing $seen.
+                // Preserve MIME-derived rows once a raw body is cached; their part
+                // identifiers belong to the MIME parser, not the JMAP server.
+                let body_cached: bool=tx.query_row("SELECT body_state='cached' FROM messages WHERE id=?1",[local_id],|r|r.get(0))?;
+                if !body_cached { persist_attachment_parts(&tx, local_id, email.attachments().unwrap_or_default())?; }
                 if !pending_mailboxes {
                     repo::gmail::set_message_folders(&tx, local_id, &folder_ids)?;
                 }
@@ -841,6 +847,47 @@ async fn persist_emails(
     }
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    Ok(())
+}
+
+fn persist_attachment_parts(
+    db: &rusqlite::Connection,
+    message: i64,
+    parts: &[jmap_client::email::EmailBodyPart],
+) -> Result<()> {
+    let mut retained = Vec::new();
+    for part in parts {
+        let Some(blob) = part.blob_id() else {
+            continue;
+        };
+        let Some(part_id) = part.part_id() else {
+            continue;
+        };
+        let existing: Option<i64> = db
+            .query_row(
+                "SELECT id FROM attachments WHERE message_id=?1 AND part_id=?2 AND jmap_blob_id=?3",
+                params![message, part_id, blob],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let id = if let Some(id) = existing {
+            id
+        } else {
+            db.execute("INSERT INTO attachments(message_id,part_id,filename,mime_type,size,content_id,is_inline,jmap_blob_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![message,part_id,part.name(),part.content_type(),part.size() as i64,part.content_id(),part.content_disposition()==Some("inline"),blob])?;
+            db.last_insert_rowid()
+        };
+        retained.push(id);
+    }
+    let old = {
+        let mut q = db.prepare("SELECT id FROM attachments WHERE message_id=?1")?;
+        q.query_map([message], |r| r.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for id in old {
+        if !retained.contains(&id) {
+            db.execute("DELETE FROM attachments WHERE id=?1", [id])?;
+        }
     }
     Ok(())
 }
@@ -1315,6 +1362,20 @@ async fn build_draft_message(
         attachments: outgoing_attachments,
     };
     let (message_id, raw) = crate::mime::build_message(&outgoing)?;
+    let raw = crate::mail_security::protect_draft(
+        &ctx.db,
+        config.id,
+        draft_id,
+        raw,
+        outgoing
+            .to
+            .iter()
+            .chain(outgoing.cc)
+            .chain(outgoing.bcc)
+            .cloned()
+            .collect(),
+    )
+    .await?;
     if raw.len() > max_upload {
         return Err(CoreError::Jmap(format!(
             "message exceeds the server or local upload limit of {} MiB",
@@ -1948,11 +2009,11 @@ async fn fetch_attachment(
     config: &AccountConfig,
     attachment_id: i64,
 ) -> Result<Vec<u8>> {
-    let (message_id, part_id, raw_path) = ctx
+    let (message_id, part_id, raw_path, blob_id) = ctx
         .db
         .read(move |conn| {
             conn.query_row(
-                "SELECT a.message_id,a.part_id,m.raw_path FROM attachments a
+                "SELECT a.message_id,a.part_id,m.raw_path,a.jmap_blob_id FROM attachments a
                  JOIN messages m ON m.id=a.message_id WHERE a.id=?1",
                 params![attachment_id],
                 |row| {
@@ -1960,12 +2021,17 @@ async fn fetch_attachment(
                         row.get::<_, i64>(0)?,
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 },
             )
             .map_err(Into::into)
         })
         .await?;
+    if let Some(blob) = blob_id {
+        let connected = connect(ctx, config).await?;
+        return download_message_bounded(&connected, &blob).await;
+    }
     let part_id = part_id.ok_or_else(|| CoreError::NotFound("attachment MIME part".into()))?;
     let cached = match raw_path {
         Some(path) => crate::file_io::read(path, MAX_JMAP_MESSAGE_BYTES, "cached JMAP message")
@@ -2052,5 +2118,47 @@ mod tests {
             .unwrap();
         assert!(updates.contains_key(&format!("#{create_id}")));
         assert!(!updates.contains_key("email-1"));
+    }
+}
+
+#[cfg(test)]
+mod attachment_metadata_tests {
+    use super::*;
+    #[test]
+    fn header_attachment_metadata_preserves_identity_and_invalidates_changed_blobs() {
+        let db = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&db);
+        db.execute("INSERT INTO messages(id,account_id,folder_id,subject,from_addr,date) VALUES(99,1,1,'File metadata','sender@test.dev',0)",[]).unwrap();
+        let parts:Vec<jmap_client::email::EmailBodyPart>=serde_json::from_value(serde_json::json!([{"partId":"2","blobId":"blob1","name":"notes.txt","type":"text/plain","size":12,"disposition":"attachment"}])).unwrap();
+        persist_attachment_parts(&db, 99, &parts).unwrap();
+        let id: i64 = db
+            .query_row("SELECT id FROM attachments WHERE message_id=99", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        db.execute(
+            "UPDATE attachments SET file_path='/private/cached' WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+        persist_attachment_parts(&db, 99, &parts).unwrap();
+        let same: (i64, String) = db
+            .query_row(
+                "SELECT id,file_path FROM attachments WHERE message_id=99",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(same, (id, "/private/cached".into()));
+        persist_attachment_parts(&db, 99, &[]).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM attachment_files_fts WHERE rowid=?1",
+                [id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
     }
 }

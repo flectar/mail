@@ -95,12 +95,16 @@ fn android_main(app: slint::android::AndroidApp) {
     }
     let credential_store = credentials::AndroidCredentialStore::new(&app, &internal)
         .expect("failed to initialize Android Keystore credential storage");
-    let platform = flectar_mail::PlatformContext::app_private(
+    pdf::configure(&app).expect("failed to configure bundled PDF preview");
+    let documents =
+        documents::AndroidDocuments::new(&app).expect("failed to initialize document access");
+    let mut platform = flectar_mail::PlatformContext::app_private(
         internal.clone(),
         internal,
         std::sync::Arc::new(credential_store),
         oauth_redirects,
     );
+    platform.documents = documents;
     slint::android::init(app).expect("failed to initialize Slint's Android backend");
     flectar_mail::run(platform).expect("Flectar Mail terminated with an error");
 }
@@ -108,3 +112,9 @@ fn android_main(app: slint::android::AndroidApp) {
 mod credentials;
 #[cfg(target_os = "android")]
 mod oauth;
+
+#[cfg(target_os = "android")]
+mod documents;
+
+#[cfg(target_os = "android")]
+mod pdf;

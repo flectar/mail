@@ -73,6 +73,7 @@ async fn first_sync_drains_bodies_fast_and_updates_live() {
 
     let started = Instant::now();
     core.add_account_password(AddPasswordAccountArgs {
+        connection: Default::default(),
         email: "senduser@example.com".into(),
         display_name: Some("Send User".into()),
         username: "senduser".into(),

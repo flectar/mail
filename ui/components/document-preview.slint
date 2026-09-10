@@ -1,0 +1,60 @@
+import { HorizontalBox, VerticalBox, ScrollView } from "std-widgets.slint";
+import { ZoomControls, ZoomApi } from "zoom-controls.slint";
+import { ToolbarIconButton } from "controls.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+export component DocumentPreview inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> busy: false;
+    in property <image> source;
+    in property <int> page: 0;
+    in property <int> pages: 0;
+    // Raster resolution can change while its logical page size stays fixed.
+    in property <float> raster-zoom: 1;
+    in property <int> document-revision: 0;
+    callback render-page(int, int);
+    private property <bool> fitting: true;
+    private property <float> manual-zoom: 1;
+    private property <int> revision: 0;
+    private property <float> natural-width: root.source.width / max(0.01, root.raster-zoom);
+    private property <float> natural-height: root.source.height / max(0.01, root.raster-zoom);
+    private property <float> zoom: root.fitting ? clamp(canvas.visible-width / 1px / max(1, root.natural-width), 0.1, 3) : root.manual-zoom;
+    changed document-revision => { root.fitting = true; root.manual-zoom = 1; canvas.viewport-x = 0px; canvas.viewport-y = 0px; }
+    changed page => { canvas.viewport-x = 0px; canvas.viewport-y = 0px; }
+    min-width: 0px; min-height: 0px; max-width: 100000px;
+    horizontal-stretch: 1; vertical-stretch: 1;
+    function command(action: string) {
+        if action == "fit" { root.fitting = true; }
+        else {
+            private-zoom = ZoomApi.resolve(action, root.zoom, 0.1, 3);
+            if private-zoom > 0 { root.manual-zoom = clamp(private-zoom, 0.1, 3); root.fitting = false; }
+        }
+        root.revision += 1;
+        canvas.viewport-x = 0px; canvas.viewport-y = 0px;
+    }
+    private property <float> private-zoom: 1;
+    VerticalBox {
+        width: parent.width; height: parent.height;
+        padding: 0px; spacing: 8px; cross-axis-alignment: stretch;
+        ZoomControls { compact: root.compact; zoom: root.zoom; minimum: 0.1; fitting: root.fitting; revision: root.revision; available: root.source.width > 0; command(action) => { root.command(action); } }
+        if root.pages > 0 : HorizontalBox {
+            height: root.compact ? 44px : 40px; padding: 0px;
+            ToolbarIconButton { compact: root.compact; icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/caret-left.svg"); tooltip-text: @tr("Previous page"); interactive: !root.busy && root.page > 0; clicked => { root.render-page(root.page - 1, 200); } }
+            Text { text: @tr("Page {} of {}", root.page + 1, root.pages); color: AppTheme.secondary; font-size: TypeScale.caption; vertical-alignment: center; horizontal-alignment: center; horizontal-stretch: 1; }
+            ToolbarIconButton { compact: root.compact; icon-color: AppTheme.secondary; icon: @image-url("../icons/phosphor/caret-right.svg"); tooltip-text: @tr("Next page"); interactive: !root.busy && root.page + 1 < root.pages; clicked => { root.render-page(root.page + 1, 200); } }
+        }
+        canvas := ScrollView {
+            vertical-stretch: 1;
+            mouse-drag-pan-enabled: true;
+            viewport-width: max(self.visible-width, root.natural-width * root.zoom * 1px);
+            viewport-height: max(self.visible-height, root.natural-height * root.zoom * 1px);
+            Image {
+                source: root.source; image-fit: contain;
+                x: max(0px, (canvas.visible-width - self.width) / 2);
+                width: root.natural-width * root.zoom * 1px;
+                height: root.natural-height * root.zoom * 1px;
+            }
+        }
+    }
+}

@@ -25,10 +25,7 @@ impl UiMessage {
     };
 
     pub(crate) fn plain(key: &'static str) -> Self {
-        Self {
-            key,
-            ..Self::EMPTY
-        }
+        Self { key, ..Self::EMPTY }
     }
 
     pub(crate) fn detail(key: &'static str, argument: impl ToString) -> Self {

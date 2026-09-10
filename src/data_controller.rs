@@ -212,9 +212,7 @@ pub(super) fn register_data_management_callbacks(
             let display_path = path.display().to_string();
             let message = match core.create_database_snapshot(path).await {
                 Ok(_) => UiMessage::detail("Database snapshot exported to {}.", display_path),
-                Err(error) => {
-                    UiMessage::detail("Could not export database snapshot: {}", error)
-                }
+                Err(error) => UiMessage::detail("Could not export database snapshot: {}", error),
             };
             let _ = updates
                 .send(UiTaskUpdate {
@@ -223,6 +221,7 @@ pub(super) fn register_data_management_callbacks(
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -496,9 +495,7 @@ pub(super) fn register_data_management_callbacks(
                     data_reset_contacts_loaded.set(true);
                     data_reset_contacts_loading.set(false);
                     app.set_contact_loading_more(false);
-                    app.set_contact_list_revision(
-                        app.get_contact_list_revision().wrapping_add(1),
-                    );
+                    app.set_contact_list_revision(app.get_contact_list_revision().wrapping_add(1));
                     apply_contact_directory(&app, &data_reset_contacts);
                     let today = Local::now().date_naive();
                     {
@@ -523,12 +520,10 @@ pub(super) fn register_data_management_callbacks(
                         "All local Flectar Mail data was deleted.",
                     ));
                 }
-                Err(error) => {
-                    app.set_sync_status(UiMessage::detail(
-                        "Could not delete all local data: {}",
-                        error,
-                    ))
-                }
+                Err(error) => app.set_sync_status(UiMessage::detail(
+                    "Could not delete all local data: {}",
+                    error,
+                )),
             }
         }
     });
@@ -546,9 +541,7 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        app.set_sync_status(UiMessage::plain(
-            "Deleting local accounts and cached data…",
-        ));
+        app.set_sync_status(UiMessage::plain("Deleting local accounts and cached data…"));
         let updates = data_reset_tx.clone();
         runtime_for_data_reset.spawn(async move {
             let result = core.delete_all_local_data().await;

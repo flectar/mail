@@ -1,16 +1,28 @@
 mod account_controller;
+mod account_mail_preferences;
+mod attachment_controller;
+mod browser;
 mod calendar;
 mod compose_controller;
 mod compose_editor;
 mod contacts;
 mod data_controller;
+mod document_preview;
+pub mod documents;
 mod email_document;
 pub mod favicon;
+mod files_controller;
+#[cfg(target_os = "ios")]
+mod ios_documents;
 mod latest_load;
 mod mail;
 mod mail_render_projection;
+mod mail_setup;
 mod mail_view_model;
 mod mail_work;
+mod oauth_browser;
+pub mod pdf_preview;
+mod preview_controls;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -191,10 +203,10 @@ where
     reconcile_model_rows_by(model, rows, key, PartialEq::eq);
 }
 
-fn reconcile_model_rows_by<T: Clone + 'static>(
+fn reconcile_model_rows_by<T: Clone + 'static, K: Eq + std::hash::Hash>(
     model: &VecModel<T>,
     rows: Vec<T>,
-    key: impl Fn(&T) -> i32,
+    key: impl Fn(&T) -> K,
     same: impl Fn(&T, &T) -> bool,
 ) {
     let mut current = model.iter().collect::<Vec<_>>();
@@ -390,6 +402,7 @@ struct UiTaskUpdate {
     calendar_connections: Option<Vec<CalendarConnection>>,
     calendar_error: Option<(i64, Option<String>)>,
     clear_account_form: bool,
+    finishes_account_setup: bool,
     finishes_oauth: bool,
     close_to_tray: Option<bool>,
 }
@@ -843,6 +856,7 @@ impl InboxState {
 #[derive(Clone)]
 pub struct PlatformContext {
     pub paths: Paths,
+    pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
     pub oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
 }
@@ -851,6 +865,7 @@ impl PlatformContext {
     pub fn desktop() -> Result<Self, flectar_mail_core::error::CoreError> {
         Ok(Self {
             paths: Paths::default_dirs()?,
+            documents: documents::default_provider(),
             credentials: Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore),
             oauth_redirects: Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker),
         })
@@ -864,6 +879,7 @@ impl PlatformContext {
     ) -> Self {
         Self {
             paths: Paths::new(data_root.join("data"), cache_root.join("cache")),
+            documents: documents::default_provider(),
             credentials,
             oauth_redirects,
         }
@@ -1066,6 +1082,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // Until startup completes it paints the inert mailbox shell; mapping now
     // avoids making callback wiring part of first-window latency.
     let app = AppWindow::new()?;
+    app.global::<ZoomApi>()
+        .on_resolve(|action, current, minimum, maximum| {
+            crate::preview_controls::zoom(&action, current, minimum, maximum)
+        });
     theme::register_theme_utilities(&app);
     app.set_print_supported(!cfg!(any(target_os = "android", target_os = "ios")));
     app.set_document_apis_supported(!cfg!(any(target_os = "android", target_os = "ios")));
@@ -1220,6 +1240,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     mail_work::register(&app, &state, &runtime);
+    files_controller::register(
+        &app,
+        &state,
+        &runtime,
+        platform.documents.clone(),
+        platform.paths.temp_dir(),
+    );
+
+    attachment_controller::register(&app, &state, &runtime, platform.documents.clone());
 
     let state_for_mail_drag = Rc::clone(&state);
     app.global::<MailDragApi>()
@@ -3243,8 +3272,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let Some(app) = ui_task_app.upgrade() else {
                 return;
             };
+            if update.finishes_account_setup {
+                app.set_account_setup_in_progress(false);
+            }
             if update.finishes_oauth {
                 app.set_oauth_in_progress(false);
+                app.set_oauth_authorization_url("".into());
+                app.set_oauth_browser_error(false);
             }
             if let Some(enabled) = update.close_to_tray {
                 app.set_close_to_tray(enabled);
@@ -3283,6 +3317,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 refresh_connected_accounts(&app, &ui_task_state);
             }
             if update.clear_account_form {
+                app.set_account_form_open(false);
+                app.set_imap_security("auto".into());
+                app.set_smtp_security("auto".into());
+                app.set_trusted_certificate_pem("".into());
                 app.set_account_email("".into());
                 app.set_account_username("".into());
                 app.set_account_password("".into());
@@ -3351,6 +3389,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -3397,6 +3436,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -3911,6 +3951,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         Vec::<flectar_mail_core::models::Address>::new(),
     ));
     let compose_intent = Rc::new(RefCell::new(ComposeIntent::default()));
+    account_mail_preferences::register(&app, &state, &runtime, &compose_document, &compose_editor);
     apply_compose_files(&app, &compose_files.borrow());
     {
         let document = compose_document.borrow();
@@ -3923,8 +3964,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let intent_for_open = Rc::clone(&compose_intent);
     app.on_open_compose(move || {
         if let Some(app) = app_weak.upgrade() {
+            if app.get_compose_open() { return; }
             *intent_for_open.borrow_mut() = ComposeIntent::default();
             app.set_compose_mode("new".into());
+            app.global::<AccountMailPreferences>()
+                .invoke_composer_reset();
+            app.global::<AccountMailPreferences>()
+                .invoke_composer_account_changed(app.get_compose_account_id());
             app.set_compose_notice(UiMessage::EMPTY);
             app.set_compose_notice_is_error(false);
             app.set_compose_open(true);
@@ -4052,6 +4098,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 draft_id: draft.draft_id,
             };
             app.set_compose_mode("draft".into());
+            app.global::<AccountMailPreferences>()
+                .invoke_composer_reset();
+            app.global::<AccountMailPreferences>()
+                .invoke_composer_account_changed(account_id);
             app.set_compose_open(true);
             return;
         }
@@ -4124,6 +4174,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         *intent_for_message_compose.borrow_mut() = prepared.intent;
         app.set_compose_mode(action);
+        app.global::<AccountMailPreferences>()
+            .invoke_composer_reset();
+        app.global::<AccountMailPreferences>()
+            .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
     });
 
@@ -4480,6 +4534,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        if send && !app.global::<AccountMailPreferences>().get_composer_preferences_ready() {
+            return;
+        }
         if account_id <= 0 {
             app.set_compose_notice(UiMessage::plain(
                 "Choose the account this message should be sent from.",
@@ -4572,6 +4629,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let state_for_account = Rc::clone(&state);
     let runtime_for_account = Rc::clone(&runtime);
     let ui_task_tx_for_account = ui_task_tx.clone();
+    oauth_browser::register(&app);
+    mail_setup::register(&app, &runtime);
     app.on_add_password_account(
         move |protocol,
               email,
@@ -4585,14 +4644,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let Some(app) = app_weak.upgrade() else {
                 return;
             };
+            if app.get_account_setup_in_progress() {
+                return;
+            }
             let mail_protocol = MailProtocol::from_storage(protocol.as_str());
             let imap_port = if mail_protocol == MailProtocol::Jmap {
                 993
             } else {
                 match imap_port.trim().parse::<u16>() {
-                    Ok(port) => port,
-                    Err(_) => {
-                        app.set_sync_status(UiMessage::plain("IMAP port must be a number."));
+                    Ok(port) if port > 0 => port,
+                    _ => {
+                        app.set_sync_status(UiMessage::plain(
+                            "IMAP port must be between 1 and 65535.",
+                        ));
                         return;
                     }
                 }
@@ -4601,9 +4665,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 465
             } else {
                 match smtp_port.trim().parse::<u16>() {
-                    Ok(port) => port,
-                    Err(_) => {
-                        app.set_sync_status(UiMessage::plain("SMTP port must be a number."));
+                    Ok(port) if port > 0 => port,
+                    _ => {
+                        app.set_sync_status(UiMessage::plain(
+                            "SMTP port must be between 1 and 65535.",
+                        ));
                         return;
                     }
                 }
@@ -4617,7 +4683,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_sync_status(if mail_protocol == MailProtocol::Jmap {
                 UiMessage::plain("Discovering JMAP and checking capabilities…")
             } else {
-                UiMessage::plain("Testing IMAP connection…")
+                UiMessage::plain("Testing IMAP and SMTP connections…")
             });
             let args = AddPasswordAccountArgs {
                 email: email.to_string(),
@@ -4630,7 +4696,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 imap_port,
                 smtp_host: smtp_host.to_string(),
                 smtp_port,
+                connection: flectar_mail_core::models::MailConnectionSettings {
+                    imap_security: flectar_mail_core::models::ConnectionSecurity::parse(
+                        app.get_imap_security().as_str(),
+                    )
+                    .unwrap_or_default(),
+                    smtp_security: flectar_mail_core::models::ConnectionSecurity::parse(
+                        app.get_smtp_security().as_str(),
+                    )
+                    .unwrap_or_default(),
+                    trusted_certificate_pem: app.get_trusted_certificate_pem().to_string(),
+                },
             };
+            app.set_account_setup_in_progress(true);
             let updates = ui_task_tx_for_account.clone();
             runtime_for_account.spawn(async move {
                 let update = match core.add_password_account(args).await {
@@ -4654,6 +4732,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             calendar_connections: None,
                             calendar_error: None,
                             clear_account_form: true,
+                            finishes_account_setup: true,
                             finishes_oauth: false,
                             close_to_tray: None,
                         }
@@ -4664,6 +4743,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar_connections: None,
                         calendar_error: None,
                         clear_account_form: false,
+                        finishes_account_setup: true,
                         finishes_oauth: false,
                         close_to_tray: None,
                     },
@@ -4708,16 +4788,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             ));
             return;
         }
+        app.set_oauth_authorization_url("".into());
+        app.set_oauth_browser_error(false);
         app.set_oauth_in_progress(true);
         let connect_calendar = app.get_connect_calendar_on_add();
         app.set_sync_status(UiMessage::plain(
             "Complete sign-in in your browser, or choose Cancel here.",
         ));
         let updates = ui_task_tx_for_oauth.clone();
+        let browser_app = app.as_weak();
         runtime_for_oauth.spawn(async move {
             let result = core
-                .start_oauth_with_calendar(provider, connect_calendar, |url| {
-                    webbrowser::open(&url).map_err(|error| error.to_string())
+                .start_oauth_with_calendar(provider, connect_calendar, move |url| {
+                    oauth_browser::begin(browser_app.clone(), url)
                 })
                 .await;
             let update = match result {
@@ -4738,6 +4821,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar_connections: core.load_calendar_connections().await.ok(),
                         calendar_error: None,
                         clear_account_form: false,
+                        finishes_account_setup: false,
                         finishes_oauth: true,
                         close_to_tray: None,
                     }
@@ -4748,6 +4832,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: true,
                     close_to_tray: None,
                 },
@@ -4779,15 +4864,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             ));
             return;
         };
+        app.set_oauth_authorization_url("".into());
+        app.set_oauth_browser_error(false);
         app.set_oauth_in_progress(true);
         app.set_sync_status(UiMessage::plain(
             "Complete sign-in in your browser, or choose Cancel here.",
         ));
         let updates = ui_task_tx_for_reauth.clone();
+        let browser_app = app.as_weak();
         runtime_for_reauth.spawn(async move {
             let result = core
-                .reauth_account(i64::from(account_id), |url| {
-                    webbrowser::open(&url).map_err(|error| error.to_string())
+                .reauth_account(i64::from(account_id), move |url| {
+                    oauth_browser::begin(browser_app.clone(), url)
                 })
                 .await;
             let update = match result {
@@ -4808,6 +4896,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         calendar_connections: core.load_calendar_connections().await.ok(),
                         calendar_error: None,
                         clear_account_form: false,
+                        finishes_account_setup: false,
                         finishes_oauth: true,
                         close_to_tray: None,
                     }
@@ -4818,6 +4907,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: true,
                     close_to_tray: None,
                 },
@@ -4872,15 +4962,18 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             };
             (core, provider)
         };
+        app.set_oauth_authorization_url("".into());
+        app.set_oauth_browser_error(false);
         app.set_oauth_in_progress(true);
         app.set_sync_status(UiMessage::plain(
             "Authorize calendar access in your browser.",
         ));
         let updates = updates_for_calendar_connect.clone();
+        let browser_app = app.as_weak();
         runtime_for_calendar_connect.spawn(async move {
             let result = core
-                .connect_provider_calendar(i64::from(account_id), provider, |url| {
-                    webbrowser::open(&url).map_err(|error| error.to_string())
+                .connect_provider_calendar(i64::from(account_id), provider, move |url| {
+                    oauth_browser::begin(browser_app.clone(), url)
                 })
                 .await;
             let connections = core.load_calendar_connections().await.ok();
@@ -4896,6 +4989,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: connections,
                     calendar_error,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: true,
                     close_to_tray: None,
                 })
@@ -4933,6 +5027,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: connections,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -4969,6 +5064,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: connections,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -5487,4 +5583,18 @@ mod tests {
         );
         assert!(icons.len() + missing.len() <= 2);
     }
+}
+
+/// Mobile hosts release preview bytes/bitmaps and request cooperative native
+/// cancellation when backgrounded or under memory pressure.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn suspend_file_preview() {
+    files_controller::suspend();
+    attachment_controller::suspend();
+}
+
+#[cfg(target_os = "ios")]
+#[unsafe(no_mangle)]
+extern "C" fn flectar_suspend_pdf_preview() {
+    suspend_file_preview();
 }

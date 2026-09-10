@@ -56,6 +56,7 @@ pub struct MailMessage {
     pub unread: bool,
     pub starred: bool,
     pub has_attachments: bool,
+    pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
     pub has_replied: bool,
     pub labels: Vec<i64>,
     pub html: Option<String>,
@@ -89,6 +90,7 @@ impl MailMessage {
             unread: email.unread,
             starred: false,
             has_attachments: false,
+            attachments: Vec::new(),
             has_replied: false,
             labels: Vec::new(),
             html: Some(email.html.to_owned()),
@@ -199,6 +201,13 @@ pub struct CoreMailSource {
 }
 
 impl CoreMailSource {
+    pub(crate) fn account_preferences_core(&self) -> Arc<Core> {
+        Arc::clone(&self.core)
+    }
+
+    pub(crate) fn file_core(&self) -> Arc<Core> {
+        Arc::clone(&self.core)
+    }
     pub async fn start(
         paths: Paths,
         credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1583,6 +1592,7 @@ fn summary_to_message(
         unread: thread.unread_count > 0,
         starred: thread.is_starred,
         has_attachments: thread.has_attachments,
+        attachments: Vec::new(),
         has_replied: thread.has_replied,
         labels: thread.labels,
         html: None,
@@ -1635,6 +1645,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail) -> MailMessage 
         unread: !message.is_read,
         starred: row.starred,
         has_attachments: !message.attachments.is_empty(),
+        attachments: message.attachments.clone(),
         has_replied: row.has_replied,
         labels: row.labels.clone(),
         html,
