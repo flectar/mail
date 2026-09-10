@@ -19,7 +19,14 @@ build_args=(--locked --bin flectar-mail --manifest-path "$project_dir/Cargo.toml
 if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi
-cargo build "${build_args[@]}"
+if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
+  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+    printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
+    exit 1
+  fi
+else
+  cargo build "${build_args[@]}"
+fi
 
 rm -rf "$package_root"
 mkdir -p \

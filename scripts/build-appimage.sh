@@ -38,7 +38,14 @@ if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi
 # The controls are app-owned and the Linux shell uses winit directly.
-cargo build "${build_args[@]}"
+if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
+  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+    printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
+    exit 1
+  fi
+else
+  cargo build "${build_args[@]}"
+fi
 
 if ldd "$project_dir/target/release/flectar-mail" | grep -q 'libQt'; then
   printf 'The release binary unexpectedly links Qt; refusing to package it.\n' >&2

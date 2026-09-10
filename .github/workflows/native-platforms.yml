@@ -133,19 +133,22 @@ jobs:
           # broken URLs. Flathub performs its own online validation on submit.
           appstreamcli validate --no-net resources/com.flectar.mail.metainfo.xml
 
-      - name: Build AppImage
+      - name: Build release executable
         env:
-          APPIMAGE_EXTRACT_AND_RUN: "1"
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+        run: cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          FLECTAR_SKIP_BUILD: "1"
         run: ./scripts/build-appimage.sh
 
       - name: Build Debian package
         env:
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
-          FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          FLECTAR_SKIP_BUILD: "1"
         run: ./scripts/build-deb.sh
 
       - name: Benchmark startup and idle resources
