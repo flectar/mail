@@ -85,6 +85,10 @@ fi
 export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-1}"
 export MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-65536}"
 
+# Preserve the host search path for external programs such as the browser.
+export FLECTAR_MAIL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
+export FLECTAR_MAIL_BUNDLED=1
+
 # linuxdeploy places any non-system ELF dependencies here.
 export LD_LIBRARY_PATH="$app_dir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # The Linux binary supports Slint's Wayland and X11 winit integrations. Slint

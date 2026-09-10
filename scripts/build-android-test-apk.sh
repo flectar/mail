@@ -87,6 +87,8 @@ native_lib="$target_dir/aarch64-linux-android/release/libflectar_mail_android.so
 jni_dir="$target_dir/android/gradle-jni/arm64-v8a"
 mkdir -p "$jni_dir"
 cp "$native_lib" "$jni_dir/libflectar_mail_android.so"
+python3 "$project_dir/scripts/stage-pdfium.py" android-arm64 "$jni_dir" \
+  --cache "$target_dir/pdfium-downloads"
 
 export FLECTAR_ANDROID_KEYSTORE="$keystore"
 export FLECTAR_ANDROID_KEYSTORE_PASSWORD=android

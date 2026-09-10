@@ -145,6 +145,19 @@ class ReleaseTests(unittest.TestCase):
             (root / "Cargo.toml").write_text('[package]\nversion = "0.1.0-alpha.1"\n')
             (root / "target/release").mkdir(parents=True)
             shutil.copyfile("/bin/true", root / "target/release/flectar-mail")
+            # This test checks package metadata using fixture ELFs. Stub only
+            # the download/renderer helpers in the disposable checkout; actual
+            # native PDF rendering is exercised by the dedicated smoke tests.
+            (root / "scripts/stage-pdfium.py").write_text(
+                "import pathlib, shutil, sys\n"
+                "destination = pathlib.Path(sys.argv[2])\n"
+                "destination.mkdir(parents=True, exist_ok=True)\n"
+                "shutil.copyfile('/bin/true', destination / 'libpdfium.so')\n"
+            )
+            (root / "scripts/test-pdf-preview.py").write_text(
+                "import pathlib, sys\n"
+                "assert pathlib.Path(sys.argv[1]).is_file()\n"
+            )
             (root / "bin").mkdir()
             cargo = root / "bin/cargo"
             cargo.write_text("#!/bin/sh\nexit 0\n")

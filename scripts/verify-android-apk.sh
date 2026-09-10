@@ -71,6 +71,8 @@ if [[ "$archive_listing" != *'classes.dex'* ]]; then
   exit 1
 fi
 
+python3 "$project_dir/scripts/verify-android-native.py" "$apk"
+
 signing="$($apksigner verify --verbose --print-certs "$apk")"
 printf '%s\n' "$signing"
 signing_args=("$signing_mode")

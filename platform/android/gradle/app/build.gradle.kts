@@ -26,6 +26,10 @@ android {
         layout.buildDirectory.dir("generated/flectar-assets"),
     )
 
+    // PDFium is loaded by its absolute installed nativeLibraryDir path. Let the
+    // package manager extract and protect it; no temporary executable files.
+    packaging.jniLibs.useLegacyPackaging = true
+
     signingConfigs {
         create("releaseFromEnvironment") {
             val keystore = providers.environmentVariable("FLECTAR_ANDROID_KEYSTORE").orNull
@@ -56,8 +60,28 @@ val generateFlectarLicenseAssets by tasks.registering(Copy::class) {
     }
 }
 
+val generatePdfiumLicenseAssets by tasks.registering(Copy::class) {
+    into(layout.buildDirectory.dir("generated/flectar-assets/licenses/PDFium"))
+    from(repositoryAndroidTarget.dir("gradle-jni")) {
+        include("*/pdfium-licenses/**")
+    }
+}
+val verifyPdfiumRuntime by tasks.registering {
+    doLast {
+        fileTree(repositoryAndroidTarget.dir("gradle-jni")).matching {
+            include("*/libflectar_mail_android.so")
+        }.forEach { appLibrary ->
+            check(appLibrary.resolveSibling("libpdfium.so").isFile) {
+                "Missing bundled PDFium for ${appLibrary.parentFile.name}; run scripts/stage-pdfium.py for this ABI."
+            }
+            check(appLibrary.parentFile.resolve("pdfium-licenses/build.json").isFile) {
+                "Missing PDFium provenance and license notices."
+            }
+        }
+    }
+}
 tasks.named("preBuild").configure {
-    dependsOn(generateFlectarLicenseAssets)
+    dependsOn(generateFlectarLicenseAssets, generatePdfiumLicenseAssets, verifyPdfiumRuntime)
 }
 
 dependencies {
