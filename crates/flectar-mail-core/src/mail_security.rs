@@ -141,23 +141,9 @@ impl Gpg {
                     "The digital signature is invalid, expired, or revoked",
                 ));
             }
-            // GnuPG 2.2 can exit 2 after trying another anonymous recipient's
-            // key even though this recipient's decryption succeeded. Accept
-            // only the complete authenticated-decryption status sequence.
-            let partial_recipient_success = args == ["--decrypt"]
-                && status.contains("[GNUPG:] NO_SECKEY ")
-                && authenticated_decryption(&status)
-                && ![
-                    "FAILURE",
-                    "ERROR",
-                    "BADSIG",
-                    "ERRSIG",
-                    "EXPKEYSIG",
-                    "REVKEYSIG",
-                    "EXPSIG",
-                ]
-                .iter()
-                .any(|tag| status.contains(&format!("[GNUPG:] {tag} ")));
+            let partial_recipient_success = exit.code() == Some(2)
+                && args == ["--decrypt"]
+                && partial_recipient_decryption(&status);
             if !exit.success() && !partial_recipient_success {
                 // Do not expose arbitrary GPG diagnostics (UIDs, filenames, user data).
                 return Err(error(if status.contains("NO_SECKEY") {
@@ -768,10 +754,108 @@ fn authenticated_decryption(status: &str) -> bool {
         && !has("DECRYPTION_FAILED")
 }
 
+fn partial_recipient_decryption(status: &str) -> bool {
+    // Trying another anonymous recipient's ECDH key can make GnuPG exit 2
+    // despite authenticated decryption. Ubuntu's GnuPG 2.4 also appends the
+    // generic GPG_ERR_GENERAL exit status (source GPG = 2, code = 1).
+    // Accept only this fallback status, never a specific operation failure,
+    // and require a single complete, authenticated decryption with no bad
+    // signature or malformed input.
+    let last = status.lines().last();
+    authenticated_decryption(status)
+        && !invalid_signature(status)
+        && status
+            .lines()
+            .any(|line| line == "[GNUPG:] NO_SECKEY 0000000000000000")
+        && ["[GNUPG:] BEGIN_DECRYPTION", "[GNUPG:] END_DECRYPTION"]
+            .iter()
+            .all(|tag| status.lines().filter(|line| line == tag).count() == 1)
+        && status.lines().all(|line| {
+            match line
+                .strip_prefix("[GNUPG:] ")
+                .and_then(|event| event.split_ascii_whitespace().next())
+            {
+                Some("FAILURE") => {
+                    line == "[GNUPG:] FAILURE gpg-exit 33554433" && last == Some(line)
+                }
+                Some("ERROR" | "BADARMOR" | "NODATA" | "UNEXPECTED") => false,
+                _ => true,
+            }
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mail_parser::MimeHeaders;
+
+    const ANONYMOUS_DECRYPTION: &str = "\
+[GNUPG:] NO_SECKEY 0000000000000000
+[GNUPG:] BEGIN_DECRYPTION
+[GNUPG:] DECRYPTION_INFO 2 9 0
+[GNUPG:] DECRYPTION_OKAY
+[GNUPG:] GOODMDC
+[GNUPG:] END_DECRYPTION
+";
+
+    #[test]
+    fn accepts_authenticated_anonymous_recipient_despite_generic_exit_failure() {
+        // GnuPG 2.2 and upstream 2.4 can exit 2 without a FAILURE status.
+        assert!(partial_recipient_decryption(ANONYMOUS_DECRYPTION));
+        // Ubuntu 24.04 backports the generic exit status to GnuPG 2.4.4.
+        let ubuntu = format!("{ANONYMOUS_DECRYPTION}[GNUPG:] FAILURE gpg-exit 33554433\n");
+        assert!(partial_recipient_decryption(&ubuntu));
+        assert!(partial_recipient_decryption(
+            &ubuntu.replace("DECRYPTION_INFO 2 9 0", "DECRYPTION_INFO 0 9 2")
+        ));
+    }
+
+    #[test]
+    fn anonymous_recipient_fallback_rejects_incomplete_or_failed_decryption() {
+        for tag in [
+            "NO_SECKEY 0000000000000000",
+            "BEGIN_DECRYPTION",
+            "DECRYPTION_OKAY",
+            "GOODMDC",
+            "END_DECRYPTION",
+        ] {
+            let incomplete = ANONYMOUS_DECRYPTION.replace(&format!("[GNUPG:] {tag}\n"), "");
+            assert!(
+                !partial_recipient_decryption(&format!(
+                    "{incomplete}[GNUPG:] FAILURE gpg-exit 33554433\n"
+                )),
+                "{tag}"
+            );
+        }
+        for failure in [
+            "ERROR pkdecrypt_failed 33554449",
+            "FAILURE decrypt 33554433",
+            "FAILURE gpg-exit 33554449",
+            "FAILURE gpg-exit",
+            "BADMDC",
+            "DECRYPTION_FAILED",
+            "BADARMOR",
+            "NODATA 3",
+            "UNEXPECTED 0",
+            "BADSIG key uid",
+            "ERRSIG key 22 8 00 0 9",
+            "EXPKEYSIG key uid",
+            "REVKEYSIG key uid",
+            "EXPSIG key uid",
+        ] {
+            let status = format!(
+                "{ANONYMOUS_DECRYPTION}[GNUPG:] {failure}\n[GNUPG:] FAILURE gpg-exit 33554433\n"
+            );
+            assert!(!partial_recipient_decryption(&status), "{failure}");
+        }
+        assert!(!partial_recipient_decryption(
+            &ANONYMOUS_DECRYPTION.repeat(2)
+        ));
+        assert!(!partial_recipient_decryption(&format!(
+            "[GNUPG:] FAILURE gpg-exit 33554433\n{ANONYMOUS_DECRYPTION}"
+        )));
+    }
+
     #[test]
     fn validates_fingerprints_and_bcc_folding() {
         assert!(!authenticated_decryption(
@@ -967,6 +1051,7 @@ mod tests {
         let receiver = Gpg {
             home: Some(other_home.path().to_owned()),
         };
+        assert!(receiver.open_message(&protected, None).await.is_err());
         receiver.import_key(&secret).await.unwrap();
         receiver
             .import_key(&gpg.export_public_key(&alice).await.unwrap())
