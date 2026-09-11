@@ -18,8 +18,9 @@ export component Button inherits Rectangle {
     height: 32px;
     min-width: 64px;
     border-radius: LayoutMetrics.corner-radius - 2px;
-    border-width: root.primary || root.destructive ? 0px : 1px;
-    border-color: root.selected ? AppTheme.accent : AppTheme.control-border;
+    forward-focus: keyboard;
+    border-width: keyboard.has-focus ? 2px : root.primary || root.destructive ? 0px : 1px;
+    border-color: keyboard.has-focus || root.selected ? AppTheme.accent : AppTheme.control-border;
     background: !root.enabled ? AppTheme.disabled-bg
         : root.destructive ? (button-area.pressed ? AppTheme.destructive-pressed : button-area.has-hover ? AppTheme.destructive-hover : AppTheme.destructive)
         : root.primary ? (button-area.pressed ? AppTheme.primary-pressed : button-area.has-hover ? AppTheme.primary-hover : AppTheme.primary)
@@ -62,9 +63,17 @@ export component Button inherits Rectangle {
         }
     }
 
+    keyboard := FocusScope {
+        enabled: root.enabled;
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space { root.clicked(); return accept; }
+            reject
+        }
+    }
     button-area := TouchArea {
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        clicked => { keyboard.focus(); root.clicked(); }
         mouse-cursor: pointer;
     }
 }

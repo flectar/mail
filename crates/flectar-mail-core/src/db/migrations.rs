@@ -1,9 +1,12 @@
 use crate::error::{CoreError, Result};
 use rusqlite::Connection;
 
-// The application is pre-release, so the development schema stays canonical
-// instead of carrying forward migrations for profiles that can be recreated.
-const MIGRATIONS: &[&str] = &[include_str!("migrations/001_init.sql")];
+// File metadata search is additive and preserves existing mail profiles.
+const MIGRATIONS: &[&str] = &[
+    include_str!("migrations/001_init.sql"),
+    include_str!("migrations/002_attachment_files.sql"),
+    include_str!("migrations/003_attachment_content.sql"),
+];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
 pub fn run(conn: &mut Connection) -> Result<()> {
@@ -11,7 +14,7 @@ pub fn run(conn: &mut Connection) -> Result<()> {
     let latest = LATEST_VERSION;
     if version > latest {
         return Err(CoreError::Other(format!(
-            "unsupported pre-release mail database version {version}; recreate the development profile"
+            "mail database schema {version} requires a newer application; open this profile with a compatible version. Existing data has not been changed."
         )));
     }
 
@@ -45,6 +48,8 @@ mod tests {
              WHERE type = 'table'
                AND name NOT LIKE 'sqlite_%'
                AND name NOT LIKE 'messages_fts_%'
+               AND name NOT LIKE 'attachment_files_fts_%'
+               AND name NOT LIKE 'attachment_text_fts_%'
              ORDER BY name",
         )
         .unwrap()
@@ -94,6 +99,8 @@ mod tests {
             "accounts",
             "ai_usage_events",
             "app_settings",
+            "attachment_files_fts",
+            "attachment_text_fts",
             "attachments",
             "contact_accounts",
             "contacts",
@@ -128,7 +135,7 @@ mod tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            1
+            LATEST_VERSION
         );
 
         for forbidden in ["calendar_events", "calendars", "caldav_config"] {
@@ -207,11 +214,105 @@ mod tests {
     }
 
     #[test]
-    fn pre_release_profiles_are_rejected_without_mutation() {
+    fn attachment_upgrade_preserves_mail_and_reconciles_only_once() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "INSERT INTO attachments(id,message_id,part_id,filename,mime_type,size,file_path)
+             VALUES(42,1,'2','Café-budget.txt','text/plain',17,'/private/cached-copy');
+             INSERT INTO jmap_sync_state(account_id,mailbox_state,email_state,identity_state)
+             VALUES(1,'mailboxes-before','emails-before','identities-before');",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+        let attachment: (i64, String, String, Option<String>) = conn
+            .query_row(
+                "SELECT message_id,part_id,file_path,jmap_blob_id FROM attachments WHERE id=42",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            attachment,
+            (1, "2".into(), "/private/cached-copy".into(), None)
+        );
+        let metadata_matches = |term: &str| {
+            conn.query_row(
+                "SELECT count(*) FROM attachment_files_fts WHERE attachment_files_fts MATCH ?1",
+                [term],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(metadata_matches("cafe"), 1);
+        assert_eq!(metadata_matches("schema"), 1);
+        let state: (String, Option<String>, String) = conn.query_row(
+            "SELECT mailbox_state,email_state,identity_state FROM jmap_sync_state WHERE account_id=1",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            state,
+            ("mailboxes-before".into(), None, "identities-before".into())
+        );
+        conn.execute_batch(
+            "UPDATE jmap_sync_state SET email_state='emails-reconciled' WHERE account_id=1;
+             UPDATE attachments SET jmap_blob_id='blob-1' WHERE id=42;
+             INSERT INTO attachment_text_fts(rowid,content) VALUES(42,'indexed-content');",
+        )
+        .unwrap();
+        // Opening an already-upgraded profile neither resets its cursor nor
+        // rebuilds/drops downloaded attachment identities or their text index.
+        run(&mut conn).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT email_state FROM jmap_sync_state WHERE account_id=1",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "emails-reconciled"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM attachment_text_fts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        conn.execute(
+            "UPDATE attachments SET jmap_blob_id='blob-2' WHERE id=42",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM attachment_text_fts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        conn.execute("DELETE FROM messages WHERE id=1", []).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM attachment_files_fts", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+
+    #[test]
+    fn newer_profiles_are_rejected_without_mutation() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "user_version", 28).unwrap();
         let error = run(&mut conn).unwrap_err().to_string();
-        assert!(error.contains("recreate the development profile"));
+        assert!(error.contains("requires a newer application"));
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),

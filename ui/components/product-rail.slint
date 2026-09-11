@@ -61,11 +61,13 @@ export component ProductRail inherits Rectangle {
     in property <color> muted-color;
     out property <string> tooltip-text: mail-item.hovered ? mail-item.label
         : calendar-item.hovered ? calendar-item.label
+        : files-item.hovered ? files-item.label
         : contacts-item.hovered ? contacts-item.label
         : settings-item.hovered ? settings-item.label
         : "";
     out property <length> tooltip-y: mail-item.hovered ? mail-item.y + 10px
         : calendar-item.hovered ? calendar-item.y + 10px
+        : files-item.hovered ? files-item.y + 10px
         : contacts-item.hovered ? contacts-item.y + 10px
         : settings-item.hovered ? settings-item.y + 10px
         : 0px;
@@ -116,6 +118,17 @@ export component ProductRail inherits Rectangle {
             clicked => { root.select-view("calendar"); }
         }
 
+        files-item := ProductRailItem {
+            label: @tr("Files");
+            outline-icon: @image-url("../icons/phosphor/files.svg");
+            filled-icon: @image-url("../icons/phosphor/files-fill.svg");
+            active: !root.settings-active && root.active-view == "files";
+            accent-color: root.accent-color;
+            accent-background: root.accent-background;
+            muted-color: root.muted-color;
+            clicked => { root.select-view("files"); }
+        }
+
         contacts-item := ProductRailItem {
             label: @tr("Contacts");
             outline-icon: @image-url("../icons/phosphor/address-book.svg");
@@ -126,6 +139,7 @@ export component ProductRail inherits Rectangle {
             muted-color: root.muted-color;
             clicked => { root.select-view("contacts"); }
         }
+
 
         Rectangle { vertical-stretch: 1; }
 
@@ -261,6 +275,17 @@ export component CompactProductNav inherits Rectangle {
             active-background: root.accent-background;
             muted-color: root.muted-color;
             clicked => { root.select-view("calendar"); }
+        }
+        CompactProductNavItem {
+            horizontal-stretch: 1;
+            label: @tr("Files");
+            outline-icon: @image-url("../icons/phosphor/files.svg");
+            filled-icon: @image-url("../icons/phosphor/files-fill.svg");
+            active: !root.settings-active && root.active-view == "files";
+            accent-color: root.accent-color;
+            active-background: root.accent-background;
+            muted-color: root.muted-color;
+            clicked => { root.select-view("files"); }
         }
         CompactProductNavItem {
             horizontal-stretch: 1;

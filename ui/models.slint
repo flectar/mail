@@ -106,6 +106,9 @@ export struct AccountRow {
     has_avatar: bool,
     username: string,
     jmap_url: string,
+    imap_security: string,
+    smtp_security: string,
+    trusted_certificate_pem: string,
     imap_host: string,
     imap_port: string,
     smtp_host: string,
@@ -272,6 +275,7 @@ export global EmailReader {
     pure callback link-at(float, float) -> string;
     callback command(string);
     callback find(string, int);
+    in-out property <bool> auto-fit: true;
     in-out property <float> zoom: 1;
     in-out property <int> zoom-revision: 0;
     in-out property <float> width-ratio: 1;
@@ -287,4 +291,21 @@ export global EmailReader {
     in-out property <[ReaderItem]> items;
     in-out property <string> authored-text;
     in-out property <bool> use-authored-text: false;
+}
+
+export struct MailAttachment { id: string, name: string, detail: string, previewable: bool }
+export global MailAttachments {
+    callback deliver();
+    in-out property <[MailAttachment]> rows;
+    in-out property <bool> open: false;
+    in-out property <bool> busy: false;
+    in-out property <string> name;
+    in-out property <string> status;
+    in-out property <image> image;
+    in-out property <string> text;
+    in-out property <bool> is-image: false;
+    in-out property <int> page: 0;
+    in-out property <int> pages: 0;
+    in-out property <int> revision: 0;
+    callback command(string, string);
 }

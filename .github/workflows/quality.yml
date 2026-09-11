@@ -19,7 +19,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_BUILD_JOBS: "2"
+  # Slint's generated application is large; simultaneous lib/test rustc jobs
+  # can exhaust runner memory before any tests start.
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   quality:
@@ -34,6 +36,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             gettext \
+            gnupg \
             libdbus-1-dev \
             libfontconfig1-dev \
             libx11-dev \
@@ -77,7 +80,9 @@ jobs:
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
       - name: Test release validation and publication
-        run: python3 scripts/test-release.py
+        run: |
+          python3 scripts/test-release.py
+          python3 scripts/test-pdf-packaging.py
       - name: Reject unused direct dependencies
         run: |
           cargo install cargo-machete --locked --version 0.9.2
@@ -86,6 +91,8 @@ jobs:
         run: cargo check --workspace --all-targets --locked
       - name: Check the capability-minimal application
         run: cargo check -p flectar-mail --no-default-features --locked
+      - name: Check the Flatpak application profile
+        run: cargo check -p flectar-mail --no-default-features --features remote-content,flatpak --locked
       - name: Check the opt-in GPU renderer
         run: cargo check -p flectar-mail --no-default-features --features remote-content,gpu-renderer --locked
       - name: Lint without warnings
@@ -103,6 +110,13 @@ jobs:
           test -z "$(msgattrib --only-obsolete lang/es/LC_MESSAGES/flectar-mail.po)"
       - name: Run the default test suite
         run: cargo test --workspace --all-targets --locked
+      - name: Exercise the mobile PDF renderer with bundled PDFium on the host
+        run: |
+          python3 scripts/stage-pdfium.py linux-x64 target/pdfium-mobile-test
+          python3 scripts/test-pdf-preview.py --fixture "$RUNNER_TEMP/mobile-preview.pdf"
+          FLECTAR_TEST_PDFIUM="$PWD/target/pdfium-mobile-test/libpdfium.so" \
+          FLECTAR_TEST_PDF="$RUNNER_TEMP/mobile-preview.pdf" \
+            cargo test -p flectar-mail --lib --locked mobile_native_pages_and_rejection -- --ignored
 
   optional-embeddings:
     if: github.event_name != 'schedule'
@@ -113,7 +127,7 @@ jobs:
       - name: Install native core dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libdbus-1-dev pkg-config
+          sudo apt-get install -y build-essential libdbus-1-dev pkg-config gnupg
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
@@ -134,6 +148,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-targets: false
+          key: quality-rustsec
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.2
       - name: Audit the locked dependency graph
@@ -141,8 +159,10 @@ jobs:
         # Slint/Blitz typography dependencies. Deny every new warning while the
         # upstream replacements are tracked explicitly here.
         run: |
-          cargo audit --file Cargo.lock --deny warnings \
-            --ignore RUSTSEC-2025-0141 \
-            --ignore RUSTSEC-2024-0436 \
-            --ignore RUSTSEC-2026-0206 \
-            --ignore RUSTSEC-2026-0192
+          for lockfile in Cargo.lock platform/android/Cargo.lock; do
+            cargo audit --file "$lockfile" --deny warnings \
+              --ignore RUSTSEC-2025-0141 \
+              --ignore RUSTSEC-2024-0436 \
+              --ignore RUSTSEC-2026-0206 \
+              --ignore RUSTSEC-2026-0192
+          done

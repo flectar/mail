@@ -102,5 +102,6 @@ render desktop-green-dark 1320 800 dark default green
 render desktop-purple-dark 1320 800 dark default purple
 render desktop-calendar-light 1320 800 light default default calendar
 render desktop-contacts-light 1320 800 light default default contacts
+render desktop-files-light 1320 800 light default default files
 render mobile-light 390 844 light
 render mobile-dark 390 844 dark

@@ -108,6 +108,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             labels: message.labels,
             html: None,
             text: None,
+            attachments: Vec::new(),
             body_pending: true,
             sender_verification: message.sender_verification,
         }
@@ -579,7 +580,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         _ => 5,
     });
     app.set_mark_read_on_open(settings.mark_read_on_open);
-    app.set_close_to_tray(settings.close_to_tray);
+    app.set_close_to_tray(settings.close_to_tray && !cfg!(feature = "flatpak"));
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
     app.set_show_avatars(settings.show_avatars);
     app.set_workspace_layout(
@@ -661,6 +662,7 @@ mod warm_start_tests {
             labels: Vec::new(),
             html: Some("<p>body must not enter warm cache</p>".into()),
             text: Some("Plain body must not enter warm cache".into()),
+            attachments: Vec::new(),
             body_pending: false,
             sender_verification: "domain".into(),
         }

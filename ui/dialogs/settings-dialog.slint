@@ -1,3 +1,6 @@
+import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
+import { MailSecurityFields } from "../components/mail-security-fields.slint";
+import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
@@ -22,6 +25,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> remote-images-available: true;
     in property <bool> account-transfer-supported: true;
     in property <bool> sync_in_progress: false;
+    in property <bool> account_setup_in_progress: false;
     in property <bool> oauth_in_progress: false;
     in property <bool> oauth_settings_saving: false;
     in property <string> sync_status: "";
@@ -62,6 +66,15 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
+    in-out property <string> imap_security: "auto";
+    in-out property <string> smtp_security: "auto";
+    in-out property <string> trusted_certificate_pem;
+    in property <string> oauth_authorization_url;
+    in property <bool> oauth_browser_error;
+    callback retry_oauth_browser();
+    callback copy_oauth_link();
+    callback submit_oauth_redirect(string);
+    callback import_mail_certificate();
     in-out property <string> imap_host: "";
     in-out property <string> imap_port: "993";
     in-out property <string> smtp_host: "";
@@ -180,6 +193,9 @@ export component SettingsDialog inherits Rectangle {
         root.account_password = "";
         root.account_protocol = "imap";
         root.jmap_url = "";
+        root.imap_security = "auto";
+        root.smtp_security = "auto";
+        root.trusted_certificate_pem = "";
         root.imap_host = "";
         root.imap_port = "993";
         root.smtp_host = "";
@@ -542,7 +558,6 @@ export component SettingsDialog inherits Rectangle {
                             Text { text: @tr("Accounts"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; }
                             Text { height: root.compact ? 34px : 17px; text: @tr("Manage connected mailboxes and add providers. Drag an account to change its order everywhere."); color: root.secondary-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                             if root.sync_status != "" : Text {
-                                height: 34px;
                                 text: root.sync_status;
                                 color: root.secondary-text;
                                 font-size: TypeScale.secondary;
@@ -562,7 +577,7 @@ export component SettingsDialog inherits Rectangle {
                                         horizontal-stretch: 1;
                                         text: @tr("Add Gmail");
                                         icon: @image-url("../icons/brand/gmail.svg");
-                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available;
+                                        enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -574,7 +589,7 @@ export component SettingsDialog inherits Rectangle {
                                         horizontal-stretch: 1;
                                         text: @tr("Add Outlook");
                                         icon: @image-url("../icons/brand/outlook.svg");
-                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available;
+                                        enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -587,7 +602,7 @@ export component SettingsDialog inherits Rectangle {
                                         text: @tr("Add mail account");
                                         icon: @image-url("../icons/phosphor/envelope.svg");
                                         colorize-icon: true;
-                                        enabled: !root.oauth_in_progress && !root.oauth_settings_saving;
+                                        enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
                                         foreground: root.body-text;
                                         muted: root.muted-text;
                                         surface: root.surface-raised;
@@ -604,11 +619,17 @@ export component SettingsDialog inherits Rectangle {
                                 if root.compact : VerticalBox {
                                     padding: 14px;
                                     spacing: 8px;
-                                    ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
-                                    ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
-                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/phosphor/envelope.svg"); colorize-icon: true; enabled: !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
+                                    ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
+                                    ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
+                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/phosphor/envelope.svg"); colorize-icon: true; enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
                                     if root.oauth_in_progress : Button { height: 44px; text: @tr("Cancel sign-in"); clicked => { root.cancel_oauth(); } }
                                 }
+                            }
+                            if root.oauth_in_progress && root.oauth_authorization_url != "" : OAuthBrowserHelp {
+                                launch-failed: root.oauth_browser_error;
+                                retry => { root.retry_oauth_browser(); }
+                                copy-link => { root.copy_oauth_link(); }
+                                submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account in root.connected_accounts : drop-target := DropArea {
                                 height: root.compact ? 221px : account.sync_error != "" ? 183px : 159px;
@@ -684,13 +705,16 @@ export component SettingsDialog inherits Rectangle {
                                             width: account.provider == "imap" ? 58px : 82px;
                                             height: 30px;
                                             text: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
-                                            enabled: (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
+                                            enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
                                             clicked => {
                                                 if account.provider == "imap" {
                                                     root.account_email = account.email;
                                                     root.account_username = account.username;
                                                     root.account_protocol = account.mail_protocol;
                                                     root.jmap_url = account.jmap_url;
+                                                    root.imap_security = account.imap_security;
+                                                    root.smtp_security = account.smtp_security;
+                                                    root.trusted_certificate_pem = account.trusted_certificate_pem;
                                                     root.imap_host = account.imap_host;
                                                     root.imap_port = account.imap_port;
                                                     root.smtp_host = account.smtp_host;
@@ -714,7 +738,7 @@ export component SettingsDialog inherits Rectangle {
                                             width: 128px;
                                             height: 30px;
                                             text: account.calendar_status == "" ? @tr("Add calendar") : @tr("Retry calendar");
-                                            enabled: !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
                                             clicked => { root.connect_account_calendar(account.id); }
                                         }
                                         if !root.compact && !account.calendar_connected && account.provider == "imap" : Button {
@@ -751,15 +775,16 @@ export component SettingsDialog inherits Rectangle {
                                     }
                                 }
                             }
+                            AccountMailPreferencesPanel { accounts: root.connected_accounts; compact: root.compact; }
                             Rectangle {
                                 height: root.custom_oauth_open ? (root.compact ? 354px : 276px) : 118px;
                                 SettingsCard { title: @tr("OAuth app credentials"); description: root.custom_oauth_configured ? @tr("Custom desktop app credentials are configured.") : @tr("Advanced: use your own Gmail or Microsoft desktop app registration."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Button { x: parent.width - self.width - 20px; y: 70px; width: 110px; height: 32px; enabled: !root.oauth_settings_saving; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.custom_oauth_open = !root.custom_oauth_open; } }
                                 if root.custom_oauth_open : VerticalBox {
                                     x: 20px; y: 116px; width: parent.width - 40px; height: parent.height - 132px; spacing: 8px;
-                                    if !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    if root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    HorizontalBox { spacing: 8px; LineEdit { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); edited(text) => { root.ms_client_id = text; } } Button { enabled: !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
+                                    if !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    if root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); edited(text) => { root.ms_client_id = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
                                     Text { text: @tr("Outlook public desktop clients use PKCE and do not need a client secret."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                 }
                             }
@@ -1130,6 +1155,7 @@ export component SettingsDialog inherits Rectangle {
                     }
 
                     VerticalBox {
+                        padding: 0px;
                         padding-top: 22px;
                         padding-right: 22px;
                         padding-bottom: 20px;
@@ -1137,6 +1163,7 @@ export component SettingsDialog inherits Rectangle {
                         spacing: 12px;
 
                         HorizontalBox {
+                            padding: 0px;
                             height: 44px;
                             spacing: 12px;
                             Rectangle {
@@ -1147,6 +1174,7 @@ export component SettingsDialog inherits Rectangle {
                                 Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/phosphor/envelope.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
                             }
                             VerticalBox {
+                                padding: 0px;
                                 spacing: 2px;
                                 Text { text: root.imap_editing ? @tr("Edit {}", root.account_email) : @tr("Connect a mail account"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
                                 Text { text: root.account_protocol == "jmap" ? @tr("Uses JMAP for mail sync and sending, with automatic discovery.") : @tr("Uses separate IMAP and SMTP servers for mail sync and sending."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
@@ -1157,32 +1185,37 @@ export component SettingsDialog inherits Rectangle {
 
                         imap-scroll := ScrollView {
                             vertical-stretch: 1;
+                            viewport-width: self.visible-width;
                             mouse-drag-pan-enabled: root.compact;
                             VerticalBox {
-                                width: imap-scroll.visible-width;
+                                padding: 0px;
+                                width: max(0px, imap-scroll.visible-width - 16px);
                                 height: self.preferred-height;
                                 padding-right: 4px;
                                 spacing: 10px;
                                 if !root.compact : HorizontalBox {
+                                    padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { horizontal-stretch: 1; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
-                                    FormField { horizontal-stretch: 1; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
                                 }
                                 if root.compact : VerticalBox {
+                                    padding: 0px;
                                     height: 124px;
                                     spacing: 10px;
-                                    FormField { height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
-                                    FormField { height: 57px; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
                                 }
-                                FormField { height: 57px; label: @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
+                                FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
                                 HorizontalBox {
+                                    padding: 0px;
                                     height: 40px;
                                     spacing: 8px;
-                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("IMAP + SMTP"); primary: root.account_protocol == "imap"; clicked => { root.account_protocol = "imap"; } }
-                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("JMAP"); primary: root.account_protocol == "jmap"; clicked => { root.account_protocol = "jmap"; } }
+                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("IMAP + SMTP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "imap"; clicked => { root.account_protocol = "imap"; } }
+                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("JMAP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "jmap"; clicked => { root.account_protocol = "jmap"; } }
                                 }
-                                if root.account_protocol == "jmap" : FormField {
+                                if root.account_protocol == "jmap" : FormField { enabled: !root.account_setup_in_progress;
                                     height: 57px;
                                     label: @tr("Server address · Optional");
                                     value: root.jmap_url;
@@ -1191,33 +1224,49 @@ export component SettingsDialog inherits Rectangle {
                                     edited(value) => { root.jmap_url = value; }
                                 }
                                 if root.account_protocol == "imap" : HorizontalBox {
+                                    padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { horizontal-stretch: 1; label: @tr("IMAP server"); value: root.imap_host; placeholder: @tr("imap.example.com"); label-color: root.secondary-text; edited(value) => { root.imap_host = value; } }
-                                    FormField { width: 88px; label: @tr("Port"); value: root.imap_port; placeholder: @tr("993"); label-color: root.secondary-text; edited(value) => { root.imap_port = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("IMAP server"); value: root.imap_host; placeholder: @tr("imap.example.com"); label-color: root.secondary-text; edited(value) => { root.imap_host = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value: root.imap_port; placeholder: @tr("993"); label-color: root.secondary-text; edited(value) => { root.imap_port = value; } }
                                 }
                                 if root.account_protocol == "imap" : HorizontalBox {
+                                    padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { horizontal-stretch: 1; label: @tr("SMTP server"); value: root.smtp_host; placeholder: @tr("smtp.example.com"); label-color: root.secondary-text; edited(value) => { root.smtp_host = value; } }
-                                    FormField { width: 88px; label: @tr("Port"); value: root.smtp_port; placeholder: @tr("465"); label-color: root.secondary-text; edited(value) => { root.smtp_port = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("SMTP server"); value: root.smtp_host; placeholder: @tr("smtp.example.com"); label-color: root.secondary-text; edited(value) => { root.smtp_host = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value: root.smtp_port; placeholder: @tr("465"); label-color: root.secondary-text; edited(value) => { root.smtp_port = value; } }
+                                }
+                                if root.account_protocol == "imap" : Text {
+                                    text: @tr("Proton Bridge: use the local servers, ports and password shown in Bridge, and match its encryption settings.");
+                                    color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+                                }
+                                if root.account_protocol == "imap" : MailSecurityFields {
+                                    imap-security <=> root.imap_security;
+                                    smtp-security <=> root.smtp_security;
+                                    enabled: !root.account_setup_in_progress;
+                                    certificate-pem <=> root.trusted_certificate_pem;
+                                    import-certificate => { root.import_mail_certificate(); }
+                                }
+                                if root.sync_status != "" : Text {
+                                    text: root.sync_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
                                 }
                             }
                         }
 
                         HorizontalBox {
+                            padding: 0px;
                             height: root.compact ? 44px : 34px;
                             spacing: 8px;
                             Rectangle { horizontal-stretch: 1; }
                             Button { height: parent.height; text: @tr("Cancel"); clicked => { root.imap_form_open = false; } }
                             Button {
                                 height: parent.height;
-                                text: root.imap_editing ? @tr("Save account") : @tr("Connect account");
+                                text: root.account_setup_in_progress ? @tr("Connecting…") : root.imap_editing ? @tr("Save account") : @tr("Connect account");
                                 primary: true;
-                                enabled: root.imap_form_valid;
+                                enabled: root.imap_form_valid && !root.account_setup_in_progress;
                                 clicked => {
                                     root.add_password_account(root.account_protocol, root.account_email, root.account_username, root.account_password, root.jmap_url, root.imap_host, root.imap_port, root.smtp_host, root.smtp_port);
-                                    root.imap_form_open = false;
                                 }
                             }
                         }

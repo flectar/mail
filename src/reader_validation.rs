@@ -21,6 +21,10 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     let clipboard = Rc::new(RefCell::new(String::new()));
     slint::platform::set_platform(Box::new(Headless(window.clone(), clipboard.clone()))).unwrap();
     let app = AppWindow::new().unwrap();
+    app.global::<ZoomApi>()
+        .on_resolve(|action, current, min, max| {
+            crate::preview_controls::zoom(&action, current, min, max)
+        });
     app.set_startup_ready(true);
     app.set_startup_hydrated(true);
     app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
@@ -291,6 +295,17 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     draw("reader-dark", 390, 844);
     app.invoke_select_email_text();
     assert!(app.get_has_selection());
+    // Hydrated attachments must survive a body-rendering failure and remain
+    // projected independently of the HTML/plain-text reader.
+    state.borrow_mut().messages[0].attachments = vec![flectar_mail_core::models::AttachmentMeta {
+        id: 42,
+        filename: Some("Project overview.pdf".into()),
+        mime_type: Some("application/pdf".into()),
+        size: Some(1024),
+        is_inline: false,
+    }];
+    render_current(&app, &state, &runtime).unwrap();
+    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 1);
     // A structural rejection while the reader is open must never leave the
     // previous message's accessible content visible over the fallback.
     state.borrow_mut().messages[0].html = Some("<span>x</span>".repeat(16_000));
@@ -305,8 +320,105 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         !app.get_selected_plain_text()
             .contains("Reader verification")
     );
+    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 1);
+    app.set_theme_mode("light".into());
+    draw("mail-attachments-fallback", 1280, 900);
+    draw("mail-attachments-landscape", 844, 390);
+    assert!(
+        app.get_email_viewport_height() >= 40.0,
+        "Short windows must retain room for the body while attachments remain available in the toolbar"
+    );
+
+    // Exercise the same percentage editor in the attachment dialog. A wide
+    // bitmap verifies fit on resize and manual zoom preservation without a
+    // network dependency or loading a native PDF library in this UI test.
+    let attachments = app.global::<MailAttachments>();
+    attachments.set_name("Project overview.pdf".into());
+    let mut page_pixels = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(2400, 1600);
+    for (index, pixel) in page_pixels.make_mut_slice().iter_mut().enumerate() {
+        *pixel = slint::Rgba8Pixel::new(
+            (index % 2400 / 10) as u8,
+            (index / 2400 / 7) as u8,
+            128,
+            255,
+        );
+    }
+    attachments.set_image(slint::Image::from_rgba8(page_pixels));
+    attachments.set_pages(2);
+    attachments.set_is_image(true);
+    attachments.set_open(true);
+    draw("mail-preview-dialog", 1280, 900);
+    let copy_preview_zoom = || {
+        pointer(280.0, 128.0);
+        shortcut("a");
+        shortcut("c");
+        clipboard.borrow().clone()
+    };
+    let fitted = copy_preview_zoom();
+    assert_ne!(
+        fitted, "100%",
+        "Wide pages should fit the dialog on opening"
+    );
+    shortcut("a");
+    key("150%".into(), true);
+    key("150%".into(), false);
+    key(slint::platform::Key::Return.into(), true);
+    key(slint::platform::Key::Return.into(), false);
+    draw("mail-preview-zoom", 1280, 900);
+    assert_eq!(copy_preview_zoom(), "150%");
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerPressed {
+            position: slint::LogicalPosition::new(900.0, 500.0),
+            button: slint::platform::PointerEventButton::Left,
+        });
+    for (x, y) in [(700.0, 450.0), (600.0, 400.0)] {
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(x, y),
+            });
+    }
+    draw("mail-preview-pan", 1280, 900);
+    app.window()
+        .dispatch_event(slint::platform::WindowEvent::PointerReleased {
+            position: slint::LogicalPosition::new(600.0, 400.0),
+            button: slint::platform::PointerEventButton::Left,
+        });
+    let before = image::open("tmp/blitz-fixes/mail-preview-zoom.png")
+        .unwrap()
+        .to_rgb8();
+    let after = image::open("tmp/blitz-fixes/mail-preview-pan.png")
+        .unwrap()
+        .to_rgb8();
+    assert_ne!(
+        before.get_pixel(700, 500),
+        after.get_pixel(700, 500),
+        "Dragging must pan an enlarged preview"
+    );
+    draw("mail-preview-resize", 1200, 800);
+    draw("mail-preview-restored", 1280, 900);
+    assert_eq!(
+        copy_preview_zoom(),
+        "150%",
+        "Resizing must preserve manual zoom"
+    );
+    pointer(378.0, 128.0);
+    draw("mail-preview-fit", 1280, 900);
+    assert_eq!(copy_preview_zoom(), fitted);
+    let weak = app.as_weak();
+    attachments.on_command(move |action, _| {
+        if action == "close" {
+            weak.unwrap().global::<MailAttachments>().set_open(false);
+        }
+    });
+    key(slint::platform::Key::Escape.into(), true);
+    key(slint::platform::Key::Escape.into(), false);
+    assert!(
+        !attachments.get_open(),
+        "Escape must close a preview while its zoom editor is focused"
+    );
     state.borrow_mut().messages.clear();
     render_current(&app, &state, &runtime).unwrap();
+    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 0);
     assert_eq!(app.global::<EmailReader>().get_message_id(), -1);
     assert!(app.global::<EmailReader>().get_notice().is_empty());
     assert!(!app.global::<EmailReader>().get_available());

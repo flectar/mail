@@ -1,5 +1,6 @@
 # Rust build output and locally packaged artifacts
 /target/
+/.flatpak-builder/
 /libs/
 /.artifacts/
 /tmp/
@@ -7,6 +8,7 @@
 *.AppImage
 /platform/android/gradle/.gradle/
 /platform/android/gradle/app/build/
+/platform/android/gradle/build/
 /platform/ios/*.xcodeproj/
 
 # Local OAuth application registrations (see .env.example)

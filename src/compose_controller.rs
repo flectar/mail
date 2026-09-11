@@ -421,6 +421,7 @@ pub(super) fn clear_compose(
     contacts: &Rc<RefCell<Vec<flectar_mail_core::models::Address>>>,
 ) {
     files.borrow_mut().clear();
+    app.global::<AccountMailPreferences>().invoke_composer_reset();
     document.borrow_mut().reset();
     editor.borrow_mut().reset();
     contacts.borrow_mut().clear();

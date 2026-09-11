@@ -132,6 +132,8 @@ pub struct GpuEmailRenderer {
     pub preparation_viewport: (u32, u32, f32),
     pub loaded_key: Option<(u64, bool)>,
     pub zoom: f32,
+    pub auto_fit: bool,
+    fit_viewport: Option<(u32, u32)>,
     pub layout_width: f32,
     pub notice: Option<String>,
     pub metadata_revision: u64,
@@ -181,6 +183,8 @@ impl Default for GpuEmailRenderer {
             preparation_viewport: (INITIAL_WIDTH, INITIAL_HEIGHT, 1.0),
             loaded_key: None,
             zoom: 1.0,
+            auto_fit: false,
+            fit_viewport: None,
             layout_width: 520.0,
             notice: None,
             metadata_revision: 0,
@@ -326,6 +330,7 @@ impl GpuEmailRenderer {
     }
 
     pub fn set_email(&mut self, email: PreparedEmail) {
+        self.fit_viewport = None;
         self.resources
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -523,6 +528,43 @@ impl GpuEmailRenderer {
     /// Render the retained document through the compatibility CPU painter.
     /// This is used only when Slint could not create a WGPU device, but it
     /// shares the same DOM and selection state as the GPU path.
+    pub fn set_auto_fit(&mut self, enabled: bool) {
+        self.auto_fit = enabled;
+        self.fit_viewport = None;
+        self.dirty = true;
+    }
+
+    fn fit_to_viewport(&mut self, width: u32, height: u32) {
+        let _runtime = self
+            .resource_runtime
+            .as_ref()
+            .map(tokio::runtime::Handle::enter);
+        if !self.auto_fit {
+            return;
+        }
+        let Some(email) = self.email.as_mut() else {
+            return;
+        };
+        self.dirty |= email.document.drain_pending_messages();
+        if !self.dirty && self.fit_viewport == Some((width, height)) {
+            return;
+        }
+        // Measure authored overflow at 100%, then lay out the final viewport
+        // at the chosen scale. Recompute when resized or resources change.
+        email.document.set_viewport(Viewport::new(
+            width.max(1),
+            height.max(1),
+            1.0,
+            ColorScheme::Light,
+        ));
+        email.document.resolve(0.0);
+        let natural = content_surface_width(&email.document, width.max(1) as f32);
+        self.zoom = ((width.max(1) as f32) / natural.max(1.0)).clamp(0.1, 1.0);
+        self.fit_viewport = Some((width, height));
+        self.last_size = None;
+        self.dirty = true;
+    }
+
     pub fn render_cpu_if_needed(
         &mut self,
         width: u32,
@@ -530,6 +572,7 @@ impl GpuEmailRenderer {
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.fit_to_viewport(width, height);
             self.render_cpu_inner(width, height, scale)
         })) {
             Ok(result) => result,
@@ -649,6 +692,7 @@ impl GpuEmailRenderer {
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.fit_to_viewport(width.max(1.0) as u32, height.max(1.0) as u32);
             self.render_gpu_inner(device, queue, width, height, scale)
         })) {
             Ok(result) => result,

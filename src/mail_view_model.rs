@@ -99,6 +99,7 @@ pub(super) fn apply_background_mail_page(
             summary.html = selected_detail.html;
             summary.text = selected_detail.text;
             summary.to = selected_detail.to;
+            summary.attachments = selected_detail.attachments;
             summary.body_pending = false;
         }
 
@@ -395,6 +396,7 @@ pub(super) fn render_current(
         app.set_email_content_aspect(900.0 / 520.0);
         app.set_email_links(ModelRc::new(VecModel::default()));
         clear_reader_projection(app);
+        crate::attachment_controller::clear(app);
         app.global::<EmailReader>().set_message_id(-1);
         app.global::<EmailReader>().set_authored_text("".into());
         app.global::<EmailReader>().set_notice("".into());
@@ -1276,6 +1278,7 @@ mod tests {
             labels: Vec::new(),
             html: None,
             text: None,
+            attachments: Vec::new(),
             body_pending: true,
             sender_verification: String::new(),
         }

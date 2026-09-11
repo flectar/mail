@@ -1,3 +1,4 @@
+import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
 import { EmailRow, MailDragApi } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
@@ -67,6 +68,7 @@ export component MailListPane inherits Rectangle {
     in property <bool> loading_more: false;
     in property <int> content_revision: 0;
     in property <int> selection-count: 0;
+    private property <bool> selection-mode: root.selection-count > 0;
     in-out property <bool> mail_sidebar_collapsed: false;
     in property <color> accent;
     in property <color> accent-soft;
@@ -95,92 +97,22 @@ export component MailListPane inherits Rectangle {
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
 
-    // Prefetch while several rows remain instead of waiting for the physical
-    // bottom. The ListView stays virtualized; this callback only crosses into
-    // Rust when the viewport enters the trailing buffer.
-    private property <length> pagination-prefetch-distance: root.dense ? 132px : 288px;
-    private property <bool> pagination-armed: true;
-    private property <int> pagination-request-row-count: -1;
-    private property <int> pagination-request-revision: -1;
-    private property <length> pagination-request-height: -1px;
-    private property <int> pagination-row-count: root.emails.length;
-    private property <length> pagination-content-height: mail-list-scroll.viewport-height;
-
-    function maybe-load-more() {
-        if (root.can_load_more
-            && !root.loading_more
-            && root.pagination-armed
-            && mail-list-scroll.viewport-height + mail-list-scroll.viewport-y
-                - mail-list-scroll.visible-height <= root.pagination-prefetch-distance) {
-            root.pagination-armed = false;
-            root.pagination-request-row-count = root.pagination-row-count;
-            root.pagination-request-revision = root.content_revision;
-            root.pagination-request-height = root.pagination-content-height;
-            root.load_more();
-        }
+    pagination := InfiniteScrollController {
+        active: true;
+        can-load-more: root.can_load_more; loading: root.loading_more;
+        row-count: root.emails.length; revision: root.content_revision;
+        content-height: mail-list-scroll.viewport-height;
+        viewport-y: mail-list-scroll.viewport-y; visible-height: mail-list-scroll.visible-height;
+        prefetch-distance: root.dense ? 132px : 288px;
+        load-more => { root.load-more(); }
     }
-
     function reset-pagination() {
-        root.pagination-armed = true;
-        root.pagination-request-row-count = -1;
-        root.pagination-request-revision = -1;
-        root.pagination-request-height = -1px;
         mail-list-scroll.viewport-y = 0px;
-        pagination-check.restart();
+        pagination.reset();
     }
-
-    function user-scrolled() {
-        // A completed request with no revision was an error. A fresh user
-        // gesture is the retry signal; in-flight and successful requests stay
-        // latched until their settled content height changes.
-        if (!root.loading_more
-            && !root.pagination-armed
-            && root.content_revision == root.pagination-request-revision) {
-            root.pagination-armed = true;
-        }
-        root.maybe-load-more();
-    }
-
-    changed selected_scope => {
-        root.reset-pagination();
-    }
-    changed search_query => {
-        root.reset-pagination();
-    }
-    changed search_filter => {
-        root.reset-pagination();
-    }
-    changed pagination-content-height => {
-        if (!root.pagination-armed
-            && root.content_revision != root.pagination-request-revision
-            && root.pagination-content-height != root.pagination-request-height) {
-            root.pagination-armed = true;
-        }
-        pagination-check.restart();
-    }
-    changed content_revision => {
-        if (!root.pagination-armed
-            && root.content_revision != root.pagination-request-revision
-            && (root.pagination-row-count == root.pagination-request-row-count
-                || root.pagination-content-height != root.pagination-request-height)) {
-            root.pagination-armed = true;
-        }
-        pagination-check.restart();
-    }
-    changed can_load_more => { pagination-check.restart(); }
-    changed loading_more => {
-        if (!root.loading_more) {
-            pagination-check.restart();
-        }
-    }
-    pagination-check := Timer {
-        interval: 1ms;
-        running: true;
-        triggered => {
-            self.stop();
-            root.maybe-load-more();
-        }
-    }
+    changed selected_scope => { root.reset-pagination(); }
+    changed search_query => { root.reset-pagination(); }
+    changed search_filter => { root.reset-pagination(); }
 
                 width: LayoutMetrics.list-pane-width;
                 vertical-stretch: 1;
@@ -222,8 +154,8 @@ export component MailListPane inherits Rectangle {
                                 title-weight: 600;
                                 show-leading: true;
                                 leading-icon: root.mail_sidebar_collapsed
-                                    ? @image-url("../icons/phosphor/sidebar-simple.svg")
-                                    : @image-url("../icons/phosphor/sidebar-simple-fill.svg");
+                                    ? @image-url("../icons/phosphor/sidebar.svg")
+                                    : @image-url("../icons/phosphor/sidebar-fill.svg");
                                 leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                                 leading-accessible-id: "mail-folders-button";
                                 leading-ghost: true;
@@ -240,16 +172,32 @@ export component MailListPane inherits Rectangle {
                             HorizontalBox {
                                 height: LayoutMetrics.control-height;
                                 padding: 0px;
-                                spacing: 6px;
+                                spacing: 0px;
 
-                                SelectionCheckBox {
-                                    width: LayoutMetrics.control-height;
+                                // Reveal selection controls by animating the space
+                                // they occupy. This lets the search field resize with
+                                // the same motion as the collapsible workspace sidebar.
+                                selection-slot := Rectangle {
+                                    private property <length> animated-width: root.selection-mode
+                                        ? LayoutMetrics.control-height + 6px : 0px;
+                                    width: self.animated-width;
                                     height: LayoutMetrics.control-height;
-                                    enabled: root.emails.length > 0;
-                                    checked: root.emails.length > 0 && root.selection-count == root.emails.length;
-                                    indeterminate: root.selection-count > 0 && root.selection-count < root.emails.length;
-                                    accessible-label: self.checked ? @tr("Clear selection") : @tr("Select all messages on this page");
-                                    toggled(checked) => { root.set_all_emails_checked(checked); }
+                                    clip: true;
+                                    background: transparent;
+                                    animate animated-width { duration: 160ms; easing: ease-in-out; }
+
+                                    SelectionCheckBox {
+                                        visible: selection-slot.animated-width > 0px;
+                                        width: LayoutMetrics.control-height;
+                                        height: LayoutMetrics.control-height;
+                                        opacity: root.selection-mode ? 1 : 0;
+                                        enabled: root.selection-mode && root.emails.length > 0;
+                                        checked: root.emails.length > 0 && root.selection-count == root.emails.length;
+                                        indeterminate: root.selection-count > 0 && root.selection-count < root.emails.length;
+                                        accessible-label: self.checked ? @tr("Clear selection") : @tr("Select all messages on this page");
+                                        animate opacity { duration: 120ms; }
+                                        toggled(checked) => { root.set_all_emails_checked(checked); }
+                                    }
                                 }
 
                                 WorkspaceSearchToolbar {
@@ -313,9 +261,13 @@ export component MailListPane inherits Rectangle {
                             mouse-drag-pan-enabled: root.compact;
                             accessible-label: root.scope_title;
                             accessible-item-count: root.emails.length;
-                            scrolled => { root.user-scrolled(); }
+                            scrolled => { pagination.user-scrolled(); }
 
-                            for row[index] in root.emails : Rectangle {
+                            for row[index] in root.emails : mail-row := Rectangle {
+                                private property <bool> touch-pending: false;
+                                private property <bool> long-press-triggered: false;
+                                private property <float> touch-start-x: 0;
+                                private property <float> touch-start-y: 0;
                                 width: mail-list-scroll.visible-width;
                                 height: root.dense ? 44px : 96px;
                                 border-radius: 6px;
@@ -331,8 +283,24 @@ export component MailListPane inherits Rectangle {
                                 accessible-id: "mail-row-" + row.id;
                                 accessible-item-index: index;
                                 accessible-item-selectable: true;
-                                accessible-item-selected: row.selected;
-                                accessible-action-default => { root.select_email(row.id); }
+                                accessible-item-selected: root.selection-mode ? row.checked : row.selected;
+                                accessible-action-default => {
+                                    if (root.compact && root.selection-mode) {
+                                        root.set_email_checked(row.id, !row.checked);
+                                    } else {
+                                        root.select_email(row.id);
+                                    }
+                                }
+
+                                Timer {
+                                    interval: 1s;
+                                    running: mail-row.touch-pending;
+                                    triggered => {
+                                        mail-row.touch-pending = false;
+                                        mail-row.long-press-triggered = true;
+                                        root.set_email_checked(row.id, true);
+                                    }
+                                }
 
                                 Avatar {
                                     visible: root.show-avatars;
@@ -482,11 +450,10 @@ export component MailListPane inherits Rectangle {
                                     }
                                 }
 
-                                // Select on pointer-down rather than waiting for
-                                // `clicked` (pointer-up). A long-running sync can
-                                // replace the row model between those two events;
-                                // in that case the old TouchArea never receives
-                                // the release and the click appears to be lost.
+                                // Desktop selects on pointer-down because a sync can
+                                // replace the row model before release. Compact mode
+                                // waits for release so it can distinguish taps, holds,
+                                // and scrolling gestures.
                                 row-drag := DragArea {
                                     width: parent.width;
                                     height: parent.height;
@@ -498,24 +465,57 @@ export component MailListPane inherits Rectangle {
                                     row-context := ContextMenuArea {
                                         width: parent.width;
                                         height: parent.height;
+                                        // Android maps this component to long-press.
+                                        // Compact rows reserve that gesture for entering
+                                        // multi-select mode instead.
+                                        enabled: !root.compact;
 
                                         row-hit := TouchArea {
                                             width: parent.width;
                                             height: parent.height;
                                             mouse-cursor: pointer;
                                             pointer-event(event) => {
-                                                if (event.kind == PointerEventKind.down) {
-                                                    if (event.button == PointerEventButton.left) {
+                                                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.left) {
+                                                    if root.compact {
+                                                        mail-row.touch-start-x = row-hit.mouse-x / 1px;
+                                                        mail-row.touch-start-y = row-hit.mouse-y / 1px;
+                                                        mail-row.long-press-triggered = false;
+                                                        mail-row.touch-pending = true;
+                                                    } else {
                                                         root.select_email(row.id);
-                                                    } else if (event.button == PointerEventButton.right) {
-                                                        row-context.show({ x: row-hit.mouse-x, y: row-hit.mouse-y });
                                                     }
+                                                }
+                                                if (root.compact
+                                                    && event.kind == PointerEventKind.move
+                                                    && mail-row.touch-pending
+                                                    && (abs(row-hit.mouse-x / 1px - mail-row.touch-start-x) > 8
+                                                        || abs(row-hit.mouse-y / 1px - mail-row.touch-start-y) > 8)) {
+                                                    mail-row.touch-pending = false;
+                                                }
+                                                if (root.compact
+                                                    && (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel)) {
+                                                    let activate = event.kind == PointerEventKind.up
+                                                        && mail-row.touch-pending
+                                                        && !mail-row.long-press-triggered;
+                                                    mail-row.touch-pending = false;
+                                                    if activate {
+                                                        if root.selection-mode {
+                                                            root.set_email_checked(row.id, !row.checked);
+                                                        } else {
+                                                            root.select_email(row.id);
+                                                        }
+                                                    }
+                                                    mail-row.long-press-triggered = false;
+                                                }
+                                                if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
+                                                    row-context.show({ x: row-hit.mouse-x, y: row-hit.mouse-y });
                                                 }
                                             }
 
                                             row-check := SelectionCheckBox {
                                                 // Keep the control in the keyboard focus order even before hover.
-                                                opacity: root.compact || row.checked || root.selection-count > 0 || row-hit.has-hover || self.has-focus ? 1 : 0;
+                                                opacity: row.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.has-focus)) ? 1 : 0;
+                                                enabled: !root.compact || root.selection-mode || row.checked;
                                                 x: root.show-avatars ? 14px : 0px;
                                                 y: root.show-avatars ? (root.dense ? 8px : 12px) : (parent.height - self.height) / 2;
                                                 width: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
@@ -525,6 +525,7 @@ export component MailListPane inherits Rectangle {
                                                 accessible-label: row.checked
                                                     ? @tr("Deselect {}", row.sender)
                                                     : @tr("Select {}", row.sender);
+                                                animate opacity { duration: 120ms; }
                                                 toggled(checked) => { root.set_email_checked(row.id, checked); }
                                             }
                                         }

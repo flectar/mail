@@ -21,7 +21,7 @@ local-embeddings = [
 ]
 
 [dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -63,6 +63,7 @@ keyring = { version = "3", features = ["sync-secret-service", "apple-native", "w
 base64 = "0.23"
 sha2 = "0.10"
 url = "2"
+percent-encoding = "2"
 
 # CalDAV (HTTP + multistatus XML); rustls keeps the no-native-TLS property
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "form", "json", "stream"] }
@@ -81,3 +82,6 @@ ring = "0.17"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios"))'.dependencies]
+rustix = { version = "1", features = ["fs"] }

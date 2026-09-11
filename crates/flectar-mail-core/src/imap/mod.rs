@@ -125,6 +125,52 @@ pub fn tls_connector() -> TlsConnector {
     TlsConnector::from(CONFIG.clone())
 }
 
+/// Parse a bounded PEM bundle and reject private keys or non-certificate data.
+pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
+    use rustls::pki_types::pem::PemObject;
+    if pem.is_empty() {
+        return Ok(Vec::new());
+    }
+    if pem.len() > 256 * 1024 || pem.contains("PRIVATE KEY") {
+        return Err(CoreError::Tls(
+            "Import a public PEM certificate, not a private key (maximum 256 KiB).".into(),
+        ));
+    }
+    let certificates = rustls::pki_types::CertificateDer::pem_slice_iter(pem.as_bytes())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| CoreError::Tls("The imported file is not a valid PEM certificate.".into()))?;
+    if certificates.is_empty() {
+        return Err(CoreError::Tls(
+            "No certificates found in the PEM file.".into(),
+        ));
+    }
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in &certificates {
+        roots
+            .add(cert.clone())
+            .map_err(|_| CoreError::Tls("The imported certificate is invalid.".into()))?;
+    }
+    Ok(certificates)
+}
+
+fn account_tls_connector(pem: &str) -> Result<TlsConnector> {
+    if pem.is_empty() {
+        return Ok(tls_connector());
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    for cert in trusted_certificates(pem)? {
+        roots.add(cert).map_err(|e| CoreError::Tls(e.to_string()))?;
+    }
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| CoreError::Tls(e.to_string()))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(TlsConnector::from(Arc::new(config)))
+}
+
 #[derive(Clone)]
 pub enum ImapCredentials {
     Password { user: String, password: String },
@@ -178,11 +224,26 @@ impl async_imap::Authenticator for XOAuth2Authenticator {
 }
 
 pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
+    connect_with_settings(
+        host,
+        port,
+        creds,
+        &crate::models::MailConnectionSettings::default(),
+    )
+    .await
+}
+
+pub async fn connect_with_settings(
+    host: &str,
+    port: u16,
+    creds: ImapCredentials,
+    settings: &crate::models::MailConnectionSettings,
+) -> Result<Session> {
     // Bound the whole handshake so a silent stall (server never sends the
     // greeting, or an AUTHENTICATE that never gets a tagged response) surfaces
     // as an error instead of hanging the sync actor forever.
     const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    tokio::time::timeout(CONNECT_TIMEOUT, connect_inner(host, port, creds))
+    tokio::time::timeout(CONNECT_TIMEOUT, connect_inner(host, port, creds, settings))
         .await
         .map_err(|_| {
             tracing::warn!(%host, port, "imap connect: timed out after 30s");
@@ -190,36 +251,64 @@ pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Se
         })?
 }
 
-async fn connect_inner(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
-    tracing::debug!(%host, port, "imap connect: opening TCP");
+async fn connect_inner(
+    host: &str,
+    port: u16,
+    creds: ImapCredentials,
+    settings: &crate::models::MailConnectionSettings,
+) -> Result<Session> {
+    use crate::models::ConnectionSecurity;
+    let connector = account_tls_connector(&settings.trusted_certificate_pem)?;
     let tcp = TcpStream::connect((host, port))
         .await
         .map_err(|e| CoreError::Imap(format!("connect {host}:{port}: {e}")))?;
     tcp.set_nodelay(true).ok();
+    let starttls = match settings.imap_security {
+        ConnectionSecurity::Starttls => true,
+        ConnectionSecurity::Tls => false,
+        ConnectionSecurity::Auto => port == 143,
+    };
+    let tcp = if starttls {
+        let mut client = async_imap::Client::new(tcp);
+        if client
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .is_none()
+        {
+            return Err(CoreError::Imap(
+                "Server closed before the IMAP greeting.".into(),
+            ));
+        }
+        // Required upgrade: never send credentials if STARTTLS is rejected.
+        client
+            .run_command_and_check_ok("STARTTLS", None)
+            .await
+            .map_err(|e| {
+                CoreError::Tls(format!(
+                    "IMAP STARTTLS was rejected: {e}. Check the server port and security mode."
+                ))
+            })?;
+        client.into_inner()
+    } else {
+        tcp
+    };
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|e| CoreError::Tls(e.to_string()))?;
-    tracing::debug!(%host, "imap connect: TCP up, starting TLS");
-    let tls = tls_connector()
-        .connect(server_name, tcp)
-        .await
-        .map_err(|e| CoreError::Tls(e.to_string()))?;
-    tracing::debug!(%host, "imap connect: TLS up, reading greeting");
+    let tls = connector.connect(server_name, tcp).await
+        .map_err(|e| CoreError::Tls(format!("IMAP {host}:{port}: {e}. Check SSL/TLS versus STARTTLS and use the hostname on the server certificate. For Proton Bridge, import its exported certificate.")))?;
     let mut client = async_imap::Client::new(tls);
-    // async-imap requires the caller to consume the server greeting before
-    // issuing any command. Skipping it leaves `* OK ...ready` in the buffer,
-    // which the login/AUTHENTICATE handshake then reads in place of the real
-    // tagged/continuation response - desyncing the exchange so it hangs until
-    // the socket times out (the "stuck Offline, never syncs" bug).
-    match client.read_response().await {
-        Ok(Some(greeting)) => {
-            tracing::debug!(%host, greeting = ?greeting.parsed(), "imap connect: greeting received, authenticating");
-        }
-        Ok(None) => {
-            return Err(CoreError::Imap(format!(
-                "{host}: connection closed before IMAP greeting"
-            )));
-        }
-        Err(e) => return Err(CoreError::Imap(format!("{host}: reading greeting: {e}"))),
+    // STARTTLS has already consumed the greeting; no second greeting follows.
+    if !starttls
+        && client
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .is_none()
+    {
+        return Err(CoreError::Imap(
+            "Server closed before the IMAP greeting.".into(),
+        ));
     }
 
     let session = match creds {

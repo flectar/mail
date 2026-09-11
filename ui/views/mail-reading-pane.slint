@@ -1,5 +1,8 @@
+import { AccountMailPreferences } from "../components/account-mail-preferences.slint";
+import { ZoomControls } from "../components/zoom-controls.slint";
 import { Button as ReaderButton, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { EmailReader, EmailLink, EmailTile, MailLabelRow } from "../models.slint";
+import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow } from "../models.slint";
+import { SidebarItem } from "../components/sidebar-controls.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
@@ -100,6 +103,7 @@ component LabelColorSwatch inherits Rectangle {
 export component MailReadingPane inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> full-width: false;
+    private property <bool> attachment-menu-mode: root.height < 500px;
     in property <bool> show-avatars: true;
     // The title wrap width comes from the containing window, not this pane's
     // preferred width, which avoids a HorizontalBox measurement cycle.
@@ -169,6 +173,13 @@ export component MailReadingPane inherits Rectangle {
     callback select-email-text();
     callback load-remote-images-for-message();
 
+    private property <bool> viewport-pending: false;
+    changed email-viewport-width => { root.viewport-pending = true; }
+    changed email-viewport-height => { root.viewport-pending = true; }
+    Timer { interval: 50ms; running: root.viewport-pending; triggered => {
+        root.viewport-pending = false;
+        if EmailReader.available { EmailReader.command("viewport"); }
+    } }
     private property <bool> selecting: false;
     private property <bool> touch-pending: false;
     private property <float> touch-x: 0;
@@ -541,6 +552,7 @@ export component MailReadingPane inherits Rectangle {
                                     if !root.selected_is_draft : MenuItem { title: @tr("Reply"); activated => { root.compose_message_action("reply"); } }
                                     if !root.selected_is_draft : MenuItem { title: @tr("Reply all"); activated => { root.compose_message_action("reply_all"); } }
                                     if !root.selected_is_draft : MenuItem { title: @tr("Forward"); activated => { root.compose_message_action("forward"); } }
+                                    if !root.selected_is_draft : MenuItem { title: @tr("Decrypt / verify OpenPGP"); activated => { AccountMailPreferences.read-message(); } }
                                     if root.print_supported && !root.selected_is_draft : MenuItem { title: @tr("Print message"); activated => { root.print_message(); } }
                                     if !root.selected_is_draft : MenuItem { title: @tr("Open in browser"); activated => { root.open_message_in_browser(); } }
                                     MenuItem { title: @tr("About email rendering"); activated => { root.rendering_info_open = true; } }
@@ -589,15 +601,17 @@ export component MailReadingPane inherits Rectangle {
                             height: min(3, max(1, ceil(root.display-subject.character-count * 10.5px / max(1px, self.width)))) * (self.font-metrics.ascent - self.font-metrics.descent);
                             text: root.display-subject;
                             color: root.title-color;
-                            font-size: root.compact ? TypeScale.title : TypeScale.display;
+                            font-size: root.compact ? TypeScale.title-small : TypeScale.title;
                             font-weight: 600;
+                            letter-spacing: -0.3px;
                             wrap: word-wrap;
                         }
 
-                        Rectangle { height: 14px; }
+                        Rectangle { height: 8px; }
 
                         if root.selected-label-count > 0 : HorizontalBox {
                             height: 24px;
+                            padding: 0px;
                             spacing: 6px;
                             alignment: start;
                             for label in root.mail_labels : MailLabelChip {
@@ -610,12 +624,13 @@ export component MailReadingPane inherits Rectangle {
                             }
                         }
 
-                        if root.selected-label-count > 0 : Rectangle { height: 10px; }
+                        if root.selected-label-count > 0 : Rectangle { height: 8px; }
 
                         HorizontalBox {
                             min-height: 44px;
                             preferred-height: 44px;
                             max-height: 44px;
+                            padding: 0px;
                             spacing: 11px;
                             cross-axis-alignment: center;
                             Avatar {
@@ -634,6 +649,7 @@ export component MailReadingPane inherits Rectangle {
                                 min-height: 44px;
                                 preferred-height: 44px;
                                 max-height: 44px;
+                                padding: 0px;
                                 spacing: 0px;
                                 Rectangle {
                                     min-height: 24px;
@@ -641,9 +657,9 @@ export component MailReadingPane inherits Rectangle {
                                     max-height: 24px;
                                     sender-name := Text {
                                         x: 0px;
-                                        y: 0px;
+                                        y: 2px;
                                         width: max(0px, parent.width - (root.selected_sender_verification != "" ? 26px : 0px));
-                                        height: parent.height;
+                                        height: parent.height - self.y;
                                         text: root.selected_sender;
                                         color: root.heading;
                                         font-size: TypeScale.body-large;
@@ -653,7 +669,7 @@ export component MailReadingPane inherits Rectangle {
                                     }
                                     if root.selected_sender_verification != "" : Image {
                                         x: min(sender-name.preferred-width + 8px, parent.width - 18px);
-                                        y: 3px;
+                                        y: 5px;
                                         width: 18px;
                                         height: 18px;
                                         source: @image-url("../icons/phosphor/check-circle-fill.svg");
@@ -668,15 +684,28 @@ export component MailReadingPane inherits Rectangle {
                                                     : @tr("Sender domain authenticated with DMARC and DKIM");
                                     }
                                 }
-                                Text {
+                                HorizontalBox {
                                     min-height: 20px;
                                     preferred-height: 20px;
                                     max-height: 20px;
-                                    text: root.selected_address + " · " + @tr("to {} · {}", root.selected_to, root.selected_time);
-                                    color: root.secondary-text;
-                                    font-size: TypeScale.secondary;
-                                    overflow: elide;
-                                    vertical-alignment: center;
+                                    padding: 0px;
+                                    spacing: 12px;
+                                    Text {
+                                        min-width: 0px;
+                                        horizontal-stretch: 1;
+                                        text: root.selected_address + " · " + @tr("to {}", root.selected_to);
+                                        color: root.secondary-text;
+                                        font-size: TypeScale.secondary;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: root.selected_time;
+                                        color: root.secondary-text;
+                                        font-size: TypeScale.secondary;
+                                        horizontal-alignment: right;
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }
@@ -686,27 +715,24 @@ export component MailReadingPane inherits Rectangle {
                         Rectangle { height: 12px; }
 
                         HorizontalBox {
-                            height: root.compact ? 44px : 32px; padding: 0px; spacing: 4px; cross-axis-alignment: center;
-                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass-minus.svg"); tooltip-text: @tr("Zoom out"); tooltip-align-left: true; interactive: EmailReader.available && EmailReader.zoom > 0.5; clicked => { EmailReader.command("zoom-out"); } }
-                            if !root.compact : ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrow-counter-clockwise.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(EmailReader.zoom * 100)); tooltip-align-left: true; clicked => { EmailReader.command("zoom-reset"); } }
-                            zoom-input := LineEdit {
-                                in property <float> applied-zoom: EmailReader.zoom;
-                                in property <int> zoom-revision: EmailReader.zoom-revision;
-                                changed applied-zoom => { self.text = "\{round(self.applied-zoom * 100)}%"; }
-                                changed zoom-revision => { self.text = "\{round(self.applied-zoom * 100)}%"; }
-                                min-width: 62px; max-width: 62px;
-                                height: root.compact ? 44px : 32px;
-                                enabled: EmailReader.available;
-                                input-label: @tr("Zoom percentage");
-                                text: "\{round(EmailReader.zoom * 100)}%";
-                                accepted(value) => {
-                                    EmailReader.command("zoom-set:" + value);
-                                    self.text = "\{round(EmailReader.zoom * 100)}%";
+                            height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height; padding: 0px; spacing: 4px; cross-axis-alignment: center;
+                            ZoomControls { compact: root.compact; available: EmailReader.available; zoom: EmailReader.zoom; revision: EmailReader.zoom-revision; fitting: EmailReader.auto-fit; command(action) => { EmailReader.command(action); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            if root.attachment-menu-mode && MailAttachments.rows.length > 0 : ContextMenuArea {
+                                width: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
+                                height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
+                                ToolbarIconButton {
+                                    compact: root.compact; icon: @image-url("../icons/phosphor/paperclip.svg");
+                                    icon-color: root.secondary-text; tooltip-text: @tr("Attachments");
+                                    clicked => { parent.show({ x: 0px, y: parent.height }); }
+                                }
+                                Menu {
+                                    for attachment in MailAttachments.rows : MenuItem {
+                                        title: attachment.name;
+                                        activated => { MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id); }
+                                    }
                                 }
                             }
-                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass-plus.svg"); tooltip-text: @tr("Zoom in"); interactive: EmailReader.available && EmailReader.zoom < 3; clicked => { EmailReader.command("zoom-in"); } }
-                            ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/arrows-out-line-horizontal.svg"); tooltip-text: @tr("Fit to width"); clicked => { EmailReader.command("fit"); } }
-                            Rectangle { horizontal-stretch: 1; }
                             ReaderControl { compact: root.compact; icon: @image-url("../icons/phosphor/magnifying-glass.svg"); tooltip-text: @tr("Find in message"); active: EmailReader.find-open; clicked => { EmailReader.find-open = !EmailReader.find-open; if EmailReader.find-open { EmailReader.reader-mode = false; root.text_mode = false; root.source_mode = false; find-input.focus(); } } }
                             ReaderControl { compact: root.compact; icon: EmailReader.reader-mode ? @image-url("../icons/phosphor/code.svg") : @image-url("../icons/phosphor/book-open-text.svg"); tooltip-text: EmailReader.reader-mode ? @tr("Show original layout") : @tr("Reader mode"); active: EmailReader.reader-mode; clicked => { EmailReader.reader-mode = !EmailReader.reader-mode; if EmailReader.reader-mode { root.text_mode = false; root.source_mode = false; EmailReader.find-open = false; } } }
                         }
@@ -1096,6 +1122,38 @@ export component MailReadingPane inherits Rectangle {
 
                         }
 
+                        if MailAttachments.rows.length > 0 && !root.attachment-menu-mode : VerticalBox {
+                            height: 34px + min(168px, MailAttachments.rows.length * 48px);
+                            vertical-stretch: 0; padding: 0px; padding-top: 8px; spacing: 6px;
+                            Text { height: 20px; text: @tr("Attachments"); color: root.heading; font-weight: 600; }
+                            // Keep access independent of the body's scroll position.
+                            attachments-list := ListView {
+                                viewport-width: self.visible-width;
+                                mouse-drag-pan-enabled: root.compact;
+                                for attachment in MailAttachments.rows : HorizontalBox {
+                                    width: attachments-list.visible-width;
+                                    height: 48px; padding: 0px; spacing: 8px;
+                                    attachment-focus := FocusScope {
+                                        min-width: 0px; horizontal-stretch: 1;
+                                        key-pressed(event) => {
+                                            if event.text == Key.Return || event.text == Key.Space {
+                                                MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id); return accept;
+                                            }
+                                            reject
+                                        }
+                                        SidebarItem {
+                                            width: parent.width; row-height: 44px; left-padding: 8px;
+                                            label: attachment.name; selected: attachment-focus.has-focus;
+                                            icon: @image-url("../icons/phosphor/paperclip.svg");
+                                            sidebar-background: root.surface; selection-background: root.accent-soft;
+                                            accent-color: root.accent; body-color: root.heading; muted-color: root.secondary-text;
+                                            clicked(scope) => { attachment-focus.focus(); MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id); }
+                                        }
+                                    }
+                                    ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/phosphor/download-simple.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Download"); clicked => { MailAttachments.command("download", attachment.id); } }
+                                }
+                            }
+                        }
                         Text {
                             height: EmailReader.destination == "" ? 0px : 20px;
                             text: EmailReader.destination; overflow: elide; color: root.secondary-text; font-size: TypeScale.caption;

@@ -615,3 +615,37 @@ fn float_responsive_columns_and_auto_width() {
         );
     }
 }
+
+#[test]
+fn auto_fit_tracks_resize_and_preserves_explicit_zoom() {
+    let mut r = renderer(
+        "<body style='margin:0'><div style='width:900px;height:80px'>Wide newsletter</div></body>",
+    );
+    r.set_auto_fit(true);
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    assert!((r.zoom - 600.0 / 900.0).abs() < 0.02);
+    assert!(r.layout_width <= 601.0);
+    r.render_cpu_if_needed(800, 400, 1.0).unwrap();
+    assert!((r.zoom - 800.0 / 900.0).abs() < 0.02);
+    r.render_cpu_if_needed(1100, 400, 1.0).unwrap();
+    assert_eq!(r.zoom, 1.0);
+    assert!(r.render_cpu_if_needed(1100, 400, 1.0).unwrap().is_none());
+    r.render_cpu_if_needed(300, 500, 1.0).unwrap();
+    assert!((r.zoom - 300.0 / 900.0).abs() < 0.02);
+    assert!(
+        r.layout_width <= 301.0,
+        "Automatic fit must accommodate phone widths"
+    );
+    r.set_auto_fit(false);
+    r.set_zoom(1.25);
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    assert_eq!(r.zoom, 1.25);
+    r.set_auto_fit(true);
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    assert!(r.zoom < 1.0);
+    r.set_email(
+        prepare_email_html("<body style='margin:0'><p>Responsive message</p></body>").unwrap(),
+    );
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    assert_eq!(r.zoom, 1.0);
+}

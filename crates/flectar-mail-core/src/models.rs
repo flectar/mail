@@ -191,6 +191,44 @@ impl MailHistory {
     }
 }
 
+/// Explicit wire security. Auto infers the mode from conventional server ports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConnectionSecurity {
+    #[default]
+    Auto,
+    Tls,
+    Starttls,
+}
+
+impl ConnectionSecurity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Tls => "tls",
+            Self::Starttls => "starttls",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "auto" => Some(Self::Auto),
+            "tls" => Some(Self::Tls),
+            "starttls" => Some(Self::Starttls),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MailConnectionSettings {
+    pub imap_security: ConnectionSecurity,
+    pub smtp_security: ConnectionSecurity,
+    /// Additional trust anchors for this account only; normal hostname and
+    /// validity checks still apply. Contains public certificates, never keys.
+    pub trusted_certificate_pem: String,
+}
+
 /// Typed contents of `accounts.settings_json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -200,12 +238,18 @@ pub struct AccountSettings {
     // value never triggers an unbounded mailbox download.
     #[serde(default = "default_mail_history")]
     pub mail_history: MailHistory,
+    #[serde(default)]
+    pub security: crate::mail_security::MailSecurity,
+    #[serde(default)]
+    pub connection: MailConnectionSettings,
 }
 
 impl Default for AccountSettings {
     fn default() -> Self {
         Self {
             mail_history: default_mail_history(),
+            security: Default::default(),
+            connection: MailConnectionSettings::default(),
         }
     }
 }
@@ -538,6 +582,8 @@ pub struct AddPasswordAccountArgs {
     pub imap_port: u16,
     pub smtp_host: String,
     pub smtp_port: u16,
+    #[serde(default)]
+    pub connection: MailConnectionSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]

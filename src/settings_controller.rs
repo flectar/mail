@@ -33,10 +33,7 @@ pub(super) fn register_settings_preference_callbacks(
         )) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Notification preferences saved.")),
             Err(error) => {
-                app.set_sync_status(UiMessage::detail(
-                    "Could not save notifications: {}",
-                    error,
-                ))
+                app.set_sync_status(UiMessage::detail("Could not save notifications: {}", error))
             }
         }
     });
@@ -56,17 +53,12 @@ pub(super) fn register_settings_preference_callbacks(
         };
         match runtime_for_sync_interval.block_on(core.set_sync_interval_minutes(i64::from(minutes)))
         {
-            Ok(()) => {
-                app.set_sync_status(UiMessage::detail(
-                    "Sync interval set to {} minutes.",
-                    minutes,
-                ))
-            }
+            Ok(()) => app.set_sync_status(UiMessage::detail(
+                "Sync interval set to {} minutes.",
+                minutes,
+            )),
             Err(error) => {
-                app.set_sync_status(UiMessage::detail(
-                    "Could not save sync interval: {}",
-                    error,
-                ))
+                app.set_sync_status(UiMessage::detail("Could not save sync interval: {}", error))
             }
         }
     });
@@ -86,9 +78,7 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         match runtime_for_read_on_open.block_on(core.set_mark_read_on_open(enabled)) {
-            Ok(()) => app.set_sync_status(UiMessage::plain(
-                "Message-opening preference saved.",
-            )),
+            Ok(()) => app.set_sync_status(UiMessage::plain("Message-opening preference saved.")),
             Err(error) => app.set_sync_status(UiMessage::detail(
                 "Could not save message-opening preference: {}",
                 error,
@@ -109,9 +99,7 @@ pub(super) fn register_settings_preference_callbacks(
         };
         match runtime_for_theme.block_on(core.set_theme(&theme)) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Theme preference saved.")),
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail("Could not save theme: {}", error))
-            }
+            Err(error) => app.set_sync_status(UiMessage::detail("Could not save theme: {}", error)),
         }
     });
 
@@ -128,10 +116,9 @@ pub(super) fn register_settings_preference_callbacks(
         };
         match runtime_for_theme_preset.block_on(core.set_theme_preset(preset.as_str())) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Theme palette saved.")),
-            Err(error) => app.set_sync_status(UiMessage::detail(
-                "Could not save theme palette: {}",
-                error,
-            )),
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not save theme palette: {}", error))
+            }
         }
     });
 
@@ -165,9 +152,7 @@ pub(super) fn register_settings_preference_callbacks(
                 dark_border: theme::color_to_hex(dark_border),
             };
             let Some(core) = state_for_custom_theme.borrow().core.clone() else {
-                app.set_sync_status(UiMessage::plain(
-                    "Custom theme updated for this session.",
-                ));
+                app.set_sync_status(UiMessage::plain("Custom theme updated for this session."));
                 return false;
             };
             match runtime_for_custom_theme.block_on(core.set_custom_theme(custom_theme)) {
@@ -220,9 +205,7 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         match runtime_for_sidebar_icons.block_on(core.set_monochrome_sidebar_icons(monochrome)) {
-            Ok(()) => app.set_sync_status(UiMessage::plain(
-                "Sidebar icon preference saved.",
-            )),
+            Ok(()) => app.set_sync_status(UiMessage::plain("Sidebar icon preference saved.")),
             Err(error) => app.set_sync_status(UiMessage::detail(
                 "Could not save sidebar icon preference: {}",
                 error,
@@ -245,12 +228,10 @@ pub(super) fn register_settings_preference_callbacks(
         };
         match runtime_for_avatars.block_on(core.set_show_avatars(enabled)) {
             Ok(()) => app.set_sync_status(UiMessage::plain("Avatar preference saved.")),
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail(
-                    "Could not save avatar preference: {}",
-                    error,
-                ))
-            }
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save avatar preference: {}",
+                error,
+            )),
         }
     });
 
@@ -268,15 +249,11 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         match runtime_for_workspace_layout.block_on(core.set_workspace_layout(layout.as_str())) {
-            Ok(()) => app.set_sync_status(UiMessage::plain(
-                "Workspace layout preference saved.",
+            Ok(()) => app.set_sync_status(UiMessage::plain("Workspace layout preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save workspace layout: {}",
+                error,
             )),
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail(
-                    "Could not save workspace layout: {}",
-                    error,
-                ))
-            }
         }
     });
 }

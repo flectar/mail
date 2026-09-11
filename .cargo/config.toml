@@ -2,6 +2,10 @@
 # one disposable build tree. Cargo resolves this relative path to <repo>/target.
 [build]
 target-dir = "target"
+# Compiling Slint's generated library and test harness together can exhaust
+# memory on a 16 GiB development host, including editor background checks.
+# Larger builders can opt into more parallelism with Cargo's -j option.
+jobs = 1
 
 # Slint's desktop guide recommends matching Linux's larger main-thread stack on
 # Windows. This prevents stack overflows in debug builds with deep UI trees.
@@ -10,3 +14,11 @@ rustflags = ["-C", "link-arg=/STACK:8000000"]
 
 [target.aarch64-pc-windows-msvc]
 rustflags = ["-C", "link-arg=/STACK:8000000"]
+
+# NDK r27 and newer devices must agree on 16 KiB ELF load alignment. This also
+# remains compatible with 4 KiB Android devices and matches bundled PDFium.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

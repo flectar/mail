@@ -38,7 +38,14 @@ if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi
 # The controls are app-owned and the Linux shell uses winit directly.
-cargo build "${build_args[@]}"
+if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
+  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+    printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
+    exit 1
+  fi
+else
+  cargo build "${build_args[@]}"
+fi
 
 if ldd "$project_dir/target/release/flectar-mail" | grep -q 'libQt'; then
   printf 'The release binary unexpectedly links Qt; refusing to package it.\n' >&2
@@ -54,6 +61,7 @@ mkdir -p \
   "$app_dir/usr/share/icons/hicolor/scalable/apps" \
   "$app_dir/usr/share/metainfo"
 cp "$project_dir/target/release/flectar-mail" "$app_dir/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/stage-pdfium.py" linux-x64 "$app_dir/usr/lib/flectar-mail"
 app_version="$(python3 "$project_dir/scripts/stage-linux-metadata.py" "$app_dir")"
 cp "$project_dir/resources/app-icon/flectar-mail-masked-512.png" "$app_dir/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
 cp "$project_dir/resources/app-icon/flectar-mail-masked.svg" "$app_dir/usr/share/icons/hicolor/scalable/apps/com.flectar.mail.svg"
@@ -86,6 +94,10 @@ VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"
 # Preserve the allocator tuning and stable process name from our launcher.
 cp "$project_dir/resources/AppRun" "$app_dir/AppRun"
 chmod +x "$app_dir/AppRun"
+
+# The pinned PDFium runtime depends only on the ordinary glibc runtime. Keep
+# its private path intact and verify it after deployment has adjusted the ELF files.
+python3 "$project_dir/scripts/test-pdf-preview.py" "$app_dir/usr/bin/flectar-mail"
 
 # AppDir specifies a PNG .DirIcon for file-manager thumbnails. linuxdeploy
 # prefers the scalable icon for the root entry, so restore the PNG thumbnail

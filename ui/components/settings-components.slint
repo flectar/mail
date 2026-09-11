@@ -308,6 +308,7 @@ export component ShortcutRow inherits Rectangle {
 }
 
 export component FormField inherits VerticalBox {
+    in property <bool> enabled: true;
     in property <string> label;
     in-out property <string> value;
     in property <string> placeholder;
@@ -315,6 +316,7 @@ export component FormField inherits VerticalBox {
     in property <color> label-color;
     callback edited(string);
 
+    padding: 0px;
     spacing: 5px;
     Text {
         height: 16px;
@@ -325,6 +327,7 @@ export component FormField inherits VerticalBox {
         vertical-alignment: center;
     }
     LineEdit {
+        enabled: root.enabled;
         height: 36px;
         text: root.value;
         placeholder-text: root.placeholder;

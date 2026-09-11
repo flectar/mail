@@ -5,8 +5,7 @@ use flectar_mail::flectar_mail_core::{
     oauth::{
         loopback::AuthCode,
         redirect::{
-            OAuthRedirectBroker, OAuthRedirectGuard, OAuthRedirectSession,
-            PlatformAuthorization,
+            OAuthRedirectBroker, OAuthRedirectGuard, OAuthRedirectSession, PlatformAuthorization,
         },
     },
 };
@@ -57,7 +56,10 @@ struct AndroidRedirectSession {
 static BROKER: OnceLock<Arc<AndroidOAuthBroker>> = OnceLock::new();
 
 impl AndroidOAuthBroker {
-    pub(super) fn global(app: &slint::android::AndroidApp, private_root: &Path) -> Result<Arc<Self>> {
+    pub(super) fn global(
+        app: &slint::android::AndroidApp,
+        private_root: &Path,
+    ) -> Result<Arc<Self>> {
         let transient_microsoft_callback = activity_intent_data(app)
             .is_some_and(|uri| uri.starts_with("msauth://com.flectar.mail/"));
         // SAFETY: Android owns this process-wide VM pointer for the lifetime of
@@ -163,11 +165,10 @@ impl AndroidOAuthBroker {
     }
 
     fn microsoft_redirect_uri(&self) -> Result<String> {
-        let mut env = self
-            .state
-            .vm
-            .attach_current_thread()
-            .map_err(|error| CoreError::Other(format!("attach Android OAuth thread: {error}")))?;
+        let mut env =
+            self.state.vm.attach_current_thread().map_err(|error| {
+                CoreError::Other(format!("attach Android OAuth thread: {error}"))
+            })?;
         let activity = self
             .state
             .activity
@@ -181,9 +182,7 @@ impl AndroidOAuthBroker {
                 &[],
             )
             .and_then(|value| value.l())
-            .map_err(|error| {
-                CoreError::Other(format!("read Android signing identity: {error}"))
-            })?;
+            .map_err(|error| CoreError::Other(format!("read Android signing identity: {error}")))?;
         if value.is_null() {
             return Err(CoreError::Auth(
                 "Android could not derive the Microsoft signing redirect".into(),
@@ -391,7 +390,9 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeGoogleAuthori
         if error.starts_with("needs_reauth:") {
             Err(CoreError::NeedsReauth)
         } else {
-            Err(CoreError::Auth(format!("Google authorization failed: {error}")))
+            Err(CoreError::Auth(format!(
+                "Google authorization failed: {error}"
+            )))
         }
     } else {
         let token = env

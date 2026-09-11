@@ -204,32 +204,26 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         };
         let reader = app.global::<EmailReader>();
-        let requested_zoom = command.strip_prefix("zoom-set:").and_then(|value| {
-            value
-                .trim()
-                .trim_end_matches('%')
-                .trim()
-                .parse::<f32>()
-                .ok()
-                .filter(|value| value.is_finite())
-                .map(|value| value / 100.0)
-        });
+        let requested_zoom = crate::preview_controls::zoom(&command, r.borrow().zoom, 0.5, 3.0);
         let command = if command.starts_with("zoom-set:") {
             "zoom-set"
         } else {
             command.as_str()
         };
         match command {
+            "viewport" => repaint_reader(&app, &r, gpu),
             "zoom-set" | "zoom-in" | "zoom-out" | "zoom-reset" | "fit" => {
                 let old = r.borrow().zoom;
                 let zoom = match command {
-                    "zoom-set" => requested_zoom.unwrap_or(old),
+                    "zoom-set" => requested_zoom,
                     "zoom-in" => old * 1.2,
                     "zoom-out" => old / 1.2,
                     "fit" => old / reader.get_width_ratio().max(1.0),
                     _ => 1.0,
                 }
                 .clamp(0.5, 3.0);
+                r.borrow_mut().set_auto_fit(command == "fit");
+                reader.set_auto_fit(command == "fit");
                 r.borrow_mut().set_zoom(zoom);
                 reader.set_zoom(zoom);
                 reader.set_zoom_revision(reader.get_zoom_revision().wrapping_add(1));

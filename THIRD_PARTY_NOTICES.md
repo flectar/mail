@@ -36,6 +36,23 @@ notices and license texts; the Apache-2.0 license is also included in
 | percent-encoding | 2.3.2 | [servo/rust-url](https://github.com/servo/rust-url/) | Fragment and mailto decoding |
 | base64 | 0.22.1 | [marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) | Export CSP hash encoding |
 
+## PDF preview
+
+Desktop, Android, and iOS packages include a non-V8 PDFium runtime from
+[bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries), built
+from [PDFium](https://pdfium.googlesource.com/pdfium/). The selected release and
+per-platform SHA-256 digests are pinned in `scripts/stage-pdfium.py`. Every
+package retains the archive's `LICENSE`, complete `licenses/` directory, and
+build provenance under `pdfium-licenses` beside the private desktop library,
+Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
+PDFium's third-party components retain their respective licenses.
+
+The Rust interface is [pdfium-render](https://github.com/ajrcarey/pdfium-render)
+0.9.4, used under its Apache-2.0 option. Linux process restrictions use
+[Landlock](https://github.com/landlock-lsm/rust-landlock) and
+[seccompiler](https://github.com/rust-vmm/seccompiler), under their Apache-2.0
+options. Rust package versions and source checksums are recorded in `Cargo.lock`.
+
 ## Phosphor Icons
 
 The bundled SVG icons in `ui/icons/phosphor` are sourced from

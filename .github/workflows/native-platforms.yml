@@ -27,6 +27,15 @@ on:
         description: Also build an experimental unsigned iOS archive
         type: boolean
         default: false
+  pull_request:
+    paths:
+      - ".github/workflows/native-platforms.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.rs"
+      - "packaging/**"
+      - "resources/**"
+      - "scripts/**"
   push:
     tags:
       - "v*.*.*"
@@ -36,7 +45,7 @@ permissions:
 
 concurrency:
   group: native-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -84,7 +93,7 @@ jobs:
 
   linux:
     needs: metadata
-    if: github.event_name == 'push' || inputs.include_linux
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
     name: Linux packages (x64)
     runs-on: ubuntu-22.04
     env:
@@ -133,19 +142,22 @@ jobs:
           # broken URLs. Flathub performs its own online validation on submit.
           appstreamcli validate --no-net resources/com.flectar.mail.metainfo.xml
 
-      - name: Build AppImage
+      - name: Build release executable
         env:
-          APPIMAGE_EXTRACT_AND_RUN: "1"
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
           FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
           FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+        run: cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          FLECTAR_SKIP_BUILD: "1"
         run: ./scripts/build-appimage.sh
 
       - name: Build Debian package
         env:
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
-          FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          FLECTAR_SKIP_BUILD: "1"
         run: ./scripts/build-deb.sh
 
       - name: Benchmark startup and idle resources
@@ -163,6 +175,137 @@ jobs:
             target/appimage/*.AppImage
             target/deb/*.deb
             target/startup-benchmark/*.json
+          if-no-files-found: error
+
+  rpm:
+    needs: metadata
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
+    name: Fedora RPM preview (x64)
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+    steps:
+      - name: Install Fedora build dependencies
+        run: |
+          dnf install -y \
+            appstream \
+            dbus-daemon \
+            dbus-devel \
+            desktop-file-utils \
+            findutils \
+            fontconfig-devel \
+            gcc \
+            gcc-c++ \
+            git \
+            libX11-devel \
+            libXcursor-devel \
+            libxcb-devel \
+            libxkbcommon-devel \
+            libxkbcommon-x11-devel \
+            make \
+            pkgconf-pkg-config \
+            python3 \
+            rpm-build \
+            tar \
+            wayland-devel \
+            xorg-x11-server-Xvfb
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-on-failure: true
+          key: native-fedora-rpm-x64
+      - name: Build Fedora release executable
+        env:
+          FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
+          FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
+          FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+        run: cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail
+      - name: Build and inspect RPM
+        env:
+          FLECTAR_SKIP_BUILD: "1"
+        run: |
+          ./scripts/build-rpm.sh
+          rpm -qip target/rpm/flectar-mail.rpm
+          rpm -qlp target/rpm/flectar-mail.rpm
+      - name: Test RPM installation and removal
+        run: |
+          dnf install -y target/rpm/flectar-mail.rpm
+          test -x /usr/bin/flectar-mail
+          test -f "$(rpm --eval '%{_libdir}')/flectar-mail/libpdfium.so"
+          desktop-file-validate /usr/share/applications/com.flectar.mail.desktop
+          appstreamcli validate --no-net /usr/share/metainfo/com.flectar.mail.metainfo.xml
+          set +e
+          timeout 15s dbus-run-session -- xvfb-run -a /usr/bin/flectar-mail \
+            > target/rpm/launch.log 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -ne 124 ]]; then
+            cat target/rpm/launch.log
+            echo "Installed RPM launch smoke test exited unexpectedly with status $status" >&2
+            exit 1
+          fi
+          dnf remove -y flectar-mail
+          test ! -e /usr/bin/flectar-mail
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-rpm-x64
+          path: target/rpm/flectar-mail.rpm
+          if-no-files-found: error
+
+  flatpak:
+    needs: metadata
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
+    name: Flatpak preview bundle (x64)
+    runs-on: ubuntu-24.04
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install Flatpak build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream dbus-x11 desktop-file-utils flatpak flatpak-builder xvfb
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
+      - name: Build Flatpak bundle from locked sources
+        run: ./scripts/build-flatpak.sh
+      - name: Test Flatpak installation and packaged runtime
+        env:
+          EXPECTED_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          flatpak install --user --noninteractive -y target/flatpak/flectar-mail.flatpak
+          flatpak run --command=sh --env=EXPECTED_VERSION="$EXPECTED_VERSION" com.flectar.mail -c '
+            test -x /app/bin/flectar-mail
+            test -f /app/lib/flectar-mail/libpdfium.so
+            test -x /usr/bin/gpg
+            test -f /app/share/applications/com.flectar.mail.desktop
+            test -f /app/share/metainfo/com.flectar.mail.metainfo.xml
+            ! grep -q X-AppImage /app/share/applications/com.flectar.mail.desktop
+            grep -q "version=\"$EXPECTED_VERSION\"" /app/share/metainfo/com.flectar.mail.metainfo.xml
+          '
+          flatpak info --user --show-permissions com.flectar.mail
+          set +e
+          timeout 15s dbus-run-session -- xvfb-run -a flatpak run com.flectar.mail \
+            > target/flatpak/launch.log 2>&1
+          status=$?
+          set -e
+          if [[ "$status" -ne 124 ]]; then
+            cat target/flatpak/launch.log
+            echo "Flatpak launch smoke test exited unexpectedly with status $status" >&2
+            exit 1
+          fi
+          flatpak uninstall --user --noninteractive -y com.flectar.mail
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-flatpak-x64
+          path: target/flatpak/flectar-mail.flatpak
           if-no-files-found: error
 
   windows:
@@ -210,6 +353,8 @@ jobs:
           New-Item -ItemType Directory -Force target/package/windows | Out-Null
           New-Item -ItemType Directory -Force "target/package/windows/Licenses/Google Sans Flex" | Out-Null
           New-Item -ItemType Directory -Force "target/package/windows/Licenses/Noto Emoji" | Out-Null
+          python scripts/stage-pdfium.py win-x64 target/package/windows
+          if ($LASTEXITCODE -ne 0) { throw "PDFium staging failed" }
           Copy-Item target/release/flectar-mail.exe target/package/windows/
           Copy-Item README.md target/package/windows/
           Copy-Item LICENSE target/package/windows/
@@ -219,6 +364,8 @@ jobs:
           Copy-Item resources/fonts/google-sans-flex/README.md "target/package/windows/Licenses/Google Sans Flex/"
           Copy-Item resources/fonts/noto-emoji/OFL.txt "target/package/windows/Licenses/Noto Emoji/"
           Copy-Item resources/fonts/noto-emoji/README.md "target/package/windows/Licenses/Noto Emoji/"
+          python scripts/test-pdf-preview.py target/package/windows/flectar-mail.exe
+          if ($LASTEXITCODE -ne 0) { throw "Packaged PDF preview test failed" }
           Compress-Archive -Path target/package/windows/* -DestinationPath target/flectar-mail-windows-x64.zip -Force
 
       - name: Install pinned Inno Setup compiler
@@ -431,15 +578,19 @@ jobs:
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref_type == 'tag' &&
       needs.metadata.result == 'success' && needs.quality.result == 'success' &&
-      needs.linux.result == 'success' && needs.windows.result == 'success' &&
+      needs.linux.result == 'success' && needs.rpm.result == 'success' &&
+      needs.flatpak.result == 'success' && needs.windows.result == 'success' &&
       needs.macos.result == 'success' &&
       (needs.android.result == 'success' ||
        (needs.metadata.outputs.prerelease == 'false' && needs.android.result == 'skipped'))
-    needs: [metadata, quality, linux, windows, macos, android]
+    needs: [metadata, quality, linux, rpm, flatpak, windows, macos, android]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
+      artifact-metadata: write
+      attestations: write
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
@@ -454,6 +605,18 @@ jobs:
         with:
           name: flectar-mail-windows-x64
           path: release-assets/windows
+
+      - name: Download RPM package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flectar-mail-rpm-x64
+          path: release-assets/rpm
+
+      - name: Download Flatpak bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: flectar-mail-flatpak-x64
+          path: release-assets/flatpak
 
       - name: Download macOS package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -472,6 +635,11 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
         run: python3 scripts/prepare-release.py
+
+      - name: Attest release downloads
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/*
 
       - name: Publish tagged release
         env:

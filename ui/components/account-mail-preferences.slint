@@ -1,0 +1,166 @@
+import { VerticalBox, HorizontalBox, ScrollView, TextEdit } from "std-widgets.slint";
+import { AccountRow } from "../models.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { Button } from "button.slint";
+import { LineEdit } from "controls.slint";
+import { SettingsSelectRow, SettingsSwitchRow } from "settings-components.slint";
+
+export struct SignatureChoice { id: string, name: string, text: string }
+export global AccountMailPreferences {
+    in-out property <int> account-id: -1;
+    in-out property <string> account-label;
+    in-out property <[SignatureChoice]> signatures;
+    in-out property <[string]> signature-names;
+    in-out property <[string]> default-names;
+    in-out property <int> editing-index: -1;
+    in-out property <string> editing-id;
+    in-out property <string> signature-name;
+    in-out property <string> signature-text;
+    in-out property <int> new-index: 0;
+    in-out property <int> reply-index: 0;
+    in-out property <string> fingerprint;
+    in-out property <bool> sign: false;
+    in-out property <bool> encrypt: false;
+    in-out property <string> recipient-keys;
+    in-out property <string> key-inventory;
+    in-out property <string> status;
+    in-out property <bool> busy: false;
+    in-out property <bool> desktop-supported: true;
+    callback load(int);
+    callback edit-signature(int);
+    callback save-signature;
+    callback delete-signature;
+    callback save-defaults;
+    callback save-security;
+    callback key-action(string);
+    callback composer-reset;
+    callback composer-account-changed(int);
+    callback composer-signature(int);
+    in-out property <[string]> composer-signature-names;
+    in-out property <int> composer-signature-index: 0;
+    in-out property <string> composer-security;
+    in-out property <bool> composer-preferences-ready: false;
+    callback read-message;
+    callback export-message;
+    callback close-reader;
+    callback context-changed;
+    in-out property <bool> reader-open: false;
+    in-out property <string> reader-status;
+    in-out property <string> reader-text;
+}
+
+export component AccountMailPreferencesPanel inherits Rectangle {
+    in property <[AccountRow]> accounts;
+    in property <bool> compact: false;
+    in-out property <bool> security-tab: false;
+    background: AppTheme.surface;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: AppTheme.input-border;
+    vertical-stretch: 0;
+    content := VerticalBox {
+        padding: 20px; spacing: 12px; alignment: start;
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Signatures & OpenPGP"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage your signature and message protection."); color: AppTheme.secondary; wrap: word-wrap; }
+        for account in root.accounts : Button {
+            text: account.email;
+            primary: AccountMailPreferences.account-id == account.id;
+            enabled: !AccountMailPreferences.busy;
+            clicked => { AccountMailPreferences.load(account.id); }
+        }
+        if AccountMailPreferences.account-id > 0 : VerticalBox {
+            spacing: 12px;
+            Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.account-label; color: AppTheme.heading; font-weight: 600; overflow: elide; }
+            HorizontalBox {
+                Button { text: @tr("Signatures"); primary: !root.security-tab; clicked => { root.security-tab = false; } }
+                Button { text: @tr("OpenPGP"); primary: root.security-tab; clicked => { root.security-tab = true; } }
+            }
+            if !root.security-tab : VerticalBox {
+                spacing: 10px;
+                SettingsSelectRow {
+                    compact: root.compact; title: @tr("Edit signature"); description: @tr("Saved separately for each account.");
+                    choices: AccountMailPreferences.signature-names; selected-index: AccountMailPreferences.editing-index;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    selected(index, value) => { AccountMailPreferences.edit-signature(index); }
+                }
+                Button { text: @tr("New signature"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.edit-signature(-1); } }
+                LineEdit { text <=> AccountMailPreferences.signature-name; input-label: @tr("Signature name"); placeholder-text: @tr("Signature name, for example Work"); enabled: !AccountMailPreferences.busy; }
+                TextEdit { wrap: word-wrap; height: 160px; text <=> AccountMailPreferences.signature-text; placeholder-text: @tr("Your name\nRole · Company\nPhone · Website"); enabled: !AccountMailPreferences.busy; }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Plain text works in every email client. You can format the inserted signature in the composer."); color: AppTheme.secondary; wrap: word-wrap; }
+                HorizontalBox {
+                    Button { text: @tr("Save signature"); primary: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-signature(); } }
+                    Button { text: @tr("Delete"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.editing-id != ""; clicked => { AccountMailPreferences.delete-signature(); } }
+                }
+                SettingsSelectRow {
+                    compact: root.compact; title: @tr("New messages"); description: @tr("Signature inserted when you start a message.");
+                    choices: AccountMailPreferences.default-names; selected-index <=> AccountMailPreferences.new-index;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    selected(index, value) => { AccountMailPreferences.new-index = index; }
+                }
+                SettingsSelectRow {
+                    compact: root.compact; title: @tr("Replies & forwards"); description: @tr("Placed above the quoted message.");
+                    choices: AccountMailPreferences.default-names; selected-index <=> AccountMailPreferences.reply-index;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    selected(index, value) => { AccountMailPreferences.reply-index = index; }
+                }
+                Button { text: @tr("Save signature defaults"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-defaults(); } }
+            }
+            if root.security-tab : VerticalBox {
+                spacing: 10px;
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("OpenPGP protects message bodies and attachments. Digital signatures let recipients check who signed a message."); color: AppTheme.secondary; wrap: word-wrap; }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.desktop-supported ? @tr("Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered in GnuPG's unlock dialog.") : @tr("OpenPGP is unavailable on this mobile build. Protected accounts cannot send without a supported encryption engine."); color: AppTheme.secondary; wrap: word-wrap; }
+                Button { text: @tr("Create a new key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("generate"); } }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("New keys expire in two years. GnuPG asks you to protect the private key with a passphrase."); color: AppTheme.secondary; wrap: word-wrap; }
+                LineEdit { text <=> AccountMailPreferences.fingerprint; input-label: @tr("Your full OpenPGP fingerprint"); placeholder-text: @tr("Your full OpenPGP key fingerprint"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; }
+                SettingsSwitchRow {
+                    title: @tr("Digitally sign messages"); description: @tr("Proves possession of your private key; does not encrypt the message.");
+                    compact: root.compact; checked: AccountMailPreferences.sign; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.sign = value; }
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                }
+                SettingsSwitchRow {
+                    title: @tr("Require encryption"); description: @tr("Blocks sending unless every recipient has a verified, usable key.");
+                    compact: root.compact; checked: AccountMailPreferences.encrypt; enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; toggled(value) => { AccountMailPreferences.encrypt = value; }
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Verified recipient keys"); color: AppTheme.heading; font-weight: 600; }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Compare fingerprints with recipients through a separate trusted channel, then enter one email=fingerprint per line. Importing a key alone does not verify it."); color: AppTheme.secondary; wrap: word-wrap; }
+                TextEdit { wrap: word-wrap; height: 130px; text <=> AccountMailPreferences.recipient-keys; placeholder-text: @tr("person@example.org=FULL_FINGERPRINT"); enabled: !AccountMailPreferences.busy; }
+                Button { text: @tr("Save OpenPGP settings"); primary: true; enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.save-security(); } }
+                if !root.compact : HorizontalBox {
+                    Button { text: @tr("Import key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("import"); } }
+                    Button { text: @tr("Export public key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("export"); } }
+                    Button { text: @tr("Show keys"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("list"); } }
+                }
+                if root.compact : VerticalBox {
+                    spacing: 8px;
+                    Button { text: @tr("Import key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("import"); } }
+                    Button { text: @tr("Export public key"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("export"); } }
+                    Button { text: @tr("Show keys"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("list"); } }
+                }
+                Button { text: @tr("Open message file (.eml)"); enabled: !AccountMailPreferences.busy && AccountMailPreferences.desktop-supported; clicked => { AccountMailPreferences.key-action("open"); } }
+                if AccountMailPreferences.key-inventory != "" : TextEdit { wrap: word-wrap; height: 150px; read-only: true; text: AccountMailPreferences.key-inventory; }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Manage expiry, revocation and private-key backups in GnuPG. Only public keys are exported here."); color: AppTheme.secondary; wrap: word-wrap; }
+                Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Subjects and addresses remain visible. Protected drafts stay on this device. Existing server drafts are not retroactively protected. S/MIME certificates are not supported."); color: AppTheme.secondary; wrap: word-wrap; }
+            }
+            if AccountMailPreferences.busy || AccountMailPreferences.status != "" : Text {
+                text: AccountMailPreferences.busy ? @tr("Working…") : AccountMailPreferences.status;
+                color: AppTheme.secondary; wrap: word-wrap;
+            }
+        }
+    }
+}
+
+export component OpenPgpReader inherits Rectangle {
+    visible: AccountMailPreferences.reader-open;
+    background: AppTheme.surface;
+    VerticalBox {
+        padding: 24px; spacing: 12px;
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("OpenPGP message"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.reader-status; color: AppTheme.secondary; wrap: word-wrap; }
+        TextEdit { wrap: word-wrap; vertical-stretch: 1; read-only: true; text: AccountMailPreferences.reader-text; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Decrypted content is shown as text, without remote content. It is not added to search or saved to the mail database."); color: AppTheme.secondary; wrap: word-wrap; }
+        Button { text: @tr("Export decrypted message"); enabled: AccountMailPreferences.reader-text != ""; clicked => { AccountMailPreferences.export-message(); } }
+        Button { text: @tr("Close"); clicked => { AccountMailPreferences.close-reader(); AccountMailPreferences.reader-open = false; AccountMailPreferences.reader-text = ""; AccountMailPreferences.reader-status = ""; } }
+    }
+}

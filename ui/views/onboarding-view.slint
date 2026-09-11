@@ -1,4 +1,7 @@
-import { HorizontalBox, ScrollView, VerticalBox, Button as NativeButton } from "std-widgets.slint";
+import { FormField } from "../components/settings-components.slint";
+import { MailSecurityFields } from "../components/mail-security-fields.slint";
+import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
+import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
 import { ProviderButton } from "../components/provider-button.slint";
@@ -18,7 +21,18 @@ export component OnboardingView inherits Rectangle {
     in property <bool> oauth-settings-saving: false;
     in-out property <string> oauth-settings-error: "";
     in property <bool> startup-ready: false;
+    in property <bool> account-setup-in-progress: false;
     in property <bool> oauth-in-progress: false;
+    in property <string> oauth-authorization-url;
+    in property <bool> oauth-browser-error;
+    callback retry-oauth-browser();
+    callback copy-oauth-link();
+    callback submit-oauth-redirect(string);
+    callback import-mail-certificate();
+    in-out property <string> imap-security: "auto";
+    in-out property <string> smtp-security: "auto";
+    in-out property <string> trusted-certificate-pem;
+    in-out property <string> account-username;
     in property <string> status: "";
     in property <color> page-bg;
     in property <color> surface;
@@ -54,28 +68,31 @@ export component OnboardingView inherits Rectangle {
     setup-scroll := ScrollView {
         width: parent.width;
         height: parent.height;
+        viewport-width: self.visible-width;
+        viewport-height: max(self.visible-height, setup-content.y + setup-content.height + 24px);
 
         setup-content := VerticalBox {
             x: max(20px, (setup-scroll.visible-width - 400px) / 2);
             y: max(24px, (setup-scroll.visible-height - self.preferred-height) / 2);
             width: min(400px, setup-scroll.visible-width - 40px);
             height: self.preferred-height;
+            padding: 0px;
             padding-bottom: 24px;
             spacing: 0px;
 
             HorizontalBox {
-                height: 62px;
+                height: root.imap-form-open ? 40px : 62px;
                 Rectangle { horizontal-stretch: 1; }
                 Image {
-                    width: 62px;
-                    height: 62px;
+                    width: root.imap-form-open ? 40px : 62px;
+                    height: root.imap-form-open ? 40px : 62px;
                     source: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
                     image-fit: contain;
                     accessible-label: @tr("Flectar Mail logo");
                 }
                 Rectangle { horizontal-stretch: 1; }
             }
-            Rectangle { height: 22px; }
+            Rectangle { height: root.imap-form-open ? 12px : 22px; }
             Text {
                 text: @tr("Flectar Mail");
                 color: root.title-color;
@@ -97,6 +114,7 @@ export component OnboardingView inherits Rectangle {
             }
 
             if root.startup-ready && !root.imap-form-open : VerticalBox {
+                padding: 0px;
                 spacing: 10px;
                 Rectangle { height: 6px; }
                 Text {
@@ -109,7 +127,7 @@ export component OnboardingView inherits Rectangle {
                 ProviderButton {
                     text: @tr("Continue with Gmail");
                     icon: @image-url("../icons/brand/gmail.svg");
-                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving && root.google-available;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && root.google-available;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -120,7 +138,7 @@ export component OnboardingView inherits Rectangle {
                 ProviderButton {
                     text: @tr("Continue with Outlook");
                     icon: @image-url("../icons/brand/outlook.svg");
-                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving && root.microsoft-available;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && root.microsoft-available;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -134,7 +152,7 @@ export component OnboardingView inherits Rectangle {
                     colorize-icon: true;
                     // Optical correction for the asymmetric mail-outline glyph.
                     icon-offset-x: 1px;
-                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -150,14 +168,14 @@ export component OnboardingView inherits Rectangle {
                     color: root.muted-text;
                     font-size: TypeScale.caption;
                     horizontal-alignment: center;
-                    wrap: word-wrap;
+                    wrap: word-wrap; height: self.preferred-height;
                 }
-                oauth-settings := NativeButton {
-                    height: 36px;
+                oauth-settings := Button {
+                    height: 40px;
                     text: @tr("Sign-in settings");
                     icon: @image-url("../icons/solar-icons/settings-outline.svg");
-                    colorize-icon: true;
-                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.oauth-setup-open = true; }
                 }
                 Rectangle { height: 8px; }
@@ -168,12 +186,18 @@ export component OnboardingView inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Button {
-                    height: 42px;
+                    height: 40px;
                     text: @tr("Import a backup");
                     icon: @image-url("../icons/phosphor/tray-arrow-down.svg");
                     has-icon: true;
-                    enabled: !root.oauth-in-progress && !root.oauth-settings-saving;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.import-account-backup(); }
+                }
+                if root.oauth-in-progress && root.oauth-authorization-url != "" : OAuthBrowserHelp {
+                    launch-failed: root.oauth-browser-error;
+                    retry => { root.retry-oauth-browser(); }
+                    copy-link => { root.copy-oauth-link(); }
+                    submit-redirect(address) => { root.submit-oauth-redirect(address); }
                 }
                 if root.oauth-in-progress : Button {
                     height: 40px;
@@ -183,6 +207,7 @@ export component OnboardingView inherits Rectangle {
             }
 
             if root.startup-ready && root.imap-form-open : VerticalBox {
+                padding: 0px;
                 spacing: 10px;
                 Rectangle { height: 6px; }
                 Text {
@@ -193,32 +218,50 @@ export component OnboardingView inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: root.account-protocol == "jmap" ? @tr("Connect using JMAP for mail sync and sending.") : @tr("Connect using IMAP for mail sync and SMTP for sending.");
+                    text: root.account-protocol == "jmap" ? @tr("Connect using JMAP for mail sync and sending.") : @tr("Connect using IMAP and SMTP. POP3 is not supported.");
+                    wrap: word-wrap; height: self.preferred-height;
                     color: root.muted-text;
                     font-size: TypeScale.secondary;
                     horizontal-alignment: center;
                 }
                 Rectangle { height: 8px; }
-                LineEdit {
-                    height: 42px;
-                    text: root.account-email;
-                    placeholder-text: @tr("Email address");
+                FormField {
+                    enabled: !root.account-setup-in-progress;
+                    height: 60px;
+                    label: @tr("Email address");
+                    label-color: root.muted-text;
+                    value: root.account-email;
+                    placeholder: @tr("Email address");
                     edited(value) => { root.account-email = value; }
                 }
-                LineEdit {
-                    height: 42px;
-                    text: root.account-password;
+                FormField {
+                    enabled: !root.account-setup-in-progress;
+                    height: 60px;
+                    label: @tr("Username (defaults to email)");
+                    label-color: root.muted-text;
+                    value: root.account-username;
+                    placeholder: @tr("Username (defaults to email)");
+                    edited(value) => { root.account-username = value; }
+                }
+                FormField {
+                    enabled: !root.account-setup-in-progress;
+                    height: 60px;
+                    label: @tr("Password or app password");
+                    label-color: root.muted-text;
+                    value: root.account-password;
                     input-type: password;
-                    placeholder-text: @tr("Password or app password");
+                    placeholder: @tr("Password or app password");
                     edited(value) => { root.account-password = value; }
                 }
                 HorizontalBox {
                     height: 42px;
+                    padding: 0px;
                     spacing: 8px;
                     Button {
                         horizontal-stretch: 1;
                         height: 42px;
                         text: @tr("IMAP + SMTP");
+                        enabled: !root.account-setup-in-progress;
                         primary: root.account-protocol == "imap";
                         clicked => { root.account-protocol = "imap"; }
                     }
@@ -226,6 +269,7 @@ export component OnboardingView inherits Rectangle {
                         horizontal-stretch: 1;
                         height: 42px;
                         text: @tr("JMAP");
+                        enabled: !root.account-setup-in-progress;
                         primary: root.account-protocol == "jmap";
                         clicked => { root.account-protocol = "jmap"; }
                     }
@@ -240,53 +284,78 @@ export component OnboardingView inherits Rectangle {
                     text: @tr("Leave blank to discover /.well-known/jmap from your email domain.");
                     color: root.muted-text;
                     font-size: TypeScale.caption;
-                    wrap: word-wrap;
+                    wrap: word-wrap; height: self.preferred-height;
                 }
                 if root.account-protocol == "imap" : HorizontalBox {
-                    height: 42px;
+                    height: 60px;
+                    padding: 0px;
                     spacing: 8px;
-                    LineEdit {
+                    FormField {
+                        enabled: !root.account-setup-in-progress;
                         horizontal-stretch: 1;
-                        text: root.imap-host;
-                        placeholder-text: @tr("IMAP server");
+                        label: @tr("IMAP server");
+                        label-color: root.muted-text;
+                        value: root.imap-host;
+                        placeholder: @tr("IMAP server");
                         edited(value) => { root.imap-host = value; }
                     }
-                    LineEdit {
+                    FormField {
+                        enabled: !root.account-setup-in-progress;
                         width: 82px;
-                        text: root.imap-port;
+                        label: @tr("Port");
+                        label-color: root.muted-text;
+                        value: root.imap-port;
                         input-type: number;
-                        placeholder-text: @tr("993");
+                        placeholder: @tr("993");
                         edited(value) => { root.imap-port = value; }
                     }
                 }
                 if root.account-protocol == "imap" : HorizontalBox {
-                    height: 42px;
+                    height: 60px;
+                    padding: 0px;
                     spacing: 8px;
-                    LineEdit {
+                    FormField {
+                        enabled: !root.account-setup-in-progress;
                         horizontal-stretch: 1;
-                        text: root.smtp-host;
-                        placeholder-text: @tr("SMTP server");
+                        label: @tr("SMTP server");
+                        label-color: root.muted-text;
+                        value: root.smtp-host;
+                        placeholder: @tr("SMTP server");
                         edited(value) => { root.smtp-host = value; }
                     }
-                    LineEdit {
+                    FormField {
+                        enabled: !root.account-setup-in-progress;
                         width: 82px;
-                        text: root.smtp-port;
+                        label: @tr("Port");
+                        label-color: root.muted-text;
+                        value: root.smtp-port;
                         input-type: number;
-                        placeholder-text: @tr("465");
+                        placeholder: @tr("465");
                         edited(value) => { root.smtp-port = value; }
                     }
+                }
+                if root.account-protocol == "imap" : Text {
+                    text: @tr("Proton Bridge: use the local servers, ports and password shown in Bridge, and match its encryption settings.");
+                    color: root.muted-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+                }
+                if root.account-protocol == "imap" : MailSecurityFields {
+                    imap-security <=> root.imap-security;
+                    smtp-security <=> root.smtp-security;
+                    enabled: !root.account-setup-in-progress;
+                    certificate-pem <=> root.trusted-certificate-pem;
+                    import-certificate => { root.import-mail-certificate(); }
                 }
                 Rectangle { height: 2px; }
                 Button {
                     height: 42px;
-                    text: @tr("Connect account");
+                    text: root.account-setup-in-progress ? @tr("Connecting…") : @tr("Connect account");
                     primary: true;
-                    enabled: root.imap-form-valid;
+                    enabled: root.imap-form-valid && !root.account-setup-in-progress;
                     clicked => {
                         root.add-password-account(
                             root.account-protocol,
                             root.account-email,
-                            root.account-email,
+                            root.account-username,
                             root.account-password,
                             root.jmap-url,
                             root.imap-host,
@@ -299,19 +368,22 @@ export component OnboardingView inherits Rectangle {
                 Button {
                     height: 40px;
                     text: @tr("Back");
+                    enabled: !root.account-setup-in-progress;
                     clicked => { root.imap-form-open = false; }
                 }
             }
 
-            Text {
-                visible: root.startup-ready && root.status != "";
-                height: self.visible ? 40px : 0px;
+            if root.startup-ready && root.status != "" : VerticalBox {
+                padding: 0px;
+                padding-top: 12px;
+                Text {
                 text: root.status;
                 color: root.muted-text;
                 font-size: TypeScale.caption;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                wrap: word-wrap;
+                wrap: word-wrap; height: self.preferred-height;
+            }
             }
         }
     }

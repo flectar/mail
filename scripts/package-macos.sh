@@ -19,6 +19,8 @@ mkdir -p \
   "$app_dir/Contents/Resources/Licenses/Noto Emoji"
 cp "$binary_path" "$app_dir/Contents/MacOS/flectar-mail"
 
+python3 "$project_dir/scripts/stage-pdfium.py" mac-arm64 "$app_dir/Contents/MacOS"
+
 icon_source="$project_dir/resources/app-icon/flectar-mail-masked.png"
 iconset_dir="$output_dir/FlectarMail.iconset"
 rm -rf "$iconset_dir"
@@ -58,6 +60,7 @@ sed \
 # An ad-hoc signature makes the CI artifact internally consistent. Distribution
 # signing and notarization replace it when Apple credentials are configured.
 codesign --force --deep --sign - "$app_dir"
+python3 "$project_dir/scripts/test-pdf-preview.py" "$app_dir/Contents/MacOS/flectar-mail"
 
 mkdir -p "$output_dir"
 ditto -c -k --sequesterRsrc --keepParent "$app_dir" "$output_dir/flectar-mail-macos-arm64.zip"

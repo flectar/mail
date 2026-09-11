@@ -50,6 +50,21 @@ fraction of the memory of a typical web-based mail client.
 - **Native and open source.** Built from the ground up with Rust. It is not a
   browser wrapped in a window, and it is released under the AGPLv3.
 
+## Files and attachments
+
+Browse JMAP/WebDAV storage, search mail attachments, keep files offline, and
+preview PDFs, images and text.
+
+## Account signatures and OpenPGP
+
+Settings → Accounts → Signatures & OpenPGP provides named signatures, separate
+new-message and reply defaults, and a composer signature selector. Desktop
+OpenPGP/MIME signing and encryption use installed GnuPG 2.x with pinentry for
+private-key passphrases. Required encryption blocks delivery when recipient keys
+are missing or invalid; protected drafts remain local until Send.
+
+S/MIME and mobile OpenPGP are not currently supported.
+
 ## Experimental HTML rendering
 
 > [!WARNING]
@@ -108,7 +123,7 @@ inbox more room when you need it.
 
 | Calendar | Contacts | Files (WebDAV/JMAP) |
 | --- | --- | --- |
-| ![Flectar Mail calendar](resources/screenshots/desktop-calendar-light.png) | ![Flectar Mail contacts](resources/screenshots/desktop-contacts-light.png) | **Coming soon** |
+| ![Flectar Mail calendar](resources/screenshots/desktop-calendar-light.png) | ![Flectar Mail contacts](resources/screenshots/desktop-contacts-light.png) | ![Flectar Mail files](resources/screenshots/desktop-files-light.png) |
 
 ### Made for smaller screens
 
@@ -140,7 +155,8 @@ When preview builds are published, download them from
 [GitHub Releases](https://github.com/flectar/mail/releases) and look for the
 **Pre-release** badge:
 
-- **Linux x64:** AppImage or Debian/Ubuntu `.deb` package
+- **Linux x64:** AppImage, Debian/Ubuntu `.deb`, Fedora `.rpm`, or a
+  sideloaded Flatpak preview bundle
 - **Windows x64:** Setup `.exe` or portable ZIP
 - **macOS Apple silicon (macOS 14+):** DMG or application ZIP
 - **Android arm64 (Android 8.0+):** Experimental test APK in prereleases
@@ -148,6 +164,20 @@ When preview builds are published, download them from
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.
+
+The Flatpak preview is provided as a standalone test bundle. It is not yet a
+Flathub package and therefore does not receive automatic Flathub updates. Its
+close-to-tray option is disabled until the tray backend can use a sandbox-safe
+D-Bus name.
+
+Install the downloaded Linux package with either
+`sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` or
+`flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak`. Launch the
+Flatpak with `flatpak run com.flectar.mail`.
+
+Each GitHub release includes `SHA256SUMS` and signed build-provenance
+attestations. With GitHub CLI installed, verify a download with
+`gh attestation verify <download> --repo flectar/mail`.
 
 Android APK updates require the same signing key; builds without a persistent
 test key may require uninstalling the previous app, which deletes local app data.
@@ -158,6 +188,19 @@ You can also build Flectar Mail from source with the
 ```bash
 cargo run --bin flectar-mail
 ```
+
+Linux desktop OAuth uses the system browser through the desktop portal and
+stores refresh credentials through the freedesktop Secret Service. A normal
+desktop session therefore needs an `xdg-desktop-portal` backend and a Secret
+Service provider such as GNOME Keyring. Release builds stop before opening the
+OAuth page when secure credential storage is unavailable, so an authorization
+grant can never be completed without a safe place to persist it.
+
+Podman and Docker development shells commonly have neither the host session
+D-Bus nor the host browser's loopback network. Debug builds support that setup
+with a clearly marked, owner-only development credential file and an accordion
+for pasting the final loopback callback URL. The file backend is excluded from
+release builds.
 
 ## Open source, for everyone
 

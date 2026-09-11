@@ -19,7 +19,14 @@ build_args=(--locked --bin flectar-mail --manifest-path "$project_dir/Cargo.toml
 if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi
-cargo build "${build_args[@]}"
+if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
+  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+    printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
+    exit 1
+  fi
+else
+  cargo build "${build_args[@]}"
+fi
 
 rm -rf "$package_root"
 mkdir -p \
@@ -33,6 +40,8 @@ mkdir -p \
 
 install -m755 "$project_dir/target/release/flectar-mail" \
   "$package_root/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/stage-pdfium.py" linux-x64 "$package_root/usr/lib/flectar-mail"
+python3 "$project_dir/scripts/test-pdf-preview.py" "$package_root/usr/bin/flectar-mail"
 python3 "$project_dir/scripts/stage-linux-metadata.py" "$package_root"
 install -m644 "$project_dir/resources/app-icon/flectar-mail-masked-512.png" \
   "$package_root/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
@@ -55,10 +64,10 @@ install -m644 "$project_dir/resources/fonts/google-sans-flex/README.md" \
 cp "$project_dir/resources/debian/source-control.in" "$build_dir/debian/control"
 shlib_substitution="$(
   cd "$build_dir"
-  dpkg-shlibdeps -O -edebian/flectar-mail/usr/bin/flectar-mail
+  dpkg-shlibdeps -O -edebian/flectar-mail/usr/bin/flectar-mail -edebian/flectar-mail/usr/lib/flectar-mail/libpdfium.so
 )"
 runtime_dependencies="${shlib_substitution#shlibs:Depends=}"
-runtime_dependencies+=", libfontconfig1, libwayland-client0, libx11-6, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, hicolor-icon-theme"
+runtime_dependencies+=", libfontconfig1, libwayland-client0, libx11-6, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, hicolor-icon-theme, xdg-utils"
 sed \
   -e "s/@VERSION@/$version/g" \
   -e "s/@DEPENDS@/$runtime_dependencies/g" \

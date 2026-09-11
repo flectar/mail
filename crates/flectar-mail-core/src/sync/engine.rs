@@ -1091,7 +1091,14 @@ pub(super) async fn emit_sync_status(ctx: &SyncCtx, account_id: i64) {
 
 async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
     let creds = imap_credentials(ctx, config).await?;
-    match imap::connect(&config.imap_host, config.imap_port, creds).await {
+    match imap::connect_with_settings(
+        &config.imap_host,
+        config.imap_port,
+        creds,
+        &config.settings.connection,
+    )
+    .await
+    {
         Err(error)
             if config.auth_kind == AuthKind::Oauth2
                 && matches!(&error, CoreError::NeedsReauth | CoreError::Auth(_)) =>
@@ -1107,7 +1114,13 @@ async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
             );
             ctx.tokens.invalidate(config.id).await;
             let creds = imap_credentials(ctx, config).await?;
-            imap::connect(&config.imap_host, config.imap_port, creds).await
+            imap::connect_with_settings(
+                &config.imap_host,
+                config.imap_port,
+                creds,
+                &config.settings.connection,
+            )
+            .await
         }
         result => result,
     }

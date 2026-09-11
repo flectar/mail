@@ -270,7 +270,12 @@ impl RichComposeDocument {
         let end = byte_to_char(&self.text, end);
         let mut links = self.styles[start..end]
             .iter()
-            .zip(self.text.chars().skip(start).take(end.saturating_sub(start)))
+            .zip(
+                self.text
+                    .chars()
+                    .skip(start)
+                    .take(end.saturating_sub(start)),
+            )
             .filter(|(_, character)| !character.is_whitespace())
             .map(|(style, _)| style.link.as_deref());
         let first = links.next().flatten()?;
@@ -524,7 +529,10 @@ impl RichComposeDocument {
             }
             let mut url_end = end;
             while url_end > start
-                && matches!(chars[url_end - 1], '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}')
+                && matches!(
+                    chars[url_end - 1],
+                    '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}'
+                )
             {
                 url_end -= 1;
             }
@@ -607,9 +615,7 @@ fn normalize_link(value: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    if value.starts_with("https://")
-        || value.starts_with("http://")
-        || value.starts_with("mailto:")
+    if value.starts_with("https://") || value.starts_with("http://") || value.starts_with("mailto:")
     {
         Some(value.to_owned())
     } else {
@@ -641,7 +647,9 @@ fn continue_list_edit(old_text: &str, new_text: &str) -> Option<(String, i32)> {
         .map_or(0, |index| index + 1);
     let line = &old[line_start..insertion];
     let (kind, prefix_len) = block_prefix(line)?;
-    let content_is_empty = line[prefix_len..].iter().all(|character| character.is_whitespace());
+    let content_is_empty = line[prefix_len..]
+        .iter()
+        .all(|character| character.is_whitespace());
     if content_is_empty {
         new.drain(line_start..=insertion);
         let text = new.iter().collect::<String>();
@@ -664,10 +672,7 @@ fn continue_list_edit(old_text: &str, new_text: &str) -> Option<(String, i32)> {
     let cursor_character = insertion + 1 + prefix.len();
     new.splice(insertion + 1..insertion + 1, prefix);
     let text = new.iter().collect::<String>();
-    Some((
-        text.clone(),
-        to_i32(char_to_byte(&text, cursor_character)),
-    ))
+    Some((text.clone(), to_i32(char_to_byte(&text, cursor_character))))
 }
 
 fn block_prefix(chars: &[char]) -> Option<(BlockKind, usize)> {
@@ -905,7 +910,9 @@ mod tests {
         document.synchronize(text, text.len() as i32, text.len() as i32);
         assert_eq!(
             document.body_html().as_deref(),
-            Some("<div>Read <a href=\"https://slint.dev/blog/slint-1.7-released\">https://slint.dev/blog/slint-1.7-released</a> for details.</div>")
+            Some(
+                "<div>Read <a href=\"https://slint.dev/blog/slint-1.7-released\">https://slint.dev/blog/slint-1.7-released</a> for details.</div>"
+            )
         );
     }
 
@@ -920,7 +927,9 @@ mod tests {
         );
         assert_eq!(
             document.body_html().as_deref(),
-            Some("<div><a href=\"https://slint.dev/blog/slint-1.7-released\">Slint release</a></div>")
+            Some(
+                "<div><a href=\"https://slint.dev/blog/slint-1.7-released\">Slint release</a></div>"
+            )
         );
     }
 

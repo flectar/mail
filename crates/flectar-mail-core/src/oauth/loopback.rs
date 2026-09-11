@@ -65,7 +65,7 @@ impl LoopbackServer {
     }
 
     /// Wait (with timeout) for the browser redirect carrying ?code=.
-    pub async fn wait_for_code(self, timeout: std::time::Duration) -> Result<AuthCode> {
+    pub async fn wait_for_code(&self, timeout: std::time::Duration) -> Result<AuthCode> {
         let fut = async {
             loop {
                 let (mut stream, _) = match &self.v6 {

@@ -5,7 +5,9 @@
 use crate::error::{CoreError, Result};
 use crate::models::Provider;
 use crate::oauth::providers::for_provider;
-use crate::oauth::redirect::{LoopbackRedirectBroker, OAuthRedirectBrokerHandle};
+use crate::oauth::redirect::{
+    LoopbackRedirectBroker, OAUTH_REDIRECT_TIMEOUT, OAuthRedirectBrokerHandle,
+};
 use crate::oauth::tokens::post_form;
 use base64::Engine;
 use sha2::Digest;
@@ -79,7 +81,7 @@ pub async fn authorize_with(
         provider,
         extra_scopes,
         login_hint,
-        std::sync::Arc::new(LoopbackRedirectBroker),
+        std::sync::Arc::new(LoopbackRedirectBroker::default()),
         open_url,
     )
     .await
@@ -168,7 +170,7 @@ pub async fn authorize_with_broker(
         .map_err(|error| CoreError::Auth(format!("could not open sign-in browser: {error}")))?;
 
     let code = redirect_session
-        .wait(std::time::Duration::from_secs(300))
+        .wait(OAUTH_REDIRECT_TIMEOUT)
         .await
         .inspect_err(|e| tracing::warn!(?provider, error = %e, "oauth: no usable callback"))?;
     tracing::info!(?provider, "oauth: authorization code received");

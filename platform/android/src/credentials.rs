@@ -170,12 +170,7 @@ impl AndroidCredentialStore {
             let iv = env.call_method(&cipher, "getIV", "()[B", &[])?.l()?;
             let input = env.byte_array_from_slice(plaintext)?;
             let ciphertext = env
-                .call_method(
-                    cipher,
-                    "doFinal",
-                    "([B)[B",
-                    &[JValue::Object(&input)],
-                )?
+                .call_method(cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?
                 .l()?;
             let iv = env.convert_byte_array(JByteArray::from(iv))?;
             let ciphertext = env.convert_byte_array(JByteArray::from(ciphertext))?;
@@ -196,13 +191,25 @@ impl AndroidCredentialStore {
         }
         let iv = fields
             .next()
-            .and_then(|value| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value).ok())
-            .ok_or_else(|| CoreError::Auth("stored credentials are damaged; sign in again".into()))?;
+            .and_then(|value| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(value)
+                    .ok()
+            })
+            .ok_or_else(|| {
+                CoreError::Auth("stored credentials are damaged; sign in again".into())
+            })?;
         let ciphertext = fields
             .next()
-            .and_then(|value| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value).ok())
+            .and_then(|value| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(value)
+                    .ok()
+            })
             .filter(|_| fields.next().is_none())
-            .ok_or_else(|| CoreError::Auth("stored credentials are damaged; sign in again".into()))?;
+            .ok_or_else(|| {
+                CoreError::Auth("stored credentials are damaged; sign in again".into())
+            })?;
 
         self.with_env(|env| {
             let key = Self::key(env)?;
@@ -233,12 +240,7 @@ impl AndroidCredentialStore {
             )?;
             let input = env.byte_array_from_slice(&ciphertext)?;
             let plaintext = env
-                .call_method(
-                    cipher,
-                    "doFinal",
-                    "([B)[B",
-                    &[JValue::Object(&input)],
-                )?
+                .call_method(cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?
                 .l()?;
             env.convert_byte_array(JByteArray::from(plaintext))
         })
@@ -320,6 +322,15 @@ impl CredentialStore for AndroidCredentialStore {
             .ok_or_else(|| CoreError::Auth("no stored credential".into()))?;
         String::from_utf8(self.decrypt(encoded)?)
             .map_err(|_| CoreError::Auth("stored credentials are damaged; sign in again".into()))
+    }
+
+    fn delete(&self, account_id: i64, slot: Slot) -> Result<()> {
+        let _transaction = self.transaction.lock().map_err(|_| {
+            CoreError::Other("Android credential transaction lock is unavailable".into())
+        })?;
+        let mut values = self.read_map()?;
+        values.remove(&Self::slot_key(account_id, slot));
+        self.write_map(&values)
     }
 
     fn delete_all(&self, account_id: i64) -> Result<()> {

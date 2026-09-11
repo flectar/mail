@@ -34,7 +34,17 @@ impl Paths {
         ))
     }
 
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(target_os = "ios")]
+    pub fn default_dirs() -> Result<Self> {
+        let root = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+            crate::error::CoreError::Other("iOS did not supply the application sandbox.".into())
+        })?;
+        Ok(Self::new(
+            root.join("Library/Application Support/Flectar"),
+            root.join("Library/Caches/Flectar"),
+        ))
+    }
+    #[cfg(target_os = "android")]
     pub fn default_dirs() -> Result<Self> {
         Err(crate::error::CoreError::Other(
             "mobile application storage must be supplied by the platform host".into(),
@@ -61,6 +71,18 @@ impl Paths {
     /// sync bookkeeping.
     pub fn calendar_db_file(&self) -> PathBuf {
         self.data_dir.join("flectar-calendar.db")
+    }
+
+    pub fn files_db_file(&self) -> PathBuf {
+        self.data_dir.join("flectar-files.db")
+    }
+    pub fn files_cache_dir(&self, account_id: i64) -> PathBuf {
+        self.cache_dir.join("files").join(account_id.to_string())
+    }
+    pub fn files_staging_dir(&self, account_id: i64) -> PathBuf {
+        self.data_dir
+            .join("file_transfers")
+            .join(account_id.to_string())
     }
 
     /// Small, reconstructable projection of the last visible mailbox page.

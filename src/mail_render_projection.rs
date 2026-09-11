@@ -142,6 +142,7 @@ pub(super) fn email_viewport_size(app: &AppWindow) -> (u32, u32) {
 /// Remove every actionable part of the previous body on empty/error transitions.
 /// Source and fallback text are owned by the caller and remain readable.
 pub(super) fn clear_reader_projection(app: &AppWindow) {
+    app.global::<AccountMailPreferences>().invoke_close_reader();
     let reader = app.global::<EmailReader>();
     reader.set_available(false);
     reader.set_body_pending(false);
@@ -184,12 +185,16 @@ pub(super) fn apply_email(
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
     let same_message = reader.get_message_id() == email.id;
+    crate::attachment_controller::project(app, &email, same_message);
     let mut scroll = if same_message {
         app.get_email_scroll_y()
     } else {
         0.0
     };
     if !same_message {
+        app.global::<AccountMailPreferences>().invoke_close_reader();
+        reader.set_auto_fit(true);
+        email_renderer.borrow_mut().set_auto_fit(true);
         reader.set_use_authored_text(false);
         reader.set_message_id(email.id);
         reader.set_query("".into());
@@ -279,6 +284,7 @@ pub(super) fn apply_email(
                     return Ok(());
                 }
             };
+        reader.set_zoom(renderer.zoom);
         reader.set_width_ratio((renderer.layout_width / width.max(1) as f32).max(1.0));
         reader.set_items(ModelRc::new(VecModel::from(renderer.reader_items())));
         reader.set_images(ModelRc::new(VecModel::from(renderer.image_placeholders())));
@@ -384,6 +390,8 @@ pub(super) fn open_email_link(url: &str) -> Result<(), String> {
 pub(super) fn sync_reader_metadata(app: &AppWindow, renderer: &Rc<RefCell<GpuEmailRenderer>>) {
     let renderer = renderer.borrow();
     let reader = app.global::<EmailReader>();
+    reader.set_zoom(renderer.zoom);
+    reader.set_auto_fit(renderer.auto_fit);
     reader.set_available(renderer.has_document());
     if !renderer.has_document() {
         clear_reader_projection(app);
