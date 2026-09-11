@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-10 21:44+0000\n"
+"POT-Creation-Date: 2026-09-11 13:50+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -1112,7 +1112,7 @@ msgstr "Falló la paginación del correo: {}"
 msgid "Could not mark message as read: {}"
 msgstr "No se pudo marcar el mensaje como leído: {}"
 
-#: ui/app.slint:405 ui/views/mail-reading-pane.slint:739
+#: ui/app.slint:405 ui/views/mail-reading-pane.slint:755
 msgid "Loading message…"
 msgstr "Cargando mensaje…"
 
@@ -1671,17 +1671,17 @@ msgid "Keep"
 msgstr "Conservar"
 
 #: ui/components/composer-fields.slint:35 ui/views/mail-reading-pane.slint:552
-#: ui/views/mail-reading-pane.slint:1211
+#: ui/views/mail-reading-pane.slint:1227
 msgid "Reply"
 msgstr "Responder"
 
 #: ui/components/composer-fields.slint:36 ui/views/mail-reading-pane.slint:553
-#: ui/views/mail-reading-pane.slint:1228
+#: ui/views/mail-reading-pane.slint:1244
 msgid "Reply all"
 msgstr "Responder a todos"
 
 #: ui/components/composer-fields.slint:37 ui/views/mail-reading-pane.slint:554
-#: ui/views/mail-reading-pane.slint:1245
+#: ui/views/mail-reading-pane.slint:1261
 msgid "Forward"
 msgstr "Reenviar"
 
@@ -2101,7 +2101,7 @@ msgid "Revert"
 msgstr "Revertir"
 
 #: ui/components/theme-editor.slint:692 ui/dialogs/folder-dialog.slint:122
-#: ui/views/mail-reading-pane.slint:1405
+#: ui/views/mail-reading-pane.slint:1421
 msgid "Save"
 msgstr "Guardar"
 
@@ -2428,7 +2428,7 @@ msgid "Save settings"
 msgstr "Guardar ajustes"
 
 #: ui/dialogs/rendering-info-dialog.slint:25
-#: ui/views/mail-reading-pane.slint:1293
+#: ui/views/mail-reading-pane.slint:1309
 msgid "About email rendering"
 msgstr "Acerca de la visualización de correos"
 
@@ -3899,7 +3899,7 @@ msgstr "Buscar etiquetas"
 msgid "Available labels"
 msgstr "Etiquetas disponibles"
 
-#: ui/views/mail-reading-pane.slint:491 ui/views/mail-reading-pane.slint:1359
+#: ui/views/mail-reading-pane.slint:491 ui/views/mail-reading-pane.slint:1375
 msgid "Edit label"
 msgstr "Editar etiqueta"
 
@@ -3915,7 +3915,7 @@ msgstr "Crear etiqueta…"
 msgid "More message actions"
 msgstr "Más acciones del mensaje"
 
-#: ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:1252
+#: ui/views/mail-reading-pane.slint:551 ui/views/mail-reading-pane.slint:1268
 msgid "Continue editing"
 msgstr "Seguir editando"
 
@@ -3927,7 +3927,7 @@ msgstr "Descifrar / verificar OpenPGP"
 msgid "Print message"
 msgstr "Imprimir mensaje"
 
-#: ui/views/mail-reading-pane.slint:557 ui/views/mail-reading-pane.slint:1262
+#: ui/views/mail-reading-pane.slint:557 ui/views/mail-reading-pane.slint:1278
 msgid "Open in browser"
 msgstr "Abrir en el navegador"
 
@@ -3943,175 +3943,175 @@ msgstr "Mostrar código fuente"
 msgid "View plain text"
 msgstr "Ver texto sin formato"
 
-#: ui/views/mail-reading-pane.slint:676
+#: ui/views/mail-reading-pane.slint:679
 msgid "Verified brand with BIMI authority evidence"
 msgstr "Marca verificada con evidencia de autoridad BIMI"
 
-#: ui/views/mail-reading-pane.slint:678
+#: ui/views/mail-reading-pane.slint:681
 msgid "BIMI-authenticated sender"
 msgstr "Remitente autenticado mediante BIMI"
 
-#: ui/views/mail-reading-pane.slint:680
+#: ui/views/mail-reading-pane.slint:683
 msgid "Sender authenticated by Microsoft"
 msgstr "Remitente autenticado por Microsoft"
 
-#: ui/views/mail-reading-pane.slint:681
+#: ui/views/mail-reading-pane.slint:684
 msgid "Sender domain authenticated with DMARC and DKIM"
 msgstr "Dominio del remitente autenticado mediante DMARC y DKIM"
 
-#: ui/views/mail-reading-pane.slint:688
-msgid "to {} · {}"
-msgstr "para {} · {}"
+#: ui/views/mail-reading-pane.slint:696
+msgid "to {}"
+msgstr "para {}"
 
-#: ui/views/mail-reading-pane.slint:710 ui/views/mail-reading-pane.slint:1112
+#: ui/views/mail-reading-pane.slint:726 ui/views/mail-reading-pane.slint:1128
 msgid "Attachments"
 msgstr "Adjuntos"
 
-#: ui/views/mail-reading-pane.slint:720 ui/views/mail-reading-pane.slint:726
+#: ui/views/mail-reading-pane.slint:736 ui/views/mail-reading-pane.slint:742
 msgid "Find in message"
 msgstr "Buscar en el mensaje"
 
-#: ui/views/mail-reading-pane.slint:721
+#: ui/views/mail-reading-pane.slint:737
 msgid "Show original layout"
 msgstr "Mostrar diseño original"
 
-#: ui/views/mail-reading-pane.slint:721
+#: ui/views/mail-reading-pane.slint:737
 msgid "Reader mode"
 msgstr "Modo de lectura"
 
-#: ui/views/mail-reading-pane.slint:728
+#: ui/views/mail-reading-pane.slint:744
 msgid "Previous match"
 msgstr "Coincidencia anterior"
 
-#: ui/views/mail-reading-pane.slint:729
+#: ui/views/mail-reading-pane.slint:745
 msgid "Next match"
 msgstr "Siguiente coincidencia"
 
-#: ui/views/mail-reading-pane.slint:730
+#: ui/views/mail-reading-pane.slint:746
 msgid "Close find"
 msgstr "Cerrar búsqueda"
 
-#: ui/views/mail-reading-pane.slint:734
+#: ui/views/mail-reading-pane.slint:750
 msgid "Some images could not be loaded."
 msgstr "No se pudieron cargar algunas imágenes."
 
-#: ui/views/mail-reading-pane.slint:735 ui/views/mail-reading-pane.slint:1021
+#: ui/views/mail-reading-pane.slint:751 ui/views/mail-reading-pane.slint:1037
 msgid "Retry images"
 msgstr "Reintentar imágenes"
 
-#: ui/views/mail-reading-pane.slint:740
+#: ui/views/mail-reading-pane.slint:756
 msgid "Reload message"
 msgstr "Volver a cargar el mensaje"
 
-#: ui/views/mail-reading-pane.slint:795
+#: ui/views/mail-reading-pane.slint:811
 msgid "Remote images were blocked to protect your privacy."
 msgstr "Las imágenes remotas se bloquearon para proteger tu privacidad."
 
-#: ui/views/mail-reading-pane.slint:804
+#: ui/views/mail-reading-pane.slint:820
 msgid "Load images"
 msgstr "Cargar imágenes"
 
-#: ui/views/mail-reading-pane.slint:834
+#: ui/views/mail-reading-pane.slint:850
 msgid "Loading image…"
 msgstr "Cargando imagen…"
 
-#: ui/views/mail-reading-pane.slint:834
+#: ui/views/mail-reading-pane.slint:850
 msgid "Blocked image"
 msgstr "Imagen bloqueada"
 
-#: ui/views/mail-reading-pane.slint:834
+#: ui/views/mail-reading-pane.slint:850
 msgid "Image exceeds limits"
 msgstr "La imagen supera los límites"
 
-#: ui/views/mail-reading-pane.slint:834
+#: ui/views/mail-reading-pane.slint:850
 msgid "Image unavailable"
 msgstr "Imagen no disponible"
 
-#: ui/views/mail-reading-pane.slint:970
+#: ui/views/mail-reading-pane.slint:986
 msgid "Show rendered email"
 msgstr "Mostrar correo renderizado"
 
-#: ui/views/mail-reading-pane.slint:993
+#: ui/views/mail-reading-pane.slint:1009
 msgid "Copy this HTML into your GitHub rendering issue."
 msgstr "Copia este HTML en tu incidencia de GitHub sobre la visualización."
 
-#: ui/views/mail-reading-pane.slint:1010
+#: ui/views/mail-reading-pane.slint:1026
 msgid "Show email"
 msgstr "Mostrar correo"
 
-#: ui/views/mail-reading-pane.slint:1020
+#: ui/views/mail-reading-pane.slint:1036
 msgid "View original plain text"
 msgstr "Ver texto original sin formato"
 
-#: ui/views/mail-reading-pane.slint:1022
+#: ui/views/mail-reading-pane.slint:1038
 msgid "Copy formatted selection"
 msgstr "Copiar selección con formato"
 
-#: ui/views/mail-reading-pane.slint:1023
+#: ui/views/mail-reading-pane.slint:1039
 msgid "Caret browsing"
 msgstr "Navegación con cursor"
 
-#: ui/views/mail-reading-pane.slint:1024
+#: ui/views/mail-reading-pane.slint:1040
 msgid "Use dark reader"
 msgstr "Usar lectura oscura"
 
-#: ui/views/mail-reading-pane.slint:1026
+#: ui/views/mail-reading-pane.slint:1042
 msgid "Copy selected text"
 msgstr "Copiar texto seleccionado"
 
-#: ui/views/mail-reading-pane.slint:1036
+#: ui/views/mail-reading-pane.slint:1052
 msgid "Copy all email text"
 msgstr "Copiar todo el texto del correo"
 
-#: ui/views/mail-reading-pane.slint:1046
+#: ui/views/mail-reading-pane.slint:1062
 msgid "Select all email text"
 msgstr "Seleccionar todo el texto del correo"
 
-#: ui/views/mail-reading-pane.slint:1062
+#: ui/views/mail-reading-pane.slint:1078
 msgid "Link: {}"
 msgstr "Enlace: {}"
 
-#: ui/views/mail-reading-pane.slint:1101
+#: ui/views/mail-reading-pane.slint:1117
 msgid "Heading: {}"
 msgstr "Encabezado: {}"
 
-#: ui/views/mail-reading-pane.slint:1327
+#: ui/views/mail-reading-pane.slint:1343
 msgid "No message selected"
 msgstr "No hay ningún mensaje seleccionado"
 
-#: ui/views/mail-reading-pane.slint:1328
+#: ui/views/mail-reading-pane.slint:1344
 msgid "Choose an email to read it here."
 msgstr "Elige un correo para leerlo aquí."
 
-#: ui/views/mail-reading-pane.slint:1359
+#: ui/views/mail-reading-pane.slint:1375
 msgid "Create label"
 msgstr "Crear etiqueta"
 
-#: ui/views/mail-reading-pane.slint:1366
+#: ui/views/mail-reading-pane.slint:1382
 msgid "Label name"
 msgstr "Nombre de la etiqueta"
 
-#: ui/views/mail-reading-pane.slint:1374
+#: ui/views/mail-reading-pane.slint:1390
 msgid "Color"
 msgstr "Color"
 
-#: ui/views/mail-reading-pane.slint:1384
+#: ui/views/mail-reading-pane.slint:1400
 msgid "Blue"
 msgstr "Azul"
 
-#: ui/views/mail-reading-pane.slint:1386
+#: ui/views/mail-reading-pane.slint:1402
 msgid "Pink"
 msgstr "Rosa"
 
-#: ui/views/mail-reading-pane.slint:1387
+#: ui/views/mail-reading-pane.slint:1403
 msgid "Red"
 msgstr "Rojo"
 
-#: ui/views/mail-reading-pane.slint:1388
+#: ui/views/mail-reading-pane.slint:1404
 msgid "Amber"
 msgstr "Ámbar"
 
-#: ui/views/mail-reading-pane.slint:1391
+#: ui/views/mail-reading-pane.slint:1407
 msgid "Slate"
 msgstr "Gris pizarra"
 
@@ -4176,3 +4176,6 @@ msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 "Déjalo vacío para detectar /.well-known/jmap a partir de tu dominio de "
 "correo."
+
+#~ msgid "to {} · {}"
+#~ msgstr "para {} · {}"
