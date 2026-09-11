@@ -4176,6 +4176,3 @@ msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 "Déjalo vacío para detectar /.well-known/jmap a partir de tu dominio de "
 "correo."
-
-#~ msgid "to {} · {}"
-#~ msgstr "para {} · {}"
