@@ -27,6 +27,15 @@ on:
         description: Also build an experimental unsigned iOS archive
         type: boolean
         default: false
+  pull_request:
+    paths:
+      - ".github/workflows/native-platforms.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "build.rs"
+      - "packaging/**"
+      - "resources/**"
+      - "scripts/**"
   push:
     tags:
       - "v*.*.*"
@@ -84,7 +93,7 @@ jobs:
 
   linux:
     needs: metadata
-    if: github.event_name == 'push' || inputs.include_linux
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
     name: Linux packages (x64)
     runs-on: ubuntu-22.04
     env:
@@ -170,7 +179,7 @@ jobs:
 
   rpm:
     needs: metadata
-    if: github.event_name == 'push' || inputs.include_linux
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
     name: Fedora RPM preview (x64)
     runs-on: ubuntu-24.04
     container: fedora:44
@@ -249,7 +258,7 @@ jobs:
 
   flatpak:
     needs: metadata
-    if: github.event_name == 'push' || inputs.include_linux
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
     name: Flatpak preview bundle (x64)
     runs-on: ubuntu-24.04
     env:
