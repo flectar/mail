@@ -324,6 +324,15 @@ impl CredentialStore for AndroidCredentialStore {
             .map_err(|_| CoreError::Auth("stored credentials are damaged; sign in again".into()))
     }
 
+    fn delete(&self, account_id: i64, slot: Slot) -> Result<()> {
+        let _transaction = self.transaction.lock().map_err(|_| {
+            CoreError::Other("Android credential transaction lock is unavailable".into())
+        })?;
+        let mut values = self.read_map()?;
+        values.remove(&Self::slot_key(account_id, slot));
+        self.write_map(&values)
+    }
+
     fn delete_all(&self, account_id: i64) -> Result<()> {
         let _transaction = self.transaction.lock().map_err(|_| {
             CoreError::Other("Android credential transaction lock is unavailable".into())

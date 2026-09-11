@@ -4,6 +4,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::parse_json_column;
 
+pub const CREDENTIAL_SETUP_STATE: &str = "credential_setup";
+
 fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
     Ok(Account {
         id: row.get("id")?,
@@ -44,10 +46,12 @@ pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, email, display_name, avatar_url, provider, auth_kind,
                 mail_protocol, sync_state, sync_error
-         FROM accounts ORDER BY sort_order, id",
+         FROM accounts
+         WHERE sync_state <> ?1
+         ORDER BY sort_order, id",
     )?;
     let rows = stmt
-        .query_map([], account_from_row)?
+        .query_map(params![CREDENTIAL_SETUP_STATE], account_from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -57,10 +61,12 @@ pub fn list_configs(conn: &Connection) -> Result<Vec<AccountConfig>> {
         "SELECT id, email, display_name, avatar_url, provider, auth_kind,
                 mail_protocol, username, jmap_url, jmap_account_id, imap_host,
                 imap_port, smtp_host, smtp_port, settings_json
-         FROM accounts ORDER BY sort_order, id",
+         FROM accounts
+         WHERE sync_state <> ?1
+         ORDER BY sort_order, id",
     )?;
     let rows = stmt
-        .query_map([], config_from_row)?
+        .query_map(params![CREDENTIAL_SETUP_STATE], config_from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -97,6 +103,14 @@ pub fn find_by_email(conn: &Connection, email: &str) -> Result<Option<Account>> 
         .optional()?)
 }
 
+pub fn credential_setup_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut statement =
+        conn.prepare("SELECT id FROM accounts WHERE sync_state = ?1 ORDER BY id")?;
+    Ok(statement
+        .query_map(params![CREDENTIAL_SETUP_STATE], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub struct NewAccount<'a> {
     pub email: &'a str,
     pub display_name: Option<&'a str>,
@@ -114,14 +128,18 @@ pub struct NewAccount<'a> {
 }
 
 pub fn insert(conn: &Connection, a: &NewAccount) -> Result<i64> {
+    insert_with_sync_state(conn, a, "idle")
+}
+
+pub fn insert_with_sync_state(conn: &Connection, a: &NewAccount, sync_state: &str) -> Result<i64> {
     let settings_json = serde_json::to_string(&AccountSettings::default())?;
     conn.execute(
         "INSERT INTO accounts (email, display_name, avatar_url, provider, auth_kind, mail_protocol, username,
                                jmap_url, jmap_account_id,
                                imap_host, imap_port, smtp_host, smtp_port, created_at,
-                               sort_order, settings_json)
+                               sort_order, settings_json, sync_state)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,
-                 COALESCE((SELECT MAX(sort_order) + 1 FROM accounts), 0), ?15)",
+                 COALESCE((SELECT MAX(sort_order) + 1 FROM accounts), 0), ?15, ?16)",
         params![
             a.email,
             a.display_name,
@@ -138,6 +156,7 @@ pub fn insert(conn: &Connection, a: &NewAccount) -> Result<i64> {
             a.smtp_port,
             now_ms(),
             settings_json,
+            sync_state,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -377,6 +396,41 @@ mod tests {
             account.avatar_url.as_deref(),
             Some("https://lh3.googleusercontent.com/a/profile")
         );
+    }
+
+    #[test]
+    fn credential_setup_accounts_are_recoverable_but_not_visible_or_started() {
+        let conn = crate::db::testutil::conn();
+        let account = NewAccount {
+            email: "pending@test.dev",
+            display_name: None,
+            avatar_url: None,
+            provider: Provider::Gmail,
+            auth_kind: AuthKind::Oauth2,
+            mail_protocol: MailProtocol::Imap,
+            username: "pending@test.dev",
+            jmap_url: "",
+            jmap_account_id: None,
+            imap_host: "imap.gmail.com",
+            imap_port: 993,
+            smtp_host: "smtp.gmail.com",
+            smtp_port: 465,
+        };
+        let id = insert_with_sync_state(&conn, &account, CREDENTIAL_SETUP_STATE).unwrap();
+
+        assert!(list(&conn).unwrap().is_empty());
+        assert!(list_configs(&conn).unwrap().is_empty());
+        assert_eq!(
+            find_by_email(&conn, "PENDING@test.dev")
+                .unwrap()
+                .unwrap()
+                .id,
+            id
+        );
+
+        set_sync_state(&conn, id, "idle").unwrap();
+        assert_eq!(list(&conn).unwrap().len(), 1);
+        assert_eq!(list_configs(&conn).unwrap().len(), 1);
     }
 
     #[test]

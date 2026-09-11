@@ -390,6 +390,8 @@ export global I18n {
         if (key == "Choose Gmail or Outlook OAuth.") { return @tr("Choose Gmail or Outlook OAuth."); }
         if (key == "Complete sign-in in your browser, or choose Cancel here.") { return @tr("Complete sign-in in your browser, or choose Cancel here."); }
         if (key == "Cancelling browser sign-in…") { return @tr("Cancelling browser sign-in…"); }
+        if (key == "Finishing browser sign-in…") { return @tr("Finishing browser sign-in…"); }
+        if (key == "Could not use that browser address: {}") { return @tr("Could not use that browser address: {}", argument); }
         if (key == "Calendar core is unavailable.") { return @tr("Calendar core is unavailable."); }
         if (key == "Account no longer exists.") { return @tr("Account no longer exists."); }
         if (key == "Authorize calendar access in your browser.") { return @tr("Authorize calendar access in your browser."); }
@@ -723,6 +725,7 @@ export component AppWindow inherits Window {
     in property <bool> oauth_browser_error;
     callback retry_oauth_browser();
     callback copy_oauth_link();
+    callback submit_oauth_redirect(string);
     callback copy_oauth_authorization_url();
     copy_oauth_authorization_url => {
         if root.oauth_in_progress && root.oauth_authorization_url != "" {
@@ -1321,6 +1324,7 @@ export component AppWindow inherits Window {
             oauth_browser_error: root.oauth_browser_error;
             retry_oauth_browser => { root.retry_oauth_browser(); }
             copy_oauth_link => { root.copy_oauth_link(); }
+            submit_oauth_redirect(address) => { root.submit_oauth_redirect(address); }
             import_mail_certificate => { root.import_mail_certificate(); }
             imap_host <=> root.imap_host;
             imap_port <=> root.imap_port;
@@ -1570,6 +1574,7 @@ export component AppWindow inherits Window {
         oauth-browser-error: root.oauth_browser_error;
         retry-oauth-browser => { root.retry_oauth_browser(); }
         copy-oauth-link => { root.copy_oauth_link(); }
+        submit-oauth-redirect(address) => { root.submit_oauth_redirect(address); }
         import-mail-certificate => { root.import_mail_certificate(); }
         imap-host <=> root.imap_host;
         imap-port <=> root.imap_port;

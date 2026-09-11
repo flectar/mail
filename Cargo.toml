@@ -119,6 +119,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
 slint = { version = "1.17", default-features = false, features = ["backend-winit"] }

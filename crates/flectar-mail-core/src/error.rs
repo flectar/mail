@@ -22,6 +22,8 @@ pub enum CoreError {
     Auth(String),
     #[error("account needs re-authentication")]
     NeedsReauth,
+    #[error("secure credential storage is unavailable: {0}")]
+    CredentialStoreUnavailable(String),
     #[error("keyring error: {0}")]
     Keyring(String),
     #[error("mime error: {0}")]
@@ -54,6 +56,7 @@ impl CoreError {
             CoreError::Tls(_) => "tls",
             CoreError::Auth(_) => "auth",
             CoreError::NeedsReauth => "needs_reauth",
+            CoreError::CredentialStoreUnavailable(_) => "credential_store_unavailable",
             CoreError::Keyring(_) => "keyring",
             CoreError::Mime(_) => "mime",
             CoreError::CalDav(_) => "caldav",
@@ -78,7 +81,22 @@ impl From<anyhow::Error> for CoreError {
 
 impl From<keyring::Error> for CoreError {
     fn from(e: keyring::Error) -> Self {
-        CoreError::Keyring(e.to_string())
+        match e {
+            keyring::Error::PlatformFailure(error) => {
+                tracing::warn!(%error, "platform credential service failed");
+                CoreError::CredentialStoreUnavailable(
+                    "the system keyring could not be reached; start or unlock it and try again"
+                        .into(),
+                )
+            }
+            keyring::Error::NoStorageAccess(error) => {
+                tracing::warn!(%error, "platform credential service denied access");
+                CoreError::CredentialStoreUnavailable(
+                    "the system keyring is locked or denied access; unlock it and try again".into(),
+                )
+            }
+            error => CoreError::Keyring(error.to_string()),
+        }
     }
 }
 

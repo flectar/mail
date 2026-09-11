@@ -1,7 +1,7 @@
 import { FormField } from "../components/settings-components.slint";
 import { MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
-import { HorizontalBox, ScrollView, VerticalBox, Button as NativeButton } from "std-widgets.slint";
+import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
 import { ProviderButton } from "../components/provider-button.slint";
@@ -27,6 +27,7 @@ export component OnboardingView inherits Rectangle {
     in property <bool> oauth-browser-error;
     callback retry-oauth-browser();
     callback copy-oauth-link();
+    callback submit-oauth-redirect(string);
     callback import-mail-certificate();
     in-out property <string> imap-security: "auto";
     in-out property <string> smtp-security: "auto";
@@ -169,11 +170,11 @@ export component OnboardingView inherits Rectangle {
                     horizontal-alignment: center;
                     wrap: word-wrap; height: self.preferred-height;
                 }
-                oauth-settings := NativeButton {
-                    height: 36px;
+                oauth-settings := Button {
+                    height: 40px;
                     text: @tr("Sign-in settings");
                     icon: @image-url("../icons/solar-icons/settings-outline.svg");
-                    colorize-icon: true;
+                    has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.oauth-setup-open = true; }
                 }
@@ -185,7 +186,7 @@ export component OnboardingView inherits Rectangle {
                     horizontal-alignment: center;
                 }
                 Button {
-                    height: 42px;
+                    height: 40px;
                     text: @tr("Import a backup");
                     icon: @image-url("../icons/phosphor/tray-arrow-down.svg");
                     has-icon: true;
@@ -196,6 +197,7 @@ export component OnboardingView inherits Rectangle {
                     launch-failed: root.oauth-browser-error;
                     retry => { root.retry-oauth-browser(); }
                     copy-link => { root.copy-oauth-link(); }
+                    submit-redirect(address) => { root.submit-oauth-redirect(address); }
                 }
                 if root.oauth-in-progress : Button {
                     height: 40px;

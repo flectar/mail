@@ -240,7 +240,7 @@ pub struct Core {
     #[cfg(feature = "local-embeddings")]
     embed: Arc<embed::EmbedState>,
     /// Fired by `cancel_oauth` to abort a pending browser sign-in (the
-    /// loopback wait otherwise blocks the UI until its 5-minute timeout).
+    /// loopback wait otherwise blocks the UI until its 15-minute timeout).
     oauth_cancel: Arc<tokio::sync::Notify>,
     /// Fired by `notify_ui_ready` once the Slint UI has finished its startup
     /// show (the first-run intro). Account actors wait for this before
@@ -257,7 +257,7 @@ impl Core {
         Self::start_with_platform(
             paths,
             Arc::new(SystemCredentialStore),
-            Arc::new(LoopbackRedirectBroker),
+            Arc::new(LoopbackRedirectBroker::default()),
             true,
         )
         .await
@@ -277,8 +277,12 @@ impl Core {
         paths: Paths,
         credentials: CredentialStoreHandle,
     ) -> Result<Core> {
-        Self::start_mail_ui_with_platform(paths, credentials, Arc::new(LoopbackRedirectBroker))
-            .await
+        Self::start_mail_ui_with_platform(
+            paths,
+            credentials,
+            Arc::new(LoopbackRedirectBroker::default()),
+        )
+        .await
     }
 
     pub async fn start_mail_ui_with_platform(
@@ -891,6 +895,9 @@ impl Core {
             args
         };
 
+        credentials::check_available_async(self.credentials.clone()).await?;
+        self.recover_incomplete_account_credentials().await?;
+
         // Verify credentials before storing anything. For JMAP, also pin the
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
@@ -989,7 +996,7 @@ impl Core {
             self.db
                 .write(move |conn| {
                     let transaction = conn.transaction()?;
-                    let id = repo::accounts::insert(
+                    let id = repo::accounts::insert_with_sync_state(
                         &transaction,
                         &repo::accounts::NewAccount {
                             email: &a.email,
@@ -1006,6 +1013,7 @@ impl Core {
                             smtp_host: &a.smtp_host,
                             smtp_port: a.smtp_port,
                         },
+                        repo::accounts::CREDENTIAL_SETUP_STATE,
                     )?;
                     let settings = AccountSettings {
                         connection: a.connection.clone(),
@@ -1029,10 +1037,7 @@ impl Core {
             // A newly inserted account without its password can never sync.
             // Roll it back atomically from the user's point of view.
             if is_new_account {
-                let _ = self
-                    .db
-                    .write(move |conn| repo::accounts::delete(conn, id))
-                    .await;
+                self.rollback_incomplete_account_credentials(id).await;
             } else if let Ok(Some(cfg)) = self
                 .db
                 .read(move |conn| repo::accounts::get_config(conn, id))
@@ -1045,6 +1050,16 @@ impl Core {
                 // the next app restart.
                 self.spawn_actor(cfg).await;
             }
+            return Err(error);
+        }
+
+        if is_new_account
+            && let Err(error) = self
+                .db
+                .write(move |conn| repo::accounts::set_sync_state(conn, id, "idle"))
+                .await
+        {
+            self.rollback_incomplete_account_credentials(id).await;
             return Err(error);
         }
 
@@ -1074,6 +1089,57 @@ impl Core {
     /// caller vs. waiter never matters.
     pub fn notify_ui_ready(&self) {
         self.ui_ready.notify_one();
+    }
+
+    /// Finish the rollback for an account whose process stopped after
+    /// reserving its database id but before committing credentials. These rows
+    /// are excluded from account lists and actor startup.
+    async fn recover_incomplete_account_credentials(&self) -> Result<()> {
+        let account_ids = self
+            .db
+            .read(|conn| repo::accounts::credential_setup_ids(conn))
+            .await?;
+        for account_id in account_ids {
+            self.tokens.forget_account(account_id).await;
+            credentials::delete_all_async(self.credentials.clone(), account_id).await?;
+            self.db
+                .write(move |conn| repo::accounts::delete(conn, account_id))
+                .await?;
+            tracing::info!(
+                account_id,
+                "rolled back incomplete account credential setup"
+            );
+        }
+        Ok(())
+    }
+
+    /// Compensate for a failed cross-store credential commit. Credentials are
+    /// deleted before the database id is released so a later account cannot
+    /// inherit an orphaned token. A cleanup failure keeps the row in its hidden
+    /// setup state for the next recovery attempt.
+    async fn rollback_incomplete_account_credentials(&self, account_id: i64) {
+        self.tokens.forget_account(account_id).await;
+        if let Err(error) =
+            credentials::delete_all_async(self.credentials.clone(), account_id).await
+        {
+            tracing::error!(
+                account_id,
+                %error,
+                "could not remove credentials after account setup failed"
+            );
+            return;
+        }
+        if let Err(error) = self
+            .db
+            .write(move |conn| repo::accounts::delete(conn, account_id))
+            .await
+        {
+            tracing::error!(
+                account_id,
+                %error,
+                "could not remove incomplete account row"
+            );
+        }
     }
 
     pub async fn start_oauth(
@@ -1131,6 +1197,14 @@ impl Core {
         consent_extra: &[&str],
         open_url: impl FnOnce(String) -> std::result::Result<(), String> + Send,
     ) -> Result<Account> {
+        let servers = match provider {
+            Provider::Gmail => &accounts::providers::GMAIL,
+            Provider::Microsoft => &accounts::providers::MICROSOFT,
+            Provider::Imap => return Err(CoreError::Auth("not an oauth provider".into())),
+        };
+        credentials::check_available_async(self.credentials.clone()).await?;
+        self.recover_incomplete_account_credentials().await?;
+
         let outcome = tokio::select! {
             r = oauth::flow::authorize_with_broker(
                 provider,
@@ -1143,12 +1217,6 @@ impl Core {
                 return Err(CoreError::Auth("sign-in cancelled".into()));
             }
         };
-        let servers = match provider {
-            Provider::Gmail => &accounts::providers::GMAIL,
-            Provider::Microsoft => &accounts::providers::MICROSOFT,
-            Provider::Imap => return Err(CoreError::Auth("not an oauth provider".into())),
-        };
-
         let email = outcome.email.clone();
         let existing = self
             .db
@@ -1169,16 +1237,6 @@ impl Core {
             let id = existing.id;
             let display_name = outcome.display_name.clone();
             let avatar_url = outcome.avatar_url.clone();
-            self.db
-                .write(move |conn| {
-                    repo::accounts::update_oauth_identity(
-                        conn,
-                        id,
-                        display_name.as_deref(),
-                        avatar_url.as_deref(),
-                    )
-                })
-                .await?;
             self.tokens
                 .store_initial(
                     id,
@@ -1188,6 +1246,16 @@ impl Core {
                     outcome.client_id,
                     outcome.client_secret,
                 )
+                .await?;
+            self.db
+                .write(move |conn| {
+                    repo::accounts::update_oauth_identity(
+                        conn,
+                        id,
+                        display_name.as_deref(),
+                        avatar_url.as_deref(),
+                    )
+                })
                 .await?;
             self.db
                 .write(move |conn| repo::accounts::set_sync_state(conn, id, "idle"))
@@ -1216,7 +1284,7 @@ impl Core {
         let id = self
             .db
             .write(move |conn| {
-                repo::accounts::insert(
+                repo::accounts::insert_with_sync_state(
                     conn,
                     &repo::accounts::NewAccount {
                         email: &email,
@@ -1233,11 +1301,13 @@ impl Core {
                         smtp_host: servers.smtp_host,
                         smtp_port: servers.smtp_port,
                     },
+                    repo::accounts::CREDENTIAL_SETUP_STATE,
                 )
             })
             .await?;
 
-        self.tokens
+        if let Err(error) = self
+            .tokens
             .store_initial(
                 id,
                 outcome.access_token,
@@ -1246,7 +1316,20 @@ impl Core {
                 outcome.client_id,
                 outcome.client_secret,
             )
-            .await?;
+            .await
+        {
+            self.rollback_incomplete_account_credentials(id).await;
+            return Err(error);
+        }
+
+        if let Err(error) = self
+            .db
+            .write(move |conn| repo::accounts::set_sync_state(conn, id, "idle"))
+            .await
+        {
+            self.rollback_incomplete_account_credentials(id).await;
+            return Err(error);
+        }
 
         let cfg = self
             .db
@@ -1285,6 +1368,7 @@ impl Core {
             Provider::Gmail => &[],
             Provider::Imap => return Err(CoreError::Auth("not an oauth provider".into())),
         };
+        credentials::check_available_async(self.credentials.clone()).await?;
         let outcome = tokio::select! {
             // Hint the provider at the account being repaired so the browser
             // preselects it instead of silently reusing whatever session is
@@ -1311,17 +1395,6 @@ impl Core {
 
         let display_name = outcome.display_name.clone();
         let avatar_url = outcome.avatar_url.clone();
-        self.db
-            .write(move |conn| {
-                repo::accounts::update_oauth_identity(
-                    conn,
-                    account_id,
-                    display_name.as_deref(),
-                    avatar_url.as_deref(),
-                )
-            })
-            .await?;
-
         self.tokens
             .store_initial(
                 account_id,
@@ -1331,6 +1404,16 @@ impl Core {
                 outcome.client_id,
                 outcome.client_secret,
             )
+            .await?;
+        self.db
+            .write(move |conn| {
+                repo::accounts::update_oauth_identity(
+                    conn,
+                    account_id,
+                    display_name.as_deref(),
+                    avatar_url.as_deref(),
+                )
+            })
             .await?;
 
         // Clear needs_reauth and wake the actor. The reauth pause loop retries
@@ -4231,6 +4314,7 @@ impl Core {
                     .clone()
                     .filter(|p| !p.is_empty())
                     .ok_or_else(|| CoreError::CalDav("password is required".into()))?;
+                credentials::check_available_async(self.credentials.clone()).await?;
                 caldav::DavAuth::Basic(user, pass)
             }
         };
@@ -4346,6 +4430,8 @@ impl Core {
             ));
         }
 
+        credentials::check_available_async(self.credentials.clone()).await?;
+
         let outcome = tokio::select! {
             r = oauth::flow::authorize_with_broker(
                 Provider::Gmail,
@@ -4413,6 +4499,7 @@ impl Core {
             // Scope not yet consented (or refresh token stale): widen consent
             // in the browser, then mint the Graph token again.
             Err(CoreError::NeedsReauth) => {
+                credentials::check_available_async(self.credentials.clone()).await?;
                 let outcome = tokio::select! {
                     r = oauth::flow::authorize_with_broker(
                         Provider::Microsoft,
@@ -7373,11 +7460,22 @@ mod account_backup_import_tests {
 mod local_data_reset_tests {
     use super::*;
 
+    async fn start_test_core(paths: &Paths) -> Core {
+        Core::start_mail_ui_with_credentials(
+            paths.clone(),
+            Arc::new(credentials::DevelopmentFileCredentialStore::new(
+                paths.data_dir.join("test-credentials.json"),
+            )),
+        )
+        .await
+        .unwrap()
+    }
+
     #[tokio::test]
     async fn delete_all_local_data_keeps_databases_open_and_empties_profile() {
         let temp = tempfile::tempdir().unwrap();
         let paths = Paths::for_tests(temp.path());
-        let core = Core::start_mail_ui(paths.clone()).await.unwrap();
+        let core = start_test_core(&paths).await;
         core.db
             .write(|conn| {
                 db::testutil::seed_account(conn);
@@ -7460,7 +7558,7 @@ mod local_data_reset_tests {
     async fn startup_recovery_finishes_interrupted_removal_and_cleans_orphans() {
         let temp = tempfile::tempdir().unwrap();
         let paths = Paths::for_tests(temp.path());
-        let core = Core::start_mail_ui(paths.clone()).await.unwrap();
+        let core = start_test_core(&paths).await;
         core.db
             .write(|conn| {
                 db::testutil::seed_account(conn);

@@ -300,6 +300,13 @@ impl flectar_mail_core::accounts::credentials::CredentialStore for TestSecrets {
     ) -> flectar_mail_core::error::Result<String> {
         Ok(self.0.clone())
     }
+    fn delete(
+        &self,
+        _: i64,
+        _: flectar_mail_core::accounts::credentials::Slot,
+    ) -> flectar_mail_core::error::Result<()> {
+        Ok(())
+    }
     fn delete_all(&self, _: i64) -> flectar_mail_core::error::Result<()> {
         Ok(())
     }

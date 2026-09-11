@@ -54,13 +54,41 @@ fn launch(mut command: Command) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn open_with_desktop_portal(address: &url::Url) -> Result<(), String> {
+    let address = address.clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    runtime.block_on(async move {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async move {
+            let request = ashpd::desktop::open_uri::OpenFileRequest::default()
+                .send_uri(&address)
+                .await
+                .map_err(|error| error.to_string())?;
+            request.response().map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|_| "desktop portal did not respond".to_owned())?
+    })
+}
+
 pub(super) fn open(url: &str) -> Result<(), String> {
     // This entry point is only for provider authorization, never a shell command.
-    if !url.starts_with("https://") {
+    let address = url::Url::parse(url).map_err(|_| "Sign-in address is invalid".to_owned())?;
+    if address.scheme() != "https" || address.host_str().is_none() {
         return Err("Sign-in requires an HTTPS address".into());
     }
+    let url = address.as_str();
     #[cfg(target_os = "linux")]
     {
+        // The portal is the reliable route from AppImages and desktop
+        // containers to the user's host browser. Keep command-based fallbacks
+        // for minimal desktops that do not run xdg-desktop-portal.
+        if open_with_desktop_portal(&address).is_ok() {
+            return Ok(());
+        }
         let mut xdg = host_command("xdg-open");
         xdg.arg(url);
         if launch(xdg).is_ok() {
@@ -93,6 +121,7 @@ mod tests {
     fn rejects_non_https_authorization() {
         assert!(open("file:///tmp/test").is_err());
         assert!(open("--help").is_err());
+        assert!(open("https://").is_err());
     }
     #[test]
     fn restores_host_libraries_only_for_bundled_builds() {

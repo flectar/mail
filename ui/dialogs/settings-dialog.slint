@@ -73,6 +73,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> oauth_browser_error;
     callback retry_oauth_browser();
     callback copy_oauth_link();
+    callback submit_oauth_redirect(string);
     callback import_mail_certificate();
     in-out property <string> imap_host: "";
     in-out property <string> imap_port: "993";
@@ -628,6 +629,7 @@ export component SettingsDialog inherits Rectangle {
                                 launch-failed: root.oauth_browser_error;
                                 retry => { root.retry_oauth_browser(); }
                                 copy-link => { root.copy_oauth_link(); }
+                                submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account in root.connected_accounts : drop-target := DropArea {
                                 height: root.compact ? 221px : account.sync_error != "" ? 183px : 159px;

@@ -5,9 +5,12 @@ use crate::{
 };
 use async_trait::async_trait;
 use std::{
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+
+/// Give people enough time to finish account selection, consent, and MFA.
+pub const OAUTH_REDIRECT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Access token returned by a platform authorization service such as Google
 /// Play Services. Native mobile authorization does not expose a reusable
@@ -42,6 +45,16 @@ pub trait OAuthRedirectBroker: Send + Sync {
         _interactive: bool,
     ) -> Option<Result<PlatformAuthorization>> {
         None
+    }
+
+    /// Forward a browser callback that could not reach the local listener.
+    ///
+    /// This is useful when the browser and application run in different
+    /// network namespaces, as can happen with containers and remote desktops.
+    fn submit_redirect(&self, _uri: &str) -> Result<()> {
+        Err(CoreError::Auth(
+            "pasted browser callbacks are not supported on this platform".into(),
+        ))
     }
 }
 
@@ -107,11 +120,23 @@ pub fn parse_redirect_uri(uri: &str) -> Result<AuthCode> {
 }
 
 #[derive(Default)]
-pub struct LoopbackRedirectBroker;
+pub struct LoopbackRedirectBroker {
+    pending: Arc<Mutex<Option<PendingRedirect>>>,
+}
+
+struct PendingRedirect {
+    redirect_uri: String,
+    expected_state: String,
+    guard: OAuthRedirectGuard,
+    sender: Option<tokio::sync::oneshot::Sender<AuthCode>>,
+}
 
 struct LoopbackRedirectSession {
     redirect_uri: String,
     server: LoopbackServer,
+    manual_redirect: tokio::sync::oneshot::Receiver<AuthCode>,
+    expected_state: String,
+    pending: Arc<Mutex<Option<PendingRedirect>>>,
 }
 
 #[async_trait]
@@ -119,7 +144,7 @@ impl OAuthRedirectBroker for LoopbackRedirectBroker {
     async fn begin(
         &self,
         provider: Provider,
-        _expected_state: &str,
+        expected_state: &str,
     ) -> Result<Box<dyn OAuthRedirectSession>> {
         let server = LoopbackServer::bind().await?;
         let redirect_uri = match provider {
@@ -127,10 +152,52 @@ impl OAuthRedirectBroker for LoopbackRedirectBroker {
             Provider::Microsoft => server.localhost_redirect_uri(),
             Provider::Imap => return Err(CoreError::Auth("provider does not use oauth".into())),
         };
+        let (sender, manual_redirect) = tokio::sync::oneshot::channel();
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| CoreError::Auth("OAuth callback state is unavailable".into()))?;
+        if pending.is_some() {
+            return Err(CoreError::Auth(
+                "another browser authorization is already in progress".into(),
+            ));
+        }
+        *pending = Some(PendingRedirect {
+            redirect_uri: redirect_uri.clone(),
+            expected_state: expected_state.to_owned(),
+            guard: OAuthRedirectGuard::new(expected_state, OAUTH_REDIRECT_TIMEOUT),
+            sender: Some(sender),
+        });
         Ok(Box::new(LoopbackRedirectSession {
             redirect_uri,
             server,
+            manual_redirect,
+            expected_state: expected_state.to_owned(),
+            pending: self.pending.clone(),
         }))
+    }
+
+    fn submit_redirect(&self, uri: &str) -> Result<()> {
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| CoreError::Auth("OAuth callback state is unavailable".into()))?;
+        let pending = pending
+            .as_mut()
+            .ok_or_else(|| CoreError::Auth("no browser authorization is in progress".into()))?;
+        if !same_redirect_endpoint(uri, &pending.redirect_uri) {
+            return Err(CoreError::Auth(
+                "paste the complete localhost address from the final browser page".into(),
+            ));
+        }
+        let code = pending.guard.accept(uri)?;
+        let sender = pending
+            .sender
+            .take()
+            .ok_or_else(|| CoreError::Auth("OAuth callback is expired or already used".into()))?;
+        sender
+            .send(code)
+            .map_err(|_| CoreError::Auth("browser authorization is no longer active".into()))
     }
 }
 
@@ -140,9 +207,43 @@ impl OAuthRedirectSession for LoopbackRedirectSession {
         &self.redirect_uri
     }
 
-    async fn wait(self: Box<Self>, timeout: Duration) -> Result<AuthCode> {
-        self.server.wait_for_code(timeout).await
+    async fn wait(mut self: Box<Self>, timeout: Duration) -> Result<AuthCode> {
+        tokio::select! {
+            result = self.server.wait_for_code(timeout) => result,
+            result = tokio::time::timeout(timeout, &mut self.manual_redirect) => {
+                result
+                    .map_err(|_| CoreError::Auth("sign-in timed out".into()))?
+                    .map_err(|_| CoreError::Auth("browser authorization is no longer active".into()))
+            }
+        }
     }
+}
+
+impl Drop for LoopbackRedirectSession {
+    fn drop(&mut self) {
+        let Ok(mut pending) = self.pending.lock() else {
+            return;
+        };
+        if pending
+            .as_ref()
+            .is_some_and(|pending| pending.expected_state == self.expected_state)
+        {
+            *pending = None;
+        }
+    }
+}
+
+fn same_redirect_endpoint(candidate: &str, expected: &str) -> bool {
+    let Ok(candidate) = url::Url::parse(candidate.trim()) else {
+        return false;
+    };
+    let Ok(expected) = url::Url::parse(expected) else {
+        return false;
+    };
+    candidate.scheme() == expected.scheme()
+        && candidate.host_str() == expected.host_str()
+        && candidate.port_or_known_default() == expected.port_or_known_default()
+        && candidate.path() == expected.path()
 }
 
 #[cfg(test)]
@@ -196,6 +297,46 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("expired")
+        );
+    }
+
+    #[tokio::test]
+    async fn loopback_broker_accepts_a_callback_pasted_from_the_error_page() {
+        let broker = LoopbackRedirectBroker::default();
+        let session = broker.begin(Provider::Gmail, "right").await.unwrap();
+        let callback = format!(
+            "{}?state=right&iss=https%3A%2F%2Faccounts.google.com&code=a%2Fb",
+            session.redirect_uri()
+        );
+
+        broker.submit_redirect(&callback).unwrap();
+        assert_eq!(
+            session.wait(Duration::from_secs(1)).await.unwrap(),
+            AuthCode {
+                code: "a/b".into(),
+                state: Some("right".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn pasted_callback_must_match_the_active_listener_and_state() {
+        let broker = LoopbackRedirectBroker::default();
+        let session = broker.begin(Provider::Gmail, "right").await.unwrap();
+        assert!(
+            broker
+                .submit_redirect("http://127.0.0.1:1/?state=right&code=nope")
+                .unwrap_err()
+                .to_string()
+                .contains("complete localhost address")
+        );
+        let wrong_state = format!("{}?state=wrong&code=nope", session.redirect_uri());
+        assert!(
+            broker
+                .submit_redirect(&wrong_state)
+                .unwrap_err()
+                .to_string()
+                .contains("state mismatch")
         );
     }
 }

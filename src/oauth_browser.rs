@@ -25,7 +25,10 @@ fn launch(app: slint::Weak<AppWindow>, url: String) {
     });
 }
 
-pub(super) fn register(app: &AppWindow) {
+pub(super) fn register(
+    app: &AppWindow,
+    redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
+) {
     let weak = app.as_weak();
     app.on_retry_oauth_browser(move || {
         let Some(app) = weak.upgrade() else {
@@ -43,6 +46,22 @@ pub(super) fn register(app: &AppWindow) {
         };
         if app.get_oauth_in_progress() && !app.get_oauth_authorization_url().is_empty() {
             app.invoke_copy_oauth_authorization_url();
+        }
+    });
+    let weak = app.as_weak();
+    app.on_submit_oauth_redirect(move |uri| {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        if !app.get_oauth_in_progress() {
+            return;
+        }
+        match redirects.submit_redirect(uri.as_str()) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Finishing browser sign-in…")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not use that browser address: {}",
+                error,
+            )),
         }
     });
 }
@@ -70,7 +89,12 @@ mod tests {
         slint::platform::set_platform(Box::new(Headless(window.clone(), clipboard.clone())))
             .unwrap();
         let app = AppWindow::new().unwrap();
-        register(&app);
+        register(
+            &app,
+            Arc::new(
+                flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default(),
+            ),
+        );
         app.set_startup_ready(true);
         app.set_oauth_in_progress(true);
         app.set_oauth_authorization_url(

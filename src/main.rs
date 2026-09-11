@@ -863,11 +863,15 @@ pub struct PlatformContext {
 
 impl PlatformContext {
     pub fn desktop() -> Result<Self, flectar_mail_core::error::CoreError> {
+        let paths = Paths::default_dirs()?;
+        let credentials = desktop_credential_store(&paths);
         Ok(Self {
-            paths: Paths::default_dirs()?,
+            paths,
             documents: documents::default_provider(),
-            credentials: Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore),
-            oauth_redirects: Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker),
+            credentials,
+            oauth_redirects: Arc::new(
+                flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default(),
+            ),
         })
     }
 
@@ -883,6 +887,63 @@ impl PlatformContext {
             credentials,
             oauth_redirects,
         }
+    }
+}
+
+fn desktop_credential_store(
+    paths: &Paths,
+) -> flectar_mail_core::accounts::credentials::CredentialStoreHandle {
+    #[cfg(all(target_os = "linux", debug_assertions))]
+    if isolated_container_without_secret_service() {
+        let path = paths.data_dir.join("credentials-v1.json");
+        tracing::warn!(
+            path = %path.display(),
+            "credential: no D-Bus session in development container; using debug-only plaintext storage"
+        );
+        return Arc::new(
+            flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
+        );
+    }
+    #[cfg(not(all(target_os = "linux", debug_assertions)))]
+    let _ = paths;
+    Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore)
+}
+
+#[cfg(all(target_os = "linux", debug_assertions))]
+fn isolated_container_without_secret_service() -> bool {
+    let container = std::env::var("container")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    isolated_container_without_secret_service_values(
+        &container,
+        std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some_and(|value| !value.is_empty()),
+    )
+}
+
+#[cfg(all(target_os = "linux", debug_assertions))]
+fn isolated_container_without_secret_service_values(container: &str, has_session_bus: bool) -> bool {
+    matches!(container, "podman" | "docker") && !has_session_bus
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod desktop_credential_store_tests {
+    use super::isolated_container_without_secret_service_values;
+
+    #[test]
+    fn debug_file_store_is_limited_to_isolated_desktop_containers() {
+        assert!(isolated_container_without_secret_service_values(
+            "podman", false
+        ));
+        assert!(isolated_container_without_secret_service_values(
+            "docker", false
+        ));
+        assert!(!isolated_container_without_secret_service_values(
+            "podman", true
+        ));
+        assert!(!isolated_container_without_secret_service_values("", false));
+        assert!(!isolated_container_without_secret_service_values(
+            "flatpak", false
+        ));
     }
 }
 
@@ -4629,7 +4690,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let state_for_account = Rc::clone(&state);
     let runtime_for_account = Rc::clone(&runtime);
     let ui_task_tx_for_account = ui_task_tx.clone();
-    oauth_browser::register(&app);
+    oauth_browser::register(&app, platform.oauth_redirects.clone());
     mail_setup::register(&app, &runtime);
     app.on_add_password_account(
         move |protocol,

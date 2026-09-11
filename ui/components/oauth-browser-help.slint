@@ -1,5 +1,6 @@
 import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { Button } from "button.slint";
+import { LineEdit } from "controls.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
@@ -7,17 +8,103 @@ export component OAuthBrowserHelp inherits VerticalBox {
     in property <bool> launch-failed: false;
     callback retry();
     callback copy-link();
+    callback submit-redirect(string);
+    in-out property <bool> expanded: false;
+    private property <string> redirect-address;
     padding: 0px;
     spacing: 8px;
-    Text {
-        text: root.launch-failed ? @tr("The browser could not be opened. Try again, or copy the link and paste it into a browser on this device.") : @tr("Browser didn’t open? Try again or copy the sign-in link into a browser on this device.");
-        color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
-    }
-    HorizontalBox {
+
+    help-header := Rectangle {
         height: 36px;
+        border-radius: 6px;
+        border-width: header-focus.has-focus ? 2px : 1px;
+        border-color: header-focus.has-focus ? AppTheme.accent : AppTheme.control-border;
+        background: header-hit.pressed ? AppTheme.muted-control-bg
+            : header-hit.has-hover ? AppTheme.control-bg.brighter(AppTheme.dark ? 8% : 2%)
+            : AppTheme.surface;
+
+        Image {
+            x: 11px;
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            source: root.expanded
+                ? @image-url("../icons/phosphor/caret-down.svg")
+                : @image-url("../icons/phosphor/caret-right.svg");
+            colorize: AppTheme.secondary;
+            image-fit: contain;
+            accessible-role: none;
+        }
+        Text {
+            x: 34px;
+            width: parent.width - self.x - 12px;
+            height: parent.height;
+            text: root.launch-failed ? @tr("Browser did not open — show sign-in help") : @tr("Having trouble with browser sign-in?");
+            color: root.launch-failed ? AppTheme.heading : AppTheme.secondary;
+            font-size: TypeScale.secondary;
+            font-weight: root.launch-failed ? 600 : 500;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        header-focus := FocusScope {
+            accessible-role: button;
+            accessible-label: root.launch-failed ? @tr("Browser did not open — show sign-in help") : @tr("Having trouble with browser sign-in?");
+            accessible-expanded: root.expanded;
+            accessible-action-default => { root.expanded = !root.expanded; }
+            key-pressed(event) => {
+                if event.text == Key.Return || event.text == Key.Space {
+                    root.expanded = !root.expanded;
+                    return accept;
+                }
+                reject
+            }
+        }
+        header-hit := TouchArea {
+            clicked => { header-focus.focus(); root.expanded = !root.expanded; }
+            mouse-cursor: pointer;
+        }
+    }
+
+    if root.expanded : VerticalBox {
         padding: 0px;
         spacing: 8px;
-        Button { text: @tr("Open browser"); clicked => { root.retry(); } }
-        Button { text: @tr("Copy sign-in link"); clicked => { root.copy-link(); } }
+        Text {
+            text: root.launch-failed ? @tr("Flectar could not reach the system browser from this app environment. Open the link again or copy it into a browser on this device.") : @tr("Open the sign-in page again or copy its link into a browser on this device.");
+            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+        }
+        HorizontalBox {
+            height: 32px;
+            padding: 0px;
+            spacing: 8px;
+            Button { text: @tr("Open browser"); clicked => { root.retry(); } }
+            Button { text: @tr("Copy sign-in link"); clicked => { root.copy-link(); } }
+        }
+        Text {
+            text: @tr("If the final browser page says localhost can’t be reached, copy its full address and paste it below.");
+            color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+        }
+        LineEdit {
+            height: 36px;
+            input-label: @tr("Final browser address");
+            placeholder-text: @tr("Final localhost address");
+            text <=> root.redirect-address;
+            accepted(value) => {
+                if value != "" {
+                    root.redirect-address = "";
+                    root.submit-redirect(value);
+                }
+            }
+        }
+        Button {
+            height: 32px;
+            text: @tr("Finish sign-in");
+            primary: root.redirect-address != "";
+            enabled: root.redirect-address != "";
+            clicked => {
+                let address = root.redirect-address;
+                root.redirect-address = "";
+                root.submit-redirect(address);
+            }
+        }
     }
 }
