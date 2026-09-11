@@ -347,10 +347,10 @@ msgid "Message ready."
 msgstr "Mensaje listo."
 
 #: ui/app.slint:183
-msgid "System tray behavior is unavailable on mobile."
+msgid "System tray behavior is unavailable in this package."
 msgstr ""
-"El comportamiento de la bandeja del sistema no está disponible en "
-"dispositivos móviles."
+"El comportamiento de la bandeja del sistema no está disponible en este "
+"paquete."
 
 #: ui/app.slint:184
 msgid "Close-to-tray is active for this session."
@@ -4176,17 +4176,3 @@ msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 "Déjalo vacío para detectar /.well-known/jmap a partir de tu dominio de "
 "correo."
-
-#~ msgid ""
-#~ "The browser could not be opened. Try again, or copy the link and paste it "
-#~ "into a browser on this device."
-#~ msgstr ""
-#~ "No se ha podido abrir el navegador. Inténtalo de nuevo o copia el enlace "
-#~ "y pégalo en un navegador de este dispositivo."
-
-#~ msgid ""
-#~ "Browser didn’t open? Try again or copy the sign-in link into a browser on "
-#~ "this device."
-#~ msgstr ""
-#~ "¿No se ha abierto el navegador? Inténtalo de nuevo o copia el enlace de "
-#~ "inicio de sesión en un navegador de este dispositivo."

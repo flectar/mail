@@ -344,7 +344,7 @@ msgid "Message ready."
 msgstr ""
 
 #: ui/app.slint:183
-msgid "System tray behavior is unavailable on mobile."
+msgid "System tray behavior is unavailable in this package."
 msgstr ""
 
 #: ui/app.slint:184
