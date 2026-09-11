@@ -91,6 +91,8 @@ jobs:
         run: cargo check --workspace --all-targets --locked
       - name: Check the capability-minimal application
         run: cargo check -p flectar-mail --no-default-features --locked
+      - name: Check the Flatpak application profile
+        run: cargo check -p flectar-mail --no-default-features --features remote-content,flatpak --locked
       - name: Check the opt-in GPU renderer
         run: cargo check -p flectar-mail --no-default-features --features remote-content,gpu-renderer --locked
       - name: Lint without warnings

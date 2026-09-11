@@ -10,12 +10,12 @@ use crate::tray_ui::FlectarTray;
 pub(super) fn create_and_register_window_lifecycle(
     app: &AppWindow,
 ) -> Result<Option<FlectarTray>, slint::PlatformError> {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", feature = "flatpak")))]
     let tray = Some(FlectarTray::new()?);
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
     let tray: Option<FlectarTray> = None;
 
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
     app.set_close_to_tray(false);
 
     if let Some(tray) = tray.as_ref() {
@@ -79,10 +79,10 @@ pub(super) fn register_window_preference_callbacks(
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        if cfg!(any(target_os = "android", target_os = "ios")) {
+        if cfg!(any(target_os = "android", target_os = "ios", feature = "flatpak")) {
             app.set_close_to_tray(false);
             app.set_sync_status(UiMessage::plain(
-                "System tray behavior is unavailable on mobile.",
+                "System tray behavior is unavailable in this package.",
             ));
             return;
         }

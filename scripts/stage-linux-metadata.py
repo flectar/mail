@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def stage(project: Path, destination: Path) -> str:
+def stage(project: Path, destination: Path, *, flatpak: bool = False) -> str:
     with (project / "Cargo.toml").open("rb") as stream:
         version = tomllib.load(stream)["package"]["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", version):
@@ -29,6 +29,8 @@ def stage(project: Path, destination: Path) -> str:
     )
     if count != 1:
         raise ValueError("Expected one X-AppImage-Version field in the desktop template")
+    if flatpak:
+        desktop = re.sub(r"^X-AppImage-[^\n]*\n?", "", desktop, flags=re.MULTILINE)
     parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
     metainfo = ET.parse(resources / "com.flectar.mail.metainfo.xml", parser=parser)
     # The first release describes the build being packaged. Retain older entries.
@@ -50,6 +52,7 @@ def stage(project: Path, destination: Path) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--flatpak", action="store_true", help="omit AppImage-only desktop keys")
     parser.add_argument("destination", type=Path, help="AppDir or Debian package root")
     args = parser.parse_args()
-    print(stage(Path(__file__).resolve().parent.parent, args.destination))
+    print(stage(Path(__file__).resolve().parent.parent, args.destination, flatpak=args.flatpak))

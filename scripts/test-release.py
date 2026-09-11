@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -34,6 +35,55 @@ stage_linux_metadata = linux_metadata.stage
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_flatpak_cargo_sources_match_lockfile(self):
+        project = SCRIPTS.parent
+        packages = tomllib.loads((project / "Cargo.lock").read_text())["package"]
+        expected = {
+            f"cargo/vendor/{package['name']}-{package['version']}": package
+            for package in packages
+            if package.get("source", "").startswith("registry+")
+        }
+        sources = json.loads(
+            (project / "packaging/flatpak/cargo-sources.json").read_text()
+        )
+        self.assertEqual(len(sources), len(expected) * 2 + 1)
+
+        archives = {source["dest"]: source for source in sources if source["type"] == "archive"}
+        checksums = {
+            source["dest"]: json.loads(source["contents"])["package"]
+            for source in sources
+            if source["type"] == "inline" and source.get("dest-filename") == ".cargo-checksum.json"
+        }
+        self.assertEqual(set(archives), set(expected))
+        self.assertEqual(
+            checksums,
+            {destination: package["checksum"] for destination, package in expected.items()},
+        )
+        for destination, package in expected.items():
+            name = package["name"]
+            version = package["version"]
+            source = archives[destination]
+            self.assertEqual(source["archive-type"], "tar-gzip")
+            self.assertEqual(source["sha256"], package["checksum"])
+            self.assertEqual(
+                source["url"],
+                f"https://static.crates.io/crates/{name}/{name}-{version}.crate",
+            )
+        self.assertEqual(
+            sources[-1],
+            {
+                "type": "inline",
+                "contents": (
+                    '[source.vendored-sources]\n'
+                    'directory = "cargo/vendor"\n\n'
+                    '[source.crates-io]\n'
+                    'replace-with = "vendored-sources"\n'
+                ),
+                "dest": "cargo",
+                "dest-filename": "config",
+            },
+        )
+
     def test_android_ci_output_and_oauth_fingerprints(self):
         signing = (SCRIPTS / "fixtures/apksigner-v2.txt").read_text()
         expected = "6f269ab047ca5d5eae7317758a265251e3d5645c5307633a5b92d192b8646280"
@@ -118,6 +168,11 @@ class ReleaseTests(unittest.TestCase):
                     for path in destination.rglob("*"):
                         if path.is_file():
                             self.assertEqual(path.read_bytes(), (repeated / path.relative_to(destination)).read_bytes())
+                flatpak = root / f"{version}-flatpak"
+                with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
+                    stage_linux_metadata(root, flatpak, flatpak=True)
+                desktop = (flatpak / "usr/share/applications/com.flectar.mail.desktop").read_text()
+                self.assertNotIn("X-AppImage-", desktop)
             for name in ("com.flectar.mail.desktop", "com.flectar.mail.metainfo.xml"):
                 self.assertEqual((root / "resources" / name).read_bytes(), (SCRIPTS.parent / "resources" / name).read_bytes())
 
@@ -237,6 +292,8 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             names = (
                 "linux/appimage/flectar-mail.AppImage",
                 "linux/deb/flectar-mail_0.1.0~beta.1_amd64.deb",
+                "linux/rpm/flectar-mail.rpm",
+                "linux/flatpak/flectar-mail.flatpak",
                 "windows/flectar-mail-windows-x64.zip",
                 "windows/flectar-mail-windows-x64-setup.exe",
                 "macos/flectar-mail-macos-arm64.zip",
@@ -250,7 +307,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             (source / "benchmark.json").write_text("{}")
             dist = root / "dist"
             prepare(source, dist, "0.1.0-beta.1")
-            self.assertEqual(len(list(dist.iterdir())), 8)
+            self.assertEqual(len(list(dist.iterdir())), 10)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64-test.apk").is_file())
             # GitHub must not rewrite a download name after we checksum it.
             deb = dist / "flectar-mail_0.1.0.beta.1_amd64.deb"
@@ -275,20 +332,22 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             with self.assertRaises(ValueError):
                 prepare(source, root / "duplicate", "0.1.0-beta.1")
 
-            # Stable releases keep the six desktop downloads, even if the
+            # Stable releases keep the eight desktop downloads, even if the
             # input folder happens to contain test APKs from another step.
             (source / "linux/deb/flectar-mail_0.1.0~beta.1_amd64.deb").rename(
                 source / "linux/deb/flectar-mail_0.1.0_amd64.deb"
             )
             stable_dist = root / "stable"
             prepare(source, stable_dist, "0.1.0")
-            self.assertEqual(len(list(stable_dist.iterdir())), 7)
+            self.assertEqual(len(list(stable_dist.iterdir())), 9)
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_amd64.deb").is_file())
             self.assertFalse(list(stable_dist.glob("*.apk")))
 
     def test_notes_distinguish_android_preview(self):
         self.assertIn("test-signed", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("prereleases only", release_assets.release_notes("0.1.0"))
+        self.assertIn("does not receive Flathub updates", release_assets.release_notes("0.1.0-beta.1"))
+        self.assertIn("build-provenance attestations", release_assets.release_notes("0.1.0-beta.1"))
 
     def test_metadata_rejects_stale_android_lockfile(self):
         with tempfile.TemporaryDirectory() as directory:

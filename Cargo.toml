@@ -51,6 +51,9 @@ gpu-renderer = [
 # runtime setting remains off by default. `--no-default-features` omits all
 # remote body-image loading code for a capability-free minimal build.
 remote-content = []
+# The Flatpak sandbox omits Slint's legacy StatusNotifierItem integration.
+# Native packages retain the system tray and close-to-tray behavior.
+flatpak = []
 # Slint's documented iOS backend uses Skia. Keep it opt-in so desktop builds
 # retain the smaller software-rendered dependency set.
 ios = ["slint/renderer-skia"]

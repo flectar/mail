@@ -414,9 +414,9 @@ pub(super) fn register_data_management_callbacks(
                 app.set_remote_images_enabled(
                     settings.load_remote_images && cfg!(feature = "remote-content"),
                 );
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                #[cfg(not(any(target_os = "android", target_os = "ios", feature = "flatpak")))]
                 app.set_close_to_tray(settings.close_to_tray);
-                #[cfg(any(target_os = "android", target_os = "ios"))]
+                #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
                 app.set_close_to_tray(false);
                 app.set_sync_status(if imported == 0 {
                     UiMessage::detail(

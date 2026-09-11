@@ -155,7 +155,8 @@ When preview builds are published, download them from
 [GitHub Releases](https://github.com/flectar/mail/releases) and look for the
 **Pre-release** badge:
 
-- **Linux x64:** AppImage or Debian/Ubuntu `.deb` package
+- **Linux x64:** AppImage, Debian/Ubuntu `.deb`, Fedora `.rpm`, or a
+  sideloaded Flatpak preview bundle
 - **Windows x64:** Setup `.exe` or portable ZIP
 - **macOS Apple silicon (macOS 14+):** DMG or application ZIP
 - **Android arm64 (Android 8.0+):** Experimental test APK in prereleases
@@ -163,6 +164,20 @@ When preview builds are published, download them from
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.
+
+The Flatpak preview is provided as a standalone test bundle. It is not yet a
+Flathub package and therefore does not receive automatic Flathub updates. Its
+close-to-tray option is disabled until the tray backend can use a sandbox-safe
+D-Bus name.
+
+Install the downloaded Linux package with either
+`sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` or
+`flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak`. Launch the
+Flatpak with `flatpak run com.flectar.mail`.
+
+Each GitHub release includes `SHA256SUMS` and signed build-provenance
+attestations. With GitHub CLI installed, verify a download with
+`gh attestation verify <download> --repo flectar/mail`.
 
 Android APK updates require the same signing key; builds without a persistent
 test key may require uninstalling the previous app, which deletes local app data.

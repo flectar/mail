@@ -15,6 +15,8 @@ def prepare(source: Path, destination: Path, version: str) -> None:
     packages = {
         "flectar-mail.AppImage": f"flectar-mail-{version}-linux-x64.AppImage",
         f"flectar-mail_{deb_version}_amd64.deb": f"flectar-mail_{deb_filename_version}_amd64.deb",
+        "flectar-mail.rpm": f"flectar-mail-{version}-linux-x64.rpm",
+        "flectar-mail.flatpak": f"flectar-mail-{version}-linux-x64.flatpak",
         "flectar-mail-windows-x64.zip": f"flectar-mail-{version}-windows-x64.zip",
         "flectar-mail-windows-x64-setup.exe": f"flectar-mail-{version}-windows-x64-setup.exe",
         "flectar-mail-macos-arm64.zip": f"flectar-mail-{version}-macos-arm64.zip",
@@ -52,7 +54,8 @@ def release_notes(version: str) -> str:
         if "-" in version else "The Android test APK is available in prereleases only.\n"
     )
     return (
-        "Desktop builds for Linux x64, Windows x64, and macOS Apple silicon.\n\n"
+        "Desktop builds for Linux x64, Windows x64, and macOS Apple silicon. "
+        "Linux testers can choose AppImage, Debian, Fedora RPM, or Flatpak.\n\n"
         "Gmail and Outlook sign-in require a bundled OAuth registration or your own "
         "keys in **Sign-in settings** on the welcome screen. IMAP/SMTP and JMAP "
         "do not require Google or Microsoft app keys. Provider policies still apply.\n\n"
@@ -60,7 +63,10 @@ def release_notes(version: str) -> str:
         "not Developer ID signed or notarized; OS security prompts are expected. "
         "macOS requires version 14 or later. Updates are installed manually.\n\n"
         "Download the installer for your platform, or use a ZIP for manual "
-        "installation. SHA256SUMS covers every download. iOS archives are "
+        "installation. The preview Flatpak is a sideloaded bundle and does not "
+        "receive Flathub updates yet; close-to-tray is disabled in that package. "
+        "SHA256SUMS covers every download, and GitHub "
+        "records signed build-provenance attestations. iOS archives are "
         "experimental and available through manual workflow runs only.\n\n"
         + android
     )

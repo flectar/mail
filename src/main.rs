@@ -3192,7 +3192,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
                     if let Some(settings) = settings.as_ref() {
                         apply_settings(&app, settings);
-                        #[cfg(any(target_os = "android", target_os = "ios"))]
+                        #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
                         app.set_close_to_tray(false);
                         if let Some(tray) =
                             startup_tray.as_ref().and_then(|tray| tray.upgrade())

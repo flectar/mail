@@ -295,10 +295,12 @@ fn library_path(executable: &std::path::Path) -> Result<std::path::PathBuf, Stri
     let name = pdfium_render::prelude::Pdfium::pdfium_platform_library_name();
     #[cfg(target_os = "linux")]
     {
-        // Debian and AppImage keep private libraries out of the executable directory.
-        let packaged = directory.join("../lib/flectar-mail").join(&name);
-        if packaged.is_file() {
-            return Ok(packaged);
+        // Linux packages keep private libraries out of the executable directory.
+        for libdir in ["../lib64/flectar-mail", "../lib/flectar-mail"] {
+            let packaged = directory.join(libdir).join(&name);
+            if packaged.is_file() {
+                return Ok(packaged);
+            }
         }
     }
     Ok(directory.join(name))
