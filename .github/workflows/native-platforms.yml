@@ -351,19 +351,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force target/package/windows | Out-Null
-          New-Item -ItemType Directory -Force "target/package/windows/Licenses/Google Sans Flex" | Out-Null
-          New-Item -ItemType Directory -Force "target/package/windows/Licenses/Noto Emoji" | Out-Null
+          New-Item -ItemType Directory -Force "target/package/windows/LICENSES/Google Sans Flex" | Out-Null
+          New-Item -ItemType Directory -Force "target/package/windows/LICENSES/Noto Emoji" | Out-Null
           python scripts/stage-pdfium.py win-x64 target/package/windows
           if ($LASTEXITCODE -ne 0) { throw "PDFium staging failed" }
           Copy-Item target/release/flectar-mail.exe target/package/windows/
           Copy-Item README.md target/package/windows/
           Copy-Item LICENSE target/package/windows/
-          Copy-Item LICENSES target/package/windows/LICENSES -Recurse
+          Copy-Item LICENSES/* target/package/windows/LICENSES/ -Recurse -Force
           Copy-Item THIRD_PARTY_NOTICES.md target/package/windows/
-          Copy-Item resources/fonts/google-sans-flex/OFL.txt "target/package/windows/Licenses/Google Sans Flex/"
-          Copy-Item resources/fonts/google-sans-flex/README.md "target/package/windows/Licenses/Google Sans Flex/"
-          Copy-Item resources/fonts/noto-emoji/OFL.txt "target/package/windows/Licenses/Noto Emoji/"
-          Copy-Item resources/fonts/noto-emoji/README.md "target/package/windows/Licenses/Noto Emoji/"
+          Copy-Item resources/fonts/google-sans-flex/OFL.txt "target/package/windows/LICENSES/Google Sans Flex/"
+          Copy-Item resources/fonts/google-sans-flex/README.md "target/package/windows/LICENSES/Google Sans Flex/"
+          Copy-Item resources/fonts/noto-emoji/OFL.txt "target/package/windows/LICENSES/Noto Emoji/"
+          Copy-Item resources/fonts/noto-emoji/README.md "target/package/windows/LICENSES/Noto Emoji/"
           python scripts/test-pdf-preview.py target/package/windows/flectar-mail.exe
           if ($LASTEXITCODE -ne 0) { throw "Packaged PDF preview test failed" }
           Compress-Archive -Path target/package/windows/* -DestinationPath target/flectar-mail-windows-x64.zip -Force
