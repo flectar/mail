@@ -26,7 +26,7 @@ ASSETS = {
 }
 
 
-def stage(target, destination, cache=None):
+def stage(target, destination, cache=None, licenses_destination=None):
     checksum, library = ASSETS[target]
     url = f"https://github.com/bblanchon/pdfium-binaries/releases/download/{RELEASE}/pdfium-{target}.tgz"
     cached = cache / f"{checksum}.tgz" if cache else None
@@ -46,6 +46,7 @@ def stage(target, destination, cache=None):
             temporary = pathlib.Path(temp.name)
         temporary.replace(cached)
     destination.mkdir(parents=True, exist_ok=True)
+    licenses_destination = licenses_destination or destination / "pdfium-licenses"
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
         members = {member.name.removeprefix("./"): member for member in archive.getmembers()}
         for name, member in members.items():
@@ -53,14 +54,18 @@ def stage(target, destination, cache=None):
                 continue
             if not member.isfile() or ".." in pathlib.PurePosixPath(name).parts:
                 raise ValueError("Invalid PDFium archive member")
-            relative = pathlib.Path(library).name if name == library else pathlib.Path("pdfium-licenses") / name
-            output = destination / relative
+            output = (
+                destination / pathlib.Path(library).name
+                if name == library
+                else licenses_destination / name
+            )
             output.parent.mkdir(parents=True, exist_ok=True)
             with archive.extractfile(member) as source, output.open("wb") as sink:
                 shutil.copyfileobj(source, sink)
         if not (destination / pathlib.Path(library).name).is_file():
             raise ValueError("PDFium runtime missing from archive")
-    (destination / "pdfium-licenses" / "build.json").write_text(json.dumps({"release": RELEASE, "sha256": checksum, "url": url}, indent=2) + "\n")
+    licenses_destination.mkdir(parents=True, exist_ok=True)
+    (licenses_destination / "build.json").write_text(json.dumps({"release": RELEASE, "sha256": checksum, "url": url}, indent=2) + "\n")
 
 
 if __name__ == "__main__":
@@ -68,5 +73,10 @@ if __name__ == "__main__":
     parser.add_argument("target", choices=ASSETS)
     parser.add_argument("destination", type=pathlib.Path)
     parser.add_argument("--cache", type=pathlib.Path, help="Verified archive cache for repeated packaging builds")
+    parser.add_argument(
+        "--licenses-destination",
+        type=pathlib.Path,
+        help="place PDFium notices outside the runtime-library directory",
+    )
     args = parser.parse_args()
-    stage(args.target, args.destination, args.cache)
+    stage(args.target, args.destination, args.cache, args.licenses_destination)

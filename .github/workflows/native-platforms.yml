@@ -433,7 +433,18 @@ jobs:
         run: cargo build --locked --release --no-default-features --features remote-content --bin flectar-mail
 
       - name: Create ad-hoc signed app bundle
-        run: ./scripts/package-macos.sh
+        run: |
+          mkdir -p target/macos
+          if ./scripts/package-macos.sh 2>&1 | tee target/macos/package.log; then
+            exit 0
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          details = "\n".join(Path("target/macos/package.log").read_text(errors="replace").splitlines()[-80:])
+          details = details[-16000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=macOS packaging failed::{details}")
+          PY
+          exit 1
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; printf "macOS packaging failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2; exit "$status"' ERR
 
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 binary_path="${1:-$project_dir/target/release/flectar-mail}"
@@ -14,12 +15,17 @@ fi
 rm -rf "$app_dir"
 mkdir -p \
   "$app_dir/Contents/MacOS" \
+  "$app_dir/Contents/Frameworks" \
   "$app_dir/Contents/Resources/Licenses/Flectar Mail" \
   "$app_dir/Contents/Resources/Licenses/Google Sans Flex" \
-  "$app_dir/Contents/Resources/Licenses/Noto Emoji"
+  "$app_dir/Contents/Resources/Licenses/Noto Emoji" \
+  "$app_dir/Contents/Resources/Licenses/PDFium"
 cp "$binary_path" "$app_dir/Contents/MacOS/flectar-mail"
 
-python3 "$project_dir/scripts/stage-pdfium.py" mac-arm64 "$app_dir/Contents/MacOS"
+python3 "$project_dir/scripts/stage-pdfium.py" \
+  mac-arm64 "$app_dir/Contents/Frameworks" \
+  --licenses-destination "$app_dir/Contents/Resources/Licenses/PDFium"
+chmod 0755 "$app_dir/Contents/Frameworks/libpdfium.dylib"
 
 icon_source="$project_dir/resources/app-icon/flectar-mail-masked.png"
 iconset_dir="$output_dir/FlectarMail.iconset"
@@ -57,9 +63,10 @@ sed \
   -e "s/@VERSION@/$native_version/g" \
   "$project_dir/platform/macos/Info.plist.in" > "$app_dir/Contents/Info.plist"
 
-# An ad-hoc signature makes the CI artifact internally consistent. Distribution
-# signing and notarization replace it when Apple credentials are configured.
-codesign --force --deep --sign - "$app_dir"
+# Sign nested code before the containing app. Distribution signing and
+# notarization replace these ad-hoc identities when Apple credentials exist.
+codesign --force --sign - "$app_dir/Contents/Frameworks/libpdfium.dylib"
+codesign --force --sign - "$app_dir"
 python3 "$project_dir/scripts/test-pdf-preview.py" "$app_dir/Contents/MacOS/flectar-mail"
 
 mkdir -p "$output_dir"

@@ -303,6 +303,13 @@ fn library_path(executable: &std::path::Path) -> Result<std::path::PathBuf, Stri
             }
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        let packaged = directory.join("../Frameworks").join(&name);
+        if packaged.is_file() {
+            return Ok(packaged);
+        }
+    }
     Ok(directory.join(name))
 }
 
