@@ -267,7 +267,7 @@ export component FilesView inherits Rectangle {
                             title: FilesUi.attachments ? @tr("Email attachments") : @tr("Server storage");
                             title-font-size: root.compact ? TypeScale.title-small : TypeScale.heading-small;
                             title-weight: 600; show-leading: true; leading-ghost: true;
-                            leading-icon: root.compact || root.sidebar-collapsed ? @image-url("../icons/phosphor/sidebar-simple.svg") : @image-url("../icons/phosphor/sidebar-simple-fill.svg");
+                            leading-icon: root.compact || root.sidebar-collapsed ? @image-url("../icons/phosphor/sidebar.svg") : @image-url("../icons/phosphor/sidebar-fill.svg");
                             leading-tooltip: @tr("File sources"); leading-accessible-id: "files-sidebar-button";
                             leading-clicked => { if root.compact { root.navigation-open = true; } else { root.sidebar-collapsed = !root.sidebar-collapsed; } }
                             if !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary;
