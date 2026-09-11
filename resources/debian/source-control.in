@@ -9,6 +9,6 @@ Homepage: https://flectar.com
 Package: flectar-mail
 Architecture: amd64
 Depends: ${shlibs:Depends}, libfontconfig1, libwayland-client0, libx11-6, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, hicolor-icon-theme, xdg-utils
-Recommends: xdg-desktop-portal
+Recommends: xdg-desktop-portal, gnome-keyring
 Description: Native Slint mail client
  Flectar Mail is a native desktop mail client built with Rust and Slint.

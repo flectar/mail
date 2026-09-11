@@ -174,6 +174,19 @@ You can also build Flectar Mail from source with the
 cargo run --bin flectar-mail
 ```
 
+Linux desktop OAuth uses the system browser through the desktop portal and
+stores refresh credentials through the freedesktop Secret Service. A normal
+desktop session therefore needs an `xdg-desktop-portal` backend and a Secret
+Service provider such as GNOME Keyring. Release builds stop before opening the
+OAuth page when secure credential storage is unavailable, so an authorization
+grant can never be completed without a safe place to persist it.
+
+Podman and Docker development shells commonly have neither the host session
+D-Bus nor the host browser's loopback network. Debug builds support that setup
+with a clearly marked, owner-only development credential file and an accordion
+for pasting the final loopback callback URL. The file backend is excluded from
+release builds.
+
 ## Open source, for everyone
 
 Flectar Mail is one open-source application. There is no separate community
