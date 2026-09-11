@@ -35,6 +35,23 @@ stage_linux_metadata = linux_metadata.stage
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_flatpak_pdfium_archive_keeps_expected_layout(self):
+        manifest = (
+            SCRIPTS.parent / "packaging/flatpak/com.flectar.mail.yml"
+        ).read_text()
+        self.assertIn(
+            "install -Dm0755 pdfium-runtime/lib/libpdfium.so "
+            "/app/lib/flectar-mail/libpdfium.so",
+            manifest,
+        )
+        self.assertRegex(
+            manifest,
+            r"(?s)url: .*pdfium-linux-x64\.tgz\n"
+            r"\s+sha256: [0-9a-f]{64}\n"
+            r"\s+dest: pdfium-runtime\n"
+            r"\s+strip-components: 0\n",
+        )
+
     def test_flatpak_cargo_sources_match_lockfile(self):
         project = SCRIPTS.parent
         packages = tomllib.loads((project / "Cargo.lock").read_text())["package"]

@@ -38,6 +38,7 @@ modules:
       - cargo build --offline --locked --release --no-default-features --features remote-content,flatpak --bin flectar-mail
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail
       - install -Dm0755 pdfium-runtime/lib/libpdfium.so /app/lib/flectar-mail/libpdfium.so
+      - python3 scripts/test-pdf-preview.py /app/bin/flectar-mail
       - python3 scripts/stage-linux-metadata.py --flatpak _flatpak-stage
       - install -Dm0644 _flatpak-stage/usr/share/applications/com.flectar.mail.desktop /app/share/applications/com.flectar.mail.desktop
       - install -Dm0644 _flatpak-stage/usr/share/metainfo/com.flectar.mail.metainfo.xml /app/share/metainfo/com.flectar.mail.metainfo.xml
@@ -51,9 +52,7 @@ modules:
       - mkdir -p /app/share/licenses/flectar-mail/pdfium
       - cp -a pdfium-runtime/LICENSE pdfium-runtime/licenses /app/share/licenses/flectar-mail/pdfium/
     sources:
-      # This local source makes the checked-in manifest build the exact commit
-      # under test. The eventual Flathub repository will replace it with a
-      # checksum-pinned archive of the stable upstream tag.
+      # Package the exact checkout selected by the release workflow.
       - type: dir
         path: ../..
         skip:
@@ -69,12 +68,11 @@ modules:
           - target
           - tmp
       - cargo-sources.json
-      # Alpha bundles retain the same checksum-pinned PDF renderer as the other
-      # native packages. A Flathub submission must source-build or feature-gate
-      # this component before the stable release.
+      # Include PDF preview in the standalone alpha bundle.
       - type: archive
         url: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8044/pdfium-linux-x64.tgz
         sha256: eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4
         dest: pdfium-runtime
+        strip-components: 0
         only-arches:
           - x86_64

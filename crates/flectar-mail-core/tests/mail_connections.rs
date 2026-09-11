@@ -280,11 +280,18 @@ async fn imported_certificate_still_checks_hostname() {
 
 #[tokio::test]
 async fn smtp_failure_prevents_saving_account() {
-    use flectar_mail_core::{Core, config::Paths};
+    use flectar_mail_core::{
+        Core, accounts::credentials::DevelopmentFileCredentialStore, config::Paths,
+    };
     let temp = tempfile::tempdir().unwrap();
-    let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
-        .await
-        .unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("test-credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
     let (imap_port, imap_task) = imap_server(true, false).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let smtp_port = listener.local_addr().unwrap().port();

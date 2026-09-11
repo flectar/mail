@@ -8,9 +8,6 @@ License:        AGPL-3.0-only
 URL:            https://flectar.com
 ExclusiveArch:  x86_64
 
-# The preview RPM is assembled from the release binary built in a Fedora
-# runner. COPR/OBS publication will replace these inputs with the tagged source
-# archive and its offline Cargo vendor archive.
 Source0:        flectar-mail
 Source1:        libpdfium.so
 Source2:        pdfium-licenses.tar.gz
@@ -24,14 +21,15 @@ Source9:        THIRD_PARTY_NOTICES.md
 Source10:       google-sans-flex-OFL.txt
 Source11:       google-sans-flex-README.md
 
-Requires:       dbus-libs
+# rpmbuild derives linked ELF requirements. Slint and winit load the display
+# and font libraries at runtime, so keep those packages explicit.
 Requires:       fontconfig
 Requires:       hicolor-icon-theme
 Requires:       libX11
 Requires:       libX11-xcb
+Requires:       libwayland-client
 Requires:       libxkbcommon
 Requires:       libxkbcommon-x11
-Requires:       wayland
 Requires:       xdg-utils
 Recommends:     gnome-keyring
 Recommends:     gnupg2
