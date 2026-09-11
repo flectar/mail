@@ -601,8 +601,9 @@ export component MailReadingPane inherits Rectangle {
                             height: min(3, max(1, ceil(root.display-subject.character-count * 10.5px / max(1px, self.width)))) * (self.font-metrics.ascent - self.font-metrics.descent);
                             text: root.display-subject;
                             color: root.title-color;
-                            font-size: root.compact ? TypeScale.title : TypeScale.display;
+                            font-size: root.compact ? TypeScale.title-small : TypeScale.title;
                             font-weight: 600;
+                            letter-spacing: -0.3px;
                             wrap: word-wrap;
                         }
 
