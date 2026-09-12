@@ -14,6 +14,39 @@ import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 
+// Use the same focusable controls in both account-card layouts.
+component AccountActions inherits GridLayout {
+    in property <bool> stacked: false;
+    in property <string> edit-label;
+    in property <bool> edit-enabled;
+    in property <bool> remove-enabled;
+    in property <bool> sync-enabled;
+    callback edit();
+    callback remove();
+    callback sync();
+    spacing: 8px;
+    height: root.stacked ? 112px : 32px;
+    Button {
+        row: 0; col: 0;
+        text: root.edit-label;
+        enabled: root.edit-enabled;
+        clicked => { root.edit(); }
+    }
+    Button {
+        row: root.stacked ? 1 : 0; col: root.stacked ? 0 : 1;
+        text: @tr("Remove");
+        destructive: true;
+        enabled: root.remove-enabled;
+        clicked => { root.remove(); }
+    }
+    Button {
+        row: root.stacked ? 2 : 0; col: root.stacked ? 0 : 2;
+        text: @tr("Sync");
+        enabled: root.sync-enabled;
+        clicked => { root.sync(); }
+    }
+}
+
 export component SettingsDialog inherits Rectangle {
     in property <bool> compact: false;
     in property <[AccountRow]> connected_accounts: [];
@@ -86,6 +119,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> imap_form_open: false;
     private property <bool> imap_editing: false;
     in-out property <bool> delete_data_confirmation: false;
+    in-out property <bool> delete_account_confirmation: false;
+    in-out property <int> delete_account_id: -1;
+    in-out property <string> delete_account_name: "";
     private property <bool> compact-nav-open: false;
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -99,6 +135,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_mark_read_on_open(bool);
     callback set_close_to_tray(bool);
     callback sync_mail();
+    callback sync_account(int);
+    callback delete_account(int);
     callback add_password_account(string, string, string, string, string, string, string, string, string);
     callback start_oauth(string);
     callback reauth_account(int);
@@ -185,6 +223,34 @@ export component SettingsDialog inherits Rectangle {
             && root.imap_port != ""
             && root.smtp_host != ""
             && root.smtp_port != ""));
+
+    function edit-account(account: AccountRow) {
+        if account.provider == "imap" {
+            root.account_email = account.email;
+            root.account_username = account.username;
+            root.account_protocol = account.mail_protocol;
+            root.jmap_url = account.jmap_url;
+            root.imap_security = account.imap_security;
+            root.smtp_security = account.smtp_security;
+            root.trusted_certificate_pem = account.trusted_certificate_pem;
+            root.imap_host = account.imap_host;
+            root.imap_port = account.imap_port;
+            root.smtp_host = account.smtp_host;
+            root.smtp_port = account.smtp_port;
+            root.account_password = "";
+            root.imap_editing = true;
+            root.imap_form_open = true;
+        } else {
+            root.reauth_account(account.id);
+        }
+    }
+
+
+    function confirm-account-removal(account: AccountRow) {
+        root.delete_account_id = account.id;
+        root.delete_account_name = account.email;
+        root.delete_account_confirmation = true;
+    }
 
     function open_new_imap() {
         root.imap_editing = false;
@@ -632,7 +698,11 @@ export component SettingsDialog inherits Rectangle {
                                 submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account in root.connected_accounts : drop-target := DropArea {
-                                height: root.compact ? 221px : account.sync_error != "" ? 183px : 159px;
+                                private property <bool> stacked-actions: self.width < 430px;
+                                private property <bool> separate-actions: root.compact || self.width < 780px;
+                                private property <length> actions-y: root.compact ? 84px : account.sync_error != "" ? 112px : 88px;
+                                private property <length> divider-y: self.separate-actions ? self.actions-y + (self.stacked-actions ? 112px : 32px) + 12px : self.actions-y;
+                                height: self.divider-y + (root.compact ? 154px : 71px);
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
                                 dropped(event) => {
                                     let source = root.read_account_transfer(event.data);
@@ -687,11 +757,11 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                         VerticalBox {
                                             horizontal-stretch: 1;
-                                            min-width: root.compact ? 98px : 190px;
+                                            min-width: root.compact ? 0px : 190px;
                                             spacing: 2px;
                                             Text { text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             Text { text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            Text { text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : root.faint-text; font-size: TypeScale.caption; }
+                                            Text { text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                             Text {
                                                 visible: !root.compact && account.sync_error != "";
                                                 height: !root.compact && account.sync_error != "" ? 28px : 0px;
@@ -701,31 +771,15 @@ export component SettingsDialog inherits Rectangle {
                                                 wrap: word-wrap;
                                             }
                                         }
-                                        Button {
-                                            width: account.provider == "imap" ? 58px : 82px;
-                                            height: 30px;
-                                            text: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
-                                            enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
-                                            clicked => {
-                                                if account.provider == "imap" {
-                                                    root.account_email = account.email;
-                                                    root.account_username = account.username;
-                                                    root.account_protocol = account.mail_protocol;
-                                                    root.jmap_url = account.jmap_url;
-                                                    root.imap_security = account.imap_security;
-                                                    root.smtp_security = account.smtp_security;
-                                                    root.trusted_certificate_pem = account.trusted_certificate_pem;
-                                                    root.imap_host = account.imap_host;
-                                                    root.imap_port = account.imap_port;
-                                                    root.smtp_host = account.smtp_host;
-                                                    root.smtp_port = account.smtp_port;
-                                                    root.account_password = "";
-                                                    root.imap_editing = true;
-                                                    root.imap_form_open = true;
-                                                } else {
-                                                    root.reauth_account(account.id);
-                                                }
-                                            }
+                                        if !drop-target.separate-actions : AccountActions {
+                                            edit-label: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
+                                            edit-enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
+                                            remove-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            sync-enabled: !root.account_setup_in_progress && !root.sync_in_progress && !root.oauth_settings_saving;
+                                            edit => { root.edit-account(account); }
+                                            remove => { root.confirm-account-removal(account); }
+                                            sync => { root.sync_account(account.id); }
+                                            width: 242px;
                                         }
                                         if !root.compact && account.calendar_connected : HorizontalBox {
                                             width: 122px;
@@ -751,19 +805,33 @@ export component SettingsDialog inherits Rectangle {
                                             }
                                         }
                                     }
+                                    if drop-target.separate-actions : AccountActions {
+                                            edit-label: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
+                                            edit-enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
+                                            remove-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            sync-enabled: !root.account_setup_in_progress && !root.sync_in_progress && !root.oauth_settings_saving;
+                                            edit => { root.edit-account(account); }
+                                            remove => { root.confirm-account-removal(account); }
+                                            sync => { root.sync_account(account.id); }
+                                        x: 14px;
+                                        y: drop-target.actions-y;
+                                        width: parent.width - 30px;
+                                        stacked: drop-target.stacked-actions;
+                                    }
                                     Rectangle {
                                         x: 8px;
-                                        y: root.compact ? 92px : account.sync_error != "" ? 112px : 88px;
+                                        y: drop-target.divider-y;
                                         width: parent.width - 16px;
                                         height: 1px;
                                         background: root.border-subtle;
                                     }
                                     SettingsSelectRow {
                                         x: root.compact ? 24px : 32px;
-                                        y: root.compact ? 101px : account.sync_error != "" ? 119px : 95px;
+                                        y: drop-target.divider-y + (root.compact ? 9px : 7px);
                                         width: parent.width - (root.compact ? 48px : 64px);
                                         compact: root.compact;
                                         title: @tr("Mail history");
+                                        compact-description-height: 51px;
                                         description: account.mail_history == "all"
                                             ? @tr("Download the full mailbox. Large accounts can take considerable time and storage.")
                                             : @tr("How far back to download. Mail already stored on this device is kept.");
@@ -1291,5 +1359,24 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_all_data(); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.delete_account_confirmation;
+            title: @tr("Remove account?");
+            subject: root.delete_account_name;
+            description: @tr("Remove this account and its downloaded mail from this device.");
+            detail: @tr("Messages on the mail server will not be deleted.");
+            confirm-label: @tr("Remove account");
+            cancel-label: @tr("Keep account");
+            icon: @image-url("../icons/phosphor/trash-fill.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.delete_account(root.delete_account_id); }
         }
 }

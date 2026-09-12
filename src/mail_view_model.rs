@@ -74,6 +74,9 @@ pub(super) fn apply_background_mail_page(
     page: mail::MailPage,
     acted_on_ids: &[i32],
 ) {
+    if !snapshot_is_current(state, page.account_revision) {
+        return;
+    }
     let mail::MailPage {
         mut messages,
         labels,
@@ -164,6 +167,9 @@ pub(super) fn append_mail_page(
     cursor: ThreadCursor,
     page: mail::MailPage,
 ) -> Result<(), String> {
+    if !snapshot_is_current(state, page.account_revision) {
+        return Ok(());
+    }
     if page.next_cursor == Some(cursor) {
         return Err("mail pagination cursor did not advance".to_owned());
     }

@@ -10,6 +10,10 @@ pub enum CoreError {
     Network(String),
     #[error("imap error: {0}")]
     Imap(String),
+    /// A selective FETCH response could not be parsed. Its session must be
+    /// discarded; explicit opens may retry using the complete message.
+    #[error("imap response parse error: {0}")]
+    ImapParse(String),
     #[error("jmap error: {0}")]
     Jmap(String),
     #[error("send status uncertain: {0}")]
@@ -49,7 +53,7 @@ impl CoreError {
             CoreError::Db(_) => "db",
             CoreError::Io(_) => "io",
             CoreError::Network(_) => "network",
-            CoreError::Imap(_) => "imap",
+            CoreError::Imap(_) | CoreError::ImapParse(_) => "imap",
             CoreError::Jmap(_) => "jmap",
             CoreError::SendUncertain(_) => "send_uncertain",
             CoreError::Smtp(_) => "smtp",

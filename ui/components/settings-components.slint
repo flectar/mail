@@ -151,6 +151,7 @@ export component SettingsSelect inherits ComboBox {
 
 export component SettingsSelectRow inherits Rectangle {
     in property <bool> compact: false;
+    in property <length> compact-description-height: 34px;
     in property <string> title;
     in property <string> description;
     in property <[string]> choices;
@@ -159,7 +160,7 @@ export component SettingsSelectRow inherits Rectangle {
     in property <color> description-color;
     callback selected(int, string);
 
-    height: root.compact ? 104px : 58px;
+    height: root.compact ? 70px + root.compact-description-height : 58px;
     vertical-stretch: 0;
 
     if !root.compact : HorizontalBox {
@@ -199,7 +200,7 @@ export component SettingsSelectRow inherits Rectangle {
             font-weight: 600;
         }
         Text {
-            height: 34px;
+            height: root.compact-description-height;
             text: root.description;
             color: root.description-color;
             font-size: TypeScale.caption;

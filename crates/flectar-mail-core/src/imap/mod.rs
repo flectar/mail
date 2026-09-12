@@ -531,7 +531,10 @@ pub async fn fetch_headers(session: &mut Session, uid_set: &str) -> Result<Vec<F
 }
 
 async fn fetch_headers_inner(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
-    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE {HEADER_FIELDS})");
+    // Keep header sync independent from BODYSTRUCTURE: an incompatible MIME
+    // response must not prevent historical headers from being stored. MIME
+    // plans are fetched separately when preparing or opening message bodies.
+    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE {HEADER_FIELDS})");
     let mut out = Vec::new();
     {
         let mut stream = session
@@ -567,6 +570,83 @@ pub struct FetchedMimePlan {
 
 const MIME_PLAN_QUERY: &str = "(UID BODYSTRUCTURE)";
 
+fn selective_fetch_error(error: async_imap::error::Error) -> CoreError {
+    match error {
+        // Do not include response bytes: they can contain private headers.
+        async_imap::error::Error::Parse(_) => {
+            CoreError::ImapParse("could not parse selective FETCH response".into())
+        }
+        // async-imap 0.11.3 wraps its wire decoder's nom errors in Io(Other)
+        // rather than Parse. Match that decoder format only, never NO/BAD or
+        // an arbitrary transport error. Keep the embedded response private.
+        async_imap::error::Error::Io(ref detail)
+            if detail.kind() == std::io::ErrorKind::Other
+                && (detail.to_string().starts_with("Error(")
+                    || detail.to_string().starts_with("Failure("))
+                && detail.to_string().contains(" during parsing of ") =>
+        {
+            CoreError::ImapParse("could not parse selective FETCH response".into())
+        }
+        error => CoreError::Imap(error.to_string()),
+    }
+}
+
+/// async-imap's FETCH stream discards the tagged completion status. Read
+/// selective responses directly so NO/BAD cannot masquerade as missing MIME.
+/// The main actor independently reconciles unsolicited flags and expunges.
+async fn selective_fetch(
+    session: &mut Session,
+    uid_set: &str,
+    query: &str,
+    mut consume: impl FnMut(u32, &[async_imap::imap_proto::AttributeValue<'_>]),
+) -> Result<()> {
+    use async_imap::imap_proto::{AttributeValue, Response, Status};
+    let tag = session
+        .run_command(format!("UID FETCH {uid_set} {query}"))
+        .await
+        .map_err(selective_fetch_error)?;
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|error| selective_fetch_error(error.into()))?
+            .ok_or_else(|| CoreError::Imap("connection closed before FETCH completed".into()))?;
+        match response.parsed() {
+            Response::Done {
+                tag: received,
+                status,
+                code,
+                information,
+            } if *received == tag => {
+                return match status {
+                    Status::Ok => Ok(()),
+                    _ => Err(CoreError::Imap(format!(
+                        "FETCH rejected: {status:?}, {code:?}, {information:?}"
+                    ))),
+                };
+            }
+            Response::Done { .. } => {
+                return Err(CoreError::ImapParse(
+                    "unexpected FETCH completion tag".into(),
+                ));
+            }
+            Response::Data {
+                status: Status::Bye,
+                ..
+            } => return Err(CoreError::Imap("server closed FETCH session".into())),
+            Response::Fetch(_, attributes) => {
+                if let Some(uid) = attributes.iter().find_map(|attr| match attr {
+                    AttributeValue::Uid(uid) => Some(*uid),
+                    _ => None,
+                }) {
+                    consume(uid, attributes);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn fetch_mime_plans_batch_inner(
     session: &mut Session,
     uids: &[u32],
@@ -577,19 +657,18 @@ async fn fetch_mime_plans_batch_inner(
     }
     let requested: std::collections::HashSet<u32> = uids.iter().copied().collect();
     let mut result = std::collections::BTreeMap::<u32, MimePlan>::new();
-    let mut stream = session
-        .uid_fetch(&uid_set, MIME_PLAN_QUERY)
-        .await
-        .map_err(|error| CoreError::Imap(error.to_string()))?;
-    while let Some(item) = stream.next().await {
-        let fetch = item.map_err(|error| CoreError::Imap(error.to_string()))?;
-        let Some(uid) = fetch.uid.filter(|uid| requested.contains(uid)) else {
-            continue;
-        };
-        if let Some(bodystructure) = fetch.bodystructure() {
-            result.insert(uid, mime::plan_bodystructure(bodystructure));
+    selective_fetch(session, &uid_set, MIME_PLAN_QUERY, |uid, attributes| {
+        if requested.contains(&uid) {
+            for attribute in attributes {
+                if let async_imap::imap_proto::AttributeValue::BodyStructure(bodystructure) =
+                    attribute
+                {
+                    result.insert(uid, mime::plan_bodystructure(bodystructure));
+                }
+            }
         }
-    }
+    })
+    .await?;
     Ok(result
         .into_iter()
         .map(|(uid, plan)| FetchedMimePlan { uid, plan })
@@ -694,36 +773,37 @@ async fn fetch_sections_batch_inner(
     let requested: std::collections::HashSet<u32> = uids.iter().copied().collect();
 
     let mut result = std::collections::BTreeMap::<u32, Vec<FetchedSection>>::new();
-    let mut stream = session
-        .uid_fetch(&uid_set, &query)
-        .await
-        .map_err(|error| CoreError::Imap(error.to_string()))?;
-    while let Some(item) = stream.next().await {
-        let fetch = item.map_err(|error| CoreError::Imap(error.to_string()))?;
-        let Some(uid) = fetch.uid.filter(|uid| requested.contains(uid)) else {
-            continue;
+    selective_fetch(session, &uid_set, &query, |uid, attributes| {
+        if !requested.contains(&uid) {
+            return;
+        }
+        let section_bytes = |path: &SectionPath| {
+            attributes.iter().find_map(|attribute| match attribute {
+                async_imap::imap_proto::AttributeValue::BodySection {
+                    section: Some(section),
+                    data: Some(data),
+                    ..
+                } if section == path => Some(data.to_vec()),
+                _ => None,
+            })
         };
         let fetched = result.entry(uid).or_default();
         for (section, numbers) in &paths {
             let body_path = SectionPath::Part(numbers.clone(), None);
             let mime_path = SectionPath::Part(numbers.clone(), Some(MessageSection::Mime));
-            if let Some(body) = fetch.section(&body_path) {
-                // A duplicate response for the same UID should not duplicate
-                // a section in the public result.
+            if let Some(body) = section_bytes(&body_path) {
                 if fetched.iter().any(|item| item.section == *section) {
                     continue;
                 }
                 fetched.push(FetchedSection {
                     section: section.clone(),
-                    mime_header: fetch
-                        .section(&mime_path)
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_default(),
-                    body: body.to_vec(),
+                    mime_header: section_bytes(&mime_path).unwrap_or_default(),
+                    body,
                 });
             }
         }
-    }
+    })
+    .await?;
     Ok(result
         .into_iter()
         .map(|(uid, sections)| FetchedMessageSections { uid, sections })

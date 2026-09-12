@@ -168,6 +168,9 @@ pub(super) fn register(
                     continue;
                 }
             };
+            if !snapshot_is_current(&page_state, page.account_revision) {
+                continue;
+            }
             let (replace, moved) = projection.unwrap();
             if replace {
                 let mut state = page_state.borrow_mut();
@@ -308,6 +311,17 @@ pub(super) fn accepts_background(state: &InboxState, generation: u64) -> bool {
 }
 pub(super) fn generation(state: &InboxState) -> u64 {
     state.mail_work.as_ref().map_or(0, |work| work.generation)
+}
+
+pub(super) fn invalidate(state: &mut InboxState) {
+    if let Some(work) = state.mail_work.as_mut() {
+        work.generation = work.generation.wrapping_add(1);
+        work.epoch = work.epoch.wrapping_add(1);
+        work.loading = false;
+        work.replace = false;
+        work.moved.clear();
+        work.pages.send_replace(None);
+    }
 }
 
 async fn collect_results<F, Fut>(

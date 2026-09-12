@@ -220,6 +220,7 @@ pub(super) fn register_data_management_callbacks(
                     accounts: None,
                     calendar_connections: None,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: false,

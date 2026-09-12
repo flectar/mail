@@ -195,6 +195,12 @@ export global I18n {
         if (key == "Account order saved.") { return @tr("Account order saved."); }
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
         if (key == "Mail history updated. Background sync is adjusting now.") { return @tr("Mail history updated. Background sync is adjusting now."); }
+        if (key == "Account removed from this device.") { return @tr("Account removed from this device."); }
+        if (key == "Account removed. Mail refresh will retry.") { return @tr("Account removed. Mail refresh will retry."); }
+        if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
+        if (key == "Could not remove account: {}") { return @tr("Could not remove account: {}", argument); }
+        if (key == "Removing account…") { return @tr("Removing account…"); }
+        if (key == "Synchronizing account…") { return @tr("Synchronizing account…"); }
         if (key == "Could not update mail history: {}") { return @tr("Could not update mail history: {}", argument); }
         if (key == "Connected {}. Initial sync is running in the background.") { return @tr("Connected {}. Initial sync is running in the background.", argument); }
         if (key == "Account setup failed: {}") { return @tr("Account setup failed: {}", argument); }
@@ -429,6 +435,8 @@ export component AppWindow inherits Window {
     callback load_more();
     callback toggle_settings();
     callback sync_mail();
+    callback sync_account(int);
+    callback delete_account(int);
     callback message_action(string);
     callback message_action_for_email(int, string);
     callback set_email_checked(int, bool);
@@ -1372,6 +1380,8 @@ export component AppWindow inherits Window {
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             set_close_to_tray(enabled) => { root.set_close_to_tray(enabled); }
             sync_mail => { root.sync_mail(); }
+            sync_account(account-id) => { root.sync_account(account-id); }
+            delete_account(account-id) => { root.delete_account(account-id); }
             add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
                 root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
             }
