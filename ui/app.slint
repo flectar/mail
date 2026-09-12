@@ -429,6 +429,8 @@ export component AppWindow inherits Window {
     callback load_more();
     callback toggle_settings();
     callback sync_mail();
+    callback sync_account(int);
+    callback delete_account(int);
     callback message_action(string);
     callback message_action_for_email(int, string);
     callback set_email_checked(int, bool);
@@ -1372,6 +1374,8 @@ export component AppWindow inherits Window {
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             set_close_to_tray(enabled) => { root.set_close_to_tray(enabled); }
             sync_mail => { root.sync_mail(); }
+            sync_account(account-id) => { root.sync_account(account-id); }
+            delete_account(account-id) => { root.delete_account(account-id); }
             add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
                 root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
             }

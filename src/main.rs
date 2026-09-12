@@ -3459,6 +3459,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_account_delete = Rc::clone(&state);
+    let runtime_for_account_delete = Rc::clone(&runtime);
+    let ui_task_tx_for_account_delete = ui_task_tx.clone();
+    app.on_delete_account(move |account_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_account_delete.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Account management requires local mail data."));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        app.set_sync_status(UiMessage::plain("Removing account…"));
+        let updates = ui_task_tx_for_account_delete.clone();
+        runtime_for_account_delete.spawn(async move {
+            let result = core.remove_account(account_id).await;
+            let accounts = match (
+                core.load_accounts().await,
+                core.load_account_configs().await,
+            ) {
+                (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
+                _ => None,
+            };
+            let message = match result {
+                Ok(()) => UiMessage::plain("Account removed from this device."),
+                Err(error) => UiMessage::detail("Could not remove account: {}", error),
+            };
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    calendar_error: None,
+                    clear_account_form: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
     let state_for_mail_history = Rc::clone(&state);
     let runtime_for_mail_history = Rc::clone(&runtime);
     let ui_task_tx_for_mail_history = ui_task_tx.clone();
@@ -3649,6 +3691,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let sync_runtime = Rc::clone(&runtime);
     let sync_progress = Rc::clone(&sync_in_progress);
     let sync_app = app.as_weak();
+    let sync_tx_for_all = sync_tx.clone();
     app.on_drain_sync_updates(move || {
         while let Ok(update) = sync_rx.borrow_mut().try_recv() {
             sync_progress.set(false);
@@ -3713,6 +3756,43 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let sync_tx = sync_tx.clone();
         runtime_for_sync.spawn(async move {
             let result = core.sync_now(None).await;
+            let metadata = if result.is_ok() {
+                core.load_mail_metadata(&scope).await.ok()
+            } else {
+                None
+            };
+            let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+        });
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_account_sync = Rc::clone(&state);
+    let runtime_for_account_sync = Rc::clone(&runtime);
+    let sync_progress_for_account_click = Rc::clone(&sync_in_progress);
+    app.on_sync_account(move |account_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if sync_progress_for_account_click.replace(true) {
+            return;
+        }
+        let (core, scope) = {
+            let state = state_for_account_sync.borrow();
+            (state.core.clone(), state.scope.clone())
+        };
+        let Some(core) = core else {
+            sync_progress_for_account_click.set(false);
+            app.set_sync_status(UiMessage::plain(
+                "Local mail data is unavailable; preview data is read-only.",
+            ));
+            return;
+        };
+        app.set_sync_in_progress(true);
+        app.set_sync_status(UiMessage::plain("Synchronizing account…"));
+        let sync_tx = sync_tx_for_all.clone();
+        let account_id = i64::from(account_id);
+        runtime_for_account_sync.spawn(async move {
+            let result = core.sync_now(Some(account_id)).await;
             let metadata = if result.is_ok() {
                 core.load_mail_metadata(&scope).await.ok()
             } else {

@@ -744,6 +744,13 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn remove_account(&self, account_id: i64) -> Result<(), String> {
+        self.core
+            .remove_account(account_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn list_contacts(
         &self,
         prefix: String,

@@ -531,7 +531,12 @@ pub async fn fetch_headers(session: &mut Session, uid_set: &str) -> Result<Vec<F
 }
 
 async fn fetch_headers_inner(session: &mut Session, uid_set: &str) -> Result<Vec<FetchedHeader>> {
-    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE BODYSTRUCTURE {HEADER_FIELDS})");
+    // Keep header sync independent from BODYSTRUCTURE. Some IMAP servers
+    // (notably QQ Mail) emit malformed BODYSTRUCTURE responses for individual
+    // messages; including it here makes async-imap abort the entire stream and
+    // prevents every historical header from being stored. MIME plans are
+    // fetched lazily by the body backfill path when needed.
+    let query = format!("(UID FLAGS INTERNALDATE RFC822.SIZE {HEADER_FIELDS})");
     let mut out = Vec::new();
     {
         let mut stream = session

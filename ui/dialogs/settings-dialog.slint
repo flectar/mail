@@ -86,6 +86,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> imap_form_open: false;
     private property <bool> imap_editing: false;
     in-out property <bool> delete_data_confirmation: false;
+    in-out property <bool> delete_account_confirmation: false;
+    in-out property <int> delete_account_id: -1;
+    in-out property <string> delete_account_name: "";
     private property <bool> compact-nav-open: false;
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -99,6 +102,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_mark_read_on_open(bool);
     callback set_close_to_tray(bool);
     callback sync_mail();
+    callback sync_account(int);
+    callback delete_account(int);
     callback add_password_account(string, string, string, string, string, string, string, string, string);
     callback start_oauth(string);
     callback reauth_account(int);
@@ -727,6 +732,25 @@ export component SettingsDialog inherits Rectangle {
                                                 }
                                             }
                                         }
+                                        Button {
+                                            width: 76px;
+                                            height: 30px;
+                                            text: @tr("Remove");
+                                            destructive: true;
+                                            enabled: !root.oauth_in_progress && !root.oauth_settings_saving;
+                                            clicked => {
+                                                root.delete_account_id = account.id;
+                                                root.delete_account_name = account.email;
+                                                root.delete_account_confirmation = true;
+                                            }
+                                        }
+                                        Button {
+                                            width: 68px;
+                                            height: 30px;
+                                            text: @tr("Sync");
+                                            enabled: !root.sync_in_progress && !root.oauth_settings_saving;
+                                            clicked => { root.sync_account(account.id); }
+                                        }
                                         if !root.compact && account.calendar_connected : HorizontalBox {
                                             width: 122px;
                                             spacing: 8px;
@@ -1291,5 +1315,23 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_all_data(); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.delete_account_confirmation;
+            title: @tr("Remove account?");
+            description: @tr("Remove this account and its downloaded mail from this device.");
+            detail: @tr("Messages on the mail server will not be deleted.");
+            confirm-label: @tr("Remove account");
+            cancel-label: @tr("Keep account");
+            icon: @image-url("../icons/phosphor/trash-fill.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.delete_account(root.delete_account_id); }
         }
 }
