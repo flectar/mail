@@ -342,8 +342,7 @@ async fn run_body_fetcher(
                     }
                 }
             }
-            let Some(s) = session.as_mut() else { break };
-            match fetch_bodies_batch(&ctx, &config, s, &ids).await {
+            match fetch_bodies_batch(&ctx, &config, &mut session, &ids).await {
                 Ok(()) => {
                     fetched = true;
                     break;
@@ -355,9 +354,7 @@ async fn run_body_fetcher(
                     );
                     // The session may be broken; drop it so the retry (and any
                     // later request) reconnects.
-                    if let Some(s) = session.take() {
-                        imap::logout(s).await;
-                    }
+                    drop(session.take());
                 }
             }
         }
@@ -423,7 +420,7 @@ async fn fetch_attachment_bytes(
 async fn fetch_bodies_batch(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    session: &mut Session,
+    session: &mut Option<Session>,
     ids: &[i64],
 ) -> Result<()> {
     use std::collections::HashMap;
@@ -462,7 +459,8 @@ async fn fetch_bodies_batch(
             reset_bodies_none(ctx, items.iter().map(|(_, m)| *m)).await;
             continue;
         };
-        select_folder_for_remote_read(ctx, session, &folder).await?;
+        select_folder_for_remote_read(ctx, session.as_mut().ok_or(CoreError::Offline)?, &folder)
+            .await?;
         items.sort_unstable_by_key(|(uid, _)| *uid);
         for (uid, message_id) in items {
             if !remote_location_is_current(ctx, message_id, folder_id, i64::from(uid)).await? {
@@ -868,10 +866,13 @@ async fn run_actor(
                                         imap::IdleOutcome::Command(SyncCmd::FetchBody {
                                             message_id,
                                         }) => {
-                                            if let Some(ref mut s) = session
-                                                && let Err(e) =
-                                                    fetch_one_body(&ctx, &config, s, message_id)
-                                                        .await
+                                            if let Err(e) = fetch_one_body(
+                                                &ctx,
+                                                &config,
+                                                &mut session,
+                                                message_id,
+                                            )
+                                            .await
                                             {
                                                 tracing::warn!("priority body fetch failed: {e}");
                                             }
@@ -947,8 +948,10 @@ async fn run_actor(
                         break;
                     }
                     Ok(Some(SyncCmd::FetchBody { message_id })) => {
-                        if let Some(ref mut s) = session {
-                            if let Err(e) = fetch_one_body(&ctx, &config, s, message_id).await {
+                        if session.is_some() {
+                            if let Err(e) =
+                                fetch_one_body(&ctx, &config, &mut session, message_id).await
+                            {
                                 tracing::warn!("priority body fetch failed: {e}");
                                 deadline = tokio::time::Instant::now();
                             }
@@ -2188,9 +2191,10 @@ enum BodyChunkError {
 
 fn classify_body_chunk_error(error: CoreError) -> BodyChunkError {
     match error {
-        error @ (CoreError::Imap(_) | CoreError::Network(_) | CoreError::Offline) => {
-            BodyChunkError::Reconnect(error)
-        }
+        error @ (CoreError::Imap(_)
+        | CoreError::ImapParse(_)
+        | CoreError::Network(_)
+        | CoreError::Offline) => BodyChunkError::Reconnect(error),
         error => BodyChunkError::Fatal(error),
     }
 }
@@ -2625,6 +2629,23 @@ async fn body_worker(
                             "body worker: reconnect after batch split failed"
                         ),
                     }
+                } else if matches!(error, CoreError::ImapParse(_)) {
+                    let failures = retry
+                        .items
+                        .iter()
+                        .map(|(message_id, _)| (*message_id, error.to_string()))
+                        .collect();
+                    record_content_failure_details(&ctx, failures).await?;
+                    skip.lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .extend(retry.items.iter().map(|(message_id, _)| *message_id));
+                    drop(session);
+                    if queue.lock().await.is_empty() {
+                        return Ok(());
+                    }
+                    session = connect(&ctx, &config).await?;
+                    selected = None;
+                    continue;
                 } else {
                     queue.lock().await.push_front(retry);
                 }
@@ -2965,7 +2986,7 @@ async fn revalidate_background_fetches(
 async fn fetch_one_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    session: &mut Session,
+    session: &mut Option<Session>,
     message_id: i64,
 ) -> Result<()> {
     let row = ctx
@@ -2984,7 +3005,8 @@ async fn fetch_one_body(
         .read(move |conn| repo::folders::get(conn, folder_id))
         .await?
         .ok_or_else(|| CoreError::NotFound("folder".into()))?;
-    select_folder_for_remote_read(ctx, session, &folder).await?;
+    select_folder_for_remote_read(ctx, session.as_mut().ok_or(CoreError::Offline)?, &folder)
+        .await?;
     if !remote_location_is_current(ctx, message_id, folder_id, uid).await? {
         reset_bodies_none(ctx, std::iter::once(message_id)).await;
         return Ok(());
@@ -2995,7 +3017,7 @@ async fn fetch_one_body(
 async fn store_one_body(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    session: &mut Session,
+    session: &mut Option<Session>,
     message_id: i64,
     folder_id: i64,
     uid: u32,
@@ -3045,7 +3067,7 @@ fn decode_selective_content(
     let mut calendar_parts = Vec::new();
     for planned in &item.plan.text_sections {
         let section = fetched_by_section.get(&planned.section).ok_or_else(|| {
-            CoreError::Imap(format!(
+            CoreError::Mime(format!(
                 "server omitted planned MIME section {}",
                 planned.section
             ))
@@ -3079,7 +3101,7 @@ fn decode_selective_content(
 async fn fetch_selective_content(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    session: &mut Session,
+    session: &mut Option<Session>,
     message_id: i64,
     folder_id: i64,
     uid: u32,
@@ -3105,7 +3127,28 @@ async fn fetch_selective_content(
                 "message remote location changed before MIME-plan fetch".into(),
             ));
         }
-        let plans = imap::fetch_mime_plans_batch(session, &[uid]).await?;
+        let plans = match imap::fetch_mime_plans_batch(
+            session.as_mut().ok_or(CoreError::Offline)?,
+            &[uid],
+        )
+        .await
+        {
+            Ok(plans) => plans,
+            Err(error @ CoreError::ImapParse(_)) if allow_open_fallback => {
+                tracing::warn!(message_id, error = %error, "MIME plan unavailable; retrying full message on a fresh session");
+                reconnect_body_session(ctx, config, session, folder_id).await?;
+                return fetch_full_open_fallback(
+                    ctx,
+                    config,
+                    session.as_mut().ok_or(CoreError::Offline)?,
+                    message_id,
+                    folder_id,
+                    uid,
+                )
+                .await;
+            }
+            Err(error) => return Err(error),
+        };
         plan = plans
             .into_iter()
             .find(|fetched| fetched.uid == uid)
@@ -3134,8 +3177,15 @@ async fn fetch_selective_content(
 
     let Some(plan) = plan else {
         if allow_open_fallback {
-            return fetch_full_open_fallback(ctx, config, session, message_id, folder_id, uid)
-                .await;
+            return fetch_full_open_fallback(
+                ctx,
+                config,
+                session.as_mut().ok_or(CoreError::Offline)?,
+                message_id,
+                folder_id,
+                uid,
+            )
+            .await;
         }
         return Err(CoreError::Mime(
             "server did not provide a usable BODYSTRUCTURE".into(),
@@ -3151,7 +3201,12 @@ async fn fetch_selective_content(
             ));
         }
         let section_ids = plan.text_section_ids();
-        let fetched = imap::fetch_content_sections(session, uid, &section_ids).await?;
+        let fetched = imap::fetch_content_sections(
+            session.as_mut().ok_or(CoreError::Offline)?,
+            uid,
+            &section_ids,
+        )
+        .await?;
         decode_selective_content(
             PlannedBodyFetch {
                 message_id,
@@ -3164,14 +3219,24 @@ async fn fetch_selective_content(
     .await;
     let content = match selective {
         Ok(content) => content,
-        Err(error) if allow_open_fallback => {
+        Err(error @ (CoreError::ImapParse(_) | CoreError::Mime(_))) if allow_open_fallback => {
             tracing::warn!(
                 message_id,
                 error = %error,
                 "selective content unavailable; using explicit-open full MIME fallback"
             );
-            return fetch_full_open_fallback(ctx, config, session, message_id, folder_id, uid)
-                .await;
+            if matches!(error, CoreError::ImapParse(_)) {
+                reconnect_body_session(ctx, config, session, folder_id).await?;
+            }
+            return fetch_full_open_fallback(
+                ctx,
+                config,
+                session.as_mut().ok_or(CoreError::Offline)?,
+                message_id,
+                folder_id,
+                uid,
+            )
+            .await;
         }
         Err(error) => return Err(error),
     };
@@ -3183,6 +3248,26 @@ async fn fetch_selective_content(
     )
     .await
     .map(|_| ())
+}
+
+/// A parser failure can leave unread response bytes. Close the old socket
+/// without LOGOUT, and verify the UID namespace before using its replacement.
+async fn reconnect_body_session(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<Session>,
+    folder_id: i64,
+) -> Result<()> {
+    drop(session.take());
+    let folder = ctx
+        .db
+        .read(move |conn| repo::folders::get(conn, folder_id))
+        .await?
+        .ok_or_else(|| CoreError::NotFound("folder".into()))?;
+    let mut fresh = connect(ctx, config).await?;
+    select_folder_for_remote_read(ctx, &mut fresh, &folder).await?;
+    *session = Some(fresh);
+    Ok(())
 }
 
 async fn fetch_full_open_fallback(
@@ -3401,3 +3486,7 @@ async fn persist_body(
     }
     Ok(())
 }
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+#[path = "mime_recovery_tests.rs"]
+mod mime_recovery_tests;
