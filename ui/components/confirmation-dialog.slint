@@ -7,6 +7,7 @@ import { TypeScale } from "../typography.slint";
 export component ConfirmationDialog inherits Rectangle {
     in-out property <bool> open: false;
     in property <string> title;
+    in property <string> subject;
     in property <string> description;
     in property <string> detail: @tr("This action cannot be undone.");
     in property <string> confirm-label: @tr("Confirm");
@@ -54,7 +55,7 @@ export component ConfirmationDialog inherits Rectangle {
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         width: min(460px, parent.width - 32px);
-        height: 244px;
+        height: max(244px, dialog-content.preferred-height);
         border-radius: 12px;
         border-width: 1px;
         border-color: root.dialog-border-color;
@@ -84,7 +85,7 @@ export component ConfirmationDialog inherits Rectangle {
                 reject
             }
 
-            VerticalBox {
+            dialog-content := VerticalBox {
                 padding-top: 22px;
                 padding-right: 22px;
                 padding-bottom: 20px;
@@ -92,7 +93,7 @@ export component ConfirmationDialog inherits Rectangle {
                 spacing: 12px;
 
                 HorizontalBox {
-                    height: 42px;
+                    height: panel.width < 360px ? 56px : 42px;
                     spacing: 12px;
                     Rectangle {
                         width: 42px;
@@ -101,19 +102,19 @@ export component ConfirmationDialog inherits Rectangle {
                         background: #d04a4324;
                         Image { x: 11px; y: 11px; width: 20px; height: 20px; source: root.icon; colorize: root.danger-color; image-fit: contain; accessible-role: none; }
                     }
-                    Text { text: root.title; color: root.title-color; font-size: TypeScale.heading; font-weight: 700; vertical-alignment: center; overflow: elide; }
+                    Text { text: root.title; color: root.title-color; font-size: TypeScale.heading; font-weight: 700; vertical-alignment: center; wrap: word-wrap; }
                 }
 
-                Text { height: 42px; text: root.description; color: root.body-color; font-size: TypeScale.secondary; wrap: word-wrap; vertical-alignment: center; }
-                Text { height: 26px; text: root.detail; color: root.muted-color; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                if root.subject != "" : Text { text: root.subject; color: root.body-color; font-size: TypeScale.secondary; font-weight: 600; wrap: char-wrap; }
+                Text { min-height: 42px; text: root.description; color: root.body-color; font-size: TypeScale.secondary; wrap: word-wrap; vertical-alignment: center; }
+                Text { min-height: 26px; text: root.detail; color: root.muted-color; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                 Rectangle { vertical-stretch: 1; }
 
-                HorizontalBox {
-                    height: 34px;
+                GridLayout {
+                    height: panel.width < 360px ? 76px : 34px;
                     spacing: 8px;
-                    Rectangle { horizontal-stretch: 1; }
-                    Button { width: 96px; height: 34px; text: root.cancel-label; selected: !root.confirm-selected; clicked => { root.cancel(); } }
-                    Button { width: 132px; height: 34px; text: root.confirm-label; destructive: true; clicked => { root.confirm(); } }
+                    Button { row: 0; col: 0; height: 34px; text: root.cancel-label; selected: !root.confirm-selected; clicked => { root.cancel(); } }
+                    Button { row: panel.width < 360px ? 1 : 0; col: panel.width < 360px ? 0 : 1; height: 34px; text: root.confirm-label; destructive: true; clicked => { root.confirm(); } }
                 }
             }
         }
