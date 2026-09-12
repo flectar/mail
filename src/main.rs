@@ -3493,6 +3493,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar_connections: None,
                     calendar_error: None,
                     clear_account_form: false,
+                    finishes_account_setup: false,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
