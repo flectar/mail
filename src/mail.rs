@@ -153,6 +153,7 @@ pub struct ComposeSource {
 
 #[derive(Clone, Debug)]
 pub struct MailPage {
+    pub account_revision: u64,
     pub messages: Vec<MailMessage>,
     pub labels: Vec<Label>,
     pub mailboxes: Vec<MailboxEntry>,
@@ -163,6 +164,7 @@ pub struct MailPage {
 
 #[derive(Clone, Debug)]
 pub struct MailMetadata {
+    pub account_revision: u64,
     pub scope: String,
     pub scope_total: usize,
     pub inbox_count: usize,
@@ -198,9 +200,32 @@ pub fn display_preview(preview: &str) -> String {
 #[derive(Clone)]
 pub struct CoreMailSource {
     core: Arc<Core>,
+    account_revision: Arc<std::sync::atomic::AtomicU64>,
+}
+
+pub struct AccountSnapshot {
+    pub revision: u64,
+    pub accounts: Vec<Account>,
+    pub configs: Vec<AccountConfig>,
 }
 
 impl CoreMailSource {
+    pub fn account_revision(&self) -> u64 {
+        self.account_revision
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub async fn load_account_snapshot(&self) -> Result<AccountSnapshot, String> {
+        let revision = self.account_revision();
+        let (accounts, configs) =
+            tokio::try_join!(self.load_accounts(), self.load_account_configs())?;
+        Ok(AccountSnapshot {
+            revision,
+            accounts,
+            configs,
+        })
+    }
+
     pub(crate) fn account_preferences_core(&self) -> Arc<Core> {
         Arc::clone(&self.core)
     }
@@ -218,6 +243,7 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         Ok(Self {
             core: Arc::new(core),
+            account_revision: Arc::default(),
         })
     }
 
@@ -236,6 +262,7 @@ impl CoreMailSource {
         limit: i64,
         include_counts: bool,
     ) -> Result<MailPage, String> {
+        let revision = self.account_revision();
         let accounts = self
             .core
             .list_accounts()
@@ -256,6 +283,10 @@ impl CoreMailSource {
             folders: &folders,
         })
         .await
+        .map(|mut page| {
+            page.account_revision = revision;
+            page
+        })
     }
 
     /// Startup needs the account list and first page together. Loading them in
@@ -298,6 +329,7 @@ impl CoreMailSource {
     /// of the latency-sensitive message page. Core events can therefore update
     /// counters live without delaying list rendering.
     pub async fn load_mail_metadata(&self, scope: &str) -> Result<MailMetadata, String> {
+        let revision = self.account_revision();
         let accounts = self
             .core
             .list_accounts()
@@ -315,6 +347,10 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         self.load_mail_metadata_with_context(scope, &accounts, &folders, &labels)
             .await
+            .map(|mut metadata| {
+                metadata.account_revision = revision;
+                metadata
+            })
     }
 
     async fn load_mail_metadata_with_context(
@@ -332,6 +368,7 @@ impl CoreMailSource {
         let resolved = resolve_scope(scope, accounts, folders, labels);
         let scope_total = count_threads(&self.core, &resolved).await?;
         Ok(MailMetadata {
+            account_revision: self.account_revision(),
             scope: scope.to_owned(),
             scope_total,
             inbox_count: badges
@@ -407,6 +444,7 @@ impl CoreMailSource {
             .collect();
 
         Ok(MailPage {
+            account_revision: self.account_revision(),
             messages,
             labels,
             mailboxes,
@@ -745,10 +783,16 @@ impl CoreMailSource {
     }
 
     pub async fn remove_account(&self, account_id: i64) -> Result<(), String> {
-        self.core
+        let result = self
+            .core
             .remove_account(account_id)
             .await
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        // Includes partial failures: snapshots read before the cross-store
+        // operation finished must never restore deleted account data.
+        self.account_revision
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        result
     }
 
     pub async fn list_contacts(
@@ -2346,5 +2390,117 @@ mod tests {
             validated_startup_scope("Label:999", &[], &[], &labels),
             "Unified Inbox"
         );
+    }
+}
+
+#[cfg(test)]
+mod account_removal_snapshot_tests {
+    use super::*;
+    use flectar_mail_core::accounts::credentials::{
+        CredentialStore, DevelopmentFileCredentialStore, Slot,
+    };
+    use flectar_mail_core::error::{CoreError, Result as CoreResult};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct FailingCredentials {
+        inner: DevelopmentFileCredentialStore,
+        fail: AtomicBool,
+    }
+    impl CredentialStore for FailingCredentials {
+        fn store(&self, account: i64, slot: Slot, value: &str) -> CoreResult<()> {
+            self.inner.store(account, slot, value)
+        }
+        fn load(&self, account: i64, slot: Slot) -> CoreResult<String> {
+            self.inner.load(account, slot)
+        }
+        fn delete(&self, account: i64, slot: Slot) -> CoreResult<()> {
+            self.inner.delete(account, slot)
+        }
+        fn delete_all(&self, account: i64) -> CoreResult<()> {
+            if self.fail.load(Ordering::Relaxed) {
+                return Err(CoreError::CredentialStoreUnavailable(
+                    "fixture failure".into(),
+                ));
+            }
+            self.inner.delete_all(account)
+        }
+    }
+    async fn seed(source: &CoreMailSource) {
+        source.core.db.write(|conn| {
+            conn.execute("INSERT INTO accounts (id, email, provider, auth_kind, username, imap_host, imap_port, smtp_host, smtp_port, created_at)
+                VALUES (1, 'fixture@example.test', 'imap', 'password', 'fixture', 'imap.example.test', 993, 'smtp.example.test', 465, 0)", [])?;
+            Ok(())
+        }).await.unwrap();
+    }
+    #[tokio::test]
+    async fn account_removal_failure_preserves_account_and_invalidates_old_snapshots() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(FailingCredentials {
+            inner: DevelopmentFileCredentialStore::new(dir.path().join("credentials.json")),
+            fail: AtomicBool::new(false),
+        });
+        let source = CoreMailSource::start(
+            Paths::for_tests(dir.path()),
+            store.clone(),
+            Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default()),
+        )
+        .await
+        .unwrap();
+        seed(&source).await;
+        let before = source.load_account_snapshot().await.unwrap();
+        let metadata = source.load_mail_metadata("Unified Inbox").await.unwrap();
+        let page = source
+            .load_page("Unified Inbox", "", None, 50, false)
+            .await
+            .unwrap();
+        store.fail.store(true, Ordering::Relaxed);
+        let result = source.remove_account(1).await;
+        assert!(result.is_err());
+        let after = source.load_account_snapshot().await.unwrap();
+        assert!(!crate::account_controller::account_was_removed(
+            1,
+            &result,
+            Some(&after)
+        ));
+        assert_eq!(after.accounts.len(), 1);
+        assert_ne!(source.account_revision(), before.revision);
+        assert_ne!(source.account_revision(), metadata.account_revision);
+        assert_ne!(source.account_revision(), page.account_revision);
+        store.fail.store(false, Ordering::Relaxed);
+        source.remove_account(1).await.unwrap();
+        assert!(source.load_accounts().await.unwrap().is_empty());
+        // Account IDs may be reused by SQLite. Revisions must not act as
+        // permanent tombstones that hide a newly connected account.
+        seed(&source).await;
+        let replacement = source.load_account_snapshot().await.unwrap();
+        assert_eq!(replacement.accounts.len(), 1);
+        assert_eq!(replacement.revision, source.account_revision());
+    }
+    #[tokio::test]
+    async fn account_removal_late_failure_reflects_deleted_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::for_tests(dir.path());
+        let source = CoreMailSource::start(
+            paths.clone(),
+            Arc::new(DevelopmentFileCredentialStore::new(
+                dir.path().join("credentials.json"),
+            )),
+            Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default()),
+        )
+        .await
+        .unwrap();
+        seed(&source).await;
+        let cache = paths.mail_dir(1);
+        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
+        std::fs::write(cache, b"not a directory").unwrap();
+        let result = source.remove_account(1).await;
+        assert!(result.is_err());
+        let after = source.load_account_snapshot().await.unwrap();
+        assert!(crate::account_controller::account_was_removed(
+            1,
+            &result,
+            Some(&after)
+        ));
+        assert!(after.accounts.is_empty());
     }
 }

@@ -1,5 +1,7 @@
 mod account_controller;
 mod account_mail_preferences;
+#[cfg(test)]
+mod account_removal_tests;
 mod attachment_controller;
 mod browser;
 mod calendar;
@@ -398,7 +400,8 @@ fn spawn_contact_page(
 
 struct UiTaskUpdate {
     message: UiMessage,
-    accounts: Option<(Vec<Account>, Vec<AccountConfig>)>,
+    accounts: Option<mail::AccountSnapshot>,
+    account_removal: Option<AccountRemovalUpdate>,
     calendar_connections: Option<Vec<CalendarConnection>>,
     calendar_error: Option<(i64, Option<String>)>,
     clear_account_form: bool,
@@ -921,7 +924,10 @@ fn isolated_container_without_secret_service() -> bool {
 }
 
 #[cfg(all(target_os = "linux", debug_assertions))]
-fn isolated_container_without_secret_service_values(container: &str, has_session_bus: bool) -> bool {
+fn isolated_container_without_secret_service_values(
+    container: &str,
+    has_session_bus: bool,
+) -> bool {
     matches!(container, "podman" | "docker") && !has_session_bus
 }
 
@@ -2420,7 +2426,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let Some(app) = folder_update_app.upgrade() else {
                 return;
             };
-            if let Some(metadata) = update.metadata {
+            if let Some(metadata) = update.metadata.filter(|metadata| {
+                snapshot_is_current(&folder_update_state, metadata.account_revision)
+            }) {
                 let mut state = folder_update_state.borrow_mut();
                 state.scope = metadata.scope.clone();
                 state.mailboxes = metadata.mailboxes;
@@ -2693,6 +2701,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             };
             match update.result {
                 Ok(metadata) => {
+                    if !snapshot_is_current(&mail_metadata_state, metadata.account_revision) {
+                        continue;
+                    }
                     let mut state = mail_metadata_state.borrow_mut();
                     state.mailboxes = metadata.mailboxes;
                     state.unified_mailboxes = metadata.unified_mailboxes;
@@ -3324,6 +3335,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let ui_task_runtime = Rc::clone(&runtime);
     let ui_task_app = app.as_weak();
     let ui_task_tray = tray.as_ref().map(|tray| tray.as_weak());
+    let removal_contacts = contact_state.clone();
+    let removal_contact_generation = contact_load_generation.clone();
+    let removal_contacts_loaded = contacts_loaded.clone();
+    let removal_contacts_loading = contacts_loading.clone();
+    let removal_calendar = calendar_state.clone();
+    let removal_calendar_editing = calendar_editing_event_id.clone();
+    let removal_body_pending = body_pending.clone();
+    let removal_pagination_generation = mail_pagination_generation.clone();
+    let removal_pagination_loading = mail_pagination_in_progress.clone();
+    let removal_metadata_requested = mail_metadata_refresh_requested.clone();
     app.on_drain_ui_task_updates(move || {
         loop {
             let update = match ui_task_rx.borrow_mut().try_recv() {
@@ -3347,24 +3368,89 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     tray.set_enabled(enabled);
                 }
             }
-            if let Some((accounts, configs)) = update.accounts {
+            let removed = update
+                .account_removal
+                .as_ref()
+                .filter(|removal| removal.removed);
+            if let Some(removal) = removed {
+                reconcile_removed_account(&mut ui_task_state.borrow_mut(), removal.account_id);
+                removal_body_pending.set(None);
+                removal_pagination_generation
+                    .set(removal_pagination_generation.get().wrapping_add(1));
+                removal_pagination_loading.set(false);
+                app.set_mail_loading_more(false);
+                app.set_mail_page_loading(false);
+                removal_contact_generation.set(removal_contact_generation.get().wrapping_add(1));
+                removal_contacts_loaded.set(false);
+                removal_contacts_loading.set(false);
+                {
+                    let mut contacts = removal_contacts.borrow_mut();
+                    if contacts.scope == format!("Account:{}", removal.account_id) {
+                        contacts.scope = "All contacts".into();
+                    }
+                    contacts.begin_core_query();
+                    contacts.account_counts.remove(&removal.account_id);
+                    contacts.total_count = 0;
+                    contacts.favorite_count = 0;
+                }
+                {
+                    let mut calendar = removal_calendar.borrow_mut();
+                    if removal_calendar_editing.get().is_some_and(|id| {
+                        calendar.events.iter().any(|event| {
+                            i64::from(event.id) == id && event.account_id == removal.account_id
+                        })
+                    }) {
+                        removal_calendar_editing.set(None);
+                        app.set_calendar_editor_open(false);
+                    }
+                    calendar
+                        .events
+                        .retain(|event| event.account_id != removal.account_id);
+                    calendar
+                        .sources
+                        .retain(|source| source.account_id != removal.account_id);
+                    calendar
+                        .accounts
+                        .retain(|account| account.id != removal.account_id);
+                }
+            }
+            if let Some(snapshot) = update.accounts.filter(|snapshot| {
+                ui_task_state
+                    .borrow()
+                    .core
+                    .as_ref()
+                    .is_some_and(|core| core.account_revision() == snapshot.revision)
+            }) {
                 ui_task_state.borrow_mut().using_core = true;
                 update_connected_accounts(
                     &app,
                     &ui_task_state,
                     &ui_task_runtime,
-                    accounts,
-                    configs,
+                    snapshot.accounts,
+                    snapshot.configs,
                 );
             }
             let mut refresh_account_rows = false;
-            if let Some(connections) = update.calendar_connections {
-                ui_task_state.borrow_mut().calendar_connections = connections;
+            if let Some(mut connections) = update.calendar_connections {
+                let mut state = ui_task_state.borrow_mut();
+                connections.retain(|connection| {
+                    state
+                        .connected_accounts
+                        .iter()
+                        .any(|account| account.id == connection.account_id)
+                });
+                state.calendar_connections = connections;
                 refresh_account_rows = true;
             }
             if let Some((account_id, error)) = update.calendar_error {
                 let mut state = ui_task_state.borrow_mut();
-                match error.filter(|error| !error.trim().is_empty()) {
+                match error.filter(|error| {
+                    !error.trim().is_empty()
+                        && state
+                            .connected_accounts
+                            .iter()
+                            .any(|account| account.id == account_id)
+                }) {
                     Some(error) => {
                         state.calendar_errors.insert(account_id, error);
                     }
@@ -3389,6 +3475,86 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_jmap_url("".into());
                 app.set_imap_host("".into());
                 app.set_smtp_host("".into());
+            }
+            if let Some(removal) = removed {
+                let current_page = {
+                    let mut state = ui_task_state.borrow_mut();
+                    if let Some(metadata) = removal
+                        .metadata
+                        .as_ref()
+                        .filter(|_| !state.connected_accounts.is_empty())
+                    {
+                        state.mailboxes = metadata.mailboxes.clone();
+                        state.unified_mailboxes = metadata.unified_mailboxes.clone();
+                        state.inbox_count = metadata.inbox_count;
+                        if metadata.scope == state.scope && state.query.trim().is_empty() {
+                            state.total_count = metadata.scope_total;
+                        }
+                    }
+                    let current = removal.scope == state.scope && removal.query == state.query;
+                    if current && let Some(page) = removal.page.as_ref() {
+                        let selected = state
+                            .messages
+                            .iter()
+                            .find(|message| Some(message.id) == state.selected_id)
+                            .cloned();
+                        state.messages = page.messages.clone();
+                        if let Some(selected) = selected
+                            && let Some(message) = state
+                                .messages
+                                .iter_mut()
+                                .find(|message| message.id == selected.id)
+                        {
+                            message.html = selected.html;
+                            message.text = selected.text;
+                            message.attachments = selected.attachments;
+                            message.body_pending = selected.body_pending;
+                        }
+                        state.labels = page.labels.clone();
+                        state.next_cursor = page.next_cursor;
+                        if !state.query.trim().is_empty() {
+                            state.total_count = state.messages.len();
+                        }
+                    }
+                    current && removal.page.is_some()
+                };
+                refresh_connected_accounts(&app, &ui_task_state);
+                apply_contact_directory(&app, &removal_contacts);
+                if app.get_active_view() == "contacts" {
+                    app.invoke_load_contacts();
+                }
+                app.set_contact_loading_more(false);
+                clear_contact_form(&app);
+                apply_calendar(&app, &removal_calendar.borrow(), Local::now().date_naive());
+                let _ = render_current(&app, &ui_task_state, &ui_task_runtime);
+                if !current_page && !ui_task_state.borrow().connected_accounts.is_empty() {
+                    let _ = refresh_from_source(&app, &ui_task_state, &ui_task_runtime, false, &[]);
+                }
+                removal_metadata_requested.set(true);
+                app.invoke_drain_core_updates();
+            }
+            if let Some(removal) = update.account_removal.as_ref() {
+                let mut calendar = removal_calendar.borrow_mut();
+                if calendar.visible_month == removal.calendar_month
+                    && let Some(events) = removal.calendar_events.as_ref()
+                {
+                    calendar.events = events.clone();
+                }
+                if let Some(sources) = removal.calendar_sources.as_ref() {
+                    calendar.sources = sources.clone();
+                }
+                calendar.accounts =
+                    calendar::calendar_accounts(&ui_task_state.borrow().connected_accounts);
+                if removal_calendar_editing.get().is_some_and(|id| {
+                    !calendar
+                        .events
+                        .iter()
+                        .any(|event| i64::from(event.id) == id)
+                }) {
+                    removal_calendar_editing.set(None);
+                    app.set_calendar_editor_open(false);
+                }
+                apply_calendar(&app, &calendar, Local::now().date_naive());
             }
             app.set_sync_status(update.message);
         }
@@ -3432,13 +3598,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let result = core.reorder_account(source_id, target_id, after).await;
             // Always reload the authoritative order. On failure this also
             // rolls back the optimistic drag shown by the Slint model.
-            let accounts = match (
-                core.load_accounts().await,
-                core.load_account_configs().await,
-            ) {
-                (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                _ => None,
-            };
+            let accounts = core.load_account_snapshot().await.ok();
             let message = match result {
                 Ok(()) => UiMessage::plain("Account order saved."),
                 Err(error) => UiMessage::detail("Could not save account order: {}", error),
@@ -3449,6 +3609,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts,
                     calendar_connections: None,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: false,
@@ -3462,38 +3623,104 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let state_for_account_delete = Rc::clone(&state);
     let runtime_for_account_delete = Rc::clone(&runtime);
     let ui_task_tx_for_account_delete = ui_task_tx.clone();
+    let calendar_for_account_delete = calendar_state.clone();
     app.on_delete_account(move |account_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let Some(core) = state_for_account_delete.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain("Account management requires local mail data."));
+        if app.get_account_setup_in_progress()
+            || app.get_oauth_in_progress()
+            || app.get_oauth_settings_saving()
+        {
             return;
-        };
+        }
         let account_id = i64::from(account_id);
+        let (core, scope, query, limit) = {
+            let state = state_for_account_delete.borrow();
+            let Some(core) = state.core.clone() else {
+                return;
+            };
+            if !state
+                .connected_accounts
+                .iter()
+                .any(|account| account.id == account_id)
+            {
+                return;
+            }
+            let scope = if account_owns_scope(&state.mailboxes, &state.scope, account_id) {
+                "Unified Inbox".to_owned()
+            } else {
+                state.scope.clone()
+            };
+            // Keep a surviving selection reachable after browsing past the
+            // first page, including when deleting from a unified scope.
+            let limit = state.messages.len().max(PAGE_SIZE) as i64;
+            (core, scope, state.query.clone(), limit)
+        };
+        let calendar_month = calendar_for_account_delete.borrow().visible_month;
+        app.set_account_setup_in_progress(true);
         app.set_sync_status(UiMessage::plain("Removing account…"));
         let updates = ui_task_tx_for_account_delete.clone();
         runtime_for_account_delete.spawn(async move {
             let result = core.remove_account(account_id).await;
-            let accounts = match (
-                core.load_accounts().await,
-                core.load_account_configs().await,
-            ) {
-                (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                _ => None,
+            let accounts = core.load_account_snapshot().await.ok();
+            // Core deletion is journaled across stores. A late cleanup error
+            // can occur after the account row was deleted; reflect that fact.
+            let removed = account_was_removed(account_id, &result, accounts.as_ref());
+            let (metadata, page) = if removed {
+                let (metadata, page) = tokio::join!(
+                    core.load_mail_metadata(&scope),
+                    core.load_page(&scope, &query, None, limit, false)
+                );
+                (metadata.ok(), page.ok())
+            } else {
+                (None, None)
             };
+            let calendar_sources = core
+                .load_calendars(None)
+                .await
+                .ok()
+                .map(calendar::calendar_sources);
+            let calendar_events =
+                if let Ok((start, end)) = calendar::calendar_range_millis(calendar_month) {
+                    core.load_events(start, end).await.ok().map(|events| {
+                        events
+                            .into_iter()
+                            .map(calendar::core_calendar_event)
+                            .collect()
+                    })
+                } else {
+                    None
+                };
             let message = match result {
+                Ok(()) if metadata.is_none() || page.is_none() => {
+                    UiMessage::plain("Account removed. Mail refresh will retry.")
+                }
                 Ok(()) => UiMessage::plain("Account removed from this device."),
+                Err(error) if removed => {
+                    UiMessage::detail("Account removed; local cleanup needs a retry: {}", error)
+                }
                 Err(error) => UiMessage::detail("Could not remove account: {}", error),
             };
             let _ = updates
                 .send(UiTaskUpdate {
                     message,
                     accounts,
-                    calendar_connections: None,
+                    account_removal: Some(AccountRemovalUpdate {
+                        account_id,
+                        removed,
+                        scope,
+                        query,
+                        metadata,
+                        page,
+                        calendar_month,
+                        calendar_events,
+                        calendar_sources,
+                    }),
+                    calendar_connections: core.load_calendar_connections().await.ok(),
                     calendar_error: None,
                     clear_account_form: false,
-                    finishes_account_setup: false,
+                    finishes_account_setup: true,
                     finishes_oauth: false,
                     close_to_tray: None,
                 })
@@ -3526,19 +3753,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             };
             // Reload on both success and failure so the selector always shows
             // the authoritative persisted value.
-            let accounts = match (
-                core.load_accounts().await,
-                core.load_account_configs().await,
-            ) {
-                (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                _ => None,
-            };
+            let accounts = core.load_account_snapshot().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {
                     message,
                     accounts,
                     calendar_connections: None,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: false,
@@ -3705,7 +3927,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     {
                         let mut state = sync_state.borrow_mut();
                         state.using_core = true;
-                        if let Some(metadata) = update.metadata {
+                        if let Some(metadata) = update.metadata.filter(|metadata| {
+                            state.core.as_ref().is_some_and(|core| {
+                                core.account_revision() == metadata.account_revision
+                            })
+                        }) {
                             state.mailboxes = metadata.mailboxes;
                             state.unified_mailboxes = metadata.unified_mailboxes;
                             state.inbox_count = metadata.inbox_count;
@@ -4106,7 +4332,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let intent_for_open = Rc::clone(&compose_intent);
     app.on_open_compose(move || {
         if let Some(app) = app_weak.upgrade() {
-            if app.get_compose_open() { return; }
+            if app.get_compose_open() {
+                return;
+            }
             *intent_for_open.borrow_mut() = ComposeIntent::default();
             app.set_compose_mode("new".into());
             app.global::<AccountMailPreferences>()
@@ -4676,7 +4904,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        if send && !app.global::<AccountMailPreferences>().get_composer_preferences_ready() {
+        if send
+            && !app
+                .global::<AccountMailPreferences>()
+                .get_composer_preferences_ready()
+        {
             return;
         }
         if account_id <= 0 {
@@ -4858,13 +5090,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         // The account actor starts its first sync as soon as it
                         // is created. Waiting for that potentially enormous
                         // mailbox here would only hold the setup UI hostage.
-                        let accounts = match (
-                            core.load_accounts().await,
-                            core.load_account_configs().await,
-                        ) {
-                            (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                            _ => None,
-                        };
+                        let accounts = core.load_account_snapshot().await.ok();
                         UiTaskUpdate {
                             message: UiMessage::detail(
                                 "Connected {}. Initial sync is running in the background.",
@@ -4873,6 +5099,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             accounts,
                             calendar_connections: None,
                             calendar_error: None,
+                            account_removal: None,
                             clear_account_form: true,
                             finishes_account_setup: true,
                             finishes_oauth: false,
@@ -4884,6 +5111,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         accounts: None,
                         calendar_connections: None,
                         calendar_error: None,
+                        account_removal: None,
                         clear_account_form: false,
                         finishes_account_setup: true,
                         finishes_oauth: false,
@@ -4947,13 +5175,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .await;
             let update = match result {
                 Ok(account) => {
-                    let accounts = match (
-                        core.load_accounts().await,
-                        core.load_account_configs().await,
-                    ) {
-                        (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                        _ => None,
-                    };
+                    let accounts = core.load_account_snapshot().await.ok();
                     UiTaskUpdate {
                         message: UiMessage::detail(
                             "Connected {}. Initial sync is running in the background.",
@@ -4962,6 +5184,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         accounts,
                         calendar_connections: core.load_calendar_connections().await.ok(),
                         calendar_error: None,
+                        account_removal: None,
                         clear_account_form: false,
                         finishes_account_setup: false,
                         finishes_oauth: true,
@@ -4973,6 +5196,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts: None,
                     calendar_connections: None,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: true,
@@ -5022,13 +5246,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .await;
             let update = match result {
                 Ok(account) => {
-                    let accounts = match (
-                        core.load_accounts().await,
-                        core.load_account_configs().await,
-                    ) {
-                        (Ok(accounts), Ok(configs)) => Some((accounts, configs)),
-                        _ => None,
-                    };
+                    let accounts = core.load_account_snapshot().await.ok();
                     UiTaskUpdate {
                         message: UiMessage::detail(
                             "Reconnected {}. Synchronization is resuming.",
@@ -5037,6 +5255,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         accounts,
                         calendar_connections: core.load_calendar_connections().await.ok(),
                         calendar_error: None,
+                        account_removal: None,
                         clear_account_form: false,
                         finishes_account_setup: false,
                         finishes_oauth: true,
@@ -5048,6 +5267,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts: None,
                     calendar_connections: None,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: true,
@@ -5130,6 +5350,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts: None,
                     calendar_connections: connections,
                     calendar_error,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: true,
@@ -5168,6 +5389,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts: None,
                     calendar_connections: connections,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: false,
@@ -5205,6 +5427,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     accounts: None,
                     calendar_connections: connections,
                     calendar_error: None,
+                    account_removal: None,
                     clear_account_form: false,
                     finishes_account_setup: false,
                     finishes_oauth: false,

@@ -2,6 +2,107 @@
 
 use super::*;
 
+pub(super) struct AccountRemovalUpdate {
+    pub account_id: i64,
+    pub removed: bool,
+    pub scope: String,
+    pub query: String,
+    pub metadata: Option<mail::MailMetadata>,
+    pub page: Option<mail::MailPage>,
+    pub calendar_month: NaiveDate,
+    pub calendar_events: Option<Vec<calendar::LocalCalendarEvent>>,
+    pub calendar_sources: Option<Vec<calendar::LocalCalendarSource>>,
+}
+
+pub(super) fn account_was_removed(
+    account_id: i64,
+    result: &Result<(), String>,
+    snapshot: Option<&mail::AccountSnapshot>,
+) -> bool {
+    result.is_ok()
+        || snapshot.is_some_and(|snapshot| {
+            !snapshot
+                .accounts
+                .iter()
+                .any(|account| account.id == account_id)
+        })
+}
+
+pub(super) fn snapshot_is_current(state: &Rc<RefCell<InboxState>>, revision: u64) -> bool {
+    state
+        .borrow()
+        .core
+        .as_ref()
+        .is_some_and(|core| core.account_revision() == revision)
+}
+
+pub(super) fn account_owns_scope(mailboxes: &[MailboxEntry], scope: &str, account_id: i64) -> bool {
+    mailboxes
+        .iter()
+        .any(|mailbox| mailbox.account_id == account_id && mailbox.scope == scope)
+}
+
+/// Apply the local half of deletion before projecting any account or mail
+/// models. Even if reloading fails after deletion, no deleted rows survive.
+pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64) {
+    if account_owns_scope(&state.mailboxes, &state.scope, account_id) {
+        state.scope = "Unified Inbox".into();
+    }
+    if state
+        .messages
+        .iter()
+        .any(|message| message.account_id == account_id && Some(message.id) == state.selected_id)
+    {
+        state.selected_id = None;
+        state.preview_closed = true;
+        state.remote_images_override_id = None;
+    }
+    state
+        .messages
+        .retain(|message| message.account_id != account_id);
+    state
+        .mailboxes
+        .retain(|mailbox| mailbox.account_id != account_id);
+    state
+        .connected_accounts
+        .retain(|account| account.id != account_id);
+    state
+        .account_configs
+        .retain(|config| config.id != account_id);
+    state
+        .calendar_connections
+        .retain(|connection| connection.account_id != account_id);
+    state.calendar_errors.remove(&account_id);
+    state.profile_avatar_images.remove(&account_id);
+    state.profile_avatar_missing.remove(&account_id);
+    state.profile_avatar_pending.remove(&account_id);
+    state.collapsed_folder_ids.retain(|id| {
+        state
+            .mailboxes
+            .iter()
+            .any(|mailbox| mailbox.folder_id == *id)
+    });
+    state.checked_ids.clear();
+    state.next_cursor = None;
+    state.page = 1;
+    state.total_count = state.messages.len();
+    state.inbox_count = 0;
+    for mailbox in &mut state.unified_mailboxes {
+        mailbox.count.clear();
+    }
+    if state.connected_accounts.is_empty() {
+        state.messages.clear();
+        state.mailboxes.clear();
+        state.unified_mailboxes.clear();
+        state.labels.clear();
+        state.scope = "Unified Inbox".into();
+        state.query.clear();
+        state.selected_id = None;
+        state.total_count = 0;
+    }
+    mail_work::invalidate(state);
+}
+
 pub(super) fn apply_connected_accounts(
     app: &AppWindow,
     accounts: &[Account],
@@ -84,7 +185,8 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
         &state.profile_avatar_images,
     );
     drop(state);
-    app.global::<AccountMailPreferences>().invoke_context_changed();
+    app.global::<AccountMailPreferences>()
+        .invoke_context_changed();
     app.global::<FilesUi>().invoke_context_changed();
 }
 
