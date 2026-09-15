@@ -761,10 +761,11 @@ fn apply_language(app: &AppWindow, preference: &str) {
     let selected = match preference {
         "es" => "es",
         "en" => "en",
+        "tr" => "tr",
         _ => system_locale
             .as_deref()
             .and_then(|locale| locale.split(['-', '_', '@']).next())
-            .filter(|language| *language == "es")
+            .filter(|language| matches!(*language, "es" | "tr"))
             .unwrap_or("en"),
     };
     if let Err(error) = slint::select_bundled_translation(selected) {
@@ -774,6 +775,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         match preference {
             "es" => "es",
             "en" => "en",
+            "tr" => "tr",
             _ => "system",
         }
         .into(),
