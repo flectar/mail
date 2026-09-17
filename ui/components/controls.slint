@@ -142,6 +142,7 @@ export component Switch inherits Rectangle {
     border-radius: 11px;
     background: root.checked ? AppTheme.accent : AppTheme.control-border;
     opacity: root.enabled ? 1 : 0.45;
+    animate background { duration: 140ms; easing: ease-out; }
 
     Rectangle {
         x: root.checked ? parent.width - self.width - 3px : 3px;
@@ -150,6 +151,7 @@ export component Switch inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: white;
+        animate x { duration: 180ms; easing: spring(0.18); }
     }
 
     TouchArea {
@@ -340,6 +342,7 @@ export component IconButton inherits Rectangle {
     border-width: keyboard.has-focus ? 2px : 0px;
     border-color: AppTheme.accent;
     opacity: root.interactive ? 1 : 0.42;
+    animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.tooltip-text;
     accessible-action-default => {
@@ -350,13 +353,14 @@ export component IconButton inherits Rectangle {
 
     Image {
         x: (parent.width - root.icon-size) / 2;
-        y: (parent.height - root.icon-size) / 2;
+        y: (parent.height - root.icon-size) / 2 + (hit-area.pressed ? 1px : 0px);
         width: root.icon-size;
         height: root.icon-size;
         source: root.icon;
         colorize: root.primary ? white : root.icon-color;
         image-fit: contain;
         accessible-role: none;
+        animate y { duration: 140ms; easing: spring(0); }
     }
 
     keyboard := FocusScope {

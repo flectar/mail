@@ -36,8 +36,8 @@ export component ComposerToolbar inherits Rectangle {
         y: 6px;
         width: parent.width - 16px;
         height: 32px;
-        viewport-width: max(self.visible-width, toolbar-row.preferred-width);
-        viewport-height: self.visible-height;
+        content-width: max(self.visible-width, toolbar-row.preferred-width);
+        content-height: self.visible-height;
         // A native horizontal scrollbar consumes part of this 32px viewport
         // and clips the buttons. Compact toolbars remain pannable by touch.
         horizontal-scrollbar-policy: always-off;
@@ -96,8 +96,8 @@ export component ComposerAttachments inherits Rectangle {
                 y: 8px;
                 width: parent.width - 20px;
                 height: 46px;
-                viewport-width: max(self.visible-width, attachment-row.preferred-width);
-                viewport-height: self.visible-height;
+                content-width: max(self.visible-width, attachment-row.preferred-width);
+                content-height: self.visible-height;
                 horizontal-scrollbar-policy: as-needed;
                 vertical-scrollbar-policy: always-off;
                 mouse-drag-pan-enabled: root.compact;

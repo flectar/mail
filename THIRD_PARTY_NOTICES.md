@@ -6,7 +6,7 @@ authors.
 
 ## Slint
 
-Slint 1.17 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
+Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
 the upstream source is <https://github.com/slint-ui/slint>.

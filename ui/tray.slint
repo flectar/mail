@@ -1,5 +1,5 @@
 // Keep the non-visual tray in its own Slint compilation unit. app.slint embeds
-// the UI font; compiling a SystemTrayIcon alongside it makes Slint 1.17 create
+// the UI font; compiling a SystemTrayIcon alongside it makes Slint create
 // a window adapter just to register that font, which leaks an empty 800x600
 // "Slint Window" into Linux task switchers.
 export component FlectarTray inherits SystemTrayIcon {

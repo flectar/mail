@@ -96,7 +96,7 @@ component FilesNavigation inherits Rectangle {
                     enabled: !FilesUi.busy; clicked => { root.setup(); }
                 }
                 ScrollView {
-                    vertical-stretch: 1; viewport-width: self.visible-width;
+                    vertical-stretch: 1; content-width: self.visible-width;
                     horizontal-scrollbar-policy: always-off;
                     VerticalBox {
                         padding: 0px; spacing: 6px;
@@ -181,13 +181,13 @@ export component FilesView inherits Rectangle {
         active: root.active && root.list-visible && !root.setup && !root.search-pending;
         can-load-more: FilesUi.can-more; loading: FilesUi.busy;
         row-count: FilesUi.rows.length; revision: FilesUi.content-revision;
-        content-height: file-list.viewport-height;
-        viewport-y: file-list.viewport-y; visible-height: file-list.visible-height;
+        content-height: file-list.content-height;
+        content-y: file-list.content-y; visible-height: file-list.visible-height;
         prefetch-distance: 246px;
         load-more => { FilesUi.command("more", "", ""); }
     }
     function reset-pagination() {
-        file-list.viewport-y = 0px;
+        file-list.content-y = 0px;
         pagination.reset();
     }
     private property <string> list-scope: "\{FilesUi.account}:\{FilesUi.attachments ? 1 : 0}:\{FilesUi.storage-account}:\{FilesUi.path}:\{FilesUi.query}:\{FilesUi.server-attachments ? 1 : 0}";
@@ -335,7 +335,7 @@ export component FilesView inherits Rectangle {
                     scrolled => { pagination.user-scrolled(); }
                     visible: FilesUi.rows.length > 0;
                     horizontal-scrollbar-policy: always-off;
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     for row[index] in FilesUi.rows : Rectangle {
                         x: LayoutMetrics.list-row-inset; width: max(0px, parent.visible-width - 2 * LayoutMetrics.list-row-inset); height: 82px; border-radius: 6px; background: FilesUi.selected == index ? AppTheme.accent-soft : hit.has-hover ? AppTheme.sidebar-bg : transparent;
                         HorizontalBox {
@@ -368,8 +368,8 @@ export component FilesView inherits Rectangle {
                 }
                 ScrollFade {
                     x: file-list.x; y: file-list.y; width: file-list.visible-width; height: file-list.visible-height;
-                    surface-color: AppTheme.surface; viewport-y: file-list.viewport-y;
-                    viewport-height: file-list.viewport-height; visible-height: file-list.visible-height;
+                    surface-color: AppTheme.surface; content-y: file-list.content-y;
+                    content-height: file-list.content-height; visible-height: file-list.visible-height;
                 }
             }
             HorizontalBox {
@@ -421,7 +421,7 @@ export component FilesView inherits Rectangle {
                     document-revision: FilesUi.selected;
                     render-page(page, zoom) => { FilesUi.command("pdf-page", "" + page, "200"); }
                 }
-                if FilesUi.preview-open && !FilesUi.preview-is-image : ScrollView { vertical-stretch: 1; viewport-width: self.visible-width; Text { x: 0px; y: 0px; width: parent.width; height: self.preferred-height; text: FilesUi.preview-text; wrap: word-wrap; color: AppTheme.body; font-size: TypeScale.body; } }
+                if FilesUi.preview-open && !FilesUi.preview-is-image : ScrollView { vertical-stretch: 1; content-width: self.visible-width; Text { x: 0px; y: 0px; width: parent.width; height: self.preferred-height; text: FilesUi.preview-text; wrap: word-wrap; color: AppTheme.body; font-size: TypeScale.body; } }
                 if FilesUi.preview-open && FilesUi.status != "" : Text { text: FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
             }
         }
@@ -452,7 +452,7 @@ export component FilesView inherits Rectangle {
             width: min(440px, parent.width - 24px); height: min(dialog-layout.preferred-height, parent.height - 32px);
             background: AppTheme.surface; border-radius: 12px; border-width: 1px; border-color: AppTheme.border;
             ScrollView {
-            viewport-width: self.width;
+            content-width: self.width;
             dialog-layout := VerticalBox {
                 padding: 24px; spacing: 12px;
                 Text { text: FilesUi.dialog == "delete" ? @tr("Delete permanently?") : FilesUi.dialog == "share" ? @tr("Share file or folder") : FilesUi.dialog == "folder" ? @tr("New folder") : FilesUi.dialog == "rename" ? @tr("Rename") : FilesUi.dialog == "move" ? @tr("Move to folder") : FilesUi.dialog == "copy" ? @tr("Copy to folder") : FilesUi.dialog == "metadata" ? @tr("File properties") : FilesUi.dialog == "lock" ? @tr("Lock file or folder") : FilesUi.dialog == "filter" ? @tr("Filter and sort files") : @tr("Manage file"); color: AppTheme.heading; font-size: TypeScale.title; font-weight: 700; }
@@ -574,7 +574,7 @@ export component FilesView inherits Rectangle {
                     Text { text: @tr("Connect storage"); color: AppTheme.heading; font-size: TypeScale.title; horizontal-stretch: 1; }
                     ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { root.setup = false; } }
                 }
-                ScrollView { viewport-width: self.visible-width; viewport-height: storage-form.preferred-height;
+                ScrollView { content-width: self.visible-width; content-height: storage-form.preferred-height;
             storage-form := VerticalBox {
                 width: parent.visible-width; height: self.preferred-height;
                 alignment: start; padding: 0px; spacing: 10px;

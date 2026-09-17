@@ -89,8 +89,8 @@ export component OnboardingView inherits Rectangle {
     setup-scroll := ScrollView {
         width: parent.width;
         height: parent.height;
-        viewport-width: self.visible-width;
-        viewport-height: max(self.visible-height, setup-content.y + setup-content.height + 24px);
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, setup-content.y + setup-content.height + 24px);
 
         setup-content := VerticalBox {
             x: max(20px, (setup-scroll.visible-width - 400px) / 2);

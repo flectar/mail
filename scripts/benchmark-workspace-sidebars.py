@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check bounded contacts/calendar sidebar construction with slint-viewer 1.17+.
+"""Check bounded contacts/calendar sidebar construction with slint-viewer 1.18+.
 
 Screenshots are written to /tmp/workspace-sidebars. This measures UI delegate
 construction, not compiled application timing or hardware performance.

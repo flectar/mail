@@ -105,7 +105,7 @@ jobs:
       - name: Validate the Spanish catalog
         shell: bash
         run: |
-          cargo install slint-tr-extractor --version 1.17.1 --locked
+          cargo install slint-tr-extractor --version 1.18.0 --locked
           bash scripts/check-translations.sh
           msgfmt --check --check-header --check-format \
             -o /tmp/flectar-mail-es.mo \

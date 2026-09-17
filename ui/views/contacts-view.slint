@@ -93,13 +93,13 @@ export component ContactsView inherits Rectangle {
         active: root.active;
         can-load-more: root.can-load-more; loading: root.loading-more;
         row-count: root.contacts.length; revision: root.content-revision;
-        content-height: contact-list.viewport-height;
-        viewport-y: contact-list.viewport-y; visible-height: contact-list.visible-height;
+        content-height: contact-list.content-height;
+        content-y: contact-list.content-y; visible-height: contact-list.visible-height;
         prefetch-distance: 246px;
         load-more => { root.load-more(); }
     }
     function reset-pagination() {
-        contact-list.viewport-y = 0px;
+        contact-list.content-y = 0px;
         pagination.reset();
     }
     changed selected-id => { root.delete-confirming = false; }
@@ -157,12 +157,12 @@ export component ContactsView inherits Rectangle {
                     background: transparent;
 
                     contact-nav-scroll := ListView {
-                        // Keep a direct ListView repeater; Slint 1.17 does not
+                        // Keep a direct ListView repeater; Slint does not
                         // virtualize through a wrapper or inherited ListView.
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         horizontal-scrollbar-policy: always-off;
 
-                        viewport-y <=> root.sidebar-scroll-y;
+                        content-y <=> root.sidebar-scroll-y;
                         for entry in root.sidebar-rows: Rectangle {
                             width: max(0px, contact-nav-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                             height: entry.kind == ContactSidebarRowKind.unified-heading ? 34px
@@ -236,8 +236,8 @@ export component ContactsView inherits Rectangle {
                         width: contact-nav-scroll.visible-width;
                         height: contact-nav-scroll.visible-height;
                         surface-color: root.sidebar-bg;
-                        viewport-y: contact-nav-scroll.viewport-y;
-                        viewport-height: contact-nav-scroll.viewport-height;
+                        content-y: contact-nav-scroll.content-y;
+                        content-height: contact-nav-scroll.content-height;
                         visible-height: contact-nav-scroll.visible-height;
                     }
                 }
@@ -405,8 +405,8 @@ export component ContactsView inherits Rectangle {
                         width: contact-list.visible-width;
                         height: contact-list.visible-height;
                         surface-color: root.surface;
-                        viewport-y: contact-list.viewport-y;
-                        viewport-height: contact-list.viewport-height;
+                        content-y: contact-list.content-y;
+                        content-height: contact-list.content-height;
                         visible-height: contact-list.visible-height;
                     }
 
@@ -520,7 +520,7 @@ export component ContactsView inherits Rectangle {
 
                 detail-scroll := ScrollView {
                     vertical-stretch: 1;
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     horizontal-scrollbar-policy: always-off;
                     mouse-drag-pan-enabled: root.compact;
 

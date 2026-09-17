@@ -100,19 +100,19 @@ export component MailListPane inherits Rectangle {
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
 
-    animate bulk-toolbar-height { duration: 160ms; easing: ease-in-out; }
+    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
 
     pagination := InfiniteScrollController {
         active: true;
         can-load-more: root.can_load_more; loading: root.loading_more;
         row-count: root.emails.length; revision: root.content_revision;
-        content-height: mail-list-scroll.viewport-height;
-        viewport-y: mail-list-scroll.viewport-y; visible-height: mail-list-scroll.visible-height;
+        content-height: mail-list-scroll.content-height;
+        content-y: mail-list-scroll.content-y; visible-height: mail-list-scroll.visible-height;
         prefetch-distance: root.dense ? 132px : 288px;
         load-more => { root.load-more(); }
     }
     function reset-pagination() {
-        mail-list-scroll.viewport-y = 0px;
+        mail-list-scroll.content-y = 0px;
         pagination.reset();
     }
     changed selected_scope => { root.reset-pagination(); }
@@ -667,8 +667,8 @@ export component MailListPane inherits Rectangle {
                             width: mail-list-scroll.visible-width;
                             height: mail-list-scroll.visible-height;
                             surface-color: root.surface;
-                            viewport-y: mail-list-scroll.viewport-y;
-                            viewport-height: mail-list-scroll.viewport-height;
+                            content-y: mail-list-scroll.content-y;
+                            content-height: mail-list-scroll.content-height;
                             visible-height: mail-list-scroll.visible-height;
                         }
 

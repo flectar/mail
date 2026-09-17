@@ -12,7 +12,7 @@ export struct ActionMenuEntry {
 }
 
 // Application-owned action menu with one interaction and accessibility
-// contract. Slint 1.17 has no custom menu/menu-item accessibility roles, so
+// contract. Slint has no custom menu/menu-item accessibility roles, so
 // the popup is exposed as a labeled list whose entries are buttons.
 export component ActionMenu inherits Rectangle {
     in property <[ActionMenuEntry]> entries: [];
@@ -150,8 +150,8 @@ export component ActionMenu inherits Rectangle {
                     accessible-role: list;
                     accessible-label: root.tooltip-text;
                     accessible-item-count: root.entries.length;
-                    viewport-y <=> root.scroll-y;
-                    viewport-height: max(self.visible-height, root.entries.length * root.item-height + 8px);
+                    content-y <=> root.scroll-y;
+                    content-height: max(self.visible-height, root.entries.length * root.item-height + 8px);
                     horizontal-scrollbar-policy: as-needed;
                     changed visible-height => { root.menu-visible-height = self.visible-height; }
 

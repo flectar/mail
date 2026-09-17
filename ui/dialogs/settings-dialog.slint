@@ -787,7 +787,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (general-scroll.visible-width - 920px) / 2);
                             width: root.compact ? general-scroll.visible-width - 32px : min(920px, general-scroll.visible-width - 48px);
@@ -1118,7 +1118,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (accounts-scroll.visible-width - 920px) / 2);
                             width: root.compact ? accounts-scroll.visible-width - 32px : min(920px, accounts-scroll.visible-width - 48px);
@@ -1575,7 +1575,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (data-scroll.visible-width - 920px) / 2);
                             width: root.compact ? data-scroll.visible-width - 32px : min(920px, data-scroll.visible-width - 48px);
@@ -1653,7 +1653,7 @@ export component SettingsDialog inherits Rectangle {
                         visible: root.settings_tab == "Notifications";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         VerticalBox { x: root.compact ? 16px : max(24px, (notifications-scroll.visible-width - 920px) / 2); width: root.compact ? notifications-scroll.visible-width - 32px : min(920px, notifications-scroll.visible-width - 48px); padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px; padding-bottom: 32px; spacing: 10px;
                             SettingsPageTitle { label: @tr("Notifications"); title-color: root.title-color; }
                             Text { height: 20px; text: @tr("Choose how Flectar Mail gets your attention."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
@@ -1702,7 +1702,7 @@ export component SettingsDialog inherits Rectangle {
                         visible: root.settings_tab == "Shortcuts";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         VerticalBox { x: root.compact ? 16px : max(24px, (shortcuts-scroll.visible-width - 920px) / 2); width: root.compact ? shortcuts-scroll.visible-width - 32px : min(920px, shortcuts-scroll.visible-width - 48px); padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px; padding-bottom: 32px; spacing: 10px;
                             SettingsPageTitle { label: @tr("Keyboard shortcuts"); title-color: root.title-color; }
                             Text { height: 20px; text: @tr("Move through mail without leaving the keyboard."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
@@ -1722,7 +1722,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
 
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (about-scroll.visible-width - 920px) / 2);
@@ -2084,7 +2084,7 @@ export component SettingsDialog inherits Rectangle {
 
                         imap-scroll := ScrollView {
                             vertical-stretch: 1;
-                            viewport-width: self.visible-width;
+                            content-width: self.visible-width;
                             mouse-drag-pan-enabled: root.compact;
                             VerticalBox {
                                 padding: 0px;
@@ -2225,7 +2225,7 @@ export component SettingsDialog inherits Rectangle {
                     ScrollView {
                         width: parent.width;
                         height: parent.height;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                         mouse-drag-pan-enabled: root.compact;
                     VerticalBox {
                         width: profile-panel.width;
@@ -2351,7 +2351,7 @@ export component SettingsDialog inherits Rectangle {
                     width: parent.width - 44px;
                     height: parent.height - 138px;
                     mouse-drag-pan-enabled: root.compact;
-                        viewport-width: self.visible-width;
+                        content-width: self.visible-width;
                     VerticalBox {
                         spacing: 8px;
                         Text { height: 20px; text: @tr("Profiles"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }

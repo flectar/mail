@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-17 02:28+0000\n"
+"POT-Creation-Date: 2026-09-17 18:04+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -1554,7 +1554,7 @@ msgid "MY CALENDARS"
 msgstr "MIS CALENDARIOS"
 
 #: ui/components/calendar.slint:268 ui/components/calendar.slint:278
-#: ui/components/calendar.slint:317 ui/components/product-rail.slint:111
+#: ui/components/calendar.slint:317 ui/components/product-rail.slint:114
 #: ui/dialogs/settings-dialog.slint:1418
 msgid "Calendar"
 msgstr "Calendario"
@@ -1859,19 +1859,19 @@ msgstr "¿De qué trata este correo?"
 msgid "Confirm"
 msgstr "Confirmar"
 
-#: ui/components/controls.slint:161
+#: ui/components/controls.slint:163
 msgid "On"
 msgstr "Activado"
 
-#: ui/components/controls.slint:161 ui/dialogs/settings-dialog.slint:485
+#: ui/components/controls.slint:163 ui/dialogs/settings-dialog.slint:485
 msgid "Off"
 msgstr "Desactivado"
 
-#: ui/components/controls.slint:186 ui/views/mail-list-pane.slint:205
+#: ui/components/controls.slint:188 ui/views/mail-list-pane.slint:205
 msgid "Clear selection"
 msgstr "Limpiar selección"
 
-#: ui/components/controls.slint:186
+#: ui/components/controls.slint:188
 msgid "Select"
 msgstr "Seleccionar"
 
@@ -2077,26 +2077,26 @@ msgstr "Dirección final de localhost"
 msgid "Finish sign-in"
 msgstr "Finalizar inicio de sesión"
 
-#: ui/components/product-rail.slint:100 ui/components/product-rail.slint:259
+#: ui/components/product-rail.slint:103 ui/components/product-rail.slint:266
 #: ui/dialogs/settings-dialog.slint:1710
 msgid "Mail"
 msgstr "Correo"
 
-#: ui/components/product-rail.slint:122 ui/components/product-rail.slint:281
+#: ui/components/product-rail.slint:125 ui/components/product-rail.slint:288
 #: ui/views/files-view.slint:334
 msgid "Files"
 msgstr "Archivos"
 
-#: ui/components/product-rail.slint:133 ui/components/product-rail.slint:292
+#: ui/components/product-rail.slint:136 ui/components/product-rail.slint:299
 #: ui/views/contacts-view.slint:205
 msgid "Contacts"
 msgstr "Contactos"
 
-#: ui/components/product-rail.slint:147 ui/components/product-rail.slint:303
+#: ui/components/product-rail.slint:150 ui/components/product-rail.slint:310
 msgid "Settings"
 msgstr "Ajustes"
 
-#: ui/components/product-rail.slint:238
+#: ui/components/product-rail.slint:245
 msgid "Primary navigation"
 msgstr "Navegación principal"
 

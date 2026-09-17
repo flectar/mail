@@ -10,7 +10,7 @@ temporary_ui=""
 trap 'rm -rf "$temporary_dir"; test -z "$temporary_ui" || rm -f "$temporary_ui"' EXIT
 
 command -v slint-viewer >/dev/null 2>&1 || {
-  echo "slint-viewer 1.17+ is required" >&2
+  echo "slint-viewer 1.18+ is required" >&2
   exit 1
 }
 command -v cargo >/dev/null 2>&1 || {
@@ -183,7 +183,7 @@ render() {
     "$ui" > "$temporary_ui"
 
   echo "Rendering $output_name.png"
-  # Slint 1.17 can snapshot before runtime-loaded images have populated the
+  # Slint can snapshot before runtime-loaded images have populated the
   # software renderer's cache. A discarded first render keeps the committed
   # screenshot deterministic without replacing editable SVG sources.
   SLINT_SCALE_FACTOR=2 slint-viewer \

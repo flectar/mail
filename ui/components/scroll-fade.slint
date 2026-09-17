@@ -3,12 +3,12 @@
 // component keeps the visual treatment identical across workspaces.
 export component ScrollFade inherits Rectangle {
     in property <color> surface-color;
-    in property <length> viewport-y: 0px;
-    in property <length> viewport-height: 0px;
+    in property <length> content-y: 0px;
+    in property <length> content-height: 0px;
     in property <length> visible-height: root.height;
     in property <length> fade-height: 48px;
-    private property <bool> show-top: root.viewport-y < -1px;
-    private property <bool> show-bottom: root.viewport-height + root.viewport-y
+    private property <bool> show-top: root.content-y < -1px;
+    private property <bool> show-bottom: root.content-height + root.content-y
         > root.visible-height + 1px;
 
     background: transparent;

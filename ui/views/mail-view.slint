@@ -11,7 +11,7 @@ export component MailView inherits Rectangle {
     in property <bool> compact: false;
     // Keep the animated geometry outside conditionally instantiated sidebars.
     private property <length> desktop-sidebar-width: root.mail_sidebar_collapsed ? 0px : LayoutMetrics.sidebar-width;
-    animate desktop-sidebar-width { duration: 160ms; easing: ease-in-out; }
+    animate desktop-sidebar-width { duration: 220ms; easing: spring(0); }
     in property <string> layout-mode: "default";
     in property <bool> show-avatars: true;
     in property <bool> loading: false;

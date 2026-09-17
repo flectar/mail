@@ -26,13 +26,16 @@ component ProductRailItem inherits Rectangle {
         height: 40px;
         border-radius: 10px;
         background: root.active || item-hit.has-hover ? root.accent-background : transparent;
+        animate background { duration: 140ms; easing: ease-out; }
         Image {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: LayoutMetrics.icon-size;
-            height: LayoutMetrics.icon-size;
+            width: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
+            height: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
+            animate colorize { duration: 140ms; easing: ease-out; }
+            animate width, height { duration: 180ms; easing: spring(0.12); }
             image-fit: contain;
             accessible-role: none;
         }
@@ -183,14 +186,17 @@ component CompactProductNavItem inherits Rectangle {
         height: 32px;
         border-radius: 16px;
         background: root.active || nav-hit.has-hover ? root.active-background : transparent;
+        animate background { duration: 140ms; easing: ease-out; }
 
         Image {
-            x: (parent.width - 22px) / 2;
-            y: 5px;
-            width: 22px;
-            height: 22px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.active ? 24px : 22px;
+            height: root.active ? 24px : 22px;
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
+            animate colorize { duration: 140ms; easing: ease-out; }
+            animate width, height { duration: 180ms; easing: spring(0.12); }
             image-fit: contain;
             accessible-role: none;
         }
@@ -204,6 +210,7 @@ component CompactProductNavItem inherits Rectangle {
         color: root.active ? root.accent-color : root.muted-color;
         font-size: TypeScale.caption;
         font-weight: root.active ? 700 : 600;
+        animate color { duration: 140ms; easing: ease-out; }
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;

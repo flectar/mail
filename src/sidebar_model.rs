@@ -9,7 +9,7 @@ impl SidebarModel {
     }
 }
 
-// Slint 1.17.1 considers Image::default() unequal even to itself. Compare
+// Slint image handles can compare unequal even when both are empty. Compare
 // absent avatars semantically, otherwise every ordinary folder emits a change.
 fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
     let MailboxRow {

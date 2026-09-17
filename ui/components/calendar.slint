@@ -231,15 +231,15 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
         }
 
         source-scroll := ListView {
-            // Keep a direct ListView repeater; Slint 1.17 does not
+            // Keep a direct ListView repeater; Slint does not
             // virtualize through a wrapper or inherited ListView.
-            viewport-width: self.visible-width;
+            content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
             x: 0px;
             y: 330px;
             width: parent.width - LayoutMetrics.divider-width;
             height: max(0px, parent.height - self.y);
-            viewport-y <=> root.source-scroll-y;
+            content-y <=> root.source-scroll-y;
             for calendar in root.sources: Rectangle {
                 width: max(0px, source-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                 private property <length> row-y: calendar.group-start ? 26px : 0px;
@@ -330,8 +330,8 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             width: source-scroll.visible-width;
             height: source-scroll.visible-height;
             surface-color: root.surface-color;
-            viewport-y: source-scroll.viewport-y;
-            viewport-height: source-scroll.viewport-height;
+            content-y: source-scroll.content-y;
+            content-height: source-scroll.content-height;
             visible-height: source-scroll.visible-height;
         }
 
@@ -750,7 +750,7 @@ export component FunctionalCalendarView inherits Rectangle {
             y: 370px;
             width: parent.width - 16px;
             height: max(0px, parent.height - 378px);
-            viewport-width: self.visible-width;
+            content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
             mouse-drag-pan-enabled: true;
             VerticalBox {

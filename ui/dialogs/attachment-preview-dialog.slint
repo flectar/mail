@@ -37,7 +37,7 @@ export component AttachmentPreviewDialog inherits Rectangle {
                     render-page(page, zoom) => { MailAttachments.command("page", "" + page); }
                 }
                 if !MailAttachments.is-image : ScrollView {
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     Text { width: parent.visible-width; text: MailAttachments.text; wrap: word-wrap; color: AppTheme.body; }
                 }
                 Text { text: MailAttachments.busy ? @tr("Loading preview…") : MailAttachments.status; wrap: word-wrap; color: AppTheme.secondary; }

@@ -149,15 +149,15 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
             background: transparent;
 
             mailbox-scroll := ListView {
-                // Keep a direct ListView repeater; Slint 1.17 does not
+                // Keep a direct ListView repeater; Slint does not
                 // virtualize through a wrapper or inherited ListView.
-                viewport-width: self.visible-width;
+                content-width: self.visible-width;
                 horizontal-scrollbar-policy: always-off;
                 x: 0px;
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
-                viewport-y <=> root.scroll-y;
+                content-y <=> root.scroll-y;
 
                 mouse-drag-pan-enabled: root.touch-mode;
 
@@ -601,8 +601,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 width: mailbox-scroll.visible-width;
                 height: mailbox-scroll.visible-height;
                 surface-color: root.background-color;
-                viewport-y: mailbox-scroll.viewport-y;
-                viewport-height: mailbox-scroll.viewport-height;
+                content-y: mailbox-scroll.content-y;
+                content-height: mailbox-scroll.content-height;
                 visible-height: mailbox-scroll.visible-height;
             }
         }

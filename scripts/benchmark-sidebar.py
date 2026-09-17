@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Render synthetic folder trees and count constructed sidebar delegates.
 
-Requires slint-viewer 1.17+. Use --baseline-ref with a pre-virtualization
+Requires slint-viewer 1.18+. Use --baseline-ref with a pre-virtualization
 commit to compare the original ScrollView. Timings include interpretation, layout, and one software frame;
 they are diagnostic, not a compiled application or hardware benchmark.
 """

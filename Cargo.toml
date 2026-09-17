@@ -82,11 +82,8 @@ vello = { version = "0.10", optional = true }
 # This native shell currently exposes keyword/FTS search, not local semantic
 # search. Do not link Candle, tokenizers, or Hugging Face into every AppImage.
 flectar-mail-core = { path = "crates/flectar-mail-core", default-features = false }
-# Slint 1.17 and Blitz beta.2 use adjacent, semver-incompatible Fontique
-# releases that share the same native Fontconfig crate. Enable dynamic loading
-# on both so Cargo's shared native feature set cannot select an ABI that only
-# one consumer is prepared to use.
-fontique_0_10 = { package = "fontique", version = "=0.10.0", features = ["fontconfig-dlopen"] }
+# Slint 1.18 and Blitz beta.2 share Fontique 0.11. Keep dynamic Fontconfig
+# loading enabled explicitly so both rendering stacks agree on the native ABI.
 fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
 dirs = "6"
 chrono.workspace = true
@@ -103,11 +100,11 @@ tempfile = "3"
 # Linux enables both Wayland and X11; Apple and Windows use their native winit
 # integrations. Android supplies its dedicated activity backend separately.
 # The `gpu-renderer` feature adds WGPU and exposes its device/queue to Vello.
-slint = { version = "1.17", default-features = false, features = [
+slint = { version = "1.18", default-features = false, features = [
     "std",
     "renderer-software",
     "system-tray",
-    "unstable-fontique-010",
+    "unstable-fontique-011",
     "compat-1-2",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util", "fs", "process"] }
@@ -126,10 +123,10 @@ libc = "0.2"
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
-slint = { version = "1.17", default-features = false, features = ["backend-winit"] }
+slint = { version = "1.18", default-features = false, features = ["backend-winit"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
-slint = { version = "1.17", default-features = false, features = ["backend-winit"] }
+slint = { version = "1.18", default-features = false, features = ["backend-winit"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
@@ -150,17 +147,17 @@ auto_link_exclude_list = [
     "libstdc++.so*",
 ]
 
-# The Fontique aliases deliberately align a feature across Slint's and Blitz's
+# The Fontique alias deliberately aligns a feature across Slint's and Blitz's
 # transitive font stacks.
 # `slint-build`, iOS-only `cc`, and Windows-only `winresource` are consumed by build.rs.
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_10", "fontique_0_11", "slint-build", "winresource", "cc"]
+ignored = ["fontique_0_11", "slint-build", "winresource", "cc"]
 
 [build-dependencies]
 cc = "1"
-slint-build = "1.17"
+slint-build = "1.18"
 winresource = "0.1"
 
 [profile.release]

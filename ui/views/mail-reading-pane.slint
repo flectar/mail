@@ -417,7 +417,7 @@ export component MailReadingPane inherits Rectangle {
                 if screen-y < 28px || screen-y > email-surface.height - 28px {
                     let step = screen-y < 28px ? 16px : -16px;
                     let old = root.accordion-scroll-y;
-                    root.accordion-scroll-y = max(-max(0px,email-scroll.viewport-height - email-scroll.visible-height), min(0px,old + step));
+                    root.accordion-scroll-y = max(-max(0px,email-scroll.content-height - email-scroll.visible-height), min(0px,old + step));
                     root.drag-y += (old - root.accordion-scroll-y) / 1px;
                     root.syncing-accordion-scroll = true;
                     root.email-scroll-y = min(0px, root.accordion-scroll-y + root.message-body-y);
@@ -858,20 +858,20 @@ export component MailReadingPane inherits Rectangle {
                                 email-scroll := ScrollView {
                                     width: parent.width;
                                     height: parent.height;
-                                    viewport-width: 2 * (root.message-card-inset + root.message-card-border-width)
+                                    content-width: 2 * (root.message-card-inset + root.message-card-border-width)
                                         + root.email-viewport-width * EmailReader.width-ratio;
-                                    viewport-height: max(
+                                    content-height: max(
                                         parent.height,
                                         root.accordion-message-count * root.thread-header-height
                                             + max(0, root.accordion-message-count - 1) * root.thread-item-gap
                                             + root.expanded-message-height
                                     );
-                                    viewport-y <=> root.accordion-scroll-y;
+                                    content-y <=> root.accordion-scroll-y;
                                     horizontal-scrollbar-policy: EmailReader.width-ratio > 1.01 ? as-needed : always-off;
                                     mouse-drag-pan-enabled: root.compact && !root.selecting;
                                     scrolled => {
                                         root.syncing-accordion-scroll = true;
-                                        root.email-scroll-y = min(0px, self.viewport-y + root.message-body-y);
+                                        root.email-scroll-y = min(0px, self.content-y + root.message-body-y);
                                         root.syncing-accordion-scroll = false;
                                         root.email-scroll(-root.email-scroll-y / 1px, self.visible-height / 1px);
                                     }
@@ -880,7 +880,7 @@ export component MailReadingPane inherits Rectangle {
                                 // boundary. Its fixed horizontal position keeps the
                                 // chrome aligned while a zoomed document scrolls.
                                 Rectangle {
-                                    x: -email-scroll.viewport-x + root.message-card-inset;
+                                    x: -email-scroll.content-x + root.message-card-inset;
                                     y: root.selected-header-y;
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     height: root.thread-header-height + root.expanded-message-height;
@@ -891,7 +891,7 @@ export component MailReadingPane inherits Rectangle {
                                 }
 
                                 if root.thread-messages.length == 0 : ThreadMessageHeader {
-                                    x: -email-scroll.viewport-x + root.message-card-inset;
+                                    x: -email-scroll.content-x + root.message-card-inset;
                                     y: 0px;
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     sender: root.selected_sender;
@@ -914,7 +914,7 @@ export component MailReadingPane inherits Rectangle {
                                 }
 
                                 for row in root.thread-messages : ThreadMessageHeader {
-                                    x: -email-scroll.viewport-x + root.message-card-inset;
+                                    x: -email-scroll.content-x + root.message-card-inset;
                                     y: row.index * root.thread-item-stride
                                         + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
@@ -945,7 +945,7 @@ export component MailReadingPane inherits Rectangle {
                                 // message. They follow its sender header and
                                 // leave the viewport when the message is scrolled.
                                 renderer-controls := VerticalBox {
-                                    x: -email-scroll.viewport-x + root.message-card-inset + root.message-card-border-width;
+                                    x: -email-scroll.content-x + root.message-card-inset + root.message-card-border-width;
                                     y: root.selected-header-y + root.thread-header-height;
                                     width: root.email-viewport-width;
                                     height: self.preferred-height;
@@ -1146,8 +1146,8 @@ export component MailReadingPane inherits Rectangle {
                                             if event.text == Key.F7 { EmailReader.caret-mode = !EmailReader.caret-mode; return accept; }
                                             if event.text == Key.Escape { EmailReader.command("clear-selection"); return accept; }
                                             if !event.modifiers.shift && !EmailReader.caret-mode {
-                                                if event.text == Key.LeftArrow { email-scroll.viewport-x = min(0px,email-scroll.viewport-x + 40px); return accept; }
-                                                if event.text == Key.RightArrow { email-scroll.viewport-x = max(-max(0px,email-scroll.viewport-width - email-scroll.visible-width),email-scroll.viewport-x - 40px); return accept; }
+                                                if event.text == Key.LeftArrow { email-scroll.content-x = min(0px,email-scroll.content-x + 40px); return accept; }
+                                                if event.text == Key.RightArrow { email-scroll.content-x = max(-max(0px,email-scroll.content-width - email-scroll.visible-width),email-scroll.content-x - 40px); return accept; }
                                                 if event.text == Key.DownArrow { EmailReader.command("down"); return accept; }
                                                 if event.text == Key.UpArrow { EmailReader.command("up"); return accept; }
                                                 if event.text == Key.PageDown || event.text == " " { EmailReader.command("page-down"); return accept; }
@@ -1324,7 +1324,7 @@ export component MailReadingPane inherits Rectangle {
                                 // share its vertical scroll and appear only after
                                 // the rendered body has passed through the viewport.
                                 if MailAttachments.rows.length > 0 : VerticalBox {
-                                    x: -email-scroll.viewport-x + 12px;
+                                    x: -email-scroll.content-x + 12px;
                                     y: root.attachment-flow-y;
                                     width: max(0px, email-scroll.visible-width - 24px);
                                     height: root.attachment-section-height;
@@ -1378,13 +1378,13 @@ export component MailReadingPane inherits Rectangle {
 
                             }
                             if EmailReader.reader-mode : Rectangle {
-                                x: -email-scroll.viewport-x + root.message-card-inset + root.message-card-border-width;
+                                x: -email-scroll.content-x + root.message-card-inset + root.message-card-border-width;
                                 y: root.message-body-y;
                                 width: root.email-viewport-width; height: root.message-document-height;
                                 background: EmailReader.dark-reader ? #171a21 : root.surface;
                                 reader-list := ListView {
                                     width: parent.width; height: parent.height;
-                                    viewport-width: self.visible-width;
+                                    content-width: self.visible-width;
                                     for item in EmailReader.items : VerticalBox {
                                             width: reader-list.visible-width;
                                             padding: 16px; spacing: 0px;
