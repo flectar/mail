@@ -215,11 +215,17 @@ messages, events, and contacts the full screen when they need it.
 
 Flectar Mail is currently in development and is not yet stable.
 
-> [!NOTE]
-> We are waiting for Google and Microsoft to complete OAuth app verification
-> before the first stable release with Gmail, Outlook, and Microsoft 365 OAuth
-> configured by default. Earlier GitHub prereleases are intended for testers
-> using their own OAuth registrations or IMAP/JMAP accounts.
+> [!WARNING]
+> **Google OAuth verification requires an annual CASA security assessment.**
+> Flectar is a community open-source project, so completing this assessment
+> depends on sponsor support. Until the required verification is funded and
+> complete, a stable release with Gmail OAuth configured by default will not be
+> possible. If you want to help make built-in Gmail sign-in available, please
+> [sponsor Flectar](https://github.com/sponsors/flectar).
+>
+> Google and Microsoft OAuth verification is still in progress. Earlier GitHub
+> prereleases are intended for testers using their own OAuth registrations or
+> IMAP/JMAP accounts.
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 **Sign-in settings** cog on the welcome screen to save your own Google or
