@@ -11,19 +11,13 @@ and safe for a mail client that handles private user data.
 - Never submit real mailbox contents, credentials, OAuth tokens, signing
   material, or personal fixture data. Use reserved `.example` domains.
 
-## Contributor License Agreement
+## Contribution licensing
 
-Every contributor must accept the
-[`Flectar Contributor License Agreement`](CLA.md) before a pull request can be
-merged. Contributors retain copyright. The CLA permits Flectar to maintain the
-AGPL project and provides an explicit patent grant; it does not make accepted
-client contributions proprietary. This purpose is also described in
-[`LICENSING.md`](LICENSING.md).
-
-If an employer or another organization owns your work, an authorized
-representative must approve the contribution. A personal checkbox cannot grant
-rights owned by your employer. Maintainers may request a separate corporate
-agreement before review is completed.
+Contributions are licensed under the same license that applies to the files
+being changed, usually `AGPL-3.0-only`. Contributors retain copyright and must
+have the right to submit their work under that license. If an employer or
+another organization owns your work, obtain its authorization before
+contributing.
 
 ## Pull requests
 
@@ -59,5 +53,4 @@ Icon sources, generation and sizing are documented in
 
 Accepted contributions are published as part of Flectar Mail under
 `AGPL-3.0-only`, unless a file is explicitly identified as third-party material
-under another compatible license. The CLA does not remove the AGPL rights that
-recipients receive for published releases.
+under another compatible license.

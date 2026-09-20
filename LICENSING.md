@@ -39,12 +39,10 @@ own published scope, price, privacy terms, and service terms before launch.
 
 ## Contributions
 
-Outside contributions are accepted under the
-[`Flectar Contributor License Agreement`](CLA.md). Contributors retain
-copyright, and accepted contributions are published as part of Flectar Mail
-under `AGPL-3.0-only`. The agreement does not create a proprietary client
-edition or remove recipients' AGPL rights. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the acceptance process.
+Outside contributions are accepted under the license that applies to the files
+being changed, usually `AGPL-3.0-only`. Contributors retain copyright and must
+have the right to submit their work under that license. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the contribution process.
 
 ## Trademarks
 
