@@ -1,10 +1,15 @@
 import { LoadingSkeletonBlock } from "loading-skeleton.slint";
 
-// Shared motion contract for retained item lists. A one-frame handoff gives
-// Slint a real start and target value, while the critically damped 1.18
-// spring keeps fast scope changes smooth without making rows bounce.
+// Shared motion contract for retained item lists. Only semantic navigation
+// (a new scope or a completed replacement load) restarts the reveal. Model
+// revisions are deliberately kept out of this component: selection, metadata,
+// pagination, and background sync may all revise a retained list without
+// replacing what the user is looking at.
+//
+// A one-frame handoff gives Slint a real start and target value, while the
+// critically damped 1.18 spring keeps fast scope changes smooth without making
+// rows bounce.
 export component WorkspaceListTransition inherits Rectangle {
-    in property <int> revision: 0;
     in property <string> scope-key: "";
     in property <bool> loading: false;
 
@@ -18,7 +23,6 @@ export component WorkspaceListTransition inherits Rectangle {
         root.reveal-pending = true;
     }
 
-    changed revision => { if !root.loading { root.restart(); } }
     changed scope-key => { root.restart(); }
     changed loading => { if !root.loading { root.restart(); } }
 
