@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="resources/app-icon/flectar-mail-masked.png" width="112" alt="Flectar Mail logo">
+  <img src="resources/app-icon/flectar-mail-masked.png" width="88" alt="Flectar Mail logo">
   <h1 align="center">
     Flectar Mail
   </h1>
@@ -11,6 +11,15 @@
     <a href="https://flectar.com">Website</a> ·
     <a href="https://github.com/flectar/mail/issues">Report an issue</a> ·
     <a href="CONTRIBUTING.md">Contribute</a>
+  </p>
+  <p>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/flectar/mail?style=flat&label=license&color=2563eb" alt="License: AGPL-3.0"></a>
+    <a href="https://github.com/flectar/mail/releases"><img src="https://img.shields.io/github/downloads/flectar/mail/total?style=flat&label=downloads&color=16a34a" alt="Downloads across all releases"></a>
+    <a href="https://github.com/flectar/mail/releases"><img src="https://img.shields.io/github/v/release/flectar/mail?display_name=tag&include_prereleases&sort=semver&style=flat&label=release&color=0ea5e9" alt="Latest release"></a>
+  </p>
+  <p>
+    <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/language-Rust%201.92%2B-dea584?style=flat" alt="Language: Rust 1.92+"></a>
+    <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android%20%7C%20iOS-475569?style=flat" alt="Platforms: Windows, macOS, Linux, Android, iOS">
   </p>
 </div>
 
