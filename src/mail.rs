@@ -760,6 +760,7 @@ impl CoreMailSource {
         settings.language = match language {
             "es" => "es",
             "en" => "en",
+            "tr" => "tr",
             _ => "system",
         }
         .to_owned();
