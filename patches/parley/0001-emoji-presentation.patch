@@ -1,0 +1,533 @@
+--- a/crates/parley/Cargo.lock
++++ b/crates/parley/Cargo.lock
+@@ -30,18 +30,6 @@
+ checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+
+ [[package]]
+-name = "bitvec"
+-version = "1.1.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "ddcec3d12c579d40898fe0a9a358a803c23e9c52ca3c425707f81c9436211837"
+-dependencies = [
+- "funty",
+- "radium",
+- "tap",
+- "wyz",
+-]
+-
+-[[package]]
+ name = "bytemuck"
+ version = "1.25.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -62,16 +50,6 @@
+ ]
+
+ [[package]]
+-name = "cc"
+-version = "1.2.65"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e228eec9be7c17ccb640b59b36a5cd805ea2a564a4c5e162c2f659fea30d3b96"
+-dependencies = [
+- "find-msvc-tools",
+- "shlex",
+-]
+-
+-[[package]]
+ name = "cfg-if"
+ version = "1.0.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -116,12 +94,6 @@
+ ]
+
+ [[package]]
+-name = "equivalent"
+-version = "1.0.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+-
+-[[package]]
+ name = "euclid"
+ version = "0.22.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -129,12 +101,6 @@
+ dependencies = [
+  "num-traits",
+ ]
+-
+-[[package]]
+-name = "find-msvc-tools"
+-version = "0.1.9"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+
+ [[package]]
+ name = "foldhash"
+@@ -174,12 +140,6 @@
+ ]
+
+ [[package]]
+-name = "funty"
+-version = "2.0.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
+-
+-[[package]]
+ name = "harfrust"
+ version = "0.12.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -329,16 +289,6 @@
+ checksum = "e4a2c462a4d927d512f5f882a033ddd62f33a05bb9f230d98f736ac3dc85938f"
+
+ [[package]]
+-name = "indexmap"
+-version = "2.14.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+-dependencies = [
+- "equivalent",
+- "hashbrown",
+-]
+-
+-[[package]]
+ name = "kurbo"
+ version = "0.13.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -358,24 +308,6 @@
+ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+
+ [[package]]
+-name = "libdeflate-sys"
+-version = "1.25.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "72753e0008ea87963d2f0770042d0df7abe51fafbb8dcaf618ac440f2f1fec0a"
+-dependencies = [
+- "cc",
+-]
+-
+-[[package]]
+-name = "libdeflater"
+-version = "1.25.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "d1ee41cf6fb1bb6030dfb59ffb7bc01ab26aade44142084c87f0fc7a1658fe71"
+-dependencies = [
+- "libdeflate-sys",
+-]
+-
+-[[package]]
+ name = "libloading"
+ version = "0.8.9"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -404,12 +336,6 @@
+ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
+
+ [[package]]
+-name = "log"
+-version = "0.4.33"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+-
+-[[package]]
+ name = "memchr"
+ version = "2.8.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -483,20 +409,6 @@
+ version = "1.21.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+-
+-[[package]]
+-name = "oxipng"
+-version = "9.1.5"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "26c613f0f566526a647c7473f6a8556dbce22c91b13485ee4b4ec7ab648e4973"
+-dependencies = [
+- "bitvec",
+- "indexmap",
+- "libdeflater",
+- "log",
+- "rgb",
+- "rustc-hash",
+-]
+
+ [[package]]
+ name = "parlance"
+@@ -517,9 +429,9 @@
+  "icu_properties",
+  "icu_segmenter",
+  "linebender_resource_handle",
+- "oxipng",
+  "parlance",
+  "parley_data",
++ "parley_emoji",
+  "peniko",
+  "skrifa",
+ ]
+@@ -532,6 +444,10 @@
+ dependencies = [
+  "icu_properties",
+ ]
++
++[[package]]
++name = "parley_emoji"
++version = "0.11.1"
+
+ [[package]]
+ name = "peniko"
+@@ -591,12 +507,6 @@
+ ]
+
+ [[package]]
+-name = "radium"
+-version = "0.7.0"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
+-
+-[[package]]
+ name = "read-fonts"
+ version = "0.41.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -609,15 +519,6 @@
+ ]
+
+ [[package]]
+-name = "rgb"
+-version = "0.8.53"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+-dependencies = [
+- "bytemuck",
+-]
+-
+-[[package]]
+ name = "roxmltree"
+ version = "0.21.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -627,12 +528,6 @@
+ ]
+
+ [[package]]
+-name = "rustc-hash"
+-version = "2.1.2"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
+-
+-[[package]]
+ name = "serde"
+ version = "1.0.228"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+@@ -661,12 +556,6 @@
+  "quote",
+  "syn",
+ ]
+-
+-[[package]]
+-name = "shlex"
+-version = "2.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+ [[package]]
+ name = "skrifa"
+@@ -712,12 +601,6 @@
+  "quote",
+  "syn",
+ ]
+-
+-[[package]]
+-name = "tap"
+-version = "1.0.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+ [[package]]
+ name = "tinystr"
+@@ -865,15 +748,6 @@
+ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+ [[package]]
+-name = "wyz"
+-version = "0.5.1"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "05f360fc0b24296329c78fda852a1e9ae82de9cf7b27dae4b7f62f118f77b9ed"
+-dependencies = [
+- "tap",
+-]
+-
+-[[package]]
+ name = "yeslogic-fontconfig-sys"
+ version = "6.0.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+--- a/crates/parley/Cargo.toml
++++ b/crates/parley/Cargo.toml
+@@ -116,17 +116,16 @@
+ features = ["baked"]
+ default-features = false
+
++[dependencies.parley_emoji]
++path = "../parley_emoji"
++default-features = false
++
+ [dependencies.skrifa]
+ version = "0.44.0"
+ default-features = false
+
+ [dev-dependencies.peniko]
+ version = "0.6.0"
+-default-features = false
+-
+-[target.'cfg(not(target_os = "android"))'.dev-dependencies.oxipng]
+-version = "9.1.5"
+-features = ["freestanding"]
+ default-features = false
+
+ [lints.clippy]
+--- a/crates/parley/src/bidi.rs
++++ b/crates/parley/src/bidi.rs
+@@ -892,3 +892,30 @@ impl BracketStack {
+ const fn mask(t: BidiClass) -> u32 {
+-    1 << (t.to_icu4c_value() as u32)
++    // Keep the bit assignment local: these masks only need a unique bit for
++    // each bidi class and do not depend on ICU4C's numeric representation.
++    match t {
++        BidiClass::LeftToRight => 1 << 0,
++        BidiClass::RightToLeft => 1 << 1,
++        BidiClass::EuropeanNumber => 1 << 2,
++        BidiClass::EuropeanSeparator => 1 << 3,
++        BidiClass::EuropeanTerminator => 1 << 4,
++        BidiClass::ArabicNumber => 1 << 5,
++        BidiClass::CommonSeparator => 1 << 6,
++        BidiClass::ParagraphSeparator => 1 << 7,
++        BidiClass::SegmentSeparator => 1 << 8,
++        BidiClass::WhiteSpace => 1 << 9,
++        BidiClass::OtherNeutral => 1 << 10,
++        BidiClass::LeftToRightEmbedding => 1 << 11,
++        BidiClass::LeftToRightOverride => 1 << 12,
++        BidiClass::ArabicLetter => 1 << 13,
++        BidiClass::RightToLeftEmbedding => 1 << 14,
++        BidiClass::RightToLeftOverride => 1 << 15,
++        BidiClass::PopDirectionalFormat => 1 << 16,
++        BidiClass::NonspacingMark => 1 << 17,
++        BidiClass::BoundaryNeutral => 1 << 18,
++        BidiClass::FirstStrongIsolate => 1 << 19,
++        BidiClass::LeftToRightIsolate => 1 << 20,
++        BidiClass::RightToLeftIsolate => 1 << 21,
++        BidiClass::PopDirectionalIsolate => 1 << 22,
++        _ => 0,
++    }
+ }
+--- a/crates/parley/src/shape/mod.rs
++++ b/crates/parley/src/shape/mod.rs
+@@ -18,13 +18,21 @@
+ use crate::inline_box::InlineBox;
+ use crate::lru_cache::LruCache;
+ use crate::util::nearly_eq;
+-use crate::{FontData, convert};
++use crate::{convert, FontData};
+ use fontique::Language;
+ use icu_properties::props::Script;
++use icu_properties::{
++    props::{Emoji, EmojiModifier, EmojiModifierBase, EmojiPresentation},
++    CodePointSetData,
++};
++use parley_emoji::{EmojiDFA, EmojiSegmentationCategory};
+
+ use fontique::{self, Query, QueryFamily, QueryFont};
+
+ mod cache;
++
++#[cfg(test)]
++mod test_emoji;
+
+ pub(crate) struct ShapeContext {
+     shape_data_cache: LruCache<cache::ShapeDataKey, harfrust::ShaperData>,
+@@ -238,34 +246,39 @@
+     let mut force_normalize = false;
+     let mut is_emoji_or_pictograph = false;
+     let mut map_len: u8 = 0;
++    let mut emoji_dfa = EmojiDFA::new();
++    let mut leading_is_emoji_presentation = false;
+     let start = *code_unit_offset_in_string as u32;
+
+-    for ((_, ch), (info, style_index)) in segment_text.char_indices().zip(item_infos_iter.by_ref())
++    for ((i, ch), (info, style_index)) in segment_text.char_indices().zip(item_infos_iter.by_ref())
+     {
+         force_normalize |= info.force_normalize();
+-        // TODO - make emoji detection more complete, as per (except using composite Trie tables as
+-        //  much as possible:
+-        //  https://github.com/conor-93/parley/blob/4637d826732a1a82bbb3c904c7f47a16a21cceec/parley/src/shape/mod.rs#L221-L269
+         is_emoji_or_pictograph |= info.is_emoji_or_pictograph();
+         *code_unit_offset_in_string += ch.len_utf8();
+
+-        // TODO: Explore ignoring other modifiers in determining `contributes_to_shaping`:
+-        //  regional indicators, subdivision flag tag sequences, skin tone modifiers
+-        //  See also: https://github.com/google/emoji-segmenter
+-
+-        // If the color emoji has a non-printing variation selector, ignore the variation selector.
+-        // Its presentation depends on the platform and font.
+-        //
+-        // e.g.
+-        //  - `U+270C + U+FE0F`: `✌`, force basic presentation
+-        //  - `U+270C + U+FE0F`: `✌️`, force emoji presentation
+-        //
+-        // <https://www.unicode.org/reports/tr37/>
+-        let is_emoji_with_non_printing_variation_selector =
+-            is_emoji_or_pictograph && info.is_variation_selector();
+-
++        let mut is_emoji_presentation_selector = false;
++        if is_emoji_or_pictograph {
++            // Backport of linebender/parley#811. Use the existing ICU tables
++            // instead of changing 0.11's packed analysis data and public API.
++            let is_emoji_presentation = CodePointSetData::new::<EmojiPresentation>().contains(ch);
++            if i == 0 {
++                leading_is_emoji_presentation = is_emoji_presentation;
++            }
++            let category = EmojiSegmentationCategory::from_codepoint(
++                ch as u32,
++                CodePointSetData::new::<Emoji>().contains(ch),
++                is_emoji_presentation,
++                CodePointSetData::new::<EmojiModifier>().contains(ch),
++                CodePointSetData::new::<EmojiModifierBase>().contains(ch),
++                info.is_region_indicator(),
++            );
++            is_emoji_presentation_selector = category.is_presentation_selector();
++            emoji_dfa.step_record(category);
++        }
++
++        // Presentation selectors are default-ignorable, not required glyphs.
+         let contributes_to_shaping =
+-            info.contributes_to_shaping() && !is_emoji_with_non_printing_variation_selector;
++            info.contributes_to_shaping() && !is_emoji_presentation_selector;
+         if contributes_to_shaping {
+             map_len += 1;
+         }
+@@ -281,7 +294,10 @@
+
+     // Finalize cluster metadata
+     let end = *code_unit_offset_in_string as u32;
+-    char_cluster.is_emoji = is_emoji_or_pictograph;
++    char_cluster.is_emoji = is_emoji_or_pictograph
++        && emoji_dfa
++            .presentation_style(leading_is_emoji_presentation)
++            .is_emoji();
+     char_cluster.map_len = map_len;
+     char_cluster.start = start;
+     char_cluster.end = end;
+--- /dev/null
++++ b/crates/parley/src/shape/test_emoji.rs
+@@ -0,0 +1,79 @@
++// Copyright 2026 the Parley Authors
++// SPDX-License-Identifier: Apache-2.0 OR MIT
++
++use super::fill_cluster_in_place;
++use crate::analysis::cluster::CharCluster;
++use crate::{FontContext, LayoutContext};
++
++#[test]
++fn presentation_selects_fonts_without_changing_character_metadata() {
++    let mut fonts = FontContext::new();
++    let mut layout = LayoutContext::<()>::new();
++    let mut cluster = CharCluster::default();
++    // Each input is a single grapheme. Reuse the cluster, as shaping does,
++    // to also check that emoji state cannot leak into the next text cluster.
++    for (text, emoji) in [
++        ("😀", true),
++        ("0", false),
++        ("1", false),
++        ("2", false),
++        ("3", false),
++        ("4", false),
++        ("5", false),
++        ("6", false),
++        ("7", false),
++        ("8", false),
++        ("9", false),
++        ("#", false),
++        ("*", false),
++        ("©", false),
++        ("®", false),
++        ("™", false),
++        ("☺", false),
++        ("❤", false),
++        ("©\u{fe0f}", true),
++        ("®\u{fe0f}", true),
++        ("☺\u{fe0f}", true),
++        ("❤\u{fe0f}", true),
++        ("⌚\u{fe0e}", false),
++        ("⌚", true),
++        ("1\u{fe0e}", false),
++        ("1\u{fe0f}\u{20e3}", true),
++        ("#\u{fe0f}\u{20e3}", true),
++        ("*\u{fe0f}\u{20e3}", true),
++        ("1\u{20e3}", true),
++        ("🇪🇸", true),
++        ("👍🏽", true),
++        ("👩\u{200d}💻", true),
++        (
++            "🏴\u{e0067}\u{e0062}\u{e0065}\u{e006e}\u{e0067}\u{e007f}",
++            true,
++        ),
++        ("a", false),
++        ("中", false),
++        ("e\u{301}", false),
++    ] {
++        let _ = layout
++            .ranged_builder(&mut fonts, text, 1.0, true)
++            .build(text);
++        if "0123456789#*©®™☺❤".contains(text) {
++            assert!(
++                layout.info[0].0.is_emoji_or_pictograph(),
++                "text presentation must preserve the broader character property"
++            );
++        }
++        let mut offset = 0;
++        fill_cluster_in_place(text, &mut layout.info.iter(), &mut offset, &mut cluster);
++        assert_eq!(cluster.is_emoji, emoji, "presentation of {text:?}");
++        assert_eq!(offset, text.len(), "byte range of {text:?}");
++        assert_eq!(cluster.chars.len(), text.chars().count(), "character count");
++        for ch in &cluster.chars {
++            if matches!(ch.ch, '\u{fe0e}' | '\u{fe0f}') {
++                assert!(
++                    !ch.contributes_to_shaping,
++                    "selector must not require a glyph"
++                );
++            }
++        }
++    }
++}
+--- a/crates/parley/src/tests/mod.rs
++++ b/crates/parley/src/tests/mod.rs
+@@ -2,5 +2,6 @@
+ // SPDX-License-Identifier: Apache-2.0 OR MIT
+
+ mod test_analysis;
+-mod test_builders;
+-mod utils;
++// The published crate omits parley_dev and the font fixtures required by
++// test_builders and its utils. Run the self-contained analysis and presentation tests here;
++// Flectar's renderer regressions exercise layout with bundled test fonts.
+--- /dev/null
++++ b/crates/parley_emoji/Cargo.toml
+@@ -0,0 +1,13 @@
++[package]
++name = "parley_emoji"
++version = "0.11.1"
++edition = "2024"
++rust-version = "1.88"
++description = "Emoji presentation resolution for text layout in Parley."
++license = "MIT"
++repository = "https://github.com/linebender/parley"
++publish = false
++
++[features]
++default = ["std"]
++std = []
+--- /dev/null
++++ b/crates/parley_emoji/Cargo.lock
+@@ -0,0 +1,7 @@
++# This file is automatically @generated by Cargo.
++# It is not intended for manual editing.
++version = 4
++
++[[package]]
++name = "parley_emoji"
++version = "0.11.1"

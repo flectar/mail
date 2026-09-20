@@ -9,6 +9,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/004_carddav.sql"),
     include_str!("migrations/005_mailbox_count_indexes.sql"),
     include_str!("migrations/006_contact_recovery.sql"),
+    include_str!("migrations/007_account_label_ownership.sql"),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -235,6 +236,208 @@ mod tests {
                 [],
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn upgrade_splits_merged_provider_labels_by_account_without_losing_membership() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for sql in &MIGRATIONS[..6] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 6).unwrap();
+        seed_mail_graph(&conn);
+        conn.execute(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, username, imap_host, imap_port,
+               smtp_host, smtp_port, created_at
+             ) VALUES (2, 'other@test.dev', 'gmail', 'oauth2', 'other', '', 993, '', 587, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE accounts SET provider = 'gmail', auth_kind = 'oauth2' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, account_id, imap_name) VALUES (3, 2, 'Travel')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO threads (id, account_id, subject_norm) VALUES (2, 2, 'travel')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (
+               id, account_id, thread_id, folder_id, uid, subject, from_addr,
+               to_json, cc_json, date, snippet
+             ) VALUES (2, 2, 2, 3, 8, 'Trip', 'sender@test.dev', '[]', '[]', 2, '')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO labels (id, name, color, keyword, position)
+             VALUES (20, 'Travel', '#123456', 'Travel', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_labels (message_id, label_id) VALUES (1, 20), (2, 20)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO gmail_labels (
+               account_id, provider_id, name, kind, folder_id, local_label_id,
+               background_color
+             ) VALUES
+               (1, 'Label_A', 'Travel', 'user', NULL, 20, '#111111'),
+               (2, 'Label_B', 'Travel', 'user', 3, 20, '#222222')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pending_actions (
+               account_id, kind, message_id, thread_id, payload, created_at
+             ) VALUES (2, 'add_label', 2, 2, '{\"labelId\":20}', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO split_rules (id, name, query_json)
+             VALUES (9, 'Travel mail', '{\"labels\":[20,999]}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (
+               'settings',
+               '{\"aiAutomationRules\":[
+                  {\"id\":\"travel\",\"enabled\":true,\"actions\":[
+                    {\"kind\":\"add_label\",\"value\":\"20\"}
+                  ]},
+                  {\"id\":\"read\",\"enabled\":true,\"actions\":[
+                    {\"kind\":\"mark_read\",\"value\":\"\"}
+                  ]}
+                ]}'
+             )",
+            [],
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, username, imap_host, imap_port,
+               smtp_host, smtp_port, created_at
+             ) VALUES (3, 'unlinked@test.dev', 'gmail', 'oauth2', 'unlinked', '', 993, '', 587, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO pending_actions (
+               account_id, kind, message_id, thread_id, payload, created_at
+             ) VALUES (3, 'add_label', NULL, NULL, '{\"labelId\":20}', 2)",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let bindings = conn
+            .prepare(
+                "SELECT gl.account_id, gl.local_label_id, l.owner_account_id, l.color
+                   FROM gmail_labels gl JOIN labels l ON l.id = gl.local_label_id
+                  WHERE gl.provider_id IN ('Label_A', 'Label_B')
+                  ORDER BY gl.account_id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(bindings.len(), 2);
+        assert_ne!(bindings[0].1, bindings[1].1);
+        assert_eq!(bindings[0].0, bindings[0].2);
+        assert_eq!(bindings[1].0, bindings[1].2);
+        assert_eq!(bindings[0].3, "#111111");
+        assert_eq!(bindings[1].3, "#222222");
+
+        let memberships = conn
+            .prepare(
+                "SELECT m.account_id, ml.label_id
+                   FROM message_labels ml JOIN messages m ON m.id = ml.message_id
+                  ORDER BY m.account_id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(memberships, vec![(1, bindings[0].1), (2, bindings[1].1)]);
+        let queued_label_id: i64 = conn
+            .query_row(
+                "SELECT json_extract(payload, '$.labelId') FROM pending_actions WHERE account_id = 2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(queued_label_id, bindings[1].1);
+        let split_label_ids: String = conn
+            .query_row(
+                "SELECT json_extract(query_json, '$.labels')
+                   FROM split_rules WHERE id = 9",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let split_label_ids: Vec<i64> = serde_json::from_str(&split_label_ids).unwrap();
+        assert_eq!(split_label_ids, vec![bindings[0].1, bindings[1].1, 999]);
+        let automation_states: String = conn
+            .query_row(
+                "SELECT json_extract(value, '$.aiAutomationRules')
+                   FROM app_settings WHERE key = 'settings'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let automation_states: serde_json::Value =
+            serde_json::from_str(&automation_states).unwrap();
+        assert_eq!(automation_states[0]["enabled"], false);
+        assert_eq!(automation_states[1]["enabled"], true);
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM pending_actions WHERE account_id = 3",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM message_labels", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        assert!(
+            conn.prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .query([])
+                .unwrap()
+                .next()
+                .unwrap()
+                .is_none()
         );
     }
 

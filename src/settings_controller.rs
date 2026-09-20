@@ -8,6 +8,18 @@
 use super::*;
 use flectar_mail_core::models::CustomTheme;
 
+fn apply_account_presentation_settings(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    settings: &flectar_mail_core::models::Settings,
+) {
+    state.borrow_mut().account_presentation =
+        AccountPresentationSettings::from_settings(settings);
+    refresh_connected_accounts(app, state);
+    refresh_rows_only(app, state, runtime);
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -230,6 +242,174 @@ pub(super) fn register_settings_preference_callbacks(
             Ok(()) => app.set_sync_status(UiMessage::plain("Avatar preference saved.")),
             Err(error) => app.set_sync_status(UiMessage::detail(
                 "Could not save avatar preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_profiles = Rc::clone(state);
+    let runtime_for_profiles = Rc::clone(runtime);
+    app.on_save_mail_profile(move |profile_id, name, color| {
+        let Some(app) = app_weak.upgrade() else {
+            return Default::default();
+        };
+        let Some(core) = state_for_profiles.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Profile changes require local mail data.",
+            ));
+            return Default::default();
+        };
+        let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
+        match runtime_for_profiles.block_on(core.save_mail_profile(
+            profile_id,
+            name.to_string(),
+            theme::color_to_hex(color),
+        )) {
+            Ok((settings, profile)) => {
+                apply_account_presentation_settings(
+                    &app,
+                    &state_for_profiles,
+                    &runtime_for_profiles,
+                    &settings,
+                );
+                app.set_sync_status(UiMessage::plain("Profile saved."));
+                profile.id.into()
+            }
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not save profile: {}", error));
+                Default::default()
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_profile_assignment = Rc::clone(state);
+    let runtime_for_profile_assignment = Rc::clone(runtime);
+    app.on_assign_account_profile(move |account_id, profile_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_profile_assignment.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Profile changes require local mail data.",
+            ));
+            return;
+        };
+        let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
+        match runtime_for_profile_assignment.block_on(
+            core.assign_account_profile(i64::from(account_id), profile_id),
+        ) {
+            Ok(settings) => {
+                apply_account_presentation_settings(
+                    &app,
+                    &state_for_profile_assignment,
+                    &runtime_for_profile_assignment,
+                    &settings,
+                );
+                app.set_sync_status(UiMessage::plain("Account profile updated."));
+            }
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not update account profile: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_account_color = Rc::clone(state);
+    let runtime_for_account_color = Rc::clone(runtime);
+    app.on_save_account_color(move |account_id, color, generated| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_account_color.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Account color changes require local mail data.",
+            ));
+            return;
+        };
+        let color = (!generated).then(|| theme::color_to_hex(color));
+        match runtime_for_account_color
+            .block_on(core.set_account_color(i64::from(account_id), color))
+        {
+            Ok(settings) => {
+                apply_account_presentation_settings(
+                    &app,
+                    &state_for_account_color,
+                    &runtime_for_account_color,
+                    &settings,
+                );
+                app.set_sync_status(UiMessage::plain("Account color updated."));
+            }
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not update account color: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_profile_delete = Rc::clone(state);
+    let runtime_for_profile_delete = Rc::clone(runtime);
+    app.on_delete_mail_profile(move |profile_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_profile_delete.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Profile changes require local mail data.",
+            ));
+            return;
+        };
+        match runtime_for_profile_delete.block_on(core.delete_mail_profile(profile_id.to_string()))
+        {
+            Ok(settings) => {
+                apply_account_presentation_settings(
+                    &app,
+                    &state_for_profile_delete,
+                    &runtime_for_profile_delete,
+                    &settings,
+                );
+                app.set_sync_status(UiMessage::plain("Profile deleted."));
+            }
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not delete profile: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_marker_visibility = Rc::clone(state);
+    let runtime_for_marker_visibility = Rc::clone(runtime);
+    app.on_save_account_markers_visibility(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_marker_visibility.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Marker preference is active for this session.",
+            ));
+            state_for_marker_visibility
+                .borrow_mut()
+                .account_presentation
+                .show_markers = enabled;
+            refresh_rows_only(&app, &state_for_marker_visibility, &runtime_for_marker_visibility);
+            return;
+        };
+        match runtime_for_marker_visibility.block_on(core.set_show_account_badges(enabled)) {
+            Ok(settings) => {
+                apply_account_presentation_settings(
+                    &app,
+                    &state_for_marker_visibility,
+                    &runtime_for_marker_visibility,
+                    &settings,
+                );
+                app.set_sync_status(UiMessage::plain("Mail-list marker preference saved."));
+            }
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save mail-list marker preference: {}",
                 error,
             )),
         }

@@ -28,7 +28,7 @@ export component AttachmentPreviewDialog inherits Rectangle {
                 HorizontalBox {
                     Text { text: MailAttachments.name; color: AppTheme.heading; font-size: TypeScale.title; overflow: elide; horizontal-stretch: 1; }
                     Button { text: @tr("Download"); enabled: !MailAttachments.busy; clicked => { MailAttachments.command("download-current", ""); } }
-                    ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/phosphor/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { MailAttachments.command("close", ""); } }
+                    ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { MailAttachments.command("close", ""); } }
                 }
                 if MailAttachments.is-image : DocumentPreview {
                     compact: root.compact; source: MailAttachments.image; busy: MailAttachments.busy;
@@ -37,7 +37,7 @@ export component AttachmentPreviewDialog inherits Rectangle {
                     render-page(page, zoom) => { MailAttachments.command("page", "" + page); }
                 }
                 if !MailAttachments.is-image : ScrollView {
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     Text { width: parent.visible-width; text: MailAttachments.text; wrap: word-wrap; color: AppTheme.body; }
                 }
                 Text { text: MailAttachments.busy ? @tr("Loading preview…") : MailAttachments.status; wrap: word-wrap; color: AppTheme.secondary; }

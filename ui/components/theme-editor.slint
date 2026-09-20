@@ -81,6 +81,51 @@ component ThemePresetCard inherits FocusScope {
     }
 }
 
+component ThemeModeCard inherits FocusScope {
+    in property <string> name;
+    in property <string> mode;
+    in property <bool> selected: false;
+    callback chosen;
+
+    height: 68px;
+    min-width: 92px;
+    focus-on-click: true;
+    accessible-role: radio-button;
+    accessible-label: root.name;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space { root.chosen(); return accept; }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.selected || root.has-focus ? 2px : 1px;
+        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border;
+        background: mode-hit.has-hover ? AppTheme.control-bg : AppTheme.surface;
+        Rectangle {
+            x: 9px; y: 8px; width: parent.width - 18px; height: 32px;
+            border-radius: 5px; border-width: 1px; border-color: AppTheme.border; clip: true;
+            background: root.mode == "dark" ? #18191a : #f2f2f0;
+            if root.mode == "system" : Rectangle { x: parent.width / 2; width: parent.width / 2; height: parent.height; background: #18191a; }
+            Rectangle {
+                x: 6px; y: 6px; width: parent.width - 12px; height: 20px;
+                border-radius: 3px;
+                background: root.mode == "dark" ? #242526 : root.mode == "light" ? #ffffff : @linear-gradient(90deg, #ffffff 0%, #ffffff 50%, #242526 50%, #242526 100%);
+            }
+            Rectangle { x: 10px; y: 11px; width: 28%; height: 3px; border-radius: 2px; background: #3b82f6; }
+        }
+        Text {
+            x: 8px; y: 44px; width: parent.width - 16px; height: 17px;
+            text: root.name; color: root.selected ? AppTheme.accent : AppTheme.body;
+            font-size: TypeScale.caption; font-weight: root.selected ? 700 : 600;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        mode-hit := TouchArea { clicked => { root.chosen(); } mouse-cursor: pointer; }
+    }
+}
+
 component ThemeColorChip inherits FocusScope {
     in property <string> name;
     in property <color> value;
@@ -136,7 +181,7 @@ component ThemeColorChip inherits FocusScope {
     }
 }
 
-component RuntimeColorPicker inherits Rectangle {
+export component RuntimeColorPicker inherits Rectangle {
     in-out property <color> value;
     callback edited(color);
     private property <float> hue: root.value.to-hsv().hue;
@@ -150,6 +195,12 @@ component RuntimeColorPicker inherits Rectangle {
     border-width: 1px;
     border-color: AppTheme.border-subtle;
     background: AppTheme.surface-raised;
+
+    init => {
+        // External bindings are resolved before the component is shown, but
+        // an in-out string keeps its type default until explicitly synced.
+        root.hex-value = ThemeUtilities.color-to-hex(root.value);
+    }
 
     changed value => {
         root.hex-value = ThemeUtilities.color-to-hex(root.value);
@@ -382,8 +433,8 @@ export component ThemeEditor inherits Rectangle {
     private property <bool> contrast-valid: root.minimum-contrast >= 4.5;
 
     height: AppTheme.preset == "custom"
-        ? (root.compact ? 958px : 640px)
-        : (root.compact ? 408px : 222px);
+        ? (root.compact ? 970px : 690px)
+        : (root.compact ? 420px : 272px);
     border-radius: 8px;
     border-width: 1px;
     border-color: AppTheme.border-subtle;
@@ -531,31 +582,14 @@ export component ThemeEditor inherits Rectangle {
             vertical-alignment: center;
         }
 
-        if !root.compact : HorizontalBox {
-            height: 32px;
-            spacing: 18px;
-            Text {
-                text: @tr("Color scheme");
-                color: AppTheme.secondary;
-                font-size: TypeScale.secondary;
-                vertical-alignment: center;
-            }
-            RadioButton { text: @tr("System"); checked: root.theme-mode == "system"; clicked => { root.choose-mode("system"); } }
-            RadioButton { text: @tr("Dark"); checked: root.theme-mode == "dark"; clicked => { root.choose-mode("dark"); } }
-            RadioButton { text: @tr("Light"); checked: root.theme-mode == "light"; clicked => { root.choose-mode("light"); } }
-            Rectangle { horizontal-stretch: 1; }
-        }
-        if root.compact : VerticalBox {
-            height: 70px;
-            spacing: 2px;
-            Text { height: 22px; text: @tr("Color scheme"); color: AppTheme.secondary; font-size: TypeScale.secondary; vertical-alignment: center; }
-            HorizontalBox {
-                height: 44px;
-                spacing: 8px;
-                RadioButton { height: 44px; horizontal-stretch: 1; text: @tr("System"); checked: root.theme-mode == "system"; clicked => { root.choose-mode("system"); } }
-                RadioButton { height: 44px; horizontal-stretch: 1; text: @tr("Dark"); checked: root.theme-mode == "dark"; clicked => { root.choose-mode("dark"); } }
-                RadioButton { height: 44px; horizontal-stretch: 1; text: @tr("Light"); checked: root.theme-mode == "light"; clicked => { root.choose-mode("light"); } }
-            }
+        Text { height: 18px; text: @tr("Color scheme"); color: AppTheme.secondary; font-size: TypeScale.secondary; vertical-alignment: center; }
+        HorizontalBox {
+            height: 68px;
+            padding: 0px;
+            spacing: 8px;
+            ThemeModeCard { horizontal-stretch: 1; min-width: 0px; name: @tr("System"); mode: "system"; selected: root.theme-mode == "system"; chosen => { root.choose-mode("system"); } }
+            ThemeModeCard { horizontal-stretch: 1; min-width: 0px; name: @tr("Dark"); mode: "dark"; selected: root.theme-mode == "dark"; chosen => { root.choose-mode("dark"); } }
+            ThemeModeCard { horizontal-stretch: 1; min-width: 0px; name: @tr("Light"); mode: "light"; selected: root.theme-mode == "light"; chosen => { root.choose-mode("light"); } }
         }
 
         Rectangle { height: 1px; background: AppTheme.border-subtle; }
@@ -563,6 +597,7 @@ export component ThemeEditor inherits Rectangle {
 
         if !root.compact : HorizontalBox {
             height: 72px;
+            padding: 0px;
             spacing: 8px;
             ThemePresetCard { horizontal-stretch: 1; name: @tr("Default"); preview-primary: #0969da; preview-page: AppTheme.dark ? #111213 : #f2f2f0; preview-surface: AppTheme.dark ? #18191a : white; preview-text: AppTheme.dark ? #f3f3f2 : #202120; selected: AppTheme.preset == "default"; chosen => { root.choose-preset("default"); } }
             ThemePresetCard { horizontal-stretch: 1; name: @tr("Teal"); preview-primary: #006b7a; preview-page: AppTheme.dark ? #0b1519 : #edf5f7; preview-surface: AppTheme.dark ? #122026 : #fbfefe; preview-text: AppTheme.dark ? #e5f0f2 : #173039; selected: AppTheme.preset == "teal"; chosen => { root.choose-preset("teal"); } }
@@ -572,21 +607,25 @@ export component ThemeEditor inherits Rectangle {
         }
         if root.compact : VerticalBox {
             height: 220px;
+            padding: 0px;
             spacing: 8px;
             HorizontalBox {
                 height: 68px;
+                padding: 0px;
                 spacing: 8px;
                 ThemePresetCard { horizontal-stretch: 1; min-width: 0px; height: 68px; name: @tr("Default"); preview-primary: #0969da; preview-page: AppTheme.dark ? #111213 : #f2f2f0; preview-surface: AppTheme.dark ? #18191a : white; preview-text: AppTheme.dark ? #f3f3f2 : #202120; selected: AppTheme.preset == "default"; chosen => { root.choose-preset("default"); } }
                 ThemePresetCard { horizontal-stretch: 1; min-width: 0px; height: 68px; name: @tr("Teal"); preview-primary: #006b7a; preview-page: AppTheme.dark ? #0b1519 : #edf5f7; preview-surface: AppTheme.dark ? #122026 : #fbfefe; preview-text: AppTheme.dark ? #e5f0f2 : #173039; selected: AppTheme.preset == "teal"; chosen => { root.choose-preset("teal"); } }
             }
             HorizontalBox {
                 height: 68px;
+                padding: 0px;
                 spacing: 8px;
                 ThemePresetCard { horizontal-stretch: 1; min-width: 0px; height: 68px; name: @tr("Green"); preview-primary: #2f6f44; preview-page: AppTheme.dark ? #101711 : #f1f5ef; preview-surface: AppTheme.dark ? #182019 : #fcfdfb; preview-text: AppTheme.dark ? #e9f0e6 : #213026; selected: AppTheme.preset == "green"; chosen => { root.choose-preset("green"); } }
                 ThemePresetCard { horizontal-stretch: 1; min-width: 0px; height: 68px; name: @tr("Purple"); preview-primary: #78418a; preview-page: AppTheme.dark ? #171119 : #f6f1f7; preview-surface: AppTheme.dark ? #201722 : #fdfbfe; preview-text: AppTheme.dark ? #f1e8f3 : #332537; selected: AppTheme.preset == "purple"; chosen => { root.choose-preset("purple"); } }
             }
             HorizontalBox {
                 height: 68px;
+                padding: 0px;
                 spacing: 8px;
                 Rectangle { horizontal-stretch: 1; }
                 ThemePresetCard { horizontal-stretch: 1; min-width: 0px; height: 68px; name: @tr("Custom"); preview-primary: root.current-primary; preview-page: root.current-page-bg; preview-surface: root.current-surface; preview-text: root.current-text; selected: AppTheme.preset == "custom"; chosen => { root.choose-preset("custom"); } }

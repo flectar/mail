@@ -3,6 +3,7 @@ import { ComposeAttachment } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton } from "controls.slint";
 import { TypeScale } from "../typography.slint";
+import { LayoutMetrics } from "../design-system.slint";
 
 export component ComposerToolbar inherits Rectangle {
     in property <bool> compact: false;
@@ -35,8 +36,8 @@ export component ComposerToolbar inherits Rectangle {
         y: 6px;
         width: parent.width - 16px;
         height: 32px;
-        viewport-width: max(self.visible-width, toolbar-row.preferred-width);
-        viewport-height: self.visible-height;
+        content-width: max(self.visible-width, toolbar-row.preferred-width);
+        content-height: self.visible-height;
         // A native horizontal scrollbar consumes part of this 32px viewport
         // and clips the buttons. Compact toolbars remain pannable by touch.
         horizontal-scrollbar-policy: always-off;
@@ -47,27 +48,27 @@ export component ComposerToolbar inherits Rectangle {
             height: 32px;
             spacing: 2px;
 
-            IconButton { icon: @image-url("../icons/phosphor/text-b.svg"); icon-size: 18px; icon-color: root.bold-active ? root.accent-color : root.secondary-color; active: root.bold-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Bold · Ctrl+B"); clicked => { root.apply-format("bold"); } }
-            IconButton { icon: @image-url("../icons/phosphor/text-italic.svg"); icon-size: 18px; icon-color: root.italic-active ? root.accent-color : root.secondary-color; active: root.italic-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Italic · Ctrl+I"); clicked => { root.apply-format("italic"); } }
-            IconButton { icon: @image-url("../icons/phosphor/text-underline.svg"); icon-size: 18px; icon-color: root.underline-active ? root.accent-color : root.secondary-color; active: root.underline-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Underline · Ctrl+U"); clicked => { root.apply-format("underline"); } }
-            IconButton { icon: @image-url("../icons/phosphor/text-strikethrough.svg"); icon-size: 18px; icon-color: root.strike-active ? root.accent-color : root.secondary-color; active: root.strike-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Strikethrough"); clicked => { root.apply-format("strike"); } }
+            IconButton { icon: root.bold-active ? @image-url("../icons/lucide/filled/bold.svg") : @image-url("../icons/lucide/outline/bold.svg"); icon-color: root.bold-active ? root.accent-color : root.secondary-color; active: root.bold-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Bold · Ctrl+B"); clicked => { root.apply-format("bold"); } }
+            IconButton { icon: root.italic-active ? @image-url("../icons/lucide/filled/italic.svg") : @image-url("../icons/lucide/outline/italic.svg"); icon-color: root.italic-active ? root.accent-color : root.secondary-color; active: root.italic-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Italic · Ctrl+I"); clicked => { root.apply-format("italic"); } }
+            IconButton { icon: root.underline-active ? @image-url("../icons/lucide/filled/typography.svg") : @image-url("../icons/lucide/outline/typography.svg"); icon-color: root.underline-active ? root.accent-color : root.secondary-color; active: root.underline-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Underline · Ctrl+U"); clicked => { root.apply-format("underline"); } }
+            IconButton { icon: root.strike-active ? @image-url("../icons/lucide/filled/strikethrough.svg") : @image-url("../icons/lucide/outline/strikethrough.svg"); icon-color: root.strike-active ? root.accent-color : root.secondary-color; active: root.strike-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Strikethrough"); clicked => { root.apply-format("strike"); } }
 
             Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-            IconButton { icon: @image-url("../icons/phosphor/list-bullets.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Bulleted list"); clicked => { root.apply-format("bullet"); } }
-            IconButton { icon: @image-url("../icons/phosphor/list-numbers.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Numbered list"); clicked => { root.apply-format("number"); } }
-            IconButton { icon: @image-url("../icons/phosphor/quotes.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Quote"); clicked => { root.apply-format("quote"); } }
-            IconButton { icon: @image-url("../icons/phosphor/code.svg"); icon-size: 18px; icon-color: root.code-active ? root.accent-color : root.secondary-color; active: root.code-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Inline code"); clicked => { root.apply-format("code"); } }
-            IconButton { icon: @image-url("../icons/phosphor/link.svg"); icon-size: 18px; icon-color: root.link-active ? root.accent-color : root.secondary-color; active: root.link-active; active-background: root.accent-background; interactive: root.can-link; hover-background: root.control-hover-color; tooltip-text: root.can-link ? @tr("Add or edit link") : @tr("Select text to add a link"); clicked => { root.apply-format("link"); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/list-unordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Bulleted list"); clicked => { root.apply-format("bullet"); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/list-ordered.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Numbered list"); clicked => { root.apply-format("number"); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/quote.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Quote"); clicked => { root.apply-format("quote"); } }
+            IconButton { icon: root.code-active ? @image-url("../icons/lucide/filled/code.svg") : @image-url("../icons/lucide/outline/code.svg"); icon-color: root.code-active ? root.accent-color : root.secondary-color; active: root.code-active; hover-background: root.control-hover-color; active-background: root.accent-background; tooltip-text: @tr("Inline code"); clicked => { root.apply-format("code"); } }
+            IconButton { icon: root.link-active ? @image-url("../icons/lucide/filled/link.svg") : @image-url("../icons/lucide/outline/link.svg"); icon-color: root.link-active ? root.accent-color : root.secondary-color; active: root.link-active; active-background: root.accent-background; interactive: root.can-link; hover-background: root.control-hover-color; tooltip-text: root.can-link ? @tr("Add or edit link") : @tr("Select text to add a link"); clicked => { root.apply-format("link"); } }
 
             Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
-            IconButton { icon: @image-url("../icons/phosphor/book-open-text.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
 
             Rectangle { horizontal-stretch: 1; }
 
-            IconButton { icon: @image-url("../icons/phosphor/arrow-u-up-left.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
-            IconButton { icon: @image-url("../icons/phosphor/arrow-u-up-right.svg"); icon-size: 18px; icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/undo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Undo · Ctrl+Z"); clicked => { root.undo(); } }
+            IconButton { icon: @image-url("../icons/lucide/outline/redo.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Redo · Ctrl+Shift+Z"); clicked => { root.redo(); } }
         }
     }
 }
@@ -95,8 +96,8 @@ export component ComposerAttachments inherits Rectangle {
                 y: 8px;
                 width: parent.width - 20px;
                 height: 46px;
-                viewport-width: max(self.visible-width, attachment-row.preferred-width);
-                viewport-height: self.visible-height;
+                content-width: max(self.visible-width, attachment-row.preferred-width);
+                content-height: self.visible-height;
                 horizontal-scrollbar-policy: as-needed;
                 vertical-scrollbar-policy: always-off;
                 mouse-drag-pan-enabled: root.compact;
@@ -114,11 +115,11 @@ export component ComposerAttachments inherits Rectangle {
                         background: root.background-color;
 
                         Image {
-                            x: 9px;
-                            y: 10px;
-                            width: 16px;
-                            height: 16px;
-                            source: @image-url("../icons/phosphor/file-plus-fill.svg");
+                            x: 17px - self.width / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: LayoutMetrics.icon-size;
+                            height: LayoutMetrics.icon-size;
+                            source: @image-url("../icons/lucide/outline/file-added.svg");
                             colorize: root.accent-color;
                             image-fit: contain;
                             accessible-role: none;
@@ -152,8 +153,7 @@ export component ComposerAttachments inherits Rectangle {
                             y: 4px;
                             width: 28px;
                             height: 28px;
-                            icon: @image-url("../icons/phosphor/x.svg");
-                            icon-size: 12px;
+                            icon: @image-url("../icons/lucide/outline/x.svg");
                             icon-color: root.muted-color;
                             hover-background: root.control-hover-color;
                             tooltip-text: @tr("Remove attachment");
@@ -220,7 +220,7 @@ export component ComposerFooter inherits Rectangle {
                 width: root.compact ? 96px : 106px;
                 height: 34px;
                 text: root.sending ? @tr("Sending…") : @tr("Send");
-                icon: @image-url("../icons/phosphor/paper-plane-tilt-fill.svg");
+                icon: @image-url("../icons/lucide/filled/paper-airplane.svg");
                 has-icon: true;
                 primary: true;
                 enabled: root.can-send && !root.sending;
@@ -233,8 +233,7 @@ export component ComposerFooter inherits Rectangle {
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
                 height: root.compact ? 44px : 32px;
-                icon: @image-url("../icons/phosphor/paperclip.svg");
-                icon-size: 17px;
+                icon: @image-url("../icons/lucide/outline/paperclip.svg");
                 icon-color: root.secondary-color;
                 hover-background: root.control-hover-color;
                 tooltip-text: @tr("Attach files");
@@ -268,8 +267,7 @@ export component ComposerFooter inherits Rectangle {
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
                 height: root.compact ? 44px : 32px;
-                icon: @image-url("../icons/phosphor/trash-fill.svg");
-                icon-size: 16px;
+                icon: @image-url("../icons/lucide/outline/trash.svg");
                 icon-color: root.secondary-color;
                 hover-background: root.control-hover-color;
                 tooltip-text: @tr("Discard");

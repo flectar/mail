@@ -7,6 +7,191 @@ fn renderer(html: &str) -> GpuEmailRenderer {
 }
 const BODY: &str = "<body style='margin:0'><p style='margin:0;font-size:20px'>Cafe\u{301} hello <a href='https://example.com'>linked world</a></p></body>";
 
+fn font_ctx_with_color_emoji() -> (parley::FontContext, parley::fontique::Blob<u8>) {
+    use parley::fontique::{Blob, GenericFamily};
+    let mut ctx = create_email_font_ctx_with_system_fonts(false);
+    let emoji = Blob::new(Arc::new(
+        include_bytes!("../../resources/test-fonts/NotoColorEmoji-digits.ttf").as_slice(),
+    ) as _);
+    let family = ctx.collection.register_fonts(emoji.clone(), None)[0].0;
+    ctx.collection
+        .set_generic_families(GenericFamily::Emoji, [family].into_iter());
+    (ctx, emoji)
+}
+
+#[test]
+fn issue_23_missing_named_font_keeps_digits_out_of_emoji_fallback() {
+    let (ctx, emoji) = font_ctx_with_color_emoji();
+    let mut prepared = prepare_email_html_with_font_ctx(
+        r#"<body style="margin:0;background:#fff"><div style="font-family:'Segoe UI';font-size:20px;color:#000">0123456789</div></body>"#,
+        ctx,
+    ).unwrap();
+    let frame = render_prepared_cpu(&mut prepared, 300, 60, 1.0).unwrap();
+    let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+    let dark_pixels = pixels
+        .as_slice()
+        .iter()
+        .filter(|p| p.a > 0 && p.r < 100 && p.g < 100 && p.b < 100)
+        .count();
+    assert!(
+        dark_pixels > 100,
+        "digits produced only {dark_pixels} visible pixels"
+    );
+    prepared.document.visit(|_, node| {
+        if let Some(inline) = node
+            .element_data()
+            .and_then(|e| e.inline_layout_data.as_ref())
+        {
+            for line in inline.layout.lines() {
+                for item in line.items() {
+                    if let PositionedLayoutItem::GlyphRun(run) = item {
+                        assert_ne!(
+                            run.run().font().data.id(),
+                            emoji.id(),
+                            "plain digits selected the bitmap emoji font"
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn issue_23_report_matches_explicit_text_font_at_multiple_scales() {
+    let html = include_str!("../../resources/test-emails/dmarc-report.html");
+    let reference = html.replace("Segoe UI", crate::compose_editor::UI_FONT_FAMILY);
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let (ctx, _) = font_ctx_with_color_emoji();
+        let mut actual = prepare_email_html_with_font_ctx(html, ctx.clone()).unwrap();
+        let mut expected = prepare_email_html_with_font_ctx(&reference, ctx).unwrap();
+        let actual = render_prepared_cpu(&mut actual, 520, 900, scale).unwrap();
+        let expected = render_prepared_cpu(&mut expected, 520, 900, scale).unwrap();
+        assert_eq!(actual.tiles.len(), expected.tiles.len());
+        for (actual, expected) in actual.tiles.iter().zip(&expected.tiles) {
+            assert_eq!(
+                actual.image.to_rgba8().unwrap().as_bytes(),
+                expected.image.to_rgba8().unwrap().as_bytes(),
+                "fallback changed report glyphs or spacing at scale {scale}"
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_23_text_fallback_preserves_real_emoji_and_authored_families() {
+    let (ctx, emoji) = font_ctx_with_color_emoji();
+    let html = r#"<body style="font-family:'Segoe UI'">
+        <div id="text">0123456789 # * © ® 1︎ ©︎ ®︎</div>
+        <div id="emoji">😀 1️⃣ ©️ ®️</div>
+        <div id="authored" style="font-family:'Noto Color Emoji'">0123</div>
+        </body>"#;
+    let prepared = prepare_email_html_with_font_ctx(html, ctx).unwrap();
+    for (id, expect_emoji) in [("text", false), ("emoji", true), ("authored", true)] {
+        let node = prepared
+            .document
+            .get_node(prepared.document.get_element_by_id(id).unwrap())
+            .unwrap();
+        let inline = node
+            .element_data()
+            .unwrap()
+            .inline_layout_data
+            .as_ref()
+            .unwrap();
+        let mut checked = 0;
+        for line in inline.layout.lines() {
+            for item in line.items() {
+                if let PositionedLayoutItem::GlyphRun(run) = item {
+                    if inline.text[run.run().text_range()].trim().is_empty() {
+                        continue;
+                    }
+                    assert_eq!(
+                        run.run().font().data.id() == emoji.id(),
+                        expect_emoji,
+                        "{id}"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked > 0, "{id} must contain shaped glyphs");
+    }
+}
+
+#[cfg(feature = "gpu-renderer")]
+#[test]
+#[ignore = "requires a working WGPU adapter"]
+fn issue_23_gpu_paints_text_digits_with_color_emoji_installed() {
+    let (ctx, _) = font_ctx_with_color_emoji();
+    let mut prepared = prepare_email_html_with_font_ctx(
+        "<body style=\"margin:0;color:black;background:white;font:20px 'Segoe UI'\">0123456789</body>", ctx,
+    ).unwrap();
+    let pixels = render_to_buffer::<anyrender_vello::VelloImageRenderer, _>(
+        |scene| paint_scene(scene, &mut prepared.document, 1.0, 300, 60, 0, 0),
+        300,
+        60,
+    );
+    let dark_pixels = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|p| p[3] > 0 && p[0] < 100 && p[1] < 100 && p[2] < 100)
+        .count();
+    assert!(dark_pixels > 100);
+}
+
+#[test]
+fn default_link_color_preserves_sender_styles() {
+    use blitz_dom::util::ToColorColor;
+    let mut prepared = prepare_email_html(
+        "<style>.brand { color:#008000 }</style><body style='margin:0;background:white;font-size:20px'>\
+         <a href='https://example.com'>Default</a> \
+         <a class='brand' href='https://example.com'>Brand</a> \
+         <a style='color:white;background:#008000' href='https://example.com'>Button</a></body>",
+    ).unwrap();
+    let frame = render_prepared_cpu(&mut prepared, 520, 100, 1.0).unwrap();
+    let pixels = frame.tiles[0].image.to_rgba8().unwrap();
+    assert!(
+        pixels
+            .as_slice()
+            .iter()
+            .any(|p| (p.r, p.g, p.b) == (9, 105, 218))
+    );
+    assert!(
+        pixels
+            .as_slice()
+            .iter()
+            .any(|p| (p.r, p.g, p.b) == (0, 128, 0))
+    );
+    let document = &prepared.document;
+    let colors: Vec<_> = prepared
+        .links
+        .iter()
+        .map(|link| {
+            let hit = document
+                .hit(
+                    (link.x + link.width / 2.0) * 520.0,
+                    (link.y + link.height / 2.0) * 520.0,
+                )
+                .unwrap();
+            document
+                .get_node(hit.node_id)
+                .unwrap()
+                .primary_styles()
+                .unwrap()
+                .get_inherited_text()
+                .color
+                .as_color_color()
+                .to_rgba8()
+                .to_u8_array()
+        })
+        .collect();
+    assert_eq!(
+        colors,
+        [[9, 105, 218, 255], [0, 128, 0, 255], [255, 255, 255, 255]]
+    );
+}
+
 #[test]
 fn issue_16_digits_paint_with_a_deterministic_fallback() {
     let font_ctx = create_email_font_ctx_with_system_fonts(false);
@@ -27,19 +212,7 @@ fn issue_16_digits_paint_with_a_deterministic_fallback() {
 
 #[test]
 fn issue_16_reader_mode_keeps_text_around_nested_blocks() {
-    let html = r#"<div style="font-family:Segoe UI; font-size:14px;">
-This is a DMARC aggregate report from Microsoft Corporation. For Emails received between 2026-09-09 00:00:00 UTC to 2026-09-10 00:00:00 UTC.<br>
-<br>
-You're receiving this email because you have included your email address in the 'rua' tag of your DMARC record in DNS for example.eu. Please remove your email address from the 'rua' tag if you don't want to receive this email.<br>
-<br>
-<div style="font-family:Segoe UI; font-size:12px; color:#666666;">
-Please do not respond to this e-mail. This mailbox is not monitored and you will not receive a response. For any feedback/suggestions, kindly mail to dmarcreportfeedback@microsoft.com.<br>
-<br>
-Microsoft respects your privacy. Review our Online Services
-<a href="https://privacy.microsoft.com/en-us/privacystatement">Privacy Statement</a>.<br>
-One Microsoft Way, Redmond, WA, USA 98052.
-</div>
-</div>"#;
+    let html = include_str!("../../resources/test-emails/dmarc-report.html");
     let r = renderer(html);
     let items = r.reader_items();
     let reader_text = items

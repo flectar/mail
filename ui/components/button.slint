@@ -8,7 +8,7 @@ export component Button inherits Rectangle {
     in property <image> icon;
     in property <bool> has-icon: false;
     in property <bool> colorize-icon: true;
-    in property <length> icon-size: 16px;
+    in property <length> icon-size: LayoutMetrics.icon-size;
     in property <bool> primary: false;
     in property <bool> destructive: false;
     in property <bool> selected: false;
@@ -29,6 +29,7 @@ export component Button inherits Rectangle {
         : button-area.has-hover ? AppTheme.control-bg.brighter(AppTheme.dark ? 8% : 2%)
         : AppTheme.surface;
     opacity: root.enabled ? 1 : 0.5;
+    animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.text;
     accessible-action-default => {
@@ -38,6 +39,8 @@ export component Button inherits Rectangle {
     }
 
     HorizontalBox {
+        y: button-area.pressed ? 1px : 0px;
+        animate y { duration: 140ms; easing: spring(0); }
         padding-left: 12px;
         padding-right: 12px;
         spacing: 7px;

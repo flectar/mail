@@ -9,7 +9,7 @@ use flectar_mail_core::{
         CalendarConnection, CalendarEvent, CardDavConnection, ConnectCalendarArgs,
         ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage, CreateEventArgs, CustomTheme,
         DraftAttachmentIn, FolderInfo, Label, MailHistory, MailboxBadgeCounts, MessageDetail,
-        PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
+        MailProfile, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
         SaveDraftArgs, Settings, Snippet, ThreadCursor, ThreadSummary, View,
     },
 };
@@ -801,6 +801,54 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn save_mail_profile(
+        &self,
+        profile_id: Option<String>,
+        name: String,
+        color: String,
+    ) -> Result<(Settings, MailProfile), String> {
+        self.core
+            .save_mail_profile(profile_id, name, color)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn assign_account_profile(
+        &self,
+        account_id: i64,
+        profile_id: Option<String>,
+    ) -> Result<Settings, String> {
+        self.core
+            .assign_account_profile(account_id, profile_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn delete_mail_profile(&self, profile_id: String) -> Result<Settings, String> {
+        self.core
+            .delete_mail_profile(profile_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_show_account_badges(&self, enabled: bool) -> Result<Settings, String> {
+        self.core
+            .set_show_account_badges(enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_account_color(
+        &self,
+        account_id: i64,
+        color: Option<String>,
+    ) -> Result<Settings, String> {
+        self.core
+            .set_account_color(account_id, color)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_close_to_tray(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.close_to_tray = enabled;
@@ -1031,6 +1079,7 @@ impl CoreMailSource {
         id: Option<i64>,
         name: &str,
         color: &str,
+        owner_account_id: Option<i64>,
     ) -> Result<Label, String> {
         let name = name.trim();
         if name.is_empty() {
@@ -1049,14 +1098,22 @@ impl CoreMailSource {
                 .ok_or_else(|| "label no longer exists".to_owned())?,
             None => labels
                 .iter()
-                .filter(|label| !label.is_auto)
+                .filter(|label| {
+                    !label.is_auto && label.owner_account_id == owner_account_id
+                })
                 .map(|label| label.position)
                 .max()
                 .unwrap_or(-1)
                 .saturating_add(1),
         };
         self.core
-            .save_label(id, name.to_owned(), color.to_owned(), position)
+            .save_label(
+                id,
+                name.to_owned(),
+                color.to_owned(),
+                position,
+                owner_account_id,
+            )
             .await
             .map_err(|error| error.to_string())
     }
@@ -1425,7 +1482,11 @@ fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxE
 
         let mut custom_folders: Vec<&FolderInfo> = folders
             .iter()
-            .filter(|folder| folder.account_id == account.id && !is_standard_folder(folder))
+            .filter(|folder| {
+                folder.account_id == account.id
+                    && !is_standard_folder(folder)
+                    && account.provider != Provider::Gmail
+            })
             .collect();
         custom_folders.sort_by_key(|folder| folder.display_name.to_lowercase());
         let custom_ids = custom_folders
@@ -1602,13 +1663,14 @@ fn resolve_scope(
         };
     }
 
-    if let Some(label_id) = scope
-        .strip_prefix("Label:")
+    if let Some(label_id) = ["AccountLabel:", "GlobalLabel:", "Category:", "Label:"]
+        .into_iter()
+        .find_map(|prefix| scope.strip_prefix(prefix))
         .and_then(|id| id.parse::<i64>().ok())
         && let Some(label) = labels.iter().find(|label| label.id == label_id)
     {
         return ScopeResolution {
-            account_id: None,
+            account_id: label.owner_account_id,
             folder_id: None,
             split_id: None,
             label_id: Some(label_id),
@@ -1698,12 +1760,23 @@ fn validated_startup_scope(
         "Unified Trash",
         "Unified Drafts",
     ];
+    if let Some(label_id) = ["AccountLabel:", "GlobalLabel:", "Category:", "Label:"]
+        .into_iter()
+        .find_map(|prefix| preferred_scope.strip_prefix(prefix))
+        .and_then(|id| id.parse::<i64>().ok())
+        && let Some(label) = labels.iter().find(|label| label.id == label_id)
+    {
+        let prefix = if label.is_auto {
+            "Category:"
+        } else if label.owner_account_id.is_some() {
+            "AccountLabel:"
+        } else {
+            "GlobalLabel:"
+        };
+        return format!("{prefix}{label_id}");
+    }
     if UNIFIED_SCOPES.contains(&preferred_scope)
         || matches!(preferred_scope, "Important" | "Other")
-        || preferred_scope
-            .strip_prefix("Label:")
-            .and_then(|id| id.parse::<i64>().ok())
-            .is_some_and(|id| labels.iter().any(|label| label.id == id))
         || mailbox_entries(accounts, folders)
             .iter()
             .any(|mailbox| mailbox.scope == preferred_scope)
@@ -2352,7 +2425,7 @@ mod tests {
     use super::{
         ComposeMessage, compose_args, display_thread_subject, mailbox_entries, markdown_to_html,
         markdown_to_plain_text, readable_message_html, relative_time_at, resolve_scope,
-        summary_to_message, validated_startup_scope,
+        summary_to_message, validated_startup_scope, STANDARD_ACCOUNT_FOLDERS,
     };
     use chrono::{Local, TimeZone};
     use flectar_mail_core::models::{
@@ -2614,6 +2687,29 @@ mod tests {
     }
 
     #[test]
+    fn gmail_user_labels_are_not_duplicated_as_account_folders() {
+        let mut account = test_account();
+        account.provider = Provider::Gmail;
+        let folders = vec![FolderInfo {
+            id: 10,
+            account_id: account.id,
+            display_name: "Travel".into(),
+            is_jmap: false,
+            imap_name: "Travel".into(),
+            delimiter: Some("/".into()),
+            role: None,
+        }];
+
+        let entries = mailbox_entries(&[account], &folders);
+
+        assert!(entries.iter().all(|entry| entry.folder_id != 10));
+        assert_eq!(
+            entries.iter().filter(|entry| !entry.is_account).count(),
+            STANDARD_ACCOUNT_FOLDERS.len()
+        );
+    }
+
+    #[test]
     fn category_and_label_scopes_keep_their_core_filters() {
         let labels = vec![
             Label {
@@ -2622,6 +2718,7 @@ mod tests {
                 color: "#16a765".into(),
                 keyword: "Projects".into(),
                 position: 0,
+                owner_account_id: None,
                 is_auto: false,
             },
             Label {
@@ -2630,6 +2727,7 @@ mod tests {
                 color: "#a479e2".into(),
                 keyword: "newsletters".into(),
                 position: 1,
+                owner_account_id: None,
                 is_auto: true,
             },
         ];
@@ -2641,6 +2739,7 @@ mod tests {
         let manual = resolve_scope("Label:31", &[], &[], &labels);
         assert_eq!(manual.view, View::All);
         assert_eq!(manual.label_id, Some(31));
+        assert_eq!(manual.account_id, None);
         assert_eq!(manual.title, "Projects");
 
         let automatic = resolve_scope("Label:32", &[], &[], &labels);
@@ -2649,11 +2748,32 @@ mod tests {
         assert_eq!(automatic.title, "Newsletters");
         assert_eq!(
             validated_startup_scope("Label:32", &[], &[], &labels),
-            "Label:32"
+            "Category:32"
+        );
+        assert_eq!(
+            validated_startup_scope("Label:31", &[], &[], &labels),
+            "GlobalLabel:31"
         );
         assert_eq!(
             validated_startup_scope("Label:999", &[], &[], &labels),
             "Unified Inbox"
+        );
+
+        let account_label = Label {
+            id: 33,
+            name: "Travel".into(),
+            color: "#2563eb".into(),
+            keyword: "Travel".into(),
+            position: 0,
+            owner_account_id: Some(7),
+            is_auto: false,
+        };
+        let account_scope = resolve_scope("AccountLabel:33", &[], &[], std::slice::from_ref(&account_label));
+        assert_eq!(account_scope.account_id, Some(7));
+        assert_eq!(account_scope.label_id, Some(33));
+        assert_eq!(
+            validated_startup_scope("Label:33", &[], &[], &[account_label]),
+            "AccountLabel:33"
         );
     }
 }

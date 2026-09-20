@@ -137,7 +137,7 @@ export component EmailTemplates inherits Rectangle {
                     y: 8px;
                     width: 40px;
                     height: 40px;
-                    icon: @image-url("../icons/phosphor/x.svg");
+                    icon: @image-url("../icons/lucide/outline/x.svg");
                     icon-color: root.muted-color;
                     hover-background: root.hover-color;
                     tooltip-text: @tr("Close");
@@ -157,7 +157,7 @@ export component EmailTemplates inherits Rectangle {
                     width: 144px;
                     height: 34px;
                     text: @tr("New template");
-                    icon: @image-url("../icons/phosphor/plus.svg");
+                    icon: @image-url("../icons/lucide/outline/plus.svg");
                     has-icon: true;
                     primary: true;
                     clicked => { root.new-template(); }
@@ -191,7 +191,7 @@ export component EmailTemplates inherits Rectangle {
                     y: 60px;
                     width: parent.width - 24px;
                     height: parent.height - 72px;
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     horizontal-scrollbar-policy: always-off;
                     mouse-drag-pan-enabled: root.compact;
 
@@ -255,7 +255,7 @@ export component EmailTemplates inherits Rectangle {
                         IconButton {
                             x: parent.width - 66px;
                             y: 16px;
-                            icon: @image-url("../icons/phosphor/note-pencil-fill.svg");
+                            icon: @image-url("../icons/lucide/outline/compose.svg");
                             icon-color: root.muted-color;
                             hover-background: root.hover-color;
                             tooltip-text: @tr("Edit template");
@@ -265,7 +265,7 @@ export component EmailTemplates inherits Rectangle {
                         IconButton {
                             x: parent.width - 32px;
                             y: 16px;
-                            icon: @image-url("../icons/phosphor/trash.svg");
+                            icon: @image-url("../icons/lucide/outline/trash.svg");
                             icon-color: root.muted-color;
                             hover-background: root.hover-color;
                             tooltip-text: @tr("Delete template");
@@ -359,7 +359,7 @@ export component EmailTemplates inherits Rectangle {
         subject: root.delete-name;
         description: @tr("Delete this template from this device?");
         confirm-label: @tr("Delete");
-        icon: @image-url("../icons/phosphor/trash-fill.svg");
+        icon: @image-url("../icons/lucide/outline/trash.svg");
         surface: root.surface-color;
         dialog-border-color: root.ui-border-color;
         title-color: root.title-color;

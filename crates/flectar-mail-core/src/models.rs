@@ -502,6 +502,10 @@ pub struct Label {
     /// IMAP keyword atom this label maps to on the server.
     pub keyword: String,
     pub position: i64,
+    /// Owning account for a provider/account label. `None` means this is a
+    /// local global label or an automatic category.
+    #[serde(default)]
+    pub owner_account_id: Option<i64>,
     /// System auto-category (Marketing/News/Social/Pitch): classified locally
     /// at sync time, never pushed to IMAP, not deletable.
     #[serde(default)]
@@ -1053,6 +1057,20 @@ impl Default for CustomTheme {
     }
 }
 
+/// A local, user-owned grouping for connected mail accounts.
+///
+/// Profiles organize account provenance in Flectar Mail only. They never map
+/// to a provider object and therefore cannot mutate remote mailboxes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailProfile {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    #[serde(default)]
+    pub account_ids: Vec<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -1214,8 +1232,8 @@ pub struct Settings {
     /// stringified account id. Missing = follow the global `theme`.
     #[serde(default)]
     pub account_themes: std::collections::HashMap<String, String>,
-    /// Show which account each unified-inbox row belongs to (dot + short name).
-    #[serde(default = "default_true")]
+    /// Show which account each mail-list row belongs to with a color marker.
+    #[serde(default)]
     pub show_account_badges: bool,
     /// Per-account marker color (hex), keyed by stringified account id.
     /// Missing = the UI derives a stable hue from the address.
@@ -1225,6 +1243,10 @@ pub struct Settings {
     /// Missing = display name, else the address local part.
     #[serde(default)]
     pub account_short_names: std::collections::HashMap<String, String>,
+    /// Optional local groups such as Personal and Work. An account may belong
+    /// to at most one profile; provider state is never affected.
+    #[serde(default)]
+    pub mail_profiles: Vec<MailProfile>,
 }
 
 /// A named, rich-HTML signature belonging to one account.
@@ -1353,9 +1375,10 @@ impl Default for Settings {
             signature_list: Vec::new(),
             signature_defaults: std::collections::HashMap::new(),
             account_themes: std::collections::HashMap::new(),
-            show_account_badges: true,
+            show_account_badges: false,
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
+            mail_profiles: Vec::new(),
         }
     }
 }

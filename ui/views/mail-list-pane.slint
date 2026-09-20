@@ -2,7 +2,7 @@ import { InfiniteScrollController } from "../components/infinite-scroll-controll
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
 import { EmailRow, MailDragApi } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
-import { FloatingActionButton, SelectionCheckBox } from "../components/controls.slint";
+import { FloatingActionButton, SelectionCheckBox, ToolbarIconButton } from "../components/controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
@@ -29,7 +29,7 @@ component MailListLabelChip inherits Rectangle {
         y: 4px;
         width: 12px;
         height: 12px;
-        source: @image-url("../icons/phosphor/folder-simple-fill.svg");
+        source: @image-url("../icons/lucide/outline/file-directory.svg");
         colorize: root.label-color;
         image-fit: contain;
         accessible-role: none;
@@ -67,6 +67,10 @@ export component MailListPane inherits Rectangle {
     in property <int> content_revision: 0;
     in property <int> selection-count: 0;
     private property <bool> selection-mode: root.selection-count > 0;
+    // Four pixels above and below the 40px controls keeps the selection row
+    // dense while preserving equal optical breathing room on both sides.
+    private property <length> bulk-toolbar-height: root.selection-mode
+        ? LayoutMetrics.desktop-icon-button-size + 8px : 0px;
     in-out property <bool> mail_sidebar_collapsed: false;
     in property <color> accent;
     in property <color> accent-soft;
@@ -92,20 +96,23 @@ export component MailListPane inherits Rectangle {
     callback open_folders();
     callback open_compose();
     callback message_action_for_email(int, string);
+    callback bulk_message_action(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
+
+    animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
 
     pagination := InfiniteScrollController {
         active: true;
         can-load-more: root.can_load_more; loading: root.loading_more;
         row-count: root.emails.length; revision: root.content_revision;
-        content-height: mail-list-scroll.viewport-height;
-        viewport-y: mail-list-scroll.viewport-y; visible-height: mail-list-scroll.visible-height;
+        content-height: mail-list-scroll.content-height;
+        content-y: mail-list-scroll.content-y; visible-height: mail-list-scroll.visible-height;
         prefetch-distance: root.dense ? 132px : 288px;
         load-more => { root.load-more(); }
     }
     function reset-pagination() {
-        mail-list-scroll.viewport-y = 0px;
+        mail-list-scroll.content-y = 0px;
         pagination.reset();
     }
     changed selected_scope => { root.reset-pagination(); }
@@ -130,14 +137,17 @@ export component MailListPane inherits Rectangle {
                     Rectangle {
                         height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
                         background: root.surface;
+                        // Tooltips extend below the toolbar; keep them above the
+                        // list body, which is declared later in this layout.
+                        z: 1;
                         WorkspaceSearchToolbar {
                             x: root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset;
                             y: (parent.height - self.height) / 2;
                             width: parent.width - 2 * self.x;
                             show-leading: true;
                             leading-icon: root.mail_sidebar_collapsed
-                                ? @image-url("../icons/phosphor/sidebar.svg")
-                                : @image-url("../icons/phosphor/sidebar-fill.svg");
+                                ? @image-url("../icons/lucide/outline/sidebar-expand.svg")
+                                : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                             leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                             leading-accessible-id: "mail-folders-button";
                             text: root.search_query;
@@ -164,29 +174,97 @@ export component MailListPane inherits Rectangle {
                             edited(text) => { root.search_changed(text); }
                             filter-selected(value) => { root.set_search_filter(value); }
                             refresh => { root.sync_mail(); }
+                        }
+                    }
 
-                            // Selection mode remains available without reserving
-                            // a separate status row below the toolbar.
-                            selection-slot := Rectangle {
-                                private property <length> animated-width: root.selection-mode
-                                    ? LayoutMetrics.control-height : 0px;
-                                width: self.animated-width;
-                                height: LayoutMetrics.control-height;
-                                clip: true;
-                                background: transparent;
-                                animate animated-width { duration: 160ms; easing: ease-in-out; }
+                    bulk-toolbar := Rectangle {
+                        height: root.bulk-toolbar-height;
+                        background: root.surface;
+                        clip: !root.selection-mode;
+                        z: 1;
 
-                                SelectionCheckBox {
-                                    visible: selection-slot.animated-width > 0px;
-                                    width: LayoutMetrics.control-height;
-                                    height: LayoutMetrics.control-height;
-                                    opacity: root.selection-mode ? 1 : 0;
-                                    enabled: root.selection-mode && root.emails.length > 0;
-                                    checked: root.emails.length > 0 && root.selection-count == root.emails.length;
-                                    indeterminate: root.selection-count > 0 && root.selection-count < root.emails.length;
-                                    accessible-label: self.checked ? @tr("Clear selection") : @tr("Select all messages on this page");
-                                    animate opacity { duration: 120ms; }
-                                    toggled(checked) => { root.set_all_emails_checked(checked); }
+                        Rectangle {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: LayoutMetrics.divider-width;
+                            background: root.border;
+                        }
+
+                        SelectionCheckBox {
+                            // Mirror the search toolbar's leading anchor so the
+                            // select-all control sits directly below collapse.
+                            x: root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset;
+                            y: 4px;
+                            width: LayoutMetrics.desktop-icon-button-size;
+                            height: LayoutMetrics.desktop-icon-button-size;
+                            opacity: root.selection-mode ? 1 : 0;
+                            enabled: root.selection-mode && root.emails.length > 0;
+                            checked: root.emails.length > 0 && root.selection-count == root.emails.length;
+                            indeterminate: root.selection-count > 0 && root.selection-count < root.emails.length;
+                            accessible-label: self.checked ? @tr("Clear selection") : @tr("Select all messages on this page");
+                            animate opacity { duration: 120ms; }
+                            toggled(checked) => { root.set_all_emails_checked(checked); }
+                        }
+
+                        bulk-actions := Rectangle {
+                            // Match the search toolbar's trailing anchor so the
+                            // overflow action sits directly below sync.
+                            x: parent.width - self.width
+                                - (root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset);
+                            y: 4px;
+                            width: 4 * LayoutMetrics.desktop-icon-button-size;
+                            height: LayoutMetrics.desktop-icon-button-size;
+                            background: transparent;
+                            opacity: root.selection-mode ? 1 : 0;
+                            animate opacity { duration: 120ms; }
+
+                            ToolbarIconButton {
+                                x: 0px;
+                                icon: @image-url("../icons/lucide/outline/archive.svg");
+                                icon-color: root.secondary-text;
+                                hover-background: root.muted-control-bg;
+                                tooltip-text: @tr("Archive selected message");
+                                accessible-id: "bulk-archive-button";
+                                clicked => { root.bulk_message_action("archive"); }
+                            }
+                            ToolbarIconButton {
+                                x: LayoutMetrics.desktop-icon-button-size;
+                                icon: @image-url("../icons/lucide/outline/alert.svg");
+                                icon-color: root.secondary-text;
+                                hover-background: root.muted-control-bg;
+                                tooltip-text: @tr("Move to spam");
+                                accessible-id: "bulk-spam-button";
+                                clicked => { root.bulk_message_action("spam"); }
+                            }
+                            ToolbarIconButton {
+                                x: 2 * LayoutMetrics.desktop-icon-button-size;
+                                icon: @image-url("../icons/lucide/outline/trash.svg");
+                                icon-color: root.secondary-text;
+                                hover-background: root.muted-control-bg;
+                                tooltip-text: @tr("Move to trash");
+                                accessible-id: "bulk-trash-button";
+                                clicked => { root.bulk_message_action("trash"); }
+                            }
+                            bulk-more-menu := ContextMenuArea {
+                                x: 3 * LayoutMetrics.desktop-icon-button-size;
+                                width: LayoutMetrics.desktop-icon-button-size;
+                                height: LayoutMetrics.desktop-icon-button-size;
+
+                                ToolbarIconButton {
+                                    icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg");
+                                    icon-color: root.secondary-text;
+                                    hover-background: root.muted-control-bg;
+                                    tooltip-text: @tr("More message actions");
+                                    accessible-id: "bulk-more-button";
+                                    clicked => { bulk-more-menu.show({ x: 0px, y: parent.height }); }
+                                }
+
+                                Menu {
+                                    MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
+                                    MenuItem { title: @tr("Mark as unread"); activated => { root.bulk_message_action("mark_unread"); } }
+                                    MenuItem { title: @tr("Star message"); activated => { root.bulk_message_action("star"); } }
+                                    MenuItem { title: @tr("Remove star"); activated => { root.bulk_message_action("unstar"); } }
                                 }
                             }
                         }
@@ -197,9 +275,9 @@ export component MailListPane inherits Rectangle {
                         background: root.surface;
 
                         mail-list-scroll := ListView {
-                            x: 12px;
+                            x: LayoutMetrics.list-row-inset;
                             y: 0px;
-                            width: parent.width - 16px;
+                            width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
                             height: parent.height;
                             horizontal-scrollbar-policy: always-off;
                             mouse-drag-pan-enabled: root.compact;
@@ -221,6 +299,8 @@ export component MailListPane inherits Rectangle {
                                 animate opacity { duration: 120ms; }
                                 accessible-role: list-item;
                                 accessible-label: @tr("{}, {}", row.sender, row.subject == "" ? @tr("(No subject)") : row.subject)
+                                    + ", " + row.account
+                                    + (row.account_profile == "" ? "" : ", " + @tr("Profile: {}", row.account_profile))
                                     + (row.message_count > 1 ? ", " + @tr("{} messages", row.message_count) : "")
                                     + (row.label_summary == "" ? "" : ", " + row.label_summary)
                                     + (row.has_attachments ? ", " + @tr("Has attachments") : "")
@@ -245,6 +325,17 @@ export component MailListPane inherits Rectangle {
                                         mail-row.long-press-triggered = true;
                                         root.set_email_checked(row.id, true);
                                     }
+                                }
+
+                                Rectangle {
+                                    visible: row.show_account_marker;
+                                    x: 0px;
+                                    y: 4px;
+                                    width: 3px;
+                                    height: parent.height - 8px;
+                                    border-radius: 2px;
+                                    background: row.account_color;
+                                    accessible-role: none;
                                 }
 
                                 Avatar {
@@ -296,7 +387,7 @@ export component MailListPane inherits Rectangle {
                                         if row.has_attachments : Image {
                                             width: 14px;
                                             height: 14px;
-                                            source: @image-url("../icons/phosphor/paperclip.svg");
+                                            source: @image-url("../icons/lucide/outline/paperclip.svg");
                                             colorize: root.muted-text;
                                             image-fit: contain;
                                             accessible-role: none;
@@ -304,7 +395,7 @@ export component MailListPane inherits Rectangle {
                                         if row.has_replied && row.message_count <= 1 : Image {
                                             width: 14px;
                                             height: 14px;
-                                            source: @image-url("../icons/phosphor/arrow-bend-up-left.svg");
+                                            source: @image-url("../icons/lucide/outline/reply.svg");
                                             colorize: root.muted-text;
                                             image-fit: contain;
                                             accessible-role: none;
@@ -329,7 +420,7 @@ export component MailListPane inherits Rectangle {
                                             Image {
                                                 width: 11px;
                                                 height: 11px;
-                                                source: @image-url("../icons/phosphor/arrow-bend-up-left.svg");
+                                                source: @image-url("../icons/lucide/outline/reply.svg");
                                                 colorize: root.accent;
                                                 image-fit: contain;
                                                 accessible-role: none;
@@ -395,6 +486,36 @@ export component MailListPane inherits Rectangle {
                                         overflow: elide;
                                         horizontal-alignment: right;
                                         vertical-alignment: center;
+                                    }
+                                    Rectangle {
+                                        visible: root.dense;
+                                        x: sender-time.x - 54px;
+                                        y: 11px;
+                                        width: 48px;
+                                        height: 22px;
+                                        background: transparent;
+                                        accessible-role: text;
+                                        accessible-label: @tr("Account: {}", row.account);
+
+                                        Rectangle {
+                                            visible: row.show_account_marker;
+                                            x: 0px;
+                                            y: 8px;
+                                            width: 6px;
+                                            height: 6px;
+                                            border-radius: 3px;
+                                            background: row.account_color;
+                                        }
+                                        Text {
+                                            x: row.show_account_marker ? 10px : 0px;
+                                            width: row.show_account_marker ? 38px : 48px;
+                                            height: parent.height;
+                                            text: row.account;
+                                            color: root.muted-text;
+                                            font-size: TypeScale.caption;
+                                            overflow: elide;
+                                            vertical-alignment: center;
+                                        }
                                     }
                                     HorizontalBox {
                                         x: root.dense ? subject-label.x + subject-label.width + 12px : 0px;
@@ -526,9 +647,9 @@ export component MailListPane inherits Rectangle {
                         }
 
                         if root.emails.length == 0 : Rectangle {
-                            x: 12px;
+                            x: LayoutMetrics.list-row-inset;
                             y: 0px;
-                            width: parent.width - 16px;
+                            width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
                             height: min(parent.height, 120px);
                             background: root.surface;
                             VerticalBox {
@@ -546,8 +667,8 @@ export component MailListPane inherits Rectangle {
                             width: mail-list-scroll.visible-width;
                             height: mail-list-scroll.visible-height;
                             surface-color: root.surface;
-                            viewport-y: mail-list-scroll.viewport-y;
-                            viewport-height: mail-list-scroll.viewport-height;
+                            content-y: mail-list-scroll.content-y;
+                            content-height: mail-list-scroll.content-height;
                             visible-height: mail-list-scroll.visible-height;
                         }
 
@@ -557,7 +678,7 @@ export component MailListPane inherits Rectangle {
                             visible: root.single-pane-navigation || root.mail_sidebar_collapsed;
                             x: parent.width - self.width - 16px;
                             y: parent.height - self.height - 16px;
-                            icon: @image-url("../icons/phosphor/note-pencil-fill.svg");
+                            icon: @image-url("../icons/lucide/filled/compose.svg");
                             tooltip-text: @tr("New email");
                             accessible-id: "mail-compose-button";
                             z: 100;

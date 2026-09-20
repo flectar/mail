@@ -474,6 +474,7 @@ mod tests {
             color: "#fff".into(),
             keyword: "KwL".into(),
             position: 0,
+            owner_account_id: None,
             is_auto: false,
         };
 

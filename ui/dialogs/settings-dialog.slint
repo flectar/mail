@@ -3,54 +3,331 @@ import { RendererSettings } from "../renderer-settings.slint";
 import { MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow } from "../models.slint";
+import { AccountRow, MailProfileRow, StorageUsageRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
+import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow } from "../components/settings-components.slint";
-import { ThemeEditor } from "../components/theme-editor.slint";
+import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, SettingsIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 
 // Use the same focusable controls in both account-card layouts.
-component AccountActions inherits GridLayout {
-    in property <bool> stacked: false;
+component AccountActions inherits HorizontalLayout {
     in property <string> edit-label;
+    in property <bool> reconnect: false;
     in property <bool> edit-enabled;
     in property <bool> remove-enabled;
     in property <bool> sync-enabled;
     callback edit();
     callback remove();
     callback sync();
-    spacing: 8px;
-    height: root.stacked ? 112px : 32px;
-    Button {
-        row: 0; col: 0;
-        text: root.edit-label;
-        enabled: root.edit-enabled;
+    width: 108px;
+    height: 32px;
+    spacing: 6px;
+    IconButton {
+        icon: root.reconnect ? @image-url("../icons/lucide/outline/sync.svg") : @image-url("../icons/lucide/outline/pencil.svg");
+        icon-color: AppTheme.secondary;
+        ghost: true;
+        hover-background: AppTheme.muted-control-bg;
+        interactive: root.edit-enabled;
+        tooltip-text: root.edit-label;
         clicked => { root.edit(); }
     }
-    Button {
-        row: root.stacked ? 1 : 0; col: root.stacked ? 0 : 1;
-        text: @tr("Remove");
-        destructive: true;
-        enabled: root.remove-enabled;
+    IconButton {
+        icon: @image-url("../icons/lucide/outline/trash.svg");
+        icon-color: AppTheme.destructive;
+        ghost: true;
+        hover-background: AppTheme.destructive.with-alpha(0.12);
+        interactive: root.remove-enabled;
+        tooltip-text: @tr("Remove");
         clicked => { root.remove(); }
     }
-    Button {
-        row: root.stacked ? 2 : 0; col: root.stacked ? 0 : 2;
-        text: @tr("Sync");
-        enabled: root.sync-enabled;
+    IconButton {
+        icon: @image-url("../icons/lucide/outline/sync.svg");
+        icon-color: AppTheme.secondary;
+        ghost: true;
+        hover-background: AppTheme.muted-control-bg;
+        interactive: root.sync-enabled;
+        tooltip-text: @tr("Sync");
         clicked => { root.sync(); }
+    }
+}
+
+component SettingsPageTitle inherits Text {
+    in property <string> label;
+    in property <color> title-color;
+    height: 28px;
+    text: root.label;
+    color: root.title-color;
+    font-size: TypeScale.display;
+    font-weight: 600;
+    letter-spacing: -0.6px;
+    vertical-alignment: center;
+}
+
+component SettingsSearch inherits Rectangle {
+    in-out property <string> query;
+    in property <color> muted-color;
+    in property <color> hover-background;
+    callback edited(string);
+
+    height: 32px;
+    LineEdit {
+        width: parent.width;
+        height: parent.height;
+        text <=> root.query;
+        placeholder-text: @tr("Search settings");
+        input-label: @tr("Search settings");
+        show-leading-icon: true;
+        leading-icon: @image-url("../icons/lucide/outline/search.svg");
+        leading-icon-color: root.muted-color;
+        trailing-content-width: root.query == "" ? 0px : 32px;
+        edited(value) => { root.edited(value); }
+    }
+    IconButton {
+        visible: root.query != "";
+        x: parent.width - 32px;
+        width: 32px;
+        height: 32px;
+        icon: @image-url("../icons/lucide/outline/x.svg");
+        icon-size: 14px;
+        icon-color: root.muted-color;
+        hover-background: root.hover-background;
+        tooltip-text: @tr("Clear settings search");
+        clicked => { root.query = ""; root.edited(""); }
+    }
+}
+
+component WorkspaceLayoutChoice inherits FocusScope {
+    in property <string> name;
+    in property <bool> minimal: false;
+    in property <bool> selected: false;
+    callback chosen;
+
+    height: 72px;
+    min-width: 120px;
+    focus-on-click: true;
+    accessible-role: radio-button;
+    accessible-label: root.name;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space { root.chosen(); return accept; }
+        reject
+    }
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.selected || root.has-focus ? 2px : 1px;
+        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border;
+        background: layout-hit.has-hover ? AppTheme.control-bg : AppTheme.surface-raised;
+        Rectangle {
+            x: 10px; y: 9px; width: parent.width - 20px; height: 34px;
+            border-radius: 4px; border-width: 1px; border-color: AppTheme.border;
+            background: AppTheme.page-bg; clip: true;
+            Rectangle { x: 0px; width: root.minimal ? 11px : 18px; height: parent.height; background: AppTheme.sidebar-bg; }
+            Rectangle { x: root.minimal ? 14px : 21px; y: 4px; width: root.minimal ? parent.width - 18px : 25px; height: parent.height - 8px; border-radius: 2px; background: AppTheme.surface; }
+            if !root.minimal : Rectangle { x: 49px; y: 4px; width: parent.width - 53px; height: parent.height - 8px; border-radius: 2px; background: AppTheme.surface; }
+        }
+        Text {
+            x: 8px; y: 47px; width: parent.width - 16px; height: 17px;
+            text: root.name; color: root.selected ? AppTheme.accent : AppTheme.body;
+            font-size: TypeScale.caption; font-weight: root.selected ? 700 : 600;
+            horizontal-alignment: center; vertical-alignment: center;
+        }
+        layout-hit := TouchArea { clicked => { root.chosen(); } mouse-cursor: pointer; }
+    }
+}
+
+component ProfileColorChoice inherits FocusScope {
+    in property <color> value;
+    in property <bool> selected: false;
+    in property <string> label;
+    callback chosen;
+
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: radio-button;
+    accessible-label: root.label;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.chosen();
+            return accept;
+        }
+        reject
+    }
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: self.width / 2;
+        border-width: root.selected || root.has-focus ? 3px : 1px;
+        border-color: root.selected || root.has-focus ? AppTheme.heading : AppTheme.border;
+        background: root.value;
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.focus(); root.chosen(); } }
+}
+
+component StorageUsageCard inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> loading: false;
+    in property <bool> loaded: false;
+    in property <string> total;
+    in property <string> error;
+    in property <[StorageUsageRow]> rows: [];
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    callback refresh();
+
+    height: root.loaded ? (root.error != "" ? 320px : 300px) : 150px;
+    background: root.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.card-border-color;
+    clip: true;
+    accessible-role: groupbox;
+    accessible-label: @tr("Local storage usage");
+
+    Text {
+        x: 20px;
+        y: 16px;
+        width: parent.width - 80px;
+        height: 24px;
+        text: @tr("Local storage");
+        color: root.heading;
+        font-size: TypeScale.subtitle;
+        font-weight: 600;
+        letter-spacing: -0.3px;
+        vertical-alignment: center;
+    }
+    IconButton {
+        x: parent.width - self.width - 16px;
+        y: 12px;
+        width: 36px;
+        height: 36px;
+        icon: @image-url("../icons/lucide/outline/sync.svg");
+        icon-color: root.secondary-text;
+        ghost: true;
+        hover-background: root.card-border-color;
+        interactive: !root.loading;
+        tooltip-text: root.loading ? @tr("Calculating…") : @tr("Refresh");
+        clicked => { root.refresh(); }
+    }
+    Text {
+        x: 20px;
+        y: 47px;
+        width: parent.width - 40px;
+        height: 22px;
+        text: root.loading && !root.loaded ? @tr("Calculating local storage…")
+            : root.loaded ? @tr("{} used by Flectar Mail", root.total)
+            : root.error == "failed" ? @tr("Storage usage could not be calculated. Try again.")
+            : @tr("Open Storage to calculate local usage.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    if root.loaded : Rectangle {
+        x: 20px;
+        y: 80px;
+        width: parent.width - 40px;
+        height: 18px;
+        background: root.card-border-color;
+        border-radius: 9px;
+        clip: true;
+        for usage in root.rows : segment := Rectangle {
+            private property <length> segment-left: parent.width * usage.offset;
+            private property <length> segment-right: min(parent.width, parent.width * (usage.offset + usage.fraction));
+            visible: usage.fraction > 0 && self.segment-right > self.segment-left;
+            x: self.segment-left;
+            width: max(0px, self.segment-right - self.segment-left);
+            height: parent.height;
+            background: usage.color;
+        }
+    }
+    if root.loaded : VerticalBox {
+        x: 20px;
+        y: 108px;
+        width: parent.width - 40px;
+        height: 175px;
+        spacing: 0px;
+        for usage in root.rows : Rectangle {
+            height: 35px;
+            Rectangle {
+                x: 0px;
+                y: 8px;
+                width: 10px;
+                height: 10px;
+                border-radius: 5px;
+                background: usage.color;
+            }
+            Text {
+                x: 20px;
+                y: 1px;
+                width: parent.width - 120px;
+                height: 18px;
+                text: usage.kind == "mail" ? @tr("Mail")
+                    : usage.kind == "attachments" ? @tr("Attachments")
+                    : usage.kind == "files" ? @tr("Files")
+                    : usage.kind == "databases" ? @tr("Databases")
+                    : @tr("Other");
+                color: root.body-text;
+                font-size: TypeScale.body;
+                font-weight: 600;
+                overflow: elide;
+            }
+            Text {
+                x: 20px;
+                y: 18px;
+                width: parent.width - 120px;
+                height: 15px;
+                text: usage.kind == "mail" ? @tr("Downloaded messages")
+                    : usage.kind == "attachments" ? @tr("Downloaded and draft attachments")
+                    : usage.kind == "files" ? @tr("Offline file copies")
+                    : usage.kind == "databases" ? @tr("Mail, calendar, contacts, and indexes")
+                    : @tr("Settings and temporary data");
+                color: root.secondary-text;
+                font-size: TypeScale.caption;
+                overflow: elide;
+            }
+            Text {
+                x: parent.width - 96px;
+                width: 96px;
+                height: 34px;
+                text: usage.size;
+                color: root.secondary-text;
+                font-size: TypeScale.secondary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+    if root.error != "" && root.loaded : Text {
+        x: 20px;
+        y: 293px;
+        width: parent.width - 40px;
+        height: 16px;
+        text: root.error == "incomplete"
+            ? @tr("Some files could not be measured, so this total may be incomplete.")
+            : @tr("Storage usage could not be refreshed. Try again.");
+        color: root.secondary-text;
+        font-size: TypeScale.caption;
+        overflow: elide;
     }
 }
 
 export component SettingsDialog inherits Rectangle {
     in property <bool> compact: false;
     in property <[AccountRow]> connected_accounts: [];
+    in property <[MailProfileRow]> mail_profiles: [];
     in property <bool> custom_oauth_configured: false;
     in property <bool> google_oauth_available: false;
     in property <bool> microsoft_oauth_available: false;
@@ -63,6 +340,12 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> oauth_in_progress: false;
     in property <bool> oauth_settings_saving: false;
     in property <string> sync_status: "";
+    in property <string> app-version: "";
+    in property <bool> storage_loading: false;
+    in property <bool> storage_loaded: false;
+    in property <string> storage_total: "";
+    in property <string> storage_error: "";
+    in property <[StorageUsageRow]> storage_usage: [];
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> body-text;
@@ -80,6 +363,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> settings_tab: "General";
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
     in-out property <bool> monochrome_sidebar_icons: false;
@@ -131,10 +415,32 @@ export component SettingsDialog inherits Rectangle {
     in-out property <int> delete_account_id: -1;
     in-out property <string> delete_account_name: "";
     private property <bool> compact-nav-open: false;
+    private property <string> settings-search-query: "";
+    private property <bool> profile-editor-open: false;
+    private property <string> profile-editor-id: "";
+    private property <string> profile-editor-name: "";
+    private property <color> profile-editor-color: #3b82f6;
+    private property <bool> profile-editor-custom-color: false;
+    private property <bool> delete-profile-confirmation: false;
+    private property <string> delete-profile-id: "";
+    private property <string> delete-profile-name: "";
+    private property <bool> account-profile-picker-open: false;
+    private property <int> account-profile-picker-id: -1;
+    private property <string> account-profile-picker-name: "";
+    private property <string> account-profile-picker-current-id: "";
+    private property <color> account-profile-picker-color: #3b82f6;
+    private property <bool> account-profile-picker-has-custom-color: false;
+    private property <bool> account-profile-picker-custom-color: false;
+    private property <string> profile-editor-error: "";
     callback save_theme(string);
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_mail_profile(string, string, color) -> string;
+    callback assign_account_profile(int, string);
+    callback save_account_color(int, color, bool);
+    callback delete_mail_profile(string);
+    callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
     callback save_language(string);
     callback save_sidebar_icon_style(bool);
@@ -146,6 +452,7 @@ export component SettingsDialog inherits Rectangle {
     callback sync_account(int);
     callback delete_account(int);
     callback add_password_account(string, string, string, string, string, string, string, string, string);
+    callback suggest_account_settings(string);
     callback start_oauth(string);
     callback reauth_account(int);
     callback cancel_oauth();
@@ -165,6 +472,8 @@ export component SettingsDialog inherits Rectangle {
     callback import_account_backup();
     callback export_database_snapshot();
     callback delete_all_data();
+    callback load_storage_usage();
+    pure callback settings-search-matches(string, string) -> bool;
     callback open-link(string);
 
     private property <[string]> sync-interval-options: [
@@ -184,15 +493,61 @@ export component SettingsDialog inherits Rectangle {
         @tr("1 year"),
         @tr("All mail"),
     ];
+    private property <[string]> language-options: [
+        @tr("System language"),
+        @tr("English"),
+        @tr("Spanish"),
+    ];
+    private property <[color]> profile-colors: [
+        #3b82f6, #8b5cf6, #0d9488, #ea580c,
+        #db2777, #65a30d, #0891b2, #9333ea,
+    ];
     private property <int> sync-interval-index: root.sync_interval_minutes <= 1 ? 0
         : root.sync_interval_minutes <= 5 ? 1 : 2;
     private property <int> notification-index: !root.notifications_enabled ? 0
         : root.notification_scope == "all" ? 2 : 1;
+    private property <int> language-index: root.language_mode == "en" ? 1
+        : root.language_mode == "es" ? 2 : 0;
+
+    pure function settings-icon-color(section: string) -> color {
+        if root.monochrome_sidebar_icons {
+            return root.settings_tab == section ? root.accent : root.muted-text;
+        }
+        return section == "General" ? SettingsIconPalette.general
+            : section == "Accounts" ? SettingsIconPalette.accounts
+            : section == "Notifications" ? SettingsIconPalette.notifications
+            : section == "Shortcuts" ? SettingsIconPalette.shortcuts
+            : section == "Data" ? SettingsIconPalette.storage
+            : SettingsIconPalette.about;
+    }
+
+    pure function settings-section-visible(section: string) -> bool {
+        if root.settings-search-query == "" { return true; }
+        let terms = section == "General"
+            ? @tr("general theme appearance palette language workspace layout renderer privacy remote images sync")
+            : section == "Accounts"
+            ? @tr("accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures")
+            : section == "Notifications"
+            ? @tr("notifications alerts sounds desktop new mail")
+            : section == "Shortcuts"
+            ? @tr("shortcuts keyboard compose search archive spam trash")
+            : section == "Data"
+            ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
+            : @tr("about version credits contributors license flectar");
+        return root.settings-search-matches(terms, root.settings-search-query);
+    }
+
+    private property <bool> search-has-results: root.settings-section-visible("General")
+        || root.settings-section-visible("Accounts") || root.settings-section-visible("Notifications")
+        || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
+        || root.settings-section-visible("About");
 
     changed settings_open => {
         if !root.settings_open {
             theme-editor.discard-changes();
             root.close-caldav-settings();
+            root.profile-editor-open = false;
+            root.close-account-profile-picker();
             root.imap_form_open = false;
             root.imap_editing = false;
         }
@@ -211,6 +566,23 @@ export component SettingsDialog inherits Rectangle {
             root.notification_sound_enabled,
             root.notification_scope,
         );
+    }
+
+    function select-language(index: int) {
+        root.language_mode = index == 1 ? "en" : index == 2 ? "es" : "system";
+        root.save_language(root.language_mode);
+    }
+
+    function update-settings-search(value: string) {
+        root.settings-search-query = value;
+        if value != "" && !root.settings-section-visible(root.settings_tab) {
+            root.settings_tab = root.settings-section-visible("General") ? "General"
+                : root.settings-section-visible("Accounts") ? "Accounts"
+                : root.settings-section-visible("Notifications") ? "Notifications"
+                : root.settings-section-visible("Shortcuts") ? "Shortcuts"
+                : root.settings-section-visible("Data") ? "Data"
+                : root.settings-section-visible("About") ? "About" : root.settings_tab;
+        }
     }
 
     pure function mail-history-index(value: string) -> int {
@@ -285,6 +657,71 @@ export component SettingsDialog inherits Rectangle {
         root.imap_form_open = true;
     }
 
+    function open-new-profile(name: string, color: color) {
+        root.profile-editor-id = "";
+        root.profile-editor-name = name;
+        root.profile-editor-color = color;
+        root.profile-editor-custom-color = false;
+        root.profile-editor-error = "";
+        root.profile-editor-open = true;
+    }
+
+    function edit-profile(profile: MailProfileRow) {
+        root.profile-editor-id = profile.id;
+        root.profile-editor-name = profile.name;
+        root.profile-editor-color = profile.color;
+        root.profile-editor-custom-color = !root.profile-color-is-preset(profile.color);
+        root.profile-editor-error = "";
+        root.profile-editor-open = true;
+    }
+
+    function close-profile-editor() {
+        root.profile-editor-open = false;
+        root.profile-editor-id = "";
+        root.profile-editor-name = "";
+        root.profile-editor-custom-color = false;
+        root.profile-editor-error = "";
+    }
+
+    function confirm-profile-removal(profile: MailProfileRow) {
+        root.delete-profile-id = profile.id;
+        root.delete-profile-name = profile.name;
+        root.delete-profile-confirmation = true;
+    }
+
+    function open-account-profile-picker(account: AccountRow) {
+        root.account-profile-picker-id = account.id;
+        root.account-profile-picker-name = account.name;
+        root.account-profile-picker-current-id = account.profile_id;
+        root.account-profile-picker-color = account.profile_color;
+        root.account-profile-picker-has-custom-color = account.has_account_color;
+        root.account-profile-picker-custom-color = false;
+        root.account-profile-picker-open = true;
+    }
+
+    pure function profile-color-is-preset(value: color) -> bool {
+        return value == #3b82f6 || value == #8b5cf6 || value == #0d9488 || value == #ea580c
+            || value == #db2777 || value == #65a30d || value == #0891b2 || value == #9333ea;
+    }
+
+    function close-account-profile-picker() {
+        root.account-profile-picker-open = false;
+        root.account-profile-picker-id = -1;
+        root.account-profile-picker-name = "";
+        root.account-profile-picker-current-id = "";
+        root.account-profile-picker-custom-color = false;
+    }
+
+    function choose-account-profile(profile-id: string) {
+        root.assign_account_profile(root.account-profile-picker-id, profile-id);
+        root.close-account-profile-picker();
+    }
+
+    function choose-account-color(color: color, generated: bool) {
+        root.save_account_color(root.account-profile-picker-id, color, generated);
+        root.close-account-profile-picker();
+    }
+
     function open-caldav-settings(account: AccountRow) {
         root.caldav_account_id = account.id;
         root.caldav_url = account.caldav_url;
@@ -327,13 +764,15 @@ export component SettingsDialog inherits Rectangle {
                         padding-left: LayoutMetrics.sidebar-inset;
                         spacing: 5px;
                         Text { height: 22px; text: @tr("SETTINGS"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
+                        SettingsSearch { query <=> root.settings-search-query; muted-color: root.muted-text; hover-background: root.accent-soft; edited(value) => { root.update-settings-search(value); } }
 
-                        SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/phosphor/sliders-horizontal-fill.svg"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
-                        SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/phosphor/user-circle-fill.svg"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
-                        SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/phosphor/bell-fill.svg"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
-                        SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/phosphor/keyboard-fill.svg"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
-                        SettingsNavItem { text: @tr("Data management"); icon: @image-url("../icons/phosphor/database-fill.svg"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
-                        SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/phosphor/info-fill.svg"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; } }
+                        if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
+                        if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
+                        if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
+                        if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
+                        if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
+                        if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
+                        if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; } }
                         Rectangle { vertical-stretch: 1; }
                     }
                 }
@@ -348,6 +787,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (general-scroll.visible-width - 920px) / 2);
                             width: root.compact ? general-scroll.visible-width - 32px : min(920px, general-scroll.visible-width - 48px);
@@ -355,46 +795,8 @@ export component SettingsDialog inherits Rectangle {
                             padding-bottom: 32px;
                             spacing: 12px;
 
-                            Text { text: @tr("General"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; }
+                            SettingsPageTitle { label: @tr("General"); title-color: root.title-color; }
                             Text { height: root.compact ? 34px : 17px; text: @tr("Manage appearance, privacy, and synchronization."); color: root.secondary-text; font-size: TypeScale.secondary; wrap: word-wrap; }
-
-                            if RendererSettings.available : Rectangle {
-                                height: root.compact ? 176px : 114px;
-                                background: root.surface;
-                                border-radius: 8px;
-                                border-width: 1px;
-                                border-color: root.border-subtle;
-                                VerticalBox {
-                                    padding: 16px;
-                                    spacing: 6px;
-                                    SettingsSelectRow {
-                                        height: root.compact ? 120px : 58px;
-                                        compact: root.compact;
-                                        title: @tr("Renderer");
-                                        description: RendererSettings.gpu-supported ? @tr("Changes take effect after restarting Flectar Mail.") : @tr("GPU mode is unavailable in this build.");
-                                        choices: RendererSettings.gpu-supported ? [@tr("CPU — Low Memory"), @tr("GPU — WGPU")] : [@tr("CPU — Low Memory")];
-                                        selected-index: RendererSettings.gpu-supported && RendererSettings.preferred == "gpu" ? 1 : 0;
-                                        title-color: root.body-text;
-                                        description-color: root.faint-text;
-                                        selected(index, value) => {
-                                            RendererSettings.choose(index == 1 ? "gpu" : "cpu");
-                                            self.selected-index = RendererSettings.gpu-supported && RendererSettings.preferred == "gpu" ? 1 : 0;
-                                        }
-                                    }
-                                    HorizontalBox {
-                                        height: 18px;
-                                        padding: 0px;
-                                        padding-left: root.compact ? 8px : 16px;
-                                        Text {
-                                        text: RendererSettings.error != "" ? RendererSettings.error : RendererSettings.restart-required ? @tr("Restart required. Your current renderer is still active.") : RendererSettings.active == "gpu" ? @tr("Active: GPU — WGPU") : @tr("Active: CPU — Low Memory");
-                                        color: root.faint-text;
-                                        font-size: TypeScale.caption;
-                                        overflow: elide;
-                                        }
-                                    }
-                                }
-                            }
-
 
                             theme-editor := ThemeEditor {
                                 compact: root.compact;
@@ -429,7 +831,7 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             Rectangle {
-                                height: root.compact ? 326px : 218px;
+                                height: root.compact ? 346px : 264px;
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -467,38 +869,29 @@ export component SettingsDialog inherits Rectangle {
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
-                                    if !root.compact : HorizontalBox {
-                                        height: 38px;
-                                        spacing: 18px;
-                                        Text { text: @tr("Workspace layout"); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
-                                        RadioButton {
-                                            text: @tr("Default");
-                                            checked: root.workspace_layout == "default";
-                                            clicked => { root.workspace_layout = "default"; root.save_workspace_layout(root.workspace_layout); }
+                                    Text { height: 20px; text: @tr("Workspace layout"); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
+                                    HorizontalBox {
+                                        padding: 0px;
+                                        height: 72px;
+                                        spacing: 8px;
+                                        WorkspaceLayoutChoice {
+                                            horizontal-stretch: 1; min-width: 0px;
+                                            name: @tr("Default");
+                                            selected: root.workspace_layout == "default";
+                                            chosen => { root.workspace_layout = "default"; root.save_workspace_layout(root.workspace_layout); }
                                         }
-                                        RadioButton {
-                                            text: @tr("Minimal");
-                                            checked: root.workspace_layout == "minimal";
-                                            clicked => { root.workspace_layout = "minimal"; root.save_workspace_layout(root.workspace_layout); }
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
-                                    }
-                                    if root.compact : VerticalBox {
-                                        height: 82px;
-                                        spacing: 2px;
-                                        Text { height: 24px; text: @tr("Workspace layout"); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
-                                        HorizontalBox {
-                                            height: 44px;
-                                            spacing: 8px;
-                                            RadioButton { height: 44px; horizontal-stretch: 1; text: @tr("Default"); checked: root.workspace_layout == "default"; clicked => { root.workspace_layout = "default"; root.save_workspace_layout(root.workspace_layout); } }
-                                            RadioButton { height: 44px; horizontal-stretch: 1; text: @tr("Minimal"); checked: root.workspace_layout == "minimal"; clicked => { root.workspace_layout = "minimal"; root.save_workspace_layout(root.workspace_layout); } }
+                                        WorkspaceLayoutChoice {
+                                            horizontal-stretch: 1; min-width: 0px;
+                                            name: @tr("Minimal"); minimal: true;
+                                            selected: root.workspace_layout == "minimal";
+                                            chosen => { root.workspace_layout = "minimal"; root.save_workspace_layout(root.workspace_layout); }
                                         }
                                     }
                                 }
                             }
 
                             Rectangle {
-                                height: root.compact ? 140px : 94px;
+                                height: root.compact ? 154px : 116px;
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -508,14 +901,18 @@ export component SettingsDialog inherits Rectangle {
                                     padding-right: 20px;
                                     padding-bottom: 15px;
                                     padding-left: 20px;
-                                    spacing: 7px;
+                                    spacing: 5px;
                                     Text { text: @tr("Language"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-                                    HorizontalBox {
-                                        height: root.compact ? 84px : 38px;
-                                        spacing: 8px;
-                                        RadioButton { horizontal-stretch: 1; text: @tr("System language"); checked: root.language_mode == "system"; clicked => { root.language_mode = "system"; root.save_language("system"); } }
-                                        RadioButton { horizontal-stretch: 1; text: @tr("Spanish"); checked: root.language_mode == "es"; clicked => { root.language_mode = "es"; root.save_language("es"); } }
-                                        RadioButton { horizontal-stretch: 1; text: @tr("English"); checked: root.language_mode == "en"; clicked => { root.language_mode = "en"; root.save_language("en"); } }
+                                    SettingsSelectRow {
+                                        height: root.compact ? 104px : 74px;
+                                        compact: root.compact;
+                                        title: @tr("Display language");
+                                        description: root.language_mode == "system" ? @tr("Follow your device language when a translation is available.") : @tr("Choose the language used throughout Flectar Mail.");
+                                        choices: root.language-options;
+                                        selected-index: root.language-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-language(index); }
                                     }
                                 }
                             }
@@ -676,6 +1073,43 @@ export component SettingsDialog inherits Rectangle {
                                 }
                             }
 
+                            if RendererSettings.available : Rectangle {
+                                height: root.compact ? 176px : 114px;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding: 16px;
+                                    spacing: 6px;
+                                    SettingsSelectRow {
+                                        height: root.compact ? 120px : 58px;
+                                        compact: root.compact;
+                                        title: @tr("Renderer");
+                                        description: RendererSettings.gpu-supported ? @tr("Changes take effect after restarting Flectar Mail.") : @tr("GPU mode is unavailable in this build.");
+                                        choices: RendererSettings.gpu-supported ? [@tr("CPU — Low Memory"), @tr("GPU — WGPU")] : [@tr("CPU — Low Memory")];
+                                        selected-index: RendererSettings.gpu-supported && RendererSettings.preferred == "gpu" ? 1 : 0;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => {
+                                            RendererSettings.choose(index == 1 ? "gpu" : "cpu");
+                                            self.selected-index = RendererSettings.gpu-supported && RendererSettings.preferred == "gpu" ? 1 : 0;
+                                        }
+                                    }
+                                    HorizontalBox {
+                                        height: 18px;
+                                        padding: 0px;
+                                        padding-left: root.compact ? 8px : 16px;
+                                        Text {
+                                            text: RendererSettings.error != "" ? RendererSettings.error : RendererSettings.restart-required ? @tr("Restart required. Your current renderer is still active.") : RendererSettings.active == "gpu" ? @tr("Active: GPU — WGPU") : @tr("Active: CPU — Low Memory");
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+
                         }
                     }
 
@@ -684,19 +1118,152 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (accounts-scroll.visible-width - 920px) / 2);
                             width: root.compact ? accounts-scroll.visible-width - 32px : min(920px, accounts-scroll.visible-width - 48px);
                             padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
                             padding-bottom: 32px;
                             spacing: 14px;
-                            Text { text: @tr("Accounts"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; }
+                            SettingsPageTitle { label: @tr("Accounts"); title-color: root.title-color; }
                             Text { height: root.compact ? 34px : 17px; text: @tr("Manage connected mailboxes and add providers. Drag an account to change its order everywhere."); color: root.secondary-text; font-size: TypeScale.secondary; wrap: word-wrap; }
-                            if root.sync_status != "" : Text {
+                            if root.sync_status != "" : CopyableDiagnostic {
                                 text: root.sync_status;
-                                color: root.secondary-text;
+                                text-color: root.secondary-text;
                                 font-size: TypeScale.secondary;
-                                wrap: word-wrap;
+                            }
+                            Rectangle {
+                                height: root.compact ? 176px : 126px;
+                                background: root.surface;
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+
+                                Text {
+                                    x: 20px; y: 16px;
+                                    width: parent.width - (root.compact ? 40px : 180px);
+                                    height: 24px;
+                                    text: @tr("Profiles");
+                                    color: root.heading;
+                                    font-size: TypeScale.subtitle;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    x: 20px; y: 43px;
+                                    width: parent.width - 40px;
+                                    height: root.compact ? 38px : 20px;
+                                    text: @tr("Group accounts as Personal or Work and identify them by color in the mail list.");
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
+                                if !root.compact : Button {
+                                    x: parent.width - self.width - 20px; y: 14px;
+                                    width: 126px; height: 32px;
+                                    text: @tr("Add profile");
+                                    icon: @image-url("../icons/lucide/outline/plus.svg");
+                                    has-icon: true;
+                                    primary: true;
+                                    clicked => { root.open-new-profile("", #3b82f6); }
+                                }
+                                HorizontalBox {
+                                    x: 20px;
+                                    y: root.compact ? 88px : 76px;
+                                    width: parent.width - 40px;
+                                    height: root.compact ? 70px : 34px;
+                                    spacing: 10px;
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: @tr("Show account color at the left edge of each message");
+                                        color: root.body-text;
+                                        font-size: TypeScale.secondary;
+                                        vertical-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+                                    Switch {
+                                        checked: root.show_account_markers;
+                                        control-label: @tr("Show account color at the left edge of each message");
+                                        toggled => {
+                                            root.show_account_markers = self.checked;
+                                            root.save_account_markers_visibility(self.checked);
+                                        }
+                                    }
+                                    if root.compact : Button {
+                                        width: 112px; height: 40px;
+                                        text: @tr("Add profile");
+                                        primary: true;
+                                        clicked => { root.open-new-profile("", #3b82f6); }
+                                    }
+                                }
+                            }
+                            if root.mail_profiles.length == 0 : Rectangle {
+                                height: 58px;
+                                background: root.surface-raised;
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                Text {
+                                    x: 18px; y: 0px; width: parent.width - 36px; height: parent.height;
+                                    text: @tr("No profiles yet. Accounts keep their individual or generated colors until you create one.");
+                                    color: root.secondary-text;
+                                    font-size: TypeScale.secondary;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            for profile in root.mail_profiles : Rectangle {
+                                height: 66px;
+                                background: root.surface;
+                                border-radius: 10px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                Rectangle {
+                                    x: 16px; y: 13px; width: 8px; height: 40px;
+                                    border-radius: 4px;
+                                    background: profile.color;
+                                }
+                                Text {
+                                    x: 38px; y: 11px;
+                                    width: parent.width - 152px; height: 23px;
+                                    text: profile.name;
+                                    color: root.heading;
+                                    font-size: TypeScale.body-large;
+                                    font-weight: 700;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    x: 38px; y: 34px;
+                                    width: parent.width - 152px; height: 18px;
+                                    text: profile.account_count == 0 ? @tr("No accounts")
+                                        : profile.account_count == 1 ? @tr("1 account")
+                                        : @tr("{} accounts", profile.account_count);
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    vertical-alignment: center;
+                                }
+                                IconButton {
+                                    x: parent.width - 90px; y: 13px;
+                                    width: 38px; height: 38px;
+                                    icon: @image-url("../icons/lucide/outline/pencil.svg");
+                                    icon-color: root.secondary-text;
+                                    ghost: true;
+                                    hover-background: root.accent-soft;
+                                    tooltip-text: @tr("Edit profile");
+                                    clicked => { root.edit-profile(profile); }
+                                }
+                                IconButton {
+                                    x: parent.width - 48px; y: 13px;
+                                    width: 38px; height: 38px;
+                                    icon: @image-url("../icons/lucide/outline/trash.svg");
+                                    icon-color: AppTheme.destructive;
+                                    ghost: true;
+                                    hover-background: AppTheme.destructive.with-alpha(0.12);
+                                    tooltip-text: @tr("Delete profile");
+                                    clicked => { root.confirm-profile-removal(profile); }
+                                }
                             }
                             Rectangle {
                                 height: root.compact ? (root.oauth_in_progress ? 260px : 208px) : (root.oauth_in_progress ? 152px : 92px);
@@ -735,7 +1302,7 @@ export component SettingsDialog inherits Rectangle {
                                     ProviderButton {
                                         horizontal-stretch: 1;
                                         text: @tr("Add mail account");
-                                        icon: @image-url("../icons/phosphor/envelope.svg");
+                                        icon: @image-url("../icons/lucide/outline/mail.svg");
                                         colorize-icon: true;
                                         enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
                                         foreground: root.body-text;
@@ -756,7 +1323,7 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 8px;
                                     ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
                                     ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
-                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/phosphor/envelope.svg"); colorize-icon: true; enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
+                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/lucide/outline/mail.svg"); colorize-icon: true; enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
                                     if root.oauth_in_progress : Button { height: 44px; text: @tr("Cancel sign-in"); clicked => { root.cancel_oauth(); } }
                                 }
                             }
@@ -767,11 +1334,8 @@ export component SettingsDialog inherits Rectangle {
                                 submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
                             for account in root.connected_accounts : drop-target := DropArea {
-                                private property <bool> stacked-actions: self.width < 430px;
-                                private property <bool> separate-actions: root.compact || self.width < 780px;
-                                private property <length> actions-y: root.compact ? 84px : account.sync_error != "" ? 112px : 88px;
-                                private property <length> divider-y: self.separate-actions ? self.actions-y + (self.stacked-actions ? 112px : 32px) + 12px : self.actions-y;
-                                height: self.divider-y + (root.compact ? (account.provider == "imap" ? 208px : 154px) : 71px);
+                                private property <length> divider-y: account.sync_error != "" ? 112px : root.compact ? 92px : 88px;
+                                height: self.divider-y + (root.compact ? (account.provider == "imap" ? 266px : 212px) : 129px);
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
                                 dropped(event) => {
                                     let source = root.read_account_transfer(event.data);
@@ -790,7 +1354,7 @@ export component SettingsDialog inherits Rectangle {
                                         x: 0px;
                                         y: 0px;
                                         width: parent.width;
-                                        height: root.compact ? 92px : account.sync_error != "" ? 112px : 88px;
+                                        height: account.sync_error != "" ? 78px : root.compact ? 92px : 88px;
                                         padding-left: 14px;
                                         padding-right: 16px;
                                         spacing: 12px;
@@ -798,7 +1362,7 @@ export component SettingsDialog inherits Rectangle {
                                             width: 20px;
                                             data: root.make_account_transfer(account.drag_key);
                                             allow-move: true;
-                                            Image { width: 17px; height: 17px; source: @image-url("../icons/phosphor/list.svg"); colorize: root.muted-text; image-fit: contain; accessible-role: none; }
+                                            Image { width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/list-unordered.svg"); colorize: root.muted-text; image-fit: contain; accessible-role: none; }
                                         }
                                         Rectangle {
                                             width: 44px;
@@ -818,7 +1382,7 @@ export component SettingsDialog inherits Rectangle {
                                             }
                                             if !account.has_avatar : Image {
                                                 x: 10px; y: 10px; width: 24px; height: 24px;
-                                                source: account.provider == "gmail" ? @image-url("../icons/brand/gmail.svg") : account.provider == "microsoft" ? @image-url("../icons/brand/outlook.svg") : @image-url("../icons/phosphor/envelope.svg");
+                                                source: account.provider == "gmail" ? @image-url("../icons/brand/gmail.svg") : account.provider == "microsoft" ? @image-url("../icons/brand/outlook.svg") : @image-url("../icons/lucide/outline/mail.svg");
                                                 colorize: account.provider == "imap" ? root.accent : transparent;
                                                 image-fit: contain;
                                                 accessible-role: none;
@@ -831,24 +1395,17 @@ export component SettingsDialog inherits Rectangle {
                                             Text { text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             Text { text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
                                             Text { text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
-                                            Text {
-                                                visible: !root.compact && account.sync_error != "";
-                                                height: !root.compact && account.sync_error != "" ? 28px : 0px;
-                                                text: @tr("Mail synchronization error: {}", account.sync_error);
-                                                color: #c0392b;
-                                                font-size: TypeScale.caption;
-                                                wrap: word-wrap;
-                                            }
                                         }
-                                        if !drop-target.separate-actions : AccountActions {
+                                        AccountActions {
                                             edit-label: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
+                                            reconnect: account.provider != "imap";
                                             edit-enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
                                             remove-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
                                             sync-enabled: !root.account_setup_in_progress && !root.sync_in_progress && !root.oauth_settings_saving;
                                             edit => { root.edit-account(account); }
                                             remove => { root.confirm-account-removal(account); }
                                             sync => { root.sync_account(account.id); }
-                                            width: 242px;
+                                            width: 108px;
                                         }
                                         if !root.compact && account.calendar_connected : HorizontalBox {
                                             width: 122px;
@@ -895,18 +1452,14 @@ export component SettingsDialog inherits Rectangle {
                                             }
                                         }
                                     }
-                                    if drop-target.separate-actions : AccountActions {
-                                            edit-label: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
-                                            edit-enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
-                                            remove-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
-                                            sync-enabled: !root.account_setup_in_progress && !root.sync_in_progress && !root.oauth_settings_saving;
-                                            edit => { root.edit-account(account); }
-                                            remove => { root.confirm-account-removal(account); }
-                                            sync => { root.sync_account(account.id); }
-                                        x: 14px;
-                                        y: drop-target.actions-y;
-                                        width: parent.width - 30px;
-                                        stacked: drop-target.stacked-actions;
+                                    if account.sync_error != "" : CopyableDiagnostic {
+                                        x: root.compact ? 24px : 32px;
+                                        y: 80px;
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        height: 28px;
+                                        text: @tr("Mail synchronization error: {}", account.sync_error);
+                                        text-color: AppTheme.destructive;
+                                        font-size: TypeScale.caption;
                                     }
                                     Rectangle {
                                         x: 8px;
@@ -931,9 +1484,53 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-mail-history(account.id, index); }
                                     }
+                                    Rectangle {
+                                        x: root.compact ? 24px : 32px;
+                                        y: drop-target.divider-y + (root.compact ? 70px : 66px);
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        height: 50px;
+                                        background: transparent;
+                                        Text {
+                                            x: 0px; y: 4px;
+                                            width: parent.width - 146px; height: 20px;
+                                            text: @tr("Profile");
+                                            color: root.body-text;
+                                            font-size: TypeScale.body;
+                                            font-weight: 600;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            x: 0px; y: 25px;
+                                            width: parent.width - 146px; height: 18px;
+                                            text: account.has_profile
+                                                ? @tr("Uses the {} color in the mail list", account.profile_name)
+                                                : account.has_account_color
+                                                    ? @tr("Uses a custom account color")
+                                                    : @tr("Uses a generated account color");
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            overflow: elide;
+                                            vertical-alignment: center;
+                                        }
+                                        Button {
+                                            x: parent.width - self.width;
+                                            y: 8px;
+                                            width: 136px;
+                                            height: 34px;
+                                            text: account.has_profile ? account.profile_name : @tr("No profile");
+                                            clicked => { root.open-account-profile-picker(account); }
+                                        }
+                                        Rectangle {
+                                            x: parent.width - 126px;
+                                            y: 20px;
+                                            width: 10px; height: 10px;
+                                            border-radius: 5px;
+                                            background: account.profile_color;
+                                        }
+                                    }
                                     if root.compact && account.provider == "imap" : HorizontalBox {
                                         x: 24px;
-                                        y: drop-target.divider-y + 139px;
+                                        y: drop-target.divider-y + 197px;
                                         width: parent.width - 48px;
                                         height: 36px;
                                         spacing: 10px;
@@ -978,6 +1575,7 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
                         VerticalBox {
                             x: root.compact ? 16px : max(24px, (data-scroll.visible-width - 920px) / 2);
                             width: root.compact ? data-scroll.visible-width - 32px : min(920px, data-scroll.visible-width - 48px);
@@ -985,14 +1583,29 @@ export component SettingsDialog inherits Rectangle {
                             padding-bottom: 32px;
                             spacing: 10px;
 
-                            Text { height: 28px; text: @tr("Data management"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; vertical-alignment: center; }
+                            SettingsPageTitle { label: @tr("Storage"); title-color: root.title-color; }
                             Text {
                                 height: root.compact ? 34px : 20px;
-                                text: root.account-transfer-supported ? @tr("Transfer your setup, export a full snapshot, or remove local data from this device.") : @tr("Remove local data from this device.");
+                                text: @tr("See what Flectar Mail stores locally and manage the data on this device.");
                                 color: root.secondary-text;
                                 font-size: TypeScale.secondary;
                                 vertical-alignment: center;
                                 wrap: word-wrap;
+                            }
+
+                            StorageUsageCard {
+                                compact: root.compact;
+                                loading: root.storage_loading;
+                                loaded: root.storage_loaded;
+                                total: root.storage_total;
+                                error: root.storage_error;
+                                rows: root.storage_usage;
+                                surface: root.surface;
+                                card-border-color: root.border-subtle;
+                                heading: root.heading;
+                                body-text: root.body-text;
+                                secondary-text: root.secondary-text;
+                                refresh => { root.load_storage_usage(); }
                             }
 
                             Rectangle {
@@ -1000,9 +1613,9 @@ export component SettingsDialog inherits Rectangle {
                                 height: root.account-transfer-supported ? (root.compact ? 188px : 136px) : 0px;
                                 vertical-stretch: 0;
                                 SettingsCard { title: @tr("Database snapshot"); description: @tr("Export verified copies of the mail and calendar databases with their schema versions."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                Image { x: 20px; y: 79px; width: 18px; height: 18px; source: @image-url("../icons/phosphor/database-fill.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                Image { x: 20px; y: 72px + (42px - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/database.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
                                 Text { x: 48px; y: 72px; width: root.compact ? parent.width - 68px : parent.width - 260px; height: 42px; text: @tr("The snapshot contains private local mail and settings, but not passwords or OAuth tokens. Store it securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
-                                Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? 139px : 77px; width: root.compact ? parent.width - 40px : 170px; text: @tr("Export snapshot"); icon: @image-url("../icons/phosphor/download.svg"); has-icon: true; clicked => { root.export_database_snapshot(); } }
+                                Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? 139px : 77px; width: root.compact ? parent.width - 40px : 170px; text: @tr("Export snapshot"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; clicked => { root.export_database_snapshot(); } }
                             }
 
                             Rectangle {
@@ -1010,7 +1623,7 @@ export component SettingsDialog inherits Rectangle {
                                 height: root.account-transfer-supported ? (root.compact ? 188px : 136px) : 0px;
                                 vertical-stretch: 0;
                                 SettingsCard { title: @tr("Transfer account setup"); description: @tr("Import a backup or export one connected account and your preferences." | "Import a backup or export {n} connected accounts and your preferences." % root.connected_accounts.length); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                Image { x: 20px; y: 79px; width: 18px; height: 18px; source: @image-url("../icons/phosphor/check-circle-fill.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                Image { x: 20px; y: 72px + (42px - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/check-circle.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
                                 Text { x: 48px; y: 72px; width: root.compact ? parent.width - 68px : parent.width - 360px; height: 42px; text: @tr("Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                                 HorizontalBox {
                                     x: root.compact ? 20px : parent.width - 300px;
@@ -1018,8 +1631,8 @@ export component SettingsDialog inherits Rectangle {
                                     width: root.compact ? parent.width - 40px : 280px;
                                     height: 32px;
                                     spacing: 8px;
-                                    Button { text: @tr("Import"); icon: @image-url("../icons/phosphor/tray-arrow-down.svg"); has-icon: true; clicked => { root.import_account_backup(); } }
-                                    Button { text: @tr("Export"); icon: @image-url("../icons/phosphor/download.svg"); has-icon: true; primary: true; enabled: root.connected_accounts.length > 0; clicked => { root.export_account_backup(); } }
+                                    Button { text: @tr("Import"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; clicked => { root.import_account_backup(); } }
+                                    Button { text: @tr("Export"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; primary: true; enabled: root.connected_accounts.length > 0; clicked => { root.export_account_backup(); } }
                                 }
                             }
 
@@ -1027,9 +1640,9 @@ export component SettingsDialog inherits Rectangle {
                                 height: root.compact ? 188px : 136px;
                                 vertical-stretch: 0;
                                 SettingsCard { title: @tr("Delete all local data"); description: @tr("Remove accounts, downloaded mail, calendars, contacts, preferences, and credentials from this device."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                Image { x: 20px; y: 78px; width: 18px; height: 18px; source: @image-url("../icons/phosphor/trash-fill.svg"); colorize: #d04a43; image-fit: contain; accessible-role: none; }
+                                Image { x: 20px; y: 72px + (42px - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/trash.svg"); colorize: #d04a43; image-fit: contain; accessible-role: none; }
                                 Text { x: 48px; y: 72px; width: root.compact ? parent.width - 68px : parent.width - 260px; height: 42px; text: @tr("This does not delete anything from Gmail, Outlook, or your IMAP server."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
-                                Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? 139px : 77px; width: root.compact ? parent.width - 40px : 170px; text: @tr("Delete everything"); icon: @image-url("../icons/phosphor/trash-fill.svg"); has-icon: true; clicked => { root.delete_data_confirmation = true; } }
+                                Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? 139px : 77px; width: root.compact ? parent.width - 40px : 170px; text: @tr("Delete everything"); icon: @image-url("../icons/lucide/outline/trash.svg"); has-icon: true; clicked => { root.delete_data_confirmation = true; } }
                             }
 
                             if root.sync_status != "" : Text { height: 22px; text: root.sync_status; color: root.secondary-text; font-size: TypeScale.caption; vertical-alignment: center; overflow: elide; }
@@ -1040,8 +1653,9 @@ export component SettingsDialog inherits Rectangle {
                         visible: root.settings_tab == "Notifications";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
                         VerticalBox { x: root.compact ? 16px : max(24px, (notifications-scroll.visible-width - 920px) / 2); width: root.compact ? notifications-scroll.visible-width - 32px : min(920px, notifications-scroll.visible-width - 48px); padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px; padding-bottom: 32px; spacing: 10px;
-                            Text { height: 28px; text: @tr("Notifications"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; vertical-alignment: center; }
+                            SettingsPageTitle { label: @tr("Notifications"); title-color: root.title-color; }
                             Text { height: 20px; text: @tr("Choose how Flectar Mail gets your attention."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
                             Rectangle {
                                 height: root.compact ? 228px : 152px;
@@ -1088,8 +1702,9 @@ export component SettingsDialog inherits Rectangle {
                         visible: root.settings_tab == "Shortcuts";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
                         VerticalBox { x: root.compact ? 16px : max(24px, (shortcuts-scroll.visible-width - 920px) / 2); width: root.compact ? shortcuts-scroll.visible-width - 32px : min(920px, shortcuts-scroll.visible-width - 48px); padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px; padding-bottom: 32px; spacing: 10px;
-                            Text { height: 28px; text: @tr("Keyboard shortcuts"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; vertical-alignment: center; }
+                            SettingsPageTitle { label: @tr("Keyboard shortcuts"); title-color: root.title-color; }
                             Text { height: 20px; text: @tr("Move through mail without leaving the keyboard."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; }
                             Rectangle { height: 236px; vertical-stretch: 0; background: root.surface; border-radius: 8px; border-width: 1px; border-color: root.border-subtle; VerticalBox { padding-top: 12px; padding-right: 18px; padding-bottom: 12px; padding-left: 18px; spacing: 0px;
                                 Text { height: 20px; text: @tr("Mail"); color: root.heading; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
@@ -1107,15 +1722,16 @@ export component SettingsDialog inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
 
                         VerticalBox {
-                            x: root.compact ? 16px : max(24px, (about-scroll.visible-width - 720px) / 2);
-                            width: root.compact ? about-scroll.visible-width - 32px : min(720px, about-scroll.visible-width - 48px);
+                            x: root.compact ? 16px : max(24px, (about-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? about-scroll.visible-width - 32px : min(920px, about-scroll.visible-width - 48px);
                             padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
                             padding-bottom: 32px;
                             spacing: 14px;
 
-                            Text { height: 28px; text: @tr("About"); color: root.title-color; font-size: TypeScale.display; font-weight: 700; vertical-alignment: center; }
+                            SettingsPageTitle { label: @tr("About"); title-color: root.title-color; }
                             Text { height: root.compact ? 34px : 17px; text: @tr("Flectar Mail, its makers, and its community."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; wrap: word-wrap; }
 
                             Rectangle {
@@ -1164,7 +1780,7 @@ export component SettingsDialog inherits Rectangle {
                                     y: root.compact ? 181px : 170px;
                                     width: parent.width - 40px;
                                     height: 16px;
-                                    text: @tr("Version 0.1.0");
+                                    text: @tr("Version {}", root.app-version);
                                     color: root.faint-text;
                                     font-size: TypeScale.caption;
                                     horizontal-alignment: center;
@@ -1196,7 +1812,7 @@ export component SettingsDialog inherits Rectangle {
                                     SettingsLinkRow {
                                         text: @tr("Open-source contributors");
                                         description: @tr("Meet the people who have contributed on GitHub");
-                                        icon: @image-url("../icons/phosphor/users.svg");
+                                        icon: @image-url("../icons/lucide/outline/people.svg");
                                         accent: root.accent;
                                         body-text: root.body-text;
                                         muted-text: root.faint-text;
@@ -1232,9 +1848,13 @@ export component SettingsDialog inherits Rectangle {
                 y: 0px;
                 width: parent.width;
                 z: 200;
-                title: root.settings_tab == "Data" ? @tr("Data management") : root.settings_tab;
+                title: root.settings_tab == "General" ? @tr("General")
+                    : root.settings_tab == "Accounts" ? @tr("Accounts")
+                    : root.settings_tab == "Notifications" ? @tr("Notifications")
+                    : root.settings_tab == "Shortcuts" ? @tr("Shortcuts")
+                    : root.settings_tab == "Data" ? @tr("Storage") : @tr("About");
                 show-leading: true;
-                leading-icon: @image-url("../icons/phosphor/sliders-horizontal-fill.svg");
+                leading-icon: @image-url("../icons/lucide/filled/sliders.svg");
                 leading-tooltip: @tr("Settings sections");
                 leading-accessible-id: "settings-menu-button";
                 background-color: root.sidebar-bg;
@@ -1242,8 +1862,7 @@ export component SettingsDialog inherits Rectangle {
                 IconButton {
                     width: LayoutMetrics.touch-target;
                     height: LayoutMetrics.touch-target;
-                    icon-size: 18px;
-                    icon: @image-url("../icons/phosphor/x.svg");
+                    icon: @image-url("../icons/lucide/outline/x.svg");
                     icon-color: root.secondary-text;
                     idle-background: transparent;
                     hover-background: root.accent-soft;
@@ -1281,12 +1900,14 @@ export component SettingsDialog inherits Rectangle {
                     padding-left: 12px;
                     spacing: 7px;
                     Text { height: 34px; text: @tr("SETTINGS"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                    SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/phosphor/sliders-horizontal-fill.svg"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
-                    SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/phosphor/user-circle-fill.svg"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
-                    SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/phosphor/bell-fill.svg"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
-                    SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/phosphor/keyboard-fill.svg"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
-                    SettingsNavItem { text: @tr("Data management"); icon: @image-url("../icons/phosphor/database-fill.svg"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
-                    SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/phosphor/info-fill.svg"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
+                    SettingsSearch { query <=> root.settings-search-query; muted-color: root.muted-text; hover-background: root.accent-soft; edited(value) => { root.update-settings-search(value); } }
+                    if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
+                    if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("About") : SettingsNavItem { text: @tr("About"); icon: @image-url("../icons/lucide/filled/info.svg"); icon-color: root.settings-icon-color("About"); selected: root.settings_tab == "About"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "About"; root.compact-nav-open = false; } }
                     Rectangle { vertical-stretch: 1; }
                 }
             }
@@ -1341,7 +1962,7 @@ export component SettingsDialog inherits Rectangle {
                                 height: 44px;
                                 border-radius: 12px;
                                 background: root.accent-soft;
-                                Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/phosphor/calendar.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/lucide/outline/calendar.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
                             }
                             VerticalBox {
                                 spacing: 2px;
@@ -1349,7 +1970,7 @@ export component SettingsDialog inherits Rectangle {
                                 Text { text: root.caldav_manage_existing ? @tr("Discover new calendars.") : @tr("Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/phosphor/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-caldav-settings(); } }
+                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-caldav-settings(); } }
                         }
 
                         caldav-url-input := FormField {
@@ -1449,7 +2070,7 @@ export component SettingsDialog inherits Rectangle {
                                 height: 44px;
                                 border-radius: 12px;
                                 background: root.accent-soft;
-                                Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/phosphor/envelope.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                Image { x: 11px; y: 11px; width: 22px; height: 22px; source: @image-url("../icons/lucide/outline/mail.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
                             }
                             VerticalBox {
                                 padding: 0px;
@@ -1458,12 +2079,12 @@ export component SettingsDialog inherits Rectangle {
                                 Text { text: root.account_protocol == "jmap" ? @tr("Uses JMAP for mail sync and sending, with automatic discovery.") : @tr("Uses separate IMAP and SMTP servers for mail sync and sending."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/phosphor/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.imap_form_open = false; } }
+                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.imap_form_open = false; } }
                         }
 
                         imap-scroll := ScrollView {
                             vertical-stretch: 1;
-                            viewport-width: self.visible-width;
+                            content-width: self.visible-width;
                             mouse-drag-pan-enabled: root.compact;
                             VerticalBox {
                                 padding: 0px;
@@ -1475,14 +2096,14 @@ export component SettingsDialog inherits Rectangle {
                                     padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; root.suggest_account_settings(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
                                 }
                                 if root.compact : VerticalBox {
                                     padding: 0px;
                                     height: 124px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; root.suggest_account_settings(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
                                 }
                                 FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
@@ -1536,15 +2157,13 @@ export component SettingsDialog inherits Rectangle {
                             border-width: 1px;
                             border-color: root.account_setup_in_progress ? root.accent.transparentize(0.55) : AppTheme.destructive.transparentize(0.45);
 
-                            account-status := Text {
+                            account-status := CopyableDiagnostic {
                                 x: 10px;
                                 y: 8px;
                                 width: parent.width - 20px;
                                 text: root.sync_status;
-                                color: root.account_setup_in_progress ? root.body-text : AppTheme.destructive;
+                                text-color: root.account_setup_in_progress ? root.body-text : AppTheme.destructive;
                                 font-size: TypeScale.caption;
-                                wrap: word-wrap;
-                                height: self.preferred-height;
                             }
                         }
 
@@ -1570,6 +2189,226 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
+        Rectangle {
+            visible: root.settings_open && root.profile-editor-open;
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Edit profile");
+
+            TouchArea { clicked => { root.close-profile-editor(); } }
+
+            profile-panel := Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(480px, parent.width - 24px);
+                height: min(root.profile-editor-custom-color ? 592px : 396px, parent.height - 24px);
+                background: root.surface;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.border-subtle;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: #00000055;
+
+                profile-focus := FocusScope {
+                    forward-focus: profile-name-field;
+                    key-pressed(event) => {
+                        if event.text == Key.Escape {
+                            root.close-profile-editor();
+                            return accept;
+                        }
+                        reject
+                    }
+                    ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+                        content-width: self.visible-width;
+                        mouse-drag-pan-enabled: root.compact;
+                    VerticalBox {
+                        width: profile-panel.width;
+                        padding-top: 22px;
+                        padding-right: 22px;
+                        padding-bottom: 20px;
+                        padding-left: 22px;
+                        spacing: 14px;
+                        HorizontalBox {
+                            height: 44px;
+                            spacing: 12px;
+                            Rectangle {
+                                width: 44px; height: 44px;
+                                border-radius: 12px;
+                                background: root.profile-editor-color.transparentize(0.82);
+                                Rectangle {
+                                    x: 17px; y: 7px; width: 10px; height: 30px;
+                                    border-radius: 5px;
+                                    background: root.profile-editor-color;
+                                }
+                            }
+                            VerticalBox {
+                                spacing: 2px;
+                                Text { text: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Edit profile"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; }
+                                Text { text: @tr("A local group for account colors and mail-list identification."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; ghost: true; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-profile-editor(); } }
+                        }
+                        profile-name-field := FormField {
+                            height: 57px;
+                            label: @tr("Profile name");
+                            value: root.profile-editor-name;
+                            placeholder: @tr("Personal or Work");
+                            label-color: root.secondary-text;
+                            edited(value) => { root.profile-editor-name = value; root.profile-editor-error = ""; }
+                        }
+                        Text { height: 18px; text: @tr("Color"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 600; vertical-alignment: center; }
+                        HorizontalBox {
+                            height: 40px;
+                            spacing: profile-panel.width < 400px ? 4px : 8px;
+                            for swatch[index] in root.profile-colors : ProfileColorChoice {
+                                width: profile-panel.width < 400px ? 28px : 34px;
+                                height: self.width;
+                                value: swatch;
+                                selected: !root.profile-editor-custom-color && root.profile-editor-color == swatch;
+                                label: @tr("Profile color {}", index + 1);
+                                chosen => {
+                                    root.profile-editor-color = swatch;
+                                    root.profile-editor-custom-color = false;
+                                }
+                            }
+                        }
+                        Button {
+                            height: 34px;
+                            text: @tr("Custom color…");
+                            selected: root.profile-editor-custom-color;
+                            clicked => { root.profile-editor-custom-color = true; }
+                        }
+                        if root.profile-editor-custom-color : RuntimeColorPicker {
+                            height: 222px;
+                            value: root.profile-editor-color;
+                            edited(value) => { root.profile-editor-color = value; }
+                        }
+                        if root.profile-editor-error != "" : Text { height: 20px; text: root.profile-editor-error; color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap; }
+                        Rectangle { vertical-stretch: 1; }
+                        HorizontalBox {
+                            height: root.compact ? 44px : 34px;
+                            spacing: 8px;
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { height: parent.height; text: @tr("Cancel"); clicked => { root.close-profile-editor(); } }
+                            Button {
+                                height: parent.height;
+                                text: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Save profile");
+                                primary: true;
+                                enabled: root.profile-editor-name != "";
+                                clicked => {
+                                    let saved-id = root.save_mail_profile(root.profile-editor-id, root.profile-editor-name, root.profile-editor-color);
+                                    if saved-id != "" {
+                                        root.close-profile-editor();
+                                    } else {
+                                        root.profile-editor-error = @tr("Could not save this profile. Check the name and try again.");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            visible: root.settings_open && root.account-profile-picker-open;
+            width: parent.width;
+            height: parent.height;
+            background: #00000088;
+            z: 950;
+            accessible-role: groupbox;
+            accessible-label: @tr("Choose a profile for {}", root.account-profile-picker-name);
+
+            TouchArea { clicked => { root.close-account-profile-picker(); } }
+            profile-picker-panel := Rectangle {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: min(460px, parent.width - 24px);
+                height: min(
+                    (root.account-profile-picker-custom-color ? 626px : 390px)
+                        + min(root.mail_profiles.length, 4) * 50px,
+                    parent.height - 24px,
+                );
+                background: root.surface;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: root.border-subtle;
+                drop-shadow-blur: 24px;
+                drop-shadow-offset-y: 8px;
+                drop-shadow-color: #00000055;
+                Text { x: 22px; y: 20px; width: parent.width - 44px; height: 26px; text: @tr("Choose profile"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; }
+                Text { x: 22px; y: 48px; width: parent.width - 44px; height: 22px; text: root.account-profile-picker-name; color: root.secondary-text; font-size: TypeScale.secondary; overflow: elide; }
+                ScrollView {
+                    x: 22px; y: 80px;
+                    width: parent.width - 44px;
+                    height: parent.height - 138px;
+                    mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+                    VerticalBox {
+                        spacing: 8px;
+                        Text { height: 20px; text: @tr("Profiles"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
+                        for profile in root.mail_profiles : Button {
+                            height: 42px;
+                            text: profile.name;
+                            selected: root.account-profile-picker-current-id == profile.id;
+                            clicked => { root.choose-account-profile(profile.id); }
+                        }
+                        Text { height: 20px; text: @tr("No profile · Account color"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
+                        Button {
+                            height: 42px;
+                            text: @tr("Generated color");
+                            selected: root.account-profile-picker-current-id == "" && !root.account-profile-picker-has-custom-color;
+                            clicked => { root.choose-account-color(root.account-profile-picker-color, true); }
+                        }
+                        HorizontalBox {
+                            height: 36px;
+                            spacing: profile-picker-panel.width < 390px ? 4px : 8px;
+                            for swatch[index] in root.profile-colors : ProfileColorChoice {
+                                width: profile-picker-panel.width < 390px ? 24px : 32px;
+                                height: self.width;
+                                value: swatch;
+                                selected: root.account-profile-picker-current-id == ""
+                                    && root.account-profile-picker-has-custom-color
+                                    && !root.account-profile-picker-custom-color
+                                    && root.account-profile-picker-color == swatch;
+                                label: @tr("Account color {}", index + 1);
+                                chosen => { root.choose-account-color(swatch, false); }
+                            }
+                        }
+                        Button {
+                            height: 38px;
+                            text: @tr("Custom color…");
+                            selected: root.account-profile-picker-custom-color
+                                || (root.account-profile-picker-current-id == ""
+                                    && root.account-profile-picker-has-custom-color
+                                    && !root.profile-color-is-preset(root.account-profile-picker-color));
+                            clicked => { root.account-profile-picker-custom-color = true; }
+                        }
+                        if root.account-profile-picker-custom-color : RuntimeColorPicker {
+                            height: 222px;
+                            value: root.account-profile-picker-color;
+                            edited(value) => { root.account-profile-picker-color = value; }
+                        }
+                        if root.account-profile-picker-custom-color : Button {
+                            height: 38px;
+                            text: @tr("Use custom color");
+                            primary: true;
+                            clicked => { root.choose-account-color(root.account-profile-picker-color, false); }
+                        }
+                    }
+                }
+                Button { x: parent.width - self.width - 22px; y: parent.height - 46px; height: 34px; text: @tr("Cancel"); clicked => { root.close-account-profile-picker(); } }
+            }
+        }
+
         ConfirmationDialog {
             width: parent.width;
             height: parent.height;
@@ -1579,7 +2418,7 @@ export component SettingsDialog inherits Rectangle {
             detail: @tr("Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.");
             confirm-label: @tr("Delete everything");
             cancel-label: @tr("Keep my data");
-            icon: @image-url("../icons/phosphor/trash-fill.svg");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
             surface: root.surface;
             dialog-border-color: root.border-subtle;
             title-color: root.title-color;
@@ -1598,12 +2437,31 @@ export component SettingsDialog inherits Rectangle {
             detail: @tr("Messages on the mail server will not be deleted.");
             confirm-label: @tr("Remove account");
             cancel-label: @tr("Keep account");
-            icon: @image-url("../icons/phosphor/trash-fill.svg");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
             surface: root.surface;
             dialog-border-color: root.border-subtle;
             title-color: root.title-color;
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_account(root.delete_account_id); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.delete-profile-confirmation;
+            title: @tr("Delete profile?");
+            subject: root.delete-profile-name;
+            description: @tr("Accounts assigned to this profile will return to their individual or generated account colors.");
+            detail: @tr("Accounts and provider data are not changed.");
+            confirm-label: @tr("Delete profile");
+            cancel-label: @tr("Keep profile");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.delete_mail_profile(root.delete-profile-id); }
         }
 }

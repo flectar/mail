@@ -1,0 +1,218 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { ToolbarIconButton } from "controls.slint";
+
+export struct ActionMenuEntry {
+    id: string,
+    title: string,
+    icon: image,
+    disabled: bool,
+    destructive: bool,
+}
+
+// Application-owned action menu with one interaction and accessibility
+// contract. Slint has no custom menu/menu-item accessibility roles, so
+// the popup is exposed as a labeled list whose entries are buttons.
+export component ActionMenu inherits Rectangle {
+    in property <[ActionMenuEntry]> entries: [];
+    in property <image> icon;
+    in property <color> icon-color: AppTheme.secondary;
+    in property <bool> compact: false;
+    in property <bool> interactive: true;
+    in property <string> tooltip-text;
+    in property <string> trigger-accessible-id: "";
+    in property <length> menu-width: 280px;
+    in property <length> max-menu-height: 560px;
+    in property <bool> align-right: true;
+    callback activated(string);
+
+    private property <length> item-height: root.compact ? LayoutMetrics.touch-target : 36px;
+    private property <int> highlighted-index: -1;
+    private property <length> scroll-y: 0px;
+    private property <length> menu-visible-height: 0px;
+    private property <bool> menu-open: menu-popup.is-open;
+
+    width: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
+    height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
+
+    function move-highlight(direction: int) {
+        if root.entries.length == 0 { root.highlighted-index = -1; return; }
+        root.highlighted-index = direction > 0
+            ? (root.highlighted-index + 1 >= root.entries.length ? 0 : root.highlighted-index + 1)
+            : (root.highlighted-index <= 0 ? root.entries.length - 1 : root.highlighted-index - 1);
+        root.bring-highlight-into-view();
+    }
+
+    function bring-highlight-into-view() {
+        if root.highlighted-index < 0 { return; }
+        let item-y = 4px + root.highlighted-index * root.item-height;
+        if item-y + root.scroll-y < 0px {
+            root.scroll-y = -item-y;
+        } else if item-y + root.item-height + root.scroll-y > root.menu-visible-height {
+            root.scroll-y = root.menu-visible-height - item-y - root.item-height;
+        }
+    }
+
+    function activate-highlighted() {
+        if root.highlighted-index < 0 || root.entries[root.highlighted-index].disabled {
+            return;
+        }
+        let id = root.entries[root.highlighted-index].id;
+        menu-popup.close();
+        trigger.focus();
+        root.activated(id);
+    }
+
+    trigger := ToolbarIconButton {
+        compact: root.compact;
+        width: parent.width;
+        height: parent.height;
+        interactive: root.interactive;
+        icon: root.icon;
+        icon-color: root.icon-color;
+        idle-background: AppTheme.control-bg;
+        hover-background: AppTheme.muted-control-bg;
+        active-background: AppTheme.muted-control-bg;
+        active: root.menu-open;
+        tooltip-text: root.tooltip-text;
+        accessible-id: root.trigger-accessible-id;
+        accessible-expanded: root.menu-open;
+        clicked => {
+            if root.menu-open {
+                menu-popup.close();
+            } else {
+                root.scroll-y = 0px;
+                root.highlighted-index = root.entries.length > 0 ? 0 : -1;
+                menu-popup.show();
+            }
+        }
+    }
+
+    menu-popup := PopupWindow {
+        x: root.align-right ? root.width - self.width : 0px;
+        y: root.height + 4px;
+        width: root.menu-width;
+        height: min(root.max-menu-height, root.entries.length * root.item-height + 8px);
+        close-policy: close-on-click-outside;
+        forward-focus: menu-focus;
+
+        menu-frame := Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: AppTheme.border;
+            background: AppTheme.surface-raised;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: root.tooltip-text;
+
+            menu-focus := FocusScope {
+                capture-key-pressed(event) => {
+                    if event.text == Key.DownArrow {
+                        root.move-highlight(1);
+                        return accept;
+                    }
+                    if event.text == Key.UpArrow {
+                        root.move-highlight(-1);
+                        return accept;
+                    }
+                    if event.text == Key.Home {
+                        root.highlighted-index = root.entries.length > 0 ? 0 : -1;
+                        root.bring-highlight-into-view();
+                        return accept;
+                    }
+                    if event.text == Key.End {
+                        root.highlighted-index = root.entries.length - 1;
+                        root.bring-highlight-into-view();
+                        return accept;
+                    }
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.activate-highlighted();
+                        return accept;
+                    }
+                    if event.text == Key.Escape || event.text == Key.LeftArrow {
+                        menu-popup.close();
+                        trigger.focus();
+                        return accept;
+                    }
+                    if event.text == Key.Tab {
+                        menu-popup.close();
+                        trigger.focus();
+                        return reject;
+                    }
+                    reject
+                }
+
+                menu-scroll := ScrollView {
+                    accessible-role: list;
+                    accessible-label: root.tooltip-text;
+                    accessible-item-count: root.entries.length;
+                    content-y <=> root.scroll-y;
+                    content-height: max(self.visible-height, root.entries.length * root.item-height + 8px);
+                    horizontal-scrollbar-policy: as-needed;
+                    changed visible-height => { root.menu-visible-height = self.visible-height; }
+
+                    VerticalLayout {
+                        padding: 4px;
+                        spacing: 0px;
+
+                        for entry[index] in root.entries : menu-row := Rectangle {
+                            height: root.item-height;
+                            border-radius: 5px;
+                            background: index == root.highlighted-index || menu-hit.has-hover
+                                ? AppTheme.control-bg : transparent;
+                            opacity: entry.disabled ? 0.45 : 1;
+
+                            Image {
+                                x: 18px - self.width / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: LayoutMetrics.icon-size;
+                                height: LayoutMetrics.icon-size;
+                                source: entry.icon;
+                                colorize: entry.destructive ? AppTheme.destructive : AppTheme.secondary;
+                                image-fit: contain;
+                                accessible-role: none;
+                            }
+
+                            Text {
+                                x: 36px;
+                                width: parent.width - 48px;
+                                height: parent.height;
+                                text: entry.title;
+                                color: entry.destructive ? AppTheme.destructive : AppTheme.heading;
+                                font-size: TypeScale.body;
+                                font-weight: 500;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+
+                            menu-hit := TouchArea {
+                                enabled: !entry.disabled;
+                                accessible-role: button;
+                                accessible-label: entry.title;
+                                accessible-item-index: index;
+                                accessible-action-default => {
+                                    root.highlighted-index = index;
+                                    root.activate-highlighted();
+                                }
+                                changed has-hover => {
+                                    if self.has-hover && !entry.disabled {
+                                        root.highlighted-index = index;
+                                    }
+                                }
+                                clicked => {
+                                    root.highlighted-index = index;
+                                    root.activate-highlighted();
+                                }
+                                mouse-cursor: entry.disabled ? default : pointer;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

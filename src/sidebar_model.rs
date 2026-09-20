@@ -9,7 +9,7 @@ impl SidebarModel {
     }
 }
 
-// Slint 1.17.1 considers Image::default() unequal even to itself. Compare
+// Slint image handles can compare unequal even when both are empty. Compare
 // absent avatars semantically, otherwise every ordinary folder emits a change.
 fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
     let MailboxRow {
@@ -74,8 +74,27 @@ pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
             &state.collapsed_folder_ids
         },
     );
+    let account_names = mailboxes
+        .iter()
+        .filter(|mailbox| mailbox.is_account)
+        .map(|mailbox| (mailbox.account_id, mailbox.label.clone()))
+        .collect::<HashMap<_, _>>();
+    let mut labels = make_label_rows(&state.labels, None, "");
+    for label in &mut labels {
+        if let Some(name) = account_names.get(&label.account_id) {
+            label.account_name = name.clone();
+        } else if label.is_global {
+            label.account_name = "All accounts".into();
+        }
+    }
+    let gmail_account_ids = state
+        .connected_accounts
+        .iter()
+        .filter(|account| account.provider == Provider::Gmail)
+        .filter_map(|account| i32::try_from(account.id).ok())
+        .collect::<HashSet<_>>();
     let rows = if filtering {
-        make_filtered_sidebar_rows(mailboxes, query)
+        make_filtered_sidebar_rows(mailboxes, labels, query)
     } else {
         make_sidebar_rows(
             mailboxes,
@@ -85,7 +104,8 @@ pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
                 &state.labels,
                 &no_collapsed_folders,
             ),
-            make_label_rows(&state.labels, None, ""),
+            labels,
+            &gmail_account_ids,
             &state.collapsed_sidebar_sections,
         )
     };
@@ -95,7 +115,11 @@ pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
     model.reconcile(rows);
 }
 
-fn make_filtered_sidebar_rows(mailboxes: Vec<MailboxRow>, query: &str) -> Vec<SidebarRow> {
+fn make_filtered_sidebar_rows(
+    mailboxes: Vec<MailboxRow>,
+    labels: Vec<MailLabelRow>,
+    query: &str,
+) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
 
     let query = query.to_lowercase();
@@ -109,12 +133,50 @@ fn make_filtered_sidebar_rows(mailboxes: Vec<MailboxRow>, query: &str) -> Vec<Si
         }
     }
 
+    let mut account_labels: HashMap<i32, Vec<MailLabelRow>> = HashMap::new();
+    let mut global_labels = Vec::new();
+    let mut categories = Vec::new();
+    for label in labels
+        .into_iter()
+        .filter(|label| label.name.to_lowercase().contains(&query))
+    {
+        if label.is_auto {
+            categories.push(label);
+        } else if label.is_global {
+            global_labels.push(label);
+        } else {
+            account_labels.entry(label.account_id).or_default().push(label);
+        }
+    }
+
     let mut rows = Vec::new();
+    if !categories.is_empty() {
+        rows.push(section(Kind::CategoriesSection, "categories", &HashSet::new()));
+        rows.extend(categories.into_iter().map(|label| SidebarRow {
+            key: format!("category:{}", label.id).into(),
+            label,
+            ..row(Kind::Category, "")
+        }));
+    }
+    if !global_labels.is_empty() {
+        rows.push(section(
+            Kind::GlobalLabelsSection,
+            "global-labels",
+            &HashSet::new(),
+        ));
+        rows.extend(global_labels.into_iter().map(|label| SidebarRow {
+            key: format!("global-label:{}", label.id).into(),
+            label,
+            ..row(Kind::GlobalLabel, "")
+        }));
+    }
     for account in accounts {
         let account_id = account.account_id;
-        let Some(matches) = folders.remove(&account_id) else {
+        let matches = folders.remove(&account_id).unwrap_or_default();
+        let label_matches = account_labels.remove(&account_id).unwrap_or_default();
+        if matches.is_empty() && label_matches.is_empty() {
             continue;
-        };
+        }
         rows.push(SidebarRow {
             open: true,
             mailbox: account,
@@ -131,6 +193,24 @@ fn make_filtered_sidebar_rows(mailboxes: Vec<MailboxRow>, query: &str) -> Vec<Si
                 ..row(Kind::Folder, key)
             }
         }));
+        if !label_matches.is_empty() {
+            rows.push(SidebarRow {
+                mailbox: MailboxRow {
+                    account_id,
+                    ..Default::default()
+                },
+                open: true,
+                ..row(
+                    Kind::AccountLabelsSection,
+                    format!("account-labels:{account_id}"),
+                )
+            });
+            rows.extend(label_matches.into_iter().map(|label| SidebarRow {
+                key: format!("account-label:{account_id}:{}", label.id).into(),
+                label,
+                ..row(Kind::AccountLabel, "")
+            }));
+        }
     }
     rows
 }
@@ -154,48 +234,48 @@ fn make_sidebar_rows(
     mailboxes: Vec<MailboxRow>,
     unified: Vec<MailboxRow>,
     labels: Vec<MailLabelRow>,
+    gmail_account_ids: &HashSet<i32>,
     collapsed: &HashSet<String>,
 ) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
-    let mut rows = vec![
-        row(Kind::UnifiedHeading, "unified-heading"),
-        section(Kind::UnifiedSection, "unified", collapsed),
-    ];
-    if !collapsed.contains("unified") {
-        rows.push(row(Kind::UnifiedInbox, "unified-inbox"));
-        rows.extend(unified.into_iter().map(|mailbox| SidebarRow {
-            key: format!("unified:{}", mailbox.scope).into(),
-            mailbox,
-            ..row(Kind::UnifiedMailbox, "")
-        }));
-        rows.push(section(Kind::CategoriesSection, "categories", collapsed));
-        if !collapsed.contains("categories") {
-            rows.push(row(Kind::Important, "important"));
-            rows.push(row(Kind::Other, "other"));
+    let mut rows = vec![row(Kind::UnifiedHeading, "unified-heading")];
+    rows.push(row(Kind::UnifiedInbox, "unified-inbox"));
+    rows.extend(unified.into_iter().map(|mailbox| SidebarRow {
+        key: format!("unified:{}", mailbox.scope).into(),
+        mailbox,
+        ..row(Kind::UnifiedMailbox, "")
+    }));
+    rows.push(section(Kind::CategoriesSection, "categories", collapsed));
+    if !collapsed.contains("categories") {
+        rows.push(row(Kind::Important, "important"));
+        rows.push(row(Kind::Other, "other"));
+        rows.extend(
+            labels
+                .iter()
+                .filter(|label| label.is_auto)
+                .map(|label| SidebarRow {
+                    label: label.clone(),
+                    ..row(Kind::Category, format!("category:{}", label.id))
+                }),
+        );
+    }
+    if labels.iter().any(|label| label.is_global) {
+        rows.push(section(
+            Kind::GlobalLabelsSection,
+            "global-labels",
+            collapsed,
+        ));
+        if !collapsed.contains("global-labels") {
             rows.extend(
                 labels
                     .iter()
-                    .filter(|label| label.is_auto)
+                    .filter(|label| label.is_global)
                     .map(|label| SidebarRow {
+                        key: format!("global-label:{}", label.id).into(),
                         label: label.clone(),
-                        ..row(Kind::Category, format!("category:{}", label.id))
+                        ..row(Kind::GlobalLabel, "")
                     }),
             );
-        }
-        if labels.iter().any(|label| !label.is_auto) {
-            rows.push(section(Kind::LabelsSection, "labels", collapsed));
-            if !collapsed.contains("labels") {
-                rows.extend(
-                    labels
-                        .into_iter()
-                        .filter(|label| !label.is_auto)
-                        .map(|label| SidebarRow {
-                            key: format!("label:{}", label.id).into(),
-                            label,
-                            ..row(Kind::Label, "")
-                        }),
-                );
-            }
         }
     }
     rows.push(row(Kind::AccountsHeading, "accounts-heading"));
@@ -212,6 +292,7 @@ fn make_sidebar_rows(
     }
     for account in accounts {
         let account_id = account.account_id;
+        let account_name = account.label.clone();
         let key = format!("account:{account_id}");
         let open = !collapsed.contains(&key);
         rows.push(SidebarRow {
@@ -230,14 +311,50 @@ fn make_sidebar_rows(
                         ..row(Kind::Folder, "")
                     }),
             );
-            rows.push(SidebarRow {
-                mailbox: MailboxRow {
-                    account_id,
-                    folder_id: -1,
-                    ..Default::default()
-                },
-                ..row(Kind::NewFolder, format!("new-folder:{account_id}"))
-            });
+            if !gmail_account_ids.contains(&account_id) {
+                rows.push(SidebarRow {
+                    mailbox: MailboxRow {
+                        account_id,
+                        folder_id: -1,
+                        ..Default::default()
+                    },
+                    ..row(Kind::NewFolder, format!("new-folder:{account_id}"))
+                });
+            }
+            let label_key = format!("account-labels:{account_id}");
+            if gmail_account_ids.contains(&account_id)
+                || labels.iter().any(|label| label.account_id == account_id)
+            {
+                rows.push(SidebarRow {
+                    mailbox: MailboxRow {
+                        account_id,
+                        ..Default::default()
+                    },
+                    ..section(Kind::AccountLabelsSection, &label_key, collapsed)
+                });
+                if !collapsed.contains(&label_key) {
+                    rows.extend(
+                        labels
+                            .iter()
+                            .filter(|label| label.account_id == account_id)
+                            .map(|label| SidebarRow {
+                                key: format!("account-label:{account_id}:{}", label.id).into(),
+                                label: label.clone(),
+                                ..row(Kind::AccountLabel, "")
+                            }),
+                    );
+                    if gmail_account_ids.contains(&account_id) {
+                        rows.push(SidebarRow {
+                            mailbox: MailboxRow {
+                                account_id,
+                                context: account_name.clone(),
+                                ..Default::default()
+                            },
+                            ..row(Kind::NewLabel, format!("new-label:{account_id}"))
+                        });
+                    }
+                }
+            }
         }
     }
     rows.push(row(Kind::AddAccount, "add-account"));
@@ -286,7 +403,7 @@ mod tests {
     }
 
     fn defaults() -> HashSet<String> {
-        HashSet::from(["categories".into(), "labels".into()])
+        HashSet::from(["categories".into(), "global-labels".into()])
     }
 
     #[test]
@@ -296,6 +413,7 @@ mod tests {
                 accounts(account_count, folder_count),
                 vec![],
                 vec![],
+                &HashSet::new(),
                 &defaults(),
             );
             assert_eq!(
@@ -324,7 +442,7 @@ mod tests {
     fn account_order_and_interleaved_folders_use_ids_not_display_names() {
         let data = accounts(2, 2);
         let interleaved = [3, 1, 4, 0, 5, 2].map(|i| data[i].clone()).to_vec();
-        let rows = make_sidebar_rows(interleaved, vec![], vec![], &defaults());
+        let rows = make_sidebar_rows(interleaved, vec![], vec![], &HashSet::new(), &defaults());
         let ids: Vec<_> = rows
             .iter()
             .filter(|row| row.kind == Kind::Account || row.kind == Kind::Folder)
@@ -344,6 +462,88 @@ mod tests {
     }
 
     #[test]
+    fn same_named_labels_remain_distinct_under_their_accounts() {
+        let labels = vec![
+            MailLabelRow {
+                id: 11,
+                account_id: 1,
+                name: "Travel".into(),
+                ..Default::default()
+            },
+            MailLabelRow {
+                id: 22,
+                account_id: 2,
+                name: "Travel".into(),
+                ..Default::default()
+            },
+        ];
+        let rows = make_sidebar_rows(
+            accounts(2, 1),
+            vec![],
+            labels,
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        let account_labels = rows
+            .iter()
+            .filter(|row| row.kind == Kind::AccountLabel)
+            .map(|row| (row.label.account_id, row.label.id, row.label.name.clone()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(account_labels.len(), 2);
+        assert_eq!(account_labels[0].0, 1);
+        assert_eq!(account_labels[0].1, 11);
+        assert_eq!(account_labels[0].2, "Travel");
+        assert_eq!(account_labels[1].0, 2);
+        assert_eq!(account_labels[1].1, 22);
+        assert_eq!(account_labels[1].2, "Travel");
+    }
+
+    #[test]
+    fn gmail_creates_labels_while_other_accounts_create_folders() {
+        let rows = make_sidebar_rows(
+            accounts(2, 0),
+            vec![],
+            vec![],
+            &HashSet::from([1]),
+            &HashSet::new(),
+        );
+        assert!(rows.iter().any(|row| {
+            row.kind == Kind::NewLabel && row.mailbox.account_id == 1
+        }));
+        assert!(!rows.iter().any(|row| {
+            row.kind == Kind::NewFolder && row.mailbox.account_id == 1
+        }));
+        assert!(rows.iter().any(|row| {
+            row.kind == Kind::NewFolder && row.mailbox.account_id == 2
+        }));
+        assert!(!rows.iter().any(|row| {
+            row.kind == Kind::NewLabel && row.mailbox.account_id == 2
+        }));
+    }
+
+    #[test]
+    fn sidebar_filter_finds_account_and_global_labels() {
+        let labels = vec![
+            MailLabelRow {
+                id: 11,
+                account_id: 1,
+                name: "Travel".into(),
+                ..Default::default()
+            },
+            MailLabelRow {
+                id: 22,
+                name: "Travel plans".into(),
+                is_global: true,
+                ..Default::default()
+            },
+        ];
+        let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel");
+        assert!(rows.iter().any(|row| row.kind == Kind::AccountLabel && row.label.id == 11));
+        assert!(rows.iter().any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22));
+    }
+
+    #[test]
     fn section_state_survives_parent_collapse_refresh_and_reorder() {
         let labels = vec![
             MailLabelRow {
@@ -353,31 +553,52 @@ mod tests {
             },
             MailLabelRow {
                 id: 2,
+                is_global: true,
                 ..Default::default()
             },
         ];
         let mut collapsed = HashSet::from(["account:1".into()]);
-        let open = make_sidebar_rows(accounts(2, 3), vec![], labels.clone(), &collapsed);
+        let open = make_sidebar_rows(
+            accounts(2, 3),
+            vec![],
+            labels.clone(),
+            &HashSet::new(),
+            &collapsed,
+        );
         assert!(open.iter().any(|row| row.kind == Kind::Category));
-        assert!(open.iter().any(|row| row.kind == Kind::Label));
+        assert!(open.iter().any(|row| row.kind == Kind::GlobalLabel));
         assert!(
             !open.iter().any(|row| row.mailbox.account_id == 1
                 && matches!(row.kind, Kind::Folder | Kind::NewFolder))
         );
-        collapsed.insert("unified".into());
-        let closed = make_sidebar_rows(accounts(2, 3), vec![], labels.clone(), &collapsed);
+        collapsed.insert("categories".into());
+        collapsed.insert("global-labels".into());
+        let closed = make_sidebar_rows(
+            accounts(2, 3),
+            vec![],
+            labels.clone(),
+            &HashSet::new(),
+            &collapsed,
+        );
         assert!(!closed.iter().any(|row| matches!(
             row.kind,
-            Kind::Category | Kind::Label | Kind::CategoriesSection | Kind::LabelsSection
+            Kind::Category | Kind::GlobalLabel
         )));
-        collapsed.remove("unified");
+        collapsed.remove("categories");
+        collapsed.remove("global-labels");
         assert_rows_equal(
             &open,
-            &make_sidebar_rows(accounts(2, 3), vec![], labels, &collapsed),
+            &make_sidebar_rows(
+                accounts(2, 3),
+                vec![],
+                labels,
+                &HashSet::new(),
+                &collapsed,
+            ),
         );
         let mut reordered = accounts(2, 3);
         reordered.rotate_left(4);
-        let rows = make_sidebar_rows(reordered, vec![], vec![], &collapsed);
+        let rows = make_sidebar_rows(reordered, vec![], vec![], &HashSet::new(), &collapsed);
         assert!(!rows.iter().find(|row| row.key == "account:1").unwrap().open);
         assert!(rows.iter().find(|row| row.key == "account:2").unwrap().open);
     }
@@ -388,7 +609,7 @@ mod tests {
         data[2].label = "Receipts".into();
         data[5].label = "RECEIPTS 2025".into();
 
-        let rows = make_filtered_sidebar_rows(data, "receipts");
+        let rows = make_filtered_sidebar_rows(data, vec![], "receipts");
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
             vec![Kind::Account, Kind::Folder, Kind::Account, Kind::Folder]
@@ -546,13 +767,14 @@ mod interaction_tests {
         }));
         let collapsed = Rc::new(RefCell::new(HashSet::from([
             "categories".into(),
-            "labels".into(),
+            "global-labels".into(),
         ])));
         let model = Rc::new(SidebarModel::default());
         model.reconcile(make_sidebar_rows(
             mailboxes.clone(),
             vec![],
             vec![],
+            &HashSet::new(),
             &collapsed.borrow(),
         ));
         app.set_sidebar_rows(model.clone().into());
@@ -568,6 +790,7 @@ mod interaction_tests {
                 mailboxes.clone(),
                 vec![],
                 vec![],
+                &HashSet::new(),
                 &collapsed_for_click.borrow(),
             ));
         });
@@ -611,8 +834,8 @@ mod interaction_tests {
         };
         draw();
         assert!(model.row_count() > 1_000);
-        const UNIFIED_SECTION_CENTER_Y: f32 = 135.;
-        const ACCOUNT_HEADER_CENTER_Y: f32 = 265.;
+        const CATEGORY_HEADER_CENTER_Y: f32 = 169.;
+        const ACCOUNT_HEADER_CENTER_Y: f32 = 232.;
         click(140., ACCOUNT_HEADER_CENTER_Y);
         assert!(collapsed.borrow().contains("account:1"));
         assert!(model.row_count() < 10);
@@ -640,13 +863,13 @@ mod interaction_tests {
             });
             draw();
         }
-        click(140., UNIFIED_SECTION_CENTER_Y);
-        assert!(collapsed.borrow().contains("unified"));
+        click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(!collapsed.borrow().contains("categories"));
         app.window().set_size(slint::PhysicalSize::new(390, 844));
         draw();
         click(31., 29.); // Open the compact folder drawer.
-        click(140., UNIFIED_SECTION_CENTER_Y);
-        assert!(!collapsed.borrow().contains("unified"));
+        click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(collapsed.borrow().contains("categories"));
         click(340., 200.); // Close the drawer through its backdrop.
         click(31., 29.);
         click(140., ACCOUNT_HEADER_CENTER_Y);

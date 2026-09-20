@@ -1,0 +1,7 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <g>
+    <path d="M6 4v6a6 6 0 0 0 12 0V4" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <line x1="4" x2="20" y1="20" y2="20" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

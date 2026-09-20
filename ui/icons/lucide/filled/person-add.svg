@@ -1,0 +1,26 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <mask id="cut-1" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <g>
+          <line x1="19" x2="19" y1="8" y2="14" fill="none" stroke="black" stroke-width="5.7" stroke-linecap="round" stroke-linejoin="round" />
+          <line x1="22" x2="16" y1="11" y2="11" fill="none" stroke="black" stroke-width="5.7" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <g>
+    <g mask="url(#cut-1)">
+      <g>
+        <circle cx="9" cy="7" r="4" fill="#000" stroke="none" />
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 Z" fill="#000" stroke="none" />
+      </g>
+    </g>
+    <g>
+      <line x1="19" x2="19" y1="8" y2="14" fill="none" stroke="#000" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" />
+      <line x1="22" x2="16" y1="11" y2="11" fill="none" stroke="#000" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+  </g>
+</svg>

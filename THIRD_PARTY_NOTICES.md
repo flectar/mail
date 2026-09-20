@@ -6,7 +6,7 @@ authors.
 
 ## Slint
 
-Slint 1.17 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
+Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
 the upstream source is <https://github.com/slint-ui/slint>.
@@ -20,6 +20,17 @@ upstream source is <https://github.com/DioxusLabs/blitz>. The pinned release,
 checksums, and patch order are recorded in
 [`upstream.toml`](patches/blitz/upstream.toml) and
 [`series`](patches/blitz/series).
+
+## Parley emoji presentation
+
+The locally patched Parley 0.11.1 text layout crate is used under its
+Apache-2.0 option. The emoji sequence detector is copied from
+[Parley PR #811](https://github.com/linebender/parley/pull/811), based on
+[Christian Hansen's c-emoji](https://github.com/chansen/c-emoji), and is
+licensed under MIT. Its copyright and license are included in
+[`LICENSES/Parley-Emoji-MIT.txt`](LICENSES/Parley-Emoji-MIT.txt).
+Pinned sources and backport details are recorded in
+[`patches/parley/README.md`](patches/parley/README.md).
 
 ## Reader integration dependencies
 
@@ -54,12 +65,16 @@ The Rust interface is [pdfium-render](https://github.com/ajrcarey/pdfium-render)
 [seccompiler](https://github.com/rust-vmm/seccompiler), under their Apache-2.0
 options. Rust package versions and source checksums are recorded in `Cargo.lock`.
 
-## Phosphor Icons
+## Lucide Icons
 
-The bundled SVG icons in `ui/icons/phosphor` are sourced from
-[Phosphor Icons](https://github.com/phosphor-icons/core) at revision
-`2b75f3ad12b420c9504ef05df8d2564a28f8500e` and are licensed under the MIT
-License. Copyright © 2023 Phosphor Icons.
+The original SVG inputs in `ui/icons/lucide/sources` are sourced from
+[Lucide](https://lucide.dev) Static 1.46.0. The displayed outlines in
+`ui/icons/lucide/outline` preserve that geometry with an adjusted stroke weight.
+The active and sidebar variants in `ui/icons/lucide/filled` are modifications
+created for Flectar Mail from the same 24px Lucide geometry. Lucide is licensed
+under the ISC License, with Feather-derived icons covered by the MIT License.
+Both notices are retained in `ui/icons/lucide/LICENSE`. Source mappings are
+recorded in `ui/icons/lucide/sources.json` and `ui/icons/lucide/solid_recipes.py`.
 
 ## Google Sans Flex
 
@@ -72,6 +87,10 @@ License 1.1. Its license, provenance, and checksum are retained in
 The bundled Noto Emoji font is distributed under the SIL Open Font License
 1.1. Its license, provenance, and checksum are retained in
 [`resources/fonts/noto-emoji`](resources/fonts/noto-emoji).
+
+Renderer regression tests also use a subset of Noto Color Emoji under SIL OFL
+1.1. Its license and reproduction instructions are retained in
+[`resources/test-fonts`](resources/test-fonts).
 
 ## Screenshot examples
 

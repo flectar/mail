@@ -1,4 +1,4 @@
-import { SidebarRowSurface } from "sidebar-row.slint";
+import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
 import { MailDragApi } from "../models.slint";
 import { Avatar } from "avatar.slint";
 import { TypeScale } from "../typography.slint";
@@ -6,9 +6,9 @@ import { TypeScale } from "../typography.slint";
 component SidebarIcon {
     in property <image> icon;
     in property <color> color;
-    in property <length> icon-size: 16px;
+    in property <length> icon-size: SidebarStyle.icon-size;
 
-    width: 18px;
+    width: SidebarStyle.icon-size;
     height: 28px;
 
     Image {
@@ -54,14 +54,14 @@ component SidebarCountBadge inherits Rectangle {
 // selection, hover, and counts remain consistent throughout the tree.
 export component SidebarItem inherits SidebarRowSurface {
     in property <string> label;
+    in property <string> accessible-name: root.label;
     in property <string> count;
     in property <string> scope;
     in property <image> icon;
     in property <bool> selected: false;
-    in property <bool> prominent: false;
     in property <bool> label-has-emoji: false;
     in property <length> row-height: 28px;
-    in property <length> left-padding: 26px;
+    in property <length> left-padding: SidebarStyle.icon-left;
     in property <int> account-id: -1;
     in property <int> folder-id: -1;
     in property <int> label-id: -1;
@@ -69,6 +69,8 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> expanded: true;
     in property <bool> manageable: false;
     in property <bool> label-manageable: false;
+    in property <bool> label-is-global: false;
+    in property <string> label-account-name: "";
     in property <bool> mail-drop-enabled: false;
     in property <bool> mail-drop-copies: false;
     in property <color> sidebar-background;
@@ -83,8 +85,8 @@ export component SidebarItem inherits SidebarRowSurface {
     callback new-subfolder(int, int, string);
     callback rename-folder(int, string);
     callback delete-folder(int, string);
-    callback rename-label(int, string, color);
-    callback delete-label(int, string);
+    callback rename-label(int, string, color, string, bool);
+    callback delete-label(int, string, string, bool);
 
     height: root.visible ? root.row-height : 0px;
     idle-background: root.sidebar-background;
@@ -103,27 +105,27 @@ export component SidebarItem inherits SidebarRowSurface {
     }
 
     if root.has-children: Image {
-        x: root.left-padding - 17px;
-        y: (root.row-height - 11px) / 2;
-        width: 11px;
-        height: 11px;
+        x: root.left-padding - 18px;
+        y: (root.row-height - self.height) / 2;
+        width: 12px;
+        height: 12px;
         source: root.expanded
-            ? @image-url("../icons/phosphor/caret-down.svg")
-            : @image-url("../icons/phosphor/caret-right.svg");
+            ? @image-url("../icons/lucide/outline/chevron-down.svg")
+            : @image-url("../icons/lucide/outline/chevron-right.svg");
         colorize: root.muted-color;
         image-fit: contain;
         accessible-role: none;
     }
 
     Text {
-        x: root.left-padding + 26px;
+        x: root.left-padding + SidebarStyle.label-offset;
         y: 0px;
         width: max(0px, parent.width - self.x - (root.count == "" ? 6px : count-badge.width + 12px));
         height: root.row-height;
         text: root.label;
-        color: root.selected ? root.accent-color : root.body-color;
-        font-size: root.prominent ? TypeScale.body : TypeScale.secondary;
-        font-weight: root.selected ? 700 : 500;
+        color: root.body-color;
+        font-size: SidebarStyle.label-size;
+        font-weight: root.selected ? SidebarStyle.selected-weight : SidebarStyle.normal-weight;
         font-family: root.label-has-emoji ? "Noto Emoji" : "";
         vertical-alignment: center;
         overflow: elide;
@@ -140,7 +142,7 @@ export component SidebarItem inherits SidebarRowSurface {
 
     row-hit := TouchArea {
         accessible-role: button;
-        accessible-label: root.label;
+        accessible-label: root.accessible-name;
         accessible-checked: root.selected;
         accessible-action-default => { root.clicked(root.scope); }
         clicked => { root.clicked(root.scope); }
@@ -190,13 +192,13 @@ export component SidebarItem inherits SidebarRowSurface {
         height: parent.height;
         Menu {
             MenuItem {
-                title: @tr("Rename label");
-                activated => { root.rename-label(root.label-id, root.label, root.editable-color); }
+                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
+                activated => { root.rename-label(root.label-id, root.label, root.editable-color, root.label-account-name, root.label-is-global); }
             }
 
             MenuItem {
-                title: @tr("Delete label");
-                activated => { root.delete-label(root.label-id, root.label); }
+                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
+                activated => { root.delete-label(root.label-id, root.label, root.label-account-name, root.label-is-global); }
             }
         }
     }
@@ -214,14 +216,6 @@ export component SidebarItem inherits SidebarRowSurface {
             ) ? (root.mail-drop-copies ? DragAction.copy : DragAction.move) : DragAction.none
         }
         dropped(event) => {
-            if !MailDragApi.can-drop-on-mailbox(
-                event.data,
-                root.scope,
-                root.account-id,
-                root.folder-id,
-            ) {
-                return DragAction.none;
-            }
             if MailDragApi.drop-on-mailbox(
                 event.data,
                 root.scope,
@@ -249,9 +243,13 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     in property <color> body-color;
     in property <color> muted-color;
     in property <color> icon-color;
-    in property <int> label-font-weight: 600;
+    in property <int> label-font-weight: SidebarStyle.selected-weight;
     in property <length> left-padding: 4px;
     in property <bool> folder-row-style: false;
+    // Headers and children share the same icon and text columns. The leading
+    // gutter belongs to disclosure controls, not to an extra icon indent.
+    private property <length> icon-left: root.left-padding + SidebarStyle.icon-left - 4px;
+    private property <length> label-left: root.icon-left + SidebarStyle.label-offset;
     callback toggled(bool);
 
     height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 42px;
@@ -259,20 +257,20 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     hovered: header-hit.has-hover;
 
     Image {
-        x: root.folder-row-style ? 9px : root.left-padding;
+        x: root.left-padding;
         y: (parent.height - self.height) / 2;
         width: 12px;
         height: 12px;
         source: root.open
-            ? @image-url("../icons/phosphor/caret-down.svg")
-            : @image-url("../icons/phosphor/caret-right.svg");
+            ? @image-url("../icons/lucide/outline/chevron-down.svg")
+            : @image-url("../icons/lucide/outline/chevron-right.svg");
         colorize: root.muted-color;
         image-fit: contain;
         accessible-role: none;
     }
 
     if root.has-avatar: Avatar {
-        x: root.folder-row-style ? 26px : root.left-padding + 18px;
+        x: root.icon-left + (SidebarStyle.icon-size - self.width) / 2;
         y: (parent.height - self.height) / 2;
         size: 22px;
         source: root.avatar-image;
@@ -283,7 +281,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     }
 
     if !root.has-avatar: SidebarIcon {
-        x: root.folder-row-style ? 26px : root.left-padding + 18px;
+        x: root.icon-left;
         y: (parent.height - self.height) / 2;
         height: 22px;
         icon: root.icon;
@@ -291,20 +289,20 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     }
 
     Text {
-        x: root.folder-row-style ? 52px : root.left-padding + 48px;
+        x: root.label-left;
         y: root.detail == "" ? 0px : 4px;
         width: parent.width - self.x - 8px;
         height: root.detail == "" ? parent.height : 20px;
         text: root.label;
         color: root.body-color;
-        font-size: TypeScale.secondary;
+        font-size: SidebarStyle.label-size;
         font-weight: root.label-font-weight;
         vertical-alignment: center;
         overflow: elide;
     }
 
     if root.detail != "": Text {
-        x: 52px;
+        x: root.label-left;
         y: 22px;
         width: parent.width - self.x - 8px;
         height: 15px;

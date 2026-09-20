@@ -52,6 +52,9 @@ UI changes must be rendered and inspected in light and dark themes. Responsive
 changes must also be checked at the documented phone and tablet preview sizes.
 Use fictional data in screenshots.
 
+Icon sources, generation and sizing are documented in
+[Lucide icons](ui/icons/lucide/README.md).
+
 ## Licensing of accepted contributions
 
 Accepted contributions are published as part of Flectar Mail under

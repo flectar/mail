@@ -58,7 +58,7 @@ export component CollapsibleWorkspaceSidebar inherits WorkspaceSidebarSurface {
     width: root.animated-width;
     clip: true;
 
-    animate animated-width { duration: 160ms; easing: ease-in-out; }
+    animate animated-width { duration: 220ms; easing: spring(0); }
 }
 
 // Section labels use one compact typographic treatment across mail folders,
@@ -184,7 +184,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 text: root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
-                leading-icon: @image-url("../icons/phosphor/magnifying-glass.svg");
+                leading-icon: @image-url("../icons/lucide/outline/search.svg");
                 leading-icon-color: AppTheme.secondary;
                 trailing-content-width: LayoutMetrics.control-height;
                 edited(value) => { root.edited(value); }
@@ -197,7 +197,9 @@ export component WorkspaceSearchToolbar inherits Rectangle {
                 height: LayoutMetrics.control-height;
 
                 ToolbarIconButton {
-                    icon: @image-url("../icons/phosphor/funnel.svg");
+                    icon: root.filter-active
+                        ? @image-url("../icons/lucide/outline/list-filter-plus.svg")
+                        : @image-url("../icons/lucide/outline/list-filter.svg");
                     icon-color: root.filter-active ? AppTheme.accent : AppTheme.secondary;
                     hover-background: AppTheme.muted-control-bg;
                     active: root.filter-active;
@@ -220,7 +222,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
 
         ToolbarIconButton {
             interactive: root.refresh-enabled;
-            icon: @image-url("../icons/phosphor/arrow-clockwise.svg");
+            icon: @image-url("../icons/lucide/outline/sync.svg");
             icon-color: AppTheme.secondary;
             hover-background: AppTheme.muted-control-bg;
             tooltip-text: root.refresh-tooltip;

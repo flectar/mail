@@ -1,0 +1,14 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <g>
+    <path d="M10 5H3" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M12 19H3" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M14 3v4" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M16 17v4" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M21 12h-9" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M21 19h-5" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M21 5h-7" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M8 10v4" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <path d="M8 12H3" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

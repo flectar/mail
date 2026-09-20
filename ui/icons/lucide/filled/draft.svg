@@ -1,0 +1,25 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <mask id="cut-1" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z" fill="black" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+    </mask>
+    <mask id="cut-2" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <path d="M14 2v5a1 1 0 0 0 1 1h5" fill="none" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+    </mask>
+  </defs>
+  <g>
+    <g mask="url(#cut-1)">
+      <g mask="url(#cut-2)">
+        <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" fill="#000" stroke="none" />
+      </g>
+    </g>
+    <path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z" fill="#000" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

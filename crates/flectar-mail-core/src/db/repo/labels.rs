@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{CoreError, Result};
 use crate::models::Label;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
@@ -16,6 +16,7 @@ fn from_row(row: &Row) -> rusqlite::Result<Label> {
         color: row.get("color")?,
         keyword: row.get("keyword")?,
         position: row.get("position")?,
+        owner_account_id: row.get("owner_account_id")?,
         is_auto: row.get::<_, i64>("is_auto")? != 0,
     })
 }
@@ -42,8 +43,10 @@ pub fn keyword_for(name: &str) -> String {
 
 pub fn list(conn: &Connection) -> Result<Vec<Label>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, is_auto
-         FROM labels ORDER BY position, name",
+        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
+         FROM labels
+         ORDER BY CASE scope WHEN 'automatic' THEN 0 WHEN 'global' THEN 1 ELSE 2 END,
+                  owner_account_id, position, name",
     )?;
     let rows = stmt
         .query_map([], from_row)?
@@ -53,7 +56,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Label>> {
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Label>> {
     let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, is_auto
+        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
          FROM labels WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![id], from_row).optional()?)
@@ -65,7 +68,42 @@ pub fn save(
     name: &str,
     color: &str,
     position: i64,
+    owner_account_id: Option<i64>,
 ) -> Result<Label> {
+    let owner_account_id = match id {
+        Some(id) => {
+            get(conn, id)?
+                .ok_or_else(|| CoreError::NotFound(format!("label {id}")))?
+                .owner_account_id
+        }
+        None => owner_account_id,
+    };
+    let duplicate: bool = match owner_account_id {
+        Some(account_id) => conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM labels
+                WHERE name = ?1 COLLATE NOCASE
+                  AND scope = 'account' AND owner_account_id = ?2
+                  AND (?3 IS NULL OR id != ?3)
+             )",
+            params![name, account_id, id],
+            |row| row.get(0),
+        )?,
+        None => conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM labels
+                WHERE name = ?1 COLLATE NOCASE AND scope = 'global'
+                  AND (?2 IS NULL OR id != ?2)
+             )",
+            params![name, id],
+            |row| row.get(0),
+        )?,
+    };
+    if duplicate {
+        return Err(CoreError::Other(format!(
+            "a label named '{name}' already exists in this scope"
+        )));
+    }
     let id = match id {
         // Rename/recolor: keep the existing keyword so the server mapping is
         // stable even when the display name changes.
@@ -78,14 +116,27 @@ pub fn save(
         }
         None => {
             conn.execute(
-                "INSERT INTO labels (name, color, keyword, position) VALUES (?1,?2,?3,?4)",
-                params![name, color, keyword_for(name), position],
+                "INSERT INTO labels (
+                   name, color, keyword, position, scope, owner_account_id, origin
+                 ) VALUES (?1,?2,?3,?4,?5,?6,'user')",
+                params![
+                    name,
+                    color,
+                    keyword_for(name),
+                    position,
+                    if owner_account_id.is_some() {
+                        "account"
+                    } else {
+                        "global"
+                    },
+                    owner_account_id,
+                ],
             )?;
             conn.last_insert_rowid()
         }
     };
     let mut stmt = conn.prepare(
-        "SELECT id, name, color, keyword, position, is_auto
+        "SELECT id, name, color, keyword, position, owner_account_id, is_auto
          FROM labels WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![id], from_row)?)
@@ -126,8 +177,9 @@ pub fn restore_auto_defaults(conn: &Connection) -> Result<i64> {
             continue;
         }
         restored += conn.execute(
-            "INSERT OR IGNORE INTO labels (name, color, keyword, position, is_auto)
-             VALUES (?1, ?2, ?3, ?4, 1)",
+            "INSERT OR IGNORE INTO labels (
+               name, color, keyword, position, is_auto, scope, origin
+             ) VALUES (?1, ?2, ?3, ?4, 1, 'automatic', 'system')",
             params![name, color, keyword, position],
         )? as i64;
     }
@@ -168,6 +220,11 @@ pub fn remove_from_message(conn: &Connection, message_id: i64, label_id: i64) ->
 /// left alone so foreign keywords never masquerade as labels. Returns true if
 /// anything changed.
 pub fn reconcile_keywords(conn: &Connection, message_id: i64, keywords: &[String]) -> Result<bool> {
+    let account_id: i64 = conn.query_row(
+        "SELECT account_id FROM messages WHERE id = ?1",
+        params![message_id],
+        |row| row.get(0),
+    )?;
     let labels = list(conn)?;
     if labels.is_empty() {
         return Ok(false);
@@ -176,7 +233,10 @@ pub fn reconcile_keywords(conn: &Connection, message_id: i64, keywords: &[String
     // Auto labels are local-only (classified at sync, never pushed to IMAP):
     // reconciling them against server keywords would strip their memberships
     // on every flag pass, so they are excluded here.
-    for label in labels.into_iter().filter(|l| !l.is_auto) {
+    for label in labels
+        .into_iter()
+        .filter(|label| label.owner_account_id == Some(account_id))
+    {
         let present = keywords.iter().any(|k| k == &label.keyword);
         let has: bool = conn.query_row(
             "SELECT COUNT(*) FROM message_labels WHERE message_id = ?1 AND label_id = ?2",
@@ -231,9 +291,9 @@ mod tests {
     #[test]
     fn save_keeps_keyword_on_rename() {
         let c = testutil::conn();
-        let l = save(&c, None, "Follow up", "#fff", 0).unwrap();
+        let l = save(&c, None, "Follow up", "#fff", 0, None).unwrap();
         assert_eq!(l.keyword, "Follow_up");
-        let renamed = save(&c, Some(l.id), "Chase later", "#000", 1).unwrap();
+        let renamed = save(&c, Some(l.id), "Chase later", "#000", 1, None).unwrap();
         assert_eq!(renamed.keyword, "Follow_up");
         assert_eq!(renamed.name, "Chase later");
     }
@@ -276,7 +336,7 @@ mod tests {
                 .is_empty()
         );
 
-        let manual = save(&c, None, "Temp", "#fff", 0).unwrap();
+        let manual = save(&c, None, "Temp", "#fff", 0, None).unwrap();
         delete(&c, manual.id).unwrap();
         assert!(get(&c, manual.id).unwrap().is_none());
     }
@@ -346,7 +406,7 @@ mod tests {
         testutil::seed_account(&c);
         let (_t, msg) = testutil::seed_message(&c, "a@b.c", "hello", false);
 
-        let manual = save(&c, None, "Work", "#fff", 0).unwrap();
+        let manual = save(&c, None, "Work", "#fff", 0, Some(1)).unwrap();
         let auto_id: i64 = c
             .query_row(
                 "SELECT id FROM labels WHERE keyword = 'FlectarMailAutoNews'",

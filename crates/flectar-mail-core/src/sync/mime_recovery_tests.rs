@@ -88,6 +88,9 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
                         continue;
                     }
                     "LOGIN" => {}
+                    "CAPABILITY" => {
+                        response.push_str("* CAPABILITY IMAP4rev1\r\n");
+                    }
                     "SELECT" => {
                         let validity = if connection > 0 && matches!(behavior, Behavior::Reset) {
                             8

@@ -24,6 +24,7 @@ pub fn reprioritize_images() {
     scheduler::shared().reprioritize();
 }
 
+#[cfg(feature = "remote-content")]
 const MAX_REMOTE_RESOURCE_BYTES: usize = 5 * 1024 * 1024;
 // CID images are already bounded to 8 MiB by the mail core. Keep the renderer
 // in agreement so a valid embedded attachment is not rejected after it has

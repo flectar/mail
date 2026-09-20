@@ -60,7 +60,7 @@ export component EmailComposer inherits Rectangle {
 
     out property <length> editor-width: max(1px, body-scroll.visible-width - 36px);
     out property <length> editor-viewport-height: max(1px, body-scroll.visible-height - 28px);
-    out property <length> editor-scroll-y: max(0px, -body-scroll.viewport-y);
+    out property <length> editor-scroll-y: max(0px, -body-scroll.content-y);
     out property <string> editor-preedit-text: body-input.preedit-text;
 
     callback close;
@@ -131,16 +131,16 @@ export component EmailComposer inherits Rectangle {
     back-requested => { root.request-close(); }
 
     function reveal-editor-caret() {
-        if (root.editor-caret-y * 1px + body-scroll.viewport-y < 8px) {
-            body-scroll.viewport-y = min(
+        if (root.editor-caret-y * 1px + body-scroll.content-y < 8px) {
+            body-scroll.content-y = min(
                 0px,
                 max(
                     body-scroll.visible-height - body-input.height,
                     8px - root.editor-caret-y * 1px,
                 ),
             );
-        } else if ((root.editor-caret-y + root.editor-caret-height) * 1px + body-scroll.viewport-y > body-scroll.visible-height - 8px) {
-            body-scroll.viewport-y = min(
+        } else if ((root.editor-caret-y + root.editor-caret-height) * 1px + body-scroll.content-y > body-scroll.visible-height - 8px) {
+            body-scroll.content-y = min(
                 0px,
                 max(
                     body-scroll.visible-height - body-input.height,
@@ -318,8 +318,8 @@ export component EmailComposer inherits Rectangle {
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
-                viewport-width: self.visible-width;
-                viewport-height: max(self.visible-height, root.editor-content-height * 1px + 32px);
+                content-width: self.visible-width;
+                content-height: max(self.visible-height, root.editor-content-height * 1px + 32px);
                 horizontal-scrollbar-policy: always-off;
                 mouse-drag-pan-enabled: root.compact;
 

@@ -16,8 +16,8 @@ export component ZoomControls inherits HorizontalBox {
     callback command(string);
     padding: 0px; spacing: 4px; horizontal-stretch: 0; cross-axis-alignment: center;
     height: root.compact ? LayoutMetrics.touch-target : LayoutMetrics.control-height;
-    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/magnifying-glass-minus.svg"); tooltip-text: @tr("Zoom out"); tooltip-above: true; tooltip-align-left: true; interactive: root.available && root.zoom > root.minimum; clicked => { root.command("zoom-out"); } }
-    if !root.compact : ToolbarIconButton { icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/arrow-counter-clockwise.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(root.zoom * 100)); tooltip-above: true; interactive: root.available; clicked => { root.command("zoom-reset"); } }
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/lucide/outline/zoom-out.svg"); tooltip-text: @tr("Zoom out"); tooltip-above: true; tooltip-align-left: true; interactive: root.available && root.zoom > root.minimum; clicked => { root.command("zoom-out"); } }
+    if !root.compact : ToolbarIconButton { icon-color: AppTheme.body; icon: @image-url("../icons/lucide/outline/history.svg"); tooltip-text: @tr("Reset zoom ({}%)", round(root.zoom * 100)); tooltip-above: true; interactive: root.available; clicked => { root.command("zoom-reset"); } }
     editor := LineEdit {
         in property <float> applied: root.zoom;
         in property <int> revision: root.revision;
@@ -28,6 +28,6 @@ export component ZoomControls inherits HorizontalBox {
         text: "\{round(root.zoom * 100)}%";
         accepted(value) => { root.command("zoom-set:" + value); self.text = "\{round(root.zoom * 100)}%"; }
     }
-    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/magnifying-glass-plus.svg"); tooltip-text: @tr("Zoom in"); tooltip-above: true; interactive: root.available && root.zoom < root.maximum; clicked => { root.command("zoom-in"); } }
-    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/phosphor/arrows-out-line-horizontal.svg"); tooltip-text: @tr("Fit to width"); tooltip-above: true; active: root.fitting; interactive: root.available; clicked => { root.command("fit"); } }
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: @image-url("../icons/lucide/outline/zoom-in.svg"); tooltip-text: @tr("Zoom in"); tooltip-above: true; interactive: root.available && root.zoom < root.maximum; clicked => { root.command("zoom-in"); } }
+    ToolbarIconButton { compact: root.compact; icon-color: AppTheme.body; icon: root.fitting ? @image-url("../icons/lucide/filled/screen-full.svg") : @image-url("../icons/lucide/outline/screen-full.svg"); tooltip-text: @tr("Fit to width"); tooltip-above: true; active: root.fitting; interactive: root.available; clicked => { root.command("fit"); } }
 }

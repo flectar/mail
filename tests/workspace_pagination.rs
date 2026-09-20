@@ -20,7 +20,7 @@ slint::slint! {
         pagination := InfiniteScrollController {
             active: root.active; loading: root.loading; can-load-more: root.more;
             row-count: root.rows; revision: root.revision;
-            content-height: root.content; viewport-y: root.position;
+            content-height: root.content; content-y: root.position;
             visible-height: root.viewport;
             load-more => { root.requested(); }
         }

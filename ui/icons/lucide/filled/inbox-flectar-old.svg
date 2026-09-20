@@ -1,0 +1,14 @@
+<!-- Generated custom Flectar icon; recipe in ../solid_recipes.py. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <mask id="cut-1" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <path d="M5.95 5.75H18.05C18.53 5.75 18.935 6.12 18.95 6.6L19.1 11.6C19.115 12.1 18.73 12.5 18.23 12.5H17.5A2.25 2.25 0 0 0 15.25 14.75V18.75A.75 .75 0 0 1 14.5 19.5H9.5A.75 .75 0 0 1 8.75 18.75V14.75A2.25 2.25 0 0 0 6.5 12.5H5.77C5.27 12.5 4.885 12.1 4.9 11.6L5.05 6.6C5.065 6.12 5.47 5.75 5.95 5.75Z" fill="black" stroke="none" />
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#cut-1)">
+    <path d="M4.75 2H19.25C20.55 2 21.62 3.02 21.65 4.32L22 19.32C22.035 20.78 20.91 22 19.45 22H4.55C3.09 22 1.965 20.78 2 19.32L2.35 4.32C2.38 3.02 3.45 2 4.75 2Z" fill="#000" stroke="none" />
+  </g>
+</svg>

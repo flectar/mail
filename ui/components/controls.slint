@@ -65,10 +65,10 @@ export component LineEdit inherits Rectangle {
     }
 
     if root.show-leading-icon : Image {
-        x: 12px;
-        y: (parent.height - 18px) / 2;
-        width: 18px;
-        height: 18px;
+        x: 20px - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
         source: root.leading-icon;
         colorize: root.leading-icon-color;
         image-fit: contain;
@@ -134,6 +134,7 @@ export component TextEdit inherits Rectangle {
 export component Switch inherits Rectangle {
     in-out property <bool> checked: false;
     in property <bool> enabled: true;
+    in property <string> control-label: "";
     callback toggled;
 
     width: 38px;
@@ -141,6 +142,7 @@ export component Switch inherits Rectangle {
     border-radius: 11px;
     background: root.checked ? AppTheme.accent : AppTheme.control-border;
     opacity: root.enabled ? 1 : 0.45;
+    animate background { duration: 140ms; easing: ease-out; }
 
     Rectangle {
         x: root.checked ? parent.width - self.width - 3px : 3px;
@@ -149,6 +151,7 @@ export component Switch inherits Rectangle {
         height: 16px;
         border-radius: 8px;
         background: white;
+        animate x { duration: 180ms; easing: spring(0.18); }
     }
 
     TouchArea {
@@ -157,7 +160,7 @@ export component Switch inherits Rectangle {
         width: max(parent.width, 44px);
         height: 44px;
         accessible-role: switch;
-        accessible-label: root.checked ? @tr("On") : @tr("Off");
+        accessible-label: root.control-label == "" ? (root.checked ? @tr("On") : @tr("Off")) : root.control-label;
         accessible-checked: root.checked;
         enabled: root.enabled;
         clicked => {
@@ -227,8 +230,8 @@ export component SelectionCheckBox inherits FocusScope {
                 width: 12px;
                 height: 12px;
                 source: root.indeterminate
-                    ? @image-url("../icons/phosphor/minus.svg")
-                    : @image-url("../icons/phosphor/check.svg");
+                    ? @image-url("../icons/lucide/outline/dash.svg")
+                    : @image-url("../icons/lucide/outline/check.svg");
                 colorize: white;
                 image-fit: contain;
                 accessible-role: none;
@@ -321,7 +324,7 @@ export component IconButton inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> active: false;
     in property <bool> interactive: true;
-    in property <length> icon-size: 18px;
+    in property <length> icon-size: LayoutMetrics.icon-size;
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
     in property <bool> tooltip-align-left: false;
@@ -339,6 +342,7 @@ export component IconButton inherits Rectangle {
     border-width: keyboard.has-focus ? 2px : 0px;
     border-color: AppTheme.accent;
     opacity: root.interactive ? 1 : 0.42;
+    animate background { duration: 120ms; easing: ease-out; }
     accessible-role: button;
     accessible-label: root.tooltip-text;
     accessible-action-default => {
@@ -349,13 +353,14 @@ export component IconButton inherits Rectangle {
 
     Image {
         x: (parent.width - root.icon-size) / 2;
-        y: (parent.height - root.icon-size) / 2;
+        y: (parent.height - root.icon-size) / 2 + (hit-area.pressed ? 1px : 0px);
         width: root.icon-size;
         height: root.icon-size;
         source: root.icon;
         colorize: root.primary ? white : root.icon-color;
         image-fit: contain;
         accessible-role: none;
+        animate y { duration: 140ms; easing: spring(0); }
     }
 
     keyboard := FocusScope {

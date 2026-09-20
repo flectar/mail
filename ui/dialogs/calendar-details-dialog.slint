@@ -113,7 +113,7 @@ export component CalendarDetailsDialog inherits Rectangle {
                 height: 36px;
                 source: root.provider == "gmail" ? @image-url("../icons/brand/gmail.svg")
                     : root.provider == "microsoft" ? @image-url("../icons/brand/outlook.svg")
-                    : @image-url("../icons/phosphor/calendar-fill.svg");
+                    : @image-url("../icons/lucide/outline/calendar.svg");
                 image-fit: contain;
                 accessible-role: none;
             }
@@ -165,7 +165,7 @@ export component CalendarDetailsDialog inherits Rectangle {
             y: 120px;
             width: parent.width - 48px;
             height: max(0px, parent.height - 190px);
-            viewport-width: self.visible-width;
+            content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
 
             VerticalBox {

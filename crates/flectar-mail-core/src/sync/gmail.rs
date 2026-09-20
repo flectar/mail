@@ -1009,51 +1009,47 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                     .optional()?
                     .flatten();
                 let local_label_id = if label.kind == "user" {
-                    let existing: Option<i64> = tx
-                        .query_row(
-                            "SELECT id FROM labels WHERE name = ?1 AND COALESCE(is_auto, 0) = 0",
-                            params![label.name],
-                            |row| row.get(0),
+                    let existing = previous_local_label_id.filter(|id| {
+                        tx.query_row(
+                            "SELECT EXISTS(
+                               SELECT 1 FROM labels
+                                WHERE id = ?1 AND scope = 'account'
+                                  AND owner_account_id = ?2
+                             )",
+                            params![id, account_id],
+                            |row| row.get::<_, bool>(0),
                         )
-                        .optional()?;
+                        .unwrap_or(false)
+                    });
                     Some(match existing {
                         Some(id) => {
                             tx.execute(
-                                "UPDATE labels SET color = ?2 WHERE id = ?1",
-                                params![id, label.background_color.as_deref().unwrap_or("#6b7280")],
+                                "UPDATE labels
+                                    SET name = ?2, color = ?3, origin = 'provider'
+                                  WHERE id = ?1",
+                                params![
+                                    id,
+                                    label.name,
+                                    label.background_color.as_deref().unwrap_or("#6b7280")
+                                ],
                             )?;
                             id
                         }
                         None => {
-                            // An auto-category may own the plain display name.
-                            // Keep the provider label distinct rather than
-                            // converting a local-only classifier into a remote
-                            // Gmail label.
-                            let name_exists: bool = tx.query_row(
-                                "SELECT EXISTS(SELECT 1 FROM labels WHERE name = ?1)",
-                                params![label.name],
-                                |row| row.get(0),
-                            )?;
-                            let display_name = if name_exists {
-                                format!("{} (Gmail)", label.name)
-                            } else {
-                                label.name.clone()
-                            };
                             tx.execute(
-                                "INSERT OR IGNORE INTO labels (name, color, keyword, position)
-                                 VALUES (?1, ?2, ?3, ?4)",
+                                "INSERT INTO labels (
+                                   name, color, keyword, position, scope,
+                                   owner_account_id, origin
+                                 ) VALUES (?1, ?2, ?3, ?4, 'account', ?5, 'provider')",
                                 params![
-                                    display_name,
+                                    label.name,
                                     label.background_color.as_deref().unwrap_or("#6b7280"),
-                                    repo::labels::keyword_for(&display_name),
+                                    repo::labels::keyword_for(&label.name),
                                     position as i64,
+                                    account_id,
                                 ],
                             )?;
-                            tx.query_row(
-                                "SELECT id FROM labels WHERE name = ?1",
-                                params![display_name],
-                                |row| row.get(0),
-                            )?
+                            tx.last_insert_rowid()
                         }
                     })
                 } else {
@@ -1063,10 +1059,8 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                 if let (Some(previous), Some(current)) = (previous_local_label_id, local_label_id)
                     && previous != current
                 {
-                    // An external rename can resolve to a different global
-                    // local label (for example because an auto-category owns
-                    // the new display name). Move only this Gmail account's
-                    // memberships so old and new chips are not both shown.
+                    // Repair a stale pre-migration mapping without touching
+                    // memberships owned by another account.
                     tx.execute(
                         "INSERT OR IGNORE INTO message_labels (message_id, label_id)
                              SELECT ml.message_id, ?3
@@ -1109,29 +1103,32 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                 )?;
             }
 
-            // labels.list is authoritative. Remove provider mappings and their
-            // account-scoped folder when a label was deleted in another Gmail
-            // client. Keep the global local label itself: routing rules or
-            // another account may still use it, and applying it again can
-            // recreate the provider label lazily.
+            // labels.list is authoritative. A provider-owned label deleted in
+            // another Gmail client disappears locally as well. This must not
+            // leave a reusable row that can recreate the remote label during a
+            // later drag.
             let seen = labels
                 .iter()
                 .map(|label| label.id.as_str())
                 .collect::<HashSet<_>>();
             let stale = {
                 let mut stmt = tx.prepare(
-                    "SELECT provider_id, folder_id FROM gmail_labels
+                    "SELECT provider_id, folder_id, local_label_id FROM gmail_labels
                      WHERE account_id = ?1",
                 )?;
                 stmt.query_map(params![account_id], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<i64>>(2)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
                 .into_iter()
-                .filter(|(provider_id, _)| !seen.contains(provider_id.as_str()))
+                .filter(|(provider_id, ..)| !seen.contains(provider_id.as_str()))
                 .collect::<Vec<_>>()
             };
-            for (provider_id, folder_id) in stale {
+            for (provider_id, folder_id, local_label_id) in stale {
                 tx.execute(
                     "DELETE FROM gmail_labels
                      WHERE account_id = ?1 AND provider_id = ?2",
@@ -1143,6 +1140,16 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                     tx.execute(
                         "DELETE FROM folders WHERE id = ?1 AND role IS NULL",
                         params![folder_id],
+                    )?;
+                }
+                if let Some(local_label_id) = local_label_id {
+                    tx.execute(
+                        "DELETE FROM labels
+                          WHERE id = ?1 AND scope = 'account' AND origin = 'provider'
+                            AND NOT EXISTS (
+                              SELECT 1 FROM gmail_labels WHERE local_label_id = ?1
+                            )",
+                        params![local_label_id],
                     )?;
                 }
             }
@@ -2935,10 +2942,9 @@ async fn finalize_sent_draft(
     Ok(())
 }
 
-async fn ensure_provider_label(
+async fn provider_label_for_action(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    api: &GmailApi,
     local_label_id: i64,
 ) -> Result<String> {
     let account_id = config.id;
@@ -2959,35 +2965,16 @@ async fn ensure_provider_label(
             "local auto-categories cannot be pushed to Gmail".into(),
         ));
     }
-    let remote = api.create_label(&label.name, Some(&label.color)).await?;
-    let provider_id = remote.id.clone();
-    ctx.db
-        .write(move |conn| {
-            let folder_id = repo::folders::upsert(conn, account_id, &remote.name, Some("/"), None)?;
-            conn.execute(
-                "INSERT INTO gmail_labels (
-                     account_id, provider_id, name, kind, folder_id,
-                     local_label_id, background_color, text_color
-                 ) VALUES (?1, ?2, ?3, 'user', ?4, ?5, ?6, ?7)
-                 ON CONFLICT(account_id, provider_id) DO UPDATE SET
-                     name = excluded.name, folder_id = excluded.folder_id,
-                     local_label_id = excluded.local_label_id,
-                     background_color = excluded.background_color,
-                     text_color = excluded.text_color",
-                params![
-                    account_id,
-                    remote.id,
-                    remote.name,
-                    folder_id,
-                    local_label_id,
-                    remote.background_color,
-                    remote.text_color,
-                ],
-            )?;
-            Ok(())
-        })
-        .await?;
-    Ok(provider_id)
+    if label.owner_account_id != Some(account_id) {
+        return Err(CoreError::Other(format!(
+            "label '{}' belongs to another account",
+            label.name
+        )));
+    }
+    Err(CoreError::Other(format!(
+        "label '{}' is not linked to this Gmail account",
+        label.name
+    )))
 }
 
 async fn apply_action(
@@ -3019,6 +3006,56 @@ async fn apply_action(
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("send omitted draftId".into()))?;
             return send_remote_draft(ctx, config, api, draft_id).await;
+        }
+        "gmail_label_create" => {
+            let local_label_id = action.payload["labelId"]
+                .as_i64()
+                .ok_or_else(|| CoreError::Other("label creation omitted labelId".into()))?;
+            let label = ctx
+                .db
+                .read(move |conn| repo::labels::get(conn, local_label_id))
+                .await?
+                .ok_or_else(|| CoreError::NotFound(format!("label {local_label_id}")))?;
+            if label.owner_account_id != Some(config.id) || label.is_auto {
+                return Err(CoreError::Other(
+                    "only an account-owned label can be created in Gmail".into(),
+                ));
+            }
+            let remote = api.create_label(&label.name, Some(&label.color)).await?;
+            let account_id = config.id;
+            ctx.db
+                .write(move |conn| {
+                    let folder_id =
+                        repo::folders::upsert(conn, account_id, &remote.name, Some("/"), None)?;
+                    conn.execute(
+                        "INSERT INTO gmail_labels (
+                           account_id, provider_id, name, kind, folder_id,
+                           local_label_id, background_color, text_color
+                         ) VALUES (?1, ?2, ?3, 'user', ?4, ?5, ?6, ?7)
+                         ON CONFLICT(account_id, provider_id) DO UPDATE SET
+                           name = excluded.name,
+                           folder_id = excluded.folder_id,
+                           local_label_id = excluded.local_label_id,
+                           background_color = excluded.background_color,
+                           text_color = excluded.text_color",
+                        params![
+                            account_id,
+                            remote.id,
+                            remote.name,
+                            folder_id,
+                            local_label_id,
+                            remote.background_color,
+                            remote.text_color,
+                        ],
+                    )?;
+                    conn.execute(
+                        "UPDATE labels SET origin = 'provider' WHERE id = ?1",
+                        params![local_label_id],
+                    )?;
+                    Ok(())
+                })
+                .await?;
+            return Ok(());
         }
         "gmail_label_update" => {
             let provider_id = action.payload["providerId"]
@@ -3155,7 +3192,7 @@ async fn apply_action(
             let local_label_id = action.payload["labelId"]
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("label action omitted labelId".into()))?;
-            let provider_id = ensure_provider_label(ctx, config, api, local_label_id).await?;
+            let provider_id = provider_label_for_action(ctx, config, local_label_id).await?;
             if action.kind == "add_label" {
                 add.push(provider_id);
             } else {

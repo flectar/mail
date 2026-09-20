@@ -1,0 +1,13 @@
+{
+  "version": "0.11.1",
+  "revision": "eea3503dd6cf17130cbb07348e0ff2c918300e94",
+  "sha256": "22d2ff88bd3f7d68d1d9b09c7e6209f9a8e8c05088295140a2bcf2e9b17038c5",
+  "emoji_revision": "479e1980aeca0db63999cedce1b6f31332fe0a7b",
+  "emoji_files": {
+    "src/lib.rs": "4c7f39679bebf4c54d142fd54cdbfc1edccad58bfaef5dcdad936cead3843666",
+    "src/dfa.rs": "47670069d27ba70c229d0de3dbd35e485b9b79a0d22a46aa0ccf02af978a87f1",
+    "src/types.rs": "3bbc4af75f45542951ac95abdbc69a514e2bcff1405470ae22f39d358be71205",
+    "README.md": "b89ba9c3504a0b6889c6c211e74a86aa6e1755eb383ed754b0a77401a543096d",
+    "LICENSE-MIT": "6caf53e64c3351cb8130877247fdd39aa5a9062cf960f8c22f60cad835b1387d"
+  }
+}

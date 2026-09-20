@@ -26,13 +26,16 @@ component ProductRailItem inherits Rectangle {
         height: 40px;
         border-radius: 10px;
         background: root.active || item-hit.has-hover ? root.accent-background : transparent;
+        animate background { duration: 140ms; easing: ease-out; }
         Image {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 20px;
-            height: 20px;
+            width: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
+            height: root.active ? LayoutMetrics.icon-size + 2px : LayoutMetrics.icon-size;
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
+            animate colorize { duration: 140ms; easing: ease-out; }
+            animate width, height { duration: 180ms; easing: spring(0.12); }
             image-fit: contain;
             accessible-role: none;
         }
@@ -98,8 +101,8 @@ export component ProductRail inherits Rectangle {
 
         mail-item := ProductRailItem {
             label: @tr("Mail");
-            outline-icon: @image-url("../icons/phosphor/envelope-simple.svg");
-            filled-icon: @image-url("../icons/phosphor/envelope-simple-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/mail.svg");
+            filled-icon: @image-url("../icons/lucide/filled/mail.svg");
             active: !root.settings-active && root.active-view == "mail";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
@@ -109,8 +112,8 @@ export component ProductRail inherits Rectangle {
 
         calendar-item := ProductRailItem {
             label: @tr("Calendar");
-            outline-icon: @image-url("../icons/phosphor/calendar-dots.svg");
-            filled-icon: @image-url("../icons/phosphor/calendar-dots-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/calendar.svg");
+            filled-icon: @image-url("../icons/lucide/filled/calendar.svg");
             active: !root.settings-active && root.active-view == "calendar";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
@@ -120,8 +123,8 @@ export component ProductRail inherits Rectangle {
 
         files-item := ProductRailItem {
             label: @tr("Files");
-            outline-icon: @image-url("../icons/phosphor/files.svg");
-            filled-icon: @image-url("../icons/phosphor/files-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/files.svg");
+            filled-icon: @image-url("../icons/lucide/filled/files.svg");
             active: !root.settings-active && root.active-view == "files";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
@@ -131,8 +134,8 @@ export component ProductRail inherits Rectangle {
 
         contacts-item := ProductRailItem {
             label: @tr("Contacts");
-            outline-icon: @image-url("../icons/phosphor/address-book.svg");
-            filled-icon: @image-url("../icons/phosphor/address-book-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/contacts.svg");
+            filled-icon: @image-url("../icons/lucide/filled/contacts.svg");
             active: !root.settings-active && root.active-view == "contacts";
             accent-color: root.accent-color;
             accent-background: root.accent-background;
@@ -145,8 +148,8 @@ export component ProductRail inherits Rectangle {
 
         settings-item := ProductRailItem {
             label: @tr("Settings");
-            outline-icon: @image-url("../icons/phosphor/gear.svg");
-            filled-icon: @image-url("../icons/phosphor/gear-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/gear.svg");
+            filled-icon: @image-url("../icons/lucide/filled/gear.svg");
             active: root.settings-active;
             accent-color: root.accent-color;
             accent-background: root.accent-background;
@@ -183,14 +186,17 @@ component CompactProductNavItem inherits Rectangle {
         height: 32px;
         border-radius: 16px;
         background: root.active || nav-hit.has-hover ? root.active-background : transparent;
+        animate background { duration: 140ms; easing: ease-out; }
 
         Image {
-            x: (parent.width - 22px) / 2;
-            y: 5px;
-            width: 22px;
-            height: 22px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: root.active ? 24px : 22px;
+            height: root.active ? 24px : 22px;
             source: root.active ? root.filled-icon : root.outline-icon;
             colorize: root.active ? root.accent-color : root.muted-color;
+            animate colorize { duration: 140ms; easing: ease-out; }
+            animate width, height { duration: 180ms; easing: spring(0.12); }
             image-fit: contain;
             accessible-role: none;
         }
@@ -204,6 +210,7 @@ component CompactProductNavItem inherits Rectangle {
         color: root.active ? root.accent-color : root.muted-color;
         font-size: TypeScale.caption;
         font-weight: root.active ? 700 : 600;
+        animate color { duration: 140ms; easing: ease-out; }
         horizontal-alignment: center;
         vertical-alignment: center;
         overflow: elide;
@@ -257,8 +264,8 @@ export component CompactProductNav inherits Rectangle {
         CompactProductNavItem {
             horizontal-stretch: 1;
             label: @tr("Mail");
-            outline-icon: @image-url("../icons/phosphor/envelope-simple.svg");
-            filled-icon: @image-url("../icons/phosphor/envelope-simple-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/mail.svg");
+            filled-icon: @image-url("../icons/lucide/filled/mail.svg");
             active: !root.settings-active && root.active-view == "mail";
             accent-color: root.accent-color;
             active-background: root.accent-background;
@@ -268,8 +275,8 @@ export component CompactProductNav inherits Rectangle {
         CompactProductNavItem {
             horizontal-stretch: 1;
             label: @tr("Calendar");
-            outline-icon: @image-url("../icons/phosphor/calendar-dots.svg");
-            filled-icon: @image-url("../icons/phosphor/calendar-dots-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/calendar.svg");
+            filled-icon: @image-url("../icons/lucide/filled/calendar.svg");
             active: !root.settings-active && root.active-view == "calendar";
             accent-color: root.accent-color;
             active-background: root.accent-background;
@@ -279,8 +286,8 @@ export component CompactProductNav inherits Rectangle {
         CompactProductNavItem {
             horizontal-stretch: 1;
             label: @tr("Files");
-            outline-icon: @image-url("../icons/phosphor/files.svg");
-            filled-icon: @image-url("../icons/phosphor/files-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/files.svg");
+            filled-icon: @image-url("../icons/lucide/filled/files.svg");
             active: !root.settings-active && root.active-view == "files";
             accent-color: root.accent-color;
             active-background: root.accent-background;
@@ -290,8 +297,8 @@ export component CompactProductNav inherits Rectangle {
         CompactProductNavItem {
             horizontal-stretch: 1;
             label: @tr("Contacts");
-            outline-icon: @image-url("../icons/phosphor/address-book.svg");
-            filled-icon: @image-url("../icons/phosphor/address-book-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/contacts.svg");
+            filled-icon: @image-url("../icons/lucide/filled/contacts.svg");
             active: !root.settings-active && root.active-view == "contacts";
             accent-color: root.accent-color;
             active-background: root.accent-background;
@@ -301,8 +308,8 @@ export component CompactProductNav inherits Rectangle {
         CompactProductNavItem {
             horizontal-stretch: 1;
             label: @tr("Settings");
-            outline-icon: @image-url("../icons/phosphor/gear.svg");
-            filled-icon: @image-url("../icons/phosphor/gear-fill.svg");
+            outline-icon: @image-url("../icons/lucide/outline/gear.svg");
+            filled-icon: @image-url("../icons/lucide/filled/gear.svg");
             active: root.settings-active;
             accent-color: root.accent-color;
             active-background: root.accent-background;

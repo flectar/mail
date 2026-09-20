@@ -518,7 +518,7 @@ pub fn automation_planner_prompt(
 ) -> Vec<crate::ai::ChatMessage> {
     let label_catalog = labels
         .iter()
-        .filter(|label| !label.is_auto)
+        .filter(|label| !label.is_auto && label.owner_account_id.is_none())
         .map(|label| format!("- id: {}, name: {}", label.id, label.name))
         .collect::<Vec<_>>()
         .join("\n");
@@ -630,11 +630,11 @@ pub fn validate_automation_plan(
                             labels.iter().any(|label| label.id == id && label.is_auto)
                         })
             }
-            "add_label" | "remove_label" => action
-                .value
-                .parse::<i64>()
-                .ok()
-                .is_some_and(|id| labels.iter().any(|label| label.id == id && !label.is_auto)),
+            "add_label" | "remove_label" => action.value.parse::<i64>().ok().is_some_and(|id| {
+                labels.iter().any(|label| {
+                    label.id == id && !label.is_auto && label.owner_account_id.is_none()
+                })
+            }),
             "mark_read" | "star" | "archive" | "trash" => {
                 action.value.clear();
                 true
@@ -1221,7 +1221,7 @@ mod tests {
         testutil::seed_account(&c);
         let (t, msg) =
             testutil::seed_message(&c, "service@intl.paypal.com", "Your subscription", true);
-        let label = labels::save(&c, None, "INVOICE", "red", 0).unwrap();
+        let label = labels::save(&c, None, "INVOICE", "red", 0, None).unwrap();
         let q = |ids: Vec<i64>| SplitRuleQuery {
             labels: Some(ids),
             ..Default::default()
@@ -1240,7 +1240,7 @@ mod tests {
         let c = testutil::conn();
         testutil::seed_account(&c);
         let (t, msg) = testutil::seed_message(&c, "a@b.c", "hello", false);
-        let label = labels::save(&c, None, "INVOICE", "red", 0).unwrap();
+        let label = labels::save(&c, None, "INVOICE", "red", 0, None).unwrap();
         let rule = SplitRule {
             id: 5,
             name: "inv".into(),
@@ -1330,6 +1330,7 @@ mod tests {
                 color: "blue".into(),
                 keyword: "Finance".into(),
                 position: 0,
+                owner_account_id: None,
                 is_auto: false,
             },
             crate::models::Label {
@@ -1338,6 +1339,7 @@ mod tests {
                 color: "green".into(),
                 keyword: "News".into(),
                 position: 1,
+                owner_account_id: None,
                 is_auto: true,
             },
         ];
@@ -1377,6 +1379,7 @@ mod tests {
             color: "blue".into(),
             keyword: "Finance".into(),
             position: 0,
+            owner_account_id: None,
             is_auto: false,
         }];
         let prompt =

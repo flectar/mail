@@ -106,12 +106,31 @@ The full workspace keeps your folders, message list, and selected email visible
 together. The minimal layout reduces visual noise and gives each part of your
 inbox more room when you need it.
 
+### Profiles and account colors
+
+Group related accounts into named profiles such as Work or Personal, then give
+each profile its own color. In Settings → Accounts → Profiles, you can assign
+accounts, override an individual account's color, and show the effective color
+along the left edge of every message. The markers make accounts easy to tell
+apart while working in the unified inbox; the example below uses purple for Work
+and orange for Support.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-profiles-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-profiles-light.png">
+  <img src="resources/screenshots/desktop-profiles-light.png" alt="Flectar Mail unified inbox with purple and orange profile color markers">
+</picture>
+
 ### Conversation threads
 
 Replies stay grouped in chronological order, with the active message expanded
 inside the reading pane.
 
-![Flectar Mail conversation with incoming and replied messages](resources/screenshots/desktop-thread-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-thread-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-thread-light.png">
+  <img src="resources/screenshots/desktop-thread-light.png" alt="Flectar Mail conversation with incoming and replied messages">
+</picture>
 
 ### Light
 
@@ -134,9 +153,54 @@ inside the reading pane.
 
 ### Calendar, contacts, and files
 
-| Calendar | Contacts | Files (WebDAV/JMAP) |
-| --- | --- | --- |
-| ![Flectar Mail calendar](resources/screenshots/desktop-calendar-light.png) | ![Flectar Mail contacts](resources/screenshots/desktop-contacts-light.png) | ![Flectar Mail files](resources/screenshots/desktop-files-light.png) |
+<table>
+  <thead>
+    <tr>
+      <th width="33.33%">Calendar</th>
+      <th width="33.33%">Contacts</th>
+      <th width="33.33%">Files (WebDAV/JMAP)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-calendar-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-calendar-light.png">
+          <img src="resources/screenshots/desktop-calendar-light.png" alt="Flectar Mail calendar" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-contacts-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-contacts-light.png">
+          <img src="resources/screenshots/desktop-contacts-light.png" alt="Flectar Mail contacts" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-files-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-files-light.png">
+          <img src="resources/screenshots/desktop-files-light.png" alt="Flectar Mail files" width="100%">
+        </picture>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+### Storage and backups
+
+Settings → Storage shows how much space mail, attachments, offline files, and
+databases use on the device. From the same page, you can export verified database
+snapshots or transfer connected-account setup and preferences through a backup.
+Passwords and OAuth tokens stay in the system keyring, so a restored device asks
+you to sign in again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-storage-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-storage-light.png">
+  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, database snapshot, and account backup controls">
+</picture>
 
 ### Made for smaller screens
 
@@ -151,11 +215,17 @@ messages, events, and contacts the full screen when they need it.
 
 Flectar Mail is currently in development and is not yet stable.
 
-> [!NOTE]
-> We are waiting for Google and Microsoft to complete OAuth app verification
-> before the first stable release with Gmail, Outlook, and Microsoft 365 OAuth
-> configured by default. Earlier GitHub prereleases are intended for testers
-> using their own OAuth registrations or IMAP/JMAP accounts.
+> [!WARNING]
+> **Google OAuth verification requires an annual CASA security assessment.**
+> Flectar is a community open-source project, so completing this assessment
+> depends on sponsor support. Until the required verification is funded and
+> complete, a stable release with Gmail OAuth configured by default will not be
+> possible. If you want to help make built-in Gmail sign-in available, please
+> [sponsor Flectar](https://github.com/sponsors/flectar).
+>
+> Google and Microsoft OAuth verification is still in progress. Earlier GitHub
+> prereleases are intended for testers using their own OAuth registrations or
+> IMAP/JMAP accounts.
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 **Sign-in settings** cog on the welcome screen to save your own Google or

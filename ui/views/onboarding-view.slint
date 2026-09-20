@@ -3,6 +3,7 @@ import { MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
+import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { LineEdit } from "../components/controls.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
@@ -53,6 +54,7 @@ export component OnboardingView inherits Rectangle {
     in-out property <bool> imap-form-open: false;
     private property <bool> show-account-status: false;
     callback add-password-account(string, string, string, string, string, string, string, string, string);
+    callback suggest-account-settings(string);
     callback start-oauth(string);
     callback cancel-oauth();
     callback import-account-backup();
@@ -87,8 +89,8 @@ export component OnboardingView inherits Rectangle {
     setup-scroll := ScrollView {
         width: parent.width;
         height: parent.height;
-        viewport-width: self.visible-width;
-        viewport-height: max(self.visible-height, setup-content.y + setup-content.height + 24px);
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, setup-content.y + setup-content.height + 24px);
 
         setup-content := VerticalBox {
             x: max(20px, (setup-scroll.visible-width - 400px) / 2);
@@ -167,7 +169,7 @@ export component OnboardingView inherits Rectangle {
                 }
                 ProviderButton {
                     text: @tr("Connect another provider");
-                    icon: @image-url("../icons/phosphor/envelope.svg");
+                    icon: @image-url("../icons/lucide/outline/mail.svg");
                     colorize-icon: true;
                     // Optical correction for the asymmetric mail-outline glyph.
                     icon-offset-x: 1px;
@@ -192,7 +194,7 @@ export component OnboardingView inherits Rectangle {
                 oauth-settings := Button {
                     height: 40px;
                     text: @tr("Sign-in settings");
-                    icon: @image-url("../icons/solar-icons/settings-outline.svg");
+                    icon: @image-url("../icons/lucide/outline/gear.svg");
                     has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.oauth-setup-open = true; }
@@ -207,7 +209,7 @@ export component OnboardingView inherits Rectangle {
                 Button {
                     height: 40px;
                     text: @tr("Import a backup");
-                    icon: @image-url("../icons/phosphor/tray-arrow-down.svg");
+                    icon: @image-url("../icons/lucide/outline/download.svg");
                     has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.import-account-backup(); }
@@ -251,7 +253,7 @@ export component OnboardingView inherits Rectangle {
                     label-color: root.muted-text;
                     value: root.account-email;
                     placeholder: @tr("Email address");
-                    edited(value) => { root.account-email = value; }
+                    edited(value) => { root.account-email = value; root.suggest-account-settings(value); }
                 }
                 FormField {
                     enabled: !root.account-setup-in-progress;
@@ -372,16 +374,13 @@ export component OnboardingView inherits Rectangle {
                     border-width: 1px;
                     border-color: root.account-setup-in-progress ? root.ui-border : AppTheme.destructive.transparentize(0.45);
 
-                    setup-status := Text {
+                    setup-status := CopyableDiagnostic {
                         x: 10px;
                         y: 8px;
                         width: parent.width - 20px;
                         text: root.status;
-                        color: root.account-setup-in-progress ? root.body-text : AppTheme.destructive;
+                        text-color: root.account-setup-in-progress ? root.body-text : AppTheme.destructive;
                         font-size: TypeScale.caption;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                        height: self.preferred-height;
                     }
                 }
                 Button {

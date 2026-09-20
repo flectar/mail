@@ -406,7 +406,7 @@ async fn connect_inner(
         ));
     }
 
-    let session = match creds {
+    let mut session = match creds {
         ImapCredentials::Password { user, password } => client
             .login(&user, &password)
             .await
@@ -422,8 +422,40 @@ async fn connect_inner(
                 .map_err(|(e, _)| xoauth2_error(e.to_string()))?
         }
     };
+    identify_client(&mut session).await;
     tracing::debug!(%host, "imap connect: authenticated");
     Ok(session)
+}
+
+/// Identify Flectar Mail to servers that implement RFC 2971. Some services
+/// accept authentication but reject mailbox access until the client sends this
+/// command. Keep the payload limited to public application metadata.
+async fn identify_client(session: &mut Session) {
+    // The surrounding connection deadline bounds these best-effort commands.
+    // A standards-compliant server should answer CAPABILITY, but failure to
+    // identify must not make an otherwise usable account incompatible.
+    let capabilities = match session.capabilities().await {
+        Ok(capabilities) => capabilities,
+        Err(error) => {
+            tracing::warn!(%error, "imap connect: could not query ID capability");
+            return;
+        }
+    };
+    if !capabilities.has_str("ID") {
+        return;
+    }
+
+    match session
+        .id([
+            ("name", Some("Flectar Mail")),
+            ("version", Some(env!("CARGO_PKG_VERSION"))),
+            ("vendor", Some("Flectar")),
+        ])
+        .await
+    {
+        Ok(_) => tracing::debug!("imap connect: client identity accepted"),
+        Err(error) => tracing::warn!(%error, "imap connect: server rejected client identity"),
+    }
 }
 
 #[derive(Debug, Clone)]

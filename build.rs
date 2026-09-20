@@ -30,8 +30,8 @@ fn main() {
         // the same translations without depending on a system gettext install.
         .with_bundled_translations("lang");
 
-    // Compile the non-visual tray separately from app.slint. Slint 1.17
-    // otherwise registers app.slint's embedded font through the tray's shared
+    // Compile the non-visual tray separately from app.slint. Slint otherwise
+    // registers app.slint's embedded font through the tray's shared
     // globals, which creates an unintended native WindowAdapter for a
     // SystemTrayIcon-rooted component. Keep the same style and translation
     // configuration for both compilation units.

@@ -11,7 +11,7 @@ export component MailView inherits Rectangle {
     in property <bool> compact: false;
     // Keep the animated geometry outside conditionally instantiated sidebars.
     private property <length> desktop-sidebar-width: root.mail_sidebar_collapsed ? 0px : LayoutMetrics.sidebar-width;
-    animate desktop-sidebar-width { duration: 160ms; easing: ease-in-out; }
+    animate desktop-sidebar-width { duration: 220ms; easing: spring(0); }
     in property <string> layout-mode: "default";
     in property <bool> show-avatars: true;
     in property <bool> loading: false;
@@ -102,18 +102,20 @@ export component MailView inherits Rectangle {
     callback toggle_sidebar_section(string, bool);
     callback filter_folders(string);
     callback request_folder_create(int, int, string);
+    callback request_label_create(int, string);
     callback request_folder_rename(int, string);
     callback request_folder_delete(int, string);
-    callback request_label_rename(int, string, color);
-    callback request_label_delete(int, string);
+    callback request_label_rename(int, string, color, string, bool);
+    callback request_label_delete(int, string, string, bool);
     callback load_more();
     callback sync_mail();
     callback message_action(string);
     callback message_action_for_email(int, string);
+    callback bulk_message_action(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
-    callback save_mail_label(int, string, color);
+    callback save_mail_label(int, int, string, color, bool);
     callback search_mail_labels(string);
     callback compose_message_action(string);
     callback close_preview();
@@ -169,10 +171,11 @@ export component MailView inherits Rectangle {
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 filter-folders(query) => { root.filter_folders(query); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
+                request-create-label(account-id, account-name) => { root.request_label_create(account-id, account-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
-                request-rename-label(id, name, color) => { root.request_label_rename(id, name, color); }
-                request-delete-label(id, name) => { root.request_label_delete(id, name); }
+                request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
+                request-delete-label(id, name, account, global) => { root.request_label_delete(id, name, account, global); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -219,6 +222,7 @@ export component MailView inherits Rectangle {
                 message_action_for_email(id, action) => {
                     root.message_action_for_email(id, action);
                 }
+                bulk_message_action(action) => { root.bulk_message_action(action); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
@@ -286,7 +290,7 @@ export component MailView inherits Rectangle {
                 title-color: root.title-color;
                 message_action(action) => { root.message_action(action); }
                 toggle-mail-label(id, applied) => { root.toggle_mail_label(id, applied); }
-                save-mail-label(id, name, color) => { root.save_mail_label(id, name, color); }
+                save-mail-label(id, name, color, global) => { root.save_mail_label(id, -1, name, color, global); }
                 search-mail-labels(query) => { root.search_mail_labels(query); }
                 select_email(id) => { root.select_email(id); }
                 select_thread_message(index) => { root.select_thread_message(index); }
@@ -351,10 +355,11 @@ export component MailView inherits Rectangle {
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 filter-folders(query) => { root.filter_folders(query); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
+                request-create-label(account-id, account-name) => { root.request_label_create(account-id, account-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
-                request-rename-label(id, name, color) => { root.request_label_rename(id, name, color); }
-                request-delete-label(id, name) => { root.request_label_delete(id, name); }
+                request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
+                request-delete-label(id, name, account, global) => { root.request_label_delete(id, name, account, global); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -423,6 +428,7 @@ export component MailView inherits Rectangle {
                 message_action_for_email(id, action) => {
                     root.message_action_for_email(id, action);
                 }
+                bulk_message_action(action) => { root.bulk_message_action(action); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
@@ -487,7 +493,7 @@ export component MailView inherits Rectangle {
                 title-color: root.title-color;
                 message_action(action) => { root.message_action(action); }
                 toggle-mail-label(id, applied) => { root.toggle_mail_label(id, applied); }
-                save-mail-label(id, name, color) => { root.save_mail_label(id, name, color); }
+                save-mail-label(id, name, color, global) => { root.save_mail_label(id, -1, name, color, global); }
                 search-mail-labels(query) => { root.search_mail_labels(query); }
                 select_email(id) => { root.select_email(id); }
                 select_thread_message(index) => { root.select_thread_message(index); }
@@ -558,10 +564,11 @@ export component MailView inherits Rectangle {
                 toggle-folder(id, expanded) => { root.toggle_folder(id, expanded); }
                 filter-folders(query) => { root.filter_folders(query); }
                 request-create-folder(account-id, parent-id, parent-name) => { root.request_folder_create(account-id, parent-id, parent-name); }
+                request-create-label(account-id, account-name) => { root.request_label_create(account-id, account-name); }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
-                request-rename-label(id, name, color) => { root.request_label_rename(id, name, color); }
-                request-delete-label(id, name) => { root.request_label_delete(id, name); }
+                request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
+                request-delete-label(id, name, account, global) => { root.request_label_delete(id, name, account, global); }
                 compose => {
                     root.folders-open = false;
                     root.open_compose();

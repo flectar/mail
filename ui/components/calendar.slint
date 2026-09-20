@@ -1,4 +1,4 @@
-import { SidebarRowSurface } from "sidebar-row.slint";
+import { SidebarRowSurface, SidebarStyle } from "sidebar-row.slint";
 import { CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay } from "../models.slint";
 import { Button } from "button.slint";
 import { IconButton, ToolbarIconButton } from "controls.slint";
@@ -107,7 +107,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             width: max(0px, parent.width - 2 * LayoutMetrics.sidebar-inset);
             height: LayoutMetrics.sidebar-action-height;
             text: @tr("New event");
-            icon: @image-url("../icons/phosphor/calendar-plus-fill.svg");
+            icon: @image-url("../icons/lucide/filled/calendar-add.svg");
             has-icon: true;
             primary: true;
             clicked => { root.new-event(); }
@@ -131,7 +131,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             width: 28px;
             height: 28px;
             icon-size: 14px;
-            icon: @image-url("../icons/phosphor/caret-left.svg");
+            icon: @image-url("../icons/lucide/outline/chevron-left.svg");
             icon-color: root.secondary-color;
             idle-background: transparent;
             hover-background: root.control-hover-color;
@@ -145,7 +145,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             width: 28px;
             height: 28px;
             icon-size: 14px;
-            icon: @image-url("../icons/phosphor/caret-right.svg");
+            icon: @image-url("../icons/lucide/outline/chevron-right.svg");
             icon-color: root.secondary-color;
             idle-background: transparent;
             hover-background: root.control-hover-color;
@@ -231,15 +231,15 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
         }
 
         source-scroll := ListView {
-            // Keep a direct ListView repeater; Slint 1.17 does not
+            // Keep a direct ListView repeater; Slint does not
             // virtualize through a wrapper or inherited ListView.
-            viewport-width: self.visible-width;
+            content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
             x: 0px;
             y: 330px;
             width: parent.width - LayoutMetrics.divider-width;
             height: max(0px, parent.height - self.y);
-            viewport-y <=> root.source-scroll-y;
+            content-y <=> root.source-scroll-y;
             for calendar in root.sources: Rectangle {
                 width: max(0px, source-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
                 private property <length> row-y: calendar.group-start ? 26px : 0px;
@@ -278,8 +278,8 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                         text: calendar.name != "" ? calendar.name : @tr("Calendar");
                         color: root.body-color;
                         opacity: calendar.enabled ? 1 : 0.55;
-                        font-size: TypeScale.secondary;
-                        font-weight: calendar.is-default ? 650 : 500;
+                        font-size: SidebarStyle.label-size;
+                        font-weight: calendar.is-default ? SidebarStyle.selected-weight : SidebarStyle.normal-weight;
                         overflow: elide;
                         vertical-alignment: center;
                     }
@@ -330,8 +330,8 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
             width: source-scroll.visible-width;
             height: source-scroll.visible-height;
             surface-color: root.surface-color;
-            viewport-y: source-scroll.viewport-y;
-            viewport-height: source-scroll.viewport-height;
+            content-y: source-scroll.content-y;
+            content-height: source-scroll.content-height;
             visible-height: source-scroll.visible-height;
         }
 
@@ -521,7 +521,7 @@ export component FunctionalCalendarView inherits Rectangle {
                 cross-axis-alignment: center;
 
                 ToolbarIconButton {
-                    icon: @image-url("../icons/phosphor/sidebar-fill.svg");
+                    icon: @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                     icon-color: root.secondary-color;
                     hover-background: root.control-hover-color;
                     active-background: root.accent-background;
@@ -534,14 +534,14 @@ export component FunctionalCalendarView inherits Rectangle {
                 ToolbarIconButton {
                     visible: root.sidebar-collapsed;
                     width: root.sidebar-collapsed ? LayoutMetrics.desktop-icon-button-size : 0px;
-                    icon: @image-url("../icons/phosphor/calendar-plus-fill.svg");
+                    icon: @image-url("../icons/lucide/filled/calendar-add.svg");
                     primary: true;
                     tooltip-text: @tr("New event");
                     accessible-id: "calendar-new-event-desktop";
                     clicked => { root.new-event(); }
                 }
-                ToolbarIconButton { icon: @image-url("../icons/phosphor/caret-left.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous period"); clicked => { root.navigate("period", -1); } }
-                ToolbarIconButton { icon: @image-url("../icons/phosphor/caret-right.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next period"); clicked => { root.navigate("period", 1); } }
+                ToolbarIconButton { icon: @image-url("../icons/lucide/outline/chevron-left.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous period"); clicked => { root.navigate("period", -1); } }
+                ToolbarIconButton { icon: @image-url("../icons/lucide/outline/chevron-right.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next period"); clicked => { root.navigate("period", 1); } }
                 Button { width: 66px; height: LayoutMetrics.sidebar-action-height; text: @tr("Week"); selected: root.view-mode == "week"; clicked => { root.set-view("week"); } }
                 Button { width: 72px; height: LayoutMetrics.sidebar-action-height; text: @tr("Month"); selected: root.view-mode == "month"; clicked => { root.set-view("month"); } }
                 Button { width: 96px; height: LayoutMetrics.sidebar-action-height; text: @tr("Today"); clicked => { root.today(); } }
@@ -692,9 +692,9 @@ export component FunctionalCalendarView inherits Rectangle {
             width: parent.width;
             title: root.month-title;
             background-color: root.surface-color;
-            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon-size: 19px; icon: @image-url("../icons/phosphor/caret-left.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous month"); accessible-id: "calendar-previous-month"; clicked => { root.navigate("month", -1); } }
-            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon-size: 19px; icon: @image-url("../icons/phosphor/caret-right.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next month"); accessible-id: "calendar-next-month"; clicked => { root.navigate("month", 1); } }
-            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon-size: 20px; icon: @image-url("../icons/phosphor/calendar-plus-fill.svg"); primary: true; tooltip-text: @tr("New event"); accessible-id: "calendar-new-event"; clicked => { root.new-event(); } }
+            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-left.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous month"); accessible-id: "calendar-previous-month"; clicked => { root.navigate("month", -1); } }
+            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-right.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next month"); accessible-id: "calendar-next-month"; clicked => { root.navigate("month", 1); } }
+            IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/filled/calendar-add.svg"); primary: true; tooltip-text: @tr("New event"); accessible-id: "calendar-new-event"; clicked => { root.new-event(); } }
         }
 
         Rectangle {
@@ -750,7 +750,7 @@ export component FunctionalCalendarView inherits Rectangle {
             y: 370px;
             width: parent.width - 16px;
             height: max(0px, parent.height - 378px);
-            viewport-width: self.visible-width;
+            content-width: self.visible-width;
             horizontal-scrollbar-policy: always-off;
             mouse-drag-pan-enabled: true;
             VerticalBox {
@@ -833,7 +833,7 @@ export component FunctionalCalendarView inherits Rectangle {
         detail: @tr("This action cannot be undone.");
         confirm-label: @tr("Delete event");
         cancel-label: @tr("Keep event");
-        icon: @image-url("../icons/phosphor/trash-fill.svg");
+        icon: @image-url("../icons/lucide/outline/trash.svg");
         surface: root.surface-color;
         dialog-border-color: root.subtle-border-color;
         title-color: root.title-color;

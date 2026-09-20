@@ -63,6 +63,37 @@ const MAX_CACHED_HEADER_BYTES: usize = 256 * 1024;
 const SEND_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const SEND_STATUS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+fn normalize_mail_profile_name(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(CoreError::Other("profile name cannot be empty".into()));
+    }
+    if value.chars().count() > 48 {
+        return Err(CoreError::Other(
+            "profile name cannot be longer than 48 characters".into(),
+        ));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(CoreError::Other(
+            "profile name cannot contain control characters".into(),
+        ));
+    }
+    Ok(value.to_owned())
+}
+
+fn normalize_mail_profile_color(value: &str) -> Result<String> {
+    let value = value.trim();
+    let valid = value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !valid {
+        return Err(CoreError::Other(
+            "profile color must use #RRGGBB format".into(),
+        ));
+    }
+    Ok(value.to_ascii_uppercase())
+}
+
 fn validate_folder_leaf(value: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -102,9 +133,19 @@ fn normalize_account_email(value: &str) -> Option<String> {
     Some(format!("{local}@{}", domain.to_lowercase()))
 }
 
+fn normalize_account_password(value: String) -> String {
+    // Password controls are one-line inputs. Apply that invariant at the core
+    // boundary too so clipboard line endings cannot reach protocol encoders.
+    // Preserve spaces and every other character because they may be valid.
+    value
+        .chars()
+        .filter(|character| !matches!(character, '\r' | '\n'))
+        .collect()
+}
+
 #[cfg(test)]
-mod account_email_tests {
-    use super::normalize_account_email;
+mod account_input_tests {
+    use super::{normalize_account_email, normalize_account_password};
 
     #[test]
     fn account_email_preserves_local_part_and_normalizes_domain() {
@@ -115,6 +156,14 @@ mod account_email_tests {
         assert!(normalize_account_email("missing-domain@").is_none());
         assert!(normalize_account_email("two@@example.test").is_none());
         assert!(normalize_account_email("space @example.test").is_none());
+    }
+
+    #[test]
+    fn pasted_password_line_breaks_are_removed_without_trimming_spaces() {
+        assert_eq!(
+            normalize_account_password("\r\n secret\nvalue \r\n".into()),
+            " secretvalue "
+        );
     }
 }
 
@@ -827,6 +876,8 @@ impl Core {
     }
 
     pub async fn test_connection(&self, args: &AddPasswordAccountArgs) -> ConnectionTestResult {
+        let mut args = args.clone();
+        args.password = normalize_account_password(args.password);
         if args.mail_protocol == MailProtocol::Jmap {
             return match crate::jmap::client::connect_with(
                 &args.email,
@@ -847,7 +898,7 @@ impl Core {
                 },
             };
         }
-        match self.check_imap_smtp(args).await {
+        match self.check_imap_smtp(&args).await {
             Ok(()) => ConnectionTestResult {
                 ok: true,
                 error: None,
@@ -864,10 +915,12 @@ impl Core {
             user: args.username.clone(),
             password: args.password.clone(),
         };
-        let session =
+        let mut session =
             imap::connect_with_settings(&args.imap_host, args.imap_port, creds, &args.connection)
                 .await?;
+        let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
+        mailbox_result?;
         let config = AccountConfig {
             id: 0,
             email: args.email.clone(),
@@ -902,7 +955,7 @@ impl Core {
                 .map(|value| value.trim().to_owned())
                 .filter(|value| !value.is_empty()),
             username: args.username.trim().to_owned(),
-            password: args.password,
+            password: normalize_account_password(args.password),
             mail_protocol: args.mail_protocol,
             jmap_url: args.jmap_url.trim().to_owned(),
             imap_host: args.imap_host.trim().to_owned(),
@@ -1611,6 +1664,19 @@ impl Core {
                     "DELETE FROM app_settings WHERE key = ?1",
                     [format!("files:{account_id}")],
                 )?;
+                let mut settings = repo::settings::get(conn)?;
+                for profile in &mut settings.mail_profiles {
+                    profile.account_ids.retain(|id| *id != account_id);
+                }
+                let account_key = account_id.to_string();
+                settings.account_colors.remove(&account_key);
+                settings.account_short_names.remove(&account_key);
+                settings.account_themes.remove(&account_key);
+                settings.signature_defaults.remove(&account_key);
+                settings
+                    .signature_list
+                    .retain(|signature| signature.account_id != account_id);
+                repo::settings::set(conn, &settings)?;
                 repo::accounts::delete(conn, account_id)
             })
             .await?;
@@ -6072,12 +6138,18 @@ impl Core {
         name: String,
         color: String,
         position: i64,
+        owner_account_id: Option<i64>,
     ) -> Result<Label> {
         let (label, accounts) = self
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                let label = repo::labels::save(&tx, id, &name, &color, position)?;
+                if let Some(account_id) = owner_account_id
+                    && repo::accounts::get(&tx, account_id)?.is_none()
+                {
+                    return Err(CoreError::NotFound(format!("account {account_id}")));
+                }
+                let label = repo::labels::save(&tx, id, &name, &color, position, owner_account_id)?;
                 let mappings = {
                     let mut stmt = tx.prepare(
                         "SELECT account_id, provider_id FROM gmail_labels
@@ -6089,6 +6161,22 @@ impl Core {
                     .collect::<rusqlite::Result<Vec<_>>>()?
                 };
                 let mut accounts = Vec::new();
+                if id.is_none()
+                    && let Some(account_id) = label.owner_account_id
+                    && repo::accounts::get(&tx, account_id)?
+                        .is_some_and(|account| account.provider == Provider::Gmail)
+                {
+                    repo::actions::enqueue(
+                        &tx,
+                        account_id,
+                        "gmail_label_create",
+                        None,
+                        None,
+                        &serde_json::json!({ "labelId": label.id }),
+                        None,
+                    )?;
+                    accounts.push(account_id);
+                }
                 for (account_id, provider_id) in mappings {
                     repo::actions::enqueue(
                         &tx,
@@ -6500,6 +6588,185 @@ impl Core {
                 // Keep the resolver in the same order as persisted writes.
                 apply_oauth_settings(&settings);
                 Ok(())
+            })
+            .await
+    }
+
+    /// Create or update a local mail profile without touching provider state.
+    /// The settings read and write share the database writer so an unrelated
+    /// preference cannot be lost to a stale read/modify/write cycle.
+    pub async fn save_mail_profile(
+        &self,
+        profile_id: Option<String>,
+        name: String,
+        color: String,
+    ) -> Result<(Settings, MailProfile)> {
+        let name = normalize_mail_profile_name(&name)?;
+        let color = normalize_mail_profile_color(&color)?;
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let requested_id = profile_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty());
+                let duplicate = settings.mail_profiles.iter().any(|profile| {
+                    Some(profile.id.as_str()) != requested_id
+                        && profile.name.eq_ignore_ascii_case(&name)
+                });
+                if duplicate {
+                    return Err(CoreError::Other(format!(
+                        "a profile named {name:?} already exists"
+                    )));
+                }
+
+                let profile = if let Some(id) = requested_id {
+                    let profile = settings
+                        .mail_profiles
+                        .iter_mut()
+                        .find(|profile| profile.id == id)
+                        .ok_or_else(|| CoreError::NotFound(format!("mail profile {id}")))?;
+                    profile.name = name;
+                    profile.color = color;
+                    profile.clone()
+                } else {
+                    if settings.mail_profiles.len() >= 50 {
+                        return Err(CoreError::Other(
+                            "no more than 50 mail profiles can be created".into(),
+                        ));
+                    }
+                    let base_id = format!(
+                        "profile-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_micros()
+                    );
+                    let mut id = base_id.clone();
+                    let mut suffix = 2u32;
+                    while settings
+                        .mail_profiles
+                        .iter()
+                        .any(|profile| profile.id == id)
+                    {
+                        id = format!("{base_id}-{suffix}");
+                        suffix += 1;
+                    }
+                    let profile = MailProfile {
+                        id,
+                        name,
+                        color,
+                        account_ids: Vec::new(),
+                    };
+                    settings.mail_profiles.push(profile.clone());
+                    profile
+                };
+                repo::settings::set(conn, &settings)?;
+                Ok((settings, profile))
+            })
+            .await
+    }
+
+    /// Assign an account to one profile, or remove its profile assignment.
+    pub async fn assign_account_profile(
+        &self,
+        account_id: i64,
+        profile_id: Option<String>,
+    ) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                if repo::accounts::get(conn, account_id)?.is_none() {
+                    return Err(CoreError::NotFound(format!("account {account_id}")));
+                }
+                let mut settings = repo::settings::get(conn)?;
+                let profile_id = profile_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty());
+                if let Some(id) = profile_id
+                    && !settings
+                        .mail_profiles
+                        .iter()
+                        .any(|profile| profile.id == id)
+                {
+                    return Err(CoreError::NotFound(format!("mail profile {id}")));
+                }
+                for profile in &mut settings.mail_profiles {
+                    profile.account_ids.retain(|id| *id != account_id);
+                }
+                if let Some(id) = profile_id {
+                    let profile = settings
+                        .mail_profiles
+                        .iter_mut()
+                        .find(|profile| profile.id == id)
+                        .expect("profile existence checked above");
+                    profile.account_ids.push(account_id);
+                    profile.account_ids.sort_unstable();
+                }
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Set an account-specific marker color, or restore its generated color.
+    /// Choosing an individual color also leaves any profile in the same
+    /// settings write so the visible color has one unambiguous owner.
+    pub async fn set_account_color(
+        &self,
+        account_id: i64,
+        color: Option<String>,
+    ) -> Result<Settings> {
+        let color = color
+            .map(|color| normalize_mail_profile_color(&color))
+            .transpose()?;
+        self.db
+            .write(move |conn| {
+                if repo::accounts::get(conn, account_id)?.is_none() {
+                    return Err(CoreError::NotFound(format!("account {account_id}")));
+                }
+                let mut settings = repo::settings::get(conn)?;
+                for profile in &mut settings.mail_profiles {
+                    profile.account_ids.retain(|id| *id != account_id);
+                }
+                let key = account_id.to_string();
+                if let Some(color) = color {
+                    settings.account_colors.insert(key, color);
+                } else {
+                    settings.account_colors.remove(&key);
+                }
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Delete one local profile. Connected accounts and provider data remain.
+    pub async fn delete_mail_profile(&self, profile_id: String) -> Result<Settings> {
+        let profile_id = profile_id.trim().to_owned();
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                let before = settings.mail_profiles.len();
+                settings
+                    .mail_profiles
+                    .retain(|profile| profile.id != profile_id);
+                if settings.mail_profiles.len() == before {
+                    return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
+                }
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    pub async fn set_show_account_badges(&self, enabled: bool) -> Result<Settings> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                settings.show_account_badges = enabled;
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
             })
             .await
     }
@@ -7214,6 +7481,14 @@ fn apply_thread_action(
                 .ok_or_else(|| CoreError::Other("label action requires labelId".into()))?;
             let label = repo::labels::get(&tx, label_id)?
                 .ok_or_else(|| CoreError::NotFound(format!("label {label_id}")))?;
+            if let Some(owner_account_id) = label.owner_account_id
+                && owner_account_id != account_id
+            {
+                return Err(CoreError::Other(format!(
+                    "label '{}' belongs to another account",
+                    label.name
+                )));
+            }
             let add = kind == ActionKind::AddLabel;
             let payload = serde_json::json!({ "labelId": label_id, "keyword": label.keyword });
             for (id, ..) in &msgs {
@@ -7224,7 +7499,7 @@ fn apply_thread_action(
                 }
                 // Auto labels are local-only: mutate membership but never push
                 // their keyword to IMAP (server reconcile also skips them).
-                if label.is_auto {
+                if label.is_auto || label.owner_account_id.is_none() {
                     continue;
                 }
                 let aid = repo::actions::enqueue(
@@ -7290,6 +7565,90 @@ mod move_action_validation_tests {
         let after = repo::messages::get_row(&conn, message_id).unwrap().unwrap();
         assert_eq!(after.folder_id, before.folder_id);
         assert_eq!(after.uid, before.uid);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM pending_actions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn label_action_rejects_a_label_owned_by_another_account() {
+        let mut conn = db::testutil::conn();
+        db::testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username,
+             imap_host, imap_port, smtp_host, smtp_port, created_at)
+             VALUES (2,'other@test.dev','imap','password','other','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        let (thread_id, message_id) =
+            db::testutil::seed_message(&conn, "sender@test.dev", "cross account label", false);
+        let label = repo::labels::save(&conn, None, "Travel", "#123456", 0, Some(2)).unwrap();
+
+        let error = apply_thread_action(
+            &mut conn,
+            thread_id,
+            ActionKind::AddLabel,
+            Some(&ActionParams {
+                wake_at: None,
+                target_folder_id: None,
+                label_id: Some(label.id),
+            }),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("another account"));
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM message_labels WHERE message_id = ?1",
+                [message_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM pending_actions", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn global_label_action_stays_local() {
+        let mut conn = db::testutil::conn();
+        db::testutil::seed_account(&conn);
+        let (thread_id, message_id) =
+            db::testutil::seed_message(&conn, "sender@test.dev", "global label", false);
+        let label = repo::labels::save(&conn, None, "Follow up", "#123456", 0, None).unwrap();
+
+        let actions = apply_thread_action(
+            &mut conn,
+            thread_id,
+            ActionKind::AddLabel,
+            Some(&ActionParams {
+                wake_at: None,
+                target_folder_id: None,
+                label_id: Some(label.id),
+            }),
+        )
+        .unwrap();
+
+        assert!(actions.is_empty());
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM message_labels
+                  WHERE message_id = ?1 AND label_id = ?2",
+                rusqlite::params![message_id, label.id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            1
+        );
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM pending_actions", [], |row| row
                 .get::<_, i64>(0))

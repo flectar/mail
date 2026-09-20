@@ -14,9 +14,9 @@ import { TypeScale } from "typography.slint";
 export { AppTheme, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
-import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, SidebarRow, MailLabelRow, ThreadMessageRow } from "models.slint";
+import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailProfileRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
-export { ThreadMessageRow } from "models.slint";
+export { ThreadMessageRow, StorageUsageRow } from "models.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail } from "components/product-rail.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
@@ -166,6 +166,19 @@ export global I18n {
         if (key == "Avatar preference updated for this session.") { return @tr("Avatar preference updated for this session."); }
         if (key == "Avatar preference saved.") { return @tr("Avatar preference saved."); }
         if (key == "Could not save avatar preference: {}") { return @tr("Could not save avatar preference: {}", argument); }
+        if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
+        if (key == "Profile saved.") { return @tr("Profile saved."); }
+        if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
+        if (key == "Account profile updated.") { return @tr("Account profile updated."); }
+        if (key == "Account color changes require local mail data.") { return @tr("Account color changes require local mail data."); }
+        if (key == "Account color updated.") { return @tr("Account color updated."); }
+        if (key == "Could not update account color: {}") { return @tr("Could not update account color: {}", argument); }
+        if (key == "Could not update account profile: {}") { return @tr("Could not update account profile: {}", argument); }
+        if (key == "Profile deleted.") { return @tr("Profile deleted."); }
+        if (key == "Could not delete profile: {}") { return @tr("Could not delete profile: {}", argument); }
+        if (key == "Marker preference is active for this session.") { return @tr("Marker preference is active for this session."); }
+        if (key == "Mail-list marker preference saved.") { return @tr("Mail-list marker preference saved."); }
+        if (key == "Could not save mail-list marker preference: {}") { return @tr("Could not save mail-list marker preference: {}", argument); }
         if (key == "Workspace layout updated for this session.") { return @tr("Workspace layout updated for this session."); }
         if (key == "Workspace layout preference saved.") { return @tr("Workspace layout preference saved."); }
         if (key == "Could not save workspace layout: {}") { return @tr("Could not save workspace layout: {}", argument); }
@@ -335,6 +348,7 @@ export global I18n {
         if (key == "Label added.") { return @tr("Label added."); }
         if (key == "Label removed.") { return @tr("Label removed."); }
         if (key == "Label created and added.") { return @tr("Label created and added."); }
+        if (key == "Label created.") { return @tr("Label created."); }
         if (key == "Label updated.") { return @tr("Label updated."); }
         if (key == "Label deleted.") { return @tr("Label deleted."); }
         if (key == "Could not update label: {}") { return @tr("Could not update label: {}", argument); }
@@ -452,10 +466,11 @@ export component AppWindow inherits Window {
     callback delete_account(int);
     callback message_action(string);
     callback message_action_for_email(int, string);
+    callback bulk_message_action(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
-    callback save_mail_label(int, string, color);
+    callback save_mail_label(int, int, string, color, bool);
     callback delete_mail_label(int);
     callback search_mail_labels(string);
     callback compose_message_action(string);
@@ -466,6 +481,11 @@ export component AppWindow inherits Window {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_mail_profile(string, string, color) -> string;
+    callback assign_account_profile(int, string);
+    callback save_account_color(int, color, bool);
+    callback delete_mail_profile(string);
+    callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
     callback save_language(string);
     callback save_sidebar_icon_style(bool);
@@ -493,6 +513,7 @@ export component AppWindow inherits Window {
     callback save_email_template(int, string, string, string, string) -> bool;
     callback delete_email_template(int) -> bool;
     callback add_password_account(string, string, string, string, string, string, string, string, string);
+    callback suggest_account_settings(string);
     callback start_oauth(string);
     callback reauth_account(int);
     callback cancel_oauth();
@@ -500,6 +521,7 @@ export component AppWindow inherits Window {
     callback save_oauth_apps(string, string, string);
     pure callback make_account_transfer(string) -> data-transfer;
     pure callback read_account_transfer(data-transfer) -> string;
+    pure callback settings-search-matches(string, string) -> bool;
     callback reorder_account(string, int, bool);
     callback save_account_mail_history(int, string);
     callback connect_account_calendar(int);
@@ -512,6 +534,8 @@ export component AppWindow inherits Window {
     callback import_account_backup();
     callback export_database_snapshot();
     callback delete_all_data();
+    callback load_storage_usage();
+    callback cancel_storage_usage();
     callback open_email_link(string);
     callback copy_email_status(string);
     callback email-pointer-event(float, float, string, bool, bool, bool, bool);
@@ -571,6 +595,7 @@ export component AppWindow inherits Window {
     in property <[MailLabelRow]> mail_label_results: [];
     in property <int> selected_mail_label_count: 0;
     in property <[AccountRow]> connected_accounts: [];
+    in property <[MailProfileRow]> mail_profiles: [];
     // The saved visible page can paint before the core is safe to use. Keep
     // that presentation milestone separate from startup-ready, which guards
     // every callback that can touch local storage.
@@ -690,8 +715,21 @@ export component AppWindow inherits Window {
         root.product-changed(root.active_view);
     }
     in-out property <string> settings_tab: "General";
+    // Own scan lifetime here: the conditional SettingsDialog is destroyed on
+    // close, so its own change handlers cannot reliably cancel a running scan.
+    private property <bool> storage-page-open: root.settings_open && root.settings_tab == "Data";
+    changed storage-page-open => {
+        if root.storage-page-open { root.load_storage_usage(); }
+        else { root.cancel_storage_usage(); }
+    }
+    in property <bool> storage_loading: false;
+    in property <bool> storage_loaded: false;
+    in property <string> storage_total: "";
+    in property <string> storage_error: "";
+    in property <[StorageUsageRow]> storage_usage: [];
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
     in-out property <bool> monochrome_sidebar_icons: false;
@@ -803,6 +841,7 @@ export component AppWindow inherits Window {
     // provide one, do not expose the desktop file:// printing fallback.
     in property <bool> print_supported: true;
     in property <bool> document_apis_supported: true;
+    in property <string> app-version: "";
 
     // Neutral, low-chrome surfaces keep the message content visually primary.
     // Interactive controls come from Slint's desktop widget set.
@@ -858,6 +897,19 @@ export component AppWindow inherits Window {
         root.folder-dialog-open = true;
     }
 
+    function open-label-create(account-id: int, account-name: string) {
+        root.folder-dialog-item-kind = "label";
+        root.folder-dialog-mode = "create";
+        root.folder-dialog-account-id = account-id;
+        root.folder-dialog-folder-id = -1;
+        root.folder-dialog-parent-name = account-name;
+        root.folder-dialog-name = "";
+        // Gmail accepts a fixed provider palette; this blue is supported
+        // remotely and remains a sensible local default for other accounts.
+        root.folder-dialog-label-color = #4a86e8;
+        root.folder-dialog-open = true;
+    }
+
     function open-folder-rename(folder-id: int, name: string) {
         root.folder-dialog-item-kind = "folder";
         root.folder-dialog-mode = "rename";
@@ -876,19 +928,21 @@ export component AppWindow inherits Window {
         root.folder-dialog-open = true;
     }
 
-    function open-label-rename(label-id: int, name: string, color: color) {
+    function open-label-rename(label-id: int, name: string, color: color, account: string, global: bool) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "rename";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-label-color = color;
         root.folder-dialog-open = true;
     }
 
-    function open-label-delete(label-id: int, name: string) {
+    function open-label-delete(label-id: int, name: string, account: string, global: bool) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "delete";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
     }
@@ -1075,18 +1129,20 @@ export component AppWindow inherits Window {
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
             filter_folders(query) => { root.filter_folders(query); }
             request_folder_create(account-id, parent-id, parent-name) => { root.open-folder-create(account-id, parent-id, parent-name); }
+            request_label_create(account-id, account-name) => { root.open-label-create(account-id, account-name); }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
-            request_label_rename(id, name, color) => { root.open-label-rename(id, name, color); }
-            request_label_delete(id, name) => { root.open-label-delete(id, name); }
+            request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
+            request_label_delete(id, name, account, global) => { root.open-label-delete(id, name, account, global); }
             load_more => { root.load_more(); }
             sync_mail => { root.sync_mail(); }
             message_action(action) => { root.message_action(action); }
             message_action_for_email(id, action) => { root.message_action_for_email(id, action); }
+            bulk_message_action(action) => { root.bulk_message_action(action); }
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
-            save_mail_label(id, name, color) => { root.save_mail_label(id, name, color); }
+            save_mail_label(id, account-id, name, color, global) => { root.save_mail_label(id, account-id, name, color, global); }
             search_mail_labels(query) => { root.search_mail_labels(query); }
             compose_message_action(action) => { root.compose_message_action(action); }
             close_preview => { root.close_preview(); }
@@ -1308,6 +1364,7 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             connected_accounts: root.connected_accounts;
+            mail_profiles: root.mail_profiles;
             custom_oauth_configured: root.custom_oauth_configured;
             google_oauth_available: root.google_oauth_available;
             microsoft_oauth_available: root.microsoft_oauth_available;
@@ -1321,6 +1378,12 @@ export component AppWindow inherits Window {
             oauth_in_progress: root.oauth_in_progress;
             oauth_settings_saving: root.oauth_settings_saving;
             sync_status: root.sync_status;
+            app-version: root.app-version;
+            storage_loading: root.storage_loading;
+            storage_loaded: root.storage_loaded;
+            storage_total: root.storage_total;
+            storage_error: root.storage_error;
+            storage_usage: root.storage_usage;
             accent: root.accent;
             accent-soft: root.accent-soft;
             body-text: root.body-text;
@@ -1338,6 +1401,7 @@ export component AppWindow inherits Window {
             settings_tab <=> root.settings_tab;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
+            show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
             monochrome_sidebar_icons <=> root.monochrome_sidebar_icons;
@@ -1409,6 +1473,19 @@ export component AppWindow inherits Window {
                 );
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
+            save_mail_profile(profile-id, name, color) => {
+                return root.save_mail_profile(profile-id, name, color);
+            }
+            assign_account_profile(account-id, profile-id) => {
+                root.assign_account_profile(account-id, profile-id);
+            }
+            save_account_color(account-id, color, generated) => {
+                root.save_account_color(account-id, color, generated);
+            }
+            delete_mail_profile(profile-id) => { root.delete_mail_profile(profile-id); }
+            save_account_markers_visibility(enabled) => {
+                root.save_account_markers_visibility(enabled);
+            }
             save_workspace_layout(mode) => { root.save_workspace_layout(mode); }
             save_language(language) => { root.save_language(language); }
             save_sidebar_icon_style(monochrome) => { root.save_sidebar_icon_style(monochrome); }
@@ -1424,6 +1501,7 @@ export component AppWindow inherits Window {
             add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
                 root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
             }
+            suggest_account_settings(email) => { root.suggest_account_settings(email); }
             start_oauth(provider) => { root.start_oauth(provider); }
             reauth_account(account-id) => { root.reauth_account(account-id); }
             cancel_oauth => { root.cancel_oauth(); }
@@ -1433,6 +1511,7 @@ export component AppWindow inherits Window {
             set-remote-images(enabled) => { root.set-remote-images(enabled); }
             make_account_transfer(value) => root.make_account_transfer(value);
             read_account_transfer(value) => root.read_account_transfer(value);
+            settings-search-matches(haystack, query) => root.settings-search-matches(haystack, query);
             reorder_account(source, target, after) => { root.reorder_account(source, target, after); }
             save_account_mail_history(account-id, value) => { root.save_account_mail_history(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
@@ -1445,6 +1524,7 @@ export component AppWindow inherits Window {
             import_account_backup => { root.import_account_backup(); }
             export_database_snapshot => { root.export_database_snapshot(); }
             delete_all_data => { root.delete_all_data(); }
+            load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
         }
         }
@@ -1572,7 +1652,13 @@ export component AppWindow inherits Window {
         submit(name) => {
             root.folder-dialog-open = false;
             if (root.folder-dialog-item-kind == "label") {
-                root.save_mail_label(root.folder-dialog-folder-id, name, root.folder-dialog-label-color);
+                root.save_mail_label(
+                    root.folder-dialog-folder-id,
+                    root.folder-dialog-account-id,
+                    name,
+                    root.folder-dialog-label-color,
+                    false,
+                );
             } else if (root.folder-dialog-mode == "create") {
                 root.create-folder(root.folder-dialog-account-id, root.folder-dialog-parent-id, name);
             } else {
@@ -1641,6 +1727,7 @@ export component AppWindow inherits Window {
         add-password-account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
             root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
         }
+        suggest-account-settings(email) => { root.suggest_account_settings(email); }
         start-oauth(provider) => {
             root.connect_calendar_on_add = false;
             root.start_oauth(provider);

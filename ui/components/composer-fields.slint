@@ -48,8 +48,7 @@ export component ComposerHeader inherits Rectangle {
                 y: root.compact ? 4px : 10px;
                 width: root.compact ? 44px : 32px;
                 height: root.compact ? 44px : 32px;
-                icon: @image-url("../icons/phosphor/x.svg");
-                icon-size: 15px;
+                icon: @image-url("../icons/lucide/outline/x.svg");
                 icon-color: root.secondary-color;
                 hover-background: root.control-hover-color;
                 tooltip-text: @tr("Close");
@@ -125,7 +124,7 @@ export component ComposerFromRow inherits Rectangle {
                     y: 9px;
                     width: 14px;
                     height: 14px;
-                    source: @image-url("../icons/phosphor/caret-down.svg");
+                    source: @image-url("../icons/lucide/outline/chevron-down.svg");
                     colorize: root.muted-color;
                     image-fit: contain;
                     transform-rotation: account-popup.is-open ? 180deg : 0deg;

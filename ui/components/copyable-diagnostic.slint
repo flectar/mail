@@ -1,0 +1,46 @@
+import { HorizontalBox } from "std-widgets.slint";
+import { IconButton } from "controls.slint";
+import { AppTheme } from "../design-system.slint";
+
+// Error and status text stays selectable, while the explicit action makes
+// copying long protocol diagnostics practical on both pointer and touch UIs.
+export component CopyableDiagnostic inherits Rectangle {
+    in property <string> text;
+    in property <color> text-color;
+    in property <length> font-size;
+
+    height: max(28px, diagnostic-text.preferred-height);
+    background: transparent;
+
+    HorizontalBox {
+        spacing: 6px;
+
+        diagnostic-text := TextInput {
+            horizontal-stretch: 1;
+            text: root.text;
+            color: root.text-color;
+            font-size: root.font-size;
+            read-only: true;
+            single-line: false;
+            wrap: word-wrap;
+            selection-background-color: AppTheme.accent;
+            selection-foreground-color: white;
+            accessible-label: root.text;
+        }
+
+        IconButton {
+            width: 28px;
+            height: 28px;
+            icon: @image-url("../icons/lucide/outline/copy.svg");
+            icon-color: root.text-color;
+            idle-background: transparent;
+            hover-background: AppTheme.accent-soft;
+            tooltip-text: @tr("Copy diagnostics");
+            tooltip-above: true;
+            clicked => {
+                diagnostic-text.select-all();
+                diagnostic-text.copy();
+            }
+        }
+    }
+}

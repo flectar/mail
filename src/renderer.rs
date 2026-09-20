@@ -45,6 +45,10 @@ const EMAIL_TILE_HEIGHT: f32 = 512.0;
 const EMAIL_TILE_OVERSCAN: u32 = 1;
 const MAX_EMAIL_SURFACE_HEIGHT: f32 = 100_000.0;
 
+// Match the application's light-canvas accent. A user-agent rule lets sender
+// styles (including white labels on colored buttons) take precedence.
+const EMAIL_LINK_STYLE: &str = "a:any-link { color: #0969da; cursor: pointer; }";
+
 pub(crate) fn render_timings_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var_os("FLECTAR_RENDER_TIMINGS").is_some())
@@ -1623,6 +1627,7 @@ fn prepare_email_html_at_with_font_ctx(
             ..Default::default()
         },
     );
+    document.add_user_agent_stylesheet(EMAIL_LINK_STYLE);
 
     let mut stack = vec![(document.root_node().id, 0usize)];
     let mut count = 0usize;

@@ -277,6 +277,7 @@ pub(super) fn render_current(
         search_filter,
         inbox_count,
         labels,
+        account_presentation,
     ) = {
         let state = state.borrow();
         (
@@ -299,6 +300,7 @@ pub(super) fn render_current(
             state.search_filter.clone(),
             state.inbox_count,
             state.labels.clone(),
+            state.account_presentation.clone(),
         )
     };
 
@@ -350,7 +352,14 @@ pub(super) fn render_current(
     let email_rows = Rc::clone(&state.borrow().email_rows);
     reconcile_model_rows_by(
         &email_rows,
-        make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
+        make_rows(
+            visible,
+            selected_id,
+            &checked_ids,
+            &favicon_icons,
+            &labels,
+            &account_presentation,
+        ),
         |row| row.id,
         same_email_row,
     );
@@ -549,26 +558,57 @@ pub(super) fn make_label_rows(
     let applied = selected
         .map(|message| message.labels.as_slice())
         .unwrap_or_default();
-    project_label_rows(labels, applied, query)
+    let mut rows = project_label_rows(
+        labels,
+        applied,
+        selected.map(|message| message.account_id),
+        query,
+    );
+    if let Some(message) = selected {
+        for row in &mut rows {
+            row.account_name = if row.is_global {
+                "All accounts".into()
+            } else if row.account_id >= 0 {
+                message.account.clone().into()
+            } else {
+                Default::default()
+            };
+        }
+    }
+    rows
 }
 
 fn project_label_rows(
     labels: &[flectar_mail_core::models::Label],
     applied: &[i64],
+    selected_account_id: Option<i64>,
     query: &str,
 ) -> Vec<MailLabelRow> {
     let query = query.trim().to_lowercase();
     labels
         .iter()
+        .filter(|label| {
+            selected_account_id.is_none_or(|account_id| {
+                label.is_auto
+                    || label.owner_account_id.is_none()
+                    || label.owner_account_id == Some(account_id)
+            })
+        })
         .filter(|label| query.is_empty() || label.name.to_lowercase().contains(&query))
         .filter_map(|label| {
             Some(MailLabelRow {
                 id: i32::try_from(label.id).ok()?,
+                account_id: label
+                    .owner_account_id
+                    .and_then(|id| i32::try_from(id).ok())
+                    .unwrap_or(-1),
+                account_name: Default::default(),
                 name: label.name.clone().into(),
                 name_has_emoji: contains_emoji(&label.name),
                 color: label_color(&label.color),
                 applied: applied.contains(&label.id),
                 is_auto: label.is_auto,
+                is_global: !label.is_auto && label.owner_account_id.is_none(),
             })
         })
         .collect()
@@ -589,11 +629,17 @@ fn applied_label_rows(
         .filter_map(|label| {
             Some(MailLabelRow {
                 id: i32::try_from(label.id).ok()?,
+                account_id: label
+                    .owner_account_id
+                    .and_then(|id| i32::try_from(id).ok())
+                    .unwrap_or(-1),
+                account_name: Default::default(),
                 name: label.name.clone().into(),
                 name_has_emoji: contains_emoji(&label.name),
                 color: label_color(&label.color),
                 applied: true,
                 is_auto: label.is_auto,
+                is_global: !label.is_auto && label.owner_account_id.is_none(),
             })
         })
         .collect()
@@ -666,8 +712,9 @@ pub(super) fn scope_matches(email: &MailMessage, scope: &str) -> bool {
         // row.
         return true;
     }
-    if let Some(label_id) = scope
-        .strip_prefix("Label:")
+    if let Some(label_id) = ["AccountLabel:", "GlobalLabel:", "Category:", "Label:"]
+        .into_iter()
+        .find_map(|prefix| scope.strip_prefix(prefix))
         .and_then(|id| id.parse::<i64>().ok())
     {
         return email.labels.contains(&label_id);
@@ -699,6 +746,9 @@ fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
     a.id == b.id
         && a.account_id == b.account_id
         && a.account == b.account
+        && a.account_color == b.account_color
+        && a.account_profile == b.account_profile
+        && a.show_account_marker == b.show_account_marker
         && a.folder == b.folder
         && a.sender == b.sender
         && a.address == b.address
@@ -725,6 +775,7 @@ pub(super) fn make_rows(
     checked_ids: &HashSet<i32>,
     favicon_icons: &HashMap<String, FaviconImages>,
     labels: &[flectar_mail_core::models::Label],
+    account_presentation: &AccountPresentationSettings,
 ) -> Vec<EmailRow> {
     messages
         .iter()
@@ -732,10 +783,19 @@ pub(super) fn make_rows(
             let favicons = favicon_icons.get(&email.domain);
             let favicon = favicons.map(|icons| slint_image(&icons.regular));
             let favicon_small = favicons.map(|icons| slint_image(&icons.small));
+            let profile = account_presentation.profile(email.account_id);
             EmailRow {
                 id: email.id,
                 account_id: i32::try_from(email.account_id).unwrap_or(-1),
-                account: email.account.clone().into(),
+                account: account_presentation
+                    .account_label(email.account_id, &email.account)
+                    .into(),
+                account_color: account_presentation.marker_color(email.account_id),
+                account_profile: profile
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_default()
+                    .into(),
+                show_account_marker: account_presentation.show_markers,
                 folder: email.folder.clone().into(),
                 sender: email.sender.clone().into(),
                 address: email.address.clone().into(),
@@ -834,7 +894,15 @@ pub(super) fn refresh_rows_only(
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
 ) {
-    let (messages, page, using_core, selected_id, preview_closed, favicon_icons) = {
+    let (
+        messages,
+        page,
+        using_core,
+        selected_id,
+        preview_closed,
+        favicon_icons,
+        account_presentation,
+    ) = {
         let state = state.borrow();
         (
             filtered_messages(
@@ -848,6 +916,7 @@ pub(super) fn refresh_rows_only(
             state.selected_id,
             state.preview_closed,
             state.favicon_icons.clone(),
+            state.account_presentation.clone(),
         )
     };
     let visible_count = if using_core {
@@ -878,7 +947,14 @@ pub(super) fn refresh_rows_only(
     };
     reconcile_model_rows_by(
         &email_rows,
-        make_rows(visible, selected_id, &checked_ids, &favicon_icons, &labels),
+        make_rows(
+            visible,
+            selected_id,
+            &checked_ids,
+            &favicon_icons,
+            &labels,
+            &account_presentation,
+        ),
         |row| row.id,
         same_email_row,
     );
@@ -1153,7 +1229,7 @@ pub(super) fn make_mailbox_rows(
     let mut label_colors = HashMap::new();
     for label in labels {
         label_colors
-            .entry(label.name.to_ascii_lowercase())
+            .entry((label.owner_account_id, label.name.to_ascii_lowercase()))
             .or_insert_with(|| label_color(&label.color));
     }
     let parents = mailboxes
@@ -1185,7 +1261,13 @@ pub(super) fn make_mailbox_rows(
             let custom_color = (!mailbox.is_account)
                 .then(|| {
                     label_colors
-                        .get(&mailbox.label.to_ascii_lowercase())
+                        .get(&(
+                            Some(mailbox.account_id),
+                            mailbox.label.to_ascii_lowercase(),
+                        ))
+                        .or_else(|| {
+                            label_colors.get(&(None, mailbox.label.to_ascii_lowercase()))
+                        })
                         .copied()
                 })
                 .flatten();
@@ -1229,8 +1311,9 @@ fn mailbox_scope_title(
             .find(|mailbox| mailbox.scope == scope)
             .map(|mailbox| mailbox.label.clone())
             .unwrap_or_else(|| "Folder".into())
-    } else if let Some(label_id) = scope
-        .strip_prefix("Label:")
+    } else if let Some(label_id) = ["AccountLabel:", "GlobalLabel:", "Category:", "Label:"]
+        .into_iter()
+        .find_map(|prefix| scope.strip_prefix(prefix))
         .and_then(|id| id.parse::<i64>().ok())
     {
         labels
@@ -1270,6 +1353,7 @@ mod tests {
             }
         }
         let messages = vec![message(1), message(2), message(3)];
+        let presentation = AccountPresentationSettings::default();
         let project = |selected| {
             make_rows(
                 &messages,
@@ -1277,6 +1361,7 @@ mod tests {
                 &HashSet::new(),
                 &HashMap::new(),
                 &[],
+                &presentation,
             )
         };
         let model = VecModel::from(project(1));
@@ -1371,6 +1456,37 @@ mod tests {
             body_pending: true,
             sender_verification: String::new(),
         }
+    }
+
+    #[test]
+    fn mail_rows_use_the_assigned_profile_color_and_name() {
+        let mut email = message(1);
+        email.account = "alice@example.org".into();
+        let presentation = AccountPresentationSettings {
+            profiles: vec![MailProfile {
+                id: "work".into(),
+                name: "Work".into(),
+                color: "#EA580C".into(),
+                account_ids: vec![1],
+            }],
+            show_markers: true,
+            account_colors: HashMap::new(),
+            account_short_names: HashMap::from([("1".into(), "Client".into())]),
+        };
+
+        let rows = make_rows(
+            &[email],
+            None,
+            &HashSet::new(),
+            &HashMap::new(),
+            &[],
+            &presentation,
+        );
+
+        assert_eq!(rows[0].account, "Client");
+        assert_eq!(rows[0].account_profile, "Work");
+        assert_eq!(rows[0].account_color, slint::Color::from_rgb_u8(0xea, 0x58, 0x0c));
+        assert!(rows[0].show_account_marker);
     }
 
     #[test]
@@ -1480,6 +1596,7 @@ mod tests {
                 color: "#2563eb".into(),
                 keyword: "Work".into(),
                 position: 0,
+                owner_account_id: None,
                 is_auto: false,
             },
             flectar_mail_core::models::Label {
@@ -1488,6 +1605,7 @@ mod tests {
                 color: "#7c3aed".into(),
                 keyword: "Follow_up".into(),
                 position: 1,
+                owner_account_id: None,
                 is_auto: false,
             },
         ];
@@ -1506,6 +1624,7 @@ mod tests {
                 color: "#2563eb".into(),
                 keyword: "Work".into(),
                 position: 0,
+                owner_account_id: None,
                 is_auto: false,
             },
             flectar_mail_core::models::Label {
@@ -1514,6 +1633,7 @@ mod tests {
                 color: "#7c3aed".into(),
                 keyword: "Follow_Up".into(),
                 position: 1,
+                owner_account_id: None,
                 is_auto: false,
             },
         ];
@@ -1522,6 +1642,33 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "Follow Up");
         assert!(results[0].applied);
+    }
+
+    #[test]
+    fn label_picker_only_offers_the_selected_account_and_global_labels() {
+        let mut selected = message(12);
+        selected.account_id = 7;
+        selected.account = "Work".into();
+        let label = |id, owner_account_id| flectar_mail_core::models::Label {
+            id,
+            name: format!("Label {id}"),
+            color: "#2563eb".into(),
+            keyword: format!("Label{id}"),
+            position: id,
+            owner_account_id,
+            is_auto: false,
+        };
+        let labels = vec![label(1, Some(7)), label(2, Some(8)), label(3, None)];
+
+        let results = make_label_rows(&labels, Some(&selected), "");
+
+        assert_eq!(
+            results.iter().map(|row| row.id).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
+        assert_eq!(results[0].account_name, "Work");
+        assert_eq!(results[1].account_name, "All accounts");
+        assert!(results[1].is_global);
     }
 
     #[test]
@@ -1535,6 +1682,7 @@ mod tests {
                 color: "#ef4444".into(),
                 keyword: "Personal".into(),
                 position: 0,
+                owner_account_id: None,
                 is_auto: false,
             },
             flectar_mail_core::models::Label {
@@ -1543,11 +1691,19 @@ mod tests {
                 color: "#7c3aed".into(),
                 keyword: "Viaje".into(),
                 position: 1,
+                owner_account_id: None,
                 is_auto: false,
             },
         ];
 
-        let rows = make_rows(&[email], None, &HashSet::new(), &HashMap::new(), &labels);
+        let rows = make_rows(
+            &[email],
+            None,
+            &HashSet::new(),
+            &HashMap::new(),
+            &labels,
+            &AccountPresentationSettings::default(),
+        );
         assert_eq!(rows[0].labels.row_count(), 1);
         let label = rows[0].labels.row_data(0).expect("projected label");
         assert_eq!(label.name, "Viaje");
@@ -1577,6 +1733,7 @@ mod tests {
             color: "#22c55e".into(),
             keyword: "Projects".into(),
             position: 0,
+            owner_account_id: None,
             is_auto: false,
         }];
 
@@ -1635,9 +1792,10 @@ mod tests {
             color: "#4a86e8".into(),
             keyword: "Cars".into(),
             position: 0,
+            owner_account_id: None,
             is_auto: false,
         }];
-        assert!(project_label_rows(&labels, &[1], "")[0].name_has_emoji);
+        assert!(project_label_rows(&labels, &[1], None, "")[0].name_has_emoji);
     }
 
     #[test]

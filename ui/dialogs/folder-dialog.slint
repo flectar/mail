@@ -22,7 +22,8 @@ export component FolderDialog inherits Rectangle {
     background: #00000066;
     forward-focus: folder-name-input;
     accessible-role: groupbox;
-    accessible-label: root.mode == "create" ? @tr("New folder")
+    accessible-label: root.mode == "create" && root.item-kind == "label" ? @tr("New label")
+        : root.mode == "create" ? @tr("New folder")
         : root.mode == "rename" && root.item-kind == "label" ? @tr("Rename label")
         : root.mode == "rename" ? @tr("Rename folder")
         : root.item-kind == "label" ? @tr("Delete label?")
@@ -45,7 +46,8 @@ export component FolderDialog inherits Rectangle {
             y: 20px;
             width: parent.width - 44px;
             height: 28px;
-            text: root.mode == "create" ? @tr("New folder")
+            text: root.mode == "create" && root.item-kind == "label" ? @tr("New label")
+                : root.mode == "create" ? @tr("New folder")
                 : root.mode == "rename" && root.item-kind == "label" ? @tr("Rename label")
                 : root.mode == "rename" ? @tr("Rename folder")
                 : root.item-kind == "label" ? @tr("Delete label?")
@@ -63,12 +65,14 @@ export component FolderDialog inherits Rectangle {
             height: root.mode == "delete" ? 54px : 34px;
             text: root.mode == "delete"
                 ? root.item-kind == "label"
-                    ? @tr("Delete “{}”?", root.name)
+                    ? @tr("Delete “{}” from “{}”?", root.name, root.parent-name)
                     : @tr("Delete “{}” and its contents from the mail server?", root.name)
                 : root.mode == "rename"
                     ? root.item-kind == "label"
-                        ? @tr("Enter a new name for this label.")
+                        ? @tr("Rename this label in “{}”.", root.parent-name)
                         : @tr("Enter a new name for this folder.")
+                : root.item-kind == "label"
+                    ? @tr("Create a label in “{}”.", root.parent-name)
                 : root.parent-name == ""
                     ? @tr("Create at the top level")
                     : @tr("Inside “{}”", root.parent-name);
@@ -119,7 +123,10 @@ export component FolderDialog inherits Rectangle {
                 clicked => { root.cancel(); }
             }
             Button {
-                text: root.mode == "delete" ? @tr("Delete") : @tr("Save");
+                text: root.mode == "delete" ? @tr("Delete")
+                    : root.mode == "create" && root.item-kind == "label" ? @tr("Create label")
+                    : root.mode == "create" ? @tr("Create folder")
+                    : @tr("Save");
                 destructive: root.mode == "delete";
                 primary: root.mode != "delete";
                 enabled: root.mode == "delete" || root.name != "";

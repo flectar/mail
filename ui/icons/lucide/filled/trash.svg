@@ -1,0 +1,34 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <mask id="cut-1" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <g>
+          <path d="M3 6h18" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="black" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+      </g>
+    </mask>
+    <mask id="cut-2" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <g>
+          <path d="M10 11v6" fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M14 11v6" fill="none" stroke="black" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <g>
+    <g mask="url(#cut-1)">
+      <g mask="url(#cut-2)">
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6 Z" fill="#000" stroke="none" />
+      </g>
+    </g>
+    <g>
+      <path d="M3 6h18" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+  </g>
+</svg>

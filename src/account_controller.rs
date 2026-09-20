@@ -2,6 +2,48 @@
 
 use super::*;
 
+fn mail_domain(address: &str) -> Option<&str> {
+    let address = address.trim();
+    if address.is_empty() || address.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let (local, domain) = address.rsplit_once('@')?;
+    (!local.is_empty()
+        && !local.contains('@')
+        && !domain.is_empty()
+        && !domain.contains('@')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.'))
+    .then_some(domain)
+}
+
+fn same_mail_transport(left: &AccountConfig, right: &AccountConfig) -> bool {
+    left.imap_host.eq_ignore_ascii_case(&right.imap_host)
+        && left.imap_port == right.imap_port
+        && left.smtp_host.eq_ignore_ascii_case(&right.smtp_host)
+        && left.smtp_port == right.smtp_port
+        && left.settings.connection == right.settings.connection
+}
+
+/// Reuse transport details only when every manual IMAP account for the domain
+/// agrees. Ambiguous configurations deliberately leave the new form untouched.
+pub(super) fn reusable_mail_transport<'a>(
+    configs: &'a [AccountConfig],
+    address: &str,
+) -> Option<&'a AccountConfig> {
+    let domain = mail_domain(address)?;
+    let mut matches = configs.iter().filter(|config| {
+        config.provider == Provider::Imap
+            && config.mail_protocol == MailProtocol::Imap
+            && mail_domain(&config.email)
+                .is_some_and(|candidate| candidate.eq_ignore_ascii_case(domain))
+    });
+    let first = matches.next()?;
+    matches
+        .all(|candidate| same_mail_transport(first, candidate))
+        .then_some(first)
+}
+
 pub(super) struct AccountRemovalUpdate {
     pub account_id: i64,
     pub removed: bool,
@@ -69,6 +111,7 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     state
         .account_configs
         .retain(|config| config.id != account_id);
+    state.account_presentation.remove_account(account_id);
     state
         .calendar_connections
         .retain(|connection| connection.account_id != account_id);
@@ -101,6 +144,7 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     mail_work::invalidate(state);
 }
 
+#[allow(clippy::too_many_arguments, reason = "Projects the independently loaded account, connection, avatar, and presentation data into one UI model.")]
 pub(super) fn apply_connected_accounts(
     app: &AppWindow,
     accounts: &[Account],
@@ -109,6 +153,7 @@ pub(super) fn apply_connected_accounts(
     carddav_connections: &[CardDavConnection],
     calendar_errors: &HashMap<i64, String>,
     avatars: &HashMap<i64, ProfileAvatarImages>,
+    presentation: &AccountPresentationSettings,
 ) {
     let configs: HashMap<i64, &AccountConfig> =
         configs.iter().map(|config| (config.id, config)).collect();
@@ -133,6 +178,7 @@ pub(super) fn apply_connected_accounts(
             let avatar = avatars.get(&account.id);
             let calendar = calendar_connections.get(&account.id);
             let carddav = carddav_connections.get(&account.id);
+            let profile = presentation.profile(account.id);
             Some(AccountRow {
                 id: i32::try_from(account.id).ok()?,
                 drag_key: account.id.to_string().into(),
@@ -150,6 +196,17 @@ pub(super) fn apply_connected_accounts(
                     .map(|images| slint_image(&images.small))
                     .unwrap_or_default(),
                 has_avatar: avatar.is_some(),
+                profile_id: profile
+                    .map(|profile| profile.id.clone())
+                    .unwrap_or_default()
+                    .into(),
+                profile_name: profile
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_default()
+                    .into(),
+                profile_color: presentation.marker_color(account.id),
+                has_profile: profile.is_some(),
+                has_account_color: presentation.has_account_color(account.id),
                 username: config.username.clone().into(),
                 jmap_url: config.jmap_url.clone().into(),
                 imap_security: config.settings.connection.imap_security.as_str().into(),
@@ -200,6 +257,33 @@ pub(super) fn apply_connected_accounts(
         })
         .collect::<Vec<_>>();
     apply_connected_account_rows(app, rows);
+    let known_accounts = accounts
+        .iter()
+        .map(|account| account.id)
+        .collect::<HashSet<_>>();
+    app.set_mail_profiles(ModelRc::new(VecModel::from(
+        presentation
+            .profiles
+            .iter()
+            .map(|profile| {
+                MailProfileRow {
+                    id: profile.id.clone().into(),
+                    name: profile.name.clone().into(),
+                    color: parse_marker_color(&profile.color)
+                        .unwrap_or_else(|| slint::Color::from_rgb_u8(107, 114, 128)),
+                    account_count: i32::try_from(
+                        profile
+                            .account_ids
+                            .iter()
+                            .filter(|account_id| known_accounts.contains(account_id))
+                            .count(),
+                    )
+                    .unwrap_or(i32::MAX),
+                }
+            })
+            .collect::<Vec<_>>(),
+    )));
+    app.set_show_account_markers(presentation.show_markers);
 }
 
 pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
@@ -212,6 +296,7 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
         &state.carddav_connections,
         &state.calendar_errors,
         &state.profile_avatar_images,
+        &state.account_presentation,
     );
     drop(state);
     app.global::<AccountMailPreferences>()
@@ -428,5 +513,53 @@ pub(super) fn normalize_appimage_environment() {
         // or any application worker thread exists, so no concurrent environment
         // access can race this process-wide mutation.
         unsafe { std::env::remove_var("XDG_DATA_DIRS") };
+    }
+}
+
+#[cfg(test)]
+mod mail_transport_suggestion_tests {
+    use super::*;
+
+    fn config(id: i64, email: &str, imap_host: &str, smtp_host: &str) -> AccountConfig {
+        AccountConfig {
+            id,
+            email: email.into(),
+            display_name: None,
+            avatar_url: None,
+            provider: Provider::Imap,
+            auth_kind: flectar_mail_core::models::AuthKind::Password,
+            mail_protocol: MailProtocol::Imap,
+            username: email.into(),
+            jmap_url: String::new(),
+            jmap_account_id: None,
+            imap_host: imap_host.into(),
+            imap_port: 993,
+            smtp_host: smtp_host.into(),
+            smtp_port: 465,
+            settings: Default::default(),
+        }
+    }
+
+    #[test]
+    fn reuses_the_unique_transport_for_a_matching_domain() {
+        let configs = vec![config(
+            1,
+            "first@Example.com",
+            "imap.example.com",
+            "smtp.example.com",
+        )];
+        let suggestion = reusable_mail_transport(&configs, "second@example.COM").unwrap();
+        assert_eq!(suggestion.imap_host, "imap.example.com");
+        assert_eq!(suggestion.smtp_host, "smtp.example.com");
+    }
+
+    #[test]
+    fn leaves_ambiguous_or_incomplete_addresses_untouched() {
+        let configs = vec![
+            config(1, "first@example.com", "imap-a.example.com", "smtp.example.com"),
+            config(2, "other@example.com", "imap-b.example.com", "smtp.example.com"),
+        ];
+        assert!(reusable_mail_transport(&configs, "new@example.com").is_none());
+        assert!(reusable_mail_transport(&configs, "new@").is_none());
     }
 }

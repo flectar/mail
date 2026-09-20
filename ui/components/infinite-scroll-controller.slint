@@ -9,7 +9,7 @@ export component InfiniteScrollController inherits Rectangle {
     in property <int> row-count;
     in property <int> revision;
     in property <length> content-height;
-    in property <length> viewport-y;
+    in property <length> content-y;
     in property <length> visible-height;
     in property <length> prefetch-distance: 246px;
     callback load-more;
@@ -20,7 +20,7 @@ export component InfiniteScrollController inherits Rectangle {
     function check() {
         if root.active && root.visible-height > 0px && root.can-load-more
             && !root.loading && root.armed
-            && root.content-height + root.viewport-y - root.visible-height <= root.prefetch-distance {
+            && root.content-height + root.content-y - root.visible-height <= root.prefetch-distance {
             root.armed = false;
             root.request-rows = root.row-count;
             root.request-revision = root.revision;

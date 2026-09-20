@@ -1,3 +1,17 @@
+import { TypeScale } from "../typography.slint";
+import { LayoutMetrics } from "../design-system.slint";
+
+// Navigation labels share the body type scale so OS text preferences apply.
+export global SidebarStyle {
+    out property <relative-font-size> label-size: TypeScale.body;
+    out property <length> icon-size: LayoutMetrics.icon-size;
+    out property <length> icon-left: 22px;
+    out property <length> label-offset: 30px;
+    out property <length> branch-indent: 16px;
+    out property <int> normal-weight: 500;
+    out property <int> selected-weight: 600;
+}
+
 // Shared row surface for mail, contact scopes and calendar sources.
 export component SidebarRowSurface inherits Rectangle {
     in property <color> idle-background: transparent;

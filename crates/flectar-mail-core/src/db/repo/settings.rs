@@ -46,6 +46,8 @@ mod tests {
         assert_eq!(d.calendar_week_start, "monday");
         assert_eq!(d.theme_preset, "default");
         assert_eq!(d.custom_theme.light_primary, "#0969DA");
+        assert!(d.mail_profiles.is_empty());
+        assert!(!d.show_account_badges);
 
         let mut s = d.clone();
         s.theme = "carbon".into();
@@ -80,6 +82,12 @@ mod tests {
                 value: "important".into(),
             }],
         });
+        s.mail_profiles.push(crate::models::MailProfile {
+            id: "work".into(),
+            name: "Work".into(),
+            color: "#3B82F6".into(),
+            account_ids: vec![1, 2],
+        });
         set(&c, &s).unwrap();
 
         let back = get(&c).unwrap();
@@ -94,6 +102,7 @@ mod tests {
         assert_eq!(back.signature_list.len(), 1);
         assert_eq!(back.signature_list[0].html, "<b>Dean</b>");
         assert_eq!(back.ai_automation_rules, s.ai_automation_rules);
+        assert_eq!(back.mail_profiles, s.mail_profiles);
         assert_eq!(
             back.signature_defaults
                 .get("1")
@@ -128,6 +137,8 @@ mod tests {
         assert!(s.auto_advance);
         assert!(s.auto_labels_enabled);
         assert!(s.ai_automation_rules.is_empty());
+        assert!(s.mail_profiles.is_empty());
+        assert!(!s.show_account_badges);
         assert!(!s.ai_model_instant.is_empty());
         assert!(!s.ai_model_cheap.is_empty());
         assert!(!s.ai_model_intelligent.is_empty());

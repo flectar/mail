@@ -51,7 +51,7 @@ fn keyword_sanitizes_invalid_atom_chars() {
 #[test]
 fn membership_flows_to_summary_and_filter() {
     let conn = seed();
-    let work = repo::labels::save(&conn, None, "Work", "#2563eb", 0).unwrap();
+    let work = repo::labels::save(&conn, None, "Work", "#2563eb", 0, None).unwrap();
 
     repo::labels::add_to_message(&conn, 100, work.id).unwrap();
 
@@ -78,8 +78,8 @@ fn membership_flows_to_summary_and_filter() {
 #[test]
 fn reconcile_keywords_rounds_labels_in_and_out() {
     let conn = seed();
-    let work = repo::labels::save(&conn, None, "Work", "#2563eb", 0).unwrap();
-    let personal = repo::labels::save(&conn, None, "Personal", "#16a34a", 1).unwrap();
+    let work = repo::labels::save(&conn, None, "Work", "#2563eb", 0, Some(1)).unwrap();
+    let personal = repo::labels::save(&conn, None, "Personal", "#16a34a", 1, Some(1)).unwrap();
 
     // Server reports the "Work" keyword on message 100 -> membership added.
     let changed = repo::labels::reconcile_keywords(&conn, 100, &["Work".into()]).unwrap();

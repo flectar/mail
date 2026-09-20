@@ -26,7 +26,7 @@ export component ConfirmationDialog inherits Rectangle {
     visible: root.open;
     background: #00000088;
     z: 1000;
-    // Slint 1.17 has no dialog accessibility role; groupbox is the closest
+    // Slint has no dialog accessibility role; groupbox is the closest
     // semantic container, while the focused scope owns keyboard interaction.
     accessible-role: groupbox;
     accessible-label: root.title;

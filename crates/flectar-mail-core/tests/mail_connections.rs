@@ -51,6 +51,62 @@ async fn line<S: tokio::io::AsyncRead + Unpin>(stream: &mut BufReader<S>) -> Str
     .unwrap();
     line
 }
+
+async fn advertise_capabilities<S>(stream: &mut BufReader<S>, capabilities: &str)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let command = line(stream).await;
+    assert!(
+        command.contains(" CAPABILITY"),
+        "unexpected command: {command:?}"
+    );
+    let tag = command.split_whitespace().next().unwrap();
+    stream
+        .write_all(format!("* CAPABILITY {capabilities}\r\n{tag} OK capability\r\n").as_bytes())
+        .await
+        .unwrap();
+}
+
+async fn accept_client_identification<S>(stream: &mut BufReader<S>)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let command = line(stream).await;
+    assert!(command.contains(" ID ("), "unexpected command: {command:?}");
+    assert!(command.contains(r#""name" "Flectar Mail""#));
+    assert!(command.contains(&format!(r#""version" "{}""#, env!("CARGO_PKG_VERSION"))));
+    assert!(command.contains(r#""vendor" "Flectar""#));
+    let tag = command.split_whitespace().next().unwrap();
+    stream
+        .write_all(format!("* ID NIL\r\n{tag} OK identified\r\n").as_bytes())
+        .await
+        .unwrap();
+}
+
+async fn accept_inbox_select<S>(stream: &mut BufReader<S>, command: &str)
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    assert!(
+        command.contains(r#" SELECT "INBOX""#),
+        "unexpected command: {command:?}"
+    );
+    let tag = command.split_whitespace().next().unwrap();
+    stream
+        .write_all(
+            format!(
+                "* FLAGS (\\Seen \\Deleted)\r\n\
+                 * 0 EXISTS\r\n\
+                 * OK [UIDVALIDITY 1] valid\r\n\
+                 * OK [UIDNEXT 1] next\r\n\
+                 {tag} OK [READ-WRITE] selected\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+}
 async fn imap_server(starttls: bool, reject: bool) -> (u16, tokio::task::JoinHandle<()>) {
     imap_server_with_certificate(starttls, reject, CERT).await
 }
@@ -109,7 +165,14 @@ async fn imap_server_with_certificate(
             .write_all(format!("{tag} OK logged in\r\n").as_bytes())
             .await
             .unwrap();
-        let logout = line(&mut stream).await;
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let mut logout = line(&mut stream).await;
+        if logout.contains(r#" SELECT "INBOX""#) {
+            accept_inbox_select(&mut stream, &logout).await;
+            logout = line(&mut stream).await;
+        }
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
         let tag = logout.split_whitespace().next().unwrap();
         stream
             .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
@@ -204,6 +267,8 @@ async fn imap_move_server(fixture: ImapMoveFixture) -> (u16, tokio::task::JoinHa
             .write_all(format!("{tag} OK logged in\r\n").as_bytes())
             .await
             .unwrap();
+
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
 
         let select = line(&mut stream).await;
         assert!(
@@ -627,7 +692,9 @@ async fn smtp_failure_prevents_saving_account() {
             email: "user@example.com".into(),
             display_name: None,
             username: "bridge-user".into(),
-            password: "bridge-password".into(),
+            // Password managers and browser copy actions can include a line
+            // ending even though the password field itself is single-line.
+            password: "\r\nbridge-password\r\n".into(),
             mail_protocol: MailProtocol::Imap,
             jmap_url: String::new(),
             imap_host: "127.0.0.1".into(),
@@ -642,6 +709,79 @@ async fn smtp_failure_prevents_saving_account() {
     assert!(core.list_accounts().await.unwrap().is_empty());
     imap_task.await.unwrap();
     smtp_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn imap_mailbox_failure_prevents_saving_account() {
+    use flectar_mail_core::{
+        Core, accounts::credentials::DevelopmentFileCredentialStore, config::Paths,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let imap_port = listener.local_addr().unwrap().port();
+    let imap_task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
+        let mut stream = BufReader::new(tls);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+
+        let login = line(&mut stream).await;
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+
+        let select = line(&mut stream).await;
+        assert!(
+            select.contains(r#" SELECT "INBOX""#),
+            "unexpected command: {select:?}"
+        );
+        let tag = select.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} NO SELECT Unsafe Login\r\n").as_bytes())
+            .await
+            .unwrap();
+
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("test-credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
+    let error = core
+        .add_account_password(AddPasswordAccountArgs {
+            email: "user@example.com".into(),
+            display_name: None,
+            username: "bridge-user".into(),
+            password: "bridge-password".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            imap_host: "127.0.0.1".into(),
+            imap_port,
+            smtp_host: "127.0.0.1".into(),
+            smtp_port: 1,
+            connection: settings(ConnectionSecurity::Tls),
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Unsafe Login"), "{error}");
+    assert!(core.list_accounts().await.unwrap().is_empty());
+    imap_task.await.unwrap();
 }
 
 #[tokio::test]

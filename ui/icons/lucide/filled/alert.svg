@@ -1,0 +1,17 @@
+<!-- Generated from lucide-static 1.46.0; ISC license in ../LICENSE. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <mask id="cut-1" maskUnits="userSpaceOnUse" x="0" y="0" width="24" height="24" style="mask-type:luminance">
+      <rect width="24" height="24" fill="white" />
+      <g>
+        <g>
+          <path d="M12 9v4" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M12 17h.01" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </g>
+      </g>
+    </mask>
+  </defs>
+  <g mask="url(#cut-1)">
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" fill="#000" stroke="none" />
+  </g>
+</svg>

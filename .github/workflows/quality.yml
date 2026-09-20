@@ -77,8 +77,13 @@ jobs:
               if "target" not in path.parts:
                   ET.parse(path)
           PY
+          python3 ui/icons/lucide/generate.py --check
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
+      - name: Verify and test the Parley backport
+        run: |
+          python3 scripts/verify-parley.py
+          cargo test --manifest-path crates/parley/Cargo.toml --lib --locked --target-dir target/parley-tests
       - name: Test release validation and publication
         run: |
           python3 scripts/test-release.py
@@ -100,7 +105,7 @@ jobs:
       - name: Validate the Spanish catalog
         shell: bash
         run: |
-          cargo install slint-tr-extractor --version 1.17.1 --locked
+          cargo install slint-tr-extractor --version 1.18.0 --locked
           bash scripts/check-translations.sh
           msgfmt --check --check-header --check-format \
             -o /tmp/flectar-mail-es.mo \

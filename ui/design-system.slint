@@ -12,8 +12,9 @@ export global LayoutMetrics {
     out property <length> compact-header-height: 60px;
     out property <length> touch-target: 44px;
     out property <length> desktop-icon-button-size: 40px;
-    out property <length> desktop-toolbar-icon-size: 18px;
-    out property <length> compact-toolbar-icon-size: 20px;
+    out property <length> icon-size: 18px;
+    out property <length> desktop-toolbar-icon-size: icon-size;
+    out property <length> compact-toolbar-icon-size: icon-size;
     // Feature sidebars keep a full 12px content gutter. Scrollable trees add
     // their own scrollbar breathing room inside this boundary.
     out property <length> sidebar-inset: 12px;
@@ -25,9 +26,36 @@ export global LayoutMetrics {
     out property <length> workspace-action-center-y: 32px;
     out property <length> desktop-mail-toolbar-height: 64px;
     out property <length> content-inset: 12px;
+    out property <length> list-row-inset: 12px;
     out property <length> compact-inset: 10px;
     out property <length> control-height: 40px;
     out property <length> corner-radius: 8px;
+}
+
+// Mail actions and their matching sidebar destinations share one semantic
+// icon palette. These colors stay stable across themes so the same action is
+// recognizable wherever it appears.
+export global MailIconPalette {
+    out property <color> inbox: #2f9cf4;
+    out property <color> starred: #f5b301;
+    out property <color> sent: #00a8f3;
+    out property <color> spam: #f59e0b;
+    out property <color> trash: #ff5b4d;
+    out property <color> archive: #8b5cf6;
+    out property <color> drafts: #d946ef;
+    out property <color> folders: #22a06b;
+    out property <color> other: #64748b;
+}
+
+// Settings destinations use the same preference-controlled color strategy as
+// mailbox icons: semantic colors by default, neutral colors in monochrome mode.
+export global SettingsIconPalette {
+    out property <color> general: #64748b;
+    out property <color> accounts: #3b82f6;
+    out property <color> notifications: #f59e0b;
+    out property <color> shortcuts: #22a06b;
+    out property <color> storage: #a855f7;
+    out property <color> about: #ec4899;
 }
 
 // Application colors live here instead of being re-declared by every custom
