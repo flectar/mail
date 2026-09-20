@@ -70,7 +70,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
             Rectangle {
                 visible: !root.filter-open;
-                width: parent.width;
+                x: 0px;
+                width: parent.width - 36px;
                 height: parent.height;
                 border-radius: 6px;
                 background: find-hit.has-hover ? root.hover-background : transparent;
@@ -113,7 +114,8 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
             filter-field := LineEdit {
                 visible: root.filter-open;
-                width: parent.width;
+                x: 0px;
+                width: parent.width - 36px;
                 height: parent.height;
                 text <=> root.filter-query;
                 placeholder-text: @tr("Find folder or label");
@@ -127,7 +129,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
             IconButton {
                 visible: root.filter-open;
-                x: parent.width - 32px;
+                x: parent.width - 68px;
                 width: 32px;
                 height: 32px;
                 icon: @image-url("../icons/lucide/outline/x.svg");
@@ -140,6 +142,18 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                     root.filter-open = false;
                     root.filter-folders("");
                 }
+            }
+
+            IconButton {
+                x: parent.width - 32px;
+                width: 32px;
+                height: 32px;
+                icon: @image-url("../icons/lucide/outline/plus.svg");
+                icon-size: 16px;
+                icon-color: root.muted-color;
+                hover-background: root.hover-background;
+                tooltip-text: @tr("Add account");
+                clicked => { root.manage-accounts(); }
             }
         }
 
@@ -170,7 +184,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         : entry.kind == SidebarRowKind.account ? (entry.mailbox.detail == "" ? 35px : 45px)
                         : entry.kind == SidebarRowKind.unified-section || entry.kind == SidebarRowKind.unified-inbox ? 35px
                         : entry.kind == SidebarRowKind.folder && entry.mailbox.label == "Inbox" ? 35px
-                        : entry.kind == SidebarRowKind.add-account ? 37px : 31px;
+                        : 31px;
                     background: transparent;
 
                     if entry.kind == SidebarRowKind.unified-heading: WorkspaceMiniHeading {
@@ -258,7 +272,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Smart Categories");
+                        label: @tr("Categories");
                         label-font-weight: 500;
                         folder-row-style: true;
                         sidebar-background: root.background-color;
@@ -335,7 +349,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
-                        label: @tr("Global Labels");
+                        label: @tr("Labels");
                         label-font-weight: 500;
                         folder-row-style: true;
                         sidebar-background: root.background-color;
@@ -468,7 +482,6 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("Labels");
                         label-font-weight: 500;
-                        left-padding: SidebarStyle.branch-indent;
                         folder-row-style: true;
                         sidebar-background: root.background-color;
                         hover-background: root.hover-background;
@@ -487,7 +500,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.label.name;
                         accessible-name: @tr("{} label, {} account", entry.label.name, entry.label.account_name);
                         label-has-emoji: entry.label.name_has_emoji;
-                        left-padding: SidebarStyle.icon-left + 2 * SidebarStyle.branch-indent;
+                        left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         label-id: entry.label.id;
                         editable-color: entry.label.color;
                         scope: "AccountLabel:" + entry.label.id;
@@ -533,7 +546,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: @tr("New label");
                         scope: "";
-                        left-padding: SidebarStyle.icon-left + 2 * SidebarStyle.branch-indent;
+                        left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         icon: @image-url("../icons/lucide/outline/plus.svg");
                         sidebar-background: root.background-color;
                         selection-background: root.selection-background;
@@ -544,43 +557,6 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         clicked(scope) => { root.request-create-label(entry.mailbox.account_id, entry.mailbox.context); }
                     }
 
-                    if entry.kind == SidebarRowKind.add-account: Rectangle {
-                        x: 0px;
-                        y: 0px;
-                        width: parent.width;
-                        height: 34px;
-                        background: transparent;
-
-                        Text {
-                            x: 26px;
-                            width: parent.width - 26px;
-                            height: parent.height;
-                            text: @tr("Add account");
-                            color: root.muted-color;
-                            font-size: SidebarStyle.label-size;
-                            font-weight: SidebarStyle.normal-weight;
-                            vertical-alignment: center;
-                        }
-
-                        Image {
-                            x: 12px - self.width / 2;
-                            y: (parent.height - self.height) / 2;
-                            width: SidebarStyle.icon-size;
-                            height: SidebarStyle.icon-size;
-                            source: @image-url("../icons/lucide/outline/plus.svg");
-                            colorize: root.muted-color;
-                            image-fit: contain;
-                            accessible-role: none;
-                        }
-
-                        add-account-hit := TouchArea {
-                            accessible-role: button;
-                            accessible-label: @tr("Add account");
-                            accessible-action-default => { root.manage-accounts(); }
-                            clicked => { root.manage-accounts(); }
-                            mouse-cursor: pointer;
-                        }
-                    }
                 }
             }
 

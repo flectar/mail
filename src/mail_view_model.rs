@@ -378,6 +378,13 @@ pub(super) fn render_current(
         visible_count < messages.len()
     });
     app.set_has_selected(selected_email.is_some());
+    app.set_selected_account_uses_labels(selected_email.as_ref().is_some_and(|email| {
+        state
+            .borrow()
+            .connected_accounts
+            .iter()
+            .any(|account| account.id == email.account_id && account.provider == Provider::Gmail)
+    }));
     apply_label_rows(app, &labels, selected_email.as_ref());
     let (previous_email_id, next_email_id) = adjacent_message_ids(visible, selected_id);
     app.set_previous_email_id(previous_email_id);
@@ -544,10 +551,16 @@ pub(super) fn apply_label_rows(
     labels: &[flectar_mail_core::models::Label],
     selected: Option<&MailMessage>,
 ) {
-    let rows = make_label_rows(labels, selected, "");
-    app.set_selected_mail_label_count(rows.iter().filter(|label| label.applied).count() as i32);
-    app.set_mail_labels(ModelRc::new(VecModel::from(rows.clone())));
-    app.set_mail_label_results(ModelRc::new(VecModel::from(rows)));
+    let picker_rows = make_label_rows(labels, selected, "");
+    let chip_rows = selected
+        .map(|message| applied_label_rows(labels, &message.labels))
+        .unwrap_or_default();
+    app.set_selected_mail_label_count(chip_rows.len() as i32);
+    // The header strip must only receive rendered chips. Supplying the whole
+    // picker catalog and hiding unapplied entries left layout-sized gaps
+    // before labels such as "Social".
+    app.set_mail_labels(ModelRc::new(VecModel::from(chip_rows)));
+    app.set_mail_label_results(ModelRc::new(VecModel::from(picker_rows)));
 }
 
 pub(super) fn make_label_rows(
@@ -959,6 +972,13 @@ pub(super) fn refresh_rows_only(
         same_email_row,
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
+    app.set_selected_account_uses_labels(selected_email.is_some_and(|email| {
+        state
+            .borrow()
+            .connected_accounts
+            .iter()
+            .any(|account| account.id == email.account_id && account.provider == Provider::Gmail)
+    }));
     apply_label_rows(app, &labels, selected_email);
     refresh_sidebar(state);
     let selected_domain = selected_email.map(|email| {

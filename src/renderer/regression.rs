@@ -5,6 +5,7 @@ fn renderer(html: &str) -> GpuEmailRenderer {
     r.set_email(prepare_email_html(html).unwrap());
     r
 }
+
 const BODY: &str = "<body style='margin:0'><p style='margin:0;font-size:20px'>Cafe\u{301} hello <a href='https://example.com'>linked world</a></p></body>";
 
 fn font_ctx_with_color_emoji() -> (parley::FontContext, parley::fontique::Blob<u8>) {
@@ -1194,10 +1195,10 @@ fn auto_fit_tracks_resize_and_preserves_explicit_zoom() {
     assert_eq!(r.zoom, 1.0);
     assert!(r.render_cpu_if_needed(1100, 400, 1.0).unwrap().is_none());
     r.render_cpu_if_needed(300, 500, 1.0).unwrap();
-    assert!((r.zoom - 300.0 / 900.0).abs() < 0.02);
+    assert_eq!(r.zoom, MIN_EMAIL_ZOOM);
     assert!(
-        r.layout_width <= 301.0,
-        "Automatic fit must accommodate phone widths"
+        r.layout_width > 300.0,
+        "Overflow below the readable zoom floor must remain scrollable"
     );
     r.set_auto_fit(false);
     r.set_zoom(1.25);
@@ -1211,4 +1212,40 @@ fn auto_fit_tracks_resize_and_preserves_explicit_zoom() {
     );
     r.render_cpu_if_needed(600, 400, 1.0).unwrap();
     assert_eq!(r.zoom, 1.0);
+}
+
+#[test]
+fn long_table_content_reflows_at_readable_zoom() {
+    let identifier = "account.notification.delivery.preference.identifier".repeat(4);
+    let mut html = String::from("<body style='margin:0'>");
+    for index in 0..252 {
+        html.push_str(&format!(
+            "<h3><code>{identifier}.{index}</code></h3><table><tr><th>translation</th><th>last changed by</th></tr><tr><td>{identifier}</td><td>Contributor, 2026-09-20</td></tr></table>"
+        ));
+    }
+    html.push_str("</body>");
+
+    let mut r = renderer(&html);
+    assert!(
+        !r.prefers_software_rendering(),
+        "large but ordinary structured mail should remain GPU eligible"
+    );
+    r.set_auto_fit(true);
+    r.set_visible_region(0.0, 700.0);
+    let frame = r
+        .render_cpu_if_needed(560, 700, 1.0)
+        .unwrap()
+        .expect("large structured message should render");
+
+    assert_eq!(
+        r.zoom, 1.0,
+        "ordinary structured text should reflow, not shrink"
+    );
+    assert!(
+        r.layout_width <= 561.0,
+        "layout overflowed: {}",
+        r.layout_width
+    );
+    assert_eq!(frame.width, 560);
+    assert!(frame.height > 10_000, "the complete issue body must remain reachable");
 }

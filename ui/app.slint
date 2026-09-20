@@ -594,6 +594,7 @@ export component AppWindow inherits Window {
     in property <[MailLabelRow]> mail_labels: [];
     in property <[MailLabelRow]> mail_label_results: [];
     in property <int> selected_mail_label_count: 0;
+    in property <bool> selected_account_uses_labels: false;
     in property <[AccountRow]> connected_accounts: [];
     in property <[MailProfileRow]> mail_profiles: [];
     // The saved visible page can paint before the core is safe to use. Keep
@@ -1057,6 +1058,7 @@ export component AppWindow inherits Window {
             mail_labels: root.mail_labels;
             mail_label_results: root.mail_label_results;
             selected_mail_label_count: root.selected_mail_label_count;
+            selected_account_uses_labels: root.selected_account_uses_labels;
             email_tiles: root.email_tiles;
             email_links: root.email_links;
             active_view: root.active_view;

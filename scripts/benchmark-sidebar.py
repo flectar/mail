@@ -48,7 +48,6 @@ def fixture(account_count, folder_count, flat):
         rows.append(row("account", f"account:{aid}", account, True))
         rows.extend(row("folder", f"folder:{f['folder_id']}", f) for f in folders if f["account_id"] == aid)
         rows.append(row("new-folder", f"new:{aid}", account))
-    rows.append(row("add-account", "add"))
     return {"rows": rows}
 
 

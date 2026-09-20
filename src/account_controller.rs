@@ -119,7 +119,20 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     state.profile_avatar_images.remove(&account_id);
     state.profile_avatar_missing.remove(&account_id);
     state.profile_avatar_pending.remove(&account_id);
+    state.initialized_sidebar_accounts.remove(&account_id);
+    state
+        .collapsed_sidebar_sections
+        .remove(&format!("account:{account_id}"));
+    state
+        .collapsed_sidebar_sections
+        .remove(&format!("account-labels:{account_id}"));
     state.collapsed_folder_ids.retain(|id| {
+        state
+            .mailboxes
+            .iter()
+            .any(|mailbox| mailbox.folder_id == *id)
+    });
+    state.initialized_sidebar_folders.retain(|id| {
         state
             .mailboxes
             .iter()

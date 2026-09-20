@@ -24,6 +24,7 @@ export component MailView inherits Rectangle {
     in property <[MailLabelRow]> mail_labels: [];
     in property <[MailLabelRow]> mail_label_results: [];
     in property <int> selected_mail_label_count: 0;
+    in property <bool> selected_account_uses_labels: false;
     in property <[EmailTile]> email_tiles: [];
     in property <[EmailLink]> email_links: [];
     in property <string> active_view: "mail";
@@ -259,6 +260,7 @@ export component MailView inherits Rectangle {
                 mail_labels: root.mail_labels;
                 mail-label-results: root.mail_label_results;
                 selected-label-count: root.selected_mail_label_count;
+                selected-account-uses-labels: root.selected_account_uses_labels;
                 selected_initials: root.selected_initials;
                 selected_favicon: root.selected_favicon;
                 selected_has_favicon: root.selected_has_favicon;
@@ -470,6 +472,7 @@ export component MailView inherits Rectangle {
                 mail_labels: root.mail_labels;
                 mail-label-results: root.mail_label_results;
                 selected-label-count: root.selected_mail_label_count;
+                selected-account-uses-labels: root.selected_account_uses_labels;
                 selected_initials: root.selected_initials;
                 selected_favicon: root.selected_favicon;
                 selected_has_favicon: root.selected_has_favicon;

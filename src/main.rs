@@ -522,6 +522,8 @@ struct InboxState {
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
+    initialized_sidebar_accounts: HashSet<i64>,
+    initialized_sidebar_folders: HashSet<i64>,
     sidebar_rows: Rc<SidebarModel>,
     folder_filter: String,
     scope: String,
@@ -908,6 +910,8 @@ impl InboxState {
                 "categories".into(),
                 "global-labels".into(),
             ]),
+            initialized_sidebar_accounts: HashSet::new(),
+            initialized_sidebar_folders: HashSet::new(),
             sidebar_rows: Rc::new(SidebarModel::default()),
             folder_filter: String::new(),
             inbox_count: 0,
@@ -1358,14 +1362,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     if use_wgpu {
         let email_renderer_for_notifier = Rc::clone(&email_renderer);
         let app_weak_for_notifier = app.as_weak();
-        let startup_error = gpu_startup_error.clone();
         let startup_completed = gpu_startup_completed.clone();
         let mut reported_device = false;
+        let mut email_gpu_unavailable = None::<String>;
         app.window()
             .set_rendering_notifier(move |state, graphics_api| {
                 if matches!(&state, slint::RenderingState::RenderingTeardown) {
                     email_renderer_for_notifier.borrow_mut().teardown_gpu();
                     reported_device = false;
+                    email_gpu_unavailable = None;
                     return;
                 }
 
@@ -1379,33 +1384,42 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     let initialized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         email_renderer_for_notifier.borrow_mut().initialize_gpu(device, queue)
                     })).unwrap_or_else(|_| Err("GPU initialization panicked".into()));
-                    if let Err(error) = initialized {
-                        *startup_error.borrow_mut() = Some(error);
-                        let _ = slint::quit_event_loop();
-                        return;
-                    }
                     let info = device.adapter_info();
+                    if let Err(error) = initialized {
+                        email_renderer_for_notifier.borrow_mut().teardown_gpu();
+                        eprintln!("FLECTAR_RENDERER {}", serde_json::json!({
+                            "event": "email_gpu_init_fallback", "slint": "femtovg-wgpu",
+                            "blitz": "vello-cpu", "error": error.clone(),
+                        }));
+                        email_gpu_unavailable = Some(error);
+                    }
                     eprintln!("FLECTAR_RENDERER {}", serde_json::json!({
                         "event": "gpu_ready", "wgpu_version": 29,
                         "backend": format!("{:?}", info.backend), "adapter": info.name,
                         "device_type": format!("{:?}", info.device_type),
                         "wgpu_initialized": true, "instance_owner": "slint",
                         "shared_device": email_renderer_for_notifier.borrow().shares_gpu(device, queue),
-                        "slint": "femtovg-wgpu", "blitz": "vello-gpu",
+                        "slint": "femtovg-wgpu",
+                        "blitz": if email_gpu_unavailable.is_some() { "vello-cpu" } else { "vello-gpu" },
                     }));
                     reported_device = true;
                     startup_completed.set(true);
                 }
-                // Reinitialization after closing a message/device teardown can
-                // also fail. Use the full CPU backend fallback for init errors.
-                if email_renderer_for_notifier.borrow().has_document() {
+                // A Vello pipeline failure must degrade only the email body,
+                // never terminate the application event loop. Keep Slint's
+                // working WGPU shell and render mail tiles in software.
+                if email_gpu_unavailable.is_none()
+                    && email_renderer_for_notifier.borrow().has_document()
+                    && !email_renderer_for_notifier
+                        .borrow()
+                        .prefers_software_rendering()
+                {
                     let initialized = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         email_renderer_for_notifier.borrow_mut().initialize_gpu(device, queue)
                     })).unwrap_or_else(|_| Err("GPU initialization panicked".into()));
                     if let Err(error) = initialized {
-                        *startup_error.borrow_mut() = Some(error);
-                        let _ = slint::quit_event_loop();
-                        return;
+                        email_renderer_for_notifier.borrow_mut().teardown_gpu();
+                        email_gpu_unavailable = Some(error);
                     }
                 }
                 let Some(app) = app_weak_for_notifier.upgrade() else {
@@ -1415,6 +1429,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let logical_width = app.get_email_viewport_width();
                 let logical_height = app.get_email_viewport_height();
                 let scale_factor = app.window().scale_factor();
+                let complex_message = email_renderer_for_notifier
+                    .borrow()
+                    .prefers_software_rendering();
+                if complex_message || email_gpu_unavailable.is_some() {
+                    let fallback = email_renderer_for_notifier
+                        .borrow_mut()
+                        .render_cpu_if_needed(
+                            logical_width.max(1.0).ceil() as u32,
+                            logical_height.max(1.0).ceil() as u32,
+                            scale_factor,
+                        );
+                    match fallback {
+                        Ok(Some(frame)) => {
+                            apply_cpu_frame(&app, frame);
+                            sync_reader_metadata(&app, &email_renderer_for_notifier);
+                            if complex_message {
+                                app.set_render_status(UiMessage::plain(
+                                    "Large message rendered in compatibility mode.",
+                                ));
+                            } else if let Some(error) = email_gpu_unavailable.as_ref() {
+                                app.set_render_status(UiMessage::detail(
+                                    "Rendered with software fallback after GPU error: {}",
+                                    error,
+                                ));
+                            }
+                        }
+                        Ok(None) => {
+                            sync_reader_metadata(&app, &email_renderer_for_notifier);
+                        }
+                        Err(cpu_error) => {
+                            app.global::<EmailReader>()
+                                .set_notice(cpu_error.clone().into());
+                            clear_reader_projection(&app);
+                            app.set_text_mode(true);
+                            app.set_render_status(UiMessage::detail(
+                                "Software email render failed: {}",
+                                cpu_error,
+                            ));
+                        }
+                    }
+                    return;
+                }
                 let result = email_renderer_for_notifier.borrow_mut().render_if_needed(
                     device,
                     queue,

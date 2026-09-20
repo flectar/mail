@@ -9,6 +9,30 @@ impl SidebarModel {
     }
 }
 
+fn collapse_new_account_label_sections(
+    account_ids: impl IntoIterator<Item = i64>,
+    initialized: &mut HashSet<i64>,
+    collapsed: &mut HashSet<String>,
+) {
+    for account_id in account_ids {
+        if initialized.insert(account_id) {
+            collapsed.insert(format!("account-labels:{account_id}"));
+        }
+    }
+}
+
+fn collapse_new_folder_sections(
+    folder_ids: impl IntoIterator<Item = i64>,
+    initialized: &mut HashSet<i64>,
+    collapsed: &mut HashSet<i64>,
+) {
+    for folder_id in folder_ids {
+        if initialized.insert(folder_id) {
+            collapsed.insert(folder_id);
+        }
+    }
+}
+
 // Slint image handles can compare unequal even when both are empty. Compare
 // absent avatars semantically, otherwise every ordinary folder emits a change.
 fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
@@ -60,7 +84,36 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
 }
 
 pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
-    let state = state.borrow();
+    let mut state = state.borrow_mut();
+    let account_ids = state
+        .mailboxes
+        .iter()
+        .filter(|mailbox| mailbox.is_account)
+        .map(|mailbox| mailbox.account_id)
+        .collect::<Vec<_>>();
+    let folder_ids = state
+        .mailboxes
+        .iter()
+        .filter(|mailbox| !mailbox.is_account && mailbox.has_children && mailbox.folder_id >= 0)
+        .map(|mailbox| mailbox.folder_id)
+        .collect::<Vec<_>>();
+    let InboxState {
+        initialized_sidebar_accounts,
+        initialized_sidebar_folders,
+        collapsed_sidebar_sections,
+        collapsed_folder_ids,
+        ..
+    } = &mut *state;
+    collapse_new_account_label_sections(
+        account_ids,
+        initialized_sidebar_accounts,
+        collapsed_sidebar_sections,
+    );
+    collapse_new_folder_sections(
+        folder_ids,
+        initialized_sidebar_folders,
+        collapsed_folder_ids,
+    );
     let query = state.folder_filter.trim();
     let filtering = !query.is_empty();
     let no_collapsed_folders = HashSet::new();
@@ -357,7 +410,6 @@ fn make_sidebar_rows(
             }
         }
     }
-    rows.push(row(Kind::AddAccount, "add-account"));
     rows
 }
 
@@ -404,6 +456,36 @@ mod tests {
 
     fn defaults() -> HashSet<String> {
         HashSet::from(["categories".into(), "global-labels".into()])
+    }
+
+    #[test]
+    fn new_account_labels_start_collapsed_without_collapsing_accounts() {
+        let mut initialized = HashSet::new();
+        let mut collapsed = defaults();
+        collapse_new_account_label_sections([1, 2], &mut initialized, &mut collapsed);
+        assert!(!collapsed.contains("account:1"));
+        assert!(collapsed.contains("account-labels:1"));
+        assert!(!collapsed.contains("account:2"));
+        assert!(collapsed.contains("account-labels:2"));
+
+        collapsed.remove("account-labels:1");
+        collapse_new_account_label_sections([1, 2, 3], &mut initialized, &mut collapsed);
+        assert!(!collapsed.contains("account:1"));
+        assert!(!collapsed.contains("account-labels:1"));
+        assert!(!collapsed.contains("account:3"));
+        assert!(collapsed.contains("account-labels:3"));
+    }
+
+    #[test]
+    fn new_folder_branches_start_collapsed_without_overriding_user_expansion() {
+        let mut initialized = HashSet::new();
+        let mut collapsed = HashSet::new();
+        collapse_new_folder_sections([10, 20], &mut initialized, &mut collapsed);
+        assert_eq!(collapsed, HashSet::from([10, 20]));
+
+        collapsed.remove(&10);
+        collapse_new_folder_sections([10, 20, 30], &mut initialized, &mut collapsed);
+        assert_eq!(collapsed, HashSet::from([20, 30]));
     }
 
     #[test]
@@ -677,7 +759,7 @@ mod tests {
                 "account:1",
                 &HashSet::from(["account:1".into()]),
             ),
-            row(Kind::AddAccount, "tail"),
+            row(Kind::Folder, "tail"),
         ];
         model.reconcile(closed.clone());
         events.borrow_mut().clear();
@@ -685,7 +767,7 @@ mod tests {
         assert!(events.borrow().is_empty());
         let mut expanded = vec![section(Kind::Account, "account:1", &HashSet::new())];
         expanded.extend((0..10_000).map(|id| row(Kind::Folder, format!("folder:{id}"))));
-        expanded.push(row(Kind::AddAccount, "tail"));
+        expanded.push(row(Kind::Folder, "tail"));
         model.reconcile(expanded.clone());
         assert_eq!(
             *events.borrow(),

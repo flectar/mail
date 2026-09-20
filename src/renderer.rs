@@ -44,10 +44,24 @@ const EMAIL_SURFACE_BOTTOM_PAD: f32 = 12.0;
 const EMAIL_TILE_HEIGHT: f32 = 512.0;
 const EMAIL_TILE_OVERSCAN: u32 = 1;
 const MAX_EMAIL_SURFACE_HEIGHT: f32 = 100_000.0;
+const MIN_EMAIL_ZOOM: f32 = 0.5;
+// Building a Vello scene for highly fragmented email markup can exhaust or
+// reset some graphics drivers before wgpu can return a recoverable error.
+// The software renderer uses the same bounded tile cache without submitting
+// that scene to the GPU. This is a content-complexity budget, not a sender or
+// template allow/deny list.
+#[cfg(any(feature = "gpu-renderer", test))]
+const MAX_GPU_EMAIL_NODES: usize = 4_096;
 
-// Match the application's light-canvas accent. A user-agent rule lets sender
-// styles (including white labels on colored buttons) take precedence.
-const EMAIL_LINK_STYLE: &str = "a:any-link { color: #0969da; cursor: pointer; }";
+// Keep ordinary prose, URLs, code identifiers and auto-layout table cells
+// inside the reading viewport. These are user-agent rules, so an authored
+// fixed-width design can still opt into its own layout and auto-fit, while
+// ordinary structured messages reflow like they do in webmail clients.
+const EMAIL_USER_AGENT_STYLE: &str = r#"
+  a:any-link { color: #0969da; cursor: pointer; }
+  html, body { overflow-wrap: anywhere; word-break: normal; }
+  table { max-width: 100%; }
+"#;
 
 pub(crate) fn render_timings_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -99,6 +113,8 @@ impl InputModifiers {
 pub struct PreparedEmail {
     document: HtmlDocument,
     paint_cache: PaintCache,
+    #[cfg(any(feature = "gpu-renderer", test))]
+    node_count: usize,
     pub links: Vec<EmailLink>,
     pub plain_text: String,
     pub notice: Option<String>,
@@ -137,6 +153,8 @@ pub struct GpuEmailRenderer {
     gpu_context: Option<(wgpu::Device, wgpu::Queue)>,
     #[cfg(feature = "gpu-renderer")]
     scene: vello::Scene,
+    #[cfg(all(test, feature = "gpu-renderer"))]
+    gpu_teardown_count: usize,
     last_size: Option<(u32, u32, u32, u32, u32)>,
     dirty: bool,
     paint_dirty: bool,
@@ -193,6 +211,8 @@ impl Default for GpuEmailRenderer {
             gpu_context: None,
             #[cfg(feature = "gpu-renderer")]
             scene: vello::Scene::new(),
+            #[cfg(all(test, feature = "gpu-renderer"))]
+            gpu_teardown_count: 0,
             last_size: None,
             dirty: false,
             paint_dirty: false,
@@ -246,6 +266,17 @@ impl GpuEmailRenderer {
     /// Slint thread.
     pub fn set_resource_notifier(&mut self, notifier: Arc<dyn Fn() + Send + Sync>) {
         self.resource_notifier = Some(notifier);
+    }
+
+    /// Whether this document should bypass Vello GPU scene submission.
+    ///
+    /// Parsing, layout, links, selection and tiled painting remain unchanged;
+    /// only the final tile backend switches to the bounded software renderer.
+    #[cfg(any(feature = "gpu-renderer", test))]
+    pub fn prefers_software_rendering(&self) -> bool {
+        self.email
+            .as_ref()
+            .is_some_and(|email| email.node_count > MAX_GPU_EMAIL_NODES)
     }
 
     /// Enable Blitz sub-resource loading on the application's existing Tokio
@@ -402,10 +433,11 @@ impl GpuEmailRenderer {
     }
 
     pub fn clear(&mut self) {
-        #[cfg(feature = "gpu-renderer")]
-        if self.email.is_some() {
-            self.teardown_gpu();
-        }
+        // A document replacement is not a graphics-device teardown. Keep the
+        // Vello pipeline and its shared Slint WGPU device alive across message
+        // switches; rebuilding it for every click can fail under transient
+        // driver pressure. RenderingTeardown and an actual device mismatch
+        // still call `teardown_gpu()` explicitly.
         self.active_document.store(usize::MAX, Ordering::Release);
         self.email = None;
         self.resource_priorities
@@ -481,6 +513,10 @@ impl GpuEmailRenderer {
     /// display change, or Android surface recreation.
     #[cfg(feature = "gpu-renderer")]
     pub fn teardown_gpu(&mut self) {
+        #[cfg(test)]
+        {
+            self.gpu_teardown_count += 1;
+        }
         self.renderer = None;
         self.gpu_context = None;
         self.scene = vello::Scene::new();
@@ -705,7 +741,11 @@ impl GpuEmailRenderer {
         email.document.resolve(0.0);
         email.paint_cache.clear();
         let natural = content_surface_width(&email.document, width.max(1) as f32);
-        self.zoom = ((width.max(1) as f32) / natural.max(1.0)).clamp(0.1, 1.0);
+        // Reflowable prose and table cells are handled by the user-agent
+        // stylesheet above. Keep this lower bound only for genuinely authored
+        // fixed-width designs, so those layouts cannot make the body illegible.
+        // Any residual overflow from a fixed design remains reachable.
+        self.zoom = ((width.max(1) as f32) / natural.max(1.0)).clamp(MIN_EMAIL_ZOOM, 1.0);
         self.fit_viewport = Some((width, height));
         self.last_size = None;
         self.dirty = true;
@@ -1426,7 +1466,7 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
         // Blitz beta.2 stores box geometry only on document, element, and
         // anonymous-block nodes. Text and comment nodes are represented by
         // their parent's inline layout and must not be queried directly.
-        if node.stylo_element_data_opt().is_none() {
+        if node.stylo_element_data_opt().is_none() || !visible(node) {
             return;
         }
         let is_viewport_box = node.data.is_element_with_tag_name(&local_name!("html"))
@@ -1627,7 +1667,7 @@ fn prepare_email_html_at_with_font_ctx(
             ..Default::default()
         },
     );
-    document.add_user_agent_stylesheet(EMAIL_LINK_STYLE);
+    document.add_user_agent_stylesheet(EMAIL_USER_AGENT_STYLE);
 
     let mut stack = vec![(document.root_node().id, 0usize)];
     let mut count = 0usize;
@@ -1654,6 +1694,8 @@ fn prepare_email_html_at_with_font_ctx(
     Ok(PreparedEmail {
         document,
         paint_cache: PaintCache::default(),
+        #[cfg(any(feature = "gpu-renderer", test))]
+        node_count: count,
         links,
         plain_text,
         notice,
@@ -1982,6 +2024,51 @@ mod tests {
         assert_eq!(content.absolute_position(0.0, 0.0).y, 0.0);
         assert!(!prepared.plain_text.contains("Metadata title"));
         assert!(prepared.plain_text.contains("Visible content"));
+    }
+
+    #[test]
+    fn visibility_hidden_content_does_not_extend_the_message_surface() {
+        let mut prepared = prepare_email_html(
+            r#"<body style="margin:0"><div style="height:40px">Visible</div><div style="visibility:hidden;height:5000px">Hidden</div></body>"#,
+        )
+        .unwrap();
+        let frame = render_prepared_cpu(&mut prepared, 520, 900, 1.0).unwrap();
+        assert!(
+            frame.height < 200,
+            "hidden preheaders must not push message actions down: {}px",
+            frame.height
+        );
+    }
+
+    #[cfg(feature = "gpu-renderer")]
+    #[test]
+    fn replacing_a_document_does_not_teardown_the_shared_gpu_pipeline() {
+        let mut renderer = GpuEmailRenderer::default();
+        renderer.set_email(prepare_email_html("<p>First message</p>").unwrap());
+        renderer.clear();
+        assert_eq!(renderer.gpu_teardown_count, 0);
+
+        renderer.teardown_gpu();
+        assert_eq!(renderer.gpu_teardown_count, 1);
+    }
+
+    #[test]
+    fn highly_fragmented_documents_prefer_the_bounded_software_renderer() {
+        let mut renderer = GpuEmailRenderer::default();
+        renderer.set_email(prepare_email_html("<p>Ordinary message</p>").unwrap());
+        assert!(!renderer.prefers_software_rendering());
+
+        let html = format!(
+            "<body>{}</body>",
+            "<span></span>".repeat(super::MAX_GPU_EMAIL_NODES)
+        );
+        renderer.set_email(prepare_email_html(&html).unwrap());
+        assert!(renderer.prefers_software_rendering());
+        let frame = renderer
+            .render_cpu_if_needed(560, 700, 1.0)
+            .unwrap()
+            .expect("compatibility mode should produce a frame");
+        assert!(frame.tiles.len() <= 3, "the tile cache must remain bounded");
     }
 
     #[test]
