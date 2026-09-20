@@ -17,12 +17,31 @@ export component WorkspaceFrame inherits Rectangle {
     in property <length> available-width;
     in property <length> available-height;
 
-    x: root.compact ? 0px : LayoutMetrics.product-rail-width;
+    private property <length> base-x: root.compact ? 0px : LayoutMetrics.product-rail-width;
+    private property <float> reveal-progress: 0;
+    private property <bool> reveal-pending: true;
+
+    x: root.base-x + (1 - root.reveal-progress) * 14px;
     y: 0px;
-    width: max(0px, root.available-width - self.x);
+    width: max(0px, root.available-width - root.base-x);
     height: max(0px, root.available-height - (root.compact && root.reserve-compact-navigation ? LayoutMetrics.compact-navigation-height : 0px));
     background: AppTheme.page-bg;
     clip: true;
+    opacity: 0.72 + root.reveal-progress * 0.28;
+
+    // Each conditionally-instantiated workspace gets a short entrance. This
+    // provides a native view-transition feel while its data model hydrates.
+    Timer {
+        interval: 16ms;
+        running: root.reveal-pending;
+        triggered => {
+            root.reveal-pending = false;
+            root.reveal-progress = 1;
+        }
+    }
+    animate x { duration: 240ms; easing: spring(0); }
+    animate height { duration: 220ms; easing: spring(0); }
+    animate opacity { duration: 180ms; easing: ease-out; }
 
     @children
 }

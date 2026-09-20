@@ -207,6 +207,7 @@ pub(crate) fn register(
             ui.set_preview_image(slint::Image::default());
             ui.set_preview_text("".into());
             ui.set_preview_open(false);
+            ui.set_list_loading(false);
             ui.set_rows(Default::default());
             ui.set_operations(Default::default());
             let directory = directory.clone();
@@ -241,6 +242,7 @@ pub(crate) fn register(
                 task.abort();
             }
             ui.set_busy(false);
+            ui.set_list_loading(false);
             if preview_pending.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 ui.set_status("".into());
                 return;
@@ -297,6 +299,21 @@ pub(crate) fn register(
         let collision = ui.get_collision();
         let case_insensitive = ui.get_case_insensitive();
         let action = action.to_string();
+        let list_loading = matches!(
+            action.as_str(),
+            "scope"
+                | "account"
+                | "account-id"
+                | "space"
+                | "load"
+                | "search"
+                | "filter"
+                | "refresh"
+                | "enter"
+                | "up"
+                | "attachment-source"
+                | "connect"
+        );
         let a = if action.as_str()=="filter" {
             let size = |s:slint::SharedString|->Option<u32> {s.parse().ok()};
             let min=ui.get_min_size();let max=ui.get_max_size();
@@ -315,6 +332,7 @@ pub(crate) fn register(
         let progress=progress.clone();
         preview_pending.store(matches!(action.as_str(), "preview" | "pdf-page" | "details" | "notifications" | "clear-notifications"), std::sync::atomic::Ordering::SeqCst);
         let preview_pending = preview_pending.clone();
+        ui.set_list_loading(list_loading);
         ui.set_busy(true);
         ui.set_status("".into());
         let current_generation = generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
@@ -411,6 +429,7 @@ pub(crate) fn register(
                 let ui = app.global::<FilesUi>();
                 if app.get_active_view() != "files" {
                     ui.set_busy(false);
+                    ui.set_list_loading(false);
                     preview_pending.store(false, std::sync::atomic::Ordering::SeqCst);
                     return;
                 }
@@ -471,6 +490,7 @@ pub(crate) fn register(
                     Err(error) => ui.set_status(error.into()),
                 }
                 preview_pending.store(false, std::sync::atomic::Ordering::SeqCst);
+                ui.set_list_loading(false);
                 ui.set_busy(false);
             });
         });
@@ -500,6 +520,7 @@ fn reset_profile(ui: &FilesUi) {
     ui.set_pdf_zoom(100);
     ui.set_pagination_failed(false);
     ui.set_busy(false);
+    ui.set_list_loading(false);
     ui.set_connected(false);
     ui.set_can_create(false);
     ui.set_can_more(false);

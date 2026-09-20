@@ -94,11 +94,14 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         app.get_selected_plain_text()
             .contains("Reader verification 1")
     );
-    app.global::<EmailReader>().set_body_pending(false);
     let draw = |name: &str, width: u32, height: u32| {
-        slint::platform::update_timers_and_animations();
         app.window()
             .set_size(slint::PhysicalSize::new(width, height));
+        slint::platform::update_timers_and_animations();
+        // Visual regression frames capture the settled finite transitions.
+        // Loading shimmers use animation-tick and intentionally remain active.
+        std::thread::sleep(std::time::Duration::from_millis(280));
+        slint::platform::update_timers_and_animations();
         app.window().request_redraw();
         let mut pixels = vec![Rgb8Pixel::default(); (width * height) as usize];
         window.draw_if_needed(|r| {
@@ -129,10 +132,18 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         .unwrap();
     };
     app.set_theme_mode("light".into());
+    draw("message-loading", 1280, 900);
+    app.global::<EmailReader>().set_body_pending(false);
     let loaded_rows = app.get_emails();
     app.set_emails(ModelRc::default());
     app.set_mail_page_loading(true);
     draw("navigation-loading", 1280, 900);
+    app.set_show_avatars(false);
+    draw("navigation-loading-no-avatars", 1280, 900);
+    app.set_workspace_layout("minimal".into());
+    draw("navigation-loading-minimal-no-avatars", 1280, 900);
+    app.set_workspace_layout("default".into());
+    app.set_show_avatars(true);
     app.set_mail_page_loading(false);
     app.set_emails(loaded_rows);
     draw("desktop", 1280, 900);
@@ -276,6 +287,10 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     draw("desktop-dark", 1280, 900);
     app.set_theme_mode("light".into());
     draw("phone-list", 390, 844);
+    pointer(30.0, 30.0);
+    draw("phone-folders", 390, 844);
+    pointer(360.0, 220.0);
+    draw("phone-list-closed", 390, 844);
     app.window()
         .dispatch_event(slint::platform::WindowEvent::PointerPressed {
             position: slint::LogicalPosition::new(210.0, 180.0),
@@ -506,6 +521,25 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert_eq!(renderer_settings.get_preferred(), "cpu");
     assert!(!renderer_settings.get_error().is_empty());
     app.set_settings_open(false);
+    app.set_active_view("contacts".into());
+    app.set_contacts(ModelRc::default());
+    app.set_contact_loading_more(true);
+    draw("contacts-loading", 1280, 900);
+    draw("contacts-loading-phone", 390, 844);
+    app.set_theme_mode("dark".into());
+    draw("contacts-loading-dark", 1280, 900);
+    app.set_theme_mode("light".into());
+    app.set_contact_loading_more(false);
+    app.set_active_view("files".into());
+    app.global::<FilesUi>().set_rows(ModelRc::default());
+    app.global::<FilesUi>().set_list_loading(true);
+    draw("files-loading", 1280, 900);
+    draw("files-loading-phone", 390, 844);
+    app.set_theme_mode("dark".into());
+    draw("files-loading-dark", 1280, 900);
+    app.set_theme_mode("light".into());
+    app.global::<FilesUi>().set_list_loading(false);
+    app.set_active_view("mail".into());
     for view in ["calendar", "contacts", "files", "mail", "calendar", "mail"] {
         app.set_active_view(view.into());
         draw(&format!("product-switch-{view}"), 1280, 900);

@@ -9,6 +9,7 @@ import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
+import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 
 component FieldLabel inherits Text {
     in property <string> label;
@@ -61,6 +62,7 @@ export component ContactsView inherits Rectangle {
     private property <bool> single-surface: root.compact || root.layout-mode == "minimal";
     private property <bool> list-visible: !root.single-surface || !root.detail-page-visible;
     private property <bool> detail-visible: !root.single-surface || root.detail-page-visible;
+    private property <bool> list-loading: root.loading-more && root.contacts.length == 0;
 
     in property <color> accent;
     in property <color> accent-soft;
@@ -295,11 +297,21 @@ export component ContactsView inherits Rectangle {
 
                 Rectangle {
                     vertical-stretch: 1;
+                    WorkspaceListTransition {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: parent.height;
+                        revision: root.content-revision;
+                        scope-key: root.selected-scope + "|" + root.filter;
+                        loading: root.list-loading;
+
                     contact-list := ListView {
                         x: 0px;
                         y: 0px;
                         width: parent.width;
                         height: parent.height;
+                        visible: !root.list-loading;
                         horizontal-scrollbar-policy: always-off;
                         mouse-drag-pan-enabled: root.compact;
                         scrolled => { pagination.user-scrolled(); }
@@ -386,8 +398,30 @@ export component ContactsView inherits Rectangle {
                                 }
                             }
                         }
+                    }
 
-                    if root.contacts.length == 0 : Text {
+                    if root.list-loading : Rectangle {
+                        x: LayoutMetrics.list-row-inset;
+                        y: 0px;
+                        width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
+                        height: parent.height;
+                        background: root.surface;
+                        clip: true;
+
+                        for index in 8 : WorkspaceListLoadingRow {
+                            x: 0px;
+                            y: index * self.height;
+                            width: parent.width;
+                            row-height: 82px;
+                            leading-size: 38px;
+                            line-count: 3;
+                            show-trailing: mod(index, 3) == 0;
+                            base-color: root.control-bg;
+                            highlight-color: root.surface;
+                        }
+                    }
+
+                    if root.contacts.length == 0 && !root.list-loading : Text {
                         x: 20px;
                         width: parent.width - 40px;
                         height: min(parent.height, 130px);

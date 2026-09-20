@@ -1,0 +1,26 @@
+// Shared loading placeholder used by workspace lists and the retained message
+// renderer. The shimmer only ticks while active, so settled screens do not
+// keep requesting animation frames.
+export component LoadingSkeletonBlock inherits Rectangle {
+    in property <bool> active: true;
+    in property <color> base-color;
+    in property <color> highlight-color;
+    in property <length> radius: 6px;
+
+    background: root.base-color;
+    border-radius: root.radius;
+    clip: true;
+
+    if root.active : Rectangle {
+        private property <float> phase: mod(animation-tick(), 1400ms) / 1400ms;
+        x: -self.width + self.phase * (parent.width + self.width);
+        width: max(64px, parent.width * 0.42);
+        height: parent.height;
+        background: @linear-gradient(
+            90deg,
+            transparent 0%,
+            root.highlight-color.transparentize(0.52) 50%,
+            transparent 100%
+        );
+    }
+}

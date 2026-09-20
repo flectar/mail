@@ -874,6 +874,7 @@ export component AppWindow inherits Window {
     private property <bool> compact-primary-nav-visible: root.compact-layout
         && !root.compose_open && !root.calendar_editor_open
         && !(root.active_view == "mail" && root.mail-compact-page == "message")
+        && !(root.active_view == "mail" && root.mail-folders-open)
         && !(root.active_view == "contacts" && root.contacts-detail-visible)
         && !(root.active_view == "files" && FilesUi.preview-open);
     private property <length> compact-primary-nav-height: LayoutMetrics.compact-navigation-height;
@@ -1305,11 +1306,20 @@ export component AppWindow inherits Window {
         }
 
         CompactProductNav {
-            visible: root.compact-primary-nav-visible;
+            // Keep compact navigation mounted so entering/leaving a detail
+            // screen can slide it instead of popping it in and out.
+            visible: root.compact-layout
+                && (root.compact-primary-nav-visible || self.opacity > 0);
             x: 0px;
-            y: parent.height - root.compact-primary-nav-height;
+            y: root.compact-primary-nav-visible
+                ? parent.height - root.compact-primary-nav-height
+                : parent.height;
             width: parent.width;
             height: root.compact-primary-nav-height;
+            opacity: root.compact-primary-nav-visible ? 1 : 0;
+            interactive: root.compact-primary-nav-visible;
+            animate y { duration: 240ms; easing: spring(0); }
+            animate opacity { duration: 160ms; easing: ease-out; }
             active-view <=> root.active_view;
             settings-active: root.settings_open;
             background-color: root.sidebar-bg;

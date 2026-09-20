@@ -8,6 +8,7 @@ import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette } from "../design-system.slint";
@@ -98,6 +99,80 @@ component LabelColorSwatch inherits Rectangle {
         accessible-action-default => { root.chosen(); }
         clicked => { root.chosen(); }
         mouse-cursor: pointer;
+    }
+}
+
+// The native mail renderer can take a moment to parse and rasterize complex
+// HTML. Keep the document surface alive and show its approximate structure so
+// that switching messages never flashes an empty white panel.
+component MessageLoadingSkeleton inherits Rectangle {
+    in property <bool> active: false;
+    in property <color> surface-color;
+    in property <color> base-color;
+    in property <color> highlight-color;
+    in property <color> text-color;
+
+    visible: root.active || self.opacity > 0;
+    background: root.surface-color;
+    clip: true;
+    opacity: root.active ? 1 : 0;
+    animate opacity { duration: 180ms; easing: ease-out; }
+
+    LoadingSkeletonBlock {
+        x: 18px;
+        y: 18px;
+        width: 40px;
+        height: 40px;
+        radius: 20px;
+        active: root.active;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    LoadingSkeletonBlock {
+        x: 70px;
+        y: 19px;
+        width: min(180px, max(88px, parent.width * 0.34));
+        height: 14px;
+        active: root.active;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    LoadingSkeletonBlock {
+        x: 70px;
+        y: 40px;
+        width: min(124px, max(64px, parent.width * 0.24));
+        height: 10px;
+        active: root.active;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+
+    for line[index] in 7 : LoadingSkeletonBlock {
+        x: 18px;
+        y: 82px + index * 24px;
+        width: min(max(0px, parent.width - 36px), max(72px, parent.width * (index == 0 ? 0.86
+            : index == 1 ? 0.72
+            : index == 2 ? 0.91
+            : index == 3 ? 0.64
+            : index == 4 ? 0.82
+            : index == 5 ? 0.76
+            : 0.48)));
+        height: 11px;
+        active: root.active;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+
+    Text {
+        x: 18px;
+        y: 258px;
+        width: max(0px, parent.width - 36px);
+        height: 24px;
+        text: @tr("Rendering message…");
+        color: root.text-color;
+        font-size: TypeScale.secondary;
+        vertical-alignment: center;
+        accessible-role: text;
     }
 }
 
@@ -344,6 +419,7 @@ export component MailReadingPane inherits Rectangle {
         root.attachment-flow-y + root.attachment-section-height + (MailAttachments.rows.length > 0 ? 12px : 0px)
     );
     private property <length> expanded-message-height: root.renderer-controls-height + root.message-document-height;
+    animate selected-header-y { duration: 240ms; easing: spring(0); }
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> border;
@@ -375,7 +451,18 @@ export component MailReadingPane inherits Rectangle {
     callback load-remote-images-for-message();
 
     private property <bool> viewport-pending: false;
+    private property <int> transition-message-id: EmailReader.message-id;
+    private property <float> content-reveal: 1;
+    private property <bool> content-reveal-pending: false;
+
+    function restart-content-reveal() {
+        root.content-reveal = 0;
+        root.content-reveal-pending = true;
+    }
+
+    changed transition-message-id => { root.restart-content-reveal(); }
     changed selected-thread-index => {
+        root.restart-content-reveal();
         root.syncing-accordion-scroll = true;
         root.email-scroll-y = 0px;
         root.accordion-scroll-y = 0px;
@@ -394,6 +481,14 @@ export component MailReadingPane inherits Rectangle {
         root.viewport-pending = false;
         if EmailReader.available { EmailReader.command("viewport"); }
     } }
+    Timer {
+        interval: 16ms;
+        running: root.content-reveal-pending;
+        triggered => {
+            root.content-reveal-pending = false;
+            root.content-reveal = 1;
+        }
+    }
     private property <bool> selecting: false;
     private property <bool> touch-pending: false;
     private property <float> touch-x: 0;
@@ -800,13 +895,19 @@ export component MailReadingPane inherits Rectangle {
 
                     Rectangle { height: 1px; background: root.border; }
 
-                    VerticalBox {
+                    message-content := VerticalBox {
                         vertical-stretch: 1;
                         padding-top: root.compact ? 14px : 20px;
                         padding-right: root.compact ? 12px : 24px;
                         padding-bottom: 0px;
                         padding-left: root.compact ? 12px : 24px;
                         spacing: 0px;
+                        opacity: 0.28 + root.content-reveal * 0.72;
+                        animate opacity {
+                            duration: 190ms;
+                            easing: ease-out;
+                            enabled: root.content-reveal > 0;
+                        }
 
                         Text {
                             // The two navigation panes and separators occupy
@@ -917,6 +1018,7 @@ export component MailReadingPane inherits Rectangle {
                                     x: -email-scroll.content-x + root.message-card-inset;
                                     y: row.index * root.thread-item-stride
                                         + (row.index > root.accordion-selected-index ? root.expanded-message-height : 0px);
+                                    animate y { duration: 240ms; easing: spring(0); }
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     sender: row.sender;
                                     address: row.address;
@@ -1001,6 +1103,19 @@ export component MailReadingPane inherits Rectangle {
                                         text: EmailReader.notice; wrap: word-wrap; color: root.secondary-text; font-size: TypeScale.secondary;
                                         accessible-role: text;
                                     }
+                                }
+
+                                MessageLoadingSkeleton {
+                                    x: -email-scroll.content-x + root.message-card-inset + root.message-card-border-width;
+                                    y: root.message-body-y;
+                                    width: root.email-viewport-width;
+                                    height: root.message-document-height;
+                                    z: 50;
+                                    active: EmailReader.body-pending;
+                                    surface-color: root.surface;
+                                    base-color: root.control-bg;
+                                    highlight-color: root.surface-raised;
+                                    text-color: root.secondary-text;
                                 }
 
                                 // This area supplies the normal right-click

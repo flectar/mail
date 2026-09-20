@@ -8,6 +8,7 @@ import { Button } from "../components/button.slint";
 import { AccountRow } from "../models.slint";
 import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
+import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
 
 export struct FileRow {
@@ -41,6 +42,7 @@ export global FilesUi {
     in-out property <bool> connected: false;
     in-out property <int> connection-revision: 0;
     in-out property <bool> busy: false;
+    in-out property <bool> list-loading: false;
     in-out property <string> transfer-status;
     in-out property <bool> can-create: false;
     in-out property <bool> can-lock: false;
@@ -322,18 +324,47 @@ export component FilesView inherits Rectangle {
                 }
             Rectangle {
                 vertical-stretch: 1;
-                if FilesUi.rows.length == 0 : VerticalBox {
+                if FilesUi.list-loading : Rectangle {
+                    x: LayoutMetrics.list-row-inset;
+                    y: 0px;
+                    width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
+                    height: parent.height;
+                    background: AppTheme.surface;
+                    clip: true;
+
+                    for index in 8 : WorkspaceListLoadingRow {
+                        x: 0px;
+                        y: index * self.height;
+                        width: parent.width;
+                        row-height: 82px;
+                        leading-size: 24px;
+                        leading-radius: 5px;
+                        line-count: 2;
+                        base-color: AppTheme.control-bg;
+                        highlight-color: AppTheme.surface;
+                    }
+                }
+                if FilesUi.rows.length == 0 && !FilesUi.list-loading : VerticalBox {
                     alignment: center; padding: 24px; spacing: 12px;
                     Image { source: @image-url("../icons/lucide/outline/files.svg"); width: 40px; height: 40px; colorize: AppTheme.muted; horizontal-stretch: 0; }
-                    Text { text: FilesUi.busy ? @tr("Loading files…") : @tr("No files to show"); color: AppTheme.heading; font-weight: 600; font-size: TypeScale.body; horizontal-alignment: center; }
+                    Text { text: @tr("No files to show"); color: AppTheme.heading; font-weight: 600; font-size: TypeScale.body; horizontal-alignment: center; }
                     Text { text: FilesUi.attachments ? @tr("Attachments from synchronized messages will appear here.") : FilesUi.connected ? @tr("Upload a file or create a folder to get started.") : @tr("Select an account and connect its storage."); color: AppTheme.secondary; wrap: word-wrap; horizontal-alignment: center; }
                 }
+                WorkspaceListTransition {
+                    x: 0px;
+                    y: 0px;
+                    width: parent.width;
+                    height: parent.height;
+                    revision: FilesUi.content-revision;
+                    scope-key: root.list-scope;
+                    loading: FilesUi.list-loading;
+
                 file-list := ListView {
                     x: 0px; y: 0px; width: parent.width; height: parent.height;
                     mouse-drag-pan-enabled: root.compact;
                     accessible-label: @tr("Files"); accessible-item-count: FilesUi.rows.length;
                     scrolled => { pagination.user-scrolled(); }
-                    visible: FilesUi.rows.length > 0;
+                    visible: FilesUi.rows.length > 0 && !FilesUi.list-loading;
                     horizontal-scrollbar-policy: always-off;
                     content-width: self.visible-width;
                     for row[index] in FilesUi.rows : Rectangle {
@@ -365,6 +396,7 @@ export component FilesView inherits Rectangle {
                         }
                         }
                     }
+                }
                 }
                 ScrollFade {
                     x: file-list.x; y: file-list.y; width: file-list.visible-width; height: file-list.visible-height;
@@ -426,13 +458,34 @@ export component FilesView inherits Rectangle {
             }
         }
     }
-    if root.compact && root.navigation-open : Rectangle {
-        background: #00000060;
-        TouchArea { clicked => { root.navigation-open = false; } }
+    if root.compact : Rectangle {
+        background: transparent;
         Rectangle {
-            x: 0px; y: 0px;
+            visible: root.navigation-open || self.opacity > 0;
+            width: parent.width;
+            height: parent.height;
+            background: #00000060;
+            opacity: root.navigation-open ? 1 : 0;
+            animate opacity { duration: 180ms; easing: ease-out; }
+            TouchArea {
+                enabled: root.navigation-open;
+                clicked => { root.navigation-open = false; }
+            }
+        }
+        Rectangle {
+            visible: root.navigation-open || self.x > -self.width - 11px;
+            x: root.navigation-open ? 0px : -self.width - 12px;
+            y: 0px;
             width: min(LayoutMetrics.sidebar-width + 40px, parent.width - 24px);
-            height: parent.height; background: AppTheme.sidebar-bg;
+            height: parent.height;
+            background: AppTheme.sidebar-bg;
+            opacity: root.navigation-open ? 1 : 0.92;
+            drop-shadow-blur: root.navigation-open ? 24px : 0px;
+            drop-shadow-offset-x: 6px;
+            drop-shadow-color: #00000035;
+            animate x { duration: 260ms; easing: spring(0.08); }
+            animate opacity { duration: 180ms; easing: ease-out; }
+            animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
             VerticalBox {
                 padding: 0px; spacing: 0px;
                 WorkspaceTitleRow { title: @tr("File sources"); horizontal-inset: 12px; Button { text: @tr("Close"); clicked => { root.navigation-open = false; } } }

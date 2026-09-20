@@ -170,6 +170,7 @@ component CompactProductNavItem inherits Rectangle {
     in property <color> accent-color;
     in property <color> active-background;
     in property <color> muted-color;
+    in property <bool> interactive: true;
     callback clicked;
 
     min-width: 64px;
@@ -218,8 +219,10 @@ component CompactProductNavItem inherits Rectangle {
     // Make the complete navigation item interactive, including the space
     // around its indicator and label.
     nav-hit := TouchArea {
+        enabled: root.interactive;
         mouse-cursor: pointer;
         accessible-role: button;
+        accessible-enabled: root.interactive;
         accessible-label: root.label;
         accessible-id: "mobile-nav-" + root.label.to-lowercase();
         accessible-checked: root.active;
@@ -236,6 +239,7 @@ export component CompactProductNav inherits Rectangle {
     in property <color> accent-color;
     in property <color> accent-background;
     in property <color> muted-color;
+    in property <bool> interactive: true;
     callback open-settings;
     callback select-view(string);
 
@@ -270,6 +274,7 @@ export component CompactProductNav inherits Rectangle {
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
+            interactive: root.interactive;
             clicked => { root.select-view("mail"); }
         }
         CompactProductNavItem {
@@ -281,6 +286,7 @@ export component CompactProductNav inherits Rectangle {
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
+            interactive: root.interactive;
             clicked => { root.select-view("calendar"); }
         }
         CompactProductNavItem {
@@ -292,6 +298,7 @@ export component CompactProductNav inherits Rectangle {
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
+            interactive: root.interactive;
             clicked => { root.select-view("files"); }
         }
         CompactProductNavItem {
@@ -303,6 +310,7 @@ export component CompactProductNav inherits Rectangle {
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
+            interactive: root.interactive;
             clicked => { root.select-view("contacts"); }
         }
         CompactProductNavItem {
@@ -314,6 +322,7 @@ export component CompactProductNav inherits Rectangle {
             accent-color: root.accent-color;
             active-background: root.accent-background;
             muted-color: root.muted-color;
+            interactive: root.interactive;
             clicked => { root.open-settings(); }
         }
     }

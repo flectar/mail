@@ -73,6 +73,11 @@ export component MailView inherits Rectangle {
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
+    private property <length> single-pane-content-x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
+    private property <length> single-pane-content-width: max(0px, root.width - root.single-pane-content-x);
+    private property <length> page-transition-distance: root.compact
+        ? root.single-pane-content-width
+        : min(96px, root.single-pane-content-width);
     out property <length> email-viewport-width: root.single-pane ? compact-reading-pane.email-viewport-width : desktop-reading-pane.email-viewport-width;
     out property <length> email-viewport-height: root.single-pane ? compact-reading-pane.email-viewport-height : desktop-reading-pane.email-viewport-height;
     in property <color> accent;
@@ -379,10 +384,14 @@ export component MailView inherits Rectangle {
             compact-list-pane := MailListPane {
                 loading: root.loading;
                 visible: root.compact-page == "list";
-                x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
+                x: root.single-pane-content-x
+                    + (root.compact-page == "list" ? 0px : -root.page-transition-distance);
                 y: 0px;
-                width: max(0px, parent.width - self.x);
+                width: root.single-pane-content-width;
                 height: parent.height;
+                opacity: root.compact-page == "list" ? 1 : 0;
+                animate x { duration: 260ms; easing: spring(0); }
+                animate opacity { duration: 170ms; easing: ease-out; }
                 compact: root.compact;
                 single-pane-navigation: root.compact;
                 show-avatars: root.show-avatars;
@@ -438,10 +447,14 @@ export component MailView inherits Rectangle {
                 full-width: true;
                 show-avatars: root.show-avatars;
                 visible: root.compact-page == "message";
-                x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
+                x: root.single-pane-content-x
+                    + (root.compact-page == "message" ? 0px : root.page-transition-distance);
                 y: 0px;
-                width: max(0px, parent.width - self.x);
+                width: root.single-pane-content-width;
                 height: parent.height;
+                opacity: root.compact-page == "message" ? 1 : 0;
+                animate x { duration: 260ms; easing: spring(0); }
+                animate opacity { duration: 170ms; easing: ease-out; }
                 compact: root.compact;
                 window-width: self.width;
                 email_tiles: root.email_tiles;
@@ -521,25 +534,36 @@ export component MailView inherits Rectangle {
 
             // Modal drawer and scrim intentionally sit above both compact pages.
             Rectangle {
-                visible: root.compact && root.folders-open;
+                visible: root.compact && (root.folders-open || self.opacity > 0);
                 x: 0px;
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
                 z: 100;
                 background: #00000055;
+                opacity: root.folders-open ? 1 : 0;
+                animate opacity { duration: 180ms; easing: ease-out; }
                 TouchArea {
+                    enabled: root.folders-open;
                     accessible-role: button;
                     accessible-label: @tr("Close folders");
                     clicked => { root.folders-open = false; }
                 }
             }
-            if root.active_view == "mail" && root.compact && root.folders-open : MailSidebar {
-                x: 0px;
+            if root.active_view == "mail" && root.compact : MailSidebar {
+                visible: root.folders-open || self.x > -self.width - 11px;
+                x: root.folders-open ? 0px : -self.width - 12px;
                 y: 0px;
                 width: min(300px, parent.width - 48px);
                 height: parent.height;
                 z: 101;
+                opacity: root.folders-open ? 1 : 0.92;
+                drop-shadow-blur: root.folders-open ? 24px : 0px;
+                drop-shadow-offset-x: 6px;
+                drop-shadow-color: #00000035;
+                animate x { duration: 260ms; easing: spring(0.08); }
+                animate opacity { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
                 touch-mode: true;
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;

@@ -1,0 +1,124 @@
+import { LoadingSkeletonBlock } from "loading-skeleton.slint";
+
+// Shared motion contract for retained item lists. A one-frame handoff gives
+// Slint a real start and target value, while the critically damped 1.18
+// spring keeps fast scope changes smooth without making rows bounce.
+export component WorkspaceListTransition inherits Rectangle {
+    in property <int> revision: 0;
+    in property <string> scope-key: "";
+    in property <bool> loading: false;
+
+    private property <float> reveal-progress: 1;
+    private property <bool> reveal-pending: false;
+
+    clip: true;
+
+    function restart() {
+        root.reveal-progress = 0;
+        root.reveal-pending = true;
+    }
+
+    changed revision => { if !root.loading { root.restart(); } }
+    changed scope-key => { root.restart(); }
+    changed loading => { if !root.loading { root.restart(); } }
+
+    Timer {
+        interval: 16ms;
+        running: root.reveal-pending;
+        triggered => {
+            root.reveal-pending = false;
+            root.reveal-progress = 1;
+        }
+    }
+
+    content-stage := Rectangle {
+        x: (1 - root.reveal-progress) * 10px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        opacity: 0.24 + root.reveal-progress * 0.76;
+
+        animate x {
+            duration: 220ms;
+            easing: spring(0);
+            enabled: root.reveal-progress > 0;
+        }
+        animate opacity {
+            duration: 180ms;
+            easing: ease-out;
+            enabled: root.reveal-progress > 0;
+        }
+
+        @children
+    }
+}
+
+// Mail, Contacts, and Files use the same virtualized row geometry but vary in
+// density and line count. Keeping the placeholder here prevents loading states
+// from drifting apart as those views evolve.
+export component WorkspaceListLoadingRow inherits Rectangle {
+    in property <length> row-height: 82px;
+    in property <length> leading-size: 38px;
+    in property <length> leading-radius: root.leading-size / 2;
+    in property <bool> show-leading: true;
+    in property <int> line-count: 2;
+    in property <bool> show-trailing: true;
+    in property <color> base-color;
+    in property <color> highlight-color;
+
+    private property <bool> dense: root.row-height <= 52px;
+    private property <length> leading-x: 12px;
+    private property <length> content-x: root.show-leading
+        ? root.leading-x + root.leading-size + 12px : 12px;
+    private property <length> trailing-width: root.dense ? 42px : 64px;
+    private property <length> trailing-x: max(root.content-x + 72px, root.width - root.trailing-width - 12px);
+    private property <length> content-width: max(0px, root.trailing-x - root.content-x - 12px);
+
+    height: root.row-height;
+    border-radius: 6px;
+    background: transparent;
+
+    if root.show-leading : LoadingSkeletonBlock {
+        x: root.leading-x;
+        y: (parent.height - self.height) / 2;
+        width: root.leading-size;
+        height: root.leading-size;
+        radius: root.leading-radius;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    LoadingSkeletonBlock {
+        x: root.content-x;
+        y: root.dense ? (parent.height - self.height) / 2 : 13px;
+        width: min(154px, max(64px, root.content-width * 0.58));
+        height: 12px;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    if root.line-count > 1 : LoadingSkeletonBlock {
+        x: root.dense ? min(root.content-x + 166px, root.trailing-x - 84px) : root.content-x;
+        y: root.dense ? (parent.height - self.height) / 2 : 36px;
+        width: root.dense
+            ? min(118px, max(52px, root.trailing-x - self.x - 12px))
+            : min(218px, max(72px, root.content-width * 0.82));
+        height: root.dense ? 12px : 11px;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    if root.line-count > 2 && !root.dense : LoadingSkeletonBlock {
+        x: root.content-x;
+        y: 58px;
+        width: min(178px, max(64px, root.content-width * 0.64));
+        height: 10px;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+    if root.show-trailing : LoadingSkeletonBlock {
+        x: root.trailing-x;
+        y: root.dense ? (parent.height - self.height) / 2 : 14px;
+        width: min(root.trailing-width, max(0px, parent.width - self.x - 12px));
+        height: 10px;
+        base-color: root.base-color;
+        highlight-color: root.highlight-color;
+    }
+}

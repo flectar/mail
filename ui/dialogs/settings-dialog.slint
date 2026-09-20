@@ -1880,23 +1880,37 @@ export component SettingsDialog inherits Rectangle {
             }
 
             Rectangle {
-                visible: root.compact && root.compact-nav-open;
+                visible: root.compact && (root.compact-nav-open || self.opacity > 0);
                 x: 0px;
                 y: 0px;
                 width: parent.width;
                 height: parent.height;
                 z: 209;
                 background: #00000055;
-                TouchArea { accessible-role: button; accessible-label: @tr("Close settings sections"); clicked => { root.compact-nav-open = false; } }
+                opacity: root.compact-nav-open ? 1 : 0;
+                animate opacity { duration: 180ms; easing: ease-out; }
+                TouchArea {
+                    enabled: root.compact-nav-open;
+                    accessible-role: button;
+                    accessible-label: @tr("Close settings sections");
+                    clicked => { root.compact-nav-open = false; }
+                }
             }
             Rectangle {
-                visible: root.compact && root.compact-nav-open;
-                x: 0px;
+                visible: root.compact && (root.compact-nav-open || self.x > -self.width - 11px);
+                x: root.compact-nav-open ? 0px : -self.width - 12px;
                 y: 0px;
                 width: min(310px, parent.width - 48px);
                 height: parent.height;
                 z: 210;
                 background: root.sidebar-bg;
+                opacity: root.compact-nav-open ? 1 : 0.92;
+                drop-shadow-blur: root.compact-nav-open ? 24px : 0px;
+                drop-shadow-offset-x: 6px;
+                drop-shadow-color: #00000035;
+                animate x { duration: 260ms; easing: spring(0.08); }
+                animate opacity { duration: 180ms; easing: ease-out; }
+                animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
                 VerticalBox {
                     padding-top: 18px;
                     padding-right: 12px;

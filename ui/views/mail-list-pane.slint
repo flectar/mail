@@ -7,6 +7,7 @@ import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
+import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 
 component MailListLabelChip inherits Rectangle {
     in property <string> name;
@@ -273,6 +274,15 @@ export component MailListPane inherits Rectangle {
                     Rectangle {
                         vertical-stretch: 1;
                         background: root.surface;
+
+                        WorkspaceListTransition {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            revision: root.content_revision;
+                            scope-key: root.selected_scope + "|" + root.search_filter;
+                            loading: root.loading;
 
                         mail-list-scroll := ListView {
                             x: LayoutMetrics.list-row-inset;
@@ -645,8 +655,30 @@ export component MailListPane inherits Rectangle {
                                 }
                             }
                         }
+                        }
 
-                        if root.emails.length == 0 : Rectangle {
+                        if root.loading && root.emails.length == 0 : Rectangle {
+                            x: LayoutMetrics.list-row-inset;
+                            y: 0px;
+                            width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
+                            height: parent.height;
+                            background: root.surface;
+                            clip: true;
+
+                            for index in 7 : WorkspaceListLoadingRow {
+                                x: 0px;
+                                y: index * self.height;
+                                width: parent.width;
+                                row-height: root.dense ? 44px : 96px;
+                                leading-size: root.dense ? 28px : 38px;
+                                show-leading: root.show-avatars;
+                                line-count: root.dense ? 2 : 3;
+                                base-color: root.control-bg;
+                                highlight-color: root.surface;
+                            }
+                        }
+
+                        if !root.loading && root.emails.length == 0 : Rectangle {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;
                             width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
