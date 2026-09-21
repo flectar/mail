@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-21 01:50+0000\n"
+"POT-Creation-Date: 2026-09-21 02:17+0000\n"
 "PO-Revision-Date: 2026-09-15 12:00+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Turkish\n"
@@ -152,7 +152,7 @@ msgstr "Konuşma geçmişi mevcut"
 msgid "New address-book entry"
 msgstr "Yeni adres defteri kaydı"
 
-#: ui/app.slint:97 ui/app.slint:765 ui/components/composer-fields.slint:62
+#: ui/app.slint:97 ui/app.slint:766 ui/components/composer-fields.slint:62
 #: ui/dialogs/compose-dialog.slint:36
 msgid "No connected account"
 msgstr "Bağlı hesap yok"
@@ -1220,8 +1220,8 @@ msgstr "E-posta sayfalaması başarısız: {}"
 msgid "Could not mark message as read: {}"
 msgstr "İleti okundu olarak işaretlenemedi: {}"
 
-#: ui/app.slint:440 ui/views/mail-reading-pane.slint:220
-#: ui/views/mail-reading-pane.slint:1100
+#: ui/app.slint:440 ui/views/mail-reading-pane.slint:219
+#: ui/views/mail-reading-pane.slint:1105
 msgid "Loading message…"
 msgstr "İleti yükleniyor…"
 
@@ -1230,31 +1230,31 @@ msgstr "İleti yükleniyor…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:941 ui/app.slint:951
+#: ui/app.slint:942 ui/app.slint:952
 msgid "Global Labels (local only)"
 msgstr "Genel Etiketler (yalnızca yerel)"
 
-#: ui/app.slint:1790
+#: ui/app.slint:1792
 msgid "Mailbox startup failed"
 msgstr "Posta kutusu başlatılamadı"
 
-#: ui/app.slint:1796
+#: ui/app.slint:1798
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail yerel depolamayı açamadı"
 
-#: ui/app.slint:1809
+#: ui/app.slint:1811
 msgid "Diagnostic ID: {}"
 msgstr "Tanılama kimliği: {}"
 
-#: ui/app.slint:1812
+#: ui/app.slint:1814
 msgid "Diagnostic ID {}"
 msgstr "Tanılama kimliği {}"
 
-#: ui/app.slint:1817
+#: ui/app.slint:1819
 msgid "Retry"
 msgstr "Yeniden dene"
 
-#: ui/app.slint:1825 ui/components/copyable-diagnostic.slint:38
+#: ui/app.slint:1827 ui/components/copyable-diagnostic.slint:38
 msgid "Copy diagnostics"
 msgstr "Tanılama bilgilerini kopyala"
 
@@ -1805,18 +1805,18 @@ msgstr "İleti ve ekleri bu oluşturucudan kaldırılacak."
 msgid "Keep"
 msgstr "Koru"
 
-#: ui/components/composer-fields.slint:35 ui/views/mail-reading-pane.slint:354
-#: ui/views/mail-reading-pane.slint:1559
+#: ui/components/composer-fields.slint:35 ui/views/mail-reading-pane.slint:353
+#: ui/views/mail-reading-pane.slint:1624
 msgid "Reply"
 msgstr "Yanıtla"
 
-#: ui/components/composer-fields.slint:36 ui/views/mail-reading-pane.slint:355
-#: ui/views/mail-reading-pane.slint:1567
+#: ui/components/composer-fields.slint:36 ui/views/mail-reading-pane.slint:354
+#: ui/views/mail-reading-pane.slint:1632
 msgid "Reply all"
 msgstr "Tümünü yanıtla"
 
-#: ui/components/composer-fields.slint:37 ui/views/mail-reading-pane.slint:356
-#: ui/views/mail-reading-pane.slint:1575
+#: ui/components/composer-fields.slint:37 ui/views/mail-reading-pane.slint:355
+#: ui/views/mail-reading-pane.slint:1640
 msgid "Forward"
 msgstr "İlet"
 
@@ -2339,7 +2339,7 @@ msgid "Revert"
 msgstr "Eski haline dön"
 
 #: ui/components/theme-editor.slint:731 ui/dialogs/folder-dialog.slint:129
-#: ui/views/mail-reading-pane.slint:1724
+#: ui/views/mail-reading-pane.slint:1790
 msgid "Save"
 msgstr "Kaydet"
 
@@ -2563,7 +2563,7 @@ msgstr "En üst düzeyde oluştur"
 msgid "Inside “{}”"
 msgstr "“{}” içinde"
 
-#: ui/dialogs/folder-dialog.slint:127 ui/views/mail-reading-pane.slint:1673
+#: ui/dialogs/folder-dialog.slint:127 ui/views/mail-reading-pane.slint:1739
 msgid "Create label"
 msgstr "Etiket oluştur"
 
@@ -2682,7 +2682,7 @@ msgid "Save settings"
 msgstr "Ayarları kaydet"
 
 #: ui/dialogs/rendering-info-dialog.slint:25
-#: ui/views/mail-reading-pane.slint:360 ui/views/mail-reading-pane.slint:1599
+#: ui/views/mail-reading-pane.slint:359 ui/views/mail-reading-pane.slint:1664
 msgid "About email rendering"
 msgstr "E-posta görüntüleme hakkında"
 
@@ -2760,7 +2760,7 @@ msgstr "Depolama kullanımı hesaplanamadı. Tekrar deneyin."
 msgid "Open Storage to calculate local usage."
 msgstr "Yerel kullanımı hesaplamak için Depolama'yı açın."
 
-#: ui/dialogs/settings-dialog.slint:278 ui/views/mail-reading-pane.slint:1071
+#: ui/dialogs/settings-dialog.slint:278 ui/views/mail-reading-pane.slint:1076
 msgid "Attachments"
 msgstr "Ekler"
 
@@ -3472,7 +3472,7 @@ msgid "!"
 msgstr "!"
 
 #: ui/dialogs/settings-dialog.slint:1719 ui/views/mail-list-pane.slint:246
-#: ui/views/mail-reading-pane.slint:351 ui/views/mail-reading-pane.slint:380
+#: ui/views/mail-reading-pane.slint:350 ui/views/mail-reading-pane.slint:379
 msgid "Move to trash"
 msgstr "Çöp kutusuna taşı"
 
@@ -3702,7 +3702,7 @@ msgstr "Profil adı"
 msgid "Personal or Work"
 msgstr "Kişisel veya İş"
 
-#: ui/dialogs/settings-dialog.slint:2284 ui/views/mail-reading-pane.slint:1688
+#: ui/dialogs/settings-dialog.slint:2284 ui/views/mail-reading-pane.slint:1754
 msgid "Color"
 msgstr "Renk"
 
@@ -4427,21 +4427,21 @@ msgid "Select all messages on this page"
 msgstr "Bu sayfadaki tüm iletileri seç"
 
 #: ui/views/mail-list-pane.slint:237 ui/views/mail-list-pane.slint:650
-#: ui/views/mail-reading-pane.slint:379
+#: ui/views/mail-reading-pane.slint:378
 msgid "Move to spam"
 msgstr "İstenmeyene taşı"
 
-#: ui/views/mail-list-pane.slint:259 ui/views/mail-reading-pane.slint:858
+#: ui/views/mail-list-pane.slint:259 ui/views/mail-reading-pane.slint:863
 msgid "More message actions"
 msgstr "Diğer ileti işlemleri"
 
 #: ui/views/mail-list-pane.slint:265 ui/views/mail-list-pane.slint:648
-#: ui/views/mail-reading-pane.slint:377
+#: ui/views/mail-reading-pane.slint:376
 msgid "Mark as read"
 msgstr "Okundu olarak işaretle"
 
 #: ui/views/mail-list-pane.slint:266 ui/views/mail-list-pane.slint:648
-#: ui/views/mail-reading-pane.slint:377
+#: ui/views/mail-reading-pane.slint:376
 msgid "Mark as unread"
 msgstr "Okunmadı olarak işaretle"
 
@@ -4485,7 +4485,7 @@ msgstr "Hesap: {}"
 msgid "Deselect {}"
 msgstr "Seçimini kaldır: {}"
 
-#: ui/views/mail-list-pane.slint:649 ui/views/mail-reading-pane.slint:364
+#: ui/views/mail-list-pane.slint:649 ui/views/mail-reading-pane.slint:363
 msgid "Archive"
 msgstr "Arşivle"
 
@@ -4501,256 +4501,256 @@ msgstr "Burada hiçbir şey yok"
 msgid "Try another folder or search term."
 msgstr "Başka bir klasör veya arama terimi deneyin."
 
-#: ui/views/mail-reading-pane.slint:174
+#: ui/views/mail-reading-pane.slint:173
 msgid "Rendering message…"
 msgstr "İleti görüntüleniyor…"
 
-#: ui/views/mail-reading-pane.slint:219
+#: ui/views/mail-reading-pane.slint:218
 msgid "Message from {}"
 msgstr "Gönderen: {}"
 
-#: ui/views/mail-reading-pane.slint:219 ui/views/mail-reading-pane.slint:244
+#: ui/views/mail-reading-pane.slint:218 ui/views/mail-reading-pane.slint:243
 msgid "You"
 msgstr "Siz"
 
-#: ui/views/mail-reading-pane.slint:260
+#: ui/views/mail-reading-pane.slint:259
 msgid "Verified brand with BIMI authority evidence"
 msgstr "BIMI yetki kanıtıyla doğrulanmış marka"
 
-#: ui/views/mail-reading-pane.slint:262
+#: ui/views/mail-reading-pane.slint:261
 msgid "BIMI-authenticated sender"
 msgstr "BIMI kimliği doğrulanmış gönderen"
 
-#: ui/views/mail-reading-pane.slint:264
+#: ui/views/mail-reading-pane.slint:263
 msgid "Sender authenticated by Microsoft"
 msgstr "Microsoft tarafından doğrulanmış gönderen"
 
-#: ui/views/mail-reading-pane.slint:265
+#: ui/views/mail-reading-pane.slint:264
 msgid "Sender domain authenticated with DMARC and DKIM"
 msgstr "Gönderen etki alanı DMARC ve DKIM ile doğrulandı"
 
-#: ui/views/mail-reading-pane.slint:285
+#: ui/views/mail-reading-pane.slint:284
 msgid "to {}"
 msgstr "{} kişisine"
 
-#: ui/views/mail-reading-pane.slint:347 ui/views/mail-reading-pane.slint:1583
+#: ui/views/mail-reading-pane.slint:346 ui/views/mail-reading-pane.slint:1648
 msgid "Continue editing"
 msgstr "Düzenlemeye devam et"
 
-#: ui/views/mail-reading-pane.slint:349 ui/views/mail-reading-pane.slint:350
-#: ui/views/mail-reading-pane.slint:362 ui/views/mail-reading-pane.slint:376
+#: ui/views/mail-reading-pane.slint:348 ui/views/mail-reading-pane.slint:349
+#: ui/views/mail-reading-pane.slint:361 ui/views/mail-reading-pane.slint:375
 msgid "Show rendered message"
 msgstr "Görüntülenen iletiyi göster"
 
-#: ui/views/mail-reading-pane.slint:349 ui/views/mail-reading-pane.slint:361
+#: ui/views/mail-reading-pane.slint:348 ui/views/mail-reading-pane.slint:360
 msgid "Show source"
 msgstr "Kaynağı göster"
 
-#: ui/views/mail-reading-pane.slint:350 ui/views/mail-reading-pane.slint:362
+#: ui/views/mail-reading-pane.slint:349 ui/views/mail-reading-pane.slint:361
 msgid "View plain text"
 msgstr "Düz metni görüntüle"
 
-#: ui/views/mail-reading-pane.slint:357 ui/views/mail-reading-pane.slint:372
+#: ui/views/mail-reading-pane.slint:356 ui/views/mail-reading-pane.slint:371
 msgid "Decrypt / verify OpenPGP"
 msgstr "OpenPGP şifresini çöz / doğrula"
 
-#: ui/views/mail-reading-pane.slint:358
+#: ui/views/mail-reading-pane.slint:357
 msgid "Print message"
 msgstr "İletiyi yazdır"
 
-#: ui/views/mail-reading-pane.slint:359 ui/views/mail-reading-pane.slint:373
+#: ui/views/mail-reading-pane.slint:358 ui/views/mail-reading-pane.slint:372
 msgid "Open in browser"
 msgstr "Tarayıcıda aç"
 
-#: ui/views/mail-reading-pane.slint:574
+#: ui/views/mail-reading-pane.slint:579
 msgid "Close conversation"
 msgstr "Konuşmayı kapat"
 
-#: ui/views/mail-reading-pane.slint:584
+#: ui/views/mail-reading-pane.slint:589
 msgid "Previous conversation"
 msgstr "Önceki konuşma"
 
-#: ui/views/mail-reading-pane.slint:594
+#: ui/views/mail-reading-pane.slint:599
 msgid "Next conversation"
 msgstr "Sonraki konuşma"
 
-#: ui/views/mail-reading-pane.slint:607
+#: ui/views/mail-reading-pane.slint:612
 msgid "Archive message"
 msgstr "İletiyi arşivle"
 
-#: ui/views/mail-reading-pane.slint:666
+#: ui/views/mail-reading-pane.slint:671
 msgid "Manage labels"
 msgstr "Etiketleri yönet"
 
-#: ui/views/mail-reading-pane.slint:709
+#: ui/views/mail-reading-pane.slint:714
 msgid "Search labels"
 msgstr "Etiketlerde ara"
 
-#: ui/views/mail-reading-pane.slint:726
+#: ui/views/mail-reading-pane.slint:731
 msgid "Available labels"
 msgstr "Kullanılabilir etiketler"
 
-#: ui/views/mail-reading-pane.slint:765
+#: ui/views/mail-reading-pane.slint:770
 msgid "Smart category"
 msgstr "Akıllı kategori"
 
-#: ui/views/mail-reading-pane.slint:807 ui/views/mail-reading-pane.slint:1673
+#: ui/views/mail-reading-pane.slint:812 ui/views/mail-reading-pane.slint:1739
 msgid "Edit label"
 msgstr "Etiketi düzenle"
 
-#: ui/views/mail-reading-pane.slint:824
+#: ui/views/mail-reading-pane.slint:829
 msgid "No matching labels"
 msgstr "Eşleşen etiket yok"
 
-#: ui/views/mail-reading-pane.slint:836
+#: ui/views/mail-reading-pane.slint:841
 msgid "Create label…"
 msgstr "Etiket oluştur…"
 
-#: ui/views/mail-reading-pane.slint:1081 ui/views/mail-reading-pane.slint:1087
+#: ui/views/mail-reading-pane.slint:1086 ui/views/mail-reading-pane.slint:1092
 msgid "Find in message"
 msgstr "İletide bul"
 
-#: ui/views/mail-reading-pane.slint:1082
+#: ui/views/mail-reading-pane.slint:1087
 msgid "Show original layout"
 msgstr "Özgün düzeni göster"
 
-#: ui/views/mail-reading-pane.slint:1082
+#: ui/views/mail-reading-pane.slint:1087
 msgid "Reader mode"
 msgstr "Okuyucu modu"
 
-#: ui/views/mail-reading-pane.slint:1089
+#: ui/views/mail-reading-pane.slint:1094
 msgid "Previous match"
 msgstr "Önceki eşleşme"
 
-#: ui/views/mail-reading-pane.slint:1090
+#: ui/views/mail-reading-pane.slint:1095
 msgid "Next match"
 msgstr "Sonraki eşleşme"
 
-#: ui/views/mail-reading-pane.slint:1091
+#: ui/views/mail-reading-pane.slint:1096
 msgid "Close find"
 msgstr "Aramayı kapat"
 
-#: ui/views/mail-reading-pane.slint:1095
+#: ui/views/mail-reading-pane.slint:1100
 msgid "Some images could not be loaded."
 msgstr "Bazı görseller yüklenemedi."
 
-#: ui/views/mail-reading-pane.slint:1096 ui/views/mail-reading-pane.slint:1380
+#: ui/views/mail-reading-pane.slint:1101 ui/views/mail-reading-pane.slint:1385
 msgid "Retry images"
 msgstr "Görselleri yeniden dene"
 
-#: ui/views/mail-reading-pane.slint:1101
+#: ui/views/mail-reading-pane.slint:1106
 msgid "Reload message"
 msgstr "İletiyi yeniden yükle"
 
-#: ui/views/mail-reading-pane.slint:1152
+#: ui/views/mail-reading-pane.slint:1157
 msgid "Remote images were blocked to protect your privacy."
 msgstr "Gizliliğinizi korumak için uzak görseller engellendi."
 
-#: ui/views/mail-reading-pane.slint:1161
+#: ui/views/mail-reading-pane.slint:1166
 msgid "Load images"
 msgstr "Görselleri yükle"
 
-#: ui/views/mail-reading-pane.slint:1191
+#: ui/views/mail-reading-pane.slint:1196
 msgid "Loading image…"
 msgstr "Görsel yükleniyor…"
 
-#: ui/views/mail-reading-pane.slint:1191
+#: ui/views/mail-reading-pane.slint:1196
 msgid "Blocked image"
 msgstr "Engellenmiş görsel"
 
-#: ui/views/mail-reading-pane.slint:1191
+#: ui/views/mail-reading-pane.slint:1196
 msgid "Image exceeds limits"
 msgstr "Görsel sınırları aşıyor"
 
-#: ui/views/mail-reading-pane.slint:1191
+#: ui/views/mail-reading-pane.slint:1196
 msgid "Image unavailable"
 msgstr "Görsel kullanılamıyor"
 
-#: ui/views/mail-reading-pane.slint:1329
+#: ui/views/mail-reading-pane.slint:1334
 msgid "Show rendered email"
 msgstr "Görüntülenen e-postayı göster"
 
-#: ui/views/mail-reading-pane.slint:1352
+#: ui/views/mail-reading-pane.slint:1357
 msgid "Copy this HTML into your GitHub rendering issue."
 msgstr "Bu HTML'i GitHub'daki görüntüleme sorun kaydınıza yapıştırın."
 
-#: ui/views/mail-reading-pane.slint:1369
+#: ui/views/mail-reading-pane.slint:1374
 msgid "Show email"
 msgstr "E-postayı göster"
 
-#: ui/views/mail-reading-pane.slint:1379
+#: ui/views/mail-reading-pane.slint:1384
 msgid "View original plain text"
 msgstr "Özgün düz metni görüntüle"
 
-#: ui/views/mail-reading-pane.slint:1381
+#: ui/views/mail-reading-pane.slint:1386
 msgid "Copy formatted selection"
 msgstr "Biçimli seçimi kopyala"
 
-#: ui/views/mail-reading-pane.slint:1382
+#: ui/views/mail-reading-pane.slint:1387
 msgid "Caret browsing"
 msgstr "İmleçle gezinme"
 
-#: ui/views/mail-reading-pane.slint:1383
+#: ui/views/mail-reading-pane.slint:1388
 msgid "Use dark reader"
 msgstr "Koyu okuyucu kullan"
 
-#: ui/views/mail-reading-pane.slint:1385
+#: ui/views/mail-reading-pane.slint:1390
 msgid "Copy selected text"
 msgstr "Seçili metni kopyala"
 
-#: ui/views/mail-reading-pane.slint:1395
+#: ui/views/mail-reading-pane.slint:1400
 msgid "Copy all email text"
 msgstr "Tüm e-posta metnini kopyala"
 
-#: ui/views/mail-reading-pane.slint:1405
+#: ui/views/mail-reading-pane.slint:1410
 msgid "Select all email text"
 msgstr "Tüm e-posta metnini seç"
 
-#: ui/views/mail-reading-pane.slint:1423
+#: ui/views/mail-reading-pane.slint:1428
 msgid "Link: {}"
 msgstr "Bağlantı: {}"
 
-#: ui/views/mail-reading-pane.slint:1521
+#: ui/views/mail-reading-pane.slint:1588
 msgid "Heading: {}"
 msgstr "Başlık: {}"
 
-#: ui/views/mail-reading-pane.slint:1641
+#: ui/views/mail-reading-pane.slint:1707
 msgid "No message selected"
 msgstr "İleti seçilmedi"
 
-#: ui/views/mail-reading-pane.slint:1642
+#: ui/views/mail-reading-pane.slint:1708
 msgid "Choose an email to read it here."
 msgstr "Burada okumak için bir e-posta seçin."
 
-#: ui/views/mail-reading-pane.slint:1680
+#: ui/views/mail-reading-pane.slint:1746
 msgid "Label name"
 msgstr "Etiket adı"
 
-#: ui/views/mail-reading-pane.slint:1698
+#: ui/views/mail-reading-pane.slint:1764
 msgid "Blue"
 msgstr "Mavi"
 
-#: ui/views/mail-reading-pane.slint:1700
+#: ui/views/mail-reading-pane.slint:1766
 msgid "Pink"
 msgstr "Pembe"
 
-#: ui/views/mail-reading-pane.slint:1701
+#: ui/views/mail-reading-pane.slint:1767
 msgid "Red"
 msgstr "Kırmızı"
 
-#: ui/views/mail-reading-pane.slint:1702
+#: ui/views/mail-reading-pane.slint:1768
 msgid "Amber"
 msgstr "Kehribar"
 
-#: ui/views/mail-reading-pane.slint:1705
+#: ui/views/mail-reading-pane.slint:1771
 msgid "Slate"
 msgstr "Kurşuni"
 
-#: ui/views/mail-reading-pane.slint:1710
+#: ui/views/mail-reading-pane.slint:1776
 msgid "Use across all accounts (local only)"
 msgstr "Tüm hesaplarda kullan (yalnızca yerel)"
 
-#: ui/views/mail-view.slint:552
+#: ui/views/mail-view.slint:553
 msgid "Close folders"
 msgstr "Klasörleri kapat"
 
