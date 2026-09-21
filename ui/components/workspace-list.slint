@@ -1,4 +1,5 @@
 import { LoadingSkeletonBlock } from "loading-skeleton.slint";
+import { MotionSettings } from "../design-system.slint";
 
 // Shared motion contract for retained item lists. Only semantic navigation
 // (a new scope or a completed replacement load) restarts the reveal. Model
@@ -13,14 +14,20 @@ export component WorkspaceListTransition inherits Rectangle {
     in property <string> scope-key: "";
     in property <bool> loading: false;
 
-    private property <float> reveal-progress: 1;
+    private property <float> animated-reveal-progress: 1;
+    private property <float> reveal-progress: MotionSettings.enabled ? root.animated-reveal-progress : 1;
     private property <bool> reveal-pending: false;
 
     clip: true;
 
     function restart() {
-        root.reveal-progress = 0;
-        root.reveal-pending = true;
+        if MotionSettings.enabled {
+            root.animated-reveal-progress = 0;
+            root.reveal-pending = true;
+        } else {
+            root.animated-reveal-progress = 1;
+            root.reveal-pending = false;
+        }
     }
 
     changed scope-key => { root.restart(); }
@@ -28,10 +35,10 @@ export component WorkspaceListTransition inherits Rectangle {
 
     Timer {
         interval: 16ms;
-        running: root.reveal-pending;
+        running: MotionSettings.enabled && root.reveal-pending;
         triggered => {
             root.reveal-pending = false;
-            root.reveal-progress = 1;
+            root.animated-reveal-progress = 1;
         }
     }
 
@@ -45,12 +52,12 @@ export component WorkspaceListTransition inherits Rectangle {
         animate x {
             duration: 220ms;
             easing: spring(0);
-            enabled: root.reveal-progress > 0;
+            enabled: MotionSettings.enabled && root.reveal-progress > 0;
         }
         animate opacity {
             duration: 180ms;
             easing: ease-out;
-            enabled: root.reveal-progress > 0;
+            enabled: MotionSettings.enabled && root.reveal-progress > 0;
         }
 
         @children

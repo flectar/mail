@@ -32,6 +32,13 @@ export global LayoutMetrics {
     out property <length> corner-radius: 8px;
 }
 
+// Runtime motion stays enabled by default. Deterministic renderers such as the
+// README screenshot generator can opt out so they capture the settled state
+// without changing the motion users see in the application.
+export global MotionSettings {
+    in-out property <bool> enabled: true;
+}
+
 // Mail actions and their matching sidebar destinations share one semantic
 // icon palette. These colors stay stable across themes so the same action is
 // recognizable wherever it appears.

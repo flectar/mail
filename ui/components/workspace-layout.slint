@@ -1,5 +1,5 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { LineEdit, ToolbarIconButton } from "controls.slint";
 
@@ -18,7 +18,8 @@ export component WorkspaceFrame inherits Rectangle {
     in property <length> available-height;
 
     private property <length> base-x: root.compact ? 0px : LayoutMetrics.product-rail-width;
-    private property <float> reveal-progress: 0;
+    private property <float> animated-reveal-progress: 0;
+    private property <float> reveal-progress: MotionSettings.enabled ? root.animated-reveal-progress : 1;
     private property <bool> reveal-pending: true;
 
     x: root.base-x + (1 - root.reveal-progress) * 14px;
@@ -33,15 +34,15 @@ export component WorkspaceFrame inherits Rectangle {
     // provides a native view-transition feel while its data model hydrates.
     Timer {
         interval: 16ms;
-        running: root.reveal-pending;
+        running: MotionSettings.enabled && root.reveal-pending;
         triggered => {
             root.reveal-pending = false;
-            root.reveal-progress = 1;
+            root.animated-reveal-progress = 1;
         }
     }
-    animate x { duration: 240ms; easing: spring(0); }
-    animate height { duration: 220ms; easing: spring(0); }
-    animate opacity { duration: 180ms; easing: ease-out; }
+    animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.enabled; }
+    animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.enabled; }
+    animate opacity { duration: 180ms; easing: ease-out; enabled: MotionSettings.enabled; }
 
     @children
 }

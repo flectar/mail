@@ -87,6 +87,7 @@ render() {
       def favicon_path(address):
         ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
       .theme_mode = $theme
+      | .["MotionSettings.enabled"] = false
       | .workspace_layout = $workspace_layout
       | .screenshot_theme_preset = $theme_preset
       | .active_view = $active_view
@@ -188,11 +189,13 @@ render() {
   # screenshot deterministic without replacing editable SVG sources.
   SLINT_SCALE_FACTOR=2 slint-viewer \
     --style "$style" \
+    --size "${width}x${height}" \
     --load-data "$data_file" \
     --screenshot "$temporary_dir/$output_name-warmup.png" \
     "$temporary_ui"
   SLINT_SCALE_FACTOR=2 slint-viewer \
     --style "$style" \
+    --size "${width}x${height}" \
     --load-data "$data_file" \
     --screenshot "$output_dir/$output_name.png" \
     "$temporary_ui"

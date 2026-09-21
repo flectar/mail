@@ -10,7 +10,7 @@ import { EmailLinkContextArea } from "../components/email-link-context-area.slin
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics, MailIconPalette } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -459,12 +459,18 @@ export component MailReadingPane inherits Rectangle {
 
     private property <bool> viewport-pending: false;
     private property <int> transition-message-id: EmailReader.message-id;
-    private property <float> content-reveal: 1;
+    private property <float> animated-content-reveal: 1;
+    private property <float> content-reveal: MotionSettings.enabled ? root.animated-content-reveal : 1;
     private property <bool> content-reveal-pending: false;
 
     function restart-content-reveal() {
-        root.content-reveal = 0;
-        root.content-reveal-pending = true;
+        if MotionSettings.enabled {
+            root.animated-content-reveal = 0;
+            root.content-reveal-pending = true;
+        } else {
+            root.animated-content-reveal = 1;
+            root.content-reveal-pending = false;
+        }
     }
 
     changed transition-message-id => { root.restart-content-reveal(); }
@@ -493,10 +499,10 @@ export component MailReadingPane inherits Rectangle {
     } }
     Timer {
         interval: 16ms;
-        running: root.content-reveal-pending;
+        running: MotionSettings.enabled && root.content-reveal-pending;
         triggered => {
             root.content-reveal-pending = false;
-            root.content-reveal = 1;
+            root.animated-content-reveal = 1;
         }
     }
     private property <bool> selecting: false;
@@ -908,7 +914,7 @@ export component MailReadingPane inherits Rectangle {
                         animate opacity {
                             duration: 190ms;
                             easing: ease-out;
-                            enabled: root.content-reveal > 0;
+                            enabled: MotionSettings.enabled && root.content-reveal > 0;
                         }
 
                         Text {
