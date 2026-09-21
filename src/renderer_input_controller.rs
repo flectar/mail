@@ -299,6 +299,7 @@ pub(super) fn register_renderer_input_callbacks(
                     * app.get_email_viewport_width()
                     * reader.get_width_ratio()
                     + banner_height(&app)
+                    + app.get_email_scroll_tail_height()
                     - height)
                     .max(0.0);
                 let y = match command {

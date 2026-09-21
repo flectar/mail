@@ -81,6 +81,7 @@ export component MailView inherits Rectangle {
         : min(96px, root.single-pane-content-width);
     out property <length> email-viewport-width: root.single-pane ? compact-reading-pane.email-viewport-width : desktop-reading-pane.email-viewport-width;
     out property <length> email-viewport-height: root.single-pane ? compact-reading-pane.email-viewport-height : desktop-reading-pane.email-viewport-height;
+    out property <length> email-scroll-tail-height: root.single-pane ? compact-reading-pane.email-scroll-tail-height : desktop-reading-pane.email-scroll-tail-height;
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> avatar-bg;

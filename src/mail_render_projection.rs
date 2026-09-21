@@ -185,7 +185,6 @@ pub(super) fn apply_email(
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
     let same_message = reader.get_message_id() == email.id;
-    crate::attachment_controller::project(app, &email, same_message);
     let mut scroll = if same_message {
         app.get_email_scroll_y()
     } else {
@@ -202,6 +201,7 @@ pub(super) fn apply_email(
         reader.set_notice("".into());
         reader.set_destination("".into());
     }
+    crate::attachment_controller::project(app, &email, same_message);
     app.set_email_scroll_y(scroll);
 
     let preview = display_preview(&email.preview);

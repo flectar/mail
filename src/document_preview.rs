@@ -3,6 +3,7 @@ use std::sync::Arc;
 // Cancelling spawn_blocking does not stop an active decoder. Keep admission
 // inside the worker until decoding really ends, and never queue more images.
 static IMAGE_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+static THUMBNAIL_SLOT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 type Result<T> = std::result::Result<T, String>;
 pub(crate) enum Preview {
     Text(String),
@@ -77,9 +78,58 @@ async fn decode_image(work: impl FnOnce() -> Result<Preview> + Send + 'static) -
     .map_err(|e| e.to_string())?
 }
 
+/// Decode a small attachment thumbnail on a separate, serialized lane so
+/// background list decoration cannot make an explicitly requested preview
+/// report that its decoder is busy.
+pub(crate) async fn image_thumbnail(data: Vec<u8>) -> Result<(Vec<u8>, u32, u32)> {
+    if data.len() > 4 * 1024 * 1024 {
+        return Err("Image is too large for an attachment thumbnail".into());
+    }
+    let permit = THUMBNAIL_SLOT.acquire().await.map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let mut reader = image::ImageReader::new(std::io::Cursor::new(data))
+            .with_guessed_format()
+            .map_err(|e| e.to_string())?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(4096);
+        limits.max_image_height = Some(4096);
+        limits.max_alloc = Some(64 * 1024 * 1024);
+        reader.limits(limits);
+        let image = reader
+            .decode()
+            .map_err(|_| "Could not decode attachment thumbnail".to_string())?
+            .thumbnail(96, 96)
+            .into_rgba8();
+        let (width, height) = image.dimensions();
+        Ok((image.into_raw(), width, height))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attachment_thumbnail_is_bounded_and_preserves_aspect_ratio() {
+        let source = image::RgbaImage::from_pixel(200, 100, image::Rgba([24, 120, 176, 255]));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(source)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (pixels, width, height) = runtime
+            .block_on(image_thumbnail(encoded.into_inner()))
+            .unwrap();
+        assert_eq!((width, height), (96, 48));
+        assert_eq!(pixels.len(), (width * height * 4) as usize);
+    }
+
     #[test]
     fn cancelling_a_preview_does_not_admit_another_decoder_until_the_worker_exits() {
         let runtime = tokio::runtime::Builder::new_multi_thread()

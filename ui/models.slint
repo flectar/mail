@@ -360,7 +360,14 @@ export global EmailReader {
     in-out property <bool> use-authored-text: false;
 }
 
-export struct MailAttachment { id: string, name: string, detail: string, previewable: bool }
+export struct MailAttachment {
+    id: string,
+    name: string,
+    detail: string,
+    previewable: bool,
+    thumbnail: image,
+    has_thumbnail: bool,
+}
 export global MailAttachments {
     callback deliver();
     in-out property <[MailAttachment]> rows;

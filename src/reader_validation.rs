@@ -312,15 +312,24 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert!(app.get_has_selection());
     // Hydrated attachments must survive a body-rendering failure and remain
     // projected independently of the HTML/plain-text reader.
-    state.borrow_mut().messages[0].attachments = vec![flectar_mail_core::models::AttachmentMeta {
-        id: 42,
-        filename: Some("Project overview.pdf".into()),
-        mime_type: Some("application/pdf".into()),
-        size: Some(1024),
-        is_inline: false,
-    }];
+    state.borrow_mut().messages[0].attachments = vec![
+        flectar_mail_core::models::AttachmentMeta {
+            id: 42,
+            filename: Some("Project overview.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            size: Some(1024),
+            is_inline: false,
+        },
+        flectar_mail_core::models::AttachmentMeta {
+            id: 43,
+            filename: Some("email-logo.png".into()),
+            mime_type: Some("image/png".into()),
+            size: Some(512),
+            is_inline: false,
+        },
+    ];
     render_current(&app, &state, &runtime).unwrap();
-    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 1);
+    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 2);
     // A structural rejection while the reader is open must never leave the
     // previous message's accessible content visible over the fallback.
     state.borrow_mut().messages[0].html = Some("<span>x</span>".repeat(16_000));
@@ -335,7 +344,16 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         !app.get_selected_plain_text()
             .contains("Reader verification")
     );
-    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 1);
+    assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 2);
+    let attachment_rows = app.global::<MailAttachments>().get_rows();
+    let mut image_attachment = attachment_rows.row_data(1).unwrap();
+    let mut thumbnail = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(96, 64);
+    for (index, pixel) in thumbnail.make_mut_slice().iter_mut().enumerate() {
+        *pixel = slint::Rgba8Pixel::new(24, 120 + (index % 96) as u8, 176, 255);
+    }
+    image_attachment.thumbnail = slint::Image::from_rgba8(thumbnail);
+    image_attachment.has_thumbnail = true;
+    attachment_rows.set_row_data(1, image_attachment);
     app.set_theme_mode("light".into());
     draw("mail-attachments-fallback", 1280, 900);
     draw("mail-attachments-landscape", 844, 390);
@@ -343,6 +361,10 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         app.get_email_viewport_height() >= 40.0,
         "Short windows must retain room for the body while attachments remain available in the toolbar"
     );
+    app.set_text_mode(false);
+    app.set_email_content_aspect(8.0);
+    app.global::<EmailReader>().invoke_command("end".into());
+    draw("mail-long-message-actions", 1280, 900);
 
     // Exercise the same percentage editor in the attachment dialog. A wide
     // bitmap verifies fit on resize and manual zoom preservation without a
