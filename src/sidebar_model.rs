@@ -198,13 +198,20 @@ fn make_filtered_sidebar_rows(
         } else if label.is_global {
             global_labels.push(label);
         } else {
-            account_labels.entry(label.account_id).or_default().push(label);
+            account_labels
+                .entry(label.account_id)
+                .or_default()
+                .push(label);
         }
     }
 
     let mut rows = Vec::new();
     if !categories.is_empty() {
-        rows.push(section(Kind::CategoriesSection, "categories", &HashSet::new()));
+        rows.push(section(
+            Kind::CategoriesSection,
+            "categories",
+            &HashSet::new(),
+        ));
         rows.extend(categories.into_iter().map(|label| SidebarRow {
             key: format!("category:{}", label.id).into(),
             label,
@@ -590,18 +597,24 @@ mod tests {
             &HashSet::from([1]),
             &HashSet::new(),
         );
-        assert!(rows.iter().any(|row| {
-            row.kind == Kind::NewLabel && row.mailbox.account_id == 1
-        }));
-        assert!(!rows.iter().any(|row| {
-            row.kind == Kind::NewFolder && row.mailbox.account_id == 1
-        }));
-        assert!(rows.iter().any(|row| {
-            row.kind == Kind::NewFolder && row.mailbox.account_id == 2
-        }));
-        assert!(!rows.iter().any(|row| {
-            row.kind == Kind::NewLabel && row.mailbox.account_id == 2
-        }));
+        assert!(
+            rows.iter()
+                .any(|row| { row.kind == Kind::NewLabel && row.mailbox.account_id == 1 })
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| { row.kind == Kind::NewFolder && row.mailbox.account_id == 1 })
+        );
+        assert!(
+            rows.iter()
+                .any(|row| { row.kind == Kind::NewFolder && row.mailbox.account_id == 2 })
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| { row.kind == Kind::NewLabel && row.mailbox.account_id == 2 })
+        );
     }
 
     #[test]
@@ -621,8 +634,14 @@ mod tests {
             },
         ];
         let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel");
-        assert!(rows.iter().any(|row| row.kind == Kind::AccountLabel && row.label.id == 11));
-        assert!(rows.iter().any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22));
+        assert!(
+            rows.iter()
+                .any(|row| row.kind == Kind::AccountLabel && row.label.id == 11)
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22)
+        );
     }
 
     #[test]
@@ -662,21 +681,16 @@ mod tests {
             &HashSet::new(),
             &collapsed,
         );
-        assert!(!closed.iter().any(|row| matches!(
-            row.kind,
-            Kind::Category | Kind::GlobalLabel
-        )));
+        assert!(
+            !closed
+                .iter()
+                .any(|row| matches!(row.kind, Kind::Category | Kind::GlobalLabel))
+        );
         collapsed.remove("categories");
         collapsed.remove("global-labels");
         assert_rows_equal(
             &open,
-            &make_sidebar_rows(
-                accounts(2, 3),
-                vec![],
-                labels,
-                &HashSet::new(),
-                &collapsed,
-            ),
+            &make_sidebar_rows(accounts(2, 3), vec![], labels, &HashSet::new(), &collapsed),
         );
         let mut reordered = accounts(2, 3);
         reordered.rotate_left(4);

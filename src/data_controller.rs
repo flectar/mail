@@ -53,9 +53,7 @@ fn portable_account_colors(
         }
         let valid_color = color.len() == 7
             && color.starts_with('#')
-            && color[1..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit());
+            && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
         if !valid_color {
             return Err(format!("account {email:?} has an invalid color"));
         }
@@ -153,7 +151,9 @@ fn storage_category(root: StorageRoot, relative: &std::path::Path) -> usize {
         Some("attachments" | "draft_attachments") => STORAGE_ATTACHMENTS,
         Some("files" | "file_transfers") => STORAGE_FILES,
         _ if matches!(root, StorageRoot::Data)
-            && relative.parent().is_some_and(|parent| parent.as_os_str().is_empty())
+            && relative
+                .parent()
+                .is_some_and(|parent| parent.as_os_str().is_empty())
             && relative
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -229,8 +229,7 @@ fn scan_storage_tree(
                     Ok(metadata) => {
                         let relative = path.strip_prefix(root).unwrap_or(&path);
                         let category = storage_category(kind, relative);
-                        scan.bytes[category] =
-                            scan.bytes[category].saturating_add(metadata.len());
+                        scan.bytes[category] = scan.bytes[category].saturating_add(metadata.len());
                     }
                     Err(_) => scan.unreadable_entries += 1,
                 }
@@ -259,7 +258,10 @@ fn scan_storage(paths: &Paths, generation: &AtomicU64, ticket: u64) -> Option<St
         && !scan_storage_tree(
             &paths.cache_dir,
             StorageRoot::Cache,
-            paths.data_dir.starts_with(&paths.cache_dir).then_some(paths.data_dir.as_path()),
+            paths
+                .data_dir
+                .starts_with(&paths.cache_dir)
+                .then_some(paths.data_dir.as_path()),
             generation,
             ticket,
             &mut scan,
@@ -417,7 +419,8 @@ pub(super) fn register_data_management_callbacks(
         let Some(app) = storage_app.upgrade() else {
             return;
         };
-        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data" {
+        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data"
+        {
             return;
         }
         let ticket = load_generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -1030,7 +1033,9 @@ mod tests {
         use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
         struct Headless(Rc<MinimalSoftwareWindow>);
         impl slint::platform::Platform for Headless {
-            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
                 Ok(self.0.clone())
             }
         }
@@ -1124,19 +1129,41 @@ mod tests {
 
     #[test]
     fn storage_database_category_requires_exact_database_or_sidecar() {
-        for name in ["flectar-mail.db", "flectar-calendar.db-wal", "flectar-files.db-shm", "flectar-mail.db-journal"] {
-            assert_eq!(storage_category(StorageRoot::Data, name.as_ref()), STORAGE_DATABASES);
+        for name in [
+            "flectar-mail.db",
+            "flectar-calendar.db-wal",
+            "flectar-files.db-shm",
+            "flectar-mail.db-journal",
+        ] {
+            assert_eq!(
+                storage_category(StorageRoot::Data, name.as_ref()),
+                STORAGE_DATABASES
+            );
         }
-        for name in ["flectar-mail.db.backup", "flectar-files.db-old", "other/flectar-mail.db"] {
-            assert_eq!(storage_category(StorageRoot::Data, name.as_ref()), STORAGE_OTHER);
+        for name in [
+            "flectar-mail.db.backup",
+            "flectar-files.db-old",
+            "other/flectar-mail.db",
+        ] {
+            assert_eq!(
+                storage_category(StorageRoot::Data, name.as_ref()),
+                STORAGE_OTHER
+            );
         }
     }
 
     #[test]
     fn storage_rows_are_finite_for_empty_and_uneven_usage() {
         let empty = storage_rows(&StorageScan::default());
-        assert!(empty.iter().all(|row| row.fraction == 0.0 && row.offset == 0.0));
-        let scan = StorageScan { bytes: [1, 0, 999, 0, 0], unreadable_entries: 0 };
+        assert!(
+            empty
+                .iter()
+                .all(|row| row.fraction == 0.0 && row.offset == 0.0)
+        );
+        let scan = StorageScan {
+            bytes: [1, 0, 999, 0, 0],
+            unreadable_entries: 0,
+        };
         let rows = storage_rows(&scan);
         assert!((rows[0].fraction - 0.001).abs() < 0.000001);
         assert!((rows[2].offset - 0.001).abs() < 0.000001);
@@ -1171,10 +1198,7 @@ mod tests {
 
     #[test]
     fn portable_profiles_reject_cross_backup_and_duplicate_membership() {
-        let emails = HashSet::from([
-            "alice@example.org".to_owned(),
-            "bob@example.org".to_owned(),
-        ]);
+        let emails = HashSet::from(["alice@example.org".to_owned(), "bob@example.org".to_owned()]);
         let duplicate = serde_json::json!({
             "preferences": { "mailProfiles": [
                 { "name": "Work", "color": "#3B82F6", "accountEmails": ["alice@example.org"] },
@@ -1202,10 +1226,11 @@ mod tests {
                 "accountColors": { " Work@Example.com ": "#f97316" }
             }
         });
-        let colors = portable_account_colors(&valid, &emails)
-            .unwrap()
-            .unwrap();
-        assert_eq!(colors.get("work@example.com").map(String::as_str), Some("#f97316"));
+        let colors = portable_account_colors(&valid, &emails).unwrap().unwrap();
+        assert_eq!(
+            colors.get("work@example.com").map(String::as_str),
+            Some("#f97316")
+        );
 
         let invalid = serde_json::json!({
             "preferences": {

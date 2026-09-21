@@ -680,9 +680,7 @@ mod tests {
 
         assert!(decoded.pixel_width <= MAX_DECODED_DIMENSION);
         assert!(decoded.pixel_height <= MAX_DECODED_DIMENSION);
-        assert!(
-            budget >= u64::from(decoded.pixel_width) * u64::from(decoded.pixel_height)
-        );
+        assert!(budget >= u64::from(decoded.pixel_width) * u64::from(decoded.pixel_height));
     }
 
     #[test]

@@ -1591,7 +1591,9 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
         let mut fallbacks: Vec<_> = font_ctx.collection.fallback_families(key).collect();
         fallbacks.retain(|family| *family != bundled_sans);
         fallbacks.push(bundled_sans);
-        font_ctx.collection.set_fallbacks(key, fallbacks.into_iter());
+        font_ctx
+            .collection
+            .set_fallbacks(key, fallbacks.into_iter());
     }
 
     font_ctx
@@ -1626,14 +1628,7 @@ fn prepare_email_html_with_font_ctx(
     html: &str,
     font_ctx: parley::FontContext,
 ) -> Result<PreparedEmail, String> {
-    prepare_email_html_at_with_font_ctx(
-        html,
-        None,
-        INITIAL_WIDTH,
-        INITIAL_HEIGHT,
-        1.0,
-        font_ctx,
-    )
+    prepare_email_html_at_with_font_ctx(html, None, INITIAL_WIDTH, INITIAL_HEIGHT, 1.0, font_ctx)
 }
 
 fn prepare_email_html_at_with_font_ctx(

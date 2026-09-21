@@ -14,8 +14,7 @@ fn apply_account_presentation_settings(
     runtime: &tokio::runtime::Runtime,
     settings: &flectar_mail_core::models::Settings,
 ) {
-    state.borrow_mut().account_presentation =
-        AccountPresentationSettings::from_settings(settings);
+    state.borrow_mut().account_presentation = AccountPresentationSettings::from_settings(settings);
     refresh_connected_accounts(app, state);
     refresh_rows_only(app, state, runtime);
 }
@@ -255,9 +254,7 @@ pub(super) fn register_settings_preference_callbacks(
             return Default::default();
         };
         let Some(core) = state_for_profiles.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return Default::default();
         };
         let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
@@ -291,15 +288,13 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         let Some(core) = state_for_profile_assignment.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return;
         };
         let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
-        match runtime_for_profile_assignment.block_on(
-            core.assign_account_profile(i64::from(account_id), profile_id),
-        ) {
+        match runtime_for_profile_assignment
+            .block_on(core.assign_account_profile(i64::from(account_id), profile_id))
+        {
             Ok(settings) => {
                 apply_account_presentation_settings(
                     &app,
@@ -357,9 +352,7 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         let Some(core) = state_for_profile_delete.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return;
         };
         match runtime_for_profile_delete.block_on(core.delete_mail_profile(profile_id.to_string()))
@@ -373,10 +366,9 @@ pub(super) fn register_settings_preference_callbacks(
                 );
                 app.set_sync_status(UiMessage::plain("Profile deleted."));
             }
-            Err(error) => app.set_sync_status(UiMessage::detail(
-                "Could not delete profile: {}",
-                error,
-            )),
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not delete profile: {}", error))
+            }
         }
     });
 
@@ -395,7 +387,11 @@ pub(super) fn register_settings_preference_callbacks(
                 .borrow_mut()
                 .account_presentation
                 .show_markers = enabled;
-            refresh_rows_only(&app, &state_for_marker_visibility, &runtime_for_marker_visibility);
+            refresh_rows_only(
+                &app,
+                &state_for_marker_visibility,
+                &runtime_for_marker_visibility,
+            );
             return;
         };
         match runtime_for_marker_visibility.block_on(core.set_show_account_badges(enabled)) {

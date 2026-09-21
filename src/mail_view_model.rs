@@ -1281,13 +1281,8 @@ pub(super) fn make_mailbox_rows(
             let custom_color = (!mailbox.is_account)
                 .then(|| {
                     label_colors
-                        .get(&(
-                            Some(mailbox.account_id),
-                            mailbox.label.to_ascii_lowercase(),
-                        ))
-                        .or_else(|| {
-                            label_colors.get(&(None, mailbox.label.to_ascii_lowercase()))
-                        })
+                        .get(&(Some(mailbox.account_id), mailbox.label.to_ascii_lowercase()))
+                        .or_else(|| label_colors.get(&(None, mailbox.label.to_ascii_lowercase())))
                         .copied()
                 })
                 .flatten();
@@ -1505,7 +1500,10 @@ mod tests {
 
         assert_eq!(rows[0].account, "Client");
         assert_eq!(rows[0].account_profile, "Work");
-        assert_eq!(rows[0].account_color, slint::Color::from_rgb_u8(0xea, 0x58, 0x0c));
+        assert_eq!(
+            rows[0].account_color,
+            slint::Color::from_rgb_u8(0xea, 0x58, 0x0c)
+        );
         assert!(rows[0].show_account_marker);
     }
 

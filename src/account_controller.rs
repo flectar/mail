@@ -157,7 +157,10 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     mail_work::invalidate(state);
 }
 
-#[allow(clippy::too_many_arguments, reason = "Projects the independently loaded account, connection, avatar, and presentation data into one UI model.")]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Projects the independently loaded account, connection, avatar, and presentation data into one UI model."
+)]
 pub(super) fn apply_connected_accounts(
     app: &AppWindow,
     accounts: &[Account],
@@ -278,21 +281,19 @@ pub(super) fn apply_connected_accounts(
         presentation
             .profiles
             .iter()
-            .map(|profile| {
-                MailProfileRow {
-                    id: profile.id.clone().into(),
-                    name: profile.name.clone().into(),
-                    color: parse_marker_color(&profile.color)
-                        .unwrap_or_else(|| slint::Color::from_rgb_u8(107, 114, 128)),
-                    account_count: i32::try_from(
-                        profile
-                            .account_ids
-                            .iter()
-                            .filter(|account_id| known_accounts.contains(account_id))
-                            .count(),
-                    )
-                    .unwrap_or(i32::MAX),
-                }
+            .map(|profile| MailProfileRow {
+                id: profile.id.clone().into(),
+                name: profile.name.clone().into(),
+                color: parse_marker_color(&profile.color)
+                    .unwrap_or_else(|| slint::Color::from_rgb_u8(107, 114, 128)),
+                account_count: i32::try_from(
+                    profile
+                        .account_ids
+                        .iter()
+                        .filter(|account_id| known_accounts.contains(account_id))
+                        .count(),
+                )
+                .unwrap_or(i32::MAX),
             })
             .collect::<Vec<_>>(),
     )));
@@ -569,8 +570,18 @@ mod mail_transport_suggestion_tests {
     #[test]
     fn leaves_ambiguous_or_incomplete_addresses_untouched() {
         let configs = vec![
-            config(1, "first@example.com", "imap-a.example.com", "smtp.example.com"),
-            config(2, "other@example.com", "imap-b.example.com", "smtp.example.com"),
+            config(
+                1,
+                "first@example.com",
+                "imap-a.example.com",
+                "smtp.example.com",
+            ),
+            config(
+                2,
+                "other@example.com",
+                "imap-b.example.com",
+                "smtp.example.com",
+            ),
         ];
         assert!(reusable_mail_transport(&configs, "new@example.com").is_none());
         assert!(reusable_mail_transport(&configs, "new@").is_none());
