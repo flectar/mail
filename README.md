@@ -16,6 +16,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/github/license/flectar/mail?style=flat&label=license&color=2563eb" alt="License: AGPL-3.0"></a>
     <a href="https://github.com/flectar/mail/releases"><img src="https://img.shields.io/github/downloads/flectar/mail/total?style=flat&label=downloads&color=16a34a" alt="Downloads across all releases"></a>
     <a href="https://github.com/flectar/mail/releases"><img src="https://img.shields.io/github/v/release/flectar/mail?display_name=tag&include_prereleases&sort=semver&style=flat&label=release&color=0ea5e9" alt="Latest release"></a>
+    <a href="https://translate.flectar.com/engage/flectar-mail/"><img src="https://translate.flectar.com/widget/flectar-mail/svg-badge.svg" alt="Translation status"></a>
   </p>
   <p>
     <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/language-Rust%201.92%2B-dea584?style=flat" alt="Language: Rust 1.92+"></a>
@@ -293,6 +294,22 @@ D-Bus nor the host browser's loopback network. Debug builds support that setup
 with a clearly marked, owner-only development credential file and an accordion
 for pasting the final loopback callback URL. The file backend is excluded from
 release builds.
+
+## 🌍 Help translate Flectar Mail
+
+Flectar Mail is built for everyone, and we'd love your help making it available in more languages!
+
+We're using [Weblate](https://translate.flectar.com/) to manage community translations. Whether you'd like to translate Flectar Mail into your native language, improve an existing translation, or help review translated strings, every contribution is welcome.
+
+**[Start translating Flectar Mail →](https://translate.flectar.com/)**
+
+Getting started is easy:
+
+1. Create an account on our translation platform.
+2. Select your language, or start a new translation if it isn't available yet.
+3. Translate strings directly through Weblate, no programming or GitHub experience required.
+
+Translations are synchronized with our GitHub repository and submitted as pull requests for review. Contributors can also receive GitHub attribution for their work.
 
 ## Open source, for everyone
 
