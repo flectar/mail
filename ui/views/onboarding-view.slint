@@ -267,11 +267,11 @@ export component OnboardingView inherits Rectangle {
                 FormField {
                     enabled: !root.account-setup-in-progress;
                     height: 60px;
-                    label: @tr("Password or app password");
+                    label: root.account-protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password");
                     label-color: root.muted-text;
                     value: root.account-password;
                     input-type: password;
-                    placeholder: @tr("Password or app password");
+                    placeholder: root.account-protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password");
                     edited(value) => { root.account-password = value; }
                 }
                 HorizontalBox {

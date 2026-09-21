@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-21 16:14+0000\n"
+"POT-Creation-Date: 2026-09-21 18:31+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -3659,6 +3659,10 @@ msgstr "Dirección de correo"
 #: ui/dialogs/settings-dialog.slint:2117 ui/dialogs/settings-dialog.slint:2124
 msgid "name@example.com"
 msgstr "nombre@ejemplo.com"
+
+#: ui/dialogs/settings-dialog.slint:2127 ui/views/onboarding-view.slint:270
+msgid "Password, app password, or API token"
+msgstr "Contraseña, contraseña de aplicación o token de API"
 
 #: ui/dialogs/settings-dialog.slint:2127 ui/views/onboarding-view.slint:270
 msgid "Password or app password"

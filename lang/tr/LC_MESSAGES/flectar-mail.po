@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-21 16:14+0000\n"
+"POT-Creation-Date: 2026-09-21 18:31+0000\n"
 "PO-Revision-Date: 2026-09-15 12:00+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Turkish\n"
@@ -3616,6 +3616,10 @@ msgstr "E-posta adresi"
 #: ui/dialogs/settings-dialog.slint:2117 ui/dialogs/settings-dialog.slint:2124
 msgid "name@example.com"
 msgstr "ad@ornek.com"
+
+#: ui/dialogs/settings-dialog.slint:2127 ui/views/onboarding-view.slint:270
+msgid "Password, app password, or API token"
+msgstr "Parola, uygulama parolası veya API belirteci"
 
 #: ui/dialogs/settings-dialog.slint:2127 ui/views/onboarding-view.slint:270
 msgid "Password or app password"
