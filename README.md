@@ -34,7 +34,7 @@ Flectar Mail is a lightweight, native home for your email, calendars, and
 contacts. It is engineered to open instantly, stay responsive, and use a
 fraction of the memory of a typical web-based mail client.
 
-## Why Flectar Mail?
+## ❓ Why Flectar Mail?
 
 - **Fast from the first click.** A native interface and local-first data path
   get you to your inbox without waiting on a browser runtime.
@@ -60,12 +60,12 @@ fraction of the memory of a typical web-based mail client.
 - **Native and open source.** Built from the ground up with Rust. It is not a
   browser wrapped in a window, and it is released under the AGPLv3.
 
-## Files and attachments
+## 📁 Files and attachments
 
 Browse JMAP/WebDAV storage, search mail attachments, keep files offline, and
 preview PDFs, images and text.
 
-## Account signatures and OpenPGP
+## ✍🏻 Account signatures and OpenPGP
 
 Settings → Accounts → Signatures & OpenPGP provides named signatures, separate
 new-message and reply defaults, and a composer signature selector. Desktop
@@ -75,7 +75,7 @@ are missing or invalid; protected drafts remain local until Send.
 
 S/MIME and mobile OpenPGP are not currently supported.
 
-## Experimental HTML rendering
+## 🧪 Experimental HTML rendering
 
 > [!WARNING]
 > HTML email rendering is currently the most experimental part of Flectar Mail.
@@ -105,7 +105,7 @@ experimental, but it is also a major reason Flectar Mail can remain so
 lightweight compared with WebView-based clients built with frameworks such as
 Tauri or Wails.
 
-## Make it yours
+## 🎨 Make it yours
 
 Choose the workspace that fits the way you handle email. Keep the detailed
 three-pane layout, switch to a streamlined minimal view, choose a light or dark
@@ -116,7 +116,7 @@ The full workspace keeps your folders, message list, and selected email visible
 together. The minimal layout reduces visual noise and gives each part of your
 inbox more room when you need it.
 
-### Profiles and account colors
+### 👥 Profiles and account colors
 
 Group related accounts into named profiles such as Work or Personal, then give
 each profile its own color. In Settings → Accounts → Profiles, you can assign
@@ -131,7 +131,7 @@ and orange for Support.
   <img src="resources/screenshots/desktop-profiles-light.png" alt="Flectar Mail unified inbox with purple and orange profile color markers">
 </picture>
 
-### Conversation threads
+### 🧵 Conversation threads
 
 Replies stay grouped in chronological order, with the active message expanded
 inside the reading pane.
@@ -161,7 +161,7 @@ inside the reading pane.
 | ![Flectar Mail teal palette in light mode](resources/screenshots/desktop-teal-light.png) | ![Flectar Mail green palette in light mode](resources/screenshots/desktop-green-light.png) | ![Flectar Mail purple palette in light mode](resources/screenshots/desktop-purple-light.png) | ![Flectar Mail custom palette in light mode](resources/screenshots/desktop-light.png) |
 | ![Flectar Mail teal palette in dark mode](resources/screenshots/desktop-teal-dark.png) | ![Flectar Mail green palette in dark mode](resources/screenshots/desktop-green-dark.png) | ![Flectar Mail purple palette in dark mode](resources/screenshots/desktop-purple-dark.png) | ![Flectar Mail custom palette in dark mode](resources/screenshots/desktop-dark.png) |
 
-### Calendar, contacts, and files
+### 📅 Calendar, contacts, and files
 
 <table>
   <thead>
@@ -198,7 +198,7 @@ inside the reading pane.
   </tbody>
 </table>
 
-### Storage and backups
+### 💾 Storage and backups
 
 Settings → Storage shows how much space mail, attachments, offline files, and
 databases use on the device. From the same page, you can export verified database
@@ -212,7 +212,7 @@ you to sign in again.
   <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, database snapshot, and account backup controls">
 </picture>
 
-### Made for smaller screens
+### 📱 Made for smaller screens
 
 The compact interface keeps the important actions within reach while giving
 messages, events, and contacts the full screen when they need it.
@@ -221,7 +221,7 @@ messages, events, and contacts the full screen when they need it.
 | --- | --- |
 | ![Flectar Mail mobile inbox in light mode](resources/screenshots/mobile-light.png) | ![Flectar Mail mobile inbox in dark mode](resources/screenshots/mobile-dark.png) |
 
-## Get Flectar Mail
+## 📥 Get Flectar Mail
 
 Flectar Mail is currently in development and is not yet stable.
 
@@ -311,7 +311,7 @@ Getting started is easy:
 
 Translations are synchronized with our GitHub repository and submitted as pull requests for review. Contributors can also receive GitHub attribution for their work.
 
-## Open source, for everyone
+## 🌐 Open source, for everyone
 
 Flectar Mail is one open-source application. There is no separate community
 edition. The client is licensed under the
@@ -319,7 +319,7 @@ edition. The client is licensed under the
 [licensing overview](LICENSING.md) for the practical details, or see
 [CONTRIBUTING.md](CONTRIBUTING.md) to help shape the project.
 
-## Acknowledgements
+## 🫡 Acknowledgements
 
 Flectar Mail is made possible by the work of these projects and their
 contributors:
