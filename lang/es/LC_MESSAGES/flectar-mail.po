@@ -4862,10 +4862,3 @@ msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 "Déjalo vacío para detectar /.well-known/jmap a partir de tu dominio de "
 "correo."
-
-#~ msgid "Signatures & OpenPGP"
-#~ msgstr "Firmas y OpenPGP"
-
-#~ msgid "Choose an account to manage your signature and message protection."
-#~ msgstr ""
-#~ "Elige una cuenta para gestionar tu firma y la protección de los mensajes."
