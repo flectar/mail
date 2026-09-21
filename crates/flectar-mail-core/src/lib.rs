@@ -29,6 +29,7 @@ pub mod queue;
 pub mod route;
 pub mod scheduler;
 pub mod search;
+pub mod sender_identities;
 pub mod signatures;
 pub mod smtp;
 pub mod sync;
@@ -3115,6 +3116,16 @@ impl Core {
     }
 
     pub async fn save_draft(&self, args: SaveDraftArgs) -> Result<i64> {
+        // Resolve the visible From address independently of the authenticated
+        // account identity. Only provider-discovered, verified identities can
+        // cross this boundary; the canonical provider display name is stored.
+        let sender = self
+            .resolve_sender_identity(
+                args.account_id,
+                args.from.as_ref().map(|address| address.email.as_str()),
+            )
+            .await?
+            .address();
         // Stage every attachment into an app-managed dir up front, so the paths
         // persisted to `draft_attachments` (and later read at dispatch) are
         // always files the app itself copied - never an arbitrary path handed
@@ -3245,7 +3256,8 @@ impl Core {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
-                                    bcc_json = ?5, date = ?6 WHERE id = ?1 AND is_draft = 1",
+                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
+                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1",
                             rusqlite::params![
                                 id,
                                 args.subject,
@@ -3253,6 +3265,9 @@ impl Core {
                                 serde_json::to_string(&args.cc)?,
                                 serde_json::to_string(&args.bcc)?,
                                 now_ms(),
+                                sender.name,
+                                sender.email,
+                                args.account_id,
                             ],
                         )?;
                         if updated != 1 {
@@ -3261,11 +3276,6 @@ impl Core {
                         id
                     }
                     None => {
-                        let account_email: String = tx.query_row(
-                            "SELECT email FROM accounts WHERE id = ?1",
-                            rusqlite::params![args.account_id],
-                            |r| r.get(0),
-                        )?;
                         let tid = match thread_id {
                             Some(t) => t,
                             None => repo::threads::create(
@@ -3283,10 +3293,7 @@ impl Core {
                             gm_msgid: None,
                             gm_thrid: None,
                             subject: args.subject.clone(),
-                            from: Some(Address {
-                                name: None,
-                                email: account_email,
-                            }),
+                            from: Some(sender.clone()),
                             to: args.to.clone(),
                             cc: args.cc.clone(),
                             bcc: args.bcc.clone(),
@@ -3422,7 +3429,8 @@ impl Core {
             .read(move |conn| {
                 let mut draft = conn
                     .query_row(
-                        "SELECT m.account_id, m.to_json, m.cc_json, m.bcc_json, m.subject,
+                        "SELECT m.account_id, m.from_name, m.from_addr,
+                                m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
                                 m.is_draft
@@ -3432,19 +3440,25 @@ impl Core {
                          WHERE m.id = ?1",
                         rusqlite::params![draft_id],
                         |row| {
-                            let is_draft = row.get::<_, i64>(9)? != 0;
+                            let is_draft = row.get::<_, i64>(11)? != 0;
+                            let from_name = row.get::<_, Option<String>>(1)?;
+                            let from_email = row.get::<_, Option<String>>(2)?;
                             Ok((
                                 SaveDraftArgs {
                                     draft_id: Some(draft_id),
                                     account_id: row.get(0)?,
-                                    to: repo::parse_json_column(&row.get::<_, String>(1)?, 1)?,
-                                    cc: repo::parse_json_column(&row.get::<_, String>(2)?, 2)?,
-                                    bcc: repo::parse_json_column(&row.get::<_, String>(3)?, 3)?,
-                                    subject: row.get(4)?,
-                                    body_text: row.get(5)?,
-                                    body_html: row.get(6)?,
-                                    mode: row.get(7)?,
-                                    in_reply_to_message_id: row.get(8)?,
+                                    from: from_email.map(|email| Address {
+                                        name: from_name,
+                                        email,
+                                    }),
+                                    to: repo::parse_json_column(&row.get::<_, String>(3)?, 3)?,
+                                    cc: repo::parse_json_column(&row.get::<_, String>(4)?, 4)?,
+                                    bcc: repo::parse_json_column(&row.get::<_, String>(5)?, 5)?,
+                                    subject: row.get(6)?,
+                                    body_text: row.get(7)?,
+                                    body_html: row.get(8)?,
+                                    mode: row.get(9)?,
+                                    in_reply_to_message_id: row.get(10)?,
                                     attachments: Vec::new(),
                                 },
                                 is_draft,
@@ -3672,7 +3686,15 @@ impl Core {
                 let mut recipients = detail.to;
                 recipients.extend(detail.cc);
                 recipients.extend(serde_json::from_str::<Vec<Address>>(&bcc)?);
-                Ok((config.settings.security, config.email, recipients))
+                let sender = detail.from.email;
+                if repo::sender_identities::get_verified(conn, detail.account_id, &sender)?
+                    .is_none()
+                {
+                    return Err(CoreError::Other(format!(
+                        "{sender} is not an authorized sender identity for this account"
+                    )));
+                }
+                Ok((config.settings.security, sender, recipients))
             })
             .await?;
         crate::mail_security::Gpg::default()
@@ -5220,6 +5242,7 @@ impl Core {
             .save_draft(SaveDraftArgs {
                 draft_id: None,
                 account_id,
+                from: None,
                 to,
                 cc: Vec::new(),
                 bcc: Vec::new(),
@@ -7892,6 +7915,7 @@ mod draft_staging_tests {
         SaveDraftArgs {
             draft_id,
             account_id: 1,
+            from: None,
             to: Vec::new(),
             cc: Vec::new(),
             bcc: Vec::new(),

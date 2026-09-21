@@ -8,15 +8,15 @@ use flectar_mail_core::{
         Account, AccountConfig, ActionKind, ActionParams, AddPasswordAccountArgs, Address,
         CalendarConnection, CalendarEvent, CardDavConnection, ConnectCalendarArgs,
         ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage, CreateEventArgs, CustomTheme,
-        DraftAttachmentIn, FolderInfo, Label, MailHistory, MailboxBadgeCounts, MessageDetail,
-        MailProfile, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
-        SaveDraftArgs, Settings, Snippet, ThreadCursor, ThreadSummary, View,
+        DraftAttachmentIn, FolderInfo, Label, MailHistory, MailProfile, MailboxBadgeCounts,
+        MessageDetail, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
+        QueueSendResult, SaveDraftArgs, Settings, Snippet, ThreadCursor, ThreadSummary, View,
     },
 };
 #[cfg(test)]
 use pulldown_cmark::{Event, Tag, TagEnd};
 use pulldown_cmark::{Options, Parser, html};
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 #[cfg(test)]
 #[derive(Clone, Copy)]
@@ -128,6 +128,7 @@ pub struct MailboxEntry {
 pub struct ComposeMessage<'a> {
     pub draft_id: Option<i64>,
     pub account_id: i64,
+    pub sender_email: Option<&'a str>,
     pub to: &'a str,
     pub cc: &'a str,
     pub bcc: &'a str,
@@ -147,6 +148,8 @@ pub struct ComposeSource {
     pub message_id: i64,
     pub account_id: i64,
     pub account_email: String,
+    pub sender_identities: Vec<flectar_mail_core::models::SenderIdentity>,
+    pub default_sender_email: String,
     pub from: Address,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
@@ -530,10 +533,24 @@ impl CoreMailSource {
             .map(|account| account.email)
             .ok_or_else(|| "message account is no longer connected".to_owned())?;
 
+        let sender_identities = self
+            .core
+            .list_sender_identities(message.account_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let default_sender_email = self
+            .core
+            .default_sender_identity(message.account_id)
+            .await
+            .map_err(|error| error.to_string())?
+            .email;
+
         Ok(ComposeSource {
             message_id: message.id,
             account_id: message.account_id,
             account_email,
+            sender_identities,
+            default_sender_email,
             from: message.from.clone(),
             to: message.to.clone(),
             cc: message.cc.clone(),
@@ -1098,9 +1115,7 @@ impl CoreMailSource {
                 .ok_or_else(|| "label no longer exists".to_owned())?,
             None => labels
                 .iter()
-                .filter(|label| {
-                    !label.is_auto && label.owner_account_id == owner_account_id
-                })
+                .filter(|label| !label.is_auto && label.owner_account_id == owner_account_id)
                 .map(|label| label.position)
                 .max()
                 .unwrap_or(-1)
@@ -1361,6 +1376,10 @@ fn compose_args(
     Ok(SaveDraftArgs {
         draft_id: message.draft_id,
         account_id: message.account_id,
+        from: message.sender_email.map(|email| Address {
+            name: None,
+            email: email.to_owned(),
+        }),
         to: recipients,
         cc: parse_recipients(message.cc)?,
         bcc: parse_recipients(message.bcc)?,
@@ -1796,10 +1815,15 @@ fn summary_to_message(
     // A conversation can be visible in Inbox and Sent at the same time. Keep
     // the row identified by the people on the other side of the exchange so a
     // newly sent reply does not make an Inbox row look like mail from oneself.
+    let own_addresses = thread
+        .account_addresses
+        .iter()
+        .map(|email| email.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
     let mut display_participants = thread
         .participants
         .iter()
-        .filter(|person| !person.email.eq_ignore_ascii_case(&thread.account_email))
+        .filter(|person| !own_addresses.contains(&person.email.to_ascii_lowercase()))
         .collect::<Vec<_>>();
     if display_participants.is_empty() {
         display_participants.extend(thread.participants.iter());
@@ -2423,9 +2447,9 @@ pub fn fixtures() -> Vec<EmailFixture> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposeMessage, compose_args, display_thread_subject, mailbox_entries, markdown_to_html,
-        markdown_to_plain_text, readable_message_html, relative_time_at, resolve_scope,
-        summary_to_message, validated_startup_scope, STANDARD_ACCOUNT_FOLDERS,
+        ComposeMessage, STANDARD_ACCOUNT_FOLDERS, compose_args, display_thread_subject,
+        mailbox_entries, markdown_to_html, markdown_to_plain_text, readable_message_html,
+        relative_time_at, resolve_scope, summary_to_message, validated_startup_scope,
     };
     use chrono::{Local, TimeZone};
     use flectar_mail_core::models::{
@@ -2507,6 +2531,7 @@ mod tests {
                 id: 22,
                 account_id: 1,
                 account_email: "person@example.com".into(),
+                account_addresses: vec!["person@example.com".into()],
                 subject: "Re: Launch review".into(),
                 snippet: "Tuesday works for everyone.".into(),
                 participants: vec![
@@ -2551,8 +2576,14 @@ mod tests {
     #[test]
     fn conversation_subject_drops_reply_prefixes_and_keeps_local_tags() {
         assert_eq!(display_thread_subject("Re: Re[2]: Launch"), "Launch");
-        assert_eq!(display_thread_subject("[INVOICE] Re: Payment"), "[INVOICE] Payment");
-        assert_eq!(display_thread_subject("Re: [team] Standup"), "[team] Standup");
+        assert_eq!(
+            display_thread_subject("[INVOICE] Re: Payment"),
+            "[INVOICE] Payment"
+        );
+        assert_eq!(
+            display_thread_subject("Re: [team] Standup"),
+            "[team] Standup"
+        );
     }
 
     #[test]
@@ -2581,6 +2612,7 @@ mod tests {
         let message = || ComposeMessage {
             draft_id: None,
             account_id: 7,
+            sender_email: None,
             to: "",
             cc: "",
             bcc: "",
@@ -2605,6 +2637,7 @@ mod tests {
             ComposeMessage {
                 draft_id: Some(17),
                 account_id: 42,
+                sender_email: Some("work@example.com"),
                 to: "maya@example.com",
                 cc: "",
                 bcc: "",
@@ -2768,7 +2801,12 @@ mod tests {
             owner_account_id: Some(7),
             is_auto: false,
         };
-        let account_scope = resolve_scope("AccountLabel:33", &[], &[], std::slice::from_ref(&account_label));
+        let account_scope = resolve_scope(
+            "AccountLabel:33",
+            &[],
+            &[],
+            std::slice::from_ref(&account_label),
+        );
         assert_eq!(account_scope.account_id, Some(7));
         assert_eq!(account_scope.label_id, Some(33));
         assert_eq!(

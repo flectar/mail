@@ -30,6 +30,7 @@ fn args(attachment: Option<DraftAttachmentIn>) -> SaveDraftArgs {
     SaveDraftArgs {
         draft_id: None,
         account_id: 1,
+        from: None,
         to: vec![Address {
             name: Some("To".into()),
             email: "to@example.com".into(),
@@ -77,6 +78,57 @@ async fn saved_draft_can_be_reloaded_without_losing_editable_fields() {
     assert_eq!(loaded.attachments.len(), 1);
     assert_eq!(loaded.attachments[0].filename, "notes.txt");
     assert_ne!(loaded.attachments[0].file_path, source.to_string_lossy());
+}
+
+#[tokio::test]
+async fn drafts_accept_only_verified_sender_identities_and_store_provider_metadata() {
+    let (_tmp, core) = setup().await;
+    // Seed the primary row just as account discovery does, then model one
+    // accepted and one still-pending provider alias.
+    core.list_sender_identities(1).await.unwrap();
+    core.db
+        .write(|conn| {
+            conn.execute_batch(
+                "INSERT INTO sender_identities
+                   (account_id,email,display_name,is_primary,is_provider_default,
+                    verification_status,last_synced_at)
+                 VALUES
+                   (1,'work@example.com','Work identity',0,0,'accepted',1),
+                   (1,'pending@example.com','Pending identity',0,0,'pending',1);",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let mut accepted = args(None);
+    accepted.from = Some(Address {
+        // User input must not be able to replace the provider-authorized name.
+        name: Some("Forged display name".into()),
+        email: "WORK@example.com".into(),
+    });
+    let draft_id = core.save_draft(accepted).await.unwrap();
+    let loaded = core.get_draft(draft_id).await.unwrap();
+    assert_eq!(
+        loaded.from,
+        Some(Address {
+            name: Some("Work identity".into()),
+            email: "work@example.com".into(),
+        })
+    );
+
+    let mut pending = args(None);
+    pending.from = Some(Address {
+        name: None,
+        email: "pending@example.com".into(),
+    });
+    assert!(
+        core.save_draft(pending)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("not a verified sender identity")
+    );
 }
 
 #[tokio::test]

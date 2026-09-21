@@ -242,6 +242,10 @@ pub struct AccountSettings {
     pub security: crate::mail_security::MailSecurity,
     #[serde(default)]
     pub connection: MailConnectionSettings,
+    /// The sender identity Flectar should preselect for new messages. The
+    /// authenticated account address remains the account/login identity.
+    #[serde(default)]
+    pub default_sender_email: Option<String>,
 }
 
 impl Default for AccountSettings {
@@ -250,6 +254,7 @@ impl Default for AccountSettings {
             mail_history: default_mail_history(),
             security: Default::default(),
             connection: MailConnectionSettings::default(),
+            default_sender_email: None,
         }
     }
 }
@@ -368,6 +373,37 @@ pub struct Address {
     pub email: String,
 }
 
+/// A provider-authorized address that may appear in an outgoing From header.
+/// Provider discovery is deliberately separate from the authenticated account
+/// identity: aliases must never replace the login/synchronization address.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderIdentity {
+    pub account_id: i64,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub reply_to_email: Option<String>,
+    pub is_primary: bool,
+    pub is_provider_default: bool,
+    /// Gmail uses `accepted` / `pending`; provider-neutral primary identities
+    /// are recorded as `accepted` as well.
+    pub verification_status: String,
+    pub last_synced_at: i64,
+}
+
+impl SenderIdentity {
+    pub fn is_verified(&self) -> bool {
+        self.is_primary || self.verification_status == "accepted"
+    }
+
+    pub fn address(&self) -> Address {
+        Address {
+            name: self.display_name.clone(),
+            email: self.email.clone(),
+        }
+    }
+}
+
 /// A contact matched by search suggestions, with its interaction affinity
 /// (send_count*3 + recv_count) so the UI can show how well-known it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -478,6 +514,8 @@ pub struct ThreadSummary {
     pub id: i64,
     pub account_id: i64,
     pub account_email: String,
+    /// Verified addresses owned by this account, including send-as aliases.
+    pub account_addresses: Vec<String>,
     pub subject: String,
     pub snippet: String,
     pub participants: Vec<Address>,
@@ -728,6 +766,10 @@ pub struct DraftAttachmentIn {
 pub struct SaveDraftArgs {
     pub draft_id: Option<i64>,
     pub account_id: i64,
+    /// Requested provider-authorized From identity. `None` resolves to the
+    /// account's configured default sender (then the provider/primary default).
+    #[serde(default)]
+    pub from: Option<Address>,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
     pub bcc: Vec<Address>,

@@ -464,11 +464,23 @@ async fn send_action(
         .await?;
 
     let (refs, in_reply_to) = references;
-    let from = Address {
-        name: config.display_name.clone(),
-        email: config.email.clone(),
-    };
-    let domain = config
+    let account_id = config.id;
+    let from = ctx
+        .db
+        .read({
+            let requested = detail.from.email.clone();
+            move |conn| {
+                repo::sender_identities::get_verified(conn, account_id, &requested)?
+                    .map(|identity| identity.address())
+                    .ok_or_else(|| {
+                        CoreError::Other(format!(
+                            "{requested} is not an authorized sender identity for this account"
+                        ))
+                    })
+            }
+        })
+        .await?;
+    let domain = from
         .email
         .split('@')
         .nth(1)
@@ -612,7 +624,7 @@ async fn send_action(
         recipients = recipients.len(),
         "smtp send: dispatching",
     );
-    match smtp::send_raw(config, &auth, &config.email, &recipients, &raw).await {
+    match smtp::send_raw(config, &auth, &from.email, &recipients, &raw).await {
         Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
             // AUTH rejection happens before MAIL FROM/DATA, so it is safe to
             // invalidate an unexpectedly stale provider token and retry the
@@ -625,7 +637,7 @@ async fn send_action(
             ctx.tokens.invalidate(config.id).await;
             let retry_auth =
                 smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?);
-            smtp::send_raw(config, &retry_auth, &config.email, &recipients, &raw).await?;
+            smtp::send_raw(config, &retry_auth, &from.email, &recipients, &raw).await?;
         }
         Err(error) => return Err(error),
         Ok(()) => {}

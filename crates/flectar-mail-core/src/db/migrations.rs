@@ -10,6 +10,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/005_mailbox_count_indexes.sql"),
     include_str!("migrations/006_contact_recovery.sql"),
     include_str!("migrations/007_account_label_ownership.sql"),
+    include_str!("migrations/008_sender_identities.sql"),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -129,6 +130,7 @@ mod tests {
             "notification_outbox",
             "pending_actions",
             "route_cache",
+            "sender_identities",
             "snippets",
             "snoozes",
             "split_rules",
@@ -187,6 +189,56 @@ mod tests {
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .unwrap();
         assert_eq!(integrity, "ok");
+    }
+
+    #[test]
+    fn sender_identity_migration_preserves_account_ownership_and_seeds_primary() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(7).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,display_name,provider,auth_kind,username,imap_host,
+               imap_port,smtp_host,smtp_port,created_at
+             ) VALUES (1,'login@example.test','Login','gmail','oauth2','login',
+                       '',993,'',465,123)",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let row: (String, Option<String>, bool, bool, String) = conn
+            .query_row(
+                "SELECT email,display_name,is_primary,is_provider_default,
+                        verification_status
+                 FROM sender_identities WHERE account_id=1",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "login@example.test".into(),
+                Some("Login".into()),
+                true,
+                true,
+                "accepted".into(),
+            )
+        );
     }
 
     #[test]

@@ -121,6 +121,7 @@ async fn reply_send_reaches_smtp_and_sent_folder() {
         .save_draft(SaveDraftArgs {
             draft_id: None,
             account_id: parent.account_id,
+            from: None,
             to: vec![Address {
                 name: Some("Alice Chen".into()),
                 email: "alice@example.com".into(),

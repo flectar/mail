@@ -1339,16 +1339,14 @@ async fn build_draft_message(
             .await?,
         });
     }
-    let domain = config
+    let domain = detail
+        .from
         .email
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
     let outgoing = crate::mime::OutgoingMessage {
-        from: Address {
-            name: config.display_name.clone(),
-            email: config.email.clone(),
-        },
+        from: detail.from.clone(),
         to: &detail.to,
         cc: &detail.cc,
         bcc: &bcc,
@@ -1573,6 +1571,10 @@ async fn send_action(
             .ids()
             .is_empty();
     if !already_submitted {
+        let sender_email = ctx
+            .db
+            .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
+            .await?;
         let mut identity_request = c.client.build();
         identity_request.get_identity().account_id(&c.account_id);
         let identities = identity_request
@@ -1585,13 +1587,13 @@ async fn send_action(
             .find(|identity| {
                 identity
                     .email()
-                    .is_some_and(|email| identity_matches(email, &config.email))
+                    .is_some_and(|email| identity_matches(email, &sender_email))
             })
             .and_then(|identity| identity.id())
             .ok_or_else(|| {
                 CoreError::Jmap(format!(
                     "server has no JMAP sending identity for {}",
-                    config.email
+                    sender_email
                 ))
             })?
             .to_owned();

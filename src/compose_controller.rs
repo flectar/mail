@@ -22,6 +22,7 @@ impl Default for ComposeIntent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct PreparedMessageCompose {
     pub account_id: i64,
+    pub sender_email: String,
     pub to: String,
     pub cc: String,
     pub subject: String,
@@ -53,6 +54,7 @@ pub(super) fn prepare_message_compose(
     if action == "forward" {
         return Ok(PreparedMessageCompose {
             account_id: source.account_id,
+            sender_email: source.default_sender_email.clone(),
             to: String::new(),
             cc: String::new(),
             subject: prefixed_subject(&source.subject, "Fwd"),
@@ -70,16 +72,36 @@ pub(super) fn prepare_message_compose(
         });
     }
 
-    let own_email = source.account_email.trim().to_ascii_lowercase();
+    let own_emails = source
+        .sender_identities
+        .iter()
+        .filter(|identity| identity.is_verified())
+        .map(|identity| identity.email.trim().to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    let sender_email = source
+        .to
+        .iter()
+        .chain(source.cc.iter())
+        .chain(std::iter::once(&source.from))
+        .find_map(|recipient| {
+            source
+                .sender_identities
+                .iter()
+                .find(|identity| {
+                    identity.is_verified() && identity.email.eq_ignore_ascii_case(&recipient.email)
+                })
+                .map(|identity| identity.email.clone())
+        })
+        .unwrap_or_else(|| source.default_sender_email.clone());
     let mut candidates = Vec::new();
-    if !source.from.email.eq_ignore_ascii_case(&own_email) {
+    if !own_emails.contains(&source.from.email.trim().to_ascii_lowercase()) {
         candidates.push(source.from.clone());
     }
     candidates.extend(source.to.iter().cloned());
     if action == "reply_all" {
         candidates.extend(source.cc.iter().cloned());
     }
-    let recipients = deduplicated_addresses(candidates, &own_email);
+    let recipients = deduplicated_addresses(candidates, &own_emails);
     let primary = recipients
         .first()
         .ok_or_else(|| "the selected message has no reply recipient".to_owned())?;
@@ -97,6 +119,7 @@ pub(super) fn prepare_message_compose(
 
     Ok(PreparedMessageCompose {
         account_id: source.account_id,
+        sender_email,
         to: format_address(primary),
         cc,
         subject: prefixed_subject(&source.subject, "Re"),
@@ -115,14 +138,14 @@ pub(super) fn compose_addresses(addresses: &[flectar_mail_core::models::Address]
 
 fn deduplicated_addresses(
     addresses: impl IntoIterator<Item = flectar_mail_core::models::Address>,
-    own_email: &str,
+    own_emails: &HashSet<String>,
 ) -> Vec<flectar_mail_core::models::Address> {
     let mut seen = HashSet::new();
     addresses
         .into_iter()
         .filter(|address| {
             let email = address.email.trim().to_ascii_lowercase();
-            !email.is_empty() && email != own_email && seen.insert(email)
+            !email.is_empty() && !own_emails.contains(&email) && seen.insert(email)
         })
         .collect()
 }
@@ -468,7 +491,7 @@ pub(super) fn clear_compose(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flectar_mail_core::models::Address;
+    use flectar_mail_core::models::{Address, SenderIdentity};
 
     fn address(name: &str, email: &str) -> Address {
         Address {
@@ -477,11 +500,29 @@ mod tests {
         }
     }
 
+    fn identity(email: &str, primary: bool, provider_default: bool) -> SenderIdentity {
+        SenderIdentity {
+            account_id: 7,
+            email: email.to_owned(),
+            display_name: None,
+            reply_to_email: None,
+            is_primary: primary,
+            is_provider_default: provider_default,
+            verification_status: "accepted".into(),
+            last_synced_at: 1,
+        }
+    }
+
     fn source() -> ComposeSource {
         ComposeSource {
             message_id: 91,
             account_id: 7,
             account_email: "alex@example.com".to_owned(),
+            sender_identities: vec![
+                identity("alex@example.com", true, true),
+                identity("work@example.net", false, false),
+            ],
+            default_sender_email: "alex@example.com".to_owned(),
             from: address("Maya", "maya@example.com"),
             to: vec![
                 address("Alex", "alex@example.com"),
@@ -502,6 +543,7 @@ mod tests {
         let prepared = prepare_message_compose(&source(), "reply_all", "").unwrap();
 
         assert_eq!(prepared.account_id, 7);
+        assert_eq!(prepared.sender_email, "alex@example.com");
         assert_eq!(prepared.to, "Maya <maya@example.com>");
         assert_eq!(
             prepared.cc,
@@ -510,6 +552,23 @@ mod tests {
         assert_eq!(prepared.subject, "Re: Launch plan");
         assert!(prepared.body.contains("> First line\n> Second line"));
         assert_eq!(prepared.intent.in_reply_to_message_id, Some(91));
+    }
+
+    #[test]
+    fn reply_uses_the_alias_that_received_the_message_and_excludes_all_self_addresses() {
+        let mut source = source();
+        source.to = vec![
+            address("Alex at work", "work@example.net"),
+            address("Alex", "alex@example.com"),
+            address("Jon", "jon@example.com"),
+        ];
+        source.cc = vec![address("Work duplicate", "WORK@example.net")];
+
+        let prepared = prepare_message_compose(&source, "reply_all", "").unwrap();
+
+        assert_eq!(prepared.sender_email, "work@example.net");
+        assert_eq!(prepared.to, "Maya <maya@example.com>");
+        assert_eq!(prepared.cc, "Jon <jon@example.com>");
     }
 
     #[test]

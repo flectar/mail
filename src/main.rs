@@ -5143,6 +5143,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     translated(&app, &UiMessage::plain("Connected account")).to_string()
                 });
 
+            let draft_sender_email = draft
+                .from
+                .as_ref()
+                .map(|address| address.email.clone())
+                .unwrap_or_default();
             clear_compose(
                 &app,
                 &files_for_message_compose,
@@ -5196,6 +5201,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.global::<AccountMailPreferences>()
                 .invoke_composer_reset();
             app.global::<AccountMailPreferences>()
+                .set_composer_sender_email(draft_sender_email.into());
+            app.global::<AccountMailPreferences>()
                 .invoke_composer_account_changed(account_id);
             app.set_compose_open(true);
             return;
@@ -5239,6 +5246,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             ));
             return;
         };
+        let prepared_sender_email = prepared.sender_email.clone();
 
         clear_compose(
             &app,
@@ -5273,6 +5281,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_compose_mode(action);
         app.global::<AccountMailPreferences>()
             .invoke_composer_reset();
+        app.global::<AccountMailPreferences>()
+            .set_composer_sender_email(prepared_sender_email.into());
         app.global::<AccountMailPreferences>()
             .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
@@ -5677,10 +5687,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             document.body_html()
         };
         let intent = intent_for_save.borrow().clone();
+        let sender_email = app
+            .global::<AccountMailPreferences>()
+            .get_composer_sender_email();
+        if sender_email.is_empty() {
+            app.set_compose_notice(UiMessage::plain(
+                "Choose a verified sender identity for this message.",
+            ));
+            app.set_compose_notice_is_error(true);
+            return;
+        }
         if send {
             match runtime_for_compose.block_on(core.send_new_message(ComposeMessage {
                 draft_id: intent.draft_id,
                 account_id: i64::from(account_id),
+                sender_email: Some(sender_email.as_str()),
                 to: to.as_str(),
                 cc: cc.as_str(),
                 bcc: bcc.as_str(),
@@ -5723,6 +5744,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .block_on(core.save_new_draft(ComposeMessage {
                 draft_id: intent.draft_id,
                 account_id: i64::from(account_id),
+                sender_email: Some(sender_email.as_str()),
                 to: to.as_str(),
                 cc: cc.as_str(),
                 bcc: bcc.as_str(),
@@ -5873,7 +5895,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_imap_security(config.settings.connection.imap_security.as_str().into());
         app.set_smtp_security(config.settings.connection.smtp_security.as_str().into());
         app.set_trusted_certificate_pem(
-            config.settings.connection.trusted_certificate_pem.clone().into(),
+            config
+                .settings
+                .connection
+                .trusted_certificate_pem
+                .clone()
+                .into(),
         );
         *last_suggested_transport.borrow_mut() = Some(config);
     });

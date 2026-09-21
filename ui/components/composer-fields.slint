@@ -88,9 +88,9 @@ export component ComposerFromRow inherits Rectangle {
 
             Text {
                 x: 12px;
-                width: 34px;
+                width: 60px;
                 height: parent.height;
-                text: @tr("From");
+                text: @tr("Account");
                 color: root.muted-color;
                 font-size: TypeScale.caption;
                 font-weight: 600;
@@ -98,9 +98,9 @@ export component ComposerFromRow inherits Rectangle {
             }
 
             trigger := Rectangle {
-                x: 50px;
+                x: 76px;
                 y: 5px;
-                width: min(410px, parent.width - 62px);
+                width: min(410px, parent.width - 88px);
                 height: 32px;
                 border-radius: 7px;
                 border-width: 1px;

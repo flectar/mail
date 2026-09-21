@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-20 21:38+0000\n"
+"POT-Creation-Date: 2026-09-21 01:50+0000\n"
 "PO-Revision-Date: 2026-08-31 02:35+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Spanish\n"
@@ -152,7 +152,7 @@ msgstr "Historial de conversaciones disponible"
 msgid "New address-book entry"
 msgstr "Nueva entrada de contactos"
 
-#: ui/app.slint:97 ui/app.slint:763 ui/components/composer-fields.slint:62
+#: ui/app.slint:97 ui/app.slint:765 ui/components/composer-fields.slint:62
 #: ui/dialogs/compose-dialog.slint:36
 msgid "No connected account"
 msgstr "No hay ninguna cuenta conectada"
@@ -1040,104 +1040,114 @@ msgid "Choose the account this message should be sent from."
 msgstr "Elige la cuenta desde la que se debe enviar este mensaje."
 
 #: ui/app.slint:389
+msgid "Choose a verified sender identity for this message."
+msgstr "Elige una identidad de remitente verificada para este mensaje."
+
+#: ui/app.slint:390
+msgid "Could not refresh sender identities; using cached values: {}"
+msgstr ""
+"No se pudieron actualizar las identidades de remitente; se usarán los "
+"valores en caché: {}"
+
+#: ui/app.slint:391
 msgid "Connect an account before saving or sending mail."
 msgstr "Conecta una cuenta antes de guardar o enviar correo."
 
-#: ui/app.slint:390
+#: ui/app.slint:392
 msgid "Message queued for delivery (action {})."
 msgstr "Mensaje en cola para su entrega (acción {})."
 
-#: ui/app.slint:391
+#: ui/app.slint:393
 msgid "Sending message…"
 msgstr "Enviando mensaje…"
 
-#: ui/app.slint:392
+#: ui/app.slint:394
 msgid "Message sent."
 msgstr "Mensaje enviado."
 
-#: ui/app.slint:393
+#: ui/app.slint:395
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "El mensaje no se envió: {} El borrador se ha conservado."
 
-#: ui/app.slint:394
+#: ui/app.slint:396
 msgid "Draft saved locally (#{})."
 msgstr "Borrador guardado localmente (#{})."
 
-#: ui/app.slint:395
+#: ui/app.slint:397
 msgid "Compose failed: {}"
 msgstr "Falló la redacción: {}"
 
-#: ui/app.slint:396
+#: ui/app.slint:398
 msgid "Connect an account before managing email templates."
 msgstr "Conecta una cuenta antes de gestionar plantillas de correo."
 
-#: ui/app.slint:397
+#: ui/app.slint:399
 msgid "Could not load email templates: {}"
 msgstr "No se pudieron cargar las plantillas de correo: {}"
 
-#: ui/app.slint:398
+#: ui/app.slint:400
 msgid "Enter a template name."
 msgstr "Escribe un nombre para la plantilla."
 
-#: ui/app.slint:399
+#: ui/app.slint:401
 msgid "Add a subject or message to the template."
 msgstr "Añade un asunto o mensaje a la plantilla."
 
-#: ui/app.slint:400
+#: ui/app.slint:402
 msgid "Email template saved."
 msgstr "Plantilla de correo guardada."
 
-#: ui/app.slint:401
+#: ui/app.slint:403
 msgid "Could not save email template: {}"
 msgstr "No se pudo guardar la plantilla de correo: {}"
 
-#: ui/app.slint:402
+#: ui/app.slint:404
 msgid "Email template deleted."
 msgstr "Plantilla de correo eliminada."
 
-#: ui/app.slint:403
+#: ui/app.slint:405
 msgid "Could not delete email template: {}"
 msgstr "No se pudo eliminar la plantilla de correo: {}"
 
-#: ui/app.slint:404
+#: ui/app.slint:406
 msgid "Email template is no longer available."
 msgstr "La plantilla de correo ya no está disponible."
 
-#: ui/app.slint:405
+#: ui/app.slint:407
 msgid "Email template inserted."
 msgstr "Plantilla de correo insertada."
 
-#: ui/app.slint:406
+#: ui/app.slint:408
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "Plantilla de correo insertada, pero no se pudo guardar su uso: {}"
 
-#: ui/app.slint:407
+#: ui/app.slint:409
 msgid "IMAP port must be between 1 and 65535."
 msgstr "El puerto IMAP debe estar entre 1 y 65535."
 
-#: ui/app.slint:408
+#: ui/app.slint:410
 msgid "SMTP port must be between 1 and 65535."
 msgstr "El puerto SMTP debe estar entre 1 y 65535."
 
-#: ui/app.slint:409
+#: ui/app.slint:411
 msgid "Local mail data is unavailable. Retry startup."
 msgstr ""
 "Los datos de correo locales no están disponibles. Vuelve a intentar el "
 "inicio."
 
-#: ui/app.slint:410
+#: ui/app.slint:412
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "Detectando JMAP y comprobando sus capacidades…"
 
-#: ui/app.slint:411
+#: ui/app.slint:413
 msgid "Certificate imported. Connect to verify the server."
 msgstr "Certificado importado. Conecta para verificar el servidor."
 
-#: ui/app.slint:412
+#: ui/app.slint:414
 msgid "Could not load account preferences: {}"
 msgstr "No se pudieron cargar las preferencias de la cuenta: {}"
 
-#: ui/app.slint:413
+#: ui/app.slint:415
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -1145,19 +1155,19 @@ msgstr ""
 "Se conservó la firma que editaste. Elige Sin firma para mantenerla como "
 "texto del mensaje antes de insertar otra."
 
-#: ui/app.slint:414
+#: ui/app.slint:416
 msgid "Certificate import failed: {}"
 msgstr "Error al importar el certificado: {}"
 
-#: ui/app.slint:415
+#: ui/app.slint:417
 msgid "Paste the PEM certificate into the certificate field."
 msgstr "Pega el certificado PEM en el campo del certificado."
 
-#: ui/app.slint:416
+#: ui/app.slint:418
 msgid "Testing IMAP and SMTP connections…"
 msgstr "Comprobando las conexiones IMAP y SMTP…"
 
-#: ui/app.slint:421
+#: ui/app.slint:423
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
@@ -1165,149 +1175,170 @@ msgstr ""
 "Ya hay otra autorización del navegador en curso; termínala o selecciona "
 "Cancelar."
 
-#: ui/app.slint:422
+#: ui/app.slint:424
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "Añade claves de aplicación en los ajustes de inicio de sesión para habilitar "
 "este proveedor."
 
-#: ui/app.slint:423
+#: ui/app.slint:425
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Elige OAuth de Gmail o Outlook."
 
-#: ui/app.slint:424
+#: ui/app.slint:426
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 "Completa el inicio de sesión en el navegador o selecciona Cancelar aquí."
 
-#: ui/app.slint:425
+#: ui/app.slint:427
 msgid "Cancelling browser sign-in…"
 msgstr "Cancelando el inicio de sesión en el navegador…"
 
-#: ui/app.slint:426
+#: ui/app.slint:428
 msgid "Finishing browser sign-in…"
 msgstr "Finalizando el inicio de sesión en el navegador…"
 
-#: ui/app.slint:427
+#: ui/app.slint:429
 msgid "Could not use that browser address: {}"
 msgstr "No se pudo usar esa dirección del navegador: {}"
 
-#: ui/app.slint:428
+#: ui/app.slint:430
 msgid "Calendar core is unavailable."
 msgstr "El núcleo del calendario no está disponible."
 
-#: ui/app.slint:429
+#: ui/app.slint:431
 msgid "Account no longer exists."
 msgstr "La cuenta ya no existe."
 
-#: ui/app.slint:430
+#: ui/app.slint:432
 msgid "Authorize calendar access in your browser."
 msgstr "Autoriza el acceso al calendario en el navegador."
 
-#: ui/app.slint:431
+#: ui/app.slint:433
 msgid "OAuth app keys saved."
 msgstr "Claves de la aplicación OAuth guardadas."
 
-#: ui/app.slint:432
+#: ui/app.slint:434
 msgid "{} OAuth settings saved."
 msgstr "Ajustes de OAuth de {} guardados."
 
-#: ui/app.slint:433
+#: ui/app.slint:435
 msgid "OAuth settings failed: {}"
 msgstr "Fallaron los ajustes de OAuth: {}"
 
-#: ui/app.slint:434
+#: ui/app.slint:436
 msgid "Mail refresh failed: {}"
 msgstr "Falló la actualización del correo: {}"
 
-#: ui/app.slint:435
+#: ui/app.slint:437
 msgid "Mail filter failed: {}"
 msgstr "Falló el filtro de correo: {}"
 
-#: ui/app.slint:436
+#: ui/app.slint:438
 msgid "Mail pagination failed: {}"
 msgstr "Falló la paginación del correo: {}"
 
-#: ui/app.slint:437
+#: ui/app.slint:439
 msgid "Could not mark message as read: {}"
 msgstr "No se pudo marcar el mensaje como leído: {}"
 
-#: ui/app.slint:438 ui/views/mail-reading-pane.slint:220
+#: ui/app.slint:440 ui/views/mail-reading-pane.slint:220
 #: ui/views/mail-reading-pane.slint:1100
 msgid "Loading message…"
 msgstr "Cargando mensaje…"
 
-#: ui/app.slint:444 ui/dialogs/settings-dialog.slint:1762 ui/tray.slint:9
+#: ui/app.slint:446 ui/dialogs/settings-dialog.slint:1762 ui/tray.slint:9
 #: ui/views/onboarding-view.slint:118
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:939 ui/app.slint:949
+#: ui/app.slint:941 ui/app.slint:951
 msgid "Global Labels (local only)"
 msgstr "Etiquetas globales (solo locales)"
 
-#: ui/app.slint:1788
+#: ui/app.slint:1790
 msgid "Mailbox startup failed"
 msgstr "Error al iniciar el buzón"
 
-#: ui/app.slint:1794
+#: ui/app.slint:1796
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail no pudo abrir el almacenamiento local"
 
-#: ui/app.slint:1807
+#: ui/app.slint:1809
 msgid "Diagnostic ID: {}"
 msgstr "ID de diagnóstico: {}"
 
-#: ui/app.slint:1810
+#: ui/app.slint:1812
 msgid "Diagnostic ID {}"
 msgstr "ID de diagnóstico {}"
 
-#: ui/app.slint:1815
+#: ui/app.slint:1817
 msgid "Retry"
 msgstr "Reintentar"
 
-#: ui/app.slint:1823 ui/components/copyable-diagnostic.slint:38
+#: ui/app.slint:1825 ui/components/copyable-diagnostic.slint:38
 msgid "Copy diagnostics"
 msgstr "Copiar datos de diagnóstico"
 
-#: ui/components/account-mail-preferences.slint:64
-msgid "Signatures & OpenPGP"
-msgstr "Firmas y OpenPGP"
-
-#: ui/components/account-mail-preferences.slint:65
-msgid "Choose an account to manage your signature and message protection."
-msgstr ""
-"Elige una cuenta para gestionar tu firma y la protección de los mensajes."
-
 #: ui/components/account-mail-preferences.slint:76
+msgid "Sender identities, signatures & OpenPGP"
+msgstr "Identidades de remitente, firmas y OpenPGP"
+
+#: ui/components/account-mail-preferences.slint:77
+msgid ""
+"Choose an account to manage its sender identity, signature, and message "
+"protection."
+msgstr ""
+"Elige una cuenta para gestionar su identidad de remitente, firma y "
+"protección de mensajes."
+
+#: ui/components/account-mail-preferences.slint:88
 msgid "Signatures"
 msgstr "Firmas"
 
-#: ui/components/account-mail-preferences.slint:77
+#: ui/components/account-mail-preferences.slint:89
 msgid "OpenPGP"
 msgstr "OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:82
+#: ui/components/account-mail-preferences.slint:94
+msgid "Default sender identity"
+msgstr "Identidad de remitente predeterminada"
+
+#: ui/components/account-mail-preferences.slint:94
+msgid "Preselected for new messages. Your sign-in address is unchanged."
+msgstr ""
+"Preseleccionada para mensajes nuevos. Tu dirección de inicio de sesión no "
+"cambia."
+
+#: ui/components/account-mail-preferences.slint:100
+msgid "Save sender default"
+msgstr "Guardar remitente predeterminado"
+
+#: ui/components/account-mail-preferences.slint:101
+msgid "Refresh sender identities"
+msgstr "Actualizar identidades de remitente"
+
+#: ui/components/account-mail-preferences.slint:106
 msgid "Edit signature"
 msgstr "Editar firma"
 
-#: ui/components/account-mail-preferences.slint:82
+#: ui/components/account-mail-preferences.slint:106
 msgid "Saved separately for each account."
 msgstr "Se guarda por separado para cada cuenta."
 
-#: ui/components/account-mail-preferences.slint:87
+#: ui/components/account-mail-preferences.slint:111
 msgid "New signature"
 msgstr "Nueva firma"
 
-#: ui/components/account-mail-preferences.slint:88
+#: ui/components/account-mail-preferences.slint:112
 msgid "Signature name"
 msgstr "Nombre de la firma"
 
-#: ui/components/account-mail-preferences.slint:88
+#: ui/components/account-mail-preferences.slint:112
 msgid "Signature name, for example Work"
 msgstr "Nombre de la firma, por ejemplo Trabajo"
 
-#: ui/components/account-mail-preferences.slint:89
+#: ui/components/account-mail-preferences.slint:113
 msgid ""
 "Your name\n"
 "Role · Company\n"
@@ -1317,7 +1348,7 @@ msgstr ""
 "Cargo · Empresa\n"
 "Teléfono · Sitio web"
 
-#: ui/components/account-mail-preferences.slint:90
+#: ui/components/account-mail-preferences.slint:114
 msgid ""
 "Plain text works in every email client. You can format the inserted "
 "signature in the composer."
@@ -1325,36 +1356,36 @@ msgstr ""
 "El texto sin formato funciona en todos los clientes de correo. Puedes dar "
 "formato a la firma insertada en el editor."
 
-#: ui/components/account-mail-preferences.slint:92
+#: ui/components/account-mail-preferences.slint:116
 msgid "Save signature"
 msgstr "Guardar firma"
 
-#: ui/components/account-mail-preferences.slint:93
+#: ui/components/account-mail-preferences.slint:117
 #: ui/views/contacts-view.slint:534
 msgid "Delete"
 msgstr "Eliminar"
 
-#: ui/components/account-mail-preferences.slint:96
+#: ui/components/account-mail-preferences.slint:120
 msgid "New messages"
 msgstr "Mensajes nuevos"
 
-#: ui/components/account-mail-preferences.slint:96
+#: ui/components/account-mail-preferences.slint:120
 msgid "Signature inserted when you start a message."
 msgstr "Firma que se inserta al comenzar un mensaje."
 
-#: ui/components/account-mail-preferences.slint:102
+#: ui/components/account-mail-preferences.slint:126
 msgid "Replies & forwards"
 msgstr "Respuestas y reenvíos"
 
-#: ui/components/account-mail-preferences.slint:102
+#: ui/components/account-mail-preferences.slint:126
 msgid "Placed above the quoted message."
 msgstr "Se coloca encima del mensaje citado."
 
-#: ui/components/account-mail-preferences.slint:107
+#: ui/components/account-mail-preferences.slint:131
 msgid "Save signature defaults"
 msgstr "Guardar firmas predeterminadas"
 
-#: ui/components/account-mail-preferences.slint:111
+#: ui/components/account-mail-preferences.slint:135
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
@@ -1362,7 +1393,7 @@ msgstr ""
 "OpenPGP protege el contenido de los mensajes y los archivos adjuntos. Las "
 "firmas digitales permiten comprobar quién firmó un mensaje."
 
-#: ui/components/account-mail-preferences.slint:112
+#: ui/components/account-mail-preferences.slint:136
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
@@ -1370,7 +1401,7 @@ msgstr ""
 "Utiliza GnuPG 2.x instalado y su almacenamiento seguro de claves. Las frases "
 "de contraseña se introducen en el diálogo de desbloqueo de GnuPG."
 
-#: ui/components/account-mail-preferences.slint:112
+#: ui/components/account-mail-preferences.slint:136
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
@@ -1378,11 +1409,11 @@ msgstr ""
 "OpenPGP no está disponible en esta versión móvil. Las cuentas protegidas no "
 "pueden enviar mensajes sin un motor de cifrado compatible."
 
-#: ui/components/account-mail-preferences.slint:113
+#: ui/components/account-mail-preferences.slint:137
 msgid "Create a new key"
 msgstr "Crear una clave nueva"
 
-#: ui/components/account-mail-preferences.slint:114
+#: ui/components/account-mail-preferences.slint:138
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
@@ -1390,37 +1421,37 @@ msgstr ""
 "Las claves nuevas caducan en dos años. GnuPG te pide que protejas la clave "
 "privada con una frase de contraseña."
 
-#: ui/components/account-mail-preferences.slint:115
+#: ui/components/account-mail-preferences.slint:139
 msgid "Your full OpenPGP fingerprint"
 msgstr "Tu huella digital OpenPGP completa"
 
-#: ui/components/account-mail-preferences.slint:115
+#: ui/components/account-mail-preferences.slint:139
 msgid "Your full OpenPGP key fingerprint"
 msgstr "La huella digital completa de tu clave OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:117
+#: ui/components/account-mail-preferences.slint:141
 msgid "Digitally sign messages"
 msgstr "Firmar mensajes digitalmente"
 
-#: ui/components/account-mail-preferences.slint:117
+#: ui/components/account-mail-preferences.slint:141
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr "Demuestra la posesión de tu clave privada; no cifra el mensaje."
 
-#: ui/components/account-mail-preferences.slint:122
+#: ui/components/account-mail-preferences.slint:146
 msgid "Require encryption"
 msgstr "Exigir cifrado"
 
-#: ui/components/account-mail-preferences.slint:122
+#: ui/components/account-mail-preferences.slint:146
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 "Impide el envío si algún destinatario no tiene una clave verificada y "
 "utilizable."
 
-#: ui/components/account-mail-preferences.slint:126
+#: ui/components/account-mail-preferences.slint:150
 msgid "Verified recipient keys"
 msgstr "Claves verificadas de los destinatarios"
 
-#: ui/components/account-mail-preferences.slint:127
+#: ui/components/account-mail-preferences.slint:151
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
@@ -1430,31 +1461,31 @@ msgstr ""
 "confianza y después introduce un correo=huella por línea. Importar una clave "
 "no basta para verificarla."
 
-#: ui/components/account-mail-preferences.slint:128
+#: ui/components/account-mail-preferences.slint:152
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr "persona@example.org=HUELLA_COMPLETA"
 
-#: ui/components/account-mail-preferences.slint:129
+#: ui/components/account-mail-preferences.slint:153
 msgid "Save OpenPGP settings"
 msgstr "Guardar ajustes de OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:131
+#: ui/components/account-mail-preferences.slint:155
 msgid "Import key"
 msgstr "Importar clave"
 
-#: ui/components/account-mail-preferences.slint:132
+#: ui/components/account-mail-preferences.slint:156
 msgid "Export public key"
 msgstr "Exportar clave pública"
 
-#: ui/components/account-mail-preferences.slint:133
+#: ui/components/account-mail-preferences.slint:157
 msgid "Show keys"
 msgstr "Mostrar claves"
 
-#: ui/components/account-mail-preferences.slint:141
+#: ui/components/account-mail-preferences.slint:165
 msgid "Open message file (.eml)"
 msgstr "Abrir archivo de mensaje (.eml)"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:167
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
@@ -1462,7 +1493,7 @@ msgstr ""
 "Gestiona la caducidad, la revocación y las copias de seguridad de claves "
 "privadas en GnuPG. Aquí solo se exportan claves públicas."
 
-#: ui/components/account-mail-preferences.slint:144
+#: ui/components/account-mail-preferences.slint:168
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
@@ -1473,15 +1504,15 @@ msgstr ""
 "el servidor no se protegen retroactivamente. No se admiten certificados S/"
 "MIME."
 
-#: ui/components/account-mail-preferences.slint:147
+#: ui/components/account-mail-preferences.slint:171
 msgid "Working…"
 msgstr "Procesando…"
 
-#: ui/components/account-mail-preferences.slint:159
+#: ui/components/account-mail-preferences.slint:183
 msgid "OpenPGP message"
 msgstr "Mensaje OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:162
+#: ui/components/account-mail-preferences.slint:186
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
@@ -1489,11 +1520,11 @@ msgstr ""
 "El contenido descifrado se muestra como texto, sin contenido remoto. No se "
 "añade a la búsqueda ni se guarda en la base de datos de correo."
 
-#: ui/components/account-mail-preferences.slint:163
+#: ui/components/account-mail-preferences.slint:187
 msgid "Export decrypted message"
 msgstr "Exportar mensaje descifrado"
 
-#: ui/components/account-mail-preferences.slint:164
+#: ui/components/account-mail-preferences.slint:188
 #: ui/dialogs/settings-dialog.slint:2100 ui/views/files-view.slint:426
 #: ui/views/files-view.slint:627
 msgid "Close"
@@ -1823,9 +1854,9 @@ msgstr "Editar borrador"
 msgid "New message"
 msgstr "Nuevo mensaje"
 
-#: ui/components/composer-fields.slint:93
-msgid "From"
-msgstr "De"
+#: ui/components/composer-fields.slint:93 ui/views/files-view.slint:633
+msgid "Account"
+msgstr "Cuenta"
 
 #: ui/components/composer-fields.slint:251
 msgid "✓"
@@ -1895,11 +1926,19 @@ msgstr "Página {} de {}"
 msgid "Next page"
 msgstr "Página siguiente"
 
-#: ui/components/email-composer.slint:237
+#: ui/components/email-composer.slint:238
+msgid "From"
+msgstr "De"
+
+#: ui/components/email-composer.slint:239
+msgid "Verified sender identity"
+msgstr "Identidad de remitente verificada"
+
+#: ui/components/email-composer.slint:252
 msgid "Signature"
 msgstr "Firma"
 
-#: ui/components/email-composer.slint:331
+#: ui/components/email-composer.slint:346
 msgid "Write your message…"
 msgstr "Escribe tu mensaje…"
 
@@ -4370,10 +4409,6 @@ msgstr "Esta versión del servidor no permite cambiar suscripciones."
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
 
-#: ui/views/files-view.slint:633
-msgid "Account"
-msgstr "Cuenta"
-
 #: ui/views/files-view.slint:638
 msgid "Uses the selected account’s saved credentials."
 msgstr "Usa las credenciales guardadas de la cuenta seleccionada."
@@ -4827,3 +4862,10 @@ msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 "Déjalo vacío para detectar /.well-known/jmap a partir de tu dominio de "
 "correo."
+
+#~ msgid "Signatures & OpenPGP"
+#~ msgstr "Firmas y OpenPGP"
+
+#~ msgid "Choose an account to manage your signature and message protection."
+#~ msgstr ""
+#~ "Elige una cuenta para gestionar tu firma y la protección de los mensajes."

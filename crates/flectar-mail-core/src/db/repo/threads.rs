@@ -2,16 +2,17 @@ use crate::error::Result;
 use crate::models::*;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-use super::parse_addrs;
+use super::{parse_addrs, parse_json_column};
 
 fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
     Ok(ThreadSummary {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
         account_email: row.get("account_email")?,
+        account_addresses: parse_json_column(&row.get::<_, String>("account_addresses")?, 3)?,
         subject: row.get::<_, Option<String>>("subject")?.unwrap_or_default(),
         snippet: row.get("snippet")?,
-        participants: parse_addrs(&row.get::<_, String>("participants_json")?, 5)?,
+        participants: parse_addrs(&row.get::<_, String>("participants_json")?, 6)?,
         last_message_at: row.get("last_message_at")?,
         message_count: row.get("message_count")?,
         unread_count: row.get("unread_count")?,
@@ -35,6 +36,11 @@ fn parse_id_list(csv: &str) -> Vec<i64> {
 
 const SUMMARY_SELECT: &str = "
     SELECT t.id, t.account_id, a.email AS account_email,
+           COALESCE((SELECT json_group_array(si.email)
+                     FROM sender_identities si
+                     WHERE si.account_id=t.account_id
+                       AND (si.is_primary=1 OR si.verification_status='accepted')), '[]')
+             AS account_addresses,
            (SELECT COALESCE(m.local_subject_prefix, '') || m.subject
               FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1) AS subject,
            t.snippet, t.participants_json, t.last_message_at, t.message_count,

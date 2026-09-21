@@ -1821,7 +1821,6 @@ async fn store_headers(
         return Ok((Vec::new(), Vec::new()));
     }
     let account_id = config.id;
-    let account_email = config.email.to_lowercase();
     let folder_id = folder.id;
     let folder_role = folder.role.clone();
 
@@ -1831,6 +1830,11 @@ async fn store_headers(
             let settings = repo::settings::get(&tx)?;
             let auto_labels = settings.auto_labels_enabled;
             let ai_categorize = settings.ai_categorize;
+            let account_emails = repo::sender_identities::list(&tx, account_id)?
+                .into_iter()
+                .filter(|identity| identity.is_verified())
+                .map(|identity| identity.email.to_ascii_lowercase())
+                .collect::<std::collections::HashSet<_>>();
             let mut thread_ids: Vec<i64> = Vec::new();
             let mut fresh_ids: Vec<i64> = Vec::new();
             // Threads already enqueued for a desktop notification this batch, so
@@ -1917,8 +1921,8 @@ async fn store_headers(
                     .as_ref()
                     .map(|a| a.email.to_lowercase())
                     .unwrap_or_default();
-                let is_outgoing =
-                    from_email == account_email || folder_role.as_deref() == Some(roles::SENT);
+                let is_outgoing = account_emails.contains(&from_email)
+                    || folder_role.as_deref() == Some(roles::SENT);
 
                 let thread_id =
                     crate::sync::threading::resolve_thread(&tx, account_id, &parsed, date_ms)?;

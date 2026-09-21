@@ -159,7 +159,15 @@ pub fn insert_with_sync_state(conn: &Connection, a: &NewAccount, sync_state: &st
             sync_state,
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    let account_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO sender_identities (
+           account_id,email,display_name,is_primary,is_provider_default,
+           verification_status,last_synced_at
+         ) VALUES (?1,?2,?3,1,1,'accepted',?4)",
+        params![account_id, a.email, a.display_name, now_ms()],
+    )?;
+    Ok(account_id)
 }
 
 pub fn set_settings(conn: &Connection, id: i64, settings: &AccountSettings) -> Result<()> {
@@ -223,6 +231,21 @@ pub fn update_password(conn: &Connection, id: i64, a: &NewAccount) -> Result<()>
             a.smtp_host,
             a.smtp_port,
         ],
+    )?;
+    // A password-account edit invalidates any provider aliases discovered for
+    // the old connection. Seed only the new authenticated address after the
+    // account row itself has been accepted (for example, by its UNIQUE email
+    // constraint), so a rejected edit cannot leave mismatched identities.
+    conn.execute(
+        "DELETE FROM sender_identities WHERE account_id=?1",
+        params![id],
+    )?;
+    conn.execute(
+        "INSERT INTO sender_identities (
+           account_id,email,display_name,is_primary,is_provider_default,
+           verification_status,last_synced_at
+         ) VALUES (?1,?2,?3,1,1,'accepted',?4)",
+        params![id, a.email, a.display_name, now_ms()],
     )?;
     if jmap_identity_changed {
         conn.execute(

@@ -253,6 +253,13 @@ impl GmailApi {
             .collect())
     }
 
+    async fn sender_identities(&self) -> Result<Vec<crate::models::SenderIdentity>> {
+        let value = self
+            .get_json(&format!("{GMAIL_API}/settings/sendAs"))
+            .await?;
+        crate::sender_identities::parse_gmail_identities_value(&self.account, value)
+    }
+
     async fn list_messages_page(
         &self,
         page_token: Option<&str>,
@@ -614,6 +621,33 @@ impl GmailApi {
             &json!({ "id": draft_id }),
         )
         .await
+    }
+
+    /// Re-check the exact identity at provider I/O time. A cached alias may
+    /// have been revoked after the composer opened; Gmail must remain the
+    /// authority on whether the From address is still usable.
+    async fn validate_sender_identity(&self, email: &str) -> Result<()> {
+        let value = self
+            .get_json(&format!("{GMAIL_API}/settings/sendAs/{}", urlencode(email)))
+            .await
+            .map_err(|error| match error {
+                CoreError::NotFound(_) => CoreError::Other(format!(
+                    "{email} is no longer an authorized Gmail sender identity"
+                )),
+                other => other,
+            })?;
+        let returned = required_string(&value, "sendAsEmail")?;
+        let primary = value
+            .get("isPrimary")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let accepted = value.get("verificationStatus").and_then(Value::as_str) == Some("accepted");
+        if !returned.eq_ignore_ascii_case(email) || !(primary || accepted) {
+            return Err(CoreError::Other(format!(
+                "{email} is not a verified Gmail sender identity"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1154,6 +1188,21 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                 }
             }
             tx.commit()?;
+            Ok(())
+        })
+        .await
+}
+
+async fn sync_sender_identities(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+) -> Result<()> {
+    let identities = api.sender_identities().await?;
+    let account_id = config.id;
+    ctx.db
+        .write(move |conn| {
+            repo::sender_identities::replace(conn, account_id, &identities)?;
             Ok(())
         })
         .await
@@ -2505,6 +2554,8 @@ async fn prepare_draft(
         })
         .await?;
 
+    api.validate_sender_identity(&detail.from.email).await?;
+
     let staged: Vec<(String, String, Option<String>)> = ctx
         .db
         .read(move |conn| {
@@ -2592,11 +2643,13 @@ async fn prepare_draft(
         }
     }
 
-    let from = Address {
-        name: config.display_name.clone(),
-        email: config.email.clone(),
-    };
-    let domain = config.email.split('@').nth(1).unwrap_or("localhost");
+    let from = detail.from.clone();
+    let domain = from
+        .email
+        .split('@')
+        .nth(1)
+        .unwrap_or("localhost")
+        .to_owned();
     let outgoing = crate::mime::OutgoingMessage {
         from,
         to: &detail.to,
@@ -2608,7 +2661,7 @@ async fn prepare_draft(
         in_reply_to: in_reply_to.as_deref(),
         references: &refs,
         message_id: stored_message_id.as_deref(),
-        message_id_domain: domain,
+        message_id_domain: &domain,
         attachments,
     };
     let (message_id, raw) = crate::mime::build_message(&outgoing)?;
@@ -3447,6 +3500,7 @@ async fn run_actor(
             // important on a new account where the user can compose before the
             // first metadata page creates Sent, Drafts and All Mail locally.
             if refresh_labels {
+                sync_sender_identities(&ctx, &config, &api).await?;
                 sync_labels(&ctx, &config, &api).await?;
             }
             let actions_remaining = execute_actions(&ctx, &config, &api).await?;

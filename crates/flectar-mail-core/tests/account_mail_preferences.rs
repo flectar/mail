@@ -91,6 +91,7 @@ async fn protected_drafts_stay_local_and_queued_policy_cannot_downgrade() {
         .save_draft(SaveDraftArgs {
             draft_id: None,
             account_id: 1,
+            from: None,
             to: vec![Address {
                 name: None,
                 email: "bob@example.org".into(),

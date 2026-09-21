@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-09-20 21:38+0000\n"
+"POT-Creation-Date: 2026-09-21 01:50+0000\n"
 "PO-Revision-Date: 2026-09-15 12:00+0000\n"
 "Last-Translator: Flectar contributors\n"
 "Language-Team: Turkish\n"
@@ -152,7 +152,7 @@ msgstr "Konuşma geçmişi mevcut"
 msgid "New address-book entry"
 msgstr "Yeni adres defteri kaydı"
 
-#: ui/app.slint:97 ui/app.slint:763 ui/components/composer-fields.slint:62
+#: ui/app.slint:97 ui/app.slint:765 ui/components/composer-fields.slint:62
 #: ui/dialogs/compose-dialog.slint:36
 msgid "No connected account"
 msgstr "Bağlı hesap yok"
@@ -1022,102 +1022,111 @@ msgid "Choose the account this message should be sent from."
 msgstr "Bu iletinin hangi hesaptan gönderileceğini seçin."
 
 #: ui/app.slint:389
+msgid "Choose a verified sender identity for this message."
+msgstr "Bu ileti için doğrulanmış bir gönderen kimliği seçin."
+
+#: ui/app.slint:390
+msgid "Could not refresh sender identities; using cached values: {}"
+msgstr ""
+"Gönderen kimlikleri yenilenemedi; önbelleğe alınmış değerler kullanılıyor: {}"
+
+#: ui/app.slint:391
 msgid "Connect an account before saving or sending mail."
 msgstr "E-posta kaydetmeden veya göndermeden önce bir hesap bağlayın."
 
-#: ui/app.slint:390
+#: ui/app.slint:392
 msgid "Message queued for delivery (action {})."
 msgstr "İleti gönderilmek üzere kuyruğa alındı (eylem {})."
 
-#: ui/app.slint:391
+#: ui/app.slint:393
 msgid "Sending message…"
 msgstr "İleti gönderiliyor…"
 
-#: ui/app.slint:392
+#: ui/app.slint:394
 msgid "Message sent."
 msgstr "İleti gönderildi."
 
-#: ui/app.slint:393
+#: ui/app.slint:395
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "İleti gönderilemedi: {} Taslağınız korunuyor."
 
-#: ui/app.slint:394
+#: ui/app.slint:396
 msgid "Draft saved locally (#{})."
 msgstr "Taslak yerel olarak kaydedildi (#{})."
 
-#: ui/app.slint:395
+#: ui/app.slint:397
 msgid "Compose failed: {}"
 msgstr "Oluşturma başarısız: {}"
 
-#: ui/app.slint:396
+#: ui/app.slint:398
 msgid "Connect an account before managing email templates."
 msgstr "E-posta şablonlarını yönetmeden önce bir hesap bağlayın."
 
-#: ui/app.slint:397
+#: ui/app.slint:399
 msgid "Could not load email templates: {}"
 msgstr "E-posta şablonları yüklenemedi: {}"
 
-#: ui/app.slint:398
+#: ui/app.slint:400
 msgid "Enter a template name."
 msgstr "Bir şablon adı girin."
 
-#: ui/app.slint:399
+#: ui/app.slint:401
 msgid "Add a subject or message to the template."
 msgstr "Şablona bir konu veya ileti ekleyin."
 
-#: ui/app.slint:400
+#: ui/app.slint:402
 msgid "Email template saved."
 msgstr "E-posta şablonu kaydedildi."
 
-#: ui/app.slint:401
+#: ui/app.slint:403
 msgid "Could not save email template: {}"
 msgstr "E-posta şablonu kaydedilemedi: {}"
 
-#: ui/app.slint:402
+#: ui/app.slint:404
 msgid "Email template deleted."
 msgstr "E-posta şablonu silindi."
 
-#: ui/app.slint:403
+#: ui/app.slint:405
 msgid "Could not delete email template: {}"
 msgstr "E-posta şablonu silinemedi: {}"
 
-#: ui/app.slint:404
+#: ui/app.slint:406
 msgid "Email template is no longer available."
 msgstr "E-posta şablonu artık mevcut değil."
 
-#: ui/app.slint:405
+#: ui/app.slint:407
 msgid "Email template inserted."
 msgstr "E-posta şablonu eklendi."
 
-#: ui/app.slint:406
+#: ui/app.slint:408
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "E-posta şablonu eklendi, ancak kullanımı kaydedilemedi: {}"
 
-#: ui/app.slint:407
+#: ui/app.slint:409
 msgid "IMAP port must be between 1 and 65535."
 msgstr "IMAP bağlantı noktası 1 ile 65535 arasında olmalıdır."
 
-#: ui/app.slint:408
+#: ui/app.slint:410
 msgid "SMTP port must be between 1 and 65535."
 msgstr "SMTP bağlantı noktası 1 ile 65535 arasında olmalıdır."
 
-#: ui/app.slint:409
+#: ui/app.slint:411
 msgid "Local mail data is unavailable. Retry startup."
 msgstr "Yerel e-posta verisi kullanılamıyor. Başlatmayı yeniden deneyin."
 
-#: ui/app.slint:410
+#: ui/app.slint:412
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "JMAP keşfediliyor ve yetenekler denetleniyor…"
 
-#: ui/app.slint:411
+#: ui/app.slint:413
 msgid "Certificate imported. Connect to verify the server."
 msgstr "Sertifika içe aktarıldı. Sunucuyu doğrulamak için bağlanın."
 
-#: ui/app.slint:412
+#: ui/app.slint:414
 msgid "Could not load account preferences: {}"
 msgstr "Hesap tercihleri yüklenemedi: {}"
 
-#: ui/app.slint:413
+#: ui/app.slint:415
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -1125,19 +1134,19 @@ msgstr ""
 "Düzenlediğiniz imza korundu. Başka birini eklemeden önce onu ileti metni "
 "olarak tutmak için İmza yok'u seçin."
 
-#: ui/app.slint:414
+#: ui/app.slint:416
 msgid "Certificate import failed: {}"
 msgstr "Sertifika içe aktarılamadı: {}"
 
-#: ui/app.slint:415
+#: ui/app.slint:417
 msgid "Paste the PEM certificate into the certificate field."
 msgstr "PEM sertifikasını sertifika alanına yapıştırın."
 
-#: ui/app.slint:416
+#: ui/app.slint:418
 msgid "Testing IMAP and SMTP connections…"
 msgstr "IMAP ve SMTP bağlantıları sınanıyor…"
 
-#: ui/app.slint:421
+#: ui/app.slint:423
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
@@ -1145,147 +1154,167 @@ msgstr ""
 "Başka bir tarayıcı yetkilendirmesi zaten sürüyor; onu bitirin veya İptal'i "
 "seçin."
 
-#: ui/app.slint:422
+#: ui/app.slint:424
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "Bu sağlayıcıyı etkinleştirmek için Oturum açma ayarlarında uygulama "
 "anahtarları ekleyin."
 
-#: ui/app.slint:423
+#: ui/app.slint:425
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Gmail veya Outlook OAuth seçin."
 
-#: ui/app.slint:424
+#: ui/app.slint:426
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr "Oturum açmayı tarayıcınızda tamamlayın veya burada İptal'i seçin."
 
-#: ui/app.slint:425
+#: ui/app.slint:427
 msgid "Cancelling browser sign-in…"
 msgstr "Tarayıcıyla oturum açma iptal ediliyor…"
 
-#: ui/app.slint:426
+#: ui/app.slint:428
 msgid "Finishing browser sign-in…"
 msgstr "Tarayıcıyla oturum açma tamamlanıyor…"
 
-#: ui/app.slint:427
+#: ui/app.slint:429
 msgid "Could not use that browser address: {}"
 msgstr "O tarayıcı adresi kullanılamadı: {}"
 
-#: ui/app.slint:428
+#: ui/app.slint:430
 msgid "Calendar core is unavailable."
 msgstr "Takvim çekirdeği kullanılamıyor."
 
-#: ui/app.slint:429
+#: ui/app.slint:431
 msgid "Account no longer exists."
 msgstr "Hesap artık yok."
 
-#: ui/app.slint:430
+#: ui/app.slint:432
 msgid "Authorize calendar access in your browser."
 msgstr "Takvim erişimini tarayıcınızda yetkilendirin."
 
-#: ui/app.slint:431
+#: ui/app.slint:433
 msgid "OAuth app keys saved."
 msgstr "OAuth uygulama anahtarları kaydedildi."
 
-#: ui/app.slint:432
+#: ui/app.slint:434
 msgid "{} OAuth settings saved."
 msgstr "{} OAuth ayarları kaydedildi."
 
-#: ui/app.slint:433
+#: ui/app.slint:435
 msgid "OAuth settings failed: {}"
 msgstr "OAuth ayarları başarısız: {}"
 
-#: ui/app.slint:434
+#: ui/app.slint:436
 msgid "Mail refresh failed: {}"
 msgstr "E-posta yenilemesi başarısız: {}"
 
-#: ui/app.slint:435
+#: ui/app.slint:437
 msgid "Mail filter failed: {}"
 msgstr "E-posta filtresi başarısız: {}"
 
-#: ui/app.slint:436
+#: ui/app.slint:438
 msgid "Mail pagination failed: {}"
 msgstr "E-posta sayfalaması başarısız: {}"
 
-#: ui/app.slint:437
+#: ui/app.slint:439
 msgid "Could not mark message as read: {}"
 msgstr "İleti okundu olarak işaretlenemedi: {}"
 
-#: ui/app.slint:438 ui/views/mail-reading-pane.slint:220
+#: ui/app.slint:440 ui/views/mail-reading-pane.slint:220
 #: ui/views/mail-reading-pane.slint:1100
 msgid "Loading message…"
 msgstr "İleti yükleniyor…"
 
-#: ui/app.slint:444 ui/dialogs/settings-dialog.slint:1762 ui/tray.slint:9
+#: ui/app.slint:446 ui/dialogs/settings-dialog.slint:1762 ui/tray.slint:9
 #: ui/views/onboarding-view.slint:118
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:939 ui/app.slint:949
+#: ui/app.slint:941 ui/app.slint:951
 msgid "Global Labels (local only)"
 msgstr "Genel Etiketler (yalnızca yerel)"
 
-#: ui/app.slint:1788
+#: ui/app.slint:1790
 msgid "Mailbox startup failed"
 msgstr "Posta kutusu başlatılamadı"
 
-#: ui/app.slint:1794
+#: ui/app.slint:1796
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail yerel depolamayı açamadı"
 
-#: ui/app.slint:1807
+#: ui/app.slint:1809
 msgid "Diagnostic ID: {}"
 msgstr "Tanılama kimliği: {}"
 
-#: ui/app.slint:1810
+#: ui/app.slint:1812
 msgid "Diagnostic ID {}"
 msgstr "Tanılama kimliği {}"
 
-#: ui/app.slint:1815
+#: ui/app.slint:1817
 msgid "Retry"
 msgstr "Yeniden dene"
 
-#: ui/app.slint:1823 ui/components/copyable-diagnostic.slint:38
+#: ui/app.slint:1825 ui/components/copyable-diagnostic.slint:38
 msgid "Copy diagnostics"
 msgstr "Tanılama bilgilerini kopyala"
 
-#: ui/components/account-mail-preferences.slint:64
-msgid "Signatures & OpenPGP"
-msgstr "İmzalar ve OpenPGP"
-
-#: ui/components/account-mail-preferences.slint:65
-msgid "Choose an account to manage your signature and message protection."
-msgstr "İmzanızı ve ileti korumanızı yönetmek için bir hesap seçin."
-
 #: ui/components/account-mail-preferences.slint:76
+msgid "Sender identities, signatures & OpenPGP"
+msgstr "Gönderen kimlikleri, imzalar ve OpenPGP"
+
+#: ui/components/account-mail-preferences.slint:77
+msgid ""
+"Choose an account to manage its sender identity, signature, and message "
+"protection."
+msgstr ""
+"Gönderen kimliğini, imzasını ve ileti korumasını yönetmek için bir hesap "
+"seçin."
+
+#: ui/components/account-mail-preferences.slint:88
 msgid "Signatures"
 msgstr "İmzalar"
 
-#: ui/components/account-mail-preferences.slint:77
+#: ui/components/account-mail-preferences.slint:89
 msgid "OpenPGP"
 msgstr "OpenPGP"
 
-#: ui/components/account-mail-preferences.slint:82
+#: ui/components/account-mail-preferences.slint:94
+msgid "Default sender identity"
+msgstr "Varsayılan gönderen kimliği"
+
+#: ui/components/account-mail-preferences.slint:94
+msgid "Preselected for new messages. Your sign-in address is unchanged."
+msgstr "Yeni iletiler için önceden seçilir. Oturum açma adresiniz değişmez."
+
+#: ui/components/account-mail-preferences.slint:100
+msgid "Save sender default"
+msgstr "Varsayılan göndereni kaydet"
+
+#: ui/components/account-mail-preferences.slint:101
+msgid "Refresh sender identities"
+msgstr "Gönderen kimliklerini yenile"
+
+#: ui/components/account-mail-preferences.slint:106
 msgid "Edit signature"
 msgstr "İmzayı düzenle"
 
-#: ui/components/account-mail-preferences.slint:82
+#: ui/components/account-mail-preferences.slint:106
 msgid "Saved separately for each account."
 msgstr "Her hesap için ayrı kaydedilir."
 
-#: ui/components/account-mail-preferences.slint:87
+#: ui/components/account-mail-preferences.slint:111
 msgid "New signature"
 msgstr "Yeni imza"
 
-#: ui/components/account-mail-preferences.slint:88
+#: ui/components/account-mail-preferences.slint:112
 msgid "Signature name"
 msgstr "İmza adı"
 
-#: ui/components/account-mail-preferences.slint:88
+#: ui/components/account-mail-preferences.slint:112
 msgid "Signature name, for example Work"
 msgstr "İmza adı, örneğin İş"
 
-#: ui/components/account-mail-preferences.slint:89
+#: ui/components/account-mail-preferences.slint:113
 msgid ""
 "Your name\n"
 "Role · Company\n"
@@ -1295,7 +1324,7 @@ msgstr ""
 "Rol · Şirket\n"
 "Telefon · Web sitesi"
 
-#: ui/components/account-mail-preferences.slint:90
+#: ui/components/account-mail-preferences.slint:114
 msgid ""
 "Plain text works in every email client. You can format the inserted "
 "signature in the composer."
@@ -1303,36 +1332,36 @@ msgstr ""
 "Düz metin her e-posta istemcisinde çalışır. Eklenen imzayı oluşturucuda "
 "biçimlendirebilirsiniz."
 
-#: ui/components/account-mail-preferences.slint:92
+#: ui/components/account-mail-preferences.slint:116
 msgid "Save signature"
 msgstr "İmzayı kaydet"
 
-#: ui/components/account-mail-preferences.slint:93
+#: ui/components/account-mail-preferences.slint:117
 #: ui/views/contacts-view.slint:534
 msgid "Delete"
 msgstr "Sil"
 
-#: ui/components/account-mail-preferences.slint:96
+#: ui/components/account-mail-preferences.slint:120
 msgid "New messages"
 msgstr "Yeni iletiler"
 
-#: ui/components/account-mail-preferences.slint:96
+#: ui/components/account-mail-preferences.slint:120
 msgid "Signature inserted when you start a message."
 msgstr "İleti yazmaya başladığınızda imza eklenir."
 
-#: ui/components/account-mail-preferences.slint:102
+#: ui/components/account-mail-preferences.slint:126
 msgid "Replies & forwards"
 msgstr "Yanıtlar ve iletmeler"
 
-#: ui/components/account-mail-preferences.slint:102
+#: ui/components/account-mail-preferences.slint:126
 msgid "Placed above the quoted message."
 msgstr "Alıntılanan iletinin üstüne eklenir."
 
-#: ui/components/account-mail-preferences.slint:107
+#: ui/components/account-mail-preferences.slint:131
 msgid "Save signature defaults"
 msgstr "Varsayılan imzaları kaydet"
 
-#: ui/components/account-mail-preferences.slint:111
+#: ui/components/account-mail-preferences.slint:135
 msgid ""
 "OpenPGP protects message bodies and attachments. Digital signatures let "
 "recipients check who signed a message."
@@ -1340,7 +1369,7 @@ msgstr ""
 "OpenPGP, ileti gövdelerini ve ekleri korur. Dijital imzalar alıcıların bir "
 "iletiyi kimin imzaladığını denetlemesini sağlar."
 
-#: ui/components/account-mail-preferences.slint:112
+#: ui/components/account-mail-preferences.slint:136
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
@@ -1348,7 +1377,7 @@ msgstr ""
 "Yüklü GnuPG 2.x'i ve onun güvenli anahtar deposunu kullanır. Parolalar "
 "GnuPG'nin kilit açma penceresinde girilir."
 
-#: ui/components/account-mail-preferences.slint:112
+#: ui/components/account-mail-preferences.slint:136
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
@@ -1356,11 +1385,11 @@ msgstr ""
 "OpenPGP bu mobil derlemede kullanılamıyor. Desteklenen bir şifreleme motoru "
 "olmadan korumalı hesaplar gönderim yapamaz."
 
-#: ui/components/account-mail-preferences.slint:113
+#: ui/components/account-mail-preferences.slint:137
 msgid "Create a new key"
 msgstr "Yeni anahtar oluştur"
 
-#: ui/components/account-mail-preferences.slint:114
+#: ui/components/account-mail-preferences.slint:138
 msgid ""
 "New keys expire in two years. GnuPG asks you to protect the private key with "
 "a passphrase."
@@ -1368,37 +1397,37 @@ msgstr ""
 "Yeni anahtarların süresi iki yılda dolar. GnuPG, özel anahtarı bir parolayla "
 "korumanızı ister."
 
-#: ui/components/account-mail-preferences.slint:115
+#: ui/components/account-mail-preferences.slint:139
 msgid "Your full OpenPGP fingerprint"
 msgstr "OpenPGP parmak izinizin tamamı"
 
-#: ui/components/account-mail-preferences.slint:115
+#: ui/components/account-mail-preferences.slint:139
 msgid "Your full OpenPGP key fingerprint"
 msgstr "OpenPGP anahtar parmak izinizin tamamı"
 
-#: ui/components/account-mail-preferences.slint:117
+#: ui/components/account-mail-preferences.slint:141
 msgid "Digitally sign messages"
 msgstr "İletileri dijital olarak imzala"
 
-#: ui/components/account-mail-preferences.slint:117
+#: ui/components/account-mail-preferences.slint:141
 msgid "Proves possession of your private key; does not encrypt the message."
 msgstr "Özel anahtarınıza sahip olduğunuzu kanıtlar; iletiyi şifrelemez."
 
-#: ui/components/account-mail-preferences.slint:122
+#: ui/components/account-mail-preferences.slint:146
 msgid "Require encryption"
 msgstr "Şifrelemeyi zorunlu kıl"
 
-#: ui/components/account-mail-preferences.slint:122
+#: ui/components/account-mail-preferences.slint:146
 msgid "Blocks sending unless every recipient has a verified, usable key."
 msgstr ""
 "Her alıcının doğrulanmış, kullanılabilir bir anahtarı olmadıkça gönderimi "
 "engeller."
 
-#: ui/components/account-mail-preferences.slint:126
+#: ui/components/account-mail-preferences.slint:150
 msgid "Verified recipient keys"
 msgstr "Doğrulanmış alıcı anahtarları"
 
-#: ui/components/account-mail-preferences.slint:127
+#: ui/components/account-mail-preferences.slint:151
 msgid ""
 "Compare fingerprints with recipients through a separate trusted channel, "
 "then enter one email=fingerprint per line. Importing a key alone does not "
@@ -1408,31 +1437,31 @@ msgstr ""
 "ardından her satıra bir tane olacak şekilde e-posta=parmak_izi girin. "
 "Yalnızca anahtar içe aktarmak onu doğrulamaz."
 
-#: ui/components/account-mail-preferences.slint:128
+#: ui/components/account-mail-preferences.slint:152
 msgid "person@example.org=FULL_FINGERPRINT"
 msgstr "kisi@ornek.org=TAM_PARMAK_İZİ"
 
-#: ui/components/account-mail-preferences.slint:129
+#: ui/components/account-mail-preferences.slint:153
 msgid "Save OpenPGP settings"
 msgstr "OpenPGP ayarlarını kaydet"
 
-#: ui/components/account-mail-preferences.slint:131
+#: ui/components/account-mail-preferences.slint:155
 msgid "Import key"
 msgstr "Anahtar içe aktar"
 
-#: ui/components/account-mail-preferences.slint:132
+#: ui/components/account-mail-preferences.slint:156
 msgid "Export public key"
 msgstr "Genel anahtarı dışa aktar"
 
-#: ui/components/account-mail-preferences.slint:133
+#: ui/components/account-mail-preferences.slint:157
 msgid "Show keys"
 msgstr "Anahtarları göster"
 
-#: ui/components/account-mail-preferences.slint:141
+#: ui/components/account-mail-preferences.slint:165
 msgid "Open message file (.eml)"
 msgstr "İleti dosyası aç (.eml)"
 
-#: ui/components/account-mail-preferences.slint:143
+#: ui/components/account-mail-preferences.slint:167
 msgid ""
 "Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
 "are exported here."
@@ -1440,7 +1469,7 @@ msgstr ""
 "Süre sonu, iptal ve özel anahtar yedeklerini GnuPG'de yönetin. Burada "
 "yalnızca genel anahtarlar dışa aktarılır."
 
-#: ui/components/account-mail-preferences.slint:144
+#: ui/components/account-mail-preferences.slint:168
 msgid ""
 "Subjects and addresses remain visible. Protected drafts stay on this device. "
 "Existing server drafts are not retroactively protected. S/MIME certificates "
@@ -1450,15 +1479,15 @@ msgstr ""
 "Sunucudaki mevcut taslaklar geriye dönük olarak korunmaz. S/MIME "
 "sertifikaları desteklenmez."
 
-#: ui/components/account-mail-preferences.slint:147
+#: ui/components/account-mail-preferences.slint:171
 msgid "Working…"
 msgstr "Çalışıyor…"
 
-#: ui/components/account-mail-preferences.slint:159
+#: ui/components/account-mail-preferences.slint:183
 msgid "OpenPGP message"
 msgstr "OpenPGP iletisi"
 
-#: ui/components/account-mail-preferences.slint:162
+#: ui/components/account-mail-preferences.slint:186
 msgid ""
 "Decrypted content is shown as text, without remote content. It is not added "
 "to search or saved to the mail database."
@@ -1466,11 +1495,11 @@ msgstr ""
 "Şifresi çözülmüş içerik, uzak içerik olmadan metin olarak gösterilir. "
 "Aramaya eklenmez ve e-posta veritabanına kaydedilmez."
 
-#: ui/components/account-mail-preferences.slint:163
+#: ui/components/account-mail-preferences.slint:187
 msgid "Export decrypted message"
 msgstr "Şifresi çözülmüş iletiyi dışa aktar"
 
-#: ui/components/account-mail-preferences.slint:164
+#: ui/components/account-mail-preferences.slint:188
 #: ui/dialogs/settings-dialog.slint:2100 ui/views/files-view.slint:426
 #: ui/views/files-view.slint:627
 msgid "Close"
@@ -1799,9 +1828,9 @@ msgstr "Taslağı düzenle"
 msgid "New message"
 msgstr "Yeni ileti"
 
-#: ui/components/composer-fields.slint:93
-msgid "From"
-msgstr "Kimden"
+#: ui/components/composer-fields.slint:93 ui/views/files-view.slint:633
+msgid "Account"
+msgstr "Hesap"
 
 #: ui/components/composer-fields.slint:251
 msgid "✓"
@@ -1871,11 +1900,19 @@ msgstr "Sayfa {} / {}"
 msgid "Next page"
 msgstr "Sonraki sayfa"
 
-#: ui/components/email-composer.slint:237
+#: ui/components/email-composer.slint:238
+msgid "From"
+msgstr "Kimden"
+
+#: ui/components/email-composer.slint:239
+msgid "Verified sender identity"
+msgstr "Doğrulanmış gönderen kimliği"
+
+#: ui/components/email-composer.slint:252
 msgid "Signature"
 msgstr "İmza"
 
-#: ui/components/email-composer.slint:331
+#: ui/components/email-composer.slint:346
 msgid "Write your message…"
 msgstr "İletinizi yazın…"
 
@@ -4321,10 +4358,6 @@ msgstr "Abonelik değişiklikleri bu sunucu sürümünde kullanılamıyor."
 msgid "Delete permanently"
 msgstr "Kalıcı olarak sil"
 
-#: ui/views/files-view.slint:633
-msgid "Account"
-msgstr "Hesap"
-
 #: ui/views/files-view.slint:638
 msgid "Uses the selected account’s saved credentials."
 msgstr "Seçili hesabın kayıtlı kimlik bilgilerini kullanır."
@@ -4778,3 +4811,9 @@ msgstr "Sunucu adresi (isteğe bağlı)"
 #: ui/views/onboarding-view.slint:305
 msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr "E-posta etki alanınızdan /.well-known/jmap keşfi için boş bırakın."
+
+#~ msgid "Signatures & OpenPGP"
+#~ msgstr "İmzalar ve OpenPGP"
+
+#~ msgid "Choose an account to manage your signature and message protection."
+#~ msgstr "İmzanızı ve ileti korumanızı yönetmek için bir hesap seçin."
