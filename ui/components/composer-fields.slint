@@ -471,7 +471,7 @@ export component ComposerSubject inherits Rectangle {
                 x: 70px;
                 width: parent.width - 82px;
                 height: parent.height;
-                text: root.subject;
+                text <=> root.subject;
                 color: root.title-color;
                 selection-background-color: root.accent-color;
                 selection-foreground-color: white;
@@ -479,6 +479,5 @@ export component ComposerSubject inherits Rectangle {
                 font-weight: 600;
                 single-line: true;
                 vertical-alignment: center;
-                edited => { root.subject = self.text; }
             }
 }
