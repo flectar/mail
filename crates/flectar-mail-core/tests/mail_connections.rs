@@ -246,6 +246,99 @@ async fn untrusted_certificate_is_rejected() {
     task.await.unwrap();
 }
 
+#[tokio::test]
+async fn imap_incremental_search_handles_sparse_uids_and_reversed_star_ranges() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
+        let mut stream = BufReader::new(tls);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+
+        let login = line(&mut stream).await;
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+
+        let select = line(&mut stream).await;
+        assert!(
+            select.contains(r#" SELECT "INBOX""#),
+            "unexpected command: {select:?}"
+        );
+        let tag = select.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!(
+                    "* FLAGS (\\Seen \\Deleted)\r\n\
+                     * 2 EXISTS\r\n\
+                     * OK [UIDVALIDITY 7] valid\r\n\
+                     {tag} OK [READ-WRITE] selected\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let sparse = line(&mut stream).await;
+        assert!(
+            sparse.contains(" UID SEARCH UID 43:*"),
+            "unexpected command: {sparse:?}"
+        );
+        let tag = sparse.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* SEARCH 1000042 42 1000042\r\n{tag} OK searched\r\n").as_bytes())
+            .await
+            .unwrap();
+
+        let reversed = line(&mut stream).await;
+        assert!(
+            reversed.contains(" UID SEARCH UID 1000043:*"),
+            "unexpected command: {reversed:?}"
+        );
+        let tag = reversed.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* SEARCH 1000042\r\n{tag} OK searched\r\n").as_bytes())
+            .await
+            .unwrap();
+
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+
+    let mut session = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::Tls),
+    )
+    .await
+    .unwrap();
+    let selected = imap::select(&mut session, "INBOX").await.unwrap();
+    assert_eq!(selected.uid_next, None);
+    assert_eq!(
+        imap::uid_search_after(&mut session, 42).await.unwrap(),
+        [1000042]
+    );
+    assert!(
+        imap::uid_search_after(&mut session, 1000042)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    imap::logout(session).await;
+    task.await.unwrap();
+}
+
 #[derive(Clone, Copy)]
 enum ImapMoveFixture {
     LegacyUidPlus,

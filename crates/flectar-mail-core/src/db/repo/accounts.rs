@@ -311,11 +311,24 @@ pub fn set_sync_state_with_error(
     state: &str,
     error: Option<&str>,
 ) -> Result<()> {
-    conn.execute(
-        "UPDATE accounts SET sync_state = ?2, sync_error = ?3 WHERE id = ?1",
-        params![id, state, error],
-    )?;
+    update_sync_state_with_error(conn, id, state, error)?;
     Ok(())
+}
+
+/// Persist a state transition and report whether the observable state changed.
+/// The null-safe comparison prevents tight sync follow-up loops from flooding
+/// UI subscribers with duplicate events.
+pub fn update_sync_state_with_error(
+    conn: &Connection,
+    id: i64,
+    state: &str,
+    error: Option<&str>,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE accounts SET sync_state = ?2, sync_error = ?3
+         WHERE id = ?1 AND (sync_state IS NOT ?2 OR sync_error IS NOT ?3)",
+        params![id, state, error],
+    )? != 0)
 }
 
 /// Move one account before or after another and compact the persisted order.
@@ -473,6 +486,22 @@ mod tests {
         .unwrap();
         let config = get_config(&conn, 1).unwrap().unwrap();
         assert_eq!(config.settings.mail_history, MailHistory::SixMonths);
+    }
+
+    #[test]
+    fn sync_state_update_reports_only_observable_transitions() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+
+        assert!(update_sync_state_with_error(&conn, 1, "syncing", None).unwrap());
+        assert!(!update_sync_state_with_error(&conn, 1, "syncing", None).unwrap());
+        assert!(
+            update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
+        );
+        assert!(
+            !update_sync_state_with_error(&conn, 1, "retrying", Some("connection lost")).unwrap()
+        );
+        assert!(update_sync_state_with_error(&conn, 1, "idle", None).unwrap());
     }
 
     #[test]

@@ -69,7 +69,7 @@ struct InboxBaseline {
 #[derive(Debug, Clone, Copy)]
 struct CycleMode {
     foreground_only: bool,
-    action_replay: bool,
+    immediate_follow_up: bool,
 }
 
 #[derive(Debug)]
@@ -739,7 +739,7 @@ async fn run_actor(
     let mut supports_idle: Option<bool> = None;
     let mut backoff_secs: u64 = 1;
     let mut cycle: u64 = 0;
-    let mut replaying_actions = false;
+    let mut immediate_follow_up = false;
     let mut inbox_baseline: Option<InboxBaseline> = None;
     let mut sync_waiters: Vec<oneshot::Sender<std::result::Result<(), String>>> = Vec::new();
     // When the next cycle is due; only read by the waits below (any wake-up
@@ -855,7 +855,7 @@ async fn run_actor(
             &mut inbox_baseline,
             CycleMode {
                 foreground_only,
-                action_replay: replaying_actions,
+                immediate_follow_up,
             },
         )
         .await;
@@ -870,10 +870,10 @@ async fn run_actor(
         cycle_due = tokio::time::Instant::now() + configured_sync_interval(&ctx.db).await;
         let mut rerun_immediately = false;
         match cycle_result {
-            Ok(actions_remaining) => {
+            Ok(work_remaining) => {
                 session = Some(s);
                 cycle += 1;
-                replaying_actions = actions_remaining;
+                immediate_follow_up = work_remaining;
                 // Historical content is explicitly background work. It may
                 // continue for hours without keeping the foreground account
                 // state (and the top-bar spinner) stuck on syncing.
@@ -889,18 +889,19 @@ async fn run_actor(
                 if done < total {
                     let _ = pool_tx.try_send(());
                 }
-                set_state(&ctx, account_id, "idle").await;
-                ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
-                    account_id,
-                    folder: String::new(),
-                    phase: "idle".into(),
-                    done,
-                    total,
-                }));
-                if actions_remaining {
-                    // Replay another bounded slice immediately, with another
-                    // INBOX check in front of it.
+                if work_remaining {
+                    // Continue the same logical synchronization without
+                    // publishing an idle transition between bounded slices.
                     rerun_immediately = true;
+                } else {
+                    set_state(&ctx, account_id, "idle").await;
+                    ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
+                        account_id,
+                        folder: String::new(),
+                        phase: "idle".into(),
+                        done,
+                        total,
+                    }));
                 }
                 for waiter in sync_waiters.drain(..) {
                     let _ = waiter.send(Ok(()));
@@ -1101,12 +1102,16 @@ async fn set_state_inner(ctx: &SyncCtx, account_id: i64, state: &str, error: Opt
     let st = state.to_string();
     let error = error.map(str::to_owned);
     let event_error = error.clone();
-    let _ = ctx
+    let changed = ctx
         .db
         .write(move |conn| {
-            repo::accounts::set_sync_state_with_error(conn, account_id, &st, error.as_deref())
+            repo::accounts::update_sync_state_with_error(conn, account_id, &st, error.as_deref())
         })
-        .await;
+        .await
+        .unwrap_or(false);
+    if !changed {
+        return;
+    }
     ctx.bus.emit(CoreEvent::AccountState {
         account_id,
         sync_state: state.to_string(),
@@ -1267,12 +1272,12 @@ async fn run_cycle(
 ) -> Result<bool> {
     let CycleMode {
         foreground_only,
-        action_replay,
+        immediate_follow_up,
     } = mode;
     let account_id = config.id;
 
     // Folder discovery: first cycle and then every ~30 cycles.
-    if !action_replay && cycle.is_multiple_of(30) {
+    if !immediate_follow_up && cycle.is_multiple_of(30) {
         discover_folders(ctx, config, session).await?;
     }
 
@@ -1293,8 +1298,11 @@ async fn run_cycle(
         _ => 4,
     });
 
-    // The latency-sensitive INBOX pass always runs before any queued mutation.
-    // A mass archive/trash replay therefore cannot hide newly arrived mail.
+    // Give queued mutations one bounded turn before checking Inbox. This keeps
+    // an Inbox catch-up from starving moves while the following Inbox pass
+    // ensures a large mutation queue cannot starve newly arrived mail.
+    let action_slice = queue::execute_due(ctx, config, session).await?;
+
     let mut inbox_forward_remaining = false;
     if let Some(inbox) = ordered
         .iter()
@@ -1306,28 +1314,16 @@ async fn run_cycle(
             config,
             session,
             inbox,
-            !action_replay && cycle > 0 && cycle.is_multiple_of(5),
+            !immediate_follow_up && cycle > 0 && cycle.is_multiple_of(5),
             hist_tx,
             inbox_baseline,
         )
         .await?;
     }
 
-    // Foreground readiness ends at the Inbox boundary. Queued mutations,
-    // non-Inbox folders, history, and content caching are background work and
-    // must never keep the top-bar spinner running for minutes.
-    set_state(ctx, account_id, "idle").await;
-
-    // A manual Sync Now resolves at the foreground Inbox boundary. Schedule a
-    // normal pass immediately afterward for actions and other folders.
-    if foreground_only || inbox_forward_remaining {
-        return Ok(true);
-    }
-
-    // Execute one bounded action slice. If more remains, return immediately;
-    // the actor schedules another pass now and checks INBOX again first.
-    let action_slice = queue::execute_due(ctx, config, session).await?;
-    if action_slice.due_remaining {
+    // A manual Sync Now resolves at the foreground Inbox boundary. Finish any
+    // remaining bounded action/Inbox work in an immediate normal pass.
+    if foreground_only || action_slice.due_remaining || inbox_forward_remaining {
         return Ok(true);
     }
 
@@ -1340,7 +1336,7 @@ async fn run_cycle(
         }
         // Non-inbox folders get new-mail checks every cycle but heavy
         // reconciliation (flags/expunge) only every 5th cycle.
-        let heavy = !action_replay && cycle > 0 && cycle.is_multiple_of(5);
+        let heavy = !immediate_follow_up && cycle > 0 && cycle.is_multiple_of(5);
         if let Err(e) =
             sync_folder(ctx, config, session, folder, heavy, hist_tx, inbox_baseline).await
         {
@@ -1474,16 +1470,6 @@ async fn sync_folder(
         }
     }
 
-    if is_inbox
-        && inbox_baseline
-            .as_ref()
-            .is_none_or(|b| b.uid_validity != selected.uid_validity)
-    {
-        *inbox_baseline = Some(InboxBaseline {
-            uid_validity: selected.uid_validity,
-            first_live_uid: selected.uid_next.unwrap_or(1).max(1) as u32,
-        });
-    }
     {
         let (fid, uv, un) = (folder.id, selected.uid_validity, selected.uid_next);
         ctx.db
@@ -1499,35 +1485,67 @@ async fn sync_folder(
             .ok_or_else(|| CoreError::NotFound("folder".into()))?
     };
 
+    let initialize_inbox_baseline = is_inbox
+        && inbox_baseline
+            .as_ref()
+            .is_none_or(|b| b.uid_validity != selected.uid_validity);
+    let initialize_history = fresh_folder.backfill_cursor.is_none();
+    let mailbox_high = if initialize_inbox_baseline || initialize_history {
+        Some(mailbox_highest_uid(session, &selected).await?)
+    } else {
+        None
+    };
+    if initialize_inbox_baseline {
+        *inbox_baseline = Some(InboxBaseline {
+            uid_validity: selected.uid_validity,
+            first_live_uid: mailbox_high.unwrap_or(0).saturating_add(1).max(1),
+        });
+    }
+
     let mut forward_remaining = false;
-    if fresh_folder.backfill_cursor.is_none() {
+    if initialize_history {
         // Snapshot the server high-water immediately. The dedicated history
         // worker then walks downward from that point, while this actor owns all
         // later UIDs. This avoids a long initial backfill swallowing genuinely
         // live mail or leaving a gap above a date-filtered search result.
-        let live_high = selected.uid_next.unwrap_or(1).saturating_sub(1).max(0);
+        let live_high = mailbox_high.unwrap_or(0);
         let history_cursor = live_high.saturating_add(1).max(1);
         let fid = fresh_folder.id;
         ctx.db
             .write(move |conn| {
-                repo::folders::set_last_seen_uid(conn, fid, live_high)?;
-                repo::folders::set_backfill(conn, fid, Some(history_cursor), live_high == 0)
+                repo::folders::set_last_seen_uid(conn, fid, i64::from(live_high))?;
+                repo::folders::set_backfill(
+                    conn,
+                    fid,
+                    Some(i64::from(history_cursor)),
+                    live_high == 0,
+                )
             })
             .await?;
         let _ = hist_tx.try_send(());
     } else {
-        // New mail since last seen UID.
-        let last_seen = fresh_folder.last_seen_uid.max(0) as u32;
-        let uid_next = selected.uid_next.unwrap_or(i64::MAX);
-        if (last_seen as i64) + 1 < uid_next {
-            let range_end =
-                ((last_seen as u64) + HEADER_CHUNK as u64).min((uid_next - 1).max(0) as u64) as u32;
-            forward_remaining = (range_end as i64) < uid_next.saturating_sub(1);
-            let set = format!("{}:{range_end}", last_seen + 1);
+        // When SELECT indicates possible arrivals or omits UIDNEXT, SEARCH is
+        // authoritative for the live UIDs. Fetch exact UIDs so sparse UID
+        // spaces do not cause empty numeric scan cycles.
+        let last_seen = u32::try_from(fresh_folder.last_seen_uid.max(0)).unwrap_or(u32::MAX);
+        let selected_high = selected_highest_uid(&selected);
+        let new_uids = if selected_high.is_none_or(|high| high > last_seen) {
+            imap::uid_search_after(session, last_seen).await?
+        } else {
+            Vec::new()
+        };
+        let chunk_len = new_uids.len().min(HEADER_CHUNK);
+        forward_remaining = new_uids.len() > chunk_len;
+        if let Some(scanned_through) = new_uids
+            .get(..chunk_len)
+            .and_then(|uids| uids.last())
+            .copied()
+        {
+            let set = imap::uid_set(&new_uids[..chunk_len]);
             let headers = imap::fetch_headers(session, &set).await?;
             let new: Vec<FetchedHeader> = headers
                 .into_iter()
-                .filter(|h| h.uid > last_seen && h.uid <= range_end)
+                .filter(|h| h.uid > last_seen && h.uid <= scanned_through)
                 .collect();
             if !new.is_empty() {
                 tracing::info!(
@@ -1561,12 +1579,25 @@ async fn sync_folder(
                     });
                 }
             }
-            // The command successfully scanned the whole bounded range. Move
-            // the scan watermark even when UIDs are sparse or every row was a
-            // duplicate; parse failures are persisted separately for retry.
+            // The exact UID batch was scanned successfully. Advance even when
+            // messages disappeared between SEARCH and FETCH, or every row was
+            // already present; parse failures are persisted for retry.
             let fid = fresh_folder.id;
             ctx.db
-                .write(move |conn| repo::folders::set_last_seen_uid(conn, fid, range_end as i64))
+                .write(move |conn| {
+                    repo::folders::set_last_seen_uid(conn, fid, i64::from(scanned_through))
+                })
+                .await?;
+        } else if let Some(selected_high) = selected_high
+            && selected_high > last_seen
+        {
+            // UIDNEXT can advance across expunged gaps. Once SEARCH confirms
+            // there are no live messages in the gap, skip it permanently.
+            let fid = fresh_folder.id;
+            ctx.db
+                .write(move |conn| {
+                    repo::folders::set_last_seen_uid(conn, fid, i64::from(selected_high))
+                })
                 .await?;
         }
         if heavy {
@@ -1580,6 +1611,44 @@ async fn sync_folder(
         }
     }
     Ok(forward_remaining)
+}
+
+fn selected_highest_uid(selected: &imap::SelectedFolder) -> Option<u32> {
+    let uid_next = u32::try_from(selected.uid_next?).ok()?;
+    let high = uid_next.checked_sub(1)?;
+    // With unique positive UIDs, a valid high watermark cannot be below the
+    // number of live messages. Treat inconsistent server metadata like an
+    // omitted UIDNEXT and fall back to SEARCH.
+    (high >= selected.exists).then_some(high)
+}
+
+async fn mailbox_highest_uid(
+    session: &mut Session,
+    selected: &imap::SelectedFolder,
+) -> Result<u32> {
+    if selected.exists == 0 {
+        return Ok(0);
+    }
+    if let Some(high) = selected_highest_uid(selected) {
+        return Ok(high);
+    }
+    let high = imap::uid_search_all(session)
+        .await?
+        .into_iter()
+        .max()
+        .ok_or_else(|| {
+            CoreError::Imap(format!(
+                "mailbox reported {} messages but UID SEARCH returned none",
+                selected.exists
+            ))
+        })?;
+    if high < selected.exists {
+        return Err(CoreError::Imap(format!(
+            "mailbox reported {} messages but highest UID was {high}",
+            selected.exists
+        )));
+    }
+    Ok(high)
 }
 
 /// Dedicated header-backfill connection. Performs first-time folder backfills
@@ -3769,3 +3838,7 @@ async fn persist_body(
 #[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
 #[path = "mime_recovery_tests.rs"]
 mod mime_recovery_tests;
+
+#[cfg(all(test, not(any(target_os = "android", target_os = "ios"))))]
+#[path = "sync_cycle_tests.rs"]
+mod sync_cycle_tests;
