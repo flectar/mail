@@ -374,6 +374,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
+    in-out property <bool> contact_suggest_all_accounts: false;
     in-out property <bool> suggest_learned_contacts: true;
     in-out property <bool> remote-images-enabled: false;
     in-out property <bool> close_to_tray: false;
@@ -451,7 +452,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
-    callback save_contact_discovery_settings(bool, bool, bool);
+    callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback sync_mail();
@@ -1152,7 +1153,7 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             Rectangle {
-                                height: root.compact ? 350px : 214px;
+                                height: root.compact ? 466px : 274px;
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -1168,13 +1169,13 @@ export component SettingsDialog inherits Rectangle {
                                         compact-description-height: 51px;
                                         desktop-height: 60px;
                                         title: @tr("Remember people I email");
-                                        description: @tr("Remember new To, Cc, and Bcc recipients on this device. Existing mail is never scanned.");
+                                        description: @tr("While enabled, remember To, Cc, and Bcc recipients from new sends and synced Sent mail.");
                                         checked: root.collect_outgoing_contacts;
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
                                         toggled(value) => {
                                             root.collect_outgoing_contacts = value;
-                                            root.save_contact_discovery_settings(value, root.collect_incoming_contacts, root.suggest_learned_contacts);
+                                            root.save_contact_discovery_settings(value, root.collect_incoming_contacts, root.contact_suggest_all_accounts, root.suggest_learned_contacts);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
@@ -1190,7 +1191,23 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         toggled(value) => {
                                             root.collect_incoming_contacts = value;
-                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, value, root.suggest_learned_contacts);
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, value, root.contact_suggest_all_accounts, root.suggest_learned_contacts);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        compact-title-height: 34px;
+                                        compact-description-height: 51px;
+                                        desktop-height: 60px;
+                                        title: @tr("Use suggestions from all accounts");
+                                        description: @tr("Include people emailed from any connected account. Turn off to keep learned recipients account-specific.");
+                                        checked: root.contact_suggest_all_accounts;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(value) => {
+                                            root.contact_suggest_all_accounts = value;
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, root.collect_incoming_contacts, value, root.suggest_learned_contacts);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
@@ -1206,7 +1223,7 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         toggled(value) => {
                                             root.suggest_learned_contacts = value;
-                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, root.collect_incoming_contacts, value);
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, root.collect_incoming_contacts, root.contact_suggest_all_accounts, value);
                                         }
                                     }
                                 }
@@ -1224,7 +1241,7 @@ export component SettingsDialog inherits Rectangle {
                                     Text { text: @tr("Suggested people"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
                                     Text {
                                         height: root.compact ? 52px : 34px;
-                                        text: @tr("Suggestions start fresh, stay local, and never sync to CardDAV. Clearing them resets learning from that moment.");
+                                        text: @tr("People you email remain available as local suggestions and never sync to CardDAV. Clear them any time to restart learning.");
                                         color: root.faint-text;
                                         font-size: TypeScale.caption;
                                         wrap: word-wrap;

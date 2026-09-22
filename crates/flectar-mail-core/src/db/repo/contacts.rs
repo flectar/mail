@@ -45,13 +45,15 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<ContactRecord> {
 }
 
 /// Per-account boundaries prevent provider history backfills from being
-/// mistaken for new relationship activity. The defensive insert covers
-/// profiles created by unusual import paths that bypassed the account trigger.
+/// mistaken for new incoming relationship activity. Outgoing starts at zero
+/// so a newly connected account can learn its actual Sent history. The
+/// defensive insert covers profiles created by unusual import paths that
+/// bypassed the account trigger.
 pub fn learning_boundaries(conn: &Connection, account_id: i64, now_ms: i64) -> Result<(i64, i64)> {
     conn.execute(
         "INSERT OR IGNORE INTO contact_learning_state
              (account_id, outgoing_since, incoming_since)
-         VALUES (?1, ?2, ?2)",
+         VALUES (?1, 0, ?2)",
         params![account_id, now_ms],
     )?;
     conn.query_row(
@@ -1048,6 +1050,13 @@ mod tests {
         assert_eq!(learning_boundaries(&c, 1, 999).unwrap(), (300, 300));
         advance_learning_boundaries(&c, false, true, 450).unwrap();
         assert_eq!(learning_boundaries(&c, 1, 999).unwrap(), (300, 450));
+
+        c.execute(
+            "DELETE FROM contact_learning_state WHERE account_id = 1",
+            [],
+        )
+        .unwrap();
+        assert_eq!(learning_boundaries(&c, 1, 999).unwrap(), (0, 999));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 -- Suggestions are an interaction convenience, not an imported address book.
--- Establish a per-account clean-start boundary so historical backfills never
--- manufacture thousands of people from old mail.
+-- Establish per-account boundaries. Sent-mail history is useful autocomplete
+-- data, while incoming history must not manufacture thousands of suggestions.
 CREATE TABLE contact_learning_state (
   account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
   outgoing_since INTEGER NOT NULL,
@@ -14,7 +14,7 @@ ALTER TABLE messages ADD COLUMN contact_learning_recorded INTEGER NOT NULL DEFAU
 
 INSERT INTO contact_learning_state (account_id, outgoing_since, incoming_since)
 SELECT id,
-       CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+       0,
        CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
 FROM accounts;
 
@@ -24,7 +24,7 @@ BEGIN
   INSERT INTO contact_learning_state (account_id, outgoing_since, incoming_since)
   VALUES (
     NEW.id,
-    CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER),
+    0,
     CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)
   );
 END;
@@ -35,9 +35,37 @@ UPDATE contacts
 SET is_managed = 1
 WHERE is_favorite = 1 AND is_managed = 0;
 
--- One-time upgrade cleanup: retain explicit/local, favorited, and live
--- CardDAV contacts while removing legacy suggestion-only identities.
+-- Repair the aggregate defensively before deciding whether a legacy suggestion
+-- represents a genuine send. Per-account affinity is the more specific source
+-- when an interrupted older write left the global count behind.
+UPDATE contacts
+SET send_count = MAX(
+  send_count,
+  COALESCE((
+    SELECT SUM(ca.send_count)
+    FROM contact_accounts ca
+    WHERE ca.contact_id = contacts.id
+  ), 0)
+);
+
+-- One-time upgrade cleanup: retain explicit/local, favorited, live CardDAV,
+-- and genuine outgoing-recipient suggestions. Remove incoming-only identities
+-- that caused old inboxes to manufacture thousands of suggested people.
 DELETE FROM contacts
+WHERE is_managed = 0
+  AND send_count = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM carddav_objects co
+    WHERE co.contact_id = contacts.id
+      AND co.remote_exists = 1
+      AND co.deleted = 0
+  );
+
+-- For suggestion-only rows, incoming affinity belongs to the legacy cache.
+-- Preserve outbound frequency and last-known interaction so people the user
+-- actually emailed autocomplete immediately. Real contacts keep all affinity.
+UPDATE contacts
+SET recv_count = 0
 WHERE is_managed = 0
   AND NOT EXISTS (
     SELECT 1 FROM carddav_objects co
@@ -46,10 +74,16 @@ WHERE is_managed = 0
       AND co.deleted = 0
   );
 
--- Learned affinity is part of the same legacy cache. Keep real contacts and
--- their account associations, but restart their ranking history cleanly.
-UPDATE contacts
-SET send_count = 0, recv_count = 0, last_interacted = NULL;
-
 UPDATE contact_accounts
-SET send_count = 0, recv_count = 0, last_interacted = NULL;
+SET recv_count = 0
+WHERE EXISTS (
+  SELECT 1 FROM contacts c
+  WHERE c.id = contact_accounts.contact_id
+    AND c.is_managed = 0
+    AND NOT EXISTS (
+      SELECT 1 FROM carddav_objects co
+      WHERE co.contact_id = c.id
+        AND co.remote_exists = 1
+        AND co.deleted = 0
+    )
+);

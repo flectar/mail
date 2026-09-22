@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn contact_learning_migration_discards_legacy_suggestions_only() {
+    fn contact_learning_migration_keeps_only_outgoing_suggestions() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         for (index, sql) in MIGRATIONS.iter().take(8).enumerate() {
@@ -267,7 +267,9 @@ mod tests {
                (1,'saved@example.test','Saved',4,2,100,0,1),
                (2,'legacy@example.test','Legacy',0,9,200,0,0),
                (3,'dav@example.test','CardDAV',1,1,300,0,0),
-               (4,'favorite@example.test','Favorite',2,0,400,1,0)",
+               (4,'favorite@example.test','Favorite',2,1,400,1,0),
+               (5,'sent@example.test','Sent',3,7,500,0,0),
+               (6,'repaired@example.test','Repaired',0,4,600,0,0)",
             [],
         )
         .unwrap();
@@ -275,7 +277,8 @@ mod tests {
             "INSERT INTO contact_accounts
                (contact_id,account_id,send_count,recv_count,last_interacted)
              VALUES
-               (1,1,4,2,100),(2,1,0,9,200),(3,1,1,1,300),(4,1,2,0,400)",
+               (1,1,4,2,100),(2,1,0,9,200),(3,1,1,1,300),
+               (4,1,2,1,400),(5,1,3,7,500),(6,1,2,4,600)",
             [],
         )
         .unwrap();
@@ -318,9 +321,38 @@ mod tests {
         assert_eq!(
             contacts,
             [
-                (1, 0, 0, None, true),
-                (3, 0, 0, None, false),
-                (4, 0, 0, None, true),
+                (1, 4, 2, Some(100), true),
+                (3, 1, 1, Some(300), false),
+                (4, 2, 1, Some(400), true),
+                (5, 3, 0, Some(500), false),
+                (6, 2, 0, Some(600), false),
+            ]
+        );
+        let account_affinity = conn
+            .prepare(
+                "SELECT contact_id,send_count,recv_count,last_interacted
+                 FROM contact_accounts ORDER BY contact_id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            account_affinity,
+            [
+                (1, 4, 2, Some(100)),
+                (3, 1, 1, Some(300)),
+                (4, 2, 1, Some(400)),
+                (5, 3, 0, Some(500)),
+                (6, 2, 0, Some(600)),
             ]
         );
         let boundaries: (i64, i64) = conn
@@ -331,8 +363,8 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert!((before - 1_000..=after + 1_000).contains(&boundaries.0));
-        assert_eq!(boundaries.0, boundaries.1);
+        assert_eq!(boundaries.0, 0);
+        assert!((before - 1_000..=after + 1_000).contains(&boundaries.1));
 
         conn.execute(
             "INSERT INTO accounts (
@@ -342,14 +374,16 @@ mod tests {
             [],
         )
         .unwrap();
-        let created: i64 = conn
+        let created: (i64, i64) = conn
             .query_row(
-                "SELECT COUNT(*) FROM contact_learning_state WHERE account_id=2",
+                "SELECT outgoing_since,incoming_since
+                 FROM contact_learning_state WHERE account_id=2",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(created, 1);
+        assert_eq!(created.0, 0);
+        assert!((before - 1_000..=crate::models::now_ms() + 1_000).contains(&created.1));
     }
 
     #[test]

@@ -533,6 +533,7 @@ pub(super) fn register_data_management_callbacks(
                     "markReadOnOpen": settings.mark_read_on_open,
                     "collectOutgoingContacts": settings.collect_outgoing_contacts,
                     "collectIncomingContacts": settings.collect_incoming_contacts,
+                    "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
                     "suggestLearnedContacts": settings.suggest_learned_contacts,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
@@ -779,6 +780,12 @@ pub(super) fn register_data_management_callbacks(
                     settings.collect_incoming_contacts = enabled;
                 }
                 if let Some(enabled) = preferences
+                    .get("contactSuggestAllAccounts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.contact_suggest_all_accounts = enabled;
+                }
+                if let Some(enabled) = preferences
                     .get("suggestLearnedContacts")
                     .and_then(|value| value.as_bool())
                 {
@@ -917,6 +924,7 @@ pub(super) fn register_data_management_callbacks(
                 app.set_mark_read_on_open(settings.mark_read_on_open);
                 app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
                 app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
                 app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
                 state_for_backup_import.borrow_mut().mark_read_on_open =
                     settings.mark_read_on_open;

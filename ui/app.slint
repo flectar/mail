@@ -505,7 +505,7 @@ export component AppWindow inherits Window {
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
-    callback save_contact_discovery_settings(bool, bool, bool);
+    callback save_contact_discovery_settings(bool, bool, bool, bool);
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback open_compose();
@@ -760,6 +760,7 @@ export component AppWindow inherits Window {
     in-out property <bool> mark_read_on_open: true;
     in-out property <bool> collect_outgoing_contacts: true;
     in-out property <bool> collect_incoming_contacts: false;
+    in-out property <bool> contact_suggest_all_accounts: false;
     in-out property <bool> suggest_learned_contacts: true;
     in-out property <bool> close_to_tray: false;
     in-out property <bool> account_setup_in_progress: false;
@@ -1467,6 +1468,7 @@ export component AppWindow inherits Window {
             mark_read_on_open <=> root.mark_read_on_open;
             collect_outgoing_contacts <=> root.collect_outgoing_contacts;
             collect_incoming_contacts <=> root.collect_incoming_contacts;
+            contact_suggest_all_accounts <=> root.contact_suggest_all_accounts;
             suggest_learned_contacts <=> root.suggest_learned_contacts;
             close_to_tray <=> root.close_to_tray;
             remote-images-enabled <=> root.remote-images-enabled;
@@ -1552,8 +1554,8 @@ export component AppWindow inherits Window {
             }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
-            save_contact_discovery_settings(outgoing, incoming, suggest) => {
-                root.save_contact_discovery_settings(outgoing, incoming, suggest);
+            save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
+                root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
             }
             clear_contact_suggestions => { return root.clear_contact_suggestions(); }
             set_close_to_tray(enabled) => { root.set_close_to_tray(enabled); }

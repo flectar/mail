@@ -100,7 +100,7 @@ pub(super) fn register_settings_preference_callbacks(
     let app_weak = app.as_weak();
     let state_for_contacts = Rc::clone(state);
     let runtime_for_contacts = Rc::clone(runtime);
-    app.on_save_contact_discovery_settings(move |outgoing, incoming, suggest| {
+    app.on_save_contact_discovery_settings(move |outgoing, incoming, all_accounts, suggest| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
@@ -111,7 +111,10 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         match runtime_for_contacts.block_on(core.set_contact_discovery_settings(
-            outgoing, incoming, suggest,
+            outgoing,
+            incoming,
+            all_accounts,
+            suggest,
         )) {
             Ok(()) => app.set_sync_status(UiMessage::plain(
                 "Contact suggestion preferences saved.",
@@ -120,6 +123,7 @@ pub(super) fn register_settings_preference_callbacks(
                 if let Ok(settings) = runtime_for_contacts.block_on(core.load_settings()) {
                     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
                     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                    app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
                     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
                 }
                 app.set_sync_status(UiMessage::detail(

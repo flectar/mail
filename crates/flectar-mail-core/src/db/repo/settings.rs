@@ -44,6 +44,7 @@ mod tests {
         assert!(d.show_avatars);
         assert!(d.collect_outgoing_contacts);
         assert!(!d.collect_incoming_contacts);
+        assert!(!d.contact_suggest_all_accounts);
         assert!(d.suggest_learned_contacts);
         assert_eq!(d.workspace_layout, "default");
         assert_eq!(d.calendar_week_start, "monday");
@@ -59,6 +60,7 @@ mod tests {
         s.monochrome_sidebar_icons = true;
         s.show_avatars = false;
         s.workspace_layout = "minimal".into();
+        s.contact_suggest_all_accounts = true;
         s.theme_preset = "teal".into();
         s.custom_theme.light_primary = "#006B7A".into();
         s.signature_list.push(crate::models::Signature {
@@ -99,6 +101,7 @@ mod tests {
         assert!(!back.notifications_enabled);
         assert!(back.monochrome_sidebar_icons);
         assert!(!back.show_avatars);
+        assert!(back.contact_suggest_all_accounts);
         assert_eq!(back.workspace_layout, "minimal");
         assert_eq!(back.theme_preset, "teal");
         assert_eq!(back.custom_theme.light_primary, "#006B7A");
@@ -133,6 +136,7 @@ mod tests {
         assert!(s.show_avatars);
         assert!(s.collect_outgoing_contacts);
         assert!(!s.collect_incoming_contacts);
+        assert!(!s.contact_suggest_all_accounts);
         assert!(s.suggest_learned_contacts);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.calendar_week_start, "monday");

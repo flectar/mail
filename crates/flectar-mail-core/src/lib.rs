@@ -3923,6 +3923,11 @@ impl Core {
         self.db
             .read(move |conn| {
                 let settings = repo::settings::get(conn)?;
+                let account_id = if settings.contact_suggest_all_accounts {
+                    None
+                } else {
+                    account_id
+                };
                 repo::contacts::autocomplete(
                     conn,
                     &prefix,

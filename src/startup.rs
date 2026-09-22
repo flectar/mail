@@ -624,6 +624,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_mark_read_on_open(settings.mark_read_on_open);
     app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
     app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+    app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
     app.set_close_to_tray(settings.close_to_tray && !cfg!(feature = "flatpak"));
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);

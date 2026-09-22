@@ -741,11 +741,13 @@ impl CoreMailSource {
         &self,
         collect_outgoing: bool,
         collect_incoming: bool,
+        suggest_all_accounts: bool,
         suggest_learned: bool,
     ) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.collect_outgoing_contacts = collect_outgoing;
         settings.collect_incoming_contacts = collect_incoming;
+        settings.contact_suggest_all_accounts = suggest_all_accounts;
         settings.suggest_learned_contacts = suggest_learned;
         self.core
             .set_settings(settings)
