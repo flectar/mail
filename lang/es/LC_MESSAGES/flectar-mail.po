@@ -2190,11 +2190,11 @@ msgstr "Navegación principal"
 
 #: ui/components/sidebar-controls.slint:166
 msgid "Collapse label"
-msgstr ""
+msgstr "Contraer etiqueta"
 
 #: ui/components/sidebar-controls.slint:166
 msgid "Expand label"
-msgstr ""
+msgstr "Expandir etiqueta"
 
 #: ui/components/sidebar-controls.slint:167
 msgid "Collapse folder"
@@ -2218,7 +2218,7 @@ msgstr "Eliminar carpeta"
 
 #: ui/components/sidebar-controls.slint:207
 msgid "New nested label"
-msgstr ""
+msgstr "Nueva etiqueta anidada"
 
 #: ui/components/sidebar-controls.slint:213
 msgid "Rename global label"
@@ -2621,10 +2621,12 @@ msgstr "¿Eliminar carpeta?"
 msgid ""
 "Delete “{}” and all nested labels from “{}”? Messages will not be deleted."
 msgstr ""
+"¿Eliminar “{}” y todas las etiquetas anidadas de “{}”? Los mensajes no se "
+"eliminarán."
 
 #: ui/dialogs/folder-dialog.slint:71
 msgid "Delete “{}” from “{}”? Messages will not be deleted."
-msgstr ""
+msgstr "¿Eliminar “{}” de “{}”? Los mensajes no se eliminarán."
 
 #: ui/dialogs/folder-dialog.slint:72
 msgid "Delete “{}” and its contents from the mail server?"
