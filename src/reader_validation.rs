@@ -354,7 +354,9 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     );
     let header_pixels = |pixels: &[Rgb8Pixel]| {
         pixels
-            .chunks_exact(1280)
+            .as_chunks::<1280>()
+            .0
+            .iter()
             .skip(140)
             .take(110)
             .flat_map(|row| row[850..1230].iter().map(|p| [p.r, p.g, p.b]))
