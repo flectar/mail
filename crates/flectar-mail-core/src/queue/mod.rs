@@ -15,6 +15,7 @@ use tokio::time::{Duration, Instant};
 const MAX_ATTEMPTS: i64 = 8;
 const MAX_ACTIONS_PER_SLICE: i64 = 20;
 const MAX_SLICE_DURATION: Duration = Duration::from_secs(2);
+const OFFLINE_SEND_RETRY_DELAY: Duration = Duration::from_secs(30);
 
 /// Outcome of one fair pending-action execution slice.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -32,11 +33,53 @@ pub async fn execute_due(
     session: &mut Session,
 ) -> Result<ActionSliceResult> {
     let account_id = config.id;
-    let started = Instant::now();
     let due = ctx
         .db
-        .read(move |conn| repo::actions::due(conn, account_id, now_ms(), MAX_ACTIONS_PER_SLICE))
+        .read(move |conn| {
+            repo::actions::due_except_send(conn, account_id, now_ms(), MAX_ACTIONS_PER_SLICE)
+        })
         .await?;
+    let result = execute_actions(ctx, config, Some(session), due).await?;
+    let due_remaining = ctx
+        .db
+        .read(move |conn| repo::actions::has_due_except_send(conn, account_id, now_ms()))
+        .await?;
+    Ok(ActionSliceResult {
+        due_remaining,
+        ..result
+    })
+}
+
+/// Execute SMTP submissions independently of the IMAP synchronization actor.
+/// This worker owns only `send` actions; remote Sent filing is enqueued as a
+/// separate IMAP action after the relay has accepted the message.
+pub async fn execute_due_sends(ctx: &SyncCtx, config: &AccountConfig) -> Result<ActionSliceResult> {
+    let account_id = config.id;
+    let due = ctx
+        .db
+        .read(move |conn| {
+            repo::actions::due_sends(conn, account_id, now_ms(), MAX_ACTIONS_PER_SLICE)
+        })
+        .await?;
+    let result = execute_actions(ctx, config, None, due).await?;
+    let due_remaining = ctx
+        .db
+        .read(move |conn| repo::actions::has_due_sends(conn, account_id, now_ms()))
+        .await?;
+    Ok(ActionSliceResult {
+        due_remaining,
+        ..result
+    })
+}
+
+async fn execute_actions(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    mut session: Option<&mut Session>,
+    due: Vec<repo::actions::PendingAction>,
+) -> Result<ActionSliceResult> {
+    let account_id = config.id;
+    let started = Instant::now();
     let mut processed = 0;
 
     for action in due {
@@ -57,7 +100,7 @@ pub async fn execute_due(
         }
         processed += 1;
 
-        let outcome = execute_one(ctx, config, session, &action).await;
+        let outcome = execute_one(ctx, config, session.as_deref_mut(), &action).await;
         match outcome {
             Ok(()) => {
                 ctx.db
@@ -96,6 +139,28 @@ pub async fn execute_due(
             }
             Err(e) => {
                 let msg = e.to_string();
+                if action.kind == "send" && is_connection_failure(&msg) {
+                    // SMTP has no shared session whose successful connection
+                    // can gate this independent worker. A refused/timed-out
+                    // connection means the transport is unavailable, not that
+                    // the durable send is invalid, so preserve its full retry
+                    // budget while the device or relay is offline.
+                    let retry_at = now_ms().saturating_add(
+                        i64::try_from(OFFLINE_SEND_RETRY_DELAY.as_millis()).unwrap_or(i64::MAX),
+                    );
+                    let saved = msg.clone();
+                    ctx.db
+                        .write(move |conn| {
+                            repo::actions::defer_offline(conn, action_id, retry_at, &saved)
+                        })
+                        .await?;
+                    ctx.bus.emit(CoreEvent::ActionState {
+                        action_id,
+                        state: "retrying".into(),
+                        error: Some(msg),
+                    });
+                    return Err(e);
+                }
                 let attempts = action.attempts + 1;
                 tracing::warn!(
                     account_id, action_id, kind = %action.kind, attempts, error = %msg,
@@ -126,13 +191,9 @@ pub async fn execute_due(
         }
     }
 
-    let due_remaining = ctx
-        .db
-        .read(move |conn| repo::actions::has_due(conn, account_id, now_ms()))
-        .await?;
     Ok(ActionSliceResult {
         processed,
-        due_remaining,
+        due_remaining: false,
     })
 }
 
@@ -273,9 +334,18 @@ fn mark_failed_and_rollback(
 async fn execute_one(
     ctx: &SyncCtx,
     config: &AccountConfig,
-    session: &mut Session,
+    session: Option<&mut Session>,
     action: &repo::actions::PendingAction,
 ) -> Result<()> {
+    if action.kind == "send" {
+        return send_action(ctx, config, action).await;
+    }
+    let session = session.ok_or_else(|| {
+        CoreError::Other(format!(
+            "{} action was routed without an IMAP session",
+            action.kind
+        ))
+    })?;
     match action.kind.as_str() {
         "mark_read" => flag_action(ctx, session, action, "\\Seen", true).await,
         "mark_unread" => flag_action(ctx, session, action, "\\Seen", false).await,
@@ -286,7 +356,7 @@ async fn execute_one(
         }
         "add_label" => keyword_action(ctx, session, action, true).await,
         "remove_label" => keyword_action(ctx, session, action, false).await,
-        "send" => send_action(ctx, config, session, action).await,
+        "append_sent" => append_sent_action(ctx, config, session, action).await,
         // Local-only kinds recorded for undo history.
         "snooze" | "unsnooze" => Ok(()),
         other => {
@@ -422,10 +492,81 @@ async fn move_action(
     Ok(())
 }
 
-async fn send_action(
+async fn append_sent_action(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let message_id = action
+        .message_id
+        .ok_or_else(|| CoreError::NotFound("message for Sent filing".into()))?;
+    let (raw_path, rfc_message_id) = ctx
+        .db
+        .read(move |conn| {
+            let row = repo::messages::get_row(conn, message_id)?
+                .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))?;
+            Ok((
+                row.raw_path
+                    .ok_or_else(|| CoreError::NotFound("outgoing MIME snapshot".into()))?,
+                row.message_id
+                    .ok_or_else(|| CoreError::NotFound("outgoing Message-ID".into()))?,
+            ))
+        })
+        .await?;
+    let sent = ctx
+        .db
+        .read({
+            let account_id = config.id;
+            move |conn| repo::folders::by_role(conn, account_id, roles::SENT)
+        })
+        .await?
+        .ok_or_else(|| CoreError::Imap("Sent mailbox has not been discovered yet".into()))?;
+
+    // The action payload is durable database state, but still treat its file
+    // reference as untrusted. Outgoing snapshots must stay inside this
+    // account's app-managed mail directory.
+    let mail_root = tokio::fs::canonicalize(ctx.paths.mail_dir(config.id)).await?;
+    let canonical = tokio::fs::canonicalize(&raw_path).await?;
+    if !canonical.starts_with(&mail_root) {
+        return Err(CoreError::Other(
+            "refusing to file a Sent copy from outside the mail store".into(),
+        ));
+    }
+    let raw = crate::file_io::read(
+        &canonical,
+        crate::MAX_CACHED_MESSAGE_BYTES,
+        "outgoing MIME snapshot",
+    )
+    .await?;
+
+    imap::select(session, &sent.imap_name).await?;
+    let header_value = format!("<{}>", rfc_message_id.trim_matches(['<', '>']));
+    if imap::uid_search_header(session, "Message-ID", &header_value)
+        .await?
+        .is_empty()
+    {
+        imap::append(session, &sent.imap_name, &raw, true).await?;
+        tracing::debug!(
+            account_id = config.id,
+            message_id,
+            folder = %sent.imap_name,
+            "smtp send: appended durable copy to Sent",
+        );
+    } else {
+        tracing::debug!(
+            account_id = config.id,
+            message_id,
+            folder = %sent.imap_name,
+            "smtp send: Sent copy already exists",
+        );
+    }
+    Ok(())
+}
+
+async fn send_action(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
     action: &repo::actions::PendingAction,
 ) -> Result<()> {
     let Some(draft_id) = action.payload["draftId"].as_i64() else {
@@ -571,10 +712,14 @@ async fn send_action(
             .collect(),
     )
     .await?;
-    // Persist before SMTP. If the relay accepts the message but the response
-    // is lost, action recovery rebuilds the exact same Message-ID instead of
-    // producing an avoidable duplicate with a fresh identity.
+    // Persist the exact protected MIME before SMTP. It gives retries a stable
+    // Message-ID and lets Sent filing run independently after delivery without
+    // retaining composer attachments or rebuilding encrypted content.
     let msg_id_bare = msg_id.trim_matches(['<', '>']).to_string();
+    let mail_dir = ctx.paths.mail_dir(config.id);
+    let raw_path = mail_dir.join(format!("{draft_id}.outgoing.eml"));
+    crate::file_io::write_atomic(&raw_path, &raw, "outgoing MIME snapshot").await?;
+    let raw_path_string = raw_path.to_string_lossy().into_owned();
     let stable_id = msg_id_bare.clone();
     ctx.db
         .write(move |conn| {
@@ -644,27 +789,6 @@ async fn send_action(
     }
     tracing::info!(account_id = config.id, "smtp send: accepted by server");
 
-    // Gmail stores SMTP submissions in Sent automatically.
-    if config.provider != Provider::Gmail {
-        let sent = ctx
-            .db
-            .read({
-                let account_id = config.id;
-                move |conn| repo::folders::by_role(conn, account_id, roles::SENT)
-            })
-            .await?;
-        if let Some(sent) = sent {
-            match imap::append(session, &sent.imap_name, &raw, true).await {
-                Ok(_) => tracing::debug!(
-                    account_id = config.id,
-                    folder = %sent.imap_name,
-                    "smtp send: appended copy to Sent",
-                ),
-                Err(e) => tracing::warn!("append to sent failed (message was sent): {e}"),
-            }
-        }
-    }
-
     let sent_folder_id = ctx
         .db
         .read({
@@ -675,15 +799,24 @@ async fn send_action(
     // mail-parser strips angle brackets from Message-IDs; store the same form
     // so the Sent-folder sync dedupes against this row instead of duplicating.
     let sent_at = now_ms();
+    let send_action_id = action.id;
+    let should_append_sent = config.provider != Provider::Gmail;
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
             tx.execute(
                 "UPDATE messages SET is_draft = 0, is_outgoing = 1, is_read = 1,
-                        message_id = ?2, folder_id = COALESCE(?3, folder_id), uid = NULL, date = ?4
+                        message_id = ?2, raw_path = ?3,
+                        folder_id = COALESCE(?4, folder_id), uid = NULL, date = ?5
                  WHERE id = ?1",
-                rusqlite::params![draft_id, msg_id_bare, sent_folder_id, sent_at],
+                rusqlite::params![
+                    draft_id,
+                    msg_id_bare,
+                    raw_path_string,
+                    sent_folder_id,
+                    sent_at
+                ],
             )?;
             tx.execute(
                 "DELETE FROM drafts_meta WHERE message_id = ?1",
@@ -697,6 +830,24 @@ async fn send_action(
             }
             repo::search::index_message(&tx, draft_id)?;
             repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
+            // SMTP acceptance is the user-visible completion boundary. Remote
+            // Sent filing is its own durable, retryable IMAP action and may
+            // safely finish after the composer closes.
+            if should_append_sent {
+                repo::actions::enqueue(
+                    &tx,
+                    account_id,
+                    "append_sent",
+                    Some(draft_id),
+                    tid,
+                    &serde_json::json!({}),
+                    None,
+                )?;
+            }
+            // Commit delivery and its follow-up atomically. This narrows the
+            // unavoidable SMTP/SQLite crash window and prevents a restart from
+            // resubmitting a message after local completion was recorded.
+            repo::actions::set_state(&tx, send_action_id, "done", None)?;
             tx.commit()?;
             Ok((tid, staged_paths))
         })

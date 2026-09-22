@@ -1,10 +1,12 @@
 //! Per-account sync actors. The main actor's IMAP connection runs a cycle
 //! loop of only the cheap, latency-sensitive work: drain commands -> execute
-//! due pending actions -> per-folder new-mail checks and flag/expunge
+//! due IMAP actions -> per-folder new-mail checks and flag/expunge
 //! reconciliation. Everything heavy runs on its own connections in parallel:
 //! first-time header backfills and historical extension on the dedicated
 //! history connection (`run_history_backfill`), and bulk body downloads on a
-//! pool of up to BODY_POOL_CONNS connections (`run_backfill_pool`). Cycles
+//! pool of up to BODY_POOL_CONNS connections (`run_backfill_pool`). SMTP
+//! submission also has a dedicated durable worker, so sending never waits for
+//! a mailbox cycle. Cycles
 //! therefore finish in seconds and the actor is back in IDLE almost
 //! immediately, so new mail keeps arriving fast even during a huge backfill.
 //!
@@ -89,6 +91,9 @@ pub struct AccountHandle {
     /// Separate channel + connection for on-demand body reads so opening a
     /// message never waits behind a long bulk-sync cycle on the main actor.
     body_tx: mpsc::Sender<PriorityFetchCmd>,
+    /// Coalesced wake-up for the dedicated SMTP submission worker. Gmail and
+    /// JMAP own their native send queues and therefore leave this unset.
+    send_tx: Option<mpsc::Sender<()>>,
     settings_tx: watch::Sender<crate::models::AccountSettings>,
     tasks: Vec<tokio::task::AbortHandle>,
 }
@@ -104,9 +109,18 @@ pub(crate) enum PriorityFetchCmd {
 
 impl AccountHandle {
     pub fn send(&self, cmd: SyncCmd) -> bool {
+        let wakes_sender = matches!(&cmd, SyncCmd::RunActions);
+        let sender_woken = wakes_sender
+            && self
+                .send_tx
+                .as_ref()
+                .is_some_and(|tx| match tx.try_send(()) {
+                    Ok(()) | Err(mpsc::error::TrySendError::Full(())) => true,
+                    Err(mpsc::error::TrySendError::Closed(())) => false,
+                });
         // Route priority body fetches to the dedicated reader connection;
         // everything else drives the bulk sync actor.
-        match cmd {
+        let primary_woken = match cmd {
             SyncCmd::FetchBody { message_id } => self
                 .body_tx
                 .try_send(PriorityFetchCmd::Body(message_id))
@@ -132,7 +146,8 @@ impl AccountHandle {
                     false
                 }
             },
-        }
+        };
+        primary_woken || sender_woken
     }
 
     /// Stop every worker owned by this account immediately. This is used when
@@ -179,6 +194,31 @@ impl AccountHandle {
     }
 }
 
+#[cfg(test)]
+mod account_handle_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn action_nudge_wakes_sync_and_smtp_workers() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let (body_tx, _body_rx) = mpsc::channel(1);
+        let (send_tx, mut send_rx) = mpsc::channel(1);
+        let (settings_tx, _settings_rx) = watch::channel(AccountSettings::default());
+        let handle = AccountHandle {
+            account_id: 7,
+            tx,
+            body_tx,
+            send_tx: Some(send_tx),
+            settings_tx,
+            tasks: Vec::new(),
+        };
+
+        assert!(handle.send(SyncCmd::RunActions));
+        assert!(matches!(rx.recv().await, Some(SyncCmd::RunActions)));
+        assert_eq!(send_rx.recv().await, Some(()));
+    }
+}
+
 #[derive(Clone)]
 pub struct SyncCtx {
     pub db: Db,
@@ -191,8 +231,11 @@ pub struct SyncCtx {
 
 pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
     let account_id = config.id;
+    let dedicated_smtp =
+        config.provider != Provider::Gmail && config.mail_protocol == MailProtocol::Imap;
     let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
     let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
+    let (send_tx, send_rx) = mpsc::channel(1);
     // These carry idempotent wakeups rather than work. A single pending item
     // represents every newer nudge and prevents bursts from retaining memory.
     let (pool_tx, pool_rx) = mpsc::channel(1);
@@ -204,6 +247,12 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
         crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx)
     } else {
         vec![
+            tokio::spawn(run_send_dispatcher(
+                ctx.clone(),
+                config.clone(),
+                send_rx,
+                tx.clone(),
+            )),
             tokio::spawn(run_actor(
                 ctx.clone(),
                 config.clone(),
@@ -231,11 +280,86 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
         account_id,
         tx,
         body_tx,
+        send_tx: dedicated_smtp.then_some(send_tx),
         settings_tx,
         tasks: joins
             .iter()
             .map(tokio::task::JoinHandle::abort_handle)
             .collect(),
+    }
+}
+
+/// Durable per-account SMTP dispatcher. It checks the database on startup and
+/// owns its own due-time timer, so delivery does not depend on a best-effort
+/// channel notification or the five-second global scheduler tick.
+async fn run_send_dispatcher(
+    ctx: SyncCtx,
+    config: AccountConfig,
+    mut wake_rx: mpsc::Receiver<()>,
+    action_tx: mpsc::Sender<SyncCmd>,
+) {
+    let account_id = config.id;
+    tracing::debug!(account_id, "SMTP dispatcher started");
+    loop {
+        match queue::execute_due_sends(&ctx, &config).await {
+            Ok(result) => {
+                if result.processed != 0 {
+                    // A successful submission enqueues durable Sent filing.
+                    // Wake the IMAP actor immediately instead of waiting for
+                    // the global scheduler's next tick.
+                    let _ = action_tx.try_send(SyncCmd::RunActions);
+                }
+                if result.due_remaining {
+                    continue;
+                }
+            }
+            Err(error) => {
+                // The executor already persisted retry/failure state. Keep the
+                // worker alive. A short floor also prevents corrupt queue data
+                // or a database read failure from creating a hot retry loop.
+                tracing::warn!(account_id, error = %error, "SMTP dispatcher pass failed");
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                    wake = wake_rx.recv() => if wake.is_none() { return },
+                }
+            }
+        }
+
+        let next_due = ctx
+            .db
+            .read(move |conn| repo::actions::next_send_due_at(conn, account_id))
+            .await;
+        match next_due {
+            Ok(Some(due_at)) if due_at <= now_ms() => {
+                // A newly queued action may have arrived between the pass and
+                // this query. Yield once for fairness, then claim it.
+                tokio::task::yield_now().await;
+            }
+            Ok(Some(due_at)) => {
+                let delay =
+                    std::time::Duration::from_millis(due_at.saturating_sub(now_ms()).max(1) as u64);
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    wake = wake_rx.recv() => {
+                        if wake.is_none() {
+                            return;
+                        }
+                        while wake_rx.try_recv().is_ok() {}
+                    }
+                }
+            }
+            Ok(None) => match wake_rx.recv().await {
+                Some(()) => while wake_rx.try_recv().is_ok() {},
+                None => return,
+            },
+            Err(error) => {
+                tracing::warn!(account_id, error = %error, "could not schedule SMTP dispatcher");
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                    wake = wake_rx.recv() => if wake.is_none() { return },
+                }
+            }
+        }
     }
 }
 

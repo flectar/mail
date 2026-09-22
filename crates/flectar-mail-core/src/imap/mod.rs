@@ -1095,6 +1095,37 @@ async fn uid_search_all_inner(session: &mut Session) -> Result<Vec<u32>> {
     Ok(v)
 }
 
+/// Find messages by one RFC 5322 header in the selected mailbox. This is used
+/// to make retrying Sent-folder APPEND idempotent after a connection loss.
+pub async fn uid_search_header(
+    session: &mut Session,
+    header: &str,
+    value: &str,
+) -> Result<Vec<u32>> {
+    if header.is_empty()
+        || !header
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        || value.len() > 998
+        || value.bytes().any(|byte| matches!(byte, b'\r' | b'\n' | 0))
+    {
+        return Err(CoreError::Imap("invalid header search criterion".into()));
+    }
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let query = format!("HEADER {header} \"{escaped}\"");
+    with_deadline("UID SEARCH header", METADATA_TIMEOUT, async move {
+        let set = session
+            .uid_search(&query)
+            .await
+            .map_err(|error| CoreError::Imap(error.to_string()))?;
+        let mut uids: Vec<u32> = set.into_iter().collect();
+        uids.sort_unstable();
+        uids.dedup();
+        Ok(uids)
+    })
+    .await
+}
+
 pub async fn uid_search_since(session: &mut Session, date: chrono::NaiveDate) -> Result<Vec<u32>> {
     with_deadline(
         "UID SEARCH SINCE",

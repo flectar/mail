@@ -1,6 +1,8 @@
 //! Local protocol fixtures exercise actual TLS handshakes without external accounts.
+use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
+use flectar_mail_core::config::Paths;
 use flectar_mail_core::models::*;
-use flectar_mail_core::{imap, smtp};
+use flectar_mail_core::{Core, imap, smtp};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::sync::Arc;
 use tokio::{
@@ -478,6 +480,58 @@ async fn smtp_connection_with_certificate(mode: ConnectionSecurity, certificate:
     task.await.unwrap();
 }
 
+async fn smtp_test_and_delivery_server() -> (
+    u16,
+    tokio::sync::oneshot::Receiver<String>,
+    tokio::task::JoinHandle<()>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (delivered_tx, delivered_rx) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(async move {
+        let mut delivered_tx = Some(delivered_tx);
+        for delivery in [false, true] {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+            stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+            assert!(line(&mut stream).await.starts_with("EHLO "));
+            stream
+                .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+                .await
+                .unwrap();
+            assert!(line(&mut stream).await.starts_with("AUTH PLAIN "));
+            stream.write_all(b"235 Authenticated\r\n").await.unwrap();
+            if !delivery {
+                assert_eq!(line(&mut stream).await, "NOOP\r\n");
+                stream.write_all(b"250 OK\r\n").await.unwrap();
+            } else {
+                assert!(line(&mut stream).await.starts_with("MAIL FROM:"));
+                stream.write_all(b"250 Sender accepted\r\n").await.unwrap();
+                assert!(line(&mut stream).await.starts_with("RCPT TO:"));
+                stream
+                    .write_all(b"250 Recipient accepted\r\n")
+                    .await
+                    .unwrap();
+                assert_eq!(line(&mut stream).await, "DATA\r\n");
+                stream.write_all(b"354 Continue\r\n").await.unwrap();
+                let mut message = String::new();
+                loop {
+                    let next = line(&mut stream).await;
+                    if next == ".\r\n" {
+                        break;
+                    }
+                    message.push_str(&next);
+                }
+                stream.write_all(b"250 Queued\r\n").await.unwrap();
+                delivered_tx.take().unwrap().send(message).unwrap();
+            }
+            assert_eq!(line(&mut stream).await, "QUIT\r\n");
+            stream.write_all(b"221 Goodbye\r\n").await.unwrap();
+        }
+    });
+    (port, delivered_rx, task)
+}
+
 fn smtp_config(port: u16, mode: ConnectionSecurity, certificate: &str) -> AccountConfig {
     AccountConfig {
         id: 1,
@@ -507,6 +561,102 @@ async fn smtp_starttls_on_custom_port() {
 #[tokio::test]
 async fn smtp_implicit_tls_on_custom_port() {
     smtp_connection(ConnectionSecurity::Tls).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn smtp_delivery_does_not_wait_for_the_imap_sync_actor() {
+    let (imap_port, imap_task) = imap_server(false, false).await;
+    let (smtp_port, delivered, smtp_task) = smtp_test_and_delivery_server().await;
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let account = core
+        .add_account_password(AddPasswordAccountArgs {
+            email: "sender@example.com".into(),
+            display_name: Some("Sender".into()),
+            username: "sender@example.com".into(),
+            password: "test-password".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            imap_host: "127.0.0.1".into(),
+            imap_port,
+            smtp_host: "127.0.0.1".into(),
+            smtp_port,
+            connection: settings(ConnectionSecurity::Tls),
+        })
+        .await
+        .unwrap();
+    // The only IMAP fixture connection was consumed by account validation.
+    // The spawned sync actor is now offline, which used to leave this send in
+    // `pending` until the composer's 60-second watchdog cancelled it.
+    imap_task.await.unwrap();
+
+    let draft_id = core
+        .save_draft(SaveDraftArgs {
+            draft_id: None,
+            account_id: account.id,
+            from: None,
+            to: vec![Address {
+                name: Some("Recipient".into()),
+                email: "recipient@example.com".into(),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Independent SMTP dispatch".into(),
+            body_text: "The IMAP actor is intentionally offline.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            attachments: Vec::new(),
+        })
+        .await
+        .unwrap();
+    let queued = core
+        .queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(now_ms()),
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        core.wait_for_send(queued.action_id),
+    )
+    .await
+    .expect("dedicated SMTP worker did not start promptly")
+    .unwrap();
+    let message = tokio::time::timeout(std::time::Duration::from_secs(2), delivered)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(message.contains("Subject: Independent SMTP dispatch"));
+    assert!(message.contains("The IMAP actor is intentionally offline."));
+
+    core.db
+        .read(move |conn| {
+            let state: String = conn.query_row(
+                "SELECT state FROM pending_actions WHERE id=?1",
+                [queued.action_id],
+                |row| row.get(0),
+            )?;
+            let sent_follow_up: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM pending_actions
+                 WHERE message_id=?1 AND kind='append_sent' AND state='pending'",
+                [draft_id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(state, "done");
+            assert_eq!(sent_follow_up, 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    smtp_task.await.unwrap();
 }
 
 #[tokio::test]
