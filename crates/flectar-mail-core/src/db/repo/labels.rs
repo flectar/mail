@@ -142,6 +142,108 @@ pub fn save(
     Ok(stmt.query_row(params![id], from_row)?)
 }
 
+/// Rename/recolor one label and, when requested, keep every slash-delimited
+/// descendant attached to it. Gmail exposes labels as flat names even though
+/// its standard UI treats `Parent/Child` as a tree, so parent renames have to
+/// update the complete subtree explicitly when performed through the API.
+///
+/// Descendants are renamed deepest-first. This avoids transient collisions for
+/// valid moves such as renaming `A` to `A/B`, where the existing `A/B` child
+/// must move out of the way before the root takes that name.
+pub fn save_with_descendants(
+    conn: &Connection,
+    id: Option<i64>,
+    name: &str,
+    color: &str,
+    position: i64,
+    owner_account_id: Option<i64>,
+    cascade_descendants: bool,
+) -> Result<(Label, Vec<Label>)> {
+    let Some(id) = id else {
+        return Ok((
+            save(conn, None, name, color, position, owner_account_id)?,
+            Vec::new(),
+        ));
+    };
+    let previous = get(conn, id)?.ok_or_else(|| CoreError::NotFound(format!("label {id}")))?;
+    if !cascade_descendants || previous.name == name {
+        return Ok((
+            save(conn, Some(id), name, color, position, owner_account_id)?,
+            Vec::new(),
+        ));
+    }
+
+    let prefix = format!("{}/", previous.name);
+    let replacement_prefix = format!("{name}/");
+    let all_labels = list(conn)?;
+    let mut descendants = all_labels
+        .iter()
+        .filter(|label| {
+            label.owner_account_id == previous.owner_account_id
+                && label.id != previous.id
+                && label.name.starts_with(&prefix)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let subtree_ids = std::iter::once(previous.id)
+        .chain(descendants.iter().map(|label| label.id))
+        .collect::<std::collections::HashSet<_>>();
+    let target_names = std::iter::once(name.to_owned())
+        .chain(descendants.iter().map(|label| {
+            format!(
+                "{replacement_prefix}{}",
+                label.name.strip_prefix(&prefix).unwrap_or(&label.name)
+            )
+        }))
+        .collect::<Vec<_>>();
+
+    for target in &target_names {
+        if all_labels.iter().any(|label| {
+            label.owner_account_id == previous.owner_account_id
+                && !subtree_ids.contains(&label.id)
+                && label.name.eq_ignore_ascii_case(target)
+        }) {
+            return Err(CoreError::Other(format!(
+                "a label named '{target}' already exists in this scope"
+            )));
+        }
+    }
+
+    descendants.sort_by_key(|label| std::cmp::Reverse(label.name.len()));
+    let mut renamed_descendants = Vec::with_capacity(descendants.len());
+    for descendant in descendants {
+        let suffix = descendant
+            .name
+            .strip_prefix(&prefix)
+            .unwrap_or(&descendant.name);
+        renamed_descendants.push(save(
+            conn,
+            Some(descendant.id),
+            &format!("{replacement_prefix}{suffix}"),
+            &descendant.color,
+            descendant.position,
+            descendant.owner_account_id,
+        )?);
+    }
+    let root = save(conn, Some(id), name, color, position, owner_account_id)?;
+    Ok((root, renamed_descendants))
+}
+
+/// Return one slash-delimited label subtree deepest-first. Matching is scoped
+/// to the root's owner so identical paths in other accounts stay independent.
+pub fn subtree(conn: &Connection, root: &Label) -> Result<Vec<Label>> {
+    let prefix = format!("{}/", root.name);
+    let mut labels = list(conn)?
+        .into_iter()
+        .filter(|label| {
+            label.owner_account_id == root.owner_account_id
+                && (label.id == root.id || label.name.starts_with(&prefix))
+        })
+        .collect::<Vec<_>>();
+    labels.sort_by_key(|label| std::cmp::Reverse(label.name.len()));
+    Ok(labels)
+}
+
 pub fn delete(conn: &Connection, id: i64) -> Result<()> {
     let key = format!("label:{id}");
     // Any thread routed into this label (an auto category) must fall back to
@@ -296,6 +398,54 @@ mod tests {
         let renamed = save(&c, Some(l.id), "Chase later", "#000", 1, None).unwrap();
         assert_eq!(renamed.keyword, "Follow_up");
         assert_eq!(renamed.name, "Chase later");
+    }
+
+    #[test]
+    fn gmail_style_parent_rename_keeps_the_complete_label_tree() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let root = save(&c, None, "Projects", "#111111", 1, Some(1)).unwrap();
+        let child = save(&c, None, "Projects/Launch", "#222222", 2, Some(1)).unwrap();
+        let leaf = save(&c, None, "Projects/Launch/Design", "#333333", 3, Some(1)).unwrap();
+        save(&c, None, "Other", "#444444", 4, Some(1)).unwrap();
+
+        let (renamed, descendants) =
+            save_with_descendants(&c, Some(root.id), "Work", "#555555", 5, None, true).unwrap();
+
+        assert_eq!(renamed.name, "Work");
+        assert_eq!(get(&c, child.id).unwrap().unwrap().name, "Work/Launch");
+        assert_eq!(
+            get(&c, leaf.id).unwrap().unwrap().name,
+            "Work/Launch/Design"
+        );
+        assert_eq!(
+            descendants.iter().map(|label| label.id).collect::<Vec<_>>(),
+            [leaf.id, child.id]
+        );
+        assert_eq!(
+            subtree(&c, &renamed)
+                .unwrap()
+                .iter()
+                .map(|label| label.id)
+                .collect::<Vec<_>>(),
+            [leaf.id, child.id, root.id]
+        );
+    }
+
+    #[test]
+    fn subtree_rename_rejects_collisions_before_changing_any_name() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let root = save(&c, None, "Projects", "#111111", 1, Some(1)).unwrap();
+        let child = save(&c, None, "Projects/Launch", "#222222", 2, Some(1)).unwrap();
+        save(&c, None, "Work/Launch", "#333333", 3, Some(1)).unwrap();
+
+        let error =
+            save_with_descendants(&c, Some(root.id), "Work", "#444444", 4, None, true).unwrap_err();
+
+        assert!(error.to_string().contains("already exists"));
+        assert_eq!(get(&c, root.id).unwrap().unwrap().name, "Projects");
+        assert_eq!(get(&c, child.id).unwrap().unwrap().name, "Projects/Launch");
     }
 
     #[test]

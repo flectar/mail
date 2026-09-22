@@ -7,6 +7,7 @@ import { LineEdit } from "controls.slint";
 import { SettingsSelectRow, SettingsSwitchRow } from "settings-components.slint";
 
 export struct SignatureChoice { id: string, name: string, text: string }
+export struct SenderIdentityChoice { email: string, label: string }
 export global AccountMailPreferences {
     in-out property <int> account-id: -1;
     in-out property <string> account-label;
@@ -27,11 +28,17 @@ export global AccountMailPreferences {
     in-out property <string> status;
     in-out property <bool> busy: false;
     in-out property <bool> desktop-supported: true;
+    in-out property <[SenderIdentityChoice]> sender-identities;
+    in-out property <[string]> sender-identity-names;
+    in-out property <int> default-sender-index: 0;
+    in-out property <string> sender-identity-status;
     callback load(int);
     callback edit-signature(int);
     callback save-signature;
     callback delete-signature;
     callback save-defaults;
+    callback refresh-sender-identities;
+    callback save-default-sender;
     callback save-security;
     callback key-action(string);
     callback composer-reset;
@@ -41,6 +48,11 @@ export global AccountMailPreferences {
     in-out property <int> composer-signature-index: 0;
     in-out property <string> composer-security;
     in-out property <bool> composer-preferences-ready: false;
+    in-out property <[SenderIdentityChoice]> composer-sender-identities;
+    in-out property <[string]> composer-sender-names;
+    in-out property <int> composer-sender-index: 0;
+    in-out property <string> composer-sender-email;
+    callback composer-sender(int);
     callback read-message;
     callback export-message;
     callback close-reader;
@@ -61,8 +73,8 @@ export component AccountMailPreferencesPanel inherits Rectangle {
     vertical-stretch: 0;
     content := VerticalBox {
         padding: 20px; spacing: 12px; alignment: start;
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Signatures & OpenPGP"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage your signature and message protection."); color: AppTheme.secondary; wrap: word-wrap; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Sender identities, signatures & OpenPGP"); color: AppTheme.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+        Text { min-height: self.preferred-height; vertical-stretch: 0; text: @tr("Choose an account to manage its sender identity, signature, and message protection."); color: AppTheme.secondary; wrap: word-wrap; }
         for account in root.accounts : Button {
             text: account.email;
             primary: AccountMailPreferences.account-id == account.id;
@@ -78,6 +90,18 @@ export component AccountMailPreferencesPanel inherits Rectangle {
             }
             if !root.security-tab : VerticalBox {
                 spacing: 10px;
+                SettingsSelectRow {
+                    compact: root.compact; title: @tr("Default sender identity"); description: @tr("Preselected for new messages. Your sign-in address is unchanged.");
+                    choices: AccountMailPreferences.sender-identity-names; selected-index <=> AccountMailPreferences.default-sender-index;
+                    title-color: AppTheme.heading; description-color: AppTheme.secondary;
+                    selected(index, value) => { AccountMailPreferences.default-sender-index = index; }
+                }
+                HorizontalBox {
+                    Button { text: @tr("Save sender default"); primary: true; enabled: !AccountMailPreferences.busy && AccountMailPreferences.sender-identities.length > 0; clicked => { AccountMailPreferences.save-default-sender(); } }
+                    Button { text: @tr("Refresh sender identities"); enabled: !AccountMailPreferences.busy; clicked => { AccountMailPreferences.refresh-sender-identities(); } }
+                }
+                if AccountMailPreferences.sender-identity-status != "" : Text { min-height: self.preferred-height; vertical-stretch: 0; text: AccountMailPreferences.sender-identity-status; color: AppTheme.secondary; wrap: word-wrap; }
+                Rectangle { height: 1px; background: AppTheme.input-border; }
                 SettingsSelectRow {
                     compact: root.compact; title: @tr("Edit signature"); description: @tr("Saved separately for each account.");
                     choices: AccountMailPreferences.signature-names; selected-index: AccountMailPreferences.editing-index;

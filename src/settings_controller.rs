@@ -14,8 +14,7 @@ fn apply_account_presentation_settings(
     runtime: &tokio::runtime::Runtime,
     settings: &flectar_mail_core::models::Settings,
 ) {
-    state.borrow_mut().account_presentation =
-        AccountPresentationSettings::from_settings(settings);
+    state.borrow_mut().account_presentation = AccountPresentationSettings::from_settings(settings);
     refresh_connected_accounts(app, state);
     refresh_rows_only(app, state, runtime);
 }
@@ -95,6 +94,75 @@ pub(super) fn register_settings_preference_callbacks(
                 "Could not save message-opening preference: {}",
                 error,
             )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_contacts = Rc::clone(state);
+    let runtime_for_contacts = Rc::clone(runtime);
+    app.on_save_contact_discovery_settings(move |outgoing, incoming, all_accounts, suggest| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_contacts.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Contact suggestion preferences are active for this session.",
+            ));
+            return;
+        };
+        match runtime_for_contacts.block_on(core.set_contact_discovery_settings(
+            outgoing,
+            incoming,
+            all_accounts,
+            suggest,
+        )) {
+            Ok(()) => app.set_sync_status(UiMessage::plain(
+                "Contact suggestion preferences saved.",
+            )),
+            Err(error) => {
+                if let Ok(settings) = runtime_for_contacts.block_on(core.load_settings()) {
+                    app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+                    app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                    app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
+                    app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
+                }
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save contact suggestion preferences: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_clear_contacts = Rc::clone(state);
+    let runtime_for_clear_contacts = Rc::clone(runtime);
+    app.on_clear_contact_suggestions(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return false;
+        };
+        let Some(core) = state_for_clear_contacts.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Contact storage is still starting. Try again shortly.",
+            ));
+            return false;
+        };
+        match runtime_for_clear_contacts.block_on(core.clear_contact_suggestions()) {
+            Ok(removed) => {
+                app.set_sync_status(UiMessage::detail(
+                    "Cleared {} suggested people.",
+                    removed,
+                ));
+                app.invoke_search_contacts(app.get_contact_search_query());
+                true
+            }
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail(
+                    "Could not clear suggested people: {}",
+                    error,
+                ));
+                false
+            }
         }
     });
 
@@ -255,9 +323,7 @@ pub(super) fn register_settings_preference_callbacks(
             return Default::default();
         };
         let Some(core) = state_for_profiles.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return Default::default();
         };
         let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
@@ -291,15 +357,13 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         let Some(core) = state_for_profile_assignment.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return;
         };
         let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
-        match runtime_for_profile_assignment.block_on(
-            core.assign_account_profile(i64::from(account_id), profile_id),
-        ) {
+        match runtime_for_profile_assignment
+            .block_on(core.assign_account_profile(i64::from(account_id), profile_id))
+        {
             Ok(settings) => {
                 apply_account_presentation_settings(
                     &app,
@@ -357,9 +421,7 @@ pub(super) fn register_settings_preference_callbacks(
             return;
         };
         let Some(core) = state_for_profile_delete.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Profile changes require local mail data.",
-            ));
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
             return;
         };
         match runtime_for_profile_delete.block_on(core.delete_mail_profile(profile_id.to_string()))
@@ -373,10 +435,9 @@ pub(super) fn register_settings_preference_callbacks(
                 );
                 app.set_sync_status(UiMessage::plain("Profile deleted."));
             }
-            Err(error) => app.set_sync_status(UiMessage::detail(
-                "Could not delete profile: {}",
-                error,
-            )),
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not delete profile: {}", error))
+            }
         }
     });
 
@@ -395,7 +456,11 @@ pub(super) fn register_settings_preference_callbacks(
                 .borrow_mut()
                 .account_presentation
                 .show_markers = enabled;
-            refresh_rows_only(&app, &state_for_marker_visibility, &runtime_for_marker_visibility);
+            refresh_rows_only(
+                &app,
+                &state_for_marker_visibility,
+                &runtime_for_marker_visibility,
+            );
             return;
         };
         match runtime_for_marker_visibility.block_on(core.set_show_account_badges(enabled)) {
@@ -434,6 +499,29 @@ pub(super) fn register_settings_preference_callbacks(
                 "Could not save workspace layout: {}",
                 error,
             )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_list_pane_width = Rc::clone(state);
+    let runtime_for_list_pane_width = Rc::clone(runtime);
+    app.on_save_workspace_list_pane_width(move |width| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let width =
+            flectar_mail_core::models::normalized_workspace_list_pane_width(width.round() as i64);
+        app.set_workspace_list_pane_width(width as f32);
+        let Some(core) = state_for_list_pane_width.borrow().core.clone() else {
+            return;
+        };
+        if let Err(error) =
+            runtime_for_list_pane_width.block_on(core.set_workspace_list_pane_width(width))
+        {
+            app.set_sync_status(UiMessage::detail(
+                "Could not save list pane width: {}",
+                error,
+            ));
         }
     });
 }

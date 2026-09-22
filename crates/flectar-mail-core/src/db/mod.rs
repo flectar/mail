@@ -9,9 +9,12 @@ pub mod migrations;
 pub mod repo;
 pub mod snapshot;
 
-use crate::error::{CoreError, Result};
-use rusqlite::Connection;
+use crate::{
+    error::{CoreError, Result},
+    models::normalized_workspace_list_pane_width,
+};
 use rusqlite::config::DbConfig;
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, oneshot};
 
@@ -122,6 +125,35 @@ fn open_connection(path: &Path, kind: StoreKind) -> Result<Connection> {
     // Large sorts should not compete with the renderer for resident memory.
     conn.pragma_update(None, "temp_store", "FILE")?;
     Ok(conn)
+}
+
+/// Best-effort read of the list-pane width for the first rendered frame.
+///
+/// Normal startup remains responsible for opening, migrating, and validating
+/// the complete settings blob. This deliberately performs one zero-wait,
+/// read-only query so presentation state can be applied before the window is
+/// shown without putting database startup or mailbox loading on that path.
+pub(crate) fn startup_workspace_list_pane_width(path: &Path) -> Option<i64> {
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    conn.busy_timeout(std::time::Duration::ZERO).ok()?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)
+        .ok()?;
+    conn.set_db_config(DbConfig::SQLITE_DBCONFIG_TRUSTED_SCHEMA, false)
+        .ok()?;
+
+    let json = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'settings'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()??;
+    let value = serde_json::from_str::<serde_json::Value>(&json).ok()?;
+    value
+        .get("workspaceListPaneWidth")
+        .and_then(serde_json::Value::as_i64)
+        .map(normalized_workspace_list_pane_width)
 }
 
 fn sqlite_sidecar(path: &Path, suffix: &str) -> PathBuf {
@@ -536,5 +568,50 @@ mod connection_profile_tests {
             .unwrap();
 
         assert_eq!(cache_size, -2_048);
+    }
+}
+
+#[cfg(test)]
+mod startup_preference_tests {
+    use super::startup_workspace_list_pane_width;
+    use crate::models::MIN_WORKSPACE_LIST_PANE_WIDTH;
+    use rusqlite::Connection;
+
+    #[test]
+    fn startup_width_is_read_without_opening_the_full_store() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mail.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"workspaceListPaneWidth\": 672}');",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(startup_workspace_list_pane_width(&path), Some(672));
+    }
+
+    #[test]
+    fn startup_width_is_bounded_and_missing_state_is_non_fatal() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing.db");
+        assert_eq!(startup_workspace_list_pane_width(&missing), None);
+
+        let path = temp.path().join("mail.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"workspaceListPaneWidth\": 120}');",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert_eq!(
+            startup_workspace_list_pane_width(&path),
+            Some(MIN_WORKSPACE_LIST_PANE_WIDTH)
+        );
     }
 }

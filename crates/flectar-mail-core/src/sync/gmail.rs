@@ -253,6 +253,13 @@ impl GmailApi {
             .collect())
     }
 
+    async fn sender_identities(&self) -> Result<Vec<crate::models::SenderIdentity>> {
+        let value = self
+            .get_json(&format!("{GMAIL_API}/settings/sendAs"))
+            .await?;
+        crate::sender_identities::parse_gmail_identities_value(&self.account, value)
+    }
+
     async fn list_messages_page(
         &self,
         page_token: Option<&str>,
@@ -614,6 +621,33 @@ impl GmailApi {
             &json!({ "id": draft_id }),
         )
         .await
+    }
+
+    /// Re-check the exact identity at provider I/O time. A cached alias may
+    /// have been revoked after the composer opened; Gmail must remain the
+    /// authority on whether the From address is still usable.
+    async fn validate_sender_identity(&self, email: &str) -> Result<()> {
+        let value = self
+            .get_json(&format!("{GMAIL_API}/settings/sendAs/{}", urlencode(email)))
+            .await
+            .map_err(|error| match error {
+                CoreError::NotFound(_) => CoreError::Other(format!(
+                    "{email} is no longer an authorized Gmail sender identity"
+                )),
+                other => other,
+            })?;
+        let returned = required_string(&value, "sendAsEmail")?;
+        let primary = value
+            .get("isPrimary")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let accepted = value.get("verificationStatus").and_then(Value::as_str) == Some("accepted");
+        if !returned.eq_ignore_ascii_case(email) || !(primary || accepted) {
+            return Err(CoreError::Other(format!(
+                "{email} is not a verified Gmail sender identity"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -1159,6 +1193,21 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
         .await
 }
 
+async fn sync_sender_identities(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+) -> Result<()> {
+    let identities = api.sender_identities().await?;
+    let account_id = config.id;
+    ctx.db
+        .write(move |conn| {
+            repo::sender_identities::replace(conn, account_id, &identities)?;
+            Ok(())
+        })
+        .await
+}
+
 pub(crate) async fn create_user_folder(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1402,6 +1451,14 @@ async fn store_resources(
         .write(move |conn| {
             let tx = conn.transaction()?;
             let settings = repo::settings::get(&tx)?;
+            let (outgoing_learning_since, incoming_learning_since) =
+                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
+            let mut account_emails = repo::sender_identities::list(&tx, account_id)?
+                .into_iter()
+                .filter(|identity| identity.is_verified())
+                .map(|identity| identity.email.to_ascii_lowercase())
+                .collect::<HashSet<_>>();
+            account_emails.insert(account_email);
             let mut mappings = HashMap::<String, LabelMapping>::new();
             {
                 let mut stmt = tx.prepare(
@@ -1507,7 +1564,8 @@ async fn store_resources(
                     .as_ref()
                     .map(|address| address.email.to_ascii_lowercase())
                     .unwrap_or_default();
-                let is_outgoing = label_set.contains("SENT") || from_email == account_email;
+                let is_outgoing =
+                    label_set.contains("SENT") || account_emails.contains(&from_email);
                 let is_read = !label_set.contains("UNREAD");
                 let is_starred = label_set.contains("STARRED");
                 let is_draft = label_set.contains("DRAFT");
@@ -1612,11 +1670,33 @@ async fn store_resources(
                 }
                 repo::search::index_message(&tx, local_message_id)?;
 
-                if is_outgoing {
-                    for address in resource.headers.to.iter().chain(resource.headers.cc.iter()) {
-                        repo::contacts::harvest(&tx, account_id, address, true, date)?;
+                if inserted
+                    && is_outgoing
+                    && settings.collect_outgoing_contacts
+                    && resource.internal_date >= outgoing_learning_since
+                {
+                    let mut harvested_addresses = HashSet::new();
+                    for address in resource
+                        .headers
+                        .to
+                        .iter()
+                        .chain(resource.headers.cc.iter())
+                        .chain(resource.headers.bcc.iter())
+                    {
+                        let email = address.email.to_ascii_lowercase();
+                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
+                            repo::contacts::harvest(&tx, account_id, address, true, date)?;
+                        }
                     }
-                } else if let Some(from) = &resource.headers.from {
+                } else if inserted
+                    && settings.collect_incoming_contacts
+                    && resource.internal_date >= incoming_learning_since
+                    && !resource.headers.is_automated
+                    && !label_set.contains("SPAM")
+                    && !label_set.contains("TRASH")
+                    && let Some(from) = &resource.headers.from
+                    && !crate::mime::robot_sender(&from.email)
+                {
                     repo::contacts::harvest(&tx, account_id, from, false, date)?;
                 }
 
@@ -2505,6 +2585,8 @@ async fn prepare_draft(
         })
         .await?;
 
+    api.validate_sender_identity(&detail.from.email).await?;
+
     let staged: Vec<(String, String, Option<String>)> = ctx
         .db
         .read(move |conn| {
@@ -2592,11 +2674,13 @@ async fn prepare_draft(
         }
     }
 
-    let from = Address {
-        name: config.display_name.clone(),
-        email: config.email.clone(),
-    };
-    let domain = config.email.split('@').nth(1).unwrap_or("localhost");
+    let from = detail.from.clone();
+    let domain = from
+        .email
+        .split('@')
+        .nth(1)
+        .unwrap_or("localhost")
+        .to_owned();
     let outgoing = crate::mime::OutgoingMessage {
         from,
         to: &detail.to,
@@ -2608,7 +2692,7 @@ async fn prepare_draft(
         in_reply_to: in_reply_to.as_deref(),
         references: &refs,
         message_id: stored_message_id.as_deref(),
-        message_id_domain: domain,
+        message_id_domain: &domain,
         attachments,
     };
     let (message_id, raw) = crate::mime::build_message(&outgoing)?;
@@ -2873,6 +2957,7 @@ async fn finalize_sent_draft(
         .map(str::to_owned);
     let account_id = config.id;
     let message_id = message_id.trim_matches(['<', '>']).to_owned();
+    let sent_at = now_ms();
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
@@ -2906,7 +2991,7 @@ async fn finalize_sent_draft(
                     provider_message_id,
                     provider_thread_id,
                     message_id,
-                    now_ms(),
+                    sent_at,
                 ],
             )?;
             repo::gmail::set_message_folders(&tx, draft_id, &[sent_folder, all_folder])?;
@@ -2927,6 +3012,7 @@ async fn finalize_sent_draft(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             repo::search::index_message(&tx, draft_id)?;
+            repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
             tx.commit()?;
             Ok((thread_id, staged_paths))
         })
@@ -3011,11 +3097,16 @@ async fn apply_action(
             let local_label_id = action.payload["labelId"]
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("label creation omitted labelId".into()))?;
-            let label = ctx
+            let Some(label) = ctx
                 .db
                 .read(move |conn| repo::labels::get(conn, local_label_id))
                 .await?
-                .ok_or_else(|| CoreError::NotFound(format!("label {local_label_id}")))?;
+            else {
+                // A claimed create can race with an immediate user deletion.
+                // No remote request was made, so the desired final state is
+                // already satisfied and the action can complete normally.
+                return Ok(());
+            };
             if label.owner_account_id != Some(config.id) || label.is_auto {
                 return Err(CoreError::Other(
                     "only an account-owned label can be created in Gmail".into(),
@@ -3023,10 +3114,23 @@ async fn apply_action(
             }
             let remote = api.create_label(&label.name, Some(&label.color)).await?;
             let account_id = config.id;
-            ctx.db
+            let remote_for_store = remote.clone();
+            let latest = ctx
+                .db
                 .write(move |conn| {
-                    let folder_id =
-                        repo::folders::upsert(conn, account_id, &remote.name, Some("/"), None)?;
+                    let Some(latest) = repo::labels::get(conn, local_label_id)? else {
+                        return Ok(None);
+                    };
+                    if latest.owner_account_id != Some(account_id) || latest.is_auto {
+                        return Ok(None);
+                    }
+                    let folder_id = repo::folders::upsert(
+                        conn,
+                        account_id,
+                        &remote_for_store.name,
+                        Some("/"),
+                        None,
+                    )?;
                     conn.execute(
                         "INSERT INTO gmail_labels (
                            account_id, provider_id, name, kind, folder_id,
@@ -3040,21 +3144,58 @@ async fn apply_action(
                            text_color = excluded.text_color",
                         params![
                             account_id,
-                            remote.id,
-                            remote.name,
+                            remote_for_store.id,
+                            remote_for_store.name,
                             folder_id,
                             local_label_id,
-                            remote.background_color,
-                            remote.text_color,
+                            remote_for_store.background_color,
+                            remote_for_store.text_color,
                         ],
                     )?;
                     conn.execute(
                         "UPDATE labels SET origin = 'provider' WHERE id = ?1",
                         params![local_label_id],
                     )?;
-                    Ok(())
+                    Ok(Some(latest))
                 })
                 .await?;
+            let Some(latest) = latest else {
+                // The user deleted the local label while its CREATE request
+                // was in flight. Compensate immediately so no orphan is left
+                // behind in the Gmail account.
+                api.delete_label(&remote.id).await?;
+                return Ok(());
+            };
+            if latest.name != remote.name || latest.color != label.color {
+                api.update_label(&remote.id, &latest.name, Some(&latest.color))
+                    .await?;
+                let provider_id = remote.id;
+                let latest_name = latest.name;
+                let background = gmail_palette_color(&latest.color).map(str::to_owned);
+                let text = background
+                    .as_deref()
+                    .map(contrasting_text)
+                    .map(str::to_owned);
+                ctx.db
+                    .write(move |conn| {
+                        conn.execute(
+                            "UPDATE gmail_labels
+                             SET name=?3, background_color=?4, text_color=?5
+                             WHERE account_id=?1 AND provider_id=?2",
+                            params![account_id, provider_id, latest_name, background, text],
+                        )?;
+                        conn.execute(
+                            "UPDATE folders SET imap_name=?3
+                             WHERE account_id=?1 AND id=(
+                               SELECT folder_id FROM gmail_labels
+                               WHERE account_id=?1 AND provider_id=?2
+                             )",
+                            params![account_id, provider_id, latest_name],
+                        )?;
+                        Ok(())
+                    })
+                    .await?;
+            }
             return Ok(());
         }
         "gmail_label_update" => {
@@ -3447,6 +3588,7 @@ async fn run_actor(
             // important on a new account where the user can compose before the
             // first metadata page creates Sent, Drafts and All Mail locally.
             if refresh_labels {
+                sync_sender_identities(&ctx, &config, &api).await?;
                 sync_labels(&ctx, &config, &api).await?;
             }
             let actions_remaining = execute_actions(&ctx, &config, &api).await?;

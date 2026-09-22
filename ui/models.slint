@@ -37,6 +37,10 @@ export struct MailboxRow {
     has_children: bool,
     expanded: bool,
     is_standard: bool,
+    is_selectable: bool,
+    can_create_children: bool,
+    can_rename: bool,
+    can_delete: bool,
     label_has_emoji: bool,
     label: string,
     scope: string,
@@ -59,6 +63,11 @@ export struct MailLabelRow {
     account_id: int,
     account_name: string,
     name: string,
+    display_name: string,
+    depth: int,
+    has_children: bool,
+    expanded: bool,
+    can_create_children: bool,
     name_has_emoji: bool,
     color: color,
     applied: bool,
@@ -300,6 +309,7 @@ export struct ContactRow {
     detail: string,
     last_contacted: string,
     favorite: bool,
+    suggested: bool,
     selected: bool,
 }
 
@@ -316,7 +326,7 @@ export struct ContactAccountRow {
     selected: bool,
 }
 
-export enum ContactSidebarRowKind { unified-heading, unified-section, all, favorites, accounts-heading, account, contacts, hint }
+export enum ContactSidebarRowKind { unified-heading, unified-section, all, favorites, suggestions, accounts-heading, account, contacts, hint }
 export struct ContactSidebarRow {
     key: string,
     kind: ContactSidebarRowKind,
@@ -360,7 +370,14 @@ export global EmailReader {
     in-out property <bool> use-authored-text: false;
 }
 
-export struct MailAttachment { id: string, name: string, detail: string, previewable: bool }
+export struct MailAttachment {
+    id: string,
+    name: string,
+    detail: string,
+    previewable: bool,
+    thumbnail: image,
+    has_thumbnail: bool,
+}
 export global MailAttachments {
     callback deliver();
     in-out property <[MailAttachment]> rows;

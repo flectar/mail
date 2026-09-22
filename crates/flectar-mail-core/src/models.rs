@@ -242,6 +242,10 @@ pub struct AccountSettings {
     pub security: crate::mail_security::MailSecurity,
     #[serde(default)]
     pub connection: MailConnectionSettings,
+    /// The sender identity Flectar should preselect for new messages. The
+    /// authenticated account address remains the account/login identity.
+    #[serde(default)]
+    pub default_sender_email: Option<String>,
 }
 
 impl Default for AccountSettings {
@@ -250,6 +254,7 @@ impl Default for AccountSettings {
             mail_history: default_mail_history(),
             security: Default::default(),
             connection: MailConnectionSettings::default(),
+            default_sender_email: None,
         }
     }
 }
@@ -316,6 +321,9 @@ pub struct Account {
     pub mail_protocol: MailProtocol,
     pub sync_state: String,
     pub sync_error: Option<String>,
+    /// Whether the provider currently permits creating a root mailbox.
+    #[serde(default = "default_true")]
+    pub can_create_top_level_mailbox: bool,
 }
 
 /// Full account row including server config; internal to the native application.
@@ -368,6 +376,37 @@ pub struct Address {
     pub email: String,
 }
 
+/// A provider-authorized address that may appear in an outgoing From header.
+/// Provider discovery is deliberately separate from the authenticated account
+/// identity: aliases must never replace the login/synchronization address.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderIdentity {
+    pub account_id: i64,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub reply_to_email: Option<String>,
+    pub is_primary: bool,
+    pub is_provider_default: bool,
+    /// Gmail uses `accepted` / `pending`; provider-neutral primary identities
+    /// are recorded as `accepted` as well.
+    pub verification_status: String,
+    pub last_synced_at: i64,
+}
+
+impl SenderIdentity {
+    pub fn is_verified(&self) -> bool {
+        self.is_primary || self.verification_status == "accepted"
+    }
+
+    pub fn address(&self) -> Address {
+        Address {
+            name: self.display_name.clone(),
+            email: self.email.clone(),
+        }
+    }
+}
+
 /// A contact matched by search suggestions, with its interaction affinity
 /// (send_count*3 + recv_count) so the UI can show how well-known it is.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,8 +437,8 @@ pub struct ContactRecord {
     /// Accounts that discovered this contact through sent or received mail.
     #[serde(default)]
     pub account_ids: Vec<i64>,
-    /// User-managed contacts remain available from every account scope, just
-    /// like account-scoped compose autocomplete.
+    /// True for a saved address-book entry, whether managed locally or backed
+    /// by CardDAV. False identifies a mail-derived suggestion.
     #[serde(default)]
     pub is_managed: bool,
 }
@@ -418,8 +457,11 @@ pub struct ContactRecordCursor {
 pub struct ContactRecordPage {
     pub records: Vec<ContactRecord>,
     pub next_cursor: Option<ContactRecordCursor>,
+    /// Saved/manual and CardDAV-backed address-book entries.
     pub total_count: usize,
     pub favorite_count: usize,
+    /// Mail-derived people that have not been promoted to the address book.
+    pub suggestion_count: usize,
     pub account_counts: Vec<(i64, usize)>,
 }
 
@@ -478,6 +520,8 @@ pub struct ThreadSummary {
     pub id: i64,
     pub account_id: i64,
     pub account_email: String,
+    /// Verified addresses owned by this account, including send-as aliases.
+    pub account_addresses: Vec<String>,
     pub subject: String,
     pub snippet: String,
     pub participants: Vec<Address>,
@@ -728,6 +772,10 @@ pub struct DraftAttachmentIn {
 pub struct SaveDraftArgs {
     pub draft_id: Option<i64>,
     pub account_id: i64,
+    /// Requested provider-authorized From identity. `None` resolves to the
+    /// account's configured default sender (then the provider/primary default).
+    #[serde(default)]
+    pub from: Option<Address>,
     pub to: Vec<Address>,
     pub cc: Vec<Address>,
     pub bcc: Vec<Address>,
@@ -813,6 +861,9 @@ pub struct SplitRule {
 pub struct FolderInfo {
     pub id: i64,
     pub account_id: i64,
+    /// Stable local id of the parent mailbox. `None` means a top-level mailbox
+    /// or an older cached row whose hierarchy has not been rediscovered yet.
+    pub parent_id: Option<i64>,
     /// Unicode name suitable for display. `imap_name` remains the exact remote
     /// identifier used in SELECT and other protocol commands.
     pub display_name: String,
@@ -821,6 +872,12 @@ pub struct FolderInfo {
     /// IMAP hierarchy delimiter (e.g. "/" or "."), for nesting user folders.
     pub delimiter: Option<String>,
     pub role: Option<String>,
+    /// False for IMAP hierarchy containers advertised with `\\Noselect` and
+    /// other provider mailboxes intentionally excluded from message sync.
+    pub selectable: bool,
+    pub can_create_children: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1091,6 +1148,10 @@ pub struct Settings {
     /// the preference; accept it so development builds upgrade cleanly.
     #[serde(default = "default_workspace_layout", alias = "mailLayout")]
     pub workspace_layout: String,
+    /// Shared logical-pixel width of the mail, contacts, and files list pane.
+    /// The established layout width remains the default and hard minimum.
+    #[serde(default = "default_workspace_list_pane_width")]
+    pub workspace_list_pane_width: i64,
     /// Render mailbox and folder icons with a single neutral color instead of
     /// the default semantic palette.
     #[serde(default)]
@@ -1203,6 +1264,20 @@ pub struct Settings {
     /// off (default) scopes suggestions to the account you're sending from.
     #[serde(default)]
     pub contact_suggest_all_accounts: bool,
+    /// Learn addresses from messages the user sends so they can be offered as
+    /// compose suggestions. These remain local suggestions until explicitly
+    /// promoted to the address book.
+    #[serde(default = "default_true")]
+    pub collect_outgoing_contacts: bool,
+    /// Learn human senders from received mail. Off by default because inboxes
+    /// contain newsletters, receipts, and unsolicited mail that should not
+    /// silently become part of the user's people data.
+    #[serde(default)]
+    pub collect_incoming_contacts: bool,
+    /// Include locally learned people alongside saved contacts in compose and
+    /// contact-aware search suggestions.
+    #[serde(default = "default_true")]
+    pub suggest_learned_contacts: bool,
     /// Show the unread count on the app icon (macOS Dock badge).
     #[serde(default = "default_true")]
     pub dock_badge_enabled: bool,
@@ -1319,6 +1394,16 @@ fn default_notification_scope() -> String {
 fn default_workspace_layout() -> String {
     "default".into()
 }
+pub const MIN_WORKSPACE_LIST_PANE_WIDTH: i64 = 390;
+pub const MAX_WORKSPACE_LIST_PANE_WIDTH: i64 = 8192;
+
+fn default_workspace_list_pane_width() -> i64 {
+    MIN_WORKSPACE_LIST_PANE_WIDTH
+}
+
+pub fn normalized_workspace_list_pane_width(width: i64) -> i64 {
+    width.clamp(MIN_WORKSPACE_LIST_PANE_WIDTH, MAX_WORKSPACE_LIST_PANE_WIDTH)
+}
 fn default_theme_preset() -> String {
     "default".into()
 }
@@ -1331,6 +1416,7 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             workspace_layout: default_workspace_layout(),
+            workspace_list_pane_width: default_workspace_list_pane_width(),
             monochrome_sidebar_icons: false,
             language: "system".into(),
             calendar_week_start: default_calendar_week_start(),
@@ -1368,6 +1454,9 @@ impl Default for Settings {
             ai_tier_categorize: default_tier_instant(),
             group_by_date: true,
             contact_suggest_all_accounts: false,
+            collect_outgoing_contacts: true,
+            collect_incoming_contacts: false,
+            suggest_learned_contacts: true,
             dock_badge_enabled: true,
             dock_badge_source: default_badge_source(),
             notification_scope: default_notification_scope(),
@@ -1633,6 +1722,7 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.workspace_layout, "default");
+        assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
     }
 
     #[test]
@@ -1645,6 +1735,23 @@ mod tests {
 
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
+        assert_eq!(
+            serialized["workspaceListPaneWidth"],
+            MIN_WORKSPACE_LIST_PANE_WIDTH
+        );
         assert!(serialized.get("mailLayout").is_none());
+    }
+
+    #[test]
+    fn workspace_list_pane_width_is_bounded() {
+        assert_eq!(
+            normalized_workspace_list_pane_width(120),
+            MIN_WORKSPACE_LIST_PANE_WIDTH
+        );
+        assert_eq!(normalized_workspace_list_pane_width(640), 640);
+        assert_eq!(
+            normalized_workspace_list_pane_width(i64::MAX),
+            MAX_WORKSPACE_LIST_PANE_WIDTH
+        );
     }
 }

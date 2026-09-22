@@ -3,7 +3,7 @@ use super::*;
 use flectar_mail_core::{
     Core,
     mail_security::{MailSecurity, OpenedMessage},
-    models::{Settings, Signature, SignatureDefaults},
+    models::{AccountConfig, SenderIdentity, Settings, Signature, SignatureDefaults},
 };
 use slint::SharedString;
 use std::{cell::Cell, future::Future};
@@ -123,6 +123,113 @@ fn project(app: &AppWindow, settings: &Settings, account_id: i64) {
     ui.set_reply_index(index(defaults.reply_id));
 }
 
+fn identity_label(identity: &SenderIdentity) -> String {
+    match identity
+        .display_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        Some(name) if !name.eq_ignore_ascii_case(&identity.email) => {
+            format!("{name}  <{}>", identity.email)
+        }
+        _ => identity.email.clone(),
+    }
+}
+
+fn verified_identities(identities: &[SenderIdentity]) -> Vec<SenderIdentity> {
+    identities
+        .iter()
+        .filter(|identity| identity.is_verified())
+        .cloned()
+        .collect()
+}
+
+fn project_identities(
+    app: &AppWindow,
+    config: &AccountConfig,
+    identities: &[SenderIdentity],
+    refresh_warning: Option<&str>,
+) {
+    let ui = app.global::<AccountMailPreferences>();
+    let verified = verified_identities(identities);
+    let choices = verified
+        .iter()
+        .map(|identity| SenderIdentityChoice {
+            email: identity.email.clone().into(),
+            label: identity_label(identity).into(),
+        })
+        .collect::<Vec<_>>();
+    ui.set_sender_identity_names(ModelRc::new(VecModel::from(
+        choices
+            .iter()
+            .map(|identity| identity.label.clone())
+            .collect::<Vec<_>>(),
+    )));
+    ui.set_sender_identities(ModelRc::new(VecModel::from(choices)));
+    let configured = config.settings.default_sender_email.as_deref();
+    let index = configured
+        .and_then(|email| {
+            verified
+                .iter()
+                .position(|identity| identity.email.eq_ignore_ascii_case(email))
+        })
+        .or_else(|| {
+            verified
+                .iter()
+                .position(|identity| identity.is_provider_default)
+        })
+        .or_else(|| verified.iter().position(|identity| identity.is_primary))
+        .unwrap_or(0);
+    ui.set_default_sender_index(i32::try_from(index).unwrap_or(0));
+    let pending = identities
+        .iter()
+        .filter(|identity| !identity.is_verified())
+        .count();
+    let status = if let Some(warning) = refresh_warning {
+        format!("Using cached identities: {warning}")
+    } else if pending > 0 {
+        format!(
+            "{pending} sender {} awaiting provider verification and cannot be selected.",
+            if pending == 1 {
+                "identity is"
+            } else {
+                "identities are"
+            }
+        )
+    } else if verified.len() > 1 {
+        format!("{} verified sender identities available.", verified.len())
+    } else {
+        "Only the authenticated account address is available.".to_owned()
+    };
+    ui.set_sender_identity_status(status.into());
+}
+
+async fn refreshed_preferences(
+    core: &Core,
+    account_id: i64,
+) -> Result<
+    (
+        Settings,
+        Vec<AccountConfig>,
+        Vec<SenderIdentity>,
+        Option<String>,
+    ),
+    String,
+> {
+    let (identities, warning) = match core.refresh_sender_identities(account_id).await {
+        Ok(identities) => (identities, None),
+        Err(error) => (
+            core.list_sender_identities(account_id)
+                .await
+                .map_err(|cached_error| cached_error.to_string())?,
+            Some(error.to_string()),
+        ),
+    };
+    let (settings, configs) = preferences(core).await?;
+    Ok((settings, configs, identities, warning))
+}
+
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -177,6 +284,10 @@ pub(super) fn register(
         ui.set_signatures(ModelRc::default());
         ui.set_signature_names(ModelRc::default());
         ui.set_default_names(ModelRc::default());
+        ui.set_sender_identities(ModelRc::default());
+        ui.set_sender_identity_names(ModelRc::default());
+        ui.set_default_sender_index(0);
+        ui.set_sender_identity_status("".into());
         ui.invoke_edit_signature(-1);
         ui.set_fingerprint("".into());
         ui.set_recipient_keys("".into());
@@ -200,17 +311,18 @@ pub(super) fn register(
         work.spawn(
             &app,
             true,
-            async move { preferences(&core).await },
+            async move { refreshed_preferences(&core, i64::from(id)).await },
             move |app, result| {
                 let ui = app.global::<AccountMailPreferences>();
                 match result {
-                    Ok((settings, configs)) => {
+                    Ok((settings, configs, identities, warning)) => {
                         if let Some(config) = configs.iter().find(|c| c.id == i64::from(id)) {
                             ui.set_account_id(id);
                             ui.set_account_label(config.email.clone().into());
                             ui.set_status("".into());
                             ui.set_key_inventory("".into());
                             project(&app, &settings, config.id);
+                            project_identities(&app, config, &identities, warning.as_deref());
                             ui.invoke_edit_signature(-1);
                             let p = &config.settings.security;
                             ui.set_fingerprint(p.signing_fingerprint.clone().into());
@@ -229,6 +341,68 @@ pub(super) fn register(
                     Err(e) => ui.set_status(e.into()),
                 }
             },
+        );
+    });
+    let weak = app.as_weak();
+    let state_refresh_identities = state.clone();
+    let work = tasks.clone();
+    ui.on_refresh_sender_identities(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_busy() || ui.get_account_id() <= 0 {
+            return;
+        }
+        let account_id = i64::from(ui.get_account_id());
+        let Some(core) = core(&state_refresh_identities) else {
+            return;
+        };
+        work.spawn(
+            &app,
+            true,
+            async move { refreshed_preferences(&core, account_id).await },
+            move |app, result| match result {
+                Ok((_settings, configs, identities, warning)) => {
+                    if let Some(config) = configs.iter().find(|config| config.id == account_id) {
+                        project_identities(&app, config, &identities, warning.as_deref());
+                        app.global::<AccountMailPreferences>()
+                            .set_status("Sender identities refreshed.".into());
+                    }
+                }
+                Err(error) => app
+                    .global::<AccountMailPreferences>()
+                    .set_status(error.into()),
+            },
+        );
+    });
+    let weak = app.as_weak();
+    let state_sender_default = state.clone();
+    let work = tasks.clone();
+    ui.on_save_default_sender(move || {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        if ui.get_busy() || ui.get_account_id() <= 0 {
+            return;
+        }
+        let Some(identity) = usize::try_from(ui.get_default_sender_index())
+            .ok()
+            .and_then(|index| ui.get_sender_identities().row_data(index))
+        else {
+            ui.set_status("Choose a verified sender identity.".into());
+            return;
+        };
+        let account_id = i64::from(ui.get_account_id());
+        let Some(core) = core(&state_sender_default) else {
+            return;
+        };
+        work.spawn(
+            &app,
+            true,
+            async move {
+                core.set_default_sender_identity(account_id, identity.email.to_string())
+                    .await
+                    .map_err(|error| error.to_string())
+            },
+            |app, result| status(&app, result, "Default sender identity saved."),
         );
     });
     let weak = app.as_weak();
@@ -700,6 +874,10 @@ fn register_composer(
             let ui = app.global::<AccountMailPreferences>();
             ui.set_composer_signature_names(ModelRc::default());
             ui.set_composer_signature_index(0);
+            ui.set_composer_sender_identities(ModelRc::default());
+            ui.set_composer_sender_names(ModelRc::default());
+            ui.set_composer_sender_index(0);
+            ui.set_composer_sender_email("".into());
             ui.set_composer_security("".into());
             ui.set_composer_preferences_ready(false);
         }
@@ -714,6 +892,8 @@ fn register_composer(
         let ui = app.global::<AccountMailPreferences>();
         ui.set_composer_preferences_ready(false);
         ui.set_composer_signature_names(ModelRc::default());
+        ui.set_composer_sender_identities(ModelRc::default());
+        ui.set_composer_sender_names(ModelRc::default());
         ui.set_composer_security("".into());
         let Some(core) = core(&state) else { return };
         generation.set(generation.get().wrapping_add(1));
@@ -724,40 +904,88 @@ fn register_composer(
         work.spawn(
             &app,
             false,
-            async move { preferences(&core).await },
+            async move { refreshed_preferences(&core, i64::from(account_id)).await },
             move |app, result| {
                 if generation.get() != expected || app.get_compose_account_id() != account_id {
                     return;
                 }
                 let ui = app.global::<AccountMailPreferences>();
                 match result {
-                    Ok((settings, configs)) => {
-                        if !configs.iter().any(|c| c.id == i64::from(account_id)) {
+                    Ok((settings, configs, identities, warning)) => {
+                        let Some(config) = configs
+                            .iter()
+                            .find(|config| config.id == i64::from(account_id))
+                        else {
                             return;
-                        }
+                        };
+                        let identities = verified_identities(&identities);
+                        let sender_choices = identities
+                            .iter()
+                            .map(|identity| SenderIdentityChoice {
+                                email: identity.email.clone().into(),
+                                label: identity_label(identity).into(),
+                            })
+                            .collect::<Vec<_>>();
+                        ui.set_composer_sender_names(ModelRc::new(VecModel::from(
+                            sender_choices
+                                .iter()
+                                .map(|identity| identity.label.clone())
+                                .collect::<Vec<_>>(),
+                        )));
+                        ui.set_composer_sender_identities(ModelRc::new(VecModel::from(
+                            sender_choices,
+                        )));
+                        let requested = ui.get_composer_sender_email().to_string();
+                        let default_email = config.settings.default_sender_email.as_deref();
+                        let sender_index = (!requested.is_empty())
+                            .then(|| {
+                                identities.iter().position(|identity| {
+                                    identity.email.eq_ignore_ascii_case(&requested)
+                                })
+                            })
+                            .flatten()
+                            .or_else(|| {
+                                default_email.and_then(|email| {
+                                    identities.iter().position(|identity| {
+                                        identity.email.eq_ignore_ascii_case(email)
+                                    })
+                                })
+                            })
+                            .or_else(|| {
+                                identities
+                                    .iter()
+                                    .position(|identity| identity.is_provider_default)
+                            })
+                            .or_else(|| identities.iter().position(|identity| identity.is_primary))
+                            .unwrap_or(0);
                         ui.set_composer_preferences_ready(true);
+                        ui.invoke_composer_sender(i32::try_from(sender_index).unwrap_or(0));
                         let signatures = choices(&settings, i64::from(account_id));
                         let mut names = vec![SharedString::from("No signature")];
                         names.extend(signatures.iter().map(|s| SharedString::from(&s.name)));
                         ui.set_composer_signature_names(ModelRc::new(VecModel::from(names)));
                         *list.borrow_mut() = signatures.clone();
-                        if let Some(config) = configs.iter().find(|c| c.id == i64::from(account_id))
-                        {
-                            let p = &config.settings.security;
-                            ui.set_composer_security(
-                                if p.require_encryption {
-                                    if p.sign_by_default {
-                                        "OpenPGP: encryption required · digitally signed"
-                                    } else {
-                                        "OpenPGP: encryption required"
-                                    }
-                                } else if p.sign_by_default {
-                                    "OpenPGP: digitally signed · not encrypted"
+                        let p = &config.settings.security;
+                        ui.set_composer_security(
+                            if p.require_encryption {
+                                if p.sign_by_default {
+                                    "OpenPGP: encryption required · digitally signed"
                                 } else {
-                                    "Message is not end-to-end encrypted"
+                                    "OpenPGP: encryption required"
                                 }
-                                .into(),
-                            );
+                            } else if p.sign_by_default {
+                                "OpenPGP: digitally signed · not encrypted"
+                            } else {
+                                "Message is not end-to-end encrypted"
+                            }
+                            .into(),
+                        );
+                        if let Some(warning) = warning {
+                            app.set_compose_notice(UiMessage::detail(
+                                "Could not refresh sender identities; using cached values: {}",
+                                warning,
+                            ));
+                            app.set_compose_notice_is_error(false);
                         }
                         if app.get_compose_mode() == "draft" {
                             *managed.borrow_mut() = None;
@@ -794,6 +1022,19 @@ fn register_composer(
                 }
             },
         );
+    });
+    let weak = app.as_weak();
+    ui.on_composer_sender(move |index| {
+        let Some(app) = weak.upgrade() else { return };
+        let ui = app.global::<AccountMailPreferences>();
+        let Some(identity) = usize::try_from(index)
+            .ok()
+            .and_then(|index| ui.get_composer_sender_identities().row_data(index))
+        else {
+            return;
+        };
+        ui.set_composer_sender_index(index);
+        ui.set_composer_sender_email(identity.email);
     });
     let weak = app.as_weak();
     let document = document.clone();

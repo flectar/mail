@@ -1247,5 +1247,8 @@ fn long_table_content_reflows_at_readable_zoom() {
         r.layout_width
     );
     assert_eq!(frame.width, 560);
-    assert!(frame.height > 10_000, "the complete issue body must remain reachable");
+    assert!(
+        frame.height > 10_000,
+        "the complete issue body must remain reachable"
+    );
 }

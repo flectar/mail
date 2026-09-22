@@ -357,6 +357,7 @@ struct MailMetadataUpdate {
 struct FolderMutationUpdate {
     message: UiMessage,
     metadata: Option<mail::MailMetadata>,
+    reveal_parent_id: Option<i64>,
 }
 
 struct MessageLoadUpdate {
@@ -614,6 +615,7 @@ fn standard_mailbox_folder(state: &InboxState, account_id: i64, label: &str) -> 
             !mailbox.is_account
                 && mailbox.account_id == account_id
                 && mailbox.is_standard
+                && mailbox.is_selectable
                 && mailbox.label == label
                 && mailbox.folder_id >= 0
         })
@@ -711,6 +713,9 @@ fn resolve_single_mail_drop(
                         && mailbox.folder_id == i64::from(target_folder_id)
                 })
                 .ok_or_else(|| "mailbox destination is no longer available".to_owned())?;
+            if !target.is_selectable {
+                return Err("this mailbox is a hierarchy container".to_owned());
+            }
             if target.label == message.folder {
                 return Err("message is already in this destination".to_owned());
             }
@@ -1114,6 +1119,15 @@ fn spawn_startup_load(
     metrics: StartupMetrics,
 ) {
     runtime.spawn(async move {
+        for obsolete in paths.obsolete_warm_start_files() {
+            match tokio::fs::remove_file(obsolete).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "obsolete warm-start cache cleanup failed");
+                }
+            }
+        }
         let warm = load_warm_start_snapshot(&paths.warm_start_file()).await;
         let preferred_scope = warm
             .as_ref()
@@ -1260,10 +1274,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // Register the deterministic emoji face before any initial text is measured.
     configure_emoji_font_fallback()?;
 
-    // Construct and map the window before opening or migrating either database.
-    // Until startup completes it paints the inert mailbox shell; mapping now
-    // avoids making callback wiring part of first-window latency.
+    // Construct the window before opening or migrating either database. Seed
+    // the one geometry preference visible in the inert mailbox shell through a
+    // zero-wait read-only lookup, then map the first frame at its saved width.
+    // Full settings validation still happens during normal background startup.
     let app = renderer_preferences::initialize_step(use_wgpu, AppWindow::new)?;
+    if let Some(width) = flectar_mail_core::startup_workspace_list_pane_width(&platform.paths) {
+        app.set_workspace_list_pane_width(width as f32);
+    }
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
@@ -1775,6 +1793,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         let scope = match scope.as_str() {
             "Favorites" => "Favorites".to_owned(),
+            "Suggestions" => "Suggestions".to_owned(),
             value if value.starts_with("Account:") => value.to_owned(),
             _ => "All contacts".to_owned(),
         };
@@ -1917,6 +1936,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .iter()
                 .find(|contact| contact.id == i64::from(id))
                 .cloned();
+            let promoting_suggestion = previous
+                .as_ref()
+                .is_some_and(|contact| !contact.is_managed);
             let new_contact_accounts = contacts_for_save
                 .borrow()
                 .scope
@@ -1987,6 +2009,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             if let Some(core) = core {
                 let (scope, query, generation) = {
                     let mut directory = contacts_for_save.borrow_mut();
+                    if promoting_suggestion {
+                        directory.scope = "All contacts".to_owned();
+                    }
                     directory.begin_core_query();
                     directory.selected_id = Some(saved.id);
                     let generation = contact_load_generation_for_save.get().wrapping_add(1);
@@ -1995,7 +2020,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 };
                 contacts_loading_for_save.set(true);
                 app.set_contact_loading_more(true);
-                app.set_contact_save_status(UiMessage::plain("Contact saved."));
+                app.set_contact_save_status(if promoting_suggestion {
+                    UiMessage::plain("Saved to contacts.")
+                } else {
+                    UiMessage::plain("Contact saved.")
+                });
                 apply_contact_directory(&app, &contacts_for_save);
                 spawn_contact_page(
                     &runtime_for_save,
@@ -2688,6 +2717,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 state.mailboxes = metadata.mailboxes;
                 state.unified_mailboxes = metadata.unified_mailboxes;
                 state.inbox_count = metadata.inbox_count;
+                if let Some(parent_id) = update.reveal_parent_id {
+                    state.initialized_sidebar_folders.insert(parent_id);
+                    state.collapsed_folder_ids.remove(&parent_id);
+                }
                 drop(state);
                 if let Err(error) = refresh_from_source(
                     &app,
@@ -2770,7 +2803,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not create folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: (parent_id >= 0).then_some(i64::from(parent_id)),
+                })
                 .await;
         });
     });
@@ -2797,7 +2834,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not rename folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                })
                 .await;
         });
     });
@@ -2852,7 +2893,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not delete folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                })
                 .await;
         });
     });
@@ -4630,11 +4675,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let state_for_save_label = Rc::clone(&state);
     let runtime_for_save_label = Rc::clone(&runtime);
-    app.on_save_mail_label(move |label_id, owner_account_id, name, color, global| {
+    app.on_save_mail_label(
+        move |label_id, owner_account_id, name, color, global, parent_label_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let (core, thread_id, selected_account_id) = {
+        let (core, thread_id, selected_account_id, parent_path) = {
             let state = state_for_save_label.borrow();
             let selected = state
                 .selected_id
@@ -4643,6 +4689,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 state.core.clone(),
                 selected.and_then(|message| message.thread_id),
                 selected.map(|message| message.account_id),
+                if parent_label_id >= 0 {
+                    state
+                        .labels
+                        .iter()
+                        .find(|label| {
+                            label.id == i64::from(parent_label_id)
+                                && !label.is_auto
+                                && label.owner_account_id == Some(i64::from(owner_account_id))
+                        })
+                        .map(|label| label.name.clone())
+                        .ok_or_else(|| "the parent label no longer exists".to_owned())
+                        .map(Some)
+                } else {
+                    Ok(None)
+                },
             )
         };
         let existing_id = (label_id >= 0).then_some(i64::from(label_id));
@@ -4654,9 +4715,24 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         );
         let result: Result<bool, String> = (|| {
             let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
+            let parent_path = parent_path?;
+            let leaf = name.trim();
+            if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
+                return Err(
+                    "label names cannot contain '/'; create each nesting level separately"
+                        .to_owned(),
+                );
+            }
+            let full_name = if existing_id.is_none()
+                && let Some(parent_path) = parent_path
+            {
+                format!("{}/{leaf}", parent_path.trim_end_matches('/'))
+            } else {
+                leaf.to_owned()
+            };
             let label = runtime_for_save_label.block_on(core.save_label(
                 existing_id,
-                name.as_str(),
+                &full_name,
                 color.as_str(),
                 if existing_id.is_none() && !global {
                     Some(if owner_account_id >= 0 {
@@ -4694,7 +4770,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_render_status(UiMessage::detail("Could not save label: {}", error))
             }
         }
-    });
+    },
+    );
 
     let app_weak = app.as_weak();
     let state_for_delete_label = Rc::clone(&state);
@@ -5143,6 +5220,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     translated(&app, &UiMessage::plain("Connected account")).to_string()
                 });
 
+            let draft_sender_email = draft
+                .from
+                .as_ref()
+                .map(|address| address.email.clone())
+                .unwrap_or_default();
             clear_compose(
                 &app,
                 &files_for_message_compose,
@@ -5196,6 +5278,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.global::<AccountMailPreferences>()
                 .invoke_composer_reset();
             app.global::<AccountMailPreferences>()
+                .set_composer_sender_email(draft_sender_email.into());
+            app.global::<AccountMailPreferences>()
                 .invoke_composer_account_changed(account_id);
             app.set_compose_open(true);
             return;
@@ -5239,6 +5323,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             ));
             return;
         };
+        let prepared_sender_email = prepared.sender_email.clone();
 
         clear_compose(
             &app,
@@ -5273,6 +5358,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_compose_mode(action);
         app.global::<AccountMailPreferences>()
             .invoke_composer_reset();
+        app.global::<AccountMailPreferences>()
+            .set_composer_sender_email(prepared_sender_email.into());
         app.global::<AccountMailPreferences>()
             .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
@@ -5677,10 +5764,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             document.body_html()
         };
         let intent = intent_for_save.borrow().clone();
+        let sender_email = app
+            .global::<AccountMailPreferences>()
+            .get_composer_sender_email();
+        if sender_email.is_empty() {
+            app.set_compose_notice(UiMessage::plain(
+                "Choose a verified sender identity for this message.",
+            ));
+            app.set_compose_notice_is_error(true);
+            return;
+        }
         if send {
             match runtime_for_compose.block_on(core.send_new_message(ComposeMessage {
                 draft_id: intent.draft_id,
                 account_id: i64::from(account_id),
+                sender_email: Some(sender_email.as_str()),
                 to: to.as_str(),
                 cc: cc.as_str(),
                 bcc: bcc.as_str(),
@@ -5723,6 +5821,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .block_on(core.save_new_draft(ComposeMessage {
                 draft_id: intent.draft_id,
                 account_id: i64::from(account_id),
+                sender_email: Some(sender_email.as_str()),
                 to: to.as_str(),
                 cc: cc.as_str(),
                 bcc: bcc.as_str(),
@@ -5873,7 +5972,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_imap_security(config.settings.connection.imap_security.as_str().into());
         app.set_smtp_security(config.settings.connection.smtp_security.as_str().into());
         app.set_trusted_certificate_pem(
-            config.settings.connection.trusted_certificate_pem.clone().into(),
+            config
+                .settings
+                .connection
+                .trusted_certificate_pem
+                .clone()
+                .into(),
         );
         *last_suggested_transport.borrow_mut() = Some(config);
     });

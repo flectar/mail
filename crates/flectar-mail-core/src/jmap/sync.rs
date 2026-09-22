@@ -14,7 +14,7 @@ use futures::StreamExt;
 use jmap_client::core::error::MethodErrorType;
 use jmap_client::core::response::{EmailGetResponse, MailboxGetResponse};
 use jmap_client::core::set::{SetErrorType, SetObject};
-use jmap_client::email::{Email, Property as EmailProperty};
+use jmap_client::email::{Email, Header, HeaderValue, Property as EmailProperty};
 use jmap_client::mailbox::Role;
 use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
@@ -165,11 +165,14 @@ fn finish_waiters(
 async fn persist_session(ctx: &SyncCtx, id: i64, connected: &ConnectedClient) -> Result<()> {
     let url = connected.base_url.clone();
     let remote = connected.account_id.clone();
+    let can_create_top_level_mailbox = connected.may_create_top_level_mailbox;
     ctx.db
         .write(move |conn| {
             conn.execute(
-                "UPDATE accounts SET jmap_url=?2, jmap_account_id=?3 WHERE id=?1",
-                params![id, url, remote],
+                "UPDATE accounts
+                 SET jmap_url=?2, jmap_account_id=?3, can_create_top_level_mailbox=?4
+                 WHERE id=?1",
+                params![id, url, remote, can_create_top_level_mailbox],
             )?;
             Ok(())
         })
@@ -246,18 +249,40 @@ async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) 
     ctx.db
         .write(move |conn| {
             let tx = conn.transaction()?;
+            let mut local_ids = HashMap::with_capacity(mailboxes.len());
             for mailbox in mailboxes {
                 let id = mailbox.id().ok_or_else(|| {
                     CoreError::Jmap("Mailbox/get returned an object without id".into())
                 })?;
                 let display_name = mailbox_path(id, &hierarchy)?;
-                repo::folders::upsert_jmap(
+                let local_id = repo::folders::upsert_jmap(
                     &tx,
                     local_account,
                     id,
                     &display_name,
                     role(mailbox.role()),
                 )?;
+                let rights = mailbox.my_rights();
+                repo::folders::set_permissions(
+                    &tx,
+                    local_id,
+                    repo::folders::FolderPermissions {
+                        can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
+                        can_rename: rights.is_some_and(|rights| rights.may_rename()),
+                        can_delete: rights.is_some_and(|rights| rights.may_delete()),
+                    },
+                )?;
+                local_ids.insert(id.to_owned(), local_id);
+            }
+            for (remote_id, (_, parent_remote_id)) in &hierarchy {
+                let local_id = local_ids.get(remote_id).copied().ok_or_else(|| {
+                    CoreError::Jmap(format!("Mailbox {remote_id} was not persisted"))
+                })?;
+                let parent_id = parent_remote_id
+                    .as_ref()
+                    .and_then(|parent| local_ids.get(parent))
+                    .copied();
+                repo::folders::set_parent(&tx, local_id, parent_id)?;
             }
             let mut stmt = tx.prepare(
                 "SELECT id,jmap_id FROM folders WHERE account_id=?1 AND jmap_id IS NOT NULL",
@@ -460,7 +485,29 @@ fn header_properties() -> Vec<EmailProperty> {
         EmailProperty::HasAttachment,
         EmailProperty::Attachments,
         EmailProperty::Preview,
+        EmailProperty::Header(Header::as_text("Auto-Submitted", false)),
+        EmailProperty::Header(Header::as_text("List-Id", false)),
+        EmailProperty::Header(Header::as_text("Precedence", false)),
     ]
+}
+
+fn header_text<'a>(email: &'a Email, name: &str) -> Option<&'a str> {
+    match email.header(&Header::as_text(name, false)) {
+        Some(HeaderValue::AsText(value)) => Some(value.trim()),
+        _ => None,
+    }
+}
+
+fn automated_email(email: &Email) -> bool {
+    header_text(email, "Auto-Submitted")
+        .is_some_and(|value| !value.is_empty() && !value.eq_ignore_ascii_case("no"))
+        || header_text(email, "List-Id").is_some_and(|value| !value.is_empty())
+        || header_text(email, "Precedence").is_some_and(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "bulk" | "list" | "junk"
+            )
+        })
 }
 
 async fn sync_emails(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient) -> Result<()> {
@@ -548,6 +595,14 @@ async fn persist_emails(
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
+            let settings = repo::settings::get(&tx)?;
+            let (outgoing_learning_since, incoming_learning_since) =
+                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
+            let account_emails = repo::sender_identities::list(&tx, account_id)?
+                .into_iter()
+                .filter(|identity| identity.is_verified())
+                .map(|identity| identity.email.to_ascii_lowercase())
+                .collect::<HashSet<_>>();
             let mut changed_threads = HashSet::new();
             let mut stale_paths = Vec::new();
 
@@ -649,8 +704,12 @@ async fn persist_emails(
                 let is_draft = keywords.iter().any(|value| value == "$draft")
                     || primary_folder.role.as_deref() == Some(roles::DRAFTS);
                 let is_outgoing = primary_folder.role.as_deref() == Some(roles::SENT);
+                let is_automated = automated_email(&email);
                 let references = email.references().unwrap_or_default().to_vec();
                 let from = addresses(email.from()).into_iter().next();
+                let to = addresses(email.to());
+                let cc = addresses(email.cc());
+                let bcc = addresses(email.bcc());
                 let blob_id = Some(
                     email
                         .blob_id()
@@ -679,6 +738,33 @@ async fn persist_emails(
                     }
                     continue;
                 }
+                let inserted = existing.is_none();
+                let is_junk = folders.iter().any(|folder| {
+                    matches!(folder.role.as_deref(), Some(roles::SPAM) | Some(roles::TRASH))
+                });
+                if inserted
+                    && is_outgoing
+                    && settings.collect_outgoing_contacts
+                    && date >= outgoing_learning_since
+                {
+                    let mut harvested_addresses = HashSet::new();
+                    for address in to.iter().chain(cc.iter()).chain(bcc.iter()) {
+                        let email = address.email.to_ascii_lowercase();
+                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
+                            repo::contacts::harvest(&tx, account_id, address, true, date)?;
+                        }
+                    }
+                } else if inserted
+                    && !is_outgoing
+                    && settings.collect_incoming_contacts
+                    && date >= incoming_learning_since
+                    && !is_junk
+                    && !is_automated
+                    && let Some(sender) = &from
+                    && !crate::mime::robot_sender(&sender.email)
+                {
+                    repo::contacts::harvest(&tx, account_id, sender, false, date)?;
+                }
                 let mut pending_keywords = false;
                 let mut pending_mailboxes = false;
                 let local_id;
@@ -691,15 +777,15 @@ async fn persist_emails(
                         stale_paths.push(path);
                     }
                     tx.execute(
-                        "UPDATE messages SET thread_id=?2, folder_id=CASE WHEN ?20 THEN folder_id ELSE ?3 END,
+                        "UPDATE messages SET thread_id=?2, folder_id=CASE WHEN ?21 THEN folder_id ELSE ?3 END,
                            message_id=?4, subject=?5, from_name=?6, from_addr=?7, to_json=?8,
                            cc_json=?9, bcc_json=?10, date=?11, internal_date=?11,
-                           is_read=CASE WHEN ?21 THEN is_read ELSE ?12 END,
-                           is_starred=CASE WHEN ?21 THEN is_starred ELSE ?13 END,
-                           is_draft=?14, is_outgoing=?15, has_attachments=?16, size=?17,
-                           snippet=?18, jmap_blob_id=?19,
-                           body_state=CASE WHEN jmap_blob_id IS NOT ?19 THEN 'none' ELSE body_state END,
-                           raw_path=CASE WHEN jmap_blob_id IS NOT ?19 THEN NULL ELSE raw_path END
+                           is_read=CASE WHEN ?22 THEN is_read ELSE ?12 END,
+                           is_starred=CASE WHEN ?22 THEN is_starred ELSE ?13 END,
+                           is_draft=?14, is_outgoing=?15, is_automated=?16,
+                           has_attachments=?17, size=?18, snippet=?19, jmap_blob_id=?20,
+                           body_state=CASE WHEN jmap_blob_id IS NOT ?20 THEN 'none' ELSE body_state END,
+                           raw_path=CASE WHEN jmap_blob_id IS NOT ?20 THEN NULL ELSE raw_path END
                          WHERE id=?1",
                         params![
                             existing.id,
@@ -709,14 +795,15 @@ async fn persist_emails(
                             subject,
                             from.as_ref().and_then(|value| value.name.clone()),
                             from.as_ref().map(|value| value.email.clone()),
-                            serde_json::to_string(&addresses(email.to()))?,
-                            serde_json::to_string(&addresses(email.cc()))?,
-                            serde_json::to_string(&addresses(email.bcc()))?,
+                            serde_json::to_string(&to)?,
+                            serde_json::to_string(&cc)?,
+                            serde_json::to_string(&bcc)?,
                             date,
                             is_read as i64,
                             is_starred as i64,
                             is_draft as i64,
                             is_outgoing as i64,
+                            is_automated as i64,
                             email.has_attachment() as i64,
                             size,
                             email.preview().unwrap_or_default(),
@@ -754,16 +841,16 @@ async fn persist_emails(
                         gm_thrid: None,
                         subject,
                         from,
-                        to: addresses(email.to()),
-                        cc: addresses(email.cc()),
-                        bcc: addresses(email.bcc()),
+                        to,
+                        cc,
+                        bcc,
                         date,
                         internal_date: Some(date),
                         is_read,
                         is_starred,
                         is_draft,
                         is_outgoing,
-                        is_automated: false,
+                        is_automated,
                         has_attachments: email.has_attachment(),
                         size: Some(size),
                         snippet: email.preview().unwrap_or_default().to_owned(),
@@ -1339,16 +1426,14 @@ async fn build_draft_message(
             .await?,
         });
     }
-    let domain = config
+    let domain = detail
+        .from
         .email
         .rsplit_once('@')
         .map(|(_, value)| value)
         .unwrap_or("localhost");
     let outgoing = crate::mime::OutgoingMessage {
-        from: Address {
-            name: config.display_name.clone(),
-            email: config.email.clone(),
-        },
+        from: detail.from.clone(),
         to: &detail.to,
         cc: &detail.cc,
         bcc: &bcc,
@@ -1573,6 +1658,10 @@ async fn send_action(
             .ids()
             .is_empty();
     if !already_submitted {
+        let sender_email = ctx
+            .db
+            .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
+            .await?;
         let mut identity_request = c.client.build();
         identity_request.get_identity().account_id(&c.account_id);
         let identities = identity_request
@@ -1585,13 +1674,13 @@ async fn send_action(
             .find(|identity| {
                 identity
                     .email()
-                    .is_some_and(|email| identity_matches(email, &config.email))
+                    .is_some_and(|email| identity_matches(email, &sender_email))
             })
             .and_then(|identity| identity.id())
             .ok_or_else(|| {
                 CoreError::Jmap(format!(
                     "server has no JMAP sending identity for {}",
-                    config.email
+                    sender_email
                 ))
             })?
             .to_owned();
@@ -1619,6 +1708,8 @@ async fn send_action(
         })
         .await?
         .ok_or_else(|| CoreError::Jmap("local Sent mailbox projection is missing".into()))?;
+    let account_id = config.id;
+    let sent_at = now_ms();
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
@@ -1626,7 +1717,7 @@ async fn send_action(
             tx.execute(
                 "UPDATE messages SET is_draft=0,is_outgoing=1,is_read=1,
                   folder_id=?2,date=?3 WHERE id=?1",
-                params![draft_id, sent_folder_id, now_ms()],
+                params![draft_id, sent_folder_id, sent_at],
             )?;
             repo::gmail::set_message_folders(&tx, draft_id, &[sent_folder_id])?;
             tx.execute(
@@ -1639,6 +1730,7 @@ async fn send_action(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             repo::search::index_message(&tx, draft_id)?;
+            repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
             tx.commit()?;
             Ok((thread_id, staged_paths))
         })

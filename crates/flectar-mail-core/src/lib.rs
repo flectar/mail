@@ -29,6 +29,7 @@ pub mod queue;
 pub mod route;
 pub mod scheduler;
 pub mod search;
+pub mod sender_identities;
 pub mod signatures;
 pub mod smtp;
 pub mod sync;
@@ -114,6 +115,14 @@ fn validate_folder_leaf(value: &str) -> Result<String> {
 
 pub use crate::db::repo::notifications::{NotificationOutboxItem, RoutedTab};
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
+
+/// Read the pane width needed to lay out the first application frame.
+///
+/// This is a best-effort presentation bootstrap. Normal core startup remains
+/// authoritative for loading and validating the complete settings model.
+pub fn startup_workspace_list_pane_width(paths: &Paths) -> Option<i64> {
+    db::startup_workspace_list_pane_width(&paths.db_file())
+}
 
 fn normalize_account_email(value: &str) -> Option<String> {
     let value = value.trim();
@@ -2669,7 +2678,7 @@ impl Core {
         let name = validate_folder_leaf(&name)?;
         let config = self.folder_account_config(account_id).await?;
         let parent = match parent_folder_id {
-            Some(folder_id) => Some(self.editable_folder(account_id, folder_id).await?),
+            Some(folder_id) => Some(self.folder_for_child(account_id, folder_id).await?),
             None => None,
         };
         if config.provider == Provider::Gmail {
@@ -2688,12 +2697,24 @@ impl Core {
                 credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
                     .await?;
             let connected = jmap::client::connect(&config, &secret).await?;
+            if parent.is_none() && !connected.may_create_top_level_mailbox {
+                return Err(CoreError::Other(
+                    "the server does not allow creating top-level mailboxes".into(),
+                ));
+            }
             let parent_remote = parent.as_ref().and_then(|folder| folder.jmap_id.clone());
+            let parent_local_id = parent.as_ref().map(|folder| folder.id);
             let mailbox = connected
                 .client
                 .mailbox_create(&name, parent_remote, jmap_client::mailbox::Role::None)
                 .await
                 .map_err(jmap::client::map_error)?;
+            let rights = mailbox.my_rights();
+            let permissions = repo::folders::FolderPermissions {
+                can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
+                can_rename: rights.is_some_and(|rights| rights.may_rename()),
+                can_delete: rights.is_some_and(|rights| rights.may_delete()),
+            };
             let remote_id = mailbox
                 .id()
                 .ok_or_else(|| CoreError::Jmap("Mailbox/set returned no id".into()))?
@@ -2704,7 +2725,15 @@ impl Core {
                 .unwrap_or(name);
             self.db
                 .write(move |conn| {
-                    repo::folders::upsert_jmap(conn, account_id, &remote_id, &display_path, None)?;
+                    let folder_id = repo::folders::upsert_jmap(
+                        conn,
+                        account_id,
+                        &remote_id,
+                        &display_path,
+                        None,
+                    )?;
+                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
+                    repo::folders::set_permissions(conn, folder_id, permissions)?;
                     Ok(())
                 })
                 .await?;
@@ -2730,6 +2759,7 @@ impl Core {
                 )));
             }
             let encoded_leaf = imap::encode_mailbox_name(&name);
+            let parent_local_id = parent.as_ref().map(|folder| folder.id);
             let remote_name = parent
                 .as_ref()
                 .map(|parent| format!("{}{delimiter}{encoded_leaf}", parent.imap_name))
@@ -2739,7 +2769,14 @@ impl Core {
             imap::logout(session).await;
             self.db
                 .write(move |conn| {
-                    repo::folders::upsert(conn, account_id, &remote_name, Some(&delimiter), None)?;
+                    let folder_id = repo::folders::upsert(
+                        conn,
+                        account_id,
+                        &remote_name,
+                        Some(&delimiter),
+                        None,
+                    )?;
+                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
                     Ok(())
                 })
                 .await?;
@@ -2757,6 +2794,11 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
         if folder.role.is_some() {
             return Err(CoreError::Other("system folders cannot be renamed".into()));
+        }
+        if !folder.can_rename {
+            return Err(CoreError::Other(
+                "the server does not allow renaming this folder".into(),
+            ));
         }
         let account_id = folder.account_id;
         let config = self.folder_account_config(account_id).await?;
@@ -2827,6 +2869,11 @@ impl Core {
         if folder.role.is_some() {
             return Err(CoreError::Other("system folders cannot be deleted".into()));
         }
+        if !folder.can_delete {
+            return Err(CoreError::Other(
+                "the server does not allow deleting this folder".into(),
+            ));
+        }
         let account_id = folder.account_id;
         let config = self.folder_account_config(account_id).await?;
         let delimiter = if config.mail_protocol == MailProtocol::Jmap {
@@ -2896,7 +2943,7 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
     }
 
-    async fn editable_folder(
+    async fn folder_for_child(
         &self,
         account_id: i64,
         folder_id: i64,
@@ -2911,9 +2958,9 @@ impl Core {
                 "parent folder belongs to another account".into(),
             ));
         }
-        if folder.role.is_some() {
+        if !folder.can_create_children {
             return Err(CoreError::Other(
-                "system folders cannot contain subfolders here".into(),
+                "the server does not allow subfolders inside this folder".into(),
             ));
         }
         Ok(folder)
@@ -3115,6 +3162,16 @@ impl Core {
     }
 
     pub async fn save_draft(&self, args: SaveDraftArgs) -> Result<i64> {
+        // Resolve the visible From address independently of the authenticated
+        // account identity. Only provider-discovered, verified identities can
+        // cross this boundary; the canonical provider display name is stored.
+        let sender = self
+            .resolve_sender_identity(
+                args.account_id,
+                args.from.as_ref().map(|address| address.email.as_str()),
+            )
+            .await?
+            .address();
         // Stage every attachment into an app-managed dir up front, so the paths
         // persisted to `draft_attachments` (and later read at dispatch) are
         // always files the app itself copied - never an arbitrary path handed
@@ -3245,7 +3302,8 @@ impl Core {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
-                                    bcc_json = ?5, date = ?6 WHERE id = ?1 AND is_draft = 1",
+                                    bcc_json = ?5, date = ?6, from_name = ?7, from_addr = ?8
+                              WHERE id = ?1 AND account_id = ?9 AND is_draft = 1",
                             rusqlite::params![
                                 id,
                                 args.subject,
@@ -3253,6 +3311,9 @@ impl Core {
                                 serde_json::to_string(&args.cc)?,
                                 serde_json::to_string(&args.bcc)?,
                                 now_ms(),
+                                sender.name,
+                                sender.email,
+                                args.account_id,
                             ],
                         )?;
                         if updated != 1 {
@@ -3261,11 +3322,6 @@ impl Core {
                         id
                     }
                     None => {
-                        let account_email: String = tx.query_row(
-                            "SELECT email FROM accounts WHERE id = ?1",
-                            rusqlite::params![args.account_id],
-                            |r| r.get(0),
-                        )?;
                         let tid = match thread_id {
                             Some(t) => t,
                             None => repo::threads::create(
@@ -3283,10 +3339,7 @@ impl Core {
                             gm_msgid: None,
                             gm_thrid: None,
                             subject: args.subject.clone(),
-                            from: Some(Address {
-                                name: None,
-                                email: account_email,
-                            }),
+                            from: Some(sender.clone()),
                             to: args.to.clone(),
                             cc: args.cc.clone(),
                             bcc: args.bcc.clone(),
@@ -3422,7 +3475,8 @@ impl Core {
             .read(move |conn| {
                 let mut draft = conn
                     .query_row(
-                        "SELECT m.account_id, m.to_json, m.cc_json, m.bcc_json, m.subject,
+                        "SELECT m.account_id, m.from_name, m.from_addr,
+                                m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
                                 m.is_draft
@@ -3432,19 +3486,25 @@ impl Core {
                          WHERE m.id = ?1",
                         rusqlite::params![draft_id],
                         |row| {
-                            let is_draft = row.get::<_, i64>(9)? != 0;
+                            let is_draft = row.get::<_, i64>(11)? != 0;
+                            let from_name = row.get::<_, Option<String>>(1)?;
+                            let from_email = row.get::<_, Option<String>>(2)?;
                             Ok((
                                 SaveDraftArgs {
                                     draft_id: Some(draft_id),
                                     account_id: row.get(0)?,
-                                    to: repo::parse_json_column(&row.get::<_, String>(1)?, 1)?,
-                                    cc: repo::parse_json_column(&row.get::<_, String>(2)?, 2)?,
-                                    bcc: repo::parse_json_column(&row.get::<_, String>(3)?, 3)?,
-                                    subject: row.get(4)?,
-                                    body_text: row.get(5)?,
-                                    body_html: row.get(6)?,
-                                    mode: row.get(7)?,
-                                    in_reply_to_message_id: row.get(8)?,
+                                    from: from_email.map(|email| Address {
+                                        name: from_name,
+                                        email,
+                                    }),
+                                    to: repo::parse_json_column(&row.get::<_, String>(3)?, 3)?,
+                                    cc: repo::parse_json_column(&row.get::<_, String>(4)?, 4)?,
+                                    bcc: repo::parse_json_column(&row.get::<_, String>(5)?, 5)?,
+                                    subject: row.get(6)?,
+                                    body_text: row.get(7)?,
+                                    body_html: row.get(8)?,
+                                    mode: row.get(9)?,
+                                    in_reply_to_message_id: row.get(10)?,
                                     attachments: Vec::new(),
                                 },
                                 is_draft,
@@ -3672,7 +3732,15 @@ impl Core {
                 let mut recipients = detail.to;
                 recipients.extend(detail.cc);
                 recipients.extend(serde_json::from_str::<Vec<Address>>(&bcc)?);
-                Ok((config.settings.security, config.email, recipients))
+                let sender = detail.from.email;
+                if repo::sender_identities::get_verified(conn, detail.account_id, &sender)?
+                    .is_none()
+                {
+                    return Err(CoreError::Other(format!(
+                        "{sender} is not an authorized sender identity for this account"
+                    )));
+                }
+                Ok((config.settings.security, sender, recipients))
             })
             .await?;
         crate::mail_security::Gpg::default()
@@ -3892,7 +3960,19 @@ impl Core {
     ) -> Result<Vec<Address>> {
         self.db
             .read(move |conn| {
-                repo::contacts::autocomplete(conn, &prefix, account_id, limit.clamp(1, 50))
+                let settings = repo::settings::get(conn)?;
+                let account_id = if settings.contact_suggest_all_accounts {
+                    None
+                } else {
+                    account_id
+                };
+                repo::contacts::autocomplete(
+                    conn,
+                    &prefix,
+                    account_id,
+                    settings.suggest_learned_contacts,
+                    limit.clamp(1, 50),
+                )
             })
             .await
     }
@@ -3907,7 +3987,16 @@ impl Core {
     ) -> Result<Vec<ContactSuggestion>> {
         let text = search::parse(&query).text;
         self.db
-            .read(move |conn| repo::contacts::suggest(conn, &text, None, limit.clamp(1, 20)))
+            .read(move |conn| {
+                let settings = repo::settings::get(conn)?;
+                repo::contacts::suggest(
+                    conn,
+                    &text,
+                    None,
+                    settings.suggest_learned_contacts,
+                    limit.clamp(1, 20),
+                )
+            })
             .await
     }
 
@@ -3929,6 +4018,7 @@ impl Core {
         query: String,
         account_id: Option<i64>,
         favorites_only: bool,
+        suggestions_only: bool,
         cursor: Option<ContactRecordCursor>,
         limit: i64,
     ) -> Result<ContactRecordPage> {
@@ -3939,11 +4029,29 @@ impl Core {
                     &query,
                     account_id,
                     favorites_only,
+                    suggestions_only,
                     cursor.as_ref(),
                     limit.clamp(1, 100),
                 )
             })
             .await
+    }
+
+    /// Clear local mail-derived people data without touching manual or
+    /// CardDAV-backed contacts.
+    pub async fn clear_contact_suggestions(&self) -> Result<usize> {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let removed = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let removed = repo::contacts::clear_suggestions(&tx, now_ms)?;
+                tx.commit()?;
+                Ok(removed)
+            })
+            .await?;
+        self.bus.emit(CoreEvent::ContactsUpdated { account_id: 0 });
+        Ok(removed)
     }
 
     pub async fn save_contact(&self, record: ContactRecord) -> Result<ContactRecord> {
@@ -3954,8 +4062,14 @@ impl Core {
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
+                let was_saved = if was_new {
+                    false
+                } else {
+                    repo::contacts::get_record(&tx, record.id)?
+                        .is_some_and(|existing| existing.is_managed)
+                };
                 let saved = repo::contacts::save_record(&tx, &record, now_ms)?;
-                if was_new {
+                if was_new || !was_saved {
                     if account_ids.len() == 1 {
                         repo::carddav::attach_new_contact(&tx, account_ids[0], saved.id)?;
                     }
@@ -4129,7 +4243,12 @@ impl Core {
             handle.abort();
         }
         self.db
-            .write(move |conn| repo::carddav::disconnect(conn, account_id))
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                repo::carddav::disconnect(&tx, account_id)?;
+                tx.commit()?;
+                Ok(())
+            })
             .await?;
         let _ =
             credentials::delete_async(self.credentials.clone(), account_id, Slot::CarddavPassword)
@@ -5220,6 +5339,7 @@ impl Core {
             .save_draft(SaveDraftArgs {
                 draft_id: None,
                 account_id,
+                from: None,
                 to,
                 cc: Vec::new(),
                 bcc: Vec::new(),
@@ -6149,17 +6269,29 @@ impl Core {
                 {
                     return Err(CoreError::NotFound(format!("account {account_id}")));
                 }
-                let label = repo::labels::save(&tx, id, &name, &color, position, owner_account_id)?;
-                let mappings = {
-                    let mut stmt = tx.prepare(
-                        "SELECT account_id, provider_id FROM gmail_labels
-                         WHERE local_label_id = ?1",
-                    )?;
-                    stmt.query_map(rusqlite::params![label.id], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-                };
+                let previous = id
+                    .map(|label_id| repo::labels::get(&tx, label_id))
+                    .transpose()?
+                    .flatten();
+                let cascade_descendants = previous
+                    .as_ref()
+                    .and_then(|label| label.owner_account_id)
+                    .map(|account_id| repo::accounts::get(&tx, account_id))
+                    .transpose()?
+                    .flatten()
+                    .is_some_and(|account| account.provider == Provider::Gmail);
+                let (label, mut changed_labels) = repo::labels::save_with_descendants(
+                    &tx,
+                    id,
+                    &name,
+                    &color,
+                    position,
+                    owner_account_id,
+                    cascade_descendants,
+                )?;
+                // Descendants are already deepest-first; update them before
+                // their root to avoid temporary Gmail name collisions.
+                changed_labels.push(label.clone());
                 let mut accounts = Vec::new();
                 if id.is_none()
                     && let Some(account_id) = label.owner_account_id
@@ -6177,22 +6309,36 @@ impl Core {
                     )?;
                     accounts.push(account_id);
                 }
-                for (account_id, provider_id) in mappings {
-                    repo::actions::enqueue(
-                        &tx,
-                        account_id,
-                        "gmail_label_update",
-                        None,
-                        None,
-                        &serde_json::json!({
-                            "providerId": provider_id,
-                            "name": label.name,
-                            "color": label.color,
-                        }),
-                        None,
-                    )?;
-                    accounts.push(account_id);
+                for changed in changed_labels {
+                    let mappings = {
+                        let mut stmt = tx.prepare(
+                            "SELECT account_id, provider_id FROM gmail_labels
+                             WHERE local_label_id = ?1",
+                        )?;
+                        stmt.query_map(rusqlite::params![changed.id], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                    };
+                    for (account_id, provider_id) in mappings {
+                        repo::actions::enqueue(
+                            &tx,
+                            account_id,
+                            "gmail_label_update",
+                            None,
+                            None,
+                            &serde_json::json!({
+                                "providerId": provider_id,
+                                "name": changed.name,
+                                "color": changed.color,
+                            }),
+                            None,
+                        )?;
+                        accounts.push(account_id);
+                    }
                 }
+                accounts.sort_unstable();
+                accounts.dedup();
                 tx.commit()?;
                 Ok((label, accounts))
             })
@@ -6208,33 +6354,65 @@ impl Core {
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                let mappings = {
-                    let mut stmt = tx.prepare(
-                        "SELECT account_id, provider_id FROM gmail_labels
-                         WHERE local_label_id = ?1",
-                    )?;
-                    stmt.query_map(rusqlite::params![id], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
+                let root = repo::labels::get(&tx, id)?;
+                let delete_subtree = root
+                    .as_ref()
+                    .and_then(|label| label.owner_account_id)
+                    .map(|account_id| repo::accounts::get(&tx, account_id))
+                    .transpose()?
+                    .flatten()
+                    .is_some_and(|account| account.provider == Provider::Gmail);
+                let labels = match root {
+                    Some(root) if delete_subtree => repo::labels::subtree(&tx, &root)?,
+                    Some(root) => vec![root],
+                    None => Vec::new(),
                 };
-                for (account_id, provider_id) in &mappings {
-                    repo::actions::enqueue(
-                        &tx,
-                        *account_id,
-                        "gmail_label_delete",
-                        None,
-                        None,
-                        &serde_json::json!({ "providerId": provider_id }),
-                        None,
-                    )?;
+                let mut accounts = Vec::new();
+                for label in &labels {
+                    let mappings = {
+                        let mut stmt = tx.prepare(
+                            "SELECT account_id, provider_id FROM gmail_labels
+                             WHERE local_label_id = ?1",
+                        )?;
+                        stmt.query_map(rusqlite::params![label.id], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                    };
+                    for (account_id, provider_id) in mappings {
+                        repo::actions::enqueue(
+                            &tx,
+                            account_id,
+                            "gmail_label_delete",
+                            None,
+                            None,
+                            &serde_json::json!({ "providerId": provider_id }),
+                            None,
+                        )?;
+                        accounts.push(account_id);
+                    }
+                    if delete_subtree && let Some(account_id) = label.owner_account_id {
+                        // If creation has not reached Gmail yet, cancelling it
+                        // is both faster and avoids manufacturing a remote
+                        // label only to delete it immediately.
+                        tx.execute(
+                            "UPDATE pending_actions
+                             SET state='cancelled', finished_at=?3
+                             WHERE account_id=?1 AND kind='gmail_label_create'
+                               AND state='pending'
+                               AND json_extract(payload, '$.labelId')=?2",
+                            rusqlite::params![account_id, label.id, now_ms()],
+                        )?;
+                        accounts.push(account_id);
+                    }
                 }
-                repo::labels::delete(&tx, id)?;
+                for label in labels {
+                    repo::labels::delete(&tx, label.id)?;
+                }
+                accounts.sort_unstable();
+                accounts.dedup();
                 tx.commit()?;
-                Ok(mappings
-                    .into_iter()
-                    .map(|(account_id, _)| account_id)
-                    .collect::<Vec<_>>())
+                Ok(accounts)
             })
             .await?;
         for account_id in accounts {
@@ -6582,14 +6760,26 @@ impl Core {
     }
 
     pub async fn set_settings(&self, settings: Settings) -> Result<()> {
+        let oauth_settings = settings.clone();
+        let now_ms = chrono::Utc::now().timestamp_millis();
         self.db
             .write(move |conn| {
-                repo::settings::set(conn, &settings)?;
-                // Keep the resolver in the same order as persisted writes.
-                apply_oauth_settings(&settings);
+                let tx = conn.transaction()?;
+                let previous = repo::settings::get(&tx)?;
+                repo::contacts::advance_learning_boundaries(
+                    &tx,
+                    !previous.collect_outgoing_contacts && settings.collect_outgoing_contacts,
+                    !previous.collect_incoming_contacts && settings.collect_incoming_contacts,
+                    now_ms,
+                )?;
+                repo::settings::set(&tx, &settings)?;
+                tx.commit()?;
                 Ok(())
             })
-            .await
+            .await?;
+        // Keep the resolver in the same order as persisted writes.
+        apply_oauth_settings(&oauth_settings);
+        Ok(())
     }
 
     /// Create or update a local mail profile without touching provider state.
@@ -7892,6 +8082,7 @@ mod draft_staging_tests {
         SaveDraftArgs {
             draft_id,
             account_id: 1,
+            from: None,
             to: Vec::new(),
             cc: Vec::new(),
             bcc: Vec::new(),

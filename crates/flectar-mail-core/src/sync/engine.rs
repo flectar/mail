@@ -1160,7 +1160,7 @@ async fn run_cycle(
     };
 
     // Sync order: inbox first, then sent/drafts, then the rest.
-    let mut ordered: Vec<&Folder> = folders.iter().collect();
+    let mut ordered: Vec<&Folder> = folders.iter().filter(|folder| folder.selectable).collect();
     ordered.sort_by_key(|f| match f.role.as_deref() {
         Some(roles::INBOX) => 0,
         Some(roles::SENT) => 1,
@@ -1250,13 +1250,74 @@ async fn discover_folders(
     let remote = imap::list_folders(session).await?;
     ctx.db
         .write(move |conn| {
+            let tx = conn.transaction()?;
+            let mut discovered = Vec::with_capacity(remote.len());
+            let mut known_names = remote
+                .iter()
+                .map(|folder| folder.name.clone())
+                .collect::<std::collections::HashSet<_>>();
             for rf in &remote {
                 let role = crate::sync::folder_map::detect_role(rf);
-                if !crate::sync::folder_map::should_sync(rf, role) {
-                    continue;
-                }
-                repo::folders::upsert(conn, account_id, &rf.name, rf.delimiter.as_deref(), role)?;
+                let selectable = crate::sync::folder_map::should_sync(rf, role);
+                let permissions = crate::sync::folder_map::permissions(rf, role);
+                let id = repo::folders::upsert_discovered(
+                    &tx,
+                    account_id,
+                    &rf.name,
+                    rf.delimiter.as_deref(),
+                    role,
+                    selectable,
+                    permissions,
+                )?;
+                discovered.push((id, rf.name.clone(), rf.delimiter.clone()));
             }
+            for rf in &remote {
+                for ancestor in crate::sync::folder_map::ancestor_names(rf) {
+                    if !known_names.insert(ancestor.clone()) {
+                        continue;
+                    }
+                    let synthetic = imap::RemoteFolder {
+                        name: ancestor,
+                        delimiter: rf.delimiter.clone(),
+                        attributes: vec!["noselect".into()],
+                    };
+                    let role = crate::sync::folder_map::detect_role(&synthetic);
+                    let id = repo::folders::upsert_discovered(
+                        &tx,
+                        account_id,
+                        &synthetic.name,
+                        synthetic.delimiter.as_deref(),
+                        role,
+                        false,
+                        repo::folders::FolderPermissions {
+                            can_create_children: synthetic
+                                .delimiter
+                                .as_deref()
+                                .is_some_and(|delimiter| !delimiter.is_empty()),
+                            can_rename: false,
+                            can_delete: false,
+                        },
+                    )?;
+                    discovered.push((id, synthetic.name, synthetic.delimiter));
+                }
+            }
+
+            // LIST may return hierarchy containers with `\\Noselect`. They are
+            // still first-class tree nodes even though they must never be
+            // selected for synchronization.
+            let ids_by_name = discovered
+                .iter()
+                .map(|(id, name, _)| (name.clone(), *id))
+                .collect::<std::collections::HashMap<_, _>>();
+            for (id, name, delimiter) in discovered {
+                let parent_id = delimiter
+                    .as_deref()
+                    .filter(|delimiter| !delimiter.is_empty())
+                    .and_then(|delimiter| name.rsplit_once(delimiter))
+                    .and_then(|(parent, _)| ids_by_name.get(parent).copied());
+                repo::folders::set_parent(&tx, id, parent_id)?;
+            }
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -1470,7 +1531,8 @@ async fn run_history_backfill(
                 Ok(f) => f,
                 Err(_) => break,
             };
-            let mut ordered: Vec<&Folder> = folders.iter().collect();
+            let mut ordered: Vec<&Folder> =
+                folders.iter().filter(|folder| folder.selectable).collect();
             ordered.sort_by_key(|f| match f.role.as_deref() {
                 Some(roles::INBOX) => 0,
                 Some(roles::SENT) => 1,
@@ -1594,6 +1656,15 @@ async fn retry_one_header_failure(
         .read(move |conn| repo::folders::get(conn, folder_id))
         .await?
         .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+    if !folder.selectable {
+        ctx.db
+            .write(move |conn| {
+                repo::sync_failures::clear_header(conn, folder_id, uid)?;
+                Ok(())
+            })
+            .await?;
+        return Ok(true);
+    }
     if session.is_none() {
         *session = Some(connect(ctx, config).await?);
     }
@@ -1821,7 +1892,6 @@ async fn store_headers(
         return Ok((Vec::new(), Vec::new()));
     }
     let account_id = config.id;
-    let account_email = config.email.to_lowercase();
     let folder_id = folder.id;
     let folder_role = folder.role.clone();
 
@@ -1831,6 +1901,13 @@ async fn store_headers(
             let settings = repo::settings::get(&tx)?;
             let auto_labels = settings.auto_labels_enabled;
             let ai_categorize = settings.ai_categorize;
+            let (outgoing_learning_since, incoming_learning_since) =
+                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
+            let account_emails = repo::sender_identities::list(&tx, account_id)?
+                .into_iter()
+                .filter(|identity| identity.is_verified())
+                .map(|identity| identity.email.to_ascii_lowercase())
+                .collect::<std::collections::HashSet<_>>();
             let mut thread_ids: Vec<i64> = Vec::new();
             let mut fresh_ids: Vec<i64> = Vec::new();
             // Threads already enqueued for a desktop notification this batch, so
@@ -1917,8 +1994,8 @@ async fn store_headers(
                     .as_ref()
                     .map(|a| a.email.to_lowercase())
                     .unwrap_or_default();
-                let is_outgoing =
-                    from_email == account_email || folder_role.as_deref() == Some(roles::SENT);
+                let is_outgoing = account_emails.contains(&from_email)
+                    || folder_role.as_deref() == Some(roles::SENT);
 
                 let thread_id =
                     crate::sync::threading::resolve_thread(&tx, account_id, &parsed, date_ms)?;
@@ -1962,13 +2039,36 @@ async fn store_headers(
                 repo::threads::recompute(&tx, thread_id)?;
                 repo::search::index_message(&tx, msg_id)?;
 
-                // Harvest contacts.
-                let when = date_ms;
-                if is_outgoing {
-                    for a in parsed.to.iter().chain(parsed.cc.iter()) {
-                        repo::contacts::harvest(&tx, account_id, a, true, when)?;
+                // Learn compose suggestions without polluting the real address
+                // book. Outgoing recipients are the useful default; incoming
+                // senders require opt-in and exclude automated/junk mail.
+                let when = fh.internal_date_ms.unwrap_or(date_ms);
+                if is_outgoing
+                    && settings.collect_outgoing_contacts
+                    && when >= outgoing_learning_since
+                {
+                    let mut harvested_addresses = std::collections::HashSet::new();
+                    for address in parsed
+                        .to
+                        .iter()
+                        .chain(parsed.cc.iter())
+                        .chain(parsed.bcc.iter())
+                    {
+                        let email = address.email.to_ascii_lowercase();
+                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
+                            repo::contacts::harvest(&tx, account_id, address, true, when)?;
+                        }
                     }
-                } else if let Some(from) = &parsed.from {
+                } else if settings.collect_incoming_contacts
+                    && when >= incoming_learning_since
+                    && !parsed.is_automated
+                    && !matches!(
+                        folder_role.as_deref(),
+                        Some(roles::SPAM) | Some(roles::TRASH)
+                    )
+                    && let Some(from) = &parsed.from
+                    && !crate::mime::robot_sender(&from.email)
+                {
                     repo::contacts::harvest(&tx, account_id, from, false, when)?;
                 }
 
@@ -2478,7 +2578,7 @@ async fn drain_missing_bodies(
             .db
             .read(move |conn| repo::folders::list(conn, Some(account_id)))
             .await?;
-        let mut ordered: Vec<&Folder> = folders.iter().collect();
+        let mut ordered: Vec<&Folder> = folders.iter().filter(|folder| folder.selectable).collect();
         ordered.sort_by_key(|f| match f.role.as_deref() {
             Some(roles::INBOX) => 0,
             Some(roles::SENT) => 1,

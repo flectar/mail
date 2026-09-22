@@ -88,9 +88,9 @@ export component ComposerFromRow inherits Rectangle {
 
             Text {
                 x: 12px;
-                width: 34px;
+                width: 60px;
                 height: parent.height;
-                text: @tr("From");
+                text: @tr("Account");
                 color: root.muted-color;
                 font-size: TypeScale.caption;
                 font-weight: 600;
@@ -98,9 +98,9 @@ export component ComposerFromRow inherits Rectangle {
             }
 
             trigger := Rectangle {
-                x: 50px;
+                x: 76px;
                 y: 5px;
-                width: min(410px, parent.width - 62px);
+                width: min(410px, parent.width - 88px);
                 height: 32px;
                 border-radius: 7px;
                 border-width: 1px;
@@ -471,7 +471,7 @@ export component ComposerSubject inherits Rectangle {
                 x: 70px;
                 width: parent.width - 82px;
                 height: parent.height;
-                text: root.subject;
+                text <=> root.subject;
                 color: root.title-color;
                 selection-background-color: root.accent-color;
                 selection-foreground-color: white;
@@ -479,6 +479,5 @@ export component ComposerSubject inherits Rectangle {
                 font-weight: 600;
                 single-line: true;
                 vertical-alignment: center;
-                edited => { root.subject = self.text; }
             }
 }

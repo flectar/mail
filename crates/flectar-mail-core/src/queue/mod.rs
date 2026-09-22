@@ -464,11 +464,23 @@ async fn send_action(
         .await?;
 
     let (refs, in_reply_to) = references;
-    let from = Address {
-        name: config.display_name.clone(),
-        email: config.email.clone(),
-    };
-    let domain = config
+    let account_id = config.id;
+    let from = ctx
+        .db
+        .read({
+            let requested = detail.from.email.clone();
+            move |conn| {
+                repo::sender_identities::get_verified(conn, account_id, &requested)?
+                    .map(|identity| identity.address())
+                    .ok_or_else(|| {
+                        CoreError::Other(format!(
+                            "{requested} is not an authorized sender identity for this account"
+                        ))
+                    })
+            }
+        })
+        .await?;
+    let domain = from
         .email
         .split('@')
         .nth(1)
@@ -612,7 +624,7 @@ async fn send_action(
         recipients = recipients.len(),
         "smtp send: dispatching",
     );
-    match smtp::send_raw(config, &auth, &config.email, &recipients, &raw).await {
+    match smtp::send_raw(config, &auth, &from.email, &recipients, &raw).await {
         Err(CoreError::Auth(_)) if config.auth_kind == AuthKind::Oauth2 => {
             // AUTH rejection happens before MAIL FROM/DATA, so it is safe to
             // invalidate an unexpectedly stale provider token and retry the
@@ -625,7 +637,7 @@ async fn send_action(
             ctx.tokens.invalidate(config.id).await;
             let retry_auth =
                 smtp::SmtpAuth::XOAuth2(ctx.tokens.access_token(config.id, config.provider).await?);
-            smtp::send_raw(config, &retry_auth, &config.email, &recipients, &raw).await?;
+            smtp::send_raw(config, &retry_auth, &from.email, &recipients, &raw).await?;
         }
         Err(error) => return Err(error),
         Ok(()) => {}
@@ -662,6 +674,7 @@ async fn send_action(
         .await?;
     // mail-parser strips angle brackets from Message-IDs; store the same form
     // so the Sent-folder sync dedupes against this row instead of duplicating.
+    let sent_at = now_ms();
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
@@ -670,7 +683,7 @@ async fn send_action(
                 "UPDATE messages SET is_draft = 0, is_outgoing = 1, is_read = 1,
                         message_id = ?2, folder_id = COALESCE(?3, folder_id), uid = NULL, date = ?4
                  WHERE id = ?1",
-                rusqlite::params![draft_id, msg_id_bare, sent_folder_id, now_ms()],
+                rusqlite::params![draft_id, msg_id_bare, sent_folder_id, sent_at],
             )?;
             tx.execute(
                 "DELETE FROM drafts_meta WHERE message_id = ?1",
@@ -683,6 +696,7 @@ async fn send_action(
                 repo::threads::recompute(&tx, tid)?;
             }
             repo::search::index_message(&tx, draft_id)?;
+            repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
             tx.commit()?;
             Ok((tid, staged_paths))
         })

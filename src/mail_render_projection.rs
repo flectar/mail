@@ -24,6 +24,10 @@ pub(super) fn fixture_mailboxes(messages: &[MailMessage]) -> Vec<MailboxEntry> {
             depth: 0,
             has_children: false,
             is_standard: false,
+            is_selectable: false,
+            can_create_children: true,
+            can_rename: false,
+            can_delete: false,
             label: account.clone(),
             scope: account.clone(),
             context: account.clone(),
@@ -45,6 +49,10 @@ pub(super) fn fixture_mailboxes(messages: &[MailMessage]) -> Vec<MailboxEntry> {
                 depth: 0,
                 has_children: false,
                 is_standard: true,
+                is_selectable: true,
+                can_create_children: false,
+                can_rename: false,
+                can_delete: false,
                 label: label.to_owned(),
                 scope: format!("{account} / {label}"),
                 context: account.clone(),
@@ -83,6 +91,10 @@ pub(super) fn fixture_mailboxes(messages: &[MailMessage]) -> Vec<MailboxEntry> {
                 depth: 0,
                 has_children: false,
                 is_standard: false,
+                is_selectable: true,
+                can_create_children: true,
+                can_rename: true,
+                can_delete: true,
                 label: folder.clone(),
                 scope: format!("{account} / {folder}"),
                 context: account.clone(),
@@ -185,7 +197,6 @@ pub(super) fn apply_email(
     reader.set_body_pending(email.body_pending);
     reader.set_authored_text(email.text.clone().unwrap_or_default().into());
     let same_message = reader.get_message_id() == email.id;
-    crate::attachment_controller::project(app, &email, same_message);
     let mut scroll = if same_message {
         app.get_email_scroll_y()
     } else {
@@ -202,6 +213,7 @@ pub(super) fn apply_email(
         reader.set_notice("".into());
         reader.set_destination("".into());
     }
+    crate::attachment_controller::project(app, &email, same_message);
     app.set_email_scroll_y(scroll);
 
     let preview = display_preview(&email.preview);

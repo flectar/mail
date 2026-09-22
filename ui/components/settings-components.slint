@@ -95,6 +95,9 @@ export component SettingsCard inherits Rectangle {
 // settings cards from slowly drifting apart.
 export component SettingsSwitchRow inherits Rectangle {
     in property <bool> compact: false;
+    in property <length> compact-title-height: 17px;
+    in property <length> compact-description-height: 34px;
+    in property <length> desktop-height: 48px;
     in property <string> title;
     in property <string> description;
     in property <bool> checked: false;
@@ -103,7 +106,9 @@ export component SettingsSwitchRow inherits Rectangle {
     in property <color> description-color;
     callback toggled(bool);
 
-    height: root.compact ? 78px : 48px;
+    height: root.compact
+        ? 27px + root.compact-title-height + root.compact-description-height
+        : root.desktop-height;
     opacity: root.enabled ? 1 : 0.5;
 
     HorizontalBox {
@@ -113,14 +118,16 @@ export component SettingsSwitchRow inherits Rectangle {
             min-width: 0px;
             spacing: 2px;
             Text {
+                height: root.compact ? root.compact-title-height : 17px;
                 text: root.title;
                 color: root.title-color;
                 font-size: TypeScale.body;
                 font-weight: 600;
-                overflow: elide;
+                wrap: root.compact ? word-wrap : no-wrap;
+                overflow: root.compact ? clip : elide;
             }
             Text {
-                height: root.compact ? 34px : 17px;
+                height: root.compact ? root.compact-description-height : 17px;
                 text: root.description;
                 color: root.description-color;
                 font-size: TypeScale.caption;

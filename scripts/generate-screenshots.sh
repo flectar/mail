@@ -87,6 +87,7 @@ render() {
       def favicon_path(address):
         ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
       .theme_mode = $theme
+      | .["MotionSettings.enabled"] = false
       | .workspace_layout = $workspace_layout
       | .screenshot_theme_preset = $theme_preset
       | .active_view = $active_view
@@ -133,18 +134,37 @@ render() {
           {"id": "support", "name": "Support", "color": "#ea580c", "account_count": 1}
         ]
       | .sidebar_rows |= map(
-          .label.account_id = (.label.account_id // -1)
+          .mailbox.is_selectable = (if .mailbox.is_selectable == null then true else .mailbox.is_selectable end)
+          | .mailbox.can_create_children = (.mailbox.can_create_children // false)
+          | .mailbox.can_rename = (.mailbox.can_rename // false)
+          | .mailbox.can_delete = (.mailbox.can_delete // false)
+          | .label.account_id = (.label.account_id // -1)
           | .label.account_name = (.label.account_name // "")
+          | .label.display_name = (.label.display_name // .label.name // "")
+          | .label.depth = (.label.depth // 0)
+          | .label.has_children = (.label.has_children // false)
+          | .label.expanded = (if .label.expanded == null then true else .label.expanded end)
+          | .label.can_create_children = (.label.can_create_children // false)
           | .label.is_global = (.label.is_global // false)
         )
       | .mail_labels |= map(
           .account_id = (.account_id // -1)
           | .account_name = (.account_name // "")
+          | .display_name = (.display_name // .name // "")
+          | .depth = (.depth // 0)
+          | .has_children = (.has_children // false)
+          | .expanded = (if .expanded == null then true else .expanded end)
+          | .can_create_children = (.can_create_children // false)
           | .is_global = (.is_global // false)
         )
       | .mail_label_results |= map(
           .account_id = (.account_id // -1)
           | .account_name = (.account_name // "")
+          | .display_name = (.display_name // .name // "")
+          | .depth = (.depth // 0)
+          | .has_children = (.has_children // false)
+          | .expanded = (if .expanded == null then true else .expanded end)
+          | .can_create_children = (.can_create_children // false)
           | .is_global = (.is_global // false)
         )
       | (.thread_messages // [] | length) as $thread_count
@@ -159,6 +179,11 @@ render() {
           | .labels |= map(
               .account_id = (.account_id // -1)
               | .account_name = (.account_name // "")
+              | .display_name = (.display_name // .name // "")
+              | .depth = (.depth // 0)
+              | .has_children = (.has_children // false)
+              | .expanded = (if .expanded == null then true else .expanded end)
+              | .can_create_children = (.can_create_children // false)
               | .is_global = (.is_global // false)
             )
           | .favicon = favicon_path(.address)
@@ -188,11 +213,13 @@ render() {
   # screenshot deterministic without replacing editable SVG sources.
   SLINT_SCALE_FACTOR=2 slint-viewer \
     --style "$style" \
+    --size "${width}x${height}" \
     --load-data "$data_file" \
     --screenshot "$temporary_dir/$output_name-warmup.png" \
     "$temporary_ui"
   SLINT_SCALE_FACTOR=2 slint-viewer \
     --style "$style" \
+    --size "${width}x${height}" \
     --load-data "$data_file" \
     --screenshot "$output_dir/$output_name.png" \
     "$temporary_ui"

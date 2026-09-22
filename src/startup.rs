@@ -16,6 +16,7 @@ use flectar_mail_core::{
     events::CoreEvent,
     models::{
         Account, AccountConfig, CalendarConnection, CardDavConnection, Settings, ThreadCursor,
+        normalized_workspace_list_pane_width,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 
-const WARM_START_FORMAT_VERSION: u32 = 2;
+const WARM_START_FORMAT_VERSION: u32 = 3;
 const MAX_WARM_START_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WARM_START_ACCOUNTS: usize = 64;
 const MAX_WARM_START_MESSAGES: usize = 25;
@@ -138,6 +139,14 @@ pub(crate) struct WarmStartMailbox {
     pub(crate) has_children: bool,
     #[serde(default)]
     pub(crate) is_standard: bool,
+    #[serde(default = "selectable_mailbox")]
+    pub(crate) is_selectable: bool,
+    #[serde(default)]
+    pub(crate) can_create_children: bool,
+    #[serde(default)]
+    pub(crate) can_rename: bool,
+    #[serde(default)]
+    pub(crate) can_delete: bool,
     pub(crate) label: String,
     pub(crate) scope: String,
     pub(crate) context: String,
@@ -151,6 +160,10 @@ fn missing_folder_id() -> i64 {
     -1
 }
 
+fn selectable_mailbox() -> bool {
+    true
+}
+
 impl From<&mail::MailboxEntry> for WarmStartMailbox {
     fn from(mailbox: &mail::MailboxEntry) -> Self {
         Self {
@@ -160,6 +173,10 @@ impl From<&mail::MailboxEntry> for WarmStartMailbox {
             depth: mailbox.depth,
             has_children: mailbox.has_children,
             is_standard: mailbox.is_standard,
+            is_selectable: mailbox.is_selectable,
+            can_create_children: mailbox.can_create_children,
+            can_rename: mailbox.can_rename,
+            can_delete: mailbox.can_delete,
             label: mailbox.label.clone(),
             scope: mailbox.scope.clone(),
             context: mailbox.context.clone(),
@@ -180,6 +197,10 @@ impl From<WarmStartMailbox> for mail::MailboxEntry {
             depth: mailbox.depth,
             has_children: mailbox.has_children,
             is_standard: mailbox.is_standard,
+            is_selectable: mailbox.is_selectable,
+            can_create_children: mailbox.can_create_children,
+            can_rename: mailbox.can_rename,
+            can_delete: mailbox.can_delete,
             label: mailbox.label,
             scope: mailbox.scope,
             context: mailbox.context,
@@ -621,6 +642,10 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         _ => 5,
     });
     app.set_mark_read_on_open(settings.mark_read_on_open);
+    app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+    app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+    app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
+    app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
     app.set_close_to_tray(settings.close_to_tray && !cfg!(feature = "flatpak"));
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
     app.set_show_avatars(settings.show_avatars);
@@ -632,6 +657,9 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         }
         .into(),
     );
+    app.set_workspace_list_pane_width(normalized_workspace_list_pane_width(
+        settings.workspace_list_pane_width,
+    ) as f32);
     app.set_theme_mode(
         match settings.theme.as_str() {
             "carbon" | "dark" => "dark",
@@ -678,6 +706,7 @@ mod warm_start_tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            can_create_top_level_mailbox: true,
         }
     }
 
@@ -720,6 +749,10 @@ mod warm_start_tests {
             depth: 0,
             has_children: false,
             is_standard: true,
+            is_selectable: true,
+            can_create_children: true,
+            can_rename: false,
+            can_delete: false,
             label: "Inbox".into(),
             scope: "Person / Inbox".into(),
             context: "Person".into(),
@@ -805,7 +838,7 @@ mod warm_start_tests {
     #[test]
     fn benchmark_warm_cache_fixture_matches_the_current_format() {
         let snapshot: WarmStartSnapshot = serde_json::from_str(include_str!(
-            "../resources/benchmarks/warm-cache/warm-start-mailbox-v2.json"
+            "../resources/benchmarks/warm-cache/warm-start-mailbox-v3.json"
         ))
         .unwrap();
 

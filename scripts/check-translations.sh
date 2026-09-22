@@ -27,7 +27,7 @@ diff -u \
   <(sed '/^"POT-Creation-Date:/d' lang/flectar-mail.pot) \
   <(sed '/^"POT-Creation-Date:/d' "$work_dir/flectar-mail.pot")
 
-for language in es tr; do
+for language in de es tr zh_Hans; do
   msgmerge --quiet --no-fuzzy-matching \
     --output-file "$work_dir/flectar-mail-$language.po" \
     "lang/$language/LC_MESSAGES/flectar-mail.po" "$work_dir/flectar-mail.pot"

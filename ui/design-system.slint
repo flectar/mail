@@ -8,6 +8,11 @@ export global LayoutMetrics {
     out property <length> sidebar-width: 230px;
     out property <length> list-pane-width: 390px;
     out property <length> divider-width: 1px;
+    // Resizable list panes retain the established 390px default/minimum and
+    // leave enough room for the adjacent message, contact, or file detail.
+    out property <length> detail-pane-min-width: 300px;
+    out property <length> pane-resize-hit-width: 9px;
+    out property <length> pane-resize-keyboard-step: 16px;
     out property <length> compact-navigation-height: 80px;
     out property <length> compact-header-height: 60px;
     out property <length> touch-target: 44px;
@@ -30,6 +35,13 @@ export global LayoutMetrics {
     out property <length> compact-inset: 10px;
     out property <length> control-height: 40px;
     out property <length> corner-radius: 8px;
+}
+
+// Runtime motion stays enabled by default. Deterministic renderers such as the
+// README screenshot generator can opt out so they capture the settled state
+// without changing the motion users see in the application.
+export global MotionSettings {
+    in-out property <bool> enabled: true;
 }
 
 // Mail actions and their matching sidebar destinations share one semantic

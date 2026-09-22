@@ -372,6 +372,10 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
+    in-out property <bool> collect_outgoing_contacts: true;
+    in-out property <bool> collect_incoming_contacts: false;
+    in-out property <bool> contact_suggest_all_accounts: false;
+    in-out property <bool> suggest_learned_contacts: true;
     in-out property <bool> remote-images-enabled: false;
     in-out property <bool> close_to_tray: false;
     in-out property <string> account_email: "";
@@ -415,6 +419,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <int> delete_account_id: -1;
     in-out property <string> delete_account_name: "";
     private property <bool> compact-nav-open: false;
+    private property <bool> clear-contact-suggestions-confirming: false;
     private property <string> settings-search-query: "";
     private property <bool> profile-editor-open: false;
     private property <string> profile-editor-id: "";
@@ -447,6 +452,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
+    callback save_contact_discovery_settings(bool, bool, bool, bool);
+    callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback sync_mail();
     callback sync_account(int);
@@ -517,6 +524,7 @@ export component SettingsDialog inherits Rectangle {
         }
         return section == "General" ? SettingsIconPalette.general
             : section == "Accounts" ? SettingsIconPalette.accounts
+            : section == "Contacts" ? SettingsIconPalette.accounts
             : section == "Notifications" ? SettingsIconPalette.notifications
             : section == "Shortcuts" ? SettingsIconPalette.shortcuts
             : section == "Data" ? SettingsIconPalette.storage
@@ -529,6 +537,8 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("general theme appearance palette language workspace layout renderer privacy remote images sync")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures")
+            : section == "Contacts"
+            ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Notifications"
             ? @tr("notifications alerts sounds desktop new mail")
             : section == "Shortcuts"
@@ -540,7 +550,8 @@ export component SettingsDialog inherits Rectangle {
     }
 
     private property <bool> search-has-results: root.settings-section-visible("General")
-        || root.settings-section-visible("Accounts") || root.settings-section-visible("Notifications")
+        || root.settings-section-visible("Accounts") || root.settings-section-visible("Contacts")
+        || root.settings-section-visible("Notifications")
         || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
         || root.settings-section-visible("About");
 
@@ -582,6 +593,7 @@ export component SettingsDialog inherits Rectangle {
         if value != "" && !root.settings-section-visible(root.settings_tab) {
             root.settings_tab = root.settings-section-visible("General") ? "General"
                 : root.settings-section-visible("Accounts") ? "Accounts"
+                : root.settings-section-visible("Contacts") ? "Contacts"
                 : root.settings-section-visible("Notifications") ? "Notifications"
                 : root.settings-section-visible("Shortcuts") ? "Shortcuts"
                 : root.settings-section-visible("Data") ? "Data"
@@ -773,6 +785,7 @@ export component SettingsDialog inherits Rectangle {
                         if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                         if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; } }
                         if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; } }
+                        if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; } }
                         if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; } }
                         if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; } }
                         if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; } }
@@ -1114,6 +1127,157 @@ export component SettingsDialog inherits Rectangle {
                                 }
                             }
 
+                        }
+                    }
+
+                    contacts-settings-scroll := ScrollView {
+                        visible: root.settings_tab == "Contacts";
+                        width: parent.width;
+                        height: parent.height;
+                        mouse-drag-pan-enabled: root.compact;
+                        content-width: self.visible-width;
+                        VerticalBox {
+                            x: root.compact ? 16px : max(24px, (contacts-settings-scroll.visible-width - 920px) / 2);
+                            width: root.compact ? contacts-settings-scroll.visible-width - 32px : min(920px, contacts-settings-scroll.visible-width - 48px);
+                            padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+                            padding-bottom: 32px;
+                            spacing: 14px;
+
+                            SettingsPageTitle { label: @tr("Contacts"); title-color: root.title-color; }
+                            Text {
+                                height: root.compact ? 52px : 34px;
+                                text: @tr("Keep your address book clean while still making frequent recipients easy to find.");
+                                color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
+                            }
+
+                            Rectangle {
+                                height: root.compact ? 466px : 274px;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding-top: 12px;
+                                    padding-right: 20px;
+                                    padding-bottom: 12px;
+                                    padding-left: 20px;
+                                    spacing: 0px;
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        compact-description-height: 51px;
+                                        desktop-height: 60px;
+                                        title: @tr("Remember people I email");
+                                        description: @tr("While enabled, remember To, Cc, and Bcc recipients from new sends and synced Sent mail.");
+                                        checked: root.collect_outgoing_contacts;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(value) => {
+                                            root.collect_outgoing_contacts = value;
+                                            root.save_contact_discovery_settings(value, root.collect_incoming_contacts, root.contact_suggest_all_accounts, root.suggest_learned_contacts);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        compact-title-height: 34px;
+                                        compact-description-height: 51px;
+                                        desktop-height: 60px;
+                                        title: @tr("Remember incoming senders");
+                                        description: @tr("Remember human senders from new mail. Automated, spam, trash, and existing mail are excluded.");
+                                        checked: root.collect_incoming_contacts;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(value) => {
+                                            root.collect_incoming_contacts = value;
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, value, root.contact_suggest_all_accounts, root.suggest_learned_contacts);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        compact-title-height: 34px;
+                                        compact-description-height: 51px;
+                                        desktop-height: 60px;
+                                        title: @tr("Use suggestions from all accounts");
+                                        description: @tr("Include people emailed from any connected account. Turn off to keep learned recipients account-specific.");
+                                        checked: root.contact_suggest_all_accounts;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(value) => {
+                                            root.contact_suggest_all_accounts = value;
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, root.collect_incoming_contacts, value, root.suggest_learned_contacts);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        compact-title-height: 34px;
+                                        compact-description-height: 51px;
+                                        desktop-height: 60px;
+                                        title: @tr("Use suggestions when composing");
+                                        description: @tr("Include learned people in recipient autocomplete. Saved and CardDAV contacts are always available.");
+                                        checked: root.suggest_learned_contacts;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(value) => {
+                                            root.suggest_learned_contacts = value;
+                                            root.save_contact_discovery_settings(root.collect_outgoing_contacts, root.collect_incoming_contacts, root.contact_suggest_all_accounts, value);
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: root.compact ? 188px : 154px;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding: 18px;
+                                    spacing: 8px;
+                                    Text { text: @tr("Suggested people"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+                                    Text {
+                                        height: root.compact ? 52px : 34px;
+                                        text: @tr("People you email remain available as local suggestions and never sync to CardDAV. Clear them any time to restart learning.");
+                                        color: root.faint-text;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalBox {
+                                        height: 36px;
+                                        spacing: 8px;
+                                        Rectangle { horizontal-stretch: 1; }
+                                        if root.clear-contact-suggestions-confirming : Button {
+                                            width: 100px;
+                                            horizontal-stretch: 0;
+                                            text: @tr("Cancel");
+                                            clicked => { root.clear-contact-suggestions-confirming = false; }
+                                        }
+                                        Button {
+                                            width: root.compact ? 180px : 220px;
+                                            horizontal-stretch: 0;
+                                            text: root.clear-contact-suggestions-confirming ? @tr("Clear now") : @tr("Clear suggested people");
+                                            clicked => {
+                                                if root.clear-contact-suggestions-confirming {
+                                                    if root.clear_contact_suggestions() {
+                                                        root.clear-contact-suggestions-confirming = false;
+                                                    }
+                                                } else {
+                                                    root.clear-contact-suggestions-confirming = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if root.sync_status != "" : CopyableDiagnostic {
+                                text: root.sync_status;
+                                text-color: root.secondary-text;
+                                font-size: TypeScale.secondary;
+                            }
                         }
                     }
 
@@ -1854,6 +2018,7 @@ export component SettingsDialog inherits Rectangle {
                 z: 200;
                 title: root.settings_tab == "General" ? @tr("General")
                     : root.settings_tab == "Accounts" ? @tr("Accounts")
+                    : root.settings_tab == "Contacts" ? @tr("Contacts")
                     : root.settings_tab == "Notifications" ? @tr("Notifications")
                     : root.settings_tab == "Shortcuts" ? @tr("Shortcuts")
                     : root.settings_tab == "Data" ? @tr("Storage") : @tr("About");
@@ -1922,6 +2087,7 @@ export component SettingsDialog inherits Rectangle {
                     if !root.search-has-results : Text { text: @tr("No settings found"); color: root.muted-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                     if root.settings-section-visible("General") : SettingsNavItem { text: @tr("General"); icon: @image-url("../icons/lucide/filled/sliders.svg"); icon-color: root.settings-icon-color("General"); selected: root.settings_tab == "General"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "General"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Accounts") : SettingsNavItem { text: @tr("Accounts"); icon: @image-url("../icons/lucide/filled/account.svg"); icon-color: root.settings-icon-color("Accounts"); selected: root.settings_tab == "Accounts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Accounts"; root.compact-nav-open = false; } }
+                    if root.settings-section-visible("Contacts") : SettingsNavItem { text: @tr("Contacts"); icon: @image-url("../icons/lucide/filled/contacts.svg"); icon-color: root.settings-icon-color("Contacts"); selected: root.settings_tab == "Contacts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Contacts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Notifications") : SettingsNavItem { text: @tr("Notifications"); icon: @image-url("../icons/lucide/filled/bell.svg"); icon-color: root.settings-icon-color("Notifications"); selected: root.settings_tab == "Notifications"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Notifications"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Shortcuts") : SettingsNavItem { text: @tr("Shortcuts"); icon: @image-url("../icons/lucide/filled/keyboard.svg"); icon-color: root.settings-icon-color("Shortcuts"); selected: root.settings_tab == "Shortcuts"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Shortcuts"; root.compact-nav-open = false; } }
                     if root.settings-section-visible("Data") : SettingsNavItem { text: @tr("Storage"); icon: @image-url("../icons/lucide/filled/database.svg"); icon-color: root.settings-icon-color("Data"); selected: root.settings_tab == "Data"; accent: root.accent; accent-soft: root.accent-soft; body-text: root.body-text; muted-text: root.muted-text; clicked => { root.settings_tab = "Data"; root.compact-nav-open = false; } }
@@ -2124,7 +2290,7 @@ export component SettingsDialog inherits Rectangle {
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; root.suggest_account_settings(value); } }
                                     FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
                                 }
-                                FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
+                                FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
                                 HorizontalBox {
                                     padding: 0px;
                                     height: 40px;

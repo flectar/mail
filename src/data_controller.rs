@@ -7,7 +7,10 @@
 
 use super::*;
 use chrono::Utc;
-use flectar_mail_core::models::{PortableAccountConfig, Settings};
+use flectar_mail_core::models::{
+    MIN_WORKSPACE_LIST_PANE_WIDTH, PortableAccountConfig, Settings,
+    normalized_workspace_list_pane_width,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -53,9 +56,7 @@ fn portable_account_colors(
         }
         let valid_color = color.len() == 7
             && color.starts_with('#')
-            && color[1..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit());
+            && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
         if !valid_color {
             return Err(format!("account {email:?} has an invalid color"));
         }
@@ -153,7 +154,9 @@ fn storage_category(root: StorageRoot, relative: &std::path::Path) -> usize {
         Some("attachments" | "draft_attachments") => STORAGE_ATTACHMENTS,
         Some("files" | "file_transfers") => STORAGE_FILES,
         _ if matches!(root, StorageRoot::Data)
-            && relative.parent().is_some_and(|parent| parent.as_os_str().is_empty())
+            && relative
+                .parent()
+                .is_some_and(|parent| parent.as_os_str().is_empty())
             && relative
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -229,8 +232,7 @@ fn scan_storage_tree(
                     Ok(metadata) => {
                         let relative = path.strip_prefix(root).unwrap_or(&path);
                         let category = storage_category(kind, relative);
-                        scan.bytes[category] =
-                            scan.bytes[category].saturating_add(metadata.len());
+                        scan.bytes[category] = scan.bytes[category].saturating_add(metadata.len());
                     }
                     Err(_) => scan.unreadable_entries += 1,
                 }
@@ -259,7 +261,10 @@ fn scan_storage(paths: &Paths, generation: &AtomicU64, ticket: u64) -> Option<St
         && !scan_storage_tree(
             &paths.cache_dir,
             StorageRoot::Cache,
-            paths.data_dir.starts_with(&paths.cache_dir).then_some(paths.data_dir.as_path()),
+            paths
+                .data_dir
+                .starts_with(&paths.cache_dir)
+                .then_some(paths.data_dir.as_path()),
             generation,
             ticket,
             &mut scan,
@@ -417,7 +422,8 @@ pub(super) fn register_data_management_callbacks(
         let Some(app) = storage_app.upgrade() else {
             return;
         };
-        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data" {
+        if app.get_storage_loading() || !app.get_settings_open() || app.get_settings_tab() != "Data"
+        {
             return;
         }
         let ticket = load_generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -519,11 +525,16 @@ pub(super) fn register_data_management_callbacks(
                     "theme": settings.theme,
                     "showAvatars": settings.show_avatars,
                     "workspaceLayout": settings.workspace_layout,
+                    "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
                     "language": settings.language,
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
                     "markReadOnOpen": settings.mark_read_on_open,
+                    "collectOutgoingContacts": settings.collect_outgoing_contacts,
+                    "collectIncomingContacts": settings.collect_incoming_contacts,
+                    "contactSuggestAllAccounts": settings.contact_suggest_all_accounts,
+                    "suggestLearnedContacts": settings.suggest_learned_contacts,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,
@@ -723,6 +734,13 @@ pub(super) fn register_data_management_callbacks(
                 {
                     settings.workspace_layout = layout.to_owned();
                 }
+                if let Some(width) = preferences
+                    .get("workspaceListPaneWidth")
+                    .and_then(|value| value.as_i64())
+                {
+                    settings.workspace_list_pane_width =
+                        normalized_workspace_list_pane_width(width);
+                }
                 if let Some(language) = preferences
                     .get("language")
                     .and_then(|value| value.as_str())
@@ -748,6 +766,30 @@ pub(super) fn register_data_management_callbacks(
                     .and_then(|value| value.as_bool())
                 {
                     settings.mark_read_on_open = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("collectOutgoingContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.collect_outgoing_contacts = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("collectIncomingContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.collect_incoming_contacts = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("contactSuggestAllAccounts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.contact_suggest_all_accounts = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("suggestLearnedContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.suggest_learned_contacts = enabled;
                 }
                 if let Some(enabled) = preferences
                     .get("notificationsEnabled")
@@ -871,11 +913,19 @@ pub(super) fn register_data_management_callbacks(
                 app.set_show_avatars(settings.show_avatars);
                 app.set_show_account_markers(settings.show_account_badges);
                 app.set_workspace_layout(settings.workspace_layout.clone().into());
+                app.set_workspace_list_pane_width(
+                    normalized_workspace_list_pane_width(settings.workspace_list_pane_width)
+                        as f32,
+                );
                 app.set_notifications_enabled(settings.notifications_enabled);
                 app.set_notification_sound_enabled(settings.sound_enabled);
                 app.set_notification_scope(settings.notification_scope.clone().into());
                 app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
                 app.set_mark_read_on_open(settings.mark_read_on_open);
+                app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+                app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
+                app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
                 state_for_backup_import.borrow_mut().mark_read_on_open =
                     settings.mark_read_on_open;
                 app.set_remote_images_enabled(
@@ -976,6 +1026,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_show_avatars(true);
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
+                    app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);
                     app.set_notifications_enabled(true);
                     app.set_notification_sound_enabled(true);
                     app.set_notification_scope("important".into());
@@ -1030,7 +1081,9 @@ mod tests {
         use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
         struct Headless(Rc<MinimalSoftwareWindow>);
         impl slint::platform::Platform for Headless {
-            fn create_window_adapter(&self) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
                 Ok(self.0.clone())
             }
         }
@@ -1124,19 +1177,41 @@ mod tests {
 
     #[test]
     fn storage_database_category_requires_exact_database_or_sidecar() {
-        for name in ["flectar-mail.db", "flectar-calendar.db-wal", "flectar-files.db-shm", "flectar-mail.db-journal"] {
-            assert_eq!(storage_category(StorageRoot::Data, name.as_ref()), STORAGE_DATABASES);
+        for name in [
+            "flectar-mail.db",
+            "flectar-calendar.db-wal",
+            "flectar-files.db-shm",
+            "flectar-mail.db-journal",
+        ] {
+            assert_eq!(
+                storage_category(StorageRoot::Data, name.as_ref()),
+                STORAGE_DATABASES
+            );
         }
-        for name in ["flectar-mail.db.backup", "flectar-files.db-old", "other/flectar-mail.db"] {
-            assert_eq!(storage_category(StorageRoot::Data, name.as_ref()), STORAGE_OTHER);
+        for name in [
+            "flectar-mail.db.backup",
+            "flectar-files.db-old",
+            "other/flectar-mail.db",
+        ] {
+            assert_eq!(
+                storage_category(StorageRoot::Data, name.as_ref()),
+                STORAGE_OTHER
+            );
         }
     }
 
     #[test]
     fn storage_rows_are_finite_for_empty_and_uneven_usage() {
         let empty = storage_rows(&StorageScan::default());
-        assert!(empty.iter().all(|row| row.fraction == 0.0 && row.offset == 0.0));
-        let scan = StorageScan { bytes: [1, 0, 999, 0, 0], unreadable_entries: 0 };
+        assert!(
+            empty
+                .iter()
+                .all(|row| row.fraction == 0.0 && row.offset == 0.0)
+        );
+        let scan = StorageScan {
+            bytes: [1, 0, 999, 0, 0],
+            unreadable_entries: 0,
+        };
         let rows = storage_rows(&scan);
         assert!((rows[0].fraction - 0.001).abs() < 0.000001);
         assert!((rows[2].offset - 0.001).abs() < 0.000001);
@@ -1171,10 +1246,7 @@ mod tests {
 
     #[test]
     fn portable_profiles_reject_cross_backup_and_duplicate_membership() {
-        let emails = HashSet::from([
-            "alice@example.org".to_owned(),
-            "bob@example.org".to_owned(),
-        ]);
+        let emails = HashSet::from(["alice@example.org".to_owned(), "bob@example.org".to_owned()]);
         let duplicate = serde_json::json!({
             "preferences": { "mailProfiles": [
                 { "name": "Work", "color": "#3B82F6", "accountEmails": ["alice@example.org"] },
@@ -1202,10 +1274,11 @@ mod tests {
                 "accountColors": { " Work@Example.com ": "#f97316" }
             }
         });
-        let colors = portable_account_colors(&valid, &emails)
-            .unwrap()
-            .unwrap();
-        assert_eq!(colors.get("work@example.com").map(String::as_str), Some("#f97316"));
+        let colors = portable_account_colors(&valid, &emails).unwrap().unwrap();
+        assert_eq!(
+            colors.get("work@example.com").map(String::as_str),
+            Some("#f97316")
+        );
 
         let invalid = serde_json::json!({
             "preferences": {

@@ -10,6 +10,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/005_mailbox_count_indexes.sql"),
     include_str!("migrations/006_contact_recovery.sql"),
     include_str!("migrations/007_account_label_ownership.sql"),
+    include_str!("migrations/008_sender_identities.sql"),
+    include_str!("migrations/009_contact_learning_clean_start.sql"),
+    include_str!("migrations/010_folder_hierarchy.sql"),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -111,6 +114,7 @@ mod tests {
             "carddav_config",
             "carddav_objects",
             "contacts",
+            "contact_learning_state",
             "cross_store_operations",
             "draft_attachments",
             "drafts_meta",
@@ -129,6 +133,7 @@ mod tests {
             "notification_outbox",
             "pending_actions",
             "route_cache",
+            "sender_identities",
             "snippets",
             "snoozes",
             "split_rules",
@@ -187,6 +192,276 @@ mod tests {
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .unwrap();
         assert_eq!(integrity, "ok");
+    }
+
+    #[test]
+    fn sender_identity_migration_preserves_account_ownership_and_seeds_primary() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(7).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,display_name,provider,auth_kind,username,imap_host,
+               imap_port,smtp_host,smtp_port,created_at
+             ) VALUES (1,'login@example.test','Login','gmail','oauth2','login',
+                       '',993,'',465,123)",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let row: (String, Option<String>, bool, bool, String) = conn
+            .query_row(
+                "SELECT email,display_name,is_primary,is_provider_default,
+                        verification_status
+                 FROM sender_identities WHERE account_id=1",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "login@example.test".into(),
+                Some("Login".into()),
+                true,
+                true,
+                "accepted".into(),
+            )
+        );
+    }
+
+    #[test]
+    fn contact_learning_migration_keeps_only_outgoing_suggestions() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(8).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (1,'me@example.test','imap','password','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contacts
+               (id,email,name,send_count,recv_count,last_interacted,is_favorite,is_managed)
+             VALUES
+               (1,'saved@example.test','Saved',4,2,100,0,1),
+               (2,'legacy@example.test','Legacy',0,9,200,0,0),
+               (3,'dav@example.test','CardDAV',1,1,300,0,0),
+               (4,'favorite@example.test','Favorite',2,1,400,1,0),
+               (5,'sent@example.test','Sent',3,7,500,0,0),
+               (6,'repaired@example.test','Repaired',0,4,600,0,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contact_accounts
+               (contact_id,account_id,send_count,recv_count,last_interacted)
+             VALUES
+               (1,1,4,2,100),(2,1,0,9,200),(3,1,1,1,300),
+               (4,1,2,1,400),(5,1,3,7,500),(6,1,2,4,600)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO carddav_addressbooks (id,account_id,url)
+             VALUES (1,1,'https://dav.example.test/contacts/')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO carddav_objects
+               (addressbook_id,contact_id,href,remote_exists,deleted)
+             VALUES (1,3,'/contacts/dav.vcf',1,0)",
+            [],
+        )
+        .unwrap();
+
+        let before = crate::models::now_ms();
+        run(&mut conn).unwrap();
+        let after = crate::models::now_ms();
+
+        let contacts = conn
+            .prepare(
+                "SELECT id,send_count,recv_count,last_interacted,is_managed
+                 FROM contacts ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            contacts,
+            [
+                (1, 4, 2, Some(100), true),
+                (3, 1, 1, Some(300), false),
+                (4, 2, 1, Some(400), true),
+                (5, 3, 0, Some(500), false),
+                (6, 2, 0, Some(600), false),
+            ]
+        );
+        let account_affinity = conn
+            .prepare(
+                "SELECT contact_id,send_count,recv_count,last_interacted
+                 FROM contact_accounts ORDER BY contact_id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            account_affinity,
+            [
+                (1, 4, 2, Some(100)),
+                (3, 1, 1, Some(300)),
+                (4, 2, 1, Some(400)),
+                (5, 3, 0, Some(500)),
+                (6, 2, 0, Some(600)),
+            ]
+        );
+        let boundaries: (i64, i64) = conn
+            .query_row(
+                "SELECT outgoing_since,incoming_since
+                 FROM contact_learning_state WHERE account_id=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(boundaries.0, 0);
+        assert!((before - 1_000..=after + 1_000).contains(&boundaries.1));
+
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (2,'new@example.test','imap','password','new','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        let created: (i64, i64) = conn
+            .query_row(
+                "SELECT outgoing_since,incoming_since
+                 FROM contact_learning_state WHERE account_id=2",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(created.0, 0);
+        assert!((before - 1_000..=crate::models::now_ms() + 1_000).contains(&created.1));
+    }
+
+    #[test]
+    fn folder_hierarchy_migration_preserves_existing_folders() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(9).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (1,'me@example.test','imap','password','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders(id,account_id,imap_name,delimiter,role)
+             VALUES(7,1,'Archive','/','archive')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,mail_protocol,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (2,'jmap@example.test','imap','password','jmap','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders(id,account_id,imap_name,delimiter,role,jmap_id)
+             VALUES(8,2,'Projects','/',NULL,'projects')",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let hierarchy: (Option<i64>, bool) = conn
+            .query_row(
+                "SELECT parent_id,selectable FROM folders WHERE id=7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hierarchy, (None, true));
+        let imap_rights: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT a.can_create_top_level_mailbox, f.can_create_children,
+                        f.can_rename, f.can_delete
+                 FROM accounts a JOIN folders f ON f.account_id=a.id
+                 WHERE a.id=1 AND f.id=7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(imap_rights, (1, 1, 1, 1));
+        let jmap_rights: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT a.can_create_top_level_mailbox, f.can_create_children,
+                        f.can_rename, f.can_delete
+                 FROM accounts a JOIN folders f ON f.account_id=a.id
+                 WHERE a.id=2 AND f.id=8",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(jmap_rights, (0, 0, 0, 0));
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            LATEST_VERSION
+        );
     }
 
     #[test]
@@ -452,7 +727,8 @@ mod tests {
         seed_mail_graph(&conn);
         for id in 1..=600 {
             conn.execute(
-                "INSERT INTO contacts(id, name, email) VALUES(?1, 'Café', ?2)",
+                "INSERT INTO contacts(id, name, email, is_managed)
+                 VALUES(?1, 'Café', ?2, 1)",
                 params![id, format!("person-{id}@example.com")],
             )
             .unwrap();

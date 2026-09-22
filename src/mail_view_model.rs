@@ -617,6 +617,11 @@ fn project_label_rows(
                     .unwrap_or(-1),
                 account_name: Default::default(),
                 name: label.name.clone().into(),
+                display_name: label.name.clone().into(),
+                depth: 0,
+                has_children: false,
+                expanded: true,
+                can_create_children: false,
                 name_has_emoji: contains_emoji(&label.name),
                 color: label_color(&label.color),
                 applied: applied.contains(&label.id),
@@ -648,6 +653,11 @@ fn applied_label_rows(
                     .unwrap_or(-1),
                 account_name: Default::default(),
                 name: label.name.clone().into(),
+                display_name: label.name.clone().into(),
+                depth: 0,
+                has_children: false,
+                expanded: true,
+                can_create_children: false,
                 name_has_emoji: contains_emoji(&label.name),
                 color: label_color(&label.color),
                 applied: true,
@@ -1281,13 +1291,8 @@ pub(super) fn make_mailbox_rows(
             let custom_color = (!mailbox.is_account)
                 .then(|| {
                     label_colors
-                        .get(&(
-                            Some(mailbox.account_id),
-                            mailbox.label.to_ascii_lowercase(),
-                        ))
-                        .or_else(|| {
-                            label_colors.get(&(None, mailbox.label.to_ascii_lowercase()))
-                        })
+                        .get(&(Some(mailbox.account_id), mailbox.label.to_ascii_lowercase()))
+                        .or_else(|| label_colors.get(&(None, mailbox.label.to_ascii_lowercase())))
                         .copied()
                 })
                 .flatten();
@@ -1299,6 +1304,10 @@ pub(super) fn make_mailbox_rows(
                 has_children: mailbox.has_children,
                 expanded: !collapsed_folder_ids.contains(&mailbox.folder_id),
                 is_standard: mailbox.is_standard,
+                is_selectable: mailbox.is_selectable,
+                can_create_children: mailbox.can_create_children,
+                can_rename: mailbox.can_rename,
+                can_delete: mailbox.can_delete,
                 label_has_emoji: contains_emoji(&mailbox.label),
                 label: mailbox.label.clone().into(),
                 scope: mailbox.scope.clone().into(),
@@ -1505,7 +1514,10 @@ mod tests {
 
         assert_eq!(rows[0].account, "Client");
         assert_eq!(rows[0].account_profile, "Work");
-        assert_eq!(rows[0].account_color, slint::Color::from_rgb_u8(0xea, 0x58, 0x0c));
+        assert_eq!(
+            rows[0].account_color,
+            slint::Color::from_rgb_u8(0xea, 0x58, 0x0c)
+        );
         assert!(rows[0].show_account_marker);
     }
 
@@ -1739,6 +1751,10 @@ mod tests {
             depth: 0,
             has_children: false,
             is_standard: false,
+            is_selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
             label: "Projects".into(),
             scope: "Folder:7".into(),
             context: "Account".into(),
@@ -1775,6 +1791,10 @@ mod tests {
             depth,
             has_children,
             is_standard: false,
+            is_selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
             label: label.into(),
             scope: format!("Folder:{folder_id}"),
             context: "Account".into(),

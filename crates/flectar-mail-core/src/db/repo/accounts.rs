@@ -17,6 +17,7 @@ fn account_from_row(row: &Row) -> rusqlite::Result<Account> {
         mail_protocol: MailProtocol::from_storage(&row.get::<_, String>("mail_protocol")?),
         sync_state: row.get("sync_state")?,
         sync_error: row.get("sync_error")?,
+        can_create_top_level_mailbox: row.get::<_, i64>("can_create_top_level_mailbox")? != 0,
     })
 }
 
@@ -45,7 +46,7 @@ fn config_from_row(row: &Row) -> rusqlite::Result<AccountConfig> {
 pub fn list(conn: &Connection) -> Result<Vec<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, email, display_name, avatar_url, provider, auth_kind,
-                mail_protocol, sync_state, sync_error
+                mail_protocol, sync_state, sync_error, can_create_top_level_mailbox
          FROM accounts
          WHERE sync_state <> ?1
          ORDER BY sort_order, id",
@@ -84,7 +85,7 @@ pub fn get_config(conn: &Connection, id: i64) -> Result<Option<AccountConfig>> {
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, email, display_name, avatar_url, provider, auth_kind,
-                mail_protocol, sync_state, sync_error
+                mail_protocol, sync_state, sync_error, can_create_top_level_mailbox
          FROM accounts WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![id], account_from_row).optional()?)
@@ -93,7 +94,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Account>> {
 pub fn find_by_email(conn: &Connection, email: &str) -> Result<Option<Account>> {
     let mut stmt = conn.prepare(
         "SELECT id, email, display_name, avatar_url, provider, auth_kind,
-                mail_protocol, sync_state, sync_error
+                mail_protocol, sync_state, sync_error, can_create_top_level_mailbox
          FROM accounts
          WHERE email = ?1 COLLATE NOCASE
          LIMIT 1",
@@ -137,9 +138,10 @@ pub fn insert_with_sync_state(conn: &Connection, a: &NewAccount, sync_state: &st
         "INSERT INTO accounts (email, display_name, avatar_url, provider, auth_kind, mail_protocol, username,
                                jmap_url, jmap_account_id,
                                imap_host, imap_port, smtp_host, smtp_port, created_at,
-                               sort_order, settings_json, sync_state)
+                               sort_order, settings_json, sync_state,
+                               can_create_top_level_mailbox)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,
-                 COALESCE((SELECT MAX(sort_order) + 1 FROM accounts), 0), ?15, ?16)",
+                 COALESCE((SELECT MAX(sort_order) + 1 FROM accounts), 0), ?15, ?16, ?17)",
         params![
             a.email,
             a.display_name,
@@ -157,9 +159,18 @@ pub fn insert_with_sync_state(conn: &Connection, a: &NewAccount, sync_state: &st
             now_ms(),
             settings_json,
             sync_state,
+            a.mail_protocol != MailProtocol::Jmap,
         ],
     )?;
-    Ok(conn.last_insert_rowid())
+    let account_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO sender_identities (
+           account_id,email,display_name,is_primary,is_provider_default,
+           verification_status,last_synced_at
+         ) VALUES (?1,?2,?3,1,1,'accepted',?4)",
+        params![account_id, a.email, a.display_name, now_ms()],
+    )?;
+    Ok(account_id)
 }
 
 pub fn set_settings(conn: &Connection, id: i64, settings: &AccountSettings) -> Result<()> {
@@ -223,6 +234,21 @@ pub fn update_password(conn: &Connection, id: i64, a: &NewAccount) -> Result<()>
             a.smtp_host,
             a.smtp_port,
         ],
+    )?;
+    // A password-account edit invalidates any provider aliases discovered for
+    // the old connection. Seed only the new authenticated address after the
+    // account row itself has been accepted (for example, by its UNIQUE email
+    // constraint), so a rejected edit cannot leave mismatched identities.
+    conn.execute(
+        "DELETE FROM sender_identities WHERE account_id=?1",
+        params![id],
+    )?;
+    conn.execute(
+        "INSERT INTO sender_identities (
+           account_id,email,display_name,is_primary,is_provider_default,
+           verification_status,last_synced_at
+         ) VALUES (?1,?2,?3,1,1,'accepted',?4)",
+        params![id, a.email, a.display_name, now_ms()],
     )?;
     if jmap_identity_changed {
         conn.execute(
@@ -468,6 +494,13 @@ mod tests {
             smtp_port: 465,
         };
         let id = insert(&conn, &initial).unwrap();
+        assert!(
+            !get(&conn, id)
+                .unwrap()
+                .unwrap()
+                .can_create_top_level_mailbox,
+            "JMAP creation controls stay hidden until the session advertises permission"
+        );
         conn.execute(
             "INSERT INTO folders(account_id,imap_name,jmap_id) VALUES(?1,'Inbox','mailbox-a')",
             params![id],

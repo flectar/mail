@@ -33,6 +33,7 @@ fn draft_args(account_id: i64, atts: Vec<DraftAttachmentIn>) -> SaveDraftArgs {
     SaveDraftArgs {
         draft_id: None,
         account_id,
+        from: None,
         to: vec![],
         cc: vec![],
         bcc: vec![],

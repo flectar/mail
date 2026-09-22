@@ -11,7 +11,7 @@ import "../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,RON
 
 import { Palette } from "std-widgets.slint";
 import { TypeScale } from "typography.slint";
-export { AppTheme, ThemeUtilities } from "design-system.slint";
+export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailProfileRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
@@ -148,6 +148,12 @@ export global I18n {
         if (key == "Message-opening preference updated for this session.") { return @tr("Message-opening preference updated for this session."); }
         if (key == "Message-opening preference saved.") { return @tr("Message-opening preference saved."); }
         if (key == "Could not save message-opening preference: {}") { return @tr("Could not save message-opening preference: {}", argument); }
+        if (key == "Contact suggestion preferences are active for this session.") { return @tr("Contact suggestion preferences are active for this session."); }
+        if (key == "Contact suggestion preferences saved.") { return @tr("Contact suggestion preferences saved."); }
+        if (key == "Could not save contact suggestion preferences: {}") { return @tr("Could not save contact suggestion preferences: {}", argument); }
+        if (key == "Contact storage is still starting. Try again shortly.") { return @tr("Contact storage is still starting. Try again shortly."); }
+        if (key == "Cleared {} suggested people.") { return @tr("Cleared {} suggested people.", argument); }
+        if (key == "Could not clear suggested people: {}") { return @tr("Could not clear suggested people: {}", argument); }
         if (key == "Theme updated for this session.") { return @tr("Theme updated for this session."); }
         if (key == "Theme preference saved.") { return @tr("Theme preference saved."); }
         if (key == "Could not save theme: {}") { return @tr("Could not save theme: {}", argument); }
@@ -182,6 +188,7 @@ export global I18n {
         if (key == "Workspace layout updated for this session.") { return @tr("Workspace layout updated for this session."); }
         if (key == "Workspace layout preference saved.") { return @tr("Workspace layout preference saved."); }
         if (key == "Could not save workspace layout: {}") { return @tr("Could not save workspace layout: {}", argument); }
+        if (key == "Could not save list pane width: {}") { return @tr("Could not save list pane width: {}", argument); }
         return "";
     }
 
@@ -278,6 +285,7 @@ export global I18n {
         if (key == "Could not save: contact storage is unavailable.") { return @tr("Could not save: contact storage is unavailable."); }
         if (key == "Could not save contact: {}") { return @tr("Could not save contact: {}", argument); }
         if (key == "Contact saved.") { return @tr("Contact saved."); }
+        if (key == "Saved to contacts.") { return @tr("Saved to contacts."); }
         if (key == "Could not delete: contact storage is unavailable.") { return @tr("Could not delete: contact storage is unavailable."); }
         if (key == "Could not delete contact: {}") { return @tr("Could not delete contact: {}", argument); }
         if (key == "Contact deleted.") { return @tr("Contact deleted."); }
@@ -386,6 +394,8 @@ export global I18n {
         if (key == "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).") { return @tr("Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).", argument, second-argument); }
         if (key == "Attachment removed.") { return @tr("Attachment removed."); }
         if (key == "Choose the account this message should be sent from.") { return @tr("Choose the account this message should be sent from."); }
+        if (key == "Choose a verified sender identity for this message.") { return @tr("Choose a verified sender identity for this message."); }
+        if (key == "Could not refresh sender identities; using cached values: {}") { return @tr("Could not refresh sender identities; using cached values: {}", argument); }
         if (key == "Connect an account before saving or sending mail.") { return @tr("Connect an account before saving or sending mail."); }
         if (key == "Message queued for delivery (action {}).") { return @tr("Message queued for delivery (action {}).", argument); }
         if (key == "Sending message…") { return @tr("Sending message…"); }
@@ -472,7 +482,7 @@ export component AppWindow inherits Window {
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
-    callback save_mail_label(int, int, string, color, bool);
+    callback save_mail_label(int, int, string, color, bool, int);
     callback delete_mail_label(int);
     callback search_mail_labels(string);
     callback compose_message_action(string);
@@ -489,11 +499,14 @@ export component AppWindow inherits Window {
     callback delete_mail_profile(string);
     callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
+    callback save_workspace_list_pane_width(length);
     callback save_language(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
+    callback save_contact_discovery_settings(bool, bool, bool, bool);
+    callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback open_compose();
     callback close_compose();
@@ -635,11 +648,13 @@ export component AppWindow inherits Window {
     in-out property <string> contact_notes: "";
     in-out property <string> contact_tags: "";
     in-out property <bool> contact_favorite: false;
+    in property <bool> contact_is_suggested: false;
     in property <string> contact_initials: "?";
     in property <string> contact_interactions: "";
     in property <string> contact_last_interacted: "";
     in property <int> contact_total_count: 0;
     in property <int> contact_favorite_count: 0;
+    in property <int> contact_suggestion_count: 0;
     in property <string> calendar_month_title: "";
     in property <string> calendar_period_title: "";
     in property <string> calendar_week_label: "";
@@ -705,6 +720,7 @@ export component AppWindow inherits Window {
     // callback and reflows Blitz at the current logical viewport size.
     in-out property <length> email-viewport-width: 0px;
     in-out property <length> email-viewport-height: 0px;
+    in-out property <length> email-scroll-tail-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
     changed settings_open => { root.product-changed(root.active_view); }
@@ -734,6 +750,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
+    in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
     in-out property <string> language_mode: "system";
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
@@ -741,6 +758,10 @@ export component AppWindow inherits Window {
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
+    in-out property <bool> collect_outgoing_contacts: true;
+    in-out property <bool> collect_incoming_contacts: false;
+    in-out property <bool> contact_suggest_all_accounts: false;
+    in-out property <bool> suggest_learned_contacts: true;
     in-out property <bool> close_to_tray: false;
     in-out property <bool> account_setup_in_progress: false;
     in-out property <bool> account_form_open: false;
@@ -888,6 +909,9 @@ export component AppWindow inherits Window {
     private property <int> folder-dialog-folder-id: -1;
     private property <int> folder-dialog-parent-id: -1;
     private property <string> folder-dialog-parent-name: "";
+    private property <int> folder-dialog-parent-label-id: -1;
+    private property <string> folder-dialog-parent-label-path: "";
+    private property <bool> folder-dialog-has-descendants: false;
     private property <string> folder-dialog-name: "";
     private property <color> folder-dialog-label-color: transparent;
 
@@ -896,17 +920,23 @@ export component AppWindow inherits Window {
         root.folder-dialog-mode = "create";
         root.folder-dialog-account-id = account-id;
         root.folder-dialog-parent-id = parent-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = parent-name;
         root.folder-dialog-name = "";
         root.folder-dialog-open = true;
     }
 
-    function open-label-create(account-id: int, account-name: string) {
+    function open-label-create(account-id: int, account-name: string, parent-label-id: int, parent-path: string) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "create";
         root.folder-dialog-account-id = account-id;
         root.folder-dialog-folder-id = -1;
-        root.folder-dialog-parent-name = account-name;
+        root.folder-dialog-parent-label-id = parent-label-id;
+        root.folder-dialog-parent-label-path = parent-path;
+        root.folder-dialog-has-descendants = false;
+        root.folder-dialog-parent-name = parent-path == "" ? account-name : parent-path;
         root.folder-dialog-name = "";
         // Gmail accepts a fixed provider palette; this blue is supported
         // remotely and remains a sensible local default for other accounts.
@@ -918,6 +948,9 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "folder";
         root.folder-dialog-mode = "rename";
         root.folder-dialog-folder-id = folder-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = "";
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -927,6 +960,9 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "folder";
         root.folder-dialog-mode = "delete";
         root.folder-dialog-folder-id = folder-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = "";
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -936,16 +972,22 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "rename";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-label-color = color;
         root.folder-dialog-open = true;
     }
 
-    function open-label-delete(label-id: int, name: string, account: string, global: bool) {
+    function open-label-delete(label-id: int, name: string, account: string, global: bool, has-descendants: bool) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "delete";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = has-descendants;
         root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -1042,6 +1084,7 @@ export component AppWindow inherits Window {
         MailView {
             changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
+            changed email-scroll-tail-height => { root.email-scroll-tail-height = self.email-scroll-tail-height; }
             compact-page <=> root.mail-compact-page;
             folders-open <=> root.mail-folders-open;
             loading: !root.startup_hydrated || root.mail_page_loading;
@@ -1049,8 +1092,11 @@ export component AppWindow inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
+            available-width: parent.width;
             compact: root.compact-layout;
             layout-mode: root.workspace_layout;
+            list-pane-width <=> root.workspace_list_pane_width;
+            list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
             show-avatars: root.show_avatars;
             emails: root.emails;
             thread_messages: root.thread_messages;
@@ -1134,11 +1180,15 @@ export component AppWindow inherits Window {
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
             filter_folders(query) => { root.filter_folders(query); }
             request_folder_create(account-id, parent-id, parent-name) => { root.open-folder-create(account-id, parent-id, parent-name); }
-            request_label_create(account-id, account-name) => { root.open-label-create(account-id, account-name); }
+            request_label_create(account-id, account-name, parent-id, parent-path) => {
+                root.open-label-create(account-id, account-name, parent-id, parent-path);
+            }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
-            request_label_delete(id, name, account, global) => { root.open-label-delete(id, name, account, global); }
+            request_label_delete(id, name, account, global, has-descendants) => {
+                root.open-label-delete(id, name, account, global, has-descendants);
+            }
             load_more => { root.load_more(); }
             sync_mail => { root.sync_mail(); }
             message_action(action) => { root.message_action(action); }
@@ -1147,7 +1197,9 @@ export component AppWindow inherits Window {
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
-            save_mail_label(id, account-id, name, color, global) => { root.save_mail_label(id, account-id, name, color, global); }
+            save_mail_label(id, account-id, name, color, global, parent-id) => {
+                root.save_mail_label(id, account-id, name, color, global, parent-id);
+            }
             search_mail_labels(query) => { root.search_mail_labels(query); }
             compose_message_action(action) => { root.compose_message_action(action); }
             close_preview => { root.close_preview(); }
@@ -1231,15 +1283,19 @@ export component AppWindow inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
+            available-width: parent.width;
             compact: root.compact-layout;
             layout-mode: root.workspace_layout;
+            list-pane-width <=> root.workspace_list_pane_width;
+            list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
             dark-mode: root.dark-mode;
             sidebar-collapsed <=> root.contacts_sidebar_collapsed;
             contacts: root.contacts;
             sidebar-rows: root.contact_sidebar_rows;
             toggle-section(key, open) => { root.toggle-contact-section(key, open); }
             query: root.contact_search_query;
-            filter: root.contact_scope == "Favorites" ? "favorites" : "all";
+            filter: root.contact_scope == "Favorites" ? "favorites"
+                : root.contact_scope == "Suggestions" ? "suggestions" : "all";
             selected-scope: root.contact_scope;
             status: root.contact_save_status;
             can-load-more: root.contact_can_load_more;
@@ -1247,6 +1303,7 @@ export component AppWindow inherits Window {
             content-revision: root.contact_list_revision;
             total-count: root.contact_total_count;
             favorite-count: root.contact_favorite_count;
+            suggestion-count: root.contact_suggestion_count;
             has-selected: root.contact_has_selection;
             selected-id <=> root.contact_id;
             edit-name <=> root.contact_name;
@@ -1260,6 +1317,7 @@ export component AppWindow inherits Window {
             edit-notes <=> root.contact_notes;
             edit-tags <=> root.contact_tags;
             edit-favorite <=> root.contact_favorite;
+            is-suggested: root.contact_is_suggested;
             edit-initials: root.contact_initials;
             interaction-label: root.contact_interactions + (root.contact_last_interacted != "" ? " · " + root.contact_last_interacted : "");
             accent: root.accent;
@@ -1284,6 +1342,7 @@ export component AppWindow inherits Window {
             load-more => { root.load-more-contacts(); }
             select-filter(filter) => {
                 root.select-contact-scope(filter == "favorites" ? "Favorites"
+                    : filter == "suggestions" ? "Suggestions"
                     : filter == "all" ? "All contacts" : filter);
             }
             new-contact => { root.new-contact(); }
@@ -1306,7 +1365,17 @@ export component AppWindow inherits Window {
             reserve-compact-navigation: root.compact-primary-nav-visible;
             available-width: parent.width;
             available-height: parent.height;
-            files-view := FilesView { active: root.active_view == "files"; width: parent.width; height: parent.height; compact: root.compact-layout; layout-mode: root.workspace_layout; account-model: root.connected_accounts; }
+            files-view := FilesView {
+                active: root.active_view == "files";
+                width: parent.width;
+                height: parent.height;
+                available-width: parent.width;
+                compact: root.compact-layout;
+                layout-mode: root.workspace_layout;
+                list-pane-width <=> root.workspace_list_pane_width;
+                account-model: root.connected_accounts;
+                list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
+            }
         }
 
         CompactProductNav {
@@ -1424,6 +1493,10 @@ export component AppWindow inherits Window {
             notification_scope <=> root.notification_scope;
             sync_interval_minutes <=> root.sync_interval_minutes;
             mark_read_on_open <=> root.mark_read_on_open;
+            collect_outgoing_contacts <=> root.collect_outgoing_contacts;
+            collect_incoming_contacts <=> root.collect_incoming_contacts;
+            contact_suggest_all_accounts <=> root.contact_suggest_all_accounts;
+            suggest_learned_contacts <=> root.suggest_learned_contacts;
             close_to_tray <=> root.close_to_tray;
             remote-images-enabled <=> root.remote-images-enabled;
             account_email <=> root.account_email;
@@ -1508,6 +1581,10 @@ export component AppWindow inherits Window {
             }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
+            save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
+                root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
+            }
+            clear_contact_suggestions => { return root.clear_contact_suggestions(); }
             set_close_to_tray(enabled) => { root.set_close_to_tray(enabled); }
             sync_mail => { root.sync_mail(); }
             sync_account(account-id) => { root.sync_account(account-id); }
@@ -1655,6 +1732,7 @@ export component AppWindow inherits Window {
         item-kind: root.folder-dialog-item-kind;
         name <=> root.folder-dialog-name;
         parent-name: root.folder-dialog-parent-name;
+        has-descendants: root.folder-dialog-has-descendants;
         surface-color: root.surface;
         raised-color: root.control-bg;
         ui-border-color: root.border;
@@ -1672,7 +1750,14 @@ export component AppWindow inherits Window {
                     name,
                     root.folder-dialog-label-color,
                     false,
+                    root.folder-dialog-parent-label-id,
                 );
+                if (root.folder-dialog-parent-label-id >= 0) {
+                    root.toggle_sidebar_section(
+                        "gmail-label:" + root.folder-dialog-account-id + ":" + root.folder-dialog-parent-label-id,
+                        true,
+                    );
+                }
             } else if (root.folder-dialog-mode == "create") {
                 root.create-folder(root.folder-dialog-account-id, root.folder-dialog-parent-id, name);
             } else {

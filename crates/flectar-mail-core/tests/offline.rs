@@ -197,6 +197,7 @@ async fn offline_actions_queue_locally_and_survive_restart() {
         .save_draft(SaveDraftArgs {
             draft_id: None,
             account_id,
+            from: None,
             to: vec![Address {
                 name: Some("Alice Chen".into()),
                 email: "alice@example.com".into(),

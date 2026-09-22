@@ -1,12 +1,13 @@
 //! Mail attachment metadata and an independent dialog session. Files and Mail
 //! share bounded decoders/PDF workers; opening Mail never changes Files state.
-use crate::document_preview::{Preview, preview};
+use crate::document_preview::{Preview, image_thumbnail, preview};
 use crate::{
     AppWindow, EmailReader, InboxState, MailAttachment, MailAttachments, mail::MailMessage,
 };
-use slint::{ComponentHandle, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::{
     cell::RefCell,
+    collections::HashSet,
     rc::Rc,
     sync::{
         Arc,
@@ -29,12 +30,60 @@ pub(crate) fn clear(app: &AppWindow) {
     ui.set_rows(ModelRc::default());
 }
 pub(crate) fn project(app: &AppWindow, email: &MailMessage, same: bool) {
+    let previous = same.then(|| {
+        let rows = app.global::<MailAttachments>().get_rows();
+        (0..rows.row_count())
+            .filter_map(|index| rows.row_data(index))
+            .filter(|row| row.has_thumbnail)
+            .map(|row| (row.id.to_string(), row.thumbnail))
+            .collect::<std::collections::HashMap<_, _>>()
+    });
     if !same {
         clear(app);
     }
-    let rows = attachment_rows(&email.attachments);
+    let mut rows = attachment_rows(&email.attachments);
+    if let Some(previous) = previous {
+        for row in &mut rows {
+            if let Some(thumbnail) = previous.get(row.id.as_str()) {
+                row.thumbnail = thumbnail.clone();
+                row.has_thumbnail = true;
+            }
+        }
+    }
+    let thumbnail_ids = email
+        .attachments
+        .iter()
+        .filter(|attachment| {
+            thumbnail_candidate(attachment)
+                && rows
+                    .iter()
+                    .find(|row| row.id.as_str() == attachment.id.to_string())
+                    .is_some_and(|row| !row.has_thumbnail)
+        })
+        .take(4)
+        .map(|attachment| attachment.id.to_string())
+        .collect::<Vec<_>>();
     app.global::<MailAttachments>()
         .set_rows(ModelRc::new(VecModel::from(rows)));
+    for id in thumbnail_ids {
+        app.global::<MailAttachments>()
+            .invoke_command("thumbnail".into(), id.into());
+    }
+}
+
+fn thumbnail_candidate(attachment: &flectar_mail_core::models::AttachmentMeta) -> bool {
+    let media = attachment
+        .mime_type
+        .as_deref()
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    attachment.size.is_none_or(|size| size <= 4 * 1024 * 1024)
+        && media.starts_with("image/")
+        && media != "image/svg+xml"
 }
 fn attachment_rows(
     attachments: &[flectar_mail_core::models::AttachmentMeta],
@@ -71,6 +120,8 @@ fn attachment_rows(
                     || media.starts_with("text/")
                     || matches!(media.as_str(), "application/json" | "application/xml")
                     || name.to_ascii_lowercase().ends_with(".pdf"),
+                thumbnail: Default::default(),
+                has_thumbnail: false,
             }
         })
         .collect::<Vec<_>>()
@@ -169,9 +220,56 @@ pub(crate) fn register(
         Arc<flectar_mail_core::Core>,
         Result<Option<Preview>, String>,
     )>(2);
+    let (thumbnail_sender, mut thumbnail_receiver) = tokio::sync::mpsc::channel::<(
+        i32,
+        i64,
+        Arc<flectar_mail_core::Core>,
+        Result<(Vec<u8>, u32, u32), String>,
+    )>(8);
+    let (thumbnail_job_sender, mut thumbnail_job_receiver) =
+        tokio::sync::mpsc::channel::<(
+            i32,
+            flectar_mail_core::models::AttachmentMeta,
+            Arc<flectar_mail_core::Core>,
+        )>(8);
+    let thumbnail_window = weak.clone();
+    runtime.handle().spawn(async move {
+        while let Some((message, attachment, core)) = thumbnail_job_receiver.recv().await {
+            let attachment_id = attachment.id;
+            let result = async {
+                let path = core
+                    .get_attachment(attachment_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                use tokio::io::AsyncReadExt;
+                let file = tokio::fs::File::open(path)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut bytes = Vec::new();
+                file.take(4 * 1024 * 1024 + 1)
+                    .read_to_end(&mut bytes)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                image_thumbnail(bytes).await
+            }
+            .await;
+            if thumbnail_sender
+                .send((message, attachment_id, core, result))
+                .await
+                .is_err()
+            {
+                break;
+            }
+            let _ = thumbnail_window.upgrade_in_event_loop(|app| {
+                app.global::<MailAttachments>().invoke_deliver()
+            });
+        }
+    });
+    let thumbnail_pending = Rc::new(RefCell::new(HashSet::<(usize, i32, i64)>::new()));
     let state = inbox.clone();
     let session_for_delivery = session.clone();
     let current = generation.clone();
+    let pending_for_delivery = thumbnail_pending.clone();
     let window = weak.clone();
     app.global::<MailAttachments>().on_deliver(move || {
         let Some(app) = window.upgrade() else {
@@ -221,9 +319,43 @@ pub(crate) fn register(
                 Err(error) => ui.set_status(error.into()),
             }
         }
+        while let Ok((message, attachment_id, core, result)) = thumbnail_receiver.try_recv() {
+            let core_id = Arc::as_ptr(&core) as usize;
+            pending_for_delivery
+                .borrow_mut()
+                .remove(&(core_id, message, attachment_id));
+            if app.global::<EmailReader>().get_message_id() != message
+                || !state
+                    .borrow()
+                    .core
+                    .as_ref()
+                    .is_some_and(|candidate| Arc::ptr_eq(&core, &candidate.file_core()))
+            {
+                continue;
+            }
+            let Ok((pixels, width, height)) = result else {
+                continue;
+            };
+            let rows = app.global::<MailAttachments>().get_rows();
+            for index in 0..rows.row_count() {
+                let Some(mut row) = rows.row_data(index) else {
+                    continue;
+                };
+                if row.id.as_str() != attachment_id.to_string() {
+                    continue;
+                }
+                row.thumbnail = slint::Image::from_rgba8(
+                    SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&pixels, width, height),
+                );
+                row.has_thumbnail = true;
+                rows.set_row_data(index, row);
+                break;
+            }
+        }
     });
     let state = inbox.clone();
     let handle = runtime.handle().clone();
+    let pending_thumbnails = thumbnail_pending.clone();
     app.global::<MailAttachments>()
         .on_command(move |action, value| {
             let _keep_timer = &timer;
@@ -233,9 +365,6 @@ pub(crate) fn register(
             let ui = app.global::<MailAttachments>();
             if action == "close" {
                 close(&ui, &generation, &session);
-                return;
-            }
-            if ui.get_busy() {
                 return;
             }
             let Some(core) = state.borrow().core.as_ref().map(|core| core.file_core()) else {
@@ -270,6 +399,28 @@ pub(crate) fn register(
             let Some(selected) = selected else {
                 return;
             };
+            if action == "thumbnail" {
+                let core_id = Arc::as_ptr(&core) as usize;
+                if !thumbnail_candidate(&selected)
+                    || !pending_thumbnails
+                        .borrow_mut()
+                        .insert((core_id, message, selected.id))
+                {
+                    return;
+                }
+                if thumbnail_job_sender
+                    .try_send((message, selected.clone(), core))
+                    .is_err()
+                {
+                    pending_thumbnails
+                        .borrow_mut()
+                        .remove(&(core_id, message, selected.id));
+                }
+                return;
+            }
+            if ui.get_busy() {
+                return;
+            }
             let page = value.parse::<u32>().unwrap_or(0);
             if action == "page" && page >= ui.get_pages().max(0) as u32 {
                 return;
@@ -412,5 +563,8 @@ mod tests {
         assert_eq!(rows[0].id.as_str(), i64::MAX.to_string());
         assert!(rows[0].previewable && rows[1].previewable);
         assert!(!rows[2].previewable);
+        assert!(!thumbnail_candidate(&files[0]));
+        assert!(thumbnail_candidate(&files[1]));
+        assert!(!rows[1].has_thumbnail);
     }
 }

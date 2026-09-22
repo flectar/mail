@@ -227,8 +227,23 @@ export component EmailComposer inherits Rectangle {
             selected-background: root.accent-background;
             title-color: root.title-color;
             changed(account-id) => {
+                AccountMailPreferences.composer-sender-email = "";
                 root.search-contacts(root.to, account-id);
                 AccountMailPreferences.composer-account-changed(account-id);
+            }
+        }
+
+        SettingsSelectRow {
+            compact: root.compact;
+            title: @tr("From");
+            description: @tr("Verified sender identity");
+            choices: AccountMailPreferences.composer-sender-names;
+            selected-index: AccountMailPreferences.composer-sender-index;
+            title-color: root.title-color; description-color: root.secondary-color;
+            selected(index, value) => {
+                if AccountMailPreferences.composer-preferences-ready {
+                    AccountMailPreferences.composer-sender(index);
+                }
             }
         }
 

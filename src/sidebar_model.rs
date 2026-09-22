@@ -44,6 +44,10 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         has_children,
         expanded,
         is_standard,
+        is_selectable,
+        can_create_children,
+        can_rename,
+        can_delete,
         label_has_emoji,
         label,
         scope,
@@ -69,6 +73,10 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
         && *has_children == other.has_children
         && *expanded == other.expanded
         && *is_standard == other.is_standard
+        && *is_selectable == other.is_selectable
+        && *can_create_children == other.can_create_children
+        && *can_rename == other.can_rename
+        && *can_delete == other.can_delete
         && *label_has_emoji == other.label_has_emoji
         && *label == other.label
         && *scope == other.scope
@@ -147,7 +155,7 @@ pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
         .filter_map(|account| i32::try_from(account.id).ok())
         .collect::<HashSet<_>>();
     let rows = if filtering {
-        make_filtered_sidebar_rows(mailboxes, labels, query)
+        make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids)
     } else {
         make_sidebar_rows(
             mailboxes,
@@ -172,6 +180,7 @@ fn make_filtered_sidebar_rows(
     mailboxes: Vec<MailboxRow>,
     labels: Vec<MailLabelRow>,
     query: &str,
+    gmail_account_ids: &HashSet<i32>,
 ) -> Vec<SidebarRow> {
     use SidebarRowKind as Kind;
 
@@ -189,22 +198,34 @@ fn make_filtered_sidebar_rows(
     let mut account_labels: HashMap<i32, Vec<MailLabelRow>> = HashMap::new();
     let mut global_labels = Vec::new();
     let mut categories = Vec::new();
-    for label in labels
+    for mut label in labels
         .into_iter()
         .filter(|label| label.name.to_lowercase().contains(&query))
     {
+        label.display_name = label.name.clone();
+        label.depth = 0;
+        label.has_children = false;
+        label.expanded = true;
+        label.can_create_children = gmail_account_ids.contains(&label.account_id);
         if label.is_auto {
             categories.push(label);
         } else if label.is_global {
             global_labels.push(label);
         } else {
-            account_labels.entry(label.account_id).or_default().push(label);
+            account_labels
+                .entry(label.account_id)
+                .or_default()
+                .push(label);
         }
     }
 
     let mut rows = Vec::new();
     if !categories.is_empty() {
-        rows.push(section(Kind::CategoriesSection, "categories", &HashSet::new()));
+        rows.push(section(
+            Kind::CategoriesSection,
+            "categories",
+            &HashSet::new(),
+        ));
         rows.extend(categories.into_iter().map(|label| SidebarRow {
             key: format!("category:{}", label.id).into(),
             label,
@@ -283,6 +304,88 @@ fn section(kind: SidebarRowKind, key: &str, collapsed: &HashSet<String>) -> Side
     }
 }
 
+fn account_label_rows(
+    labels: &[MailLabelRow],
+    account_id: i32,
+    nested: bool,
+    collapsed: &HashSet<String>,
+) -> Vec<SidebarRow> {
+    use SidebarRowKind as Kind;
+
+    let account_labels = labels
+        .iter()
+        .filter(|label| label.account_id == account_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !nested {
+        return account_labels
+            .into_iter()
+            .map(|mut label| {
+                label.display_name = label.name.clone();
+                SidebarRow {
+                    key: format!("account-label:{account_id}:{}", label.id).into(),
+                    label,
+                    ..row(Kind::AccountLabel, "")
+                }
+            })
+            .collect();
+    }
+
+    let ids_by_name = account_labels
+        .iter()
+        .map(|label| (label.name.to_string(), label.id))
+        .collect::<HashMap<_, _>>();
+    let mut children: HashMap<Option<i32>, Vec<MailLabelRow>> = HashMap::new();
+    for label in account_labels {
+        let parent_id = label
+            .name
+            .rsplit_once('/')
+            .and_then(|(parent, _)| ids_by_name.get(parent).copied());
+        children.entry(parent_id).or_default().push(label);
+    }
+
+    let mut stack = children
+        .remove(&None)
+        .unwrap_or_default()
+        .into_iter()
+        .rev()
+        .map(|label| (label, 0))
+        .collect::<Vec<_>>();
+    let mut rows = Vec::new();
+    while let Some((mut label, depth)) = stack.pop() {
+        let key = format!("gmail-label:{account_id}:{}", label.id);
+        let descendants = children.remove(&Some(label.id)).unwrap_or_default();
+        label.display_name = if depth > 0 {
+            label
+                .name
+                .rsplit_once('/')
+                .filter(|(_, leaf)| !leaf.is_empty())
+                .map(|(_, leaf)| leaf.into())
+                .unwrap_or_else(|| label.name.clone())
+        } else {
+            label.name.clone()
+        };
+        label.depth = depth;
+        label.has_children = !descendants.is_empty();
+        label.expanded = !collapsed.contains(&key);
+        label.can_create_children = true;
+        rows.push(SidebarRow {
+            key: key.clone().into(),
+            label,
+            ..row(Kind::AccountLabel, "")
+        });
+        if !collapsed.contains(&key) {
+            stack.extend(
+                descendants
+                    .into_iter()
+                    .rev()
+                    .map(|child| (child, depth.saturating_add(1))),
+            );
+        }
+    }
+    rows
+}
+
 fn make_sidebar_rows(
     mailboxes: Vec<MailboxRow>,
     unified: Vec<MailboxRow>,
@@ -346,6 +449,7 @@ fn make_sidebar_rows(
     for account in accounts {
         let account_id = account.account_id;
         let account_name = account.label.clone();
+        let can_create_top_level_mailbox = account.can_create_children;
         let key = format!("account:{account_id}");
         let open = !collapsed.contains(&key);
         rows.push(SidebarRow {
@@ -364,7 +468,7 @@ fn make_sidebar_rows(
                         ..row(Kind::Folder, "")
                     }),
             );
-            if !gmail_account_ids.contains(&account_id) {
+            if !gmail_account_ids.contains(&account_id) && can_create_top_level_mailbox {
                 rows.push(SidebarRow {
                     mailbox: MailboxRow {
                         account_id,
@@ -386,16 +490,12 @@ fn make_sidebar_rows(
                     ..section(Kind::AccountLabelsSection, &label_key, collapsed)
                 });
                 if !collapsed.contains(&label_key) {
-                    rows.extend(
-                        labels
-                            .iter()
-                            .filter(|label| label.account_id == account_id)
-                            .map(|label| SidebarRow {
-                                key: format!("account-label:{account_id}:{}", label.id).into(),
-                                label: label.clone(),
-                                ..row(Kind::AccountLabel, "")
-                            }),
-                    );
+                    rows.extend(account_label_rows(
+                        &labels,
+                        account_id,
+                        gmail_account_ids.contains(&account_id),
+                        collapsed,
+                    ));
                     if gmail_account_ids.contains(&account_id) {
                         rows.push(SidebarRow {
                             mailbox: MailboxRow {
@@ -435,6 +535,7 @@ mod tests {
                 let account = MailboxRow {
                     account_id,
                     is_account: true,
+                    can_create_children: true,
                     label: "Same display name".into(),
                     context: "Same display name".into(),
                     ..Default::default()
@@ -590,18 +691,100 @@ mod tests {
             &HashSet::from([1]),
             &HashSet::new(),
         );
-        assert!(rows.iter().any(|row| {
-            row.kind == Kind::NewLabel && row.mailbox.account_id == 1
-        }));
-        assert!(!rows.iter().any(|row| {
-            row.kind == Kind::NewFolder && row.mailbox.account_id == 1
-        }));
-        assert!(rows.iter().any(|row| {
-            row.kind == Kind::NewFolder && row.mailbox.account_id == 2
-        }));
-        assert!(!rows.iter().any(|row| {
-            row.kind == Kind::NewLabel && row.mailbox.account_id == 2
-        }));
+        assert!(
+            rows.iter()
+                .any(|row| { row.kind == Kind::NewLabel && row.mailbox.account_id == 1 })
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| { row.kind == Kind::NewFolder && row.mailbox.account_id == 1 })
+        );
+        assert!(
+            rows.iter()
+                .any(|row| { row.kind == Kind::NewFolder && row.mailbox.account_id == 2 })
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| { row.kind == Kind::NewLabel && row.mailbox.account_id == 2 })
+        );
+    }
+
+    #[test]
+    fn account_without_root_creation_right_has_no_new_folder_action() {
+        let mut rows_input = accounts(1, 0);
+        rows_input[0].can_create_children = false;
+        let rows = make_sidebar_rows(
+            rows_input,
+            vec![],
+            vec![],
+            &HashSet::new(),
+            &HashSet::new(),
+        );
+        assert!(!rows.iter().any(|row| row.kind == Kind::NewFolder));
+    }
+
+    #[test]
+    fn gmail_labels_form_a_collapsible_tree_without_inventing_parents() {
+        let label = |id, name: &str| MailLabelRow {
+            id,
+            account_id: 1,
+            name: name.into(),
+            display_name: name.into(),
+            ..Default::default()
+        };
+        let labels = vec![
+            label(1, "Projects"),
+            label(2, "Projects/Launch"),
+            label(3, "Projects/Launch/Design"),
+            label(4, "Orphan/Child"),
+        ];
+        let rows = make_sidebar_rows(
+            accounts(1, 0),
+            vec![],
+            labels.clone(),
+            &HashSet::from([1]),
+            &HashSet::new(),
+        );
+        let visible = rows
+            .iter()
+            .filter(|row| row.kind == Kind::AccountLabel)
+            .map(|row| {
+                (
+                    row.label.id,
+                    row.label.display_name.to_string(),
+                    row.label.depth,
+                    row.label.has_children,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            visible,
+            [
+                (1, "Projects".into(), 0, true),
+                (2, "Launch".into(), 1, true),
+                (3, "Design".into(), 2, false),
+                (4, "Orphan/Child".into(), 0, false),
+            ]
+        );
+
+        let collapsed = make_sidebar_rows(
+            accounts(1, 0),
+            vec![],
+            labels,
+            &HashSet::from([1]),
+            &HashSet::from(["gmail-label:1:1".into()]),
+        );
+        assert_eq!(
+            collapsed
+                .iter()
+                .filter(|row| row.kind == Kind::AccountLabel)
+                .map(|row| row.label.id)
+                .collect::<Vec<_>>(),
+            [1, 4]
+        );
+        assert!(!collapsed.iter().find(|row| row.label.id == 1).unwrap().label.expanded);
     }
 
     #[test]
@@ -620,9 +803,15 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel");
-        assert!(rows.iter().any(|row| row.kind == Kind::AccountLabel && row.label.id == 11));
-        assert!(rows.iter().any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22));
+        let rows = make_filtered_sidebar_rows(accounts(2, 0), labels, "travel", &HashSet::new());
+        assert!(
+            rows.iter()
+                .any(|row| row.kind == Kind::AccountLabel && row.label.id == 11)
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.kind == Kind::GlobalLabel && row.label.id == 22)
+        );
     }
 
     #[test]
@@ -662,21 +851,16 @@ mod tests {
             &HashSet::new(),
             &collapsed,
         );
-        assert!(!closed.iter().any(|row| matches!(
-            row.kind,
-            Kind::Category | Kind::GlobalLabel
-        )));
+        assert!(
+            !closed
+                .iter()
+                .any(|row| matches!(row.kind, Kind::Category | Kind::GlobalLabel))
+        );
         collapsed.remove("categories");
         collapsed.remove("global-labels");
         assert_rows_equal(
             &open,
-            &make_sidebar_rows(
-                accounts(2, 3),
-                vec![],
-                labels,
-                &HashSet::new(),
-                &collapsed,
-            ),
+            &make_sidebar_rows(accounts(2, 3), vec![], labels, &HashSet::new(), &collapsed),
         );
         let mut reordered = accounts(2, 3);
         reordered.rotate_left(4);
@@ -691,7 +875,7 @@ mod tests {
         data[2].label = "Receipts".into();
         data[5].label = "RECEIPTS 2025".into();
 
-        let rows = make_filtered_sidebar_rows(data, vec![], "receipts");
+        let rows = make_filtered_sidebar_rows(data, vec![], "receipts", &HashSet::new());
         assert_eq!(
             rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
             vec![Kind::Account, Kind::Folder, Kind::Account, Kind::Folder]
@@ -997,9 +1181,14 @@ mod interaction_tests {
             *selected_for_click.borrow_mut() = scope.to_string()
         });
         draw();
-        click(140., 182.);
+        const CONTACT_FAVORITES_CENTER_Y: f32 = 182.;
+        // The account disclosure follows the unified heading/section, three
+        // unified scopes, and the accounts heading. Keep the click centered
+        // in the 45 px Account 1 row rather than on the heading above it.
+        const CONTACT_ACCOUNT_SECTION_CENTER_Y: f32 = 303.;
+        click(140., CONTACT_FAVORITES_CENTER_Y);
         assert_eq!(*selected_scope.borrow(), "Favorites");
-        click(140., 250.);
+        click(140., CONTACT_ACCOUNT_SECTION_CENTER_Y);
         assert!(contacts.borrow().collapsed_sections.contains("account:1"));
         for delta_y in [-10_000., 1_000_000.] {
             app.window().dispatch_event(WindowEvent::PointerScrolled {
@@ -1014,7 +1203,7 @@ mod interaction_tests {
         app.set_contacts_sidebar_collapsed(false);
         draw();
         assert!(contacts.borrow().collapsed_sections.contains("account:1"));
-        click(140., 250.);
+        click(140., CONTACT_ACCOUNT_SECTION_CENTER_Y);
         assert!(!contacts.borrow().collapsed_sections.contains("account:1"));
 
         // Calendar source toggles survive recycling and unrelated date changes.
