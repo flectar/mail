@@ -11,6 +11,7 @@ use flectar_mail_core::{
         DraftAttachmentIn, FolderInfo, Label, MailHistory, MailProfile, MailboxBadgeCounts,
         MessageDetail, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
         QueueSendResult, SaveDraftArgs, Settings, Snippet, ThreadCursor, ThreadSummary, View,
+        normalized_workspace_list_pane_width,
     },
 };
 #[cfg(test)]
@@ -812,6 +813,15 @@ impl CoreMailSource {
             _ => "default",
         }
         .to_owned();
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_workspace_list_pane_width(&self, width: i64) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.workspace_list_pane_width = normalized_workspace_list_pane_width(width);
         self.core
             .set_settings(settings)
             .await

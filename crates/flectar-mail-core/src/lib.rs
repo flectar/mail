@@ -116,6 +116,14 @@ fn validate_folder_leaf(value: &str) -> Result<String> {
 pub use crate::db::repo::notifications::{NotificationOutboxItem, RoutedTab};
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
 
+/// Read the pane width needed to lay out the first application frame.
+///
+/// This is a best-effort presentation bootstrap. Normal core startup remains
+/// authoritative for loading and validating the complete settings model.
+pub fn startup_workspace_list_pane_width(paths: &Paths) -> Option<i64> {
+    db::startup_workspace_list_pane_width(&paths.db_file())
+}
+
 fn normalize_account_email(value: &str) -> Option<String> {
     let value = value.trim();
     if value.is_empty() || value.len() > 320 || value.chars().any(char::is_whitespace) {

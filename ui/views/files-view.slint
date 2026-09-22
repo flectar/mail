@@ -7,7 +7,7 @@ import { TypeScale } from "../typography.slint";
 import { Button } from "../components/button.slint";
 import { AccountRow } from "../models.slint";
 import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
 
@@ -156,11 +156,22 @@ component FilesNavigation inherits Rectangle {
 export component FilesView inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> active: true;
+    in property <length> available-width: 0px;
     in property <string> layout-mode: "default";
+    in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
+    callback list-pane-width-committed(length);
     in property <[AccountRow]> account-model;
     in-out property <bool> sidebar-collapsed: false;
     in-out property <bool> navigation-open <=> FilesUi.navigation-open;
     private property <bool> single-surface: root.compact || root.layout-mode == "minimal";
+    private property <length> list-pane-maximum-width: max(
+        LayoutMetrics.list-pane-width,
+        root.available-width - workspace-sidebar.current-width - LayoutMetrics.divider-width - LayoutMetrics.detail-pane-min-width
+    );
+    private property <length> effective-list-pane-width: root.list-pane-width.clamp(
+        LayoutMetrics.list-pane-width,
+        root.list-pane-maximum-width
+    );
     private property <bool> list-visible: !root.single-surface || !FilesUi.preview-open;
     private property <bool> detail-visible: !root.single-surface || FilesUi.preview-open;
     private property <string> search-text: FilesUi.query;
@@ -243,7 +254,7 @@ export component FilesView inherits Rectangle {
     HorizontalBox {
         width: parent.width; height: parent.height;
         padding: 0px; spacing: 0px;
-        CollapsibleWorkspaceSidebar {
+        workspace-sidebar := CollapsibleWorkspaceSidebar {
             visible: !root.compact;
             collapsed: root.compact || root.sidebar-collapsed;
             if !root.compact && !root.sidebar-collapsed : FilesNavigation {
@@ -255,9 +266,9 @@ export component FilesView inherits Rectangle {
         }
         Rectangle {
             visible: root.list-visible;
-            min-width: 0px;
-            preferred-width: root.single-surface ? 0px : LayoutMetrics.list-pane-width;
-            max-width: !root.list-visible ? 0px : root.single-surface ? root.width : LayoutMetrics.list-pane-width;
+            min-width: root.single-surface ? 0px : root.effective-list-pane-width;
+            preferred-width: root.single-surface ? 0px : root.effective-list-pane-width;
+            max-width: !root.list-visible ? 0px : root.single-surface ? root.available-width : root.effective-list-pane-width;
             horizontal-stretch: root.list-visible && root.single-surface ? 1 : 0;
             VerticalBox {
                 padding: 0px; spacing: 0px;
@@ -411,9 +422,20 @@ export component FilesView inherits Rectangle {
             }
         }
         }
+        if !root.single-surface && root.list-visible && root.detail-visible : WorkspacePaneResizeHandle {
+            leading-width: root.effective-list-pane-width;
+            maximum-leading-width: root.list-pane-maximum-width;
+            divider-color: AppTheme.border;
+            active-color: AppTheme.accent;
+            accessibility-label: @tr("File list width");
+            resizing(width) => { root.list-pane-width = width; }
+            resize-finished(width) => {
+                root.list-pane-width = width;
+                root.list-pane-width-committed(width);
+            }
+        }
         if root.detail-visible : Rectangle {
             horizontal-stretch: 1; min-width: 0px; background: AppTheme.surface;
-            Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: AppTheme.border; }
             VerticalBox {
                 width: parent.width; height: parent.height;
                 padding: root.compact ? 12px : 24px; spacing: 16px; cross-axis-alignment: stretch;

@@ -8,7 +8,7 @@ import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-control
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
-import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
+import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 
 component FieldLabel inherits Text {
@@ -26,9 +26,12 @@ component FieldLabel inherits Text {
 export component ContactsView inherits Rectangle {
     in property <bool> active: true;
     in property <bool> compact: false;
+    in property <length> available-width: 0px;
     private property <length> sidebar-scroll-y: 0px;
     callback toggle-section(string, bool);
     in property <string> layout-mode: "default";
+    in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
+    callback list-pane-width-committed(length);
     in property <bool> dark-mode: false;
     in property <[ContactRow]> contacts: [];
     in property <[ContactSidebarRow]> sidebar-rows: [];
@@ -60,6 +63,14 @@ export component ContactsView inherits Rectangle {
     in-out property <bool> detail-page-visible: false;
     in-out property <bool> sidebar-collapsed: false;
     private property <bool> single-surface: root.compact || root.layout-mode == "minimal";
+    private property <length> list-pane-maximum-width: max(
+        LayoutMetrics.list-pane-width,
+        root.available-width - workspace-sidebar.current-width - LayoutMetrics.divider-width - LayoutMetrics.detail-pane-min-width
+    );
+    private property <length> effective-list-pane-width: root.list-pane-width.clamp(
+        LayoutMetrics.list-pane-width,
+        root.list-pane-maximum-width
+    );
     private property <bool> list-visible: !root.single-surface || !root.detail-page-visible;
     private property <bool> detail-visible: !root.single-surface || root.detail-page-visible;
     private property <bool> list-loading: root.loading-more && root.contacts.length == 0;
@@ -129,7 +140,7 @@ export component ContactsView inherits Rectangle {
         padding: 0px;
         spacing: 0px;
 
-        CollapsibleWorkspaceSidebar {
+        workspace-sidebar := CollapsibleWorkspaceSidebar {
             visible: !root.compact;
             collapsed: root.compact || root.sidebar-collapsed;
             surface-color: root.sidebar-bg;
@@ -248,9 +259,9 @@ export component ContactsView inherits Rectangle {
 
         Rectangle {
             visible: root.list-visible;
-            min-width: 0px;
-            preferred-width: root.single-surface ? 0px : LayoutMetrics.list-pane-width;
-            max-width: !root.list-visible ? 0px : root.single-surface ? root.width : LayoutMetrics.list-pane-width;
+            min-width: root.single-surface ? 0px : root.effective-list-pane-width;
+            preferred-width: root.single-surface ? 0px : root.effective-list-pane-width;
+            max-width: !root.list-visible ? 0px : root.single-surface ? root.available-width : root.effective-list-pane-width;
             horizontal-stretch: root.list-visible && root.single-surface ? 1 : 0;
             background: root.surface;
 
@@ -462,13 +473,24 @@ export component ContactsView inherits Rectangle {
             }
         }
 
-        Rectangle { visible: !root.single-surface; width: root.single-surface ? 0px : 1px; background: root.border; }
+        if !root.single-surface && root.list-visible && root.detail-visible : WorkspacePaneResizeHandle {
+            leading-width: root.effective-list-pane-width;
+            maximum-leading-width: root.list-pane-maximum-width;
+            divider-color: root.border;
+            active-color: root.accent;
+            accessibility-label: @tr("Contact list width");
+            resizing(width) => { root.list-pane-width = width; }
+            resize-finished(width) => {
+                root.list-pane-width = width;
+                root.list-pane-width-committed(width);
+            }
+        }
 
         Rectangle {
             visible: root.detail-visible;
             min-width: 0px;
             preferred-width: 0px;
-            max-width: root.detail-visible ? root.width : 0px;
+            max-width: root.detail-visible ? root.available-width : 0px;
             horizontal-stretch: root.detail-visible ? 1 : 0;
             background: root.surface-raised;
 

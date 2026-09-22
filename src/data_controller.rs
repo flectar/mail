@@ -7,7 +7,10 @@
 
 use super::*;
 use chrono::Utc;
-use flectar_mail_core::models::{PortableAccountConfig, Settings};
+use flectar_mail_core::models::{
+    MIN_WORKSPACE_LIST_PANE_WIDTH, PortableAccountConfig, Settings,
+    normalized_workspace_list_pane_width,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -522,6 +525,7 @@ pub(super) fn register_data_management_callbacks(
                     "theme": settings.theme,
                     "showAvatars": settings.show_avatars,
                     "workspaceLayout": settings.workspace_layout,
+                    "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
                     "language": settings.language,
                     "calendarWeekStart": settings.calendar_week_start,
@@ -726,6 +730,13 @@ pub(super) fn register_data_management_callbacks(
                 {
                     settings.workspace_layout = layout.to_owned();
                 }
+                if let Some(width) = preferences
+                    .get("workspaceListPaneWidth")
+                    .and_then(|value| value.as_i64())
+                {
+                    settings.workspace_list_pane_width =
+                        normalized_workspace_list_pane_width(width);
+                }
                 if let Some(language) = preferences
                     .get("language")
                     .and_then(|value| value.as_str())
@@ -874,6 +885,10 @@ pub(super) fn register_data_management_callbacks(
                 app.set_show_avatars(settings.show_avatars);
                 app.set_show_account_markers(settings.show_account_badges);
                 app.set_workspace_layout(settings.workspace_layout.clone().into());
+                app.set_workspace_list_pane_width(
+                    normalized_workspace_list_pane_width(settings.workspace_list_pane_width)
+                        as f32,
+                );
                 app.set_notifications_enabled(settings.notifications_enabled);
                 app.set_notification_sound_enabled(settings.sound_enabled);
                 app.set_notification_scope(settings.notification_scope.clone().into());
@@ -979,6 +994,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_show_avatars(true);
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
+                    app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);
                     app.set_notifications_enabled(true);
                     app.set_notification_sound_enabled(true);
                     app.set_notification_scope("important".into());

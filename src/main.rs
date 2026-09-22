@@ -1260,10 +1260,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // Register the deterministic emoji face before any initial text is measured.
     configure_emoji_font_fallback()?;
 
-    // Construct and map the window before opening or migrating either database.
-    // Until startup completes it paints the inert mailbox shell; mapping now
-    // avoids making callback wiring part of first-window latency.
+    // Construct the window before opening or migrating either database. Seed
+    // the one geometry preference visible in the inert mailbox shell through a
+    // zero-wait read-only lookup, then map the first frame at its saved width.
+    // Full settings validation still happens during normal background startup.
     let app = renderer_preferences::initialize_step(use_wgpu, AppWindow::new)?;
+    if let Some(width) = flectar_mail_core::startup_workspace_list_pane_width(&platform.paths) {
+        app.set_workspace_list_pane_width(width as f32);
+    }
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();

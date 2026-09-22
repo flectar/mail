@@ -81,6 +81,114 @@ export component CollapsibleWorkspaceSidebar inherits WorkspaceSidebarSurface {
     animate animated-width { duration: 220ms; easing: spring(0); }
 }
 
+// A one-pixel divider with a larger, invisible interaction target. The
+// workspace owns the requested width so mail, contacts, and files can share a
+// persisted preference while still clamping it to their current geometry.
+export component WorkspacePaneResizeHandle inherits Rectangle {
+    in property <length> leading-width: LayoutMetrics.list-pane-width;
+    in property <length> minimum-leading-width: LayoutMetrics.list-pane-width;
+    in property <length> maximum-leading-width: root.minimum-leading-width;
+    in property <color> divider-color: AppTheme.border;
+    in property <color> active-color: AppTheme.accent;
+    in property <string> accessibility-label;
+    callback resizing(length);
+    callback resize-finished(length);
+
+    private property <length> effective-maximum: max(root.minimum-leading-width, root.maximum-leading-width);
+    private property <length> drag-start-width: root.leading-width;
+    private property <length> drag-start-pointer-x: 0px;
+    private property <length> last-requested-width: root.leading-width;
+    private property <bool> dragging: false;
+
+    function request-width(value: length) {
+        let bounded = value.clamp(root.minimum-leading-width, root.effective-maximum);
+        root.last-requested-width = bounded;
+        root.resizing(bounded);
+    }
+
+    function commit-width(value: length) {
+        root.request-width(value);
+        root.resize-finished(root.last-requested-width);
+    }
+
+    width: LayoutMetrics.divider-width;
+    horizontal-stretch: 0;
+    z: 2;
+    background: resize-hit.pressed || resize-hit.has-hover || resize-focus.has-focus
+        ? root.active-color : root.divider-color;
+    animate background { duration: 150ms; easing: ease-out; }
+
+    resize-focus := FocusScope {
+        x: -(LayoutMetrics.pane-resize-hit-width - root.width) / 2;
+        y: 0px;
+        width: LayoutMetrics.pane-resize-hit-width;
+        height: parent.height;
+        focus-on-click: true;
+        accessible-role: slider;
+        accessible-label: root.accessibility-label;
+        accessible-orientation: Orientation.horizontal;
+        accessible-value: "\{(root.leading-width / 1px).round()}";
+        accessible-value-minimum: root.minimum-leading-width / 1px;
+        accessible-value-maximum: root.effective-maximum / 1px;
+        accessible-value-step: LayoutMetrics.pane-resize-keyboard-step / 1px;
+        accessible-action-set-value(value) => {
+            if value.is-float() {
+                root.commit-width(value.to-float() * 1px);
+            }
+        }
+        accessible-action-increment => {
+            root.commit-width(root.leading-width + LayoutMetrics.pane-resize-keyboard-step);
+        }
+        accessible-action-decrement => {
+            root.commit-width(root.leading-width - LayoutMetrics.pane-resize-keyboard-step);
+        }
+        key-pressed(event) => {
+            let step = event.modifiers.shift ? 40px : LayoutMetrics.pane-resize-keyboard-step;
+            if event.text == Key.LeftArrow {
+                root.request-width(root.leading-width - step);
+            } else if event.text == Key.RightArrow {
+                root.request-width(root.leading-width + step);
+            } else if event.text == Key.Home {
+                root.request-width(root.minimum-leading-width);
+            } else if event.text == Key.End {
+                root.request-width(root.effective-maximum);
+            } else {
+                return reject;
+            }
+            return accept;
+        }
+        key-released(event) => {
+            if event.text == Key.LeftArrow || event.text == Key.RightArrow
+                    || event.text == Key.Home || event.text == Key.End {
+                root.resize-finished(root.last-requested-width);
+                return accept;
+            }
+            return reject;
+        }
+
+        resize-hit := TouchArea {
+            mouse-cursor: col-resize;
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                    resize-focus.focus();
+                    root.dragging = true;
+                    root.drag-start-width = root.leading-width;
+                    root.last-requested-width = root.leading-width;
+                    root.drag-start-pointer-x = self.absolute-position.x + self.mouse-x;
+                } else if event.kind == PointerEventKind.move && root.dragging {
+                    let pointer-x = self.absolute-position.x + self.mouse-x;
+                    root.request-width(root.drag-start-width + pointer-x - root.drag-start-pointer-x);
+                } else if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel)
+                        && root.dragging {
+                    root.dragging = false;
+                    root.resize-finished(root.last-requested-width);
+                }
+            }
+            double-clicked => { root.commit-width(root.minimum-leading-width); }
+        }
+    }
+}
+
 // Section labels use one compact typographic treatment across mail folders,
 // contact groups, and calendar sources.
 export component WorkspaceMiniHeading inherits Text {

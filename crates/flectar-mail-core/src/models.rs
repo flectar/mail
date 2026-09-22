@@ -1133,6 +1133,10 @@ pub struct Settings {
     /// the preference; accept it so development builds upgrade cleanly.
     #[serde(default = "default_workspace_layout", alias = "mailLayout")]
     pub workspace_layout: String,
+    /// Shared logical-pixel width of the mail, contacts, and files list pane.
+    /// The established layout width remains the default and hard minimum.
+    #[serde(default = "default_workspace_list_pane_width")]
+    pub workspace_list_pane_width: i64,
     /// Render mailbox and folder icons with a single neutral color instead of
     /// the default semantic palette.
     #[serde(default)]
@@ -1361,6 +1365,16 @@ fn default_notification_scope() -> String {
 fn default_workspace_layout() -> String {
     "default".into()
 }
+pub const MIN_WORKSPACE_LIST_PANE_WIDTH: i64 = 390;
+pub const MAX_WORKSPACE_LIST_PANE_WIDTH: i64 = 8192;
+
+fn default_workspace_list_pane_width() -> i64 {
+    MIN_WORKSPACE_LIST_PANE_WIDTH
+}
+
+pub fn normalized_workspace_list_pane_width(width: i64) -> i64 {
+    width.clamp(MIN_WORKSPACE_LIST_PANE_WIDTH, MAX_WORKSPACE_LIST_PANE_WIDTH)
+}
 fn default_theme_preset() -> String {
     "default".into()
 }
@@ -1373,6 +1387,7 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             workspace_layout: default_workspace_layout(),
+            workspace_list_pane_width: default_workspace_list_pane_width(),
             monochrome_sidebar_icons: false,
             language: "system".into(),
             calendar_week_start: default_calendar_week_start(),
@@ -1675,6 +1690,7 @@ mod tests {
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
         assert_eq!(s.workspace_layout, "default");
+        assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
     }
 
     #[test]
@@ -1687,6 +1703,23 @@ mod tests {
 
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
+        assert_eq!(
+            serialized["workspaceListPaneWidth"],
+            MIN_WORKSPACE_LIST_PANE_WIDTH
+        );
         assert!(serialized.get("mailLayout").is_none());
+    }
+
+    #[test]
+    fn workspace_list_pane_width_is_bounded() {
+        assert_eq!(
+            normalized_workspace_list_pane_width(120),
+            MIN_WORKSPACE_LIST_PANE_WIDTH
+        );
+        assert_eq!(normalized_workspace_list_pane_width(640), 640);
+        assert_eq!(
+            normalized_workspace_list_pane_width(i64::MAX),
+            MAX_WORKSPACE_LIST_PANE_WIDTH
+        );
     }
 }

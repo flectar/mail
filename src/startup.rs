@@ -16,6 +16,7 @@ use flectar_mail_core::{
     events::CoreEvent,
     models::{
         Account, AccountConfig, CalendarConnection, CardDavConnection, Settings, ThreadCursor,
+        normalized_workspace_list_pane_width,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -632,6 +633,9 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         }
         .into(),
     );
+    app.set_workspace_list_pane_width(normalized_workspace_list_pane_width(
+        settings.workspace_list_pane_width,
+    ) as f32);
     app.set_theme_mode(
         match settings.theme.as_str() {
             "carbon" | "dark" => "dark",

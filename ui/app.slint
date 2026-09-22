@@ -182,6 +182,7 @@ export global I18n {
         if (key == "Workspace layout updated for this session.") { return @tr("Workspace layout updated for this session."); }
         if (key == "Workspace layout preference saved.") { return @tr("Workspace layout preference saved."); }
         if (key == "Could not save workspace layout: {}") { return @tr("Could not save workspace layout: {}", argument); }
+        if (key == "Could not save list pane width: {}") { return @tr("Could not save list pane width: {}", argument); }
         return "";
     }
 
@@ -491,6 +492,7 @@ export component AppWindow inherits Window {
     callback delete_mail_profile(string);
     callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
+    callback save_workspace_list_pane_width(length);
     callback save_language(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
@@ -737,6 +739,7 @@ export component AppWindow inherits Window {
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
+    in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
     in-out property <string> language_mode: "system";
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
@@ -1053,8 +1056,11 @@ export component AppWindow inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
+            available-width: parent.width;
             compact: root.compact-layout;
             layout-mode: root.workspace_layout;
+            list-pane-width <=> root.workspace_list_pane_width;
+            list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
             show-avatars: root.show_avatars;
             emails: root.emails;
             thread_messages: root.thread_messages;
@@ -1235,8 +1241,11 @@ export component AppWindow inherits Window {
             y: 0px;
             width: parent.width;
             height: parent.height;
+            available-width: parent.width;
             compact: root.compact-layout;
             layout-mode: root.workspace_layout;
+            list-pane-width <=> root.workspace_list_pane_width;
+            list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
             dark-mode: root.dark-mode;
             sidebar-collapsed <=> root.contacts_sidebar_collapsed;
             contacts: root.contacts;
@@ -1310,7 +1319,17 @@ export component AppWindow inherits Window {
             reserve-compact-navigation: root.compact-primary-nav-visible;
             available-width: parent.width;
             available-height: parent.height;
-            files-view := FilesView { active: root.active_view == "files"; width: parent.width; height: parent.height; compact: root.compact-layout; layout-mode: root.workspace_layout; account-model: root.connected_accounts; }
+            files-view := FilesView {
+                active: root.active_view == "files";
+                width: parent.width;
+                height: parent.height;
+                available-width: parent.width;
+                compact: root.compact-layout;
+                layout-mode: root.workspace_layout;
+                list-pane-width <=> root.workspace_list_pane_width;
+                account-model: root.connected_accounts;
+                list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
+            }
         }
 
         CompactProductNav {

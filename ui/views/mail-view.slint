@@ -2,6 +2,7 @@ import { HorizontalBox } from "std-widgets.slint";
 import { EmailLink, EmailRow, EmailTile, SidebarRow, MailLabelRow, ThreadMessageRow } from "../models.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
+import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
 import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
 
@@ -9,10 +10,13 @@ import { MailReadingPane } from "mail-reading-pane.slint";
 // component owns the feature layout, interaction wiring, and clipboard bridge.
 export component MailView inherits Rectangle {
     in property <bool> compact: false;
+    in property <length> available-width: 0px;
     // Keep the animated geometry outside conditionally instantiated sidebars.
     private property <length> desktop-sidebar-width: root.mail_sidebar_collapsed ? 0px : LayoutMetrics.sidebar-width;
     animate desktop-sidebar-width { duration: 220ms; easing: spring(0); }
     in property <string> layout-mode: "default";
+    in-out property <length> list-pane-width: LayoutMetrics.list-pane-width;
+    callback list-pane-width-committed(length);
     in property <bool> show-avatars: true;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
@@ -74,6 +78,14 @@ export component MailView inherits Rectangle {
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
+    private property <length> list-pane-maximum-width: max(
+        LayoutMetrics.list-pane-width,
+        root.available-width - root.desktop-sidebar-width - LayoutMetrics.divider-width - LayoutMetrics.detail-pane-min-width
+    );
+    private property <length> effective-list-pane-width: root.list-pane-width.clamp(
+        LayoutMetrics.list-pane-width,
+        root.list-pane-maximum-width
+    );
     private property <length> single-pane-content-x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
     private property <length> single-pane-content-width: max(0px, root.width - root.single-pane-content-x);
     private property <length> page-transition-distance: root.compact
@@ -191,6 +203,7 @@ export component MailView inherits Rectangle {
             }
 
             MailListPane {
+                width: root.effective-list-pane-width;
                 show-avatars: root.show-avatars;
                 loading: root.loading;
                 emails: root.emails;
@@ -234,7 +247,18 @@ export component MailView inherits Rectangle {
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
 
-            Rectangle { width: 1px; background: root.border; }
+            WorkspacePaneResizeHandle {
+                leading-width: root.effective-list-pane-width;
+                maximum-leading-width: root.list-pane-maximum-width;
+                divider-color: root.border;
+                active-color: root.accent;
+                accessibility-label: @tr("Message list width");
+                resizing(width) => { root.list-pane-width = width; }
+                resize-finished(width) => {
+                    root.list-pane-width = width;
+                    root.list-pane-width-committed(width);
+                }
+            }
 
             desktop-reading-pane := MailReadingPane {
                 show-avatars: root.show-avatars;

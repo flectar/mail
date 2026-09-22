@@ -432,6 +432,29 @@ pub(super) fn register_settings_preference_callbacks(
             )),
         }
     });
+
+    let app_weak = app.as_weak();
+    let state_for_list_pane_width = Rc::clone(state);
+    let runtime_for_list_pane_width = Rc::clone(runtime);
+    app.on_save_workspace_list_pane_width(move |width| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let width =
+            flectar_mail_core::models::normalized_workspace_list_pane_width(width.round() as i64);
+        app.set_workspace_list_pane_width(width as f32);
+        let Some(core) = state_for_list_pane_width.borrow().core.clone() else {
+            return;
+        };
+        if let Err(error) =
+            runtime_for_list_pane_width.block_on(core.set_workspace_list_pane_width(width))
+        {
+            app.set_sync_status(UiMessage::detail(
+                "Could not save list pane width: {}",
+                error,
+            ));
+        }
+    });
 }
 
 /// Both entry points share one asynchronous persistence path and busy state.
