@@ -60,6 +60,7 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <image> icon;
     in property <bool> selected: false;
     in property <bool> label-has-emoji: false;
+    in property <string> label-path: root.label;
     in property <length> row-height: 28px;
     in property <length> left-padding: SidebarStyle.icon-left;
     in property <int> account-id: -1;
@@ -67,8 +68,13 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <int> label-id: -1;
     in property <bool> has-children: false;
     in property <bool> expanded: true;
-    in property <bool> manageable: false;
+    in property <bool> label-tree-node: false;
+    in property <bool> folder-menu-enabled: false;
+    in property <bool> can-create-child: false;
+    in property <bool> can-rename: false;
+    in property <bool> can-delete: false;
     in property <bool> label-manageable: false;
+    in property <bool> label-can-create-child: false;
     in property <bool> label-is-global: false;
     in property <string> label-account-name: "";
     in property <bool> mail-drop-enabled: false;
@@ -85,8 +91,9 @@ export component SidebarItem inherits SidebarRowSurface {
     callback new-subfolder(int, int, string);
     callback rename-folder(int, string);
     callback delete-folder(int, string);
+    callback new-child-label(int, int, string, string);
     callback rename-label(int, string, color, string, bool);
-    callback delete-label(int, string, string, bool);
+    callback delete-label(int, string, string, bool, bool);
 
     height: root.visible ? root.row-height : 0px;
     idle-background: root.sidebar-background;
@@ -155,7 +162,9 @@ export component SidebarItem inherits SidebarRowSurface {
         width: 22px;
         height: root.row-height;
         accessible-role: button;
-        accessible-label: root.expanded ? @tr("Collapse folder") : @tr("Expand folder");
+        accessible-label: root.label-tree-node
+            ? (root.expanded ? @tr("Collapse label") : @tr("Expand label"))
+            : (root.expanded ? @tr("Collapse folder") : @tr("Expand folder"));
         accessible-expanded: root.expanded;
         accessible-action-default => {
             root.toggled(root.folder-id, !root.expanded);
@@ -164,41 +173,67 @@ export component SidebarItem inherits SidebarRowSurface {
         mouse-cursor: pointer;
     }
 
-    if root.manageable: ContextMenuArea {
+    if root.folder-menu-enabled: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
         Menu {
             MenuItem {
                 title: @tr("New subfolder");
+                enabled: root.can-create-child;
                 activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
             }
 
             MenuItem {
                 title: @tr("Rename folder");
+                enabled: root.can-rename;
                 activated => { root.rename-folder(root.folder-id, root.label); }
             }
 
             MenuItem {
                 title: @tr("Delete folder");
+                enabled: root.can-delete;
                 activated => { root.delete-folder(root.folder-id, root.label); }
             }
         }
     }
 
-    if root.label-manageable: ContextMenuArea {
+    if root.label-manageable && root.label-can-create-child: ContextMenuArea {
+        x: 22px;
+        width: parent.width - 22px;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("New nested label");
+                enabled: root.label-can-create-child;
+                activated => { root.new-child-label(root.account-id, root.label-id, root.label-path, root.label-account-name); }
+            }
+
+            MenuItem {
+                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
+                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
+            }
+
+            MenuItem {
+                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
+                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
+            }
+        }
+    }
+
+    if root.label-manageable && !root.label-can-create-child: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
         Menu {
             MenuItem {
                 title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
-                activated => { root.rename-label(root.label-id, root.label, root.editable-color, root.label-account-name, root.label-is-global); }
+                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
             }
 
             MenuItem {
                 title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
-                activated => { root.delete-label(root.label-id, root.label, root.label-account-name, root.label-is-global); }
+                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
             }
         }
     }

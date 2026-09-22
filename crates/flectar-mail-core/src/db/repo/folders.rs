@@ -6,6 +6,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 pub struct Folder {
     pub id: i64,
     pub account_id: i64,
+    pub parent_id: Option<i64>,
     pub imap_name: String,
     pub delimiter: Option<String>,
     pub role: Option<String>,
@@ -16,12 +17,32 @@ pub struct Folder {
     pub backfill_cursor: Option<i64>,
     pub backfill_done: bool,
     pub jmap_id: Option<String>,
+    pub selectable: bool,
+    pub can_create_children: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderPermissions {
+    pub can_create_children: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
+}
+
+impl FolderPermissions {
+    pub const FULL: Self = Self {
+        can_create_children: true,
+        can_rename: true,
+        can_delete: true,
+    };
 }
 
 fn from_row(row: &Row) -> rusqlite::Result<Folder> {
     Ok(Folder {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
+        parent_id: row.get("parent_id")?,
         imap_name: row.get("imap_name")?,
         delimiter: row.get("delimiter")?,
         role: row.get("role")?,
@@ -32,6 +53,10 @@ fn from_row(row: &Row) -> rusqlite::Result<Folder> {
         backfill_cursor: row.get("backfill_cursor")?,
         backfill_done: row.get::<_, i64>("backfill_done")? != 0,
         jmap_id: row.get("jmap_id")?,
+        selectable: row.get::<_, i64>("selectable")? != 0,
+        can_create_children: row.get::<_, i64>("can_create_children")? != 0,
+        can_rename: row.get::<_, i64>("can_rename")? != 0,
+        can_delete: row.get::<_, i64>("can_delete")? != 0,
     })
 }
 
@@ -42,12 +67,46 @@ pub fn upsert(
     delimiter: Option<&str>,
     role: Option<&str>,
 ) -> Result<i64> {
+    upsert_discovered(
+        conn,
+        account_id,
+        imap_name,
+        delimiter,
+        role,
+        true,
+        FolderPermissions::FULL,
+    )
+}
+
+pub fn upsert_discovered(
+    conn: &Connection,
+    account_id: i64,
+    imap_name: &str,
+    delimiter: Option<&str>,
+    role: Option<&str>,
+    selectable: bool,
+    permissions: FolderPermissions,
+) -> Result<i64> {
     conn.execute(
-        "INSERT INTO folders (account_id, imap_name, delimiter, role)
-         VALUES (?1,?2,?3,?4)
+        "INSERT INTO folders (account_id, imap_name, delimiter, role, selectable,
+                              can_create_children, can_rename, can_delete)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
          ON CONFLICT(account_id, imap_name)
-         DO UPDATE SET delimiter = excluded.delimiter, role = excluded.role, jmap_id = NULL",
-        params![account_id, imap_name, delimiter, role],
+         DO UPDATE SET delimiter = excluded.delimiter, role = excluded.role,
+                       selectable = excluded.selectable,
+                       can_create_children = excluded.can_create_children,
+                       can_rename = excluded.can_rename,
+                       can_delete = excluded.can_delete, jmap_id = NULL",
+        params![
+            account_id,
+            imap_name,
+            delimiter,
+            role,
+            selectable,
+            permissions.can_create_children,
+            permissions.can_rename,
+            permissions.can_delete,
+        ],
     )?;
     let id: i64 = conn.query_row(
         "SELECT id FROM folders WHERE account_id = ?1 AND imap_name = ?2",
@@ -59,11 +118,15 @@ pub fn upsert(
 
 pub fn list(conn: &Connection, account_id: Option<i64>) -> Result<Vec<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT f.id AS id, f.account_id AS account_id, f.imap_name AS imap_name,
+        "SELECT f.id AS id, f.account_id AS account_id, f.parent_id AS parent_id,
+                f.imap_name AS imap_name,
                 f.delimiter AS delimiter, f.role AS role, f.uidvalidity AS uidvalidity,
                 f.uidnext AS uidnext, f.highestmodseq AS highestmodseq,
                 f.last_seen_uid AS last_seen_uid, f.backfill_cursor AS backfill_cursor,
-                f.backfill_done AS backfill_done, f.jmap_id AS jmap_id
+                f.backfill_done AS backfill_done, f.jmap_id AS jmap_id,
+                f.selectable AS selectable,
+                f.can_create_children AS can_create_children,
+                f.can_rename AS can_rename, f.can_delete AS can_delete
          FROM folders f
          JOIN accounts a ON a.id = f.account_id
          WHERE (?1 IS NULL OR f.account_id = ?1)
@@ -82,6 +145,7 @@ pub fn list_info(conn: &Connection, account_id: Option<i64>) -> Result<Vec<Folde
         .map(|f| FolderInfo {
             id: f.id,
             account_id: f.account_id,
+            parent_id: f.parent_id,
             display_name: if f.jmap_id.is_some() {
                 f.imap_name.clone()
             } else {
@@ -91,6 +155,10 @@ pub fn list_info(conn: &Connection, account_id: Option<i64>) -> Result<Vec<Folde
             imap_name: f.imap_name,
             delimiter: f.delimiter,
             role: f.role,
+            selectable: f.selectable,
+            can_create_children: f.can_create_children,
+            can_rename: f.can_rename,
+            can_delete: f.can_delete,
         })
         .collect())
 }
@@ -173,8 +241,9 @@ pub fn delete_tree(
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, account_id, imap_name, delimiter, role, uidvalidity, uidnext,
-                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id
+        "SELECT id, account_id, parent_id, imap_name, delimiter, role, uidvalidity, uidnext,
+                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id, selectable,
+                can_create_children, can_rename, can_delete
          FROM folders WHERE id = ?1",
     )?;
     Ok(stmt.query_row(params![id], from_row).optional()?)
@@ -182,9 +251,12 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Folder>> {
 
 pub fn by_role(conn: &Connection, account_id: i64, role: &str) -> Result<Option<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, account_id, imap_name, delimiter, role, uidvalidity, uidnext,
-                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id
-         FROM folders WHERE account_id = ?1 AND role = ?2 LIMIT 1",
+        "SELECT id, account_id, parent_id, imap_name, delimiter, role, uidvalidity, uidnext,
+                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id, selectable,
+                can_create_children, can_rename, can_delete
+         FROM folders
+         WHERE account_id = ?1 AND role = ?2 AND selectable = 1
+         LIMIT 1",
     )?;
     Ok(stmt
         .query_row(params![account_id, role], from_row)
@@ -193,10 +265,12 @@ pub fn by_role(conn: &Connection, account_id: i64, role: &str) -> Result<Option<
 
 pub fn by_jmap_role(conn: &Connection, account_id: i64, role: &str) -> Result<Option<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, account_id, imap_name, delimiter, role, uidvalidity, uidnext,
-                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id
+        "SELECT id, account_id, parent_id, imap_name, delimiter, role, uidvalidity, uidnext,
+                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id, selectable,
+                can_create_children, can_rename, can_delete
          FROM folders
-         WHERE account_id=?1 AND role=?2 AND jmap_id IS NOT NULL LIMIT 1",
+         WHERE account_id=?1 AND role=?2 AND jmap_id IS NOT NULL AND selectable = 1
+         LIMIT 1",
     )?;
     Ok(stmt
         .query_row(params![account_id, role], from_row)
@@ -205,13 +279,41 @@ pub fn by_jmap_role(conn: &Connection, account_id: i64, role: &str) -> Result<Op
 
 pub fn by_jmap_id(conn: &Connection, account_id: i64, jmap_id: &str) -> Result<Option<Folder>> {
     let mut stmt = conn.prepare(
-        "SELECT id, account_id, imap_name, delimiter, role, uidvalidity, uidnext,
-                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id
+        "SELECT id, account_id, parent_id, imap_name, delimiter, role, uidvalidity, uidnext,
+                highestmodseq, last_seen_uid, backfill_cursor, backfill_done, jmap_id, selectable,
+                can_create_children, can_rename, can_delete
          FROM folders WHERE account_id = ?1 AND jmap_id = ?2 LIMIT 1",
     )?;
     Ok(stmt
         .query_row(params![account_id, jmap_id], from_row)
         .optional()?)
+}
+
+pub fn set_parent(conn: &Connection, folder_id: i64, parent_id: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET parent_id = ?2 WHERE id = ?1",
+        params![folder_id, parent_id],
+    )?;
+    Ok(())
+}
+
+pub fn set_permissions(
+    conn: &Connection,
+    folder_id: i64,
+    permissions: FolderPermissions,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE folders
+         SET can_create_children=?2, can_rename=?3, can_delete=?4
+         WHERE id=?1",
+        params![
+            folder_id,
+            permissions.can_create_children,
+            permissions.can_rename,
+            permissions.can_delete,
+        ],
+    )?;
+    Ok(())
 }
 
 pub fn upsert_jmap(
@@ -239,7 +341,10 @@ pub fn upsert_jmap(
         }
         let name = unique_jmap_name(conn, account_id, name, jmap_id, Some(folder.id))?;
         conn.execute(
-            "UPDATE folders SET imap_name = ?2, role = ?3 WHERE id = ?1",
+            "UPDATE folders
+             SET imap_name=?2, role=?3, selectable=1,
+                 can_create_children=0, can_rename=0, can_delete=0
+             WHERE id=?1",
             params![folder.id, name, role],
         )?;
         return Ok(folder.id);
@@ -247,10 +352,12 @@ pub fn upsert_jmap(
     let name = unique_jmap_name(conn, account_id, name, jmap_id, None)?;
     conn.execute(
         "INSERT INTO folders (account_id, imap_name, delimiter, role, jmap_id,
-                              backfill_done)
-         VALUES (?1, ?2, '/', ?3, ?4, 1)
+                              backfill_done, can_create_children, can_rename, can_delete)
+         VALUES (?1, ?2, '/', ?3, ?4, 1, 0, 0, 0)
          ON CONFLICT(account_id, imap_name) DO UPDATE SET
-           role = excluded.role, jmap_id = excluded.jmap_id, backfill_done = 1",
+           role = excluded.role, jmap_id = excluded.jmap_id,
+           backfill_done = 1, selectable = 1,
+           can_create_children = 0, can_rename = 0, can_delete = 0",
         params![account_id, name, role, jmap_id],
     )?;
     Ok(conn.query_row(
@@ -401,6 +508,72 @@ mod tests {
             1
         );
         assert!(get(&conn, 1).unwrap().unwrap().jmap_id.is_none());
+    }
+
+    #[test]
+    fn hierarchy_containers_are_listed_but_not_role_destinations() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let archive = upsert_discovered(
+            &conn,
+            1,
+            "Archive",
+            Some("/"),
+            Some("archive"),
+            false,
+            FolderPermissions::FULL,
+        )
+        .unwrap();
+        let year = upsert_discovered(
+            &conn,
+            1,
+            "Archive/2025",
+            Some("/"),
+            None,
+            false,
+            FolderPermissions::FULL,
+        )
+        .unwrap();
+        let leaf = upsert_discovered(
+            &conn,
+            1,
+            "Archive/2025/GitHub",
+            Some("/"),
+            None,
+            true,
+            FolderPermissions::FULL,
+        )
+        .unwrap();
+        set_parent(&conn, year, Some(archive)).unwrap();
+        set_parent(&conn, leaf, Some(year)).unwrap();
+
+        let listed = list_info(&conn, Some(1)).unwrap();
+        let year_info = listed.iter().find(|folder| folder.id == year).unwrap();
+        let leaf_info = listed.iter().find(|folder| folder.id == leaf).unwrap();
+        assert!(!year_info.selectable);
+        assert!(year_info.can_create_children);
+        assert_eq!(year_info.parent_id, Some(archive));
+        assert!(leaf_info.selectable);
+        assert_eq!(leaf_info.parent_id, Some(year));
+        assert!(by_role(&conn, 1, "archive").unwrap().is_none());
+    }
+
+    #[test]
+    fn explicit_jmap_parent_is_exposed_to_the_sidebar_projection() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute("UPDATE accounts SET mail_protocol='jmap' WHERE id=1", [])
+            .unwrap();
+        let parent = upsert_jmap(&conn, 1, "parent", "Archive", Some("archive")).unwrap();
+        let child = upsert_jmap(&conn, 1, "child", "Archive / 2025", None).unwrap();
+        set_parent(&conn, child, Some(parent)).unwrap();
+
+        let listed = list_info(&conn, Some(1)).unwrap();
+        let child = listed.iter().find(|folder| folder.id == child).unwrap();
+        assert_eq!(child.parent_id, Some(parent));
+        assert!(!child.can_create_children);
+        assert!(!child.can_rename);
+        assert!(!child.can_delete);
     }
 
     #[test]

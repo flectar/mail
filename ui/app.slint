@@ -482,7 +482,7 @@ export component AppWindow inherits Window {
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
-    callback save_mail_label(int, int, string, color, bool);
+    callback save_mail_label(int, int, string, color, bool, int);
     callback delete_mail_label(int);
     callback search_mail_labels(string);
     callback compose_message_action(string);
@@ -909,6 +909,9 @@ export component AppWindow inherits Window {
     private property <int> folder-dialog-folder-id: -1;
     private property <int> folder-dialog-parent-id: -1;
     private property <string> folder-dialog-parent-name: "";
+    private property <int> folder-dialog-parent-label-id: -1;
+    private property <string> folder-dialog-parent-label-path: "";
+    private property <bool> folder-dialog-has-descendants: false;
     private property <string> folder-dialog-name: "";
     private property <color> folder-dialog-label-color: transparent;
 
@@ -917,17 +920,23 @@ export component AppWindow inherits Window {
         root.folder-dialog-mode = "create";
         root.folder-dialog-account-id = account-id;
         root.folder-dialog-parent-id = parent-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = parent-name;
         root.folder-dialog-name = "";
         root.folder-dialog-open = true;
     }
 
-    function open-label-create(account-id: int, account-name: string) {
+    function open-label-create(account-id: int, account-name: string, parent-label-id: int, parent-path: string) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "create";
         root.folder-dialog-account-id = account-id;
         root.folder-dialog-folder-id = -1;
-        root.folder-dialog-parent-name = account-name;
+        root.folder-dialog-parent-label-id = parent-label-id;
+        root.folder-dialog-parent-label-path = parent-path;
+        root.folder-dialog-has-descendants = false;
+        root.folder-dialog-parent-name = parent-path == "" ? account-name : parent-path;
         root.folder-dialog-name = "";
         // Gmail accepts a fixed provider palette; this blue is supported
         // remotely and remains a sensible local default for other accounts.
@@ -939,6 +948,9 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "folder";
         root.folder-dialog-mode = "rename";
         root.folder-dialog-folder-id = folder-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = "";
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -948,6 +960,9 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "folder";
         root.folder-dialog-mode = "delete";
         root.folder-dialog-folder-id = folder-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = "";
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -957,16 +972,22 @@ export component AppWindow inherits Window {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "rename";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = false;
         root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-label-color = color;
         root.folder-dialog-open = true;
     }
 
-    function open-label-delete(label-id: int, name: string, account: string, global: bool) {
+    function open-label-delete(label-id: int, name: string, account: string, global: bool, has-descendants: bool) {
         root.folder-dialog-item-kind = "label";
         root.folder-dialog-mode = "delete";
         root.folder-dialog-folder-id = label-id;
+        root.folder-dialog-parent-label-id = -1;
+        root.folder-dialog-parent-label-path = "";
+        root.folder-dialog-has-descendants = has-descendants;
         root.folder-dialog-parent-name = global ? @tr("Global Labels (local only)") : account;
         root.folder-dialog-name = name;
         root.folder-dialog-open = true;
@@ -1159,11 +1180,15 @@ export component AppWindow inherits Window {
             toggle_folder(id, expanded) => { root.toggle_folder(id, expanded); }
             filter_folders(query) => { root.filter_folders(query); }
             request_folder_create(account-id, parent-id, parent-name) => { root.open-folder-create(account-id, parent-id, parent-name); }
-            request_label_create(account-id, account-name) => { root.open-label-create(account-id, account-name); }
+            request_label_create(account-id, account-name, parent-id, parent-path) => {
+                root.open-label-create(account-id, account-name, parent-id, parent-path);
+            }
             request_folder_rename(id, name) => { root.open-folder-rename(id, name); }
             request_folder_delete(id, name) => { root.open-folder-delete(id, name); }
             request_label_rename(id, name, color, account, global) => { root.open-label-rename(id, name, color, account, global); }
-            request_label_delete(id, name, account, global) => { root.open-label-delete(id, name, account, global); }
+            request_label_delete(id, name, account, global, has-descendants) => {
+                root.open-label-delete(id, name, account, global, has-descendants);
+            }
             load_more => { root.load_more(); }
             sync_mail => { root.sync_mail(); }
             message_action(action) => { root.message_action(action); }
@@ -1172,7 +1197,9 @@ export component AppWindow inherits Window {
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
-            save_mail_label(id, account-id, name, color, global) => { root.save_mail_label(id, account-id, name, color, global); }
+            save_mail_label(id, account-id, name, color, global, parent-id) => {
+                root.save_mail_label(id, account-id, name, color, global, parent-id);
+            }
             search_mail_labels(query) => { root.search_mail_labels(query); }
             compose_message_action(action) => { root.compose_message_action(action); }
             close_preview => { root.close_preview(); }
@@ -1705,6 +1732,7 @@ export component AppWindow inherits Window {
         item-kind: root.folder-dialog-item-kind;
         name <=> root.folder-dialog-name;
         parent-name: root.folder-dialog-parent-name;
+        has-descendants: root.folder-dialog-has-descendants;
         surface-color: root.surface;
         raised-color: root.control-bg;
         ui-border-color: root.border;
@@ -1722,7 +1750,14 @@ export component AppWindow inherits Window {
                     name,
                     root.folder-dialog-label-color,
                     false,
+                    root.folder-dialog-parent-label-id,
                 );
+                if (root.folder-dialog-parent-label-id >= 0) {
+                    root.toggle_sidebar_section(
+                        "gmail-label:" + root.folder-dialog-account-id + ":" + root.folder-dialog-parent-label-id,
+                        true,
+                    );
+                }
             } else if (root.folder-dialog-mode == "create") {
                 root.create-folder(root.folder-dialog-account-id, root.folder-dialog-parent-id, name);
             } else {

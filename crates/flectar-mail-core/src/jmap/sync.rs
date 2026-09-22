@@ -165,11 +165,14 @@ fn finish_waiters(
 async fn persist_session(ctx: &SyncCtx, id: i64, connected: &ConnectedClient) -> Result<()> {
     let url = connected.base_url.clone();
     let remote = connected.account_id.clone();
+    let can_create_top_level_mailbox = connected.may_create_top_level_mailbox;
     ctx.db
         .write(move |conn| {
             conn.execute(
-                "UPDATE accounts SET jmap_url=?2, jmap_account_id=?3 WHERE id=?1",
-                params![id, url, remote],
+                "UPDATE accounts
+                 SET jmap_url=?2, jmap_account_id=?3, can_create_top_level_mailbox=?4
+                 WHERE id=?1",
+                params![id, url, remote, can_create_top_level_mailbox],
             )?;
             Ok(())
         })
@@ -246,18 +249,40 @@ async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) 
     ctx.db
         .write(move |conn| {
             let tx = conn.transaction()?;
+            let mut local_ids = HashMap::with_capacity(mailboxes.len());
             for mailbox in mailboxes {
                 let id = mailbox.id().ok_or_else(|| {
                     CoreError::Jmap("Mailbox/get returned an object without id".into())
                 })?;
                 let display_name = mailbox_path(id, &hierarchy)?;
-                repo::folders::upsert_jmap(
+                let local_id = repo::folders::upsert_jmap(
                     &tx,
                     local_account,
                     id,
                     &display_name,
                     role(mailbox.role()),
                 )?;
+                let rights = mailbox.my_rights();
+                repo::folders::set_permissions(
+                    &tx,
+                    local_id,
+                    repo::folders::FolderPermissions {
+                        can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
+                        can_rename: rights.is_some_and(|rights| rights.may_rename()),
+                        can_delete: rights.is_some_and(|rights| rights.may_delete()),
+                    },
+                )?;
+                local_ids.insert(id.to_owned(), local_id);
+            }
+            for (remote_id, (_, parent_remote_id)) in &hierarchy {
+                let local_id = local_ids.get(remote_id).copied().ok_or_else(|| {
+                    CoreError::Jmap(format!("Mailbox {remote_id} was not persisted"))
+                })?;
+                let parent_id = parent_remote_id
+                    .as_ref()
+                    .and_then(|parent| local_ids.get(parent))
+                    .copied();
+                repo::folders::set_parent(&tx, local_id, parent_id)?;
             }
             let mut stmt = tx.prepare(
                 "SELECT id,jmap_id FROM folders WHERE account_id=?1 AND jmap_id IS NOT NULL",

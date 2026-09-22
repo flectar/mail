@@ -114,6 +114,10 @@ pub struct MailboxEntry {
     pub depth: usize,
     pub has_children: bool,
     pub is_standard: bool,
+    pub is_selectable: bool,
+    pub can_create_children: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
     pub label: String,
     pub scope: String,
     pub context: String,
@@ -1498,6 +1502,80 @@ fn is_standard_folder(folder: &FolderInfo) -> bool {
     )
 }
 
+#[derive(Clone, Copy)]
+struct FolderTreeRoot<'a> {
+    folder: &'a FolderInfo,
+    depth: usize,
+    parent_folder_id: i64,
+    standard_label: Option<&'a str>,
+}
+
+fn append_folder_tree<'a>(
+    entries: &mut Vec<MailboxEntry>,
+    root: FolderTreeRoot<'a>,
+    account_label: &str,
+    children: &std::collections::HashMap<i64, Vec<&'a FolderInfo>>,
+    visited: &mut std::collections::HashSet<i64>,
+) {
+    let mut pending = vec![root];
+    while let Some(FolderTreeRoot {
+        folder,
+        depth,
+        parent_folder_id,
+        standard_label,
+    }) = pending.pop()
+    {
+        if !visited.insert(folder.id) {
+            continue;
+        }
+        let descendants = children.get(&folder.id);
+        let has_children = descendants.is_some_and(|descendants| {
+            descendants
+                .iter()
+                .any(|descendant| !visited.contains(&descendant.id))
+        });
+        let is_standard = standard_label.is_some();
+        let label = standard_label
+            .map(str::to_owned)
+            .unwrap_or_else(|| folder_label(folder));
+        entries.push(MailboxEntry {
+            account_id: folder.account_id,
+            folder_id: folder.id,
+            parent_folder_id,
+            depth,
+            has_children,
+            is_standard,
+            is_selectable: folder.selectable,
+            can_create_children: folder.can_create_children,
+            can_rename: folder.can_rename,
+            can_delete: folder.can_delete,
+            label,
+            scope: standard_label.map_or_else(
+                || format!("Folder:{}", folder.id),
+                |label| format!("{account_label} / {label}"),
+            ),
+            context: account_label.to_owned(),
+            detail: String::new(),
+            avatar: String::new(),
+            is_account: false,
+            count: String::new(),
+        });
+
+        if let Some(descendants) = descendants {
+            for descendant in descendants.iter().rev() {
+                if !visited.contains(&descendant.id) {
+                    pending.push(FolderTreeRoot {
+                        folder: descendant,
+                        depth: depth + 1,
+                        parent_folder_id: folder.id,
+                        standard_label: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
 fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxEntry> {
     let mut entries = Vec::new();
     for account in accounts {
@@ -1509,6 +1587,10 @@ fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxE
             depth: 0,
             has_children: false,
             is_standard: false,
+            is_selectable: false,
+            can_create_children: account.can_create_top_level_mailbox,
+            can_rename: false,
+            can_delete: false,
             label: account_label.clone(),
             scope: account_label.clone(),
             context: account_label.clone(),
@@ -1518,20 +1600,104 @@ fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxE
             count: String::new(),
         });
 
+        let account_folders = folders
+            .iter()
+            .filter(|folder| folder.account_id == account.id)
+            .collect::<Vec<_>>();
+        let role_folders = STANDARD_ACCOUNT_FOLDERS
+            .iter()
+            .filter_map(|label| {
+                let role = standard_folder_role(label)?;
+                account_folders
+                    .iter()
+                    .copied()
+                    .find(|folder| folder.role.as_deref() == Some(role))
+                    .map(|folder| (*label, folder))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let role_folder_ids = role_folders
+            .values()
+            .map(|folder| folder.id)
+            .collect::<std::collections::HashSet<_>>();
+        let mut tree_folders = account_folders
+            .into_iter()
+            .filter(|folder| {
+                role_folder_ids.contains(&folder.id)
+                    || (account.provider != Provider::Gmail && !is_standard_folder(folder))
+            })
+            .collect::<Vec<_>>();
+        tree_folders.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
+
+        // Fresh discovery provides explicit local parent ids. Path inference
+        // preserves an upgraded database's existing hierarchy until its first
+        // authoritative provider discovery populates those new ids.
+        let ids_by_name = tree_folders
+            .iter()
+            .map(|folder| (folder.imap_name.as_str(), folder.id))
+            .collect::<std::collections::HashMap<_, _>>();
+        let folder_ids = tree_folders
+            .iter()
+            .map(|folder| folder.id)
+            .collect::<std::collections::HashSet<_>>();
+        let parent_ids = tree_folders
+            .iter()
+            .map(|folder| {
+                let path_parent_id = folder
+                    .is_jmap
+                    .then_some(" / ")
+                    .or(folder.delimiter.as_deref())
+                    .filter(|delimiter| !delimiter.is_empty())
+                    .and_then(|delimiter| folder.imap_name.rsplit_once(delimiter))
+                    .and_then(|(parent, _)| ids_by_name.get(parent).copied());
+                let parent_id = folder
+                    .parent_id
+                    .filter(|parent| *parent != folder.id && folder_ids.contains(parent))
+                    .or(path_parent_id)
+                    .unwrap_or(-1);
+                // Special-use mailboxes remain pinned roots, matching the
+                // standard ordering used by major desktop mail clients.
+                (folder.id, if role_folder_ids.contains(&folder.id) { -1 } else { parent_id })
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut children = std::collections::HashMap::<i64, Vec<&FolderInfo>>::new();
+        for folder in &tree_folders {
+            let parent_id = parent_ids.get(&folder.id).copied().unwrap_or(-1);
+            if parent_id >= 0 {
+                children.entry(parent_id).or_default().push(folder);
+            }
+        }
+        for descendants in children.values_mut() {
+            descendants.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
+        }
+
+        let mut visited = std::collections::HashSet::new();
         for label in STANDARD_ACCOUNT_FOLDERS {
-            let expected_role = standard_folder_role(label);
-            let role_folder = expected_role.and_then(|role| {
-                folders.iter().find(|folder| {
-                    folder.account_id == account.id && folder.role.as_deref() == Some(role)
-                })
-            });
+            if let Some(folder) = role_folders.get(label).copied() {
+                append_folder_tree(
+                    &mut entries,
+                    FolderTreeRoot {
+                        folder,
+                        depth: 0,
+                        parent_folder_id: -1,
+                        standard_label: Some(label),
+                    },
+                    &account_label,
+                    &children,
+                    &mut visited,
+                );
+                continue;
+            }
             entries.push(MailboxEntry {
                 account_id: account.id,
-                folder_id: role_folder.map_or(-1, |folder| folder.id),
+                folder_id: -1,
                 parent_folder_id: -1,
                 depth: 0,
                 has_children: false,
                 is_standard: true,
+                is_selectable: true,
+                can_create_children: false,
+                can_rename: false,
+                can_delete: false,
                 label: label.to_owned(),
                 scope: format!("{account_label} / {label}"),
                 context: account_label.clone(),
@@ -1542,58 +1708,47 @@ fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxE
             });
         }
 
-        let mut custom_folders: Vec<&FolderInfo> = folders
+        let roots = tree_folders
             .iter()
+            .copied()
             .filter(|folder| {
-                folder.account_id == account.id
-                    && !is_standard_folder(folder)
-                    && account.provider != Provider::Gmail
+                !role_folder_ids.contains(&folder.id)
+                    && parent_ids.get(&folder.id).copied().unwrap_or(-1) < 0
             })
-            .collect();
-        custom_folders.sort_by_key(|folder| folder.display_name.to_lowercase());
-        let custom_ids = custom_folders
-            .iter()
-            .map(|folder| (folder.imap_name.as_str(), folder.id))
-            .collect::<std::collections::HashMap<_, _>>();
-        let parent_ids = custom_folders
-            .iter()
-            .map(|folder| {
-                let parent = folder
-                    .is_jmap
-                    .then_some(" / ")
-                    .or(folder.delimiter.as_deref())
-                    .filter(|delimiter| !delimiter.is_empty())
-                    .and_then(|delimiter| folder.imap_name.rsplit_once(delimiter))
-                    .and_then(|(parent, _)| custom_ids.get(parent).copied())
-                    .unwrap_or(-1);
-                (folder.id, parent)
-            })
-            .collect::<std::collections::HashMap<_, _>>();
-        for folder in custom_folders {
-            let label = folder_label(folder);
-            let parent_folder_id = parent_ids.get(&folder.id).copied().unwrap_or(-1);
-            let mut depth = 0usize;
-            let mut parent = parent_folder_id;
-            let mut visited = std::collections::HashSet::new();
-            while parent >= 0 && visited.insert(parent) {
-                depth += 1;
-                parent = parent_ids.get(&parent).copied().unwrap_or(-1);
+            .collect::<Vec<_>>();
+        for root in roots {
+            append_folder_tree(
+                &mut entries,
+                FolderTreeRoot {
+                    folder: root,
+                    depth: 0,
+                    parent_folder_id: -1,
+                    standard_label: None,
+                },
+                &account_label,
+                &children,
+                &mut visited,
+            );
+        }
+
+        // Broken or cyclic provider data must not make a mailbox disappear.
+        // Promote one unvisited node at a time to a safe root; the visited set
+        // then bounds traversal and prevents duplicates.
+        for folder in tree_folders {
+            if !visited.contains(&folder.id) {
+                append_folder_tree(
+                    &mut entries,
+                    FolderTreeRoot {
+                        folder,
+                        depth: 0,
+                        parent_folder_id: -1,
+                        standard_label: None,
+                    },
+                    &account_label,
+                    &children,
+                    &mut visited,
+                );
             }
-            entries.push(MailboxEntry {
-                account_id: account.id,
-                folder_id: folder.id,
-                parent_folder_id,
-                depth,
-                has_children: parent_ids.values().any(|parent| *parent == folder.id),
-                is_standard: false,
-                label: label.clone(),
-                scope: format!("Folder:{}", folder.id),
-                context: account_label.clone(),
-                detail: String::new(),
-                avatar: String::new(),
-                is_account: false,
-                count: String::new(),
-            });
         }
     }
     entries
@@ -1644,6 +1799,10 @@ fn unified_mailbox_entries(badges: &[MailboxBadgeCounts]) -> Vec<MailboxEntry> {
             depth: 0,
             has_children: false,
             is_standard: true,
+            is_selectable: true,
+            can_create_children: false,
+            can_rename: false,
+            can_delete: false,
             label: label.to_owned(),
             scope: scope.to_owned(),
             context: "Unified".to_owned(),
@@ -2510,6 +2669,7 @@ mod tests {
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
+            can_create_top_level_mailbox: true,
         }
     }
 
@@ -2712,38 +2872,58 @@ mod tests {
             FolderInfo {
                 id: 10,
                 account_id: 1,
+                parent_id: None,
                 display_name: "☺ Projects".into(),
                 is_jmap: false,
                 imap_name: "&Jjo- Projects".into(),
                 delimiter: Some("/".into()),
                 role: None,
+                selectable: true,
+                can_create_children: true,
+                can_rename: true,
+                can_delete: true,
             },
             FolderInfo {
                 id: 11,
                 account_id: 1,
+                parent_id: Some(10),
                 display_name: "☺ Projects/2026".into(),
                 is_jmap: false,
                 imap_name: "&Jjo- Projects/2026".into(),
                 delimiter: Some("/".into()),
                 role: None,
+                selectable: true,
+                can_create_children: true,
+                can_rename: true,
+                can_delete: true,
             },
             FolderInfo {
                 id: 12,
                 account_id: 1,
+                parent_id: None,
                 display_name: "Archive copy/2026".into(),
                 is_jmap: false,
                 imap_name: "Archive copy/2026".into(),
                 delimiter: Some("/".into()),
                 role: None,
+                selectable: true,
+                can_create_children: true,
+                can_rename: true,
+                can_delete: true,
             },
             FolderInfo {
                 id: 13,
                 account_id: 1,
+                parent_id: None,
                 display_name: "Inbox".into(),
                 is_jmap: false,
                 imap_name: "Inbox".into(),
                 delimiter: Some("/".into()),
                 role: None,
+                selectable: true,
+                can_create_children: true,
+                can_rename: true,
+                can_delete: true,
             },
         ];
 
@@ -2769,11 +2949,16 @@ mod tests {
         let folders = vec![FolderInfo {
             id: 10,
             account_id: account.id,
+            parent_id: None,
             display_name: "Travel".into(),
             is_jmap: false,
             imap_name: "Travel".into(),
             delimiter: Some("/".into()),
             role: None,
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
         }];
 
         let entries = mailbox_entries(&[account], &folders);
@@ -2783,6 +2968,72 @@ mod tests {
             entries.iter().filter(|entry| !entry.is_account).count(),
             STANDARD_ACCOUNT_FOLDERS.len()
         );
+    }
+
+    #[test]
+    fn standard_archive_is_the_parent_of_its_complete_folder_tree() {
+        let folder = |id, parent_id, name: &str, role: Option<String>, selectable| FolderInfo {
+            id,
+            account_id: 1,
+            parent_id,
+            display_name: name.into(),
+            is_jmap: false,
+            imap_name: name.into(),
+            delimiter: Some("/".into()),
+            role: role.clone(),
+            selectable,
+            can_create_children: true,
+            can_rename: role.is_none(),
+            can_delete: role.is_none(),
+        };
+        let folders = vec![
+            folder(10, None, "Archive", Some("archive".into()), true),
+            folder(11, Some(10), "Archive/2025", None, false),
+            folder(12, Some(11), "Archive/2025/GitHub", None, true),
+            folder(13, Some(10), "Archive/2026", None, false),
+            folder(14, Some(13), "Archive/2026/GitHub", None, true),
+        ];
+
+        let entries = mailbox_entries(&[test_account()], &folders);
+        let projected = entries
+            .iter()
+            .filter(|entry| !entry.is_account)
+            .map(|entry| {
+                (
+                    entry.folder_id,
+                    entry.parent_folder_id,
+                    entry.depth,
+                    entry.label.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            projected,
+            vec![
+                (-1, -1, 0, "Inbox"),
+                (-1, -1, 0, "Starred"),
+                (-1, -1, 0, "Sent"),
+                (10, -1, 0, "Archive"),
+                (11, 10, 1, "2025"),
+                (12, 11, 2, "GitHub"),
+                (13, 10, 1, "2026"),
+                (14, 13, 2, "GitHub"),
+                (-1, -1, 0, "Spam"),
+                (-1, -1, 0, "Trash"),
+                (-1, -1, 0, "Drafts"),
+            ]
+        );
+
+        let archive = entries.iter().find(|entry| entry.folder_id == 10).unwrap();
+        let year = entries.iter().find(|entry| entry.folder_id == 11).unwrap();
+        assert!(archive.is_standard);
+        assert!(archive.has_children);
+        assert!(archive.can_create_children);
+        assert!(!archive.can_rename);
+        assert!(!archive.can_delete);
+        assert!(!year.is_selectable);
+        assert!(year.has_children);
+        assert!(year.can_create_children);
     }
 
     #[test]

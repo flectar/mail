@@ -3097,11 +3097,16 @@ async fn apply_action(
             let local_label_id = action.payload["labelId"]
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("label creation omitted labelId".into()))?;
-            let label = ctx
+            let Some(label) = ctx
                 .db
                 .read(move |conn| repo::labels::get(conn, local_label_id))
                 .await?
-                .ok_or_else(|| CoreError::NotFound(format!("label {local_label_id}")))?;
+            else {
+                // A claimed create can race with an immediate user deletion.
+                // No remote request was made, so the desired final state is
+                // already satisfied and the action can complete normally.
+                return Ok(());
+            };
             if label.owner_account_id != Some(config.id) || label.is_auto {
                 return Err(CoreError::Other(
                     "only an account-owned label can be created in Gmail".into(),
@@ -3109,10 +3114,23 @@ async fn apply_action(
             }
             let remote = api.create_label(&label.name, Some(&label.color)).await?;
             let account_id = config.id;
-            ctx.db
+            let remote_for_store = remote.clone();
+            let latest = ctx
+                .db
                 .write(move |conn| {
-                    let folder_id =
-                        repo::folders::upsert(conn, account_id, &remote.name, Some("/"), None)?;
+                    let Some(latest) = repo::labels::get(conn, local_label_id)? else {
+                        return Ok(None);
+                    };
+                    if latest.owner_account_id != Some(account_id) || latest.is_auto {
+                        return Ok(None);
+                    }
+                    let folder_id = repo::folders::upsert(
+                        conn,
+                        account_id,
+                        &remote_for_store.name,
+                        Some("/"),
+                        None,
+                    )?;
                     conn.execute(
                         "INSERT INTO gmail_labels (
                            account_id, provider_id, name, kind, folder_id,
@@ -3126,21 +3144,58 @@ async fn apply_action(
                            text_color = excluded.text_color",
                         params![
                             account_id,
-                            remote.id,
-                            remote.name,
+                            remote_for_store.id,
+                            remote_for_store.name,
                             folder_id,
                             local_label_id,
-                            remote.background_color,
-                            remote.text_color,
+                            remote_for_store.background_color,
+                            remote_for_store.text_color,
                         ],
                     )?;
                     conn.execute(
                         "UPDATE labels SET origin = 'provider' WHERE id = ?1",
                         params![local_label_id],
                     )?;
-                    Ok(())
+                    Ok(Some(latest))
                 })
                 .await?;
+            let Some(latest) = latest else {
+                // The user deleted the local label while its CREATE request
+                // was in flight. Compensate immediately so no orphan is left
+                // behind in the Gmail account.
+                api.delete_label(&remote.id).await?;
+                return Ok(());
+            };
+            if latest.name != remote.name || latest.color != label.color {
+                api.update_label(&remote.id, &latest.name, Some(&latest.color))
+                    .await?;
+                let provider_id = remote.id;
+                let latest_name = latest.name;
+                let background = gmail_palette_color(&latest.color).map(str::to_owned);
+                let text = background
+                    .as_deref()
+                    .map(contrasting_text)
+                    .map(str::to_owned);
+                ctx.db
+                    .write(move |conn| {
+                        conn.execute(
+                            "UPDATE gmail_labels
+                             SET name=?3, background_color=?4, text_color=?5
+                             WHERE account_id=?1 AND provider_id=?2",
+                            params![account_id, provider_id, latest_name, background, text],
+                        )?;
+                        conn.execute(
+                            "UPDATE folders SET imap_name=?3
+                             WHERE account_id=?1 AND id=(
+                               SELECT folder_id FROM gmail_labels
+                               WHERE account_id=?1 AND provider_id=?2
+                             )",
+                            params![account_id, provider_id, latest_name],
+                        )?;
+                        Ok(())
+                    })
+                    .await?;
+            }
             return Ok(());
         }
         "gmail_label_update" => {

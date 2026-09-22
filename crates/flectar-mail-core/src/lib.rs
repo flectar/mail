@@ -2678,7 +2678,7 @@ impl Core {
         let name = validate_folder_leaf(&name)?;
         let config = self.folder_account_config(account_id).await?;
         let parent = match parent_folder_id {
-            Some(folder_id) => Some(self.editable_folder(account_id, folder_id).await?),
+            Some(folder_id) => Some(self.folder_for_child(account_id, folder_id).await?),
             None => None,
         };
         if config.provider == Provider::Gmail {
@@ -2697,12 +2697,24 @@ impl Core {
                 credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
                     .await?;
             let connected = jmap::client::connect(&config, &secret).await?;
+            if parent.is_none() && !connected.may_create_top_level_mailbox {
+                return Err(CoreError::Other(
+                    "the server does not allow creating top-level mailboxes".into(),
+                ));
+            }
             let parent_remote = parent.as_ref().and_then(|folder| folder.jmap_id.clone());
+            let parent_local_id = parent.as_ref().map(|folder| folder.id);
             let mailbox = connected
                 .client
                 .mailbox_create(&name, parent_remote, jmap_client::mailbox::Role::None)
                 .await
                 .map_err(jmap::client::map_error)?;
+            let rights = mailbox.my_rights();
+            let permissions = repo::folders::FolderPermissions {
+                can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
+                can_rename: rights.is_some_and(|rights| rights.may_rename()),
+                can_delete: rights.is_some_and(|rights| rights.may_delete()),
+            };
             let remote_id = mailbox
                 .id()
                 .ok_or_else(|| CoreError::Jmap("Mailbox/set returned no id".into()))?
@@ -2713,7 +2725,15 @@ impl Core {
                 .unwrap_or(name);
             self.db
                 .write(move |conn| {
-                    repo::folders::upsert_jmap(conn, account_id, &remote_id, &display_path, None)?;
+                    let folder_id = repo::folders::upsert_jmap(
+                        conn,
+                        account_id,
+                        &remote_id,
+                        &display_path,
+                        None,
+                    )?;
+                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
+                    repo::folders::set_permissions(conn, folder_id, permissions)?;
                     Ok(())
                 })
                 .await?;
@@ -2739,6 +2759,7 @@ impl Core {
                 )));
             }
             let encoded_leaf = imap::encode_mailbox_name(&name);
+            let parent_local_id = parent.as_ref().map(|folder| folder.id);
             let remote_name = parent
                 .as_ref()
                 .map(|parent| format!("{}{delimiter}{encoded_leaf}", parent.imap_name))
@@ -2748,7 +2769,14 @@ impl Core {
             imap::logout(session).await;
             self.db
                 .write(move |conn| {
-                    repo::folders::upsert(conn, account_id, &remote_name, Some(&delimiter), None)?;
+                    let folder_id = repo::folders::upsert(
+                        conn,
+                        account_id,
+                        &remote_name,
+                        Some(&delimiter),
+                        None,
+                    )?;
+                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
                     Ok(())
                 })
                 .await?;
@@ -2766,6 +2794,11 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
         if folder.role.is_some() {
             return Err(CoreError::Other("system folders cannot be renamed".into()));
+        }
+        if !folder.can_rename {
+            return Err(CoreError::Other(
+                "the server does not allow renaming this folder".into(),
+            ));
         }
         let account_id = folder.account_id;
         let config = self.folder_account_config(account_id).await?;
@@ -2836,6 +2869,11 @@ impl Core {
         if folder.role.is_some() {
             return Err(CoreError::Other("system folders cannot be deleted".into()));
         }
+        if !folder.can_delete {
+            return Err(CoreError::Other(
+                "the server does not allow deleting this folder".into(),
+            ));
+        }
         let account_id = folder.account_id;
         let config = self.folder_account_config(account_id).await?;
         let delimiter = if config.mail_protocol == MailProtocol::Jmap {
@@ -2905,7 +2943,7 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
     }
 
-    async fn editable_folder(
+    async fn folder_for_child(
         &self,
         account_id: i64,
         folder_id: i64,
@@ -2920,9 +2958,9 @@ impl Core {
                 "parent folder belongs to another account".into(),
             ));
         }
-        if folder.role.is_some() {
+        if !folder.can_create_children {
             return Err(CoreError::Other(
-                "system folders cannot contain subfolders here".into(),
+                "the server does not allow subfolders inside this folder".into(),
             ));
         }
         Ok(folder)
@@ -6231,17 +6269,29 @@ impl Core {
                 {
                     return Err(CoreError::NotFound(format!("account {account_id}")));
                 }
-                let label = repo::labels::save(&tx, id, &name, &color, position, owner_account_id)?;
-                let mappings = {
-                    let mut stmt = tx.prepare(
-                        "SELECT account_id, provider_id FROM gmail_labels
-                         WHERE local_label_id = ?1",
-                    )?;
-                    stmt.query_map(rusqlite::params![label.id], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
-                };
+                let previous = id
+                    .map(|label_id| repo::labels::get(&tx, label_id))
+                    .transpose()?
+                    .flatten();
+                let cascade_descendants = previous
+                    .as_ref()
+                    .and_then(|label| label.owner_account_id)
+                    .map(|account_id| repo::accounts::get(&tx, account_id))
+                    .transpose()?
+                    .flatten()
+                    .is_some_and(|account| account.provider == Provider::Gmail);
+                let (label, mut changed_labels) = repo::labels::save_with_descendants(
+                    &tx,
+                    id,
+                    &name,
+                    &color,
+                    position,
+                    owner_account_id,
+                    cascade_descendants,
+                )?;
+                // Descendants are already deepest-first; update them before
+                // their root to avoid temporary Gmail name collisions.
+                changed_labels.push(label.clone());
                 let mut accounts = Vec::new();
                 if id.is_none()
                     && let Some(account_id) = label.owner_account_id
@@ -6259,22 +6309,36 @@ impl Core {
                     )?;
                     accounts.push(account_id);
                 }
-                for (account_id, provider_id) in mappings {
-                    repo::actions::enqueue(
-                        &tx,
-                        account_id,
-                        "gmail_label_update",
-                        None,
-                        None,
-                        &serde_json::json!({
-                            "providerId": provider_id,
-                            "name": label.name,
-                            "color": label.color,
-                        }),
-                        None,
-                    )?;
-                    accounts.push(account_id);
+                for changed in changed_labels {
+                    let mappings = {
+                        let mut stmt = tx.prepare(
+                            "SELECT account_id, provider_id FROM gmail_labels
+                             WHERE local_label_id = ?1",
+                        )?;
+                        stmt.query_map(rusqlite::params![changed.id], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                    };
+                    for (account_id, provider_id) in mappings {
+                        repo::actions::enqueue(
+                            &tx,
+                            account_id,
+                            "gmail_label_update",
+                            None,
+                            None,
+                            &serde_json::json!({
+                                "providerId": provider_id,
+                                "name": changed.name,
+                                "color": changed.color,
+                            }),
+                            None,
+                        )?;
+                        accounts.push(account_id);
+                    }
                 }
+                accounts.sort_unstable();
+                accounts.dedup();
                 tx.commit()?;
                 Ok((label, accounts))
             })
@@ -6290,33 +6354,65 @@ impl Core {
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                let mappings = {
-                    let mut stmt = tx.prepare(
-                        "SELECT account_id, provider_id FROM gmail_labels
-                         WHERE local_label_id = ?1",
-                    )?;
-                    stmt.query_map(rusqlite::params![id], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()?
+                let root = repo::labels::get(&tx, id)?;
+                let delete_subtree = root
+                    .as_ref()
+                    .and_then(|label| label.owner_account_id)
+                    .map(|account_id| repo::accounts::get(&tx, account_id))
+                    .transpose()?
+                    .flatten()
+                    .is_some_and(|account| account.provider == Provider::Gmail);
+                let labels = match root {
+                    Some(root) if delete_subtree => repo::labels::subtree(&tx, &root)?,
+                    Some(root) => vec![root],
+                    None => Vec::new(),
                 };
-                for (account_id, provider_id) in &mappings {
-                    repo::actions::enqueue(
-                        &tx,
-                        *account_id,
-                        "gmail_label_delete",
-                        None,
-                        None,
-                        &serde_json::json!({ "providerId": provider_id }),
-                        None,
-                    )?;
+                let mut accounts = Vec::new();
+                for label in &labels {
+                    let mappings = {
+                        let mut stmt = tx.prepare(
+                            "SELECT account_id, provider_id FROM gmail_labels
+                             WHERE local_label_id = ?1",
+                        )?;
+                        stmt.query_map(rusqlite::params![label.id], |row| {
+                            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                    };
+                    for (account_id, provider_id) in mappings {
+                        repo::actions::enqueue(
+                            &tx,
+                            account_id,
+                            "gmail_label_delete",
+                            None,
+                            None,
+                            &serde_json::json!({ "providerId": provider_id }),
+                            None,
+                        )?;
+                        accounts.push(account_id);
+                    }
+                    if delete_subtree && let Some(account_id) = label.owner_account_id {
+                        // If creation has not reached Gmail yet, cancelling it
+                        // is both faster and avoids manufacturing a remote
+                        // label only to delete it immediately.
+                        tx.execute(
+                            "UPDATE pending_actions
+                             SET state='cancelled', finished_at=?3
+                             WHERE account_id=?1 AND kind='gmail_label_create'
+                               AND state='pending'
+                               AND json_extract(payload, '$.labelId')=?2",
+                            rusqlite::params![account_id, label.id, now_ms()],
+                        )?;
+                        accounts.push(account_id);
+                    }
                 }
-                repo::labels::delete(&tx, id)?;
+                for label in labels {
+                    repo::labels::delete(&tx, label.id)?;
+                }
+                accounts.sort_unstable();
+                accounts.dedup();
                 tx.commit()?;
-                Ok(mappings
-                    .into_iter()
-                    .map(|(account_id, _)| account_id)
-                    .collect::<Vec<_>>())
+                Ok(accounts)
             })
             .await?;
         for account_id in accounts {

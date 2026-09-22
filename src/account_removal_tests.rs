@@ -23,6 +23,7 @@ fn account(id: i64) -> Account {
         mail_protocol: MailProtocol::Imap,
         sync_state: "idle".into(),
         sync_error: None,
+        can_create_top_level_mailbox: true,
     }
 }
 fn config(account: &Account) -> AccountConfig {

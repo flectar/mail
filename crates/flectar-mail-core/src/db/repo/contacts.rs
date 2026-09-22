@@ -320,9 +320,11 @@ pub fn suggest(
     };
     // `contact_accounts` has no name/email/folded columns, so the folded WHERE
     // clause stays unambiguous; only the affinity columns get an alias.
-    let saved_filter = (!include_suggestions)
-        .then(|| format!(" AND {}", saved_contact_predicate("c")))
-        .unwrap_or_default();
+    let saved_filter = if include_suggestions {
+        String::new()
+    } else {
+        format!(" AND {}", saved_contact_predicate("c"))
+    };
     let sql = if let Some(aid) = account_id {
         bind.push(Box::new(aid));
         let aid_ix = bind.len();

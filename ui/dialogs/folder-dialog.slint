@@ -8,6 +8,7 @@ export component FolderDialog inherits Rectangle {
     in property <string> mode: "create";
     in-out property <string> name: "";
     in property <string> parent-name: "";
+    in property <bool> has-descendants: false;
     in property <color> surface-color;
     in property <color> raised-color;
     in property <color> ui-border-color;
@@ -65,7 +66,9 @@ export component FolderDialog inherits Rectangle {
             height: root.mode == "delete" ? 54px : 34px;
             text: root.mode == "delete"
                 ? root.item-kind == "label"
-                    ? @tr("Delete “{}” from “{}”?", root.name, root.parent-name)
+                    ? root.has-descendants
+                        ? @tr("Delete “{}” and all nested labels from “{}”? Messages will not be deleted.", root.name, root.parent-name)
+                        : @tr("Delete “{}” from “{}”? Messages will not be deleted.", root.name, root.parent-name)
                     : @tr("Delete “{}” and its contents from the mail server?", root.name)
                 : root.mode == "rename"
                     ? root.item-kind == "label"

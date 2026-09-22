@@ -321,6 +321,9 @@ pub struct Account {
     pub mail_protocol: MailProtocol,
     pub sync_state: String,
     pub sync_error: Option<String>,
+    /// Whether the provider currently permits creating a root mailbox.
+    #[serde(default = "default_true")]
+    pub can_create_top_level_mailbox: bool,
 }
 
 /// Full account row including server config; internal to the native application.
@@ -858,6 +861,9 @@ pub struct SplitRule {
 pub struct FolderInfo {
     pub id: i64,
     pub account_id: i64,
+    /// Stable local id of the parent mailbox. `None` means a top-level mailbox
+    /// or an older cached row whose hierarchy has not been rediscovered yet.
+    pub parent_id: Option<i64>,
     /// Unicode name suitable for display. `imap_name` remains the exact remote
     /// identifier used in SELECT and other protocol commands.
     pub display_name: String,
@@ -866,6 +872,12 @@ pub struct FolderInfo {
     /// IMAP hierarchy delimiter (e.g. "/" or "."), for nesting user folders.
     pub delimiter: Option<String>,
     pub role: Option<String>,
+    /// False for IMAP hierarchy containers advertised with `\\Noselect` and
+    /// other provider mailboxes intentionally excluded from message sync.
+    pub selectable: bool,
+    pub can_create_children: bool,
+    pub can_rename: bool,
+    pub can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -89,7 +89,18 @@ impl Paths {
     /// The native shell may paint this before the databases finish opening;
     /// SQLite remains authoritative and replaces it during normal startup.
     pub fn warm_start_file(&self) -> PathBuf {
-        self.cache_dir.join("warm-start-mailbox-v2.json")
+        self.cache_dir.join("warm-start-mailbox.json")
+    }
+
+    /// Superseded reconstructable caches that can be removed without reading.
+    ///
+    /// TODO(warm-start-v2-cleanup): After the first public release using the
+    /// stable `warm-start-mailbox.json` filename has been superseded by a later
+    /// release, remove this method, its startup cleanup loop, and the matching
+    /// path test. Keeping it longer is harmless; removing it sooner only leaves
+    /// the old, unread v2 cache orphaned on direct upgrades from older builds.
+    pub fn obsolete_warm_start_files(&self) -> [PathBuf; 1] {
+        [self.cache_dir.join("warm-start-mailbox-v2.json")]
     }
 
     /// Directory for raw .eml files of one account.
@@ -160,7 +171,11 @@ mod tests {
         );
         assert_eq!(
             paths.warm_start_file(),
-            root.join("cache/warm-start-mailbox-v2.json")
+            root.join("cache/warm-start-mailbox.json")
+        );
+        assert_eq!(
+            paths.obsolete_warm_start_files(),
+            [root.join("cache/warm-start-mailbox-v2.json")]
         );
         assert_eq!(paths.mail_dir(7), root.join("data/mail/7"));
         assert_eq!(

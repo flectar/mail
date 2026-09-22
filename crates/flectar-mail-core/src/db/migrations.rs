@@ -12,6 +12,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/007_account_label_ownership.sql"),
     include_str!("migrations/008_sender_identities.sql"),
     include_str!("migrations/009_contact_learning_clean_start.sql"),
+    include_str!("migrations/010_folder_hierarchy.sql"),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -384,6 +385,83 @@ mod tests {
             .unwrap();
         assert_eq!(created.0, 0);
         assert!((before - 1_000..=crate::models::now_ms() + 1_000).contains(&created.1));
+    }
+
+    #[test]
+    fn folder_hierarchy_migration_preserves_existing_folders() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(9).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (1,'me@example.test','imap','password','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders(id,account_id,imap_name,delimiter,role)
+             VALUES(7,1,'Archive','/','archive')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,mail_protocol,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (2,'jmap@example.test','imap','password','jmap','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders(id,account_id,imap_name,delimiter,role,jmap_id)
+             VALUES(8,2,'Projects','/',NULL,'projects')",
+            [],
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let hierarchy: (Option<i64>, bool) = conn
+            .query_row(
+                "SELECT parent_id,selectable FROM folders WHERE id=7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(hierarchy, (None, true));
+        let imap_rights: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT a.can_create_top_level_mailbox, f.can_create_children,
+                        f.can_rename, f.can_delete
+                 FROM accounts a JOIN folders f ON f.account_id=a.id
+                 WHERE a.id=1 AND f.id=7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(imap_rights, (1, 1, 1, 1));
+        let jmap_rights: (i64, i64, i64, i64) = conn
+            .query_row(
+                "SELECT a.can_create_top_level_mailbox, f.can_create_children,
+                        f.can_rename, f.can_delete
+                 FROM accounts a JOIN folders f ON f.account_id=a.id
+                 WHERE a.id=2 AND f.id=8",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(jmap_rights, (0, 0, 0, 0));
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            LATEST_VERSION
+        );
     }
 
     #[test]

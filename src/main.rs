@@ -357,6 +357,7 @@ struct MailMetadataUpdate {
 struct FolderMutationUpdate {
     message: UiMessage,
     metadata: Option<mail::MailMetadata>,
+    reveal_parent_id: Option<i64>,
 }
 
 struct MessageLoadUpdate {
@@ -614,6 +615,7 @@ fn standard_mailbox_folder(state: &InboxState, account_id: i64, label: &str) -> 
             !mailbox.is_account
                 && mailbox.account_id == account_id
                 && mailbox.is_standard
+                && mailbox.is_selectable
                 && mailbox.label == label
                 && mailbox.folder_id >= 0
         })
@@ -711,6 +713,9 @@ fn resolve_single_mail_drop(
                         && mailbox.folder_id == i64::from(target_folder_id)
                 })
                 .ok_or_else(|| "mailbox destination is no longer available".to_owned())?;
+            if !target.is_selectable {
+                return Err("this mailbox is a hierarchy container".to_owned());
+            }
             if target.label == message.folder {
                 return Err("message is already in this destination".to_owned());
             }
@@ -1114,6 +1119,15 @@ fn spawn_startup_load(
     metrics: StartupMetrics,
 ) {
     runtime.spawn(async move {
+        for obsolete in paths.obsolete_warm_start_files() {
+            match tokio::fs::remove_file(obsolete).await {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "obsolete warm-start cache cleanup failed");
+                }
+            }
+        }
         let warm = load_warm_start_snapshot(&paths.warm_start_file()).await;
         let preferred_scope = warm
             .as_ref()
@@ -2703,6 +2717,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 state.mailboxes = metadata.mailboxes;
                 state.unified_mailboxes = metadata.unified_mailboxes;
                 state.inbox_count = metadata.inbox_count;
+                if let Some(parent_id) = update.reveal_parent_id {
+                    state.initialized_sidebar_folders.insert(parent_id);
+                    state.collapsed_folder_ids.remove(&parent_id);
+                }
                 drop(state);
                 if let Err(error) = refresh_from_source(
                     &app,
@@ -2785,7 +2803,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not create folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: (parent_id >= 0).then_some(i64::from(parent_id)),
+                })
                 .await;
         });
     });
@@ -2812,7 +2834,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not rename folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                })
                 .await;
         });
     });
@@ -2867,7 +2893,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) => UiMessage::detail("Could not delete folder: {}", error),
             };
             let _ = updates
-                .send(FolderMutationUpdate { message, metadata })
+                .send(FolderMutationUpdate {
+                    message,
+                    metadata,
+                    reveal_parent_id: None,
+                })
                 .await;
         });
     });
@@ -4645,11 +4675,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let state_for_save_label = Rc::clone(&state);
     let runtime_for_save_label = Rc::clone(&runtime);
-    app.on_save_mail_label(move |label_id, owner_account_id, name, color, global| {
+    app.on_save_mail_label(
+        move |label_id, owner_account_id, name, color, global, parent_label_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let (core, thread_id, selected_account_id) = {
+        let (core, thread_id, selected_account_id, parent_path) = {
             let state = state_for_save_label.borrow();
             let selected = state
                 .selected_id
@@ -4658,6 +4689,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 state.core.clone(),
                 selected.and_then(|message| message.thread_id),
                 selected.map(|message| message.account_id),
+                if parent_label_id >= 0 {
+                    state
+                        .labels
+                        .iter()
+                        .find(|label| {
+                            label.id == i64::from(parent_label_id)
+                                && !label.is_auto
+                                && label.owner_account_id == Some(i64::from(owner_account_id))
+                        })
+                        .map(|label| label.name.clone())
+                        .ok_or_else(|| "the parent label no longer exists".to_owned())
+                        .map(Some)
+                } else {
+                    Ok(None)
+                },
             )
         };
         let existing_id = (label_id >= 0).then_some(i64::from(label_id));
@@ -4669,9 +4715,24 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         );
         let result: Result<bool, String> = (|| {
             let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
+            let parent_path = parent_path?;
+            let leaf = name.trim();
+            if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
+                return Err(
+                    "label names cannot contain '/'; create each nesting level separately"
+                        .to_owned(),
+                );
+            }
+            let full_name = if existing_id.is_none()
+                && let Some(parent_path) = parent_path
+            {
+                format!("{}/{leaf}", parent_path.trim_end_matches('/'))
+            } else {
+                leaf.to_owned()
+            };
             let label = runtime_for_save_label.block_on(core.save_label(
                 existing_id,
-                name.as_str(),
+                &full_name,
                 color.as_str(),
                 if existing_id.is_none() && !global {
                     Some(if owner_account_id >= 0 {
@@ -4709,7 +4770,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_render_status(UiMessage::detail("Could not save label: {}", error))
             }
         }
-    });
+    },
+    );
 
     let app_weak = app.as_weak();
     let state_for_delete_label = Rc::clone(&state);

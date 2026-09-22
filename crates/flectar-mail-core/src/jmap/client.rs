@@ -2,7 +2,7 @@ use crate::error::{CoreError, Result};
 use crate::models::AccountConfig;
 use jmap_client::URI;
 use jmap_client::client::{Client, Credentials};
-use jmap_client::core::session::Session;
+use jmap_client::core::session::{Capabilities, Session};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use url::Url;
@@ -29,6 +29,7 @@ pub struct ConnectedClient {
     pub account_id: String,
     pub base_url: String,
     pub supports_submission: bool,
+    pub may_create_top_level_mailbox: bool,
 }
 
 /// Turn a user-entered host/base URL into the base expected by RFC 8620
@@ -198,6 +199,19 @@ pub async fn connect_with(
                 )
             })?
     };
+    let may_create_top_level_mailbox = session
+        .account(&account_id)
+        .and_then(|account| account.capability(MAIL_CAPABILITY))
+        .and_then(|capability| match capability {
+            Capabilities::Mail(mail) => Some(mail.may_create_top_level_mailbox()),
+            _ => None,
+        })
+        .or_else(|| {
+            session
+                .mail_capabilities()
+                .map(|mail| mail.may_create_top_level_mailbox())
+        })
+        .unwrap_or(false);
     drop(session);
     client.set_default_account_id(account_id.clone());
     let mut download_headers = client.headers().clone();
@@ -216,6 +230,7 @@ pub async fn connect_with(
         account_id,
         base_url,
         supports_submission: true,
+        may_create_top_level_mailbox,
     })
 }
 

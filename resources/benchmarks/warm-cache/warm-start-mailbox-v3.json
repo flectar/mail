@@ -1,5 +1,5 @@
 {
-  "format_version": 2,
+  "format_version": 3,
   "saved_at_ms": 1787961600000,
   "scope": "Unified Inbox",
   "inbox_count": 2,
@@ -14,7 +14,8 @@
       "authKind": "password",
       "mailProtocol": "imap",
       "syncState": "idle",
-      "syncError": null
+      "syncError": null,
+      "canCreateTopLevelMailbox": true
     }
   ],
   "messages": [
@@ -85,6 +86,7 @@
       "detail": "alex@example.com",
       "avatar": "EA",
       "is_account": true,
+      "can_create_children": true,
       "count": "2"
     },
     {
