@@ -388,6 +388,7 @@ export component MailReadingPane inherits Rectangle {
     private property <length> message-card-inset: 6px;
     private property <length> message-card-border-width: 1px;
     private property <length> thread-item-gap: 6px;
+    private property <bool> alternate-body-active: root.text_mode || root.source_mode || EmailReader.reader-mode;
     out property <length> email-viewport-width: max(
         0px,
         email-scroll.visible-width - 2 * (root.message-card-inset + root.message-card-border-width)
@@ -398,11 +399,13 @@ export component MailReadingPane inherits Rectangle {
     );
     private property <length> rendered-email-height: root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px);
     private property <length> attachment-section-height: MailAttachments.rows.length > 0 ? 34px + MailAttachments.rows.length * 48px : 0px;
-    // Normal HTML uses its intrinsic rendered height so short messages do not
-    // create a viewport-tall empty card. Alternate text/reader surfaces retain
-    // a viewport-sized area because they own an inner scrolling control.
-    private property <length> message-body-content-height: root.text_mode || root.source_mode || EmailReader.reader-mode
-        ? max(root.email-viewport-height, root.rendered-email-height)
+    // Normal HTML uses its intrinsic rendered height. Alternate surfaces own
+    // their scrolling. Fit their body and footer in the outer viewport when
+    // possible so a short reader view cannot scroll its header away.
+    private property <length> message-body-content-height: root.alternate-body-active
+        ? max(40px, root.email-viewport-height - root.attachment-section-height
+            - (MailAttachments.rows.length > 0 ? 12px : 0px)
+            - root.message-actions-height - root.message-bottom-padding)
         : root.rendered-email-height;
     private property <length> attachment-flow-y: root.message-body-content-height;
     private property <length> message-actions-height: root.compact ? 52px : 42px;
@@ -422,10 +425,10 @@ export component MailReadingPane inherits Rectangle {
         + root.message-document-height
         + root.message-actions-height
         + root.message-bottom-padding;
-    out property <length> email-scroll-tail-height: max(
-        0px,
-        root.message-document-height - root.rendered-email-height
-    ) + root.message-actions-height + root.message-bottom-padding;
+    // Height from the selected message body through its footer. Keyboard
+    // navigation uses the active surface's height, including attachments.
+    out property <length> email-scroll-document-height: root.message-document-height
+        + root.message-actions-height + root.message-bottom-padding;
     animate selected-header-y { duration: 240ms; easing: spring(0); }
     in property <color> accent;
     in property <color> accent-soft;
@@ -484,10 +487,18 @@ export component MailReadingPane inherits Rectangle {
         root.accordion-scroll-y = -root.accordion-selected-index * root.thread-item-stride;
         root.syncing-accordion-scroll = false;
     }
+    changed alternate-body-active => {
+        root.syncing-accordion-scroll = true;
+        root.email-scroll-y = 0px;
+        root.accordion-scroll-y = -root.selected-header-y;
+        email-scroll.content-x = 0px;
+        root.syncing-accordion-scroll = false;
+        root.email-scroll(0, email-scroll.visible-height / 1px);
+    }
     changed email-scroll-y => {
         if (!root.syncing-accordion-scroll) {
             root.accordion-scroll-y = root.email-scroll-y == 0px
-                ? 0px
+                ? (root.alternate-body-active ? -root.selected-header-y : 0px)
                 : root.email-scroll-y - root.message-body-y;
         }
     }
@@ -971,7 +982,7 @@ export component MailReadingPane inherits Rectangle {
                                     width: parent.width;
                                     height: parent.height;
                                     content-width: 2 * (root.message-card-inset + root.message-card-border-width)
-                                        + root.email-viewport-width * EmailReader.width-ratio;
+                                        + root.email-viewport-width * (root.alternate-body-active ? 1 : EmailReader.width-ratio);
                                     content-height: max(
                                         parent.height,
                                         root.accordion-message-count * root.thread-header-height
@@ -979,7 +990,7 @@ export component MailReadingPane inherits Rectangle {
                                             + root.expanded-message-height
                                     );
                                     content-y <=> root.accordion-scroll-y;
-                                    horizontal-scrollbar-policy: EmailReader.width-ratio > 1.01 ? as-needed : always-off;
+                                    horizontal-scrollbar-policy: !root.alternate-body-active && EmailReader.width-ratio > 1.01 ? as-needed : always-off;
                                     mouse-drag-pan-enabled: root.compact && !root.selecting;
                                     scrolled => {
                                         root.syncing-accordion-scroll = true;
@@ -1137,7 +1148,7 @@ export component MailReadingPane inherits Rectangle {
                                 email-context := ContextMenuArea {
                                     x: root.message-card-inset + root.message-card-border-width;
                                     y: root.message-body-y;
-                                    width: root.email-viewport-width * EmailReader.width-ratio;
+                                    width: root.email-viewport-width * (root.alternate-body-active ? 1 : EmailReader.width-ratio);
                                     height: root.message-body-content-height;
                                     // Keep the parent enabled in plain-text
                                     // mode as well; otherwise Slint propagates

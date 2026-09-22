@@ -302,12 +302,91 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
             button: slint::platform::PointerEventButton::Left,
         });
     draw("phone", 390, 844);
+    pointer(120.0, 100.0);
+    draw("phone-message", 390, 844);
     draw("tablet", 768, 1024);
     draw("phone-landscape", 844, 390);
     app.global::<EmailReader>().set_reader_mode(true);
     app.global::<EmailReader>().set_dark_reader(true);
     app.set_theme_mode("dark".into());
     draw("reader-dark", 390, 844);
+    draw("reader-desktop", 1280, 900);
+    let flush_reader_layout = || {
+        app.window().request_redraw();
+        let mut pixels = vec![Rgb8Pixel::default(); 1280 * 900];
+        window.draw_if_needed(|renderer| {
+            renderer.render(&mut pixels, 1280);
+        });
+        pixels
+    };
+    // A sparse HTML layout can be far taller than its extracted reader text.
+    // Switching surfaces must not leave the HTML scroll range behind (#24).
+    let original_html = state.borrow().messages[0].html.clone();
+    {
+        let mut state = state.borrow_mut();
+        state.messages[0].html = Some(
+            "<html><body style='margin:0;padding:20px'><h2>Reader verification 1</h2><div style='height:3600px'></div><p>Selectable text and a <a href='https://example.com'>working link</a>.</p></body></html>".into(),
+        );
+        state.messages[0].body_pending = false;
+    }
+    app.global::<EmailReader>().set_reader_mode(false);
+    render_current(&app, &state, &runtime).unwrap();
+    draw("html-before-reader", 1280, 900);
+    let long_html_aspect = app.get_email_content_aspect();
+    assert!(
+        long_html_aspect * app.get_email_viewport_width() > 2.0 * app.get_email_viewport_height(),
+        "The HTML fixture must actually be taller than the viewport"
+    );
+    app.global::<EmailReader>().invoke_command("end".into());
+    assert!(
+        -app.get_email_scroll_y() > app.get_email_viewport_height(),
+        "The long HTML message should have a real outer scroll range"
+    );
+    app.global::<EmailReader>().set_reader_mode(true);
+    draw("reader-long-html", 1280, 900);
+    assert!(!app.global::<EmailReader>().get_body_pending());
+    assert!(app.global::<EmailReader>().get_items().row_count() > 0);
+    assert_eq!(app.get_email_scroll_y(), 0.0);
+    app.global::<EmailReader>().invoke_command("end".into());
+    assert!(
+        app.get_email_scroll_y().abs() <= 1.0,
+        "Reader mode must keep the header in view when its content fits"
+    );
+    let header_pixels = |pixels: &[Rgb8Pixel]| {
+        pixels
+            .chunks_exact(1280)
+            .skip(140)
+            .take(110)
+            .flat_map(|row| row[850..1230].iter().map(|p| [p.r, p.g, p.b]))
+            .collect::<Vec<_>>()
+    };
+    let header_before_wheel = header_pixels(&flush_reader_layout());
+    for delta_y in [-320.0, 320.0] {
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(1000.0, 550.0),
+                delta_x: 0.0,
+                delta_y,
+            });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        slint::platform::update_timers_and_animations();
+        assert!((app.get_email_content_aspect() - long_html_aspect).abs() < 0.1);
+        assert_eq!(
+            header_pixels(&flush_reader_layout()),
+            header_before_wheel,
+            "Scrolling the reader body must leave its header in place"
+        );
+    }
+    app.global::<EmailReader>().set_reader_mode(false);
+    draw("html-after-reader", 1280, 900);
+    app.global::<EmailReader>().invoke_command("end".into());
+    assert!(
+        -app.get_email_scroll_y() > app.get_email_viewport_height(),
+        "Switching back must restore the HTML scroll range"
+    );
+    state.borrow_mut().messages[0].html = original_html;
+    render_current(&app, &state, &runtime).unwrap();
+    app.global::<EmailReader>().set_reader_mode(true);
     app.invoke_select_email_text();
     assert!(app.get_has_selection());
     // Hydrated attachments must survive a body-rendering failure and remain

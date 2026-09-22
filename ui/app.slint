@@ -720,7 +720,7 @@ export component AppWindow inherits Window {
     // callback and reflows Blitz at the current logical viewport size.
     in-out property <length> email-viewport-width: 0px;
     in-out property <length> email-viewport-height: 0px;
-    in-out property <length> email-scroll-tail-height: 0px;
+    in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
     changed settings_open => { root.product-changed(root.active_view); }
@@ -1084,7 +1084,7 @@ export component AppWindow inherits Window {
         MailView {
             changed email-viewport-width => { root.email-viewport-width = self.email-viewport-width; }
             changed email-viewport-height => { root.email-viewport-height = self.email-viewport-height; }
-            changed email-scroll-tail-height => { root.email-scroll-tail-height = self.email-scroll-tail-height; }
+            changed email-scroll-document-height => { root.email-scroll-document-height = self.email-scroll-document-height; }
             compact-page <=> root.mail-compact-page;
             folders-open <=> root.mail-folders-open;
             loading: !root.startup_hydrated || root.mail_page_loading;

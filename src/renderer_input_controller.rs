@@ -2,7 +2,11 @@
 use super::*;
 use crate::renderer::InputModifiers;
 fn banner_height(app: &AppWindow) -> f32 {
-    if app.get_remote_images_blocked() {
+    if app.get_remote_images_blocked()
+        && !app.get_text_mode()
+        && !app.get_source_mode()
+        && !app.global::<EmailReader>().get_reader_mode()
+    {
         60.0
     } else {
         0.0
@@ -295,13 +299,7 @@ pub(super) fn register_renderer_input_callbacks(
             "page-up" | "page-down" | "up" | "down" | "home" | "end" => {
                 let height = app.get_email_viewport_height();
                 let current = -app.get_email_scroll_y();
-                let bottom = (app.get_email_content_aspect()
-                    * app.get_email_viewport_width()
-                    * reader.get_width_ratio()
-                    + banner_height(&app)
-                    + app.get_email_scroll_tail_height()
-                    - height)
-                    .max(0.0);
+                let bottom = (app.get_email_scroll_document_height() - height).max(0.0);
                 let y = match command {
                     "page-up" => current - height * 0.85,
                     "page-down" => current + height * 0.85,
