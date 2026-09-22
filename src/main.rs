@@ -866,30 +866,55 @@ fn parse_preview_window_size(value: &str) -> Result<slint::LogicalSize, String> 
     Ok(slint::LogicalSize::new(width as f32, height as f32))
 }
 
-fn apply_language(app: &AppWindow, preference: &str) {
-    let system_locale = sys_locale::get_locale();
-    let selected = match preference {
-        "es" => "es",
+fn normalized_language_preference(language: &str) -> &'static str {
+    match language {
         "en" => "en",
+        "es" => "es",
         "tr" => "tr",
-        _ => system_locale
+        "zh" | "zh-Hans" | "zh_Hans" => "zh_Hans",
+        _ => "system",
+    }
+}
+
+fn bundled_language_for_locale(locale: &str) -> Option<&'static str> {
+    let mut subtags = locale
+        .split(['-', '_', '.', '@'])
+        .filter(|part| !part.is_empty());
+    let language = subtags.next()?;
+    if language.eq_ignore_ascii_case("es") {
+        return Some("es");
+    }
+    if language.eq_ignore_ascii_case("tr") {
+        return Some("tr");
+    }
+    if !language.eq_ignore_ascii_case("zh") {
+        return None;
+    }
+
+    // Bare `zh` defaults to Hans. A Hant script or Traditional Chinese region
+    // must not fall back to the Simplified Chinese catalog.
+    let is_traditional = subtags.next().is_some_and(|subtag| {
+        ["hant", "tw", "hk", "mo"]
+            .iter()
+            .any(|value| subtag.eq_ignore_ascii_case(value))
+    });
+    (!is_traditional).then_some("zh_Hans")
+}
+
+fn apply_language(app: &AppWindow, preference: &str) {
+    let language_mode = normalized_language_preference(preference);
+    let system_locale = sys_locale::get_locale();
+    let selected = match language_mode {
+        "system" => system_locale
             .as_deref()
-            .and_then(|locale| locale.split(['-', '_', '@']).next())
-            .filter(|language| matches!(*language, "es" | "tr"))
+            .and_then(bundled_language_for_locale)
             .unwrap_or("en"),
+        language => language,
     };
     if let Err(error) = slint::select_bundled_translation(selected) {
         eprintln!("could not select {selected} translation: {error}");
     }
-    app.set_language_mode(
-        match preference {
-            "es" => "es",
-            "en" => "en",
-            "tr" => "tr",
-            _ => "system",
-        }
-        .into(),
-    );
+    app.set_language_mode(language_mode.into());
 }
 
 impl InboxState {
@@ -7040,6 +7065,33 @@ mod tests {
         assert_eq!((size.width, size.height), (390.0, 844.0));
         assert!(parse_preview_window_size("390-by-844").is_err());
         assert!(parse_preview_window_size("0x844").is_err());
+    }
+
+    #[test]
+    fn language_preferences_use_the_bundled_catalog_name() {
+        assert_eq!(normalized_language_preference("zh_Hans"), "zh_Hans");
+        assert_eq!(normalized_language_preference("zh-Hans"), "zh_Hans");
+        assert_eq!(normalized_language_preference("zh"), "zh_Hans");
+        assert_eq!(normalized_language_preference("unknown"), "system");
+    }
+
+    #[test]
+    fn language_system_locales_select_only_compatible_bundled_catalogs() {
+        for (locale, expected) in [
+            ("es_MX.UTF-8", Some("es")),
+            ("tr-TR", Some("tr")),
+            ("zh", Some("zh_Hans")),
+            ("zh_CN.UTF-8", Some("zh_Hans")),
+            ("zh_SG", Some("zh_Hans")),
+            ("zh-Hans-TW", Some("zh_Hans")),
+            ("zh_TW", None),
+            ("zh_HK", None),
+            ("zh_MO", None),
+            ("zh-Hant-CN", None),
+            ("en_US", None),
+        ] {
+            assert_eq!(bundled_language_for_locale(locale), expected, "{locale}");
+        }
     }
 
     #[test]

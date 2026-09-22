@@ -149,6 +149,7 @@ export component OnboardingView inherits Rectangle {
                     text: @tr("Continue with Gmail");
                     icon: @image-url("../icons/brand/gmail.svg");
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && root.google-available;
+                    tooltip-text: root.google-available ? "" : @tr("Add app keys in Sign-in settings to enable this provider.");
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;
@@ -160,6 +161,7 @@ export component OnboardingView inherits Rectangle {
                     text: @tr("Continue with Outlook");
                     icon: @image-url("../icons/brand/outlook.svg");
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving && root.microsoft-available;
+                    tooltip-text: root.microsoft-available ? "" : @tr("Add app keys in Sign-in settings to enable this provider.");
                     foreground: root.body-text;
                     muted: root.muted-text;
                     surface: root.surface;

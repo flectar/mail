@@ -64,6 +64,11 @@ const MAX_CACHED_HEADER_BYTES: usize = 256 * 1024;
 const SEND_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const SEND_STATUS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
+fn send_start_expired(now: i64, observed_at: i64, not_before: Option<i64>) -> bool {
+    let timeout_ms = i64::try_from(SEND_START_TIMEOUT.as_millis()).unwrap_or(i64::MAX);
+    now >= not_before.unwrap_or(observed_at).saturating_add(timeout_ms)
+}
+
 fn normalize_mail_profile_name(value: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() {
@@ -3094,27 +3099,29 @@ impl Core {
     /// retry before returning the error so an editable preserved draft cannot
     /// also be delivered later behind the user's back.
     pub async fn wait_for_send(&self, action_id: i64) -> Result<()> {
-        let started = tokio::time::Instant::now();
+        let observed_at = now_ms();
         loop {
             let status = self
                 .db
                 .read(move |conn| {
                     Ok(conn
                         .query_row(
-                            "SELECT kind, state, last_error FROM pending_actions WHERE id = ?1",
+                            "SELECT kind, state, last_error, not_before
+                             FROM pending_actions WHERE id = ?1",
                             rusqlite::params![action_id],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
                                     row.get::<_, String>(1)?,
                                     row.get::<_, Option<String>>(2)?,
+                                    row.get::<_, Option<i64>>(3)?,
                                 ))
                             },
                         )
                         .optional()?)
                 })
                 .await?;
-            let Some((kind, state, last_error)) = status else {
+            let Some((kind, state, last_error, not_before)) = status else {
                 return Err(CoreError::NotFound("send action".into()));
             };
             if kind != "send" {
@@ -3142,11 +3149,12 @@ impl Core {
                         return Err(CoreError::Other(last_error.unwrap()));
                     }
                 }
-                "pending" if started.elapsed() >= SEND_START_TIMEOUT => {
+                "pending" if send_start_expired(now_ms(), observed_at, not_before) => {
                     if self.cancel_send(action_id).await? {
-                        return Err(CoreError::Smtp(
-                            "message delivery did not start within 60 seconds".into(),
-                        ));
+                        return Err(CoreError::Smtp(format!(
+                            "message delivery did not start within {} seconds of its scheduled time",
+                            SEND_START_TIMEOUT.as_secs()
+                        )));
                     }
                 }
                 "pending" | "inflight" => {}
@@ -8249,6 +8257,20 @@ mod draft_action_race_tests {
 #[cfg(test)]
 mod send_confirmation_tests {
     use super::*;
+
+    #[test]
+    fn send_start_timeout_begins_at_scheduled_delivery() {
+        let observed_at = 1_000;
+        let scheduled_at = 121_000;
+        assert!(!send_start_expired(61_000, observed_at, Some(scheduled_at)));
+        assert!(!send_start_expired(
+            180_999,
+            observed_at,
+            Some(scheduled_at)
+        ));
+        assert!(send_start_expired(181_000, observed_at, Some(scheduled_at)));
+        assert!(send_start_expired(61_000, observed_at, None));
+    }
 
     async fn send_action() -> (Core, tempfile::TempDir, i64) {
         let temp = tempfile::tempdir().unwrap();

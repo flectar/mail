@@ -77,6 +77,50 @@ pub fn due(conn: &Connection, account_id: i64, now: i64, limit: i64) -> Result<V
     Ok(rows)
 }
 
+/// Due IMAP/local actions for one account. SMTP submission has a dedicated
+/// worker so an Inbox sync can never hold an interactive send in the queue.
+pub fn due_except_send(
+    conn: &Connection,
+    account_id: i64,
+    now: i64,
+    limit: i64,
+) -> Result<Vec<PendingAction>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, account_id, kind, message_id, thread_id, payload, state,
+                attempts, not_before, created_at
+         FROM pending_actions
+         WHERE account_id = ?1 AND state = 'pending' AND (not_before IS NULL OR not_before <= ?2)
+           AND kind NOT LIKE 'cal!_%' ESCAPE '!' AND kind <> 'send'
+         ORDER BY created_at ASC, id ASC LIMIT ?3",
+    )?;
+    let rows = stmt
+        .query_map(params![account_id, now, limit], from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Due SMTP submissions for one account, oldest first. Only the dedicated
+/// outbound worker calls this query.
+pub fn due_sends(
+    conn: &Connection,
+    account_id: i64,
+    now: i64,
+    limit: i64,
+) -> Result<Vec<PendingAction>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, account_id, kind, message_id, thread_id, payload, state,
+                attempts, not_before, created_at
+         FROM pending_actions
+         WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'
+           AND (not_before IS NULL OR not_before <= ?2)
+         ORDER BY created_at ASC, id ASC LIMIT ?3",
+    )?;
+    let rows = stmt
+        .query_map(params![account_id, now, limit], from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Whether one account has more IMAP/SMTP actions ready to execute now.
 /// CalDAV actions are owned by the calendar task and intentionally excluded.
 pub fn has_due(conn: &Connection, account_id: i64, now: i64) -> Result<bool> {
@@ -86,6 +130,31 @@ pub fn has_due(conn: &Connection, account_id: i64, now: i64) -> Result<bool> {
              WHERE account_id = ?1 AND state = 'pending'
                AND (not_before IS NULL OR not_before <= ?2)
                AND kind NOT LIKE 'cal!_%' ESCAPE '!'
+         )",
+        params![account_id, now],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn has_due_except_send(conn: &Connection, account_id: i64, now: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM pending_actions
+             WHERE account_id = ?1 AND state = 'pending'
+               AND (not_before IS NULL OR not_before <= ?2)
+               AND kind NOT LIKE 'cal!_%' ESCAPE '!' AND kind <> 'send'
+         )",
+        params![account_id, now],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn has_due_sends(conn: &Connection, account_id: i64, now: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM pending_actions
+             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'
+               AND (not_before IS NULL OR not_before <= ?2)
          )",
         params![account_id, now],
         |row| row.get(0),
@@ -133,6 +202,18 @@ pub fn next_mail_due_at(conn: &Connection) -> Result<Option<i64>> {
              WHERE state = 'pending' AND not_before IS NOT NULL
                AND kind NOT LIKE 'cal!_%' ESCAPE '!'",
             [],
+            |r| r.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT MIN(COALESCE(not_before, created_at)) FROM pending_actions
+             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'",
+            params![account_id],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -231,6 +312,20 @@ pub fn bump_attempt(conn: &Connection, id: i64, retry_at: i64, error: &str) -> R
     Ok(())
 }
 
+/// Return an action to the pending queue without consuming its retry budget.
+///
+/// A connection failure says nothing about whether the action itself is
+/// valid. Keeping transport availability separate from delivery attempts lets
+/// offline-first actions wait indefinitely for the network to return.
+pub fn defer_offline(conn: &Connection, id: i64, retry_at: i64, error: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET state = 'pending', not_before = ?2, last_error = ?3
+         WHERE id = ?1",
+        params![id, retry_at, error],
+    )?;
+    Ok(())
+}
+
 /// Whether an optimistic move is still in flight from this folder. Header sync
 /// uses this to avoid re-linking the old server copy to a row already moved
 /// locally while the queued IMAP command is waiting to run.
@@ -283,7 +378,7 @@ pub fn has_pending_remote_creation(conn: &Connection, message_id: i64) -> Result
         "SELECT EXISTS(
            SELECT 1 FROM pending_actions
            WHERE message_id=?1 AND state IN ('pending','inflight')
-             AND kind IN ('save_draft','send')
+             AND kind IN ('save_draft','send','append_sent')
          )",
         params![message_id],
         |row| row.get(0),
@@ -397,6 +492,52 @@ mod tests {
         .unwrap();
 
         assert!(due(&conn, 1, 1, 20).is_err());
+    }
+
+    #[test]
+    fn smtp_submissions_are_owned_only_by_the_send_queue() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let send = enqueue(
+            &conn,
+            1,
+            "send",
+            None,
+            None,
+            &serde_json::json!({ "draftId": 7 }),
+            Some(1_000),
+        )
+        .unwrap();
+        let append = enqueue(
+            &conn,
+            1,
+            "append_sent",
+            None,
+            None,
+            &serde_json::json!({}),
+            Some(1_000),
+        )
+        .unwrap();
+
+        assert_eq!(
+            due_sends(&conn, 1, 1_000, 20)
+                .unwrap()
+                .into_iter()
+                .map(|action| action.id)
+                .collect::<Vec<_>>(),
+            vec![send]
+        );
+        assert_eq!(
+            due_except_send(&conn, 1, 1_000, 20)
+                .unwrap()
+                .into_iter()
+                .map(|action| action.id)
+                .collect::<Vec<_>>(),
+            vec![append]
+        );
+        assert!(has_due_sends(&conn, 1, 1_000).unwrap());
+        assert!(has_due_except_send(&conn, 1, 1_000).unwrap());
+        assert_eq!(next_send_due_at(&conn, 1).unwrap(), Some(1_000));
     }
 
     #[test]
