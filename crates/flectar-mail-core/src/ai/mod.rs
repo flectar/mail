@@ -79,7 +79,7 @@ pub fn ui_language_name(code: &str) -> Option<&'static str> {
         "en" => Some("English"),
         "es" => Some("Spanish"),
         "fr" => Some("French"),
-        "zh" => Some("Chinese"),
+        "zh" | "zh-Hans" | "zh_Hans" => Some("Simplified Chinese"),
         "vi" => Some("Vietnamese"),
         _ => None,
     }

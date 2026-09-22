@@ -505,6 +505,7 @@ export component SettingsDialog inherits Rectangle {
         @tr("English"),
         @tr("Spanish"),
         @tr("Turkish"),
+        @tr("Simplified Chinese"),
     ];
     private property <[color]> profile-colors: [
         #3b82f6, #8b5cf6, #0d9488, #ea580c,
@@ -516,7 +517,8 @@ export component SettingsDialog inherits Rectangle {
         : root.notification_scope == "all" ? 2 : 1;
     private property <int> language-index: root.language_mode == "en" ? 1
         : root.language_mode == "es" ? 2
-        : root.language_mode == "tr" ? 3 : 0;
+        : root.language_mode == "tr" ? 3
+        : root.language_mode == "zh_Hans" ? 4 : 0;
 
     pure function settings-icon-color(section: string) -> color {
         if root.monochrome_sidebar_icons {
@@ -584,7 +586,8 @@ export component SettingsDialog inherits Rectangle {
     function select-language(index: int) {
         root.language_mode = index == 1 ? "en"
             : index == 2 ? "es"
-            : index == 3 ? "tr" : "system";
+            : index == 3 ? "tr"
+            : index == 4 ? "zh_Hans" : "system";
         root.save_language(root.language_mode);
     }
 

@@ -2922,6 +2922,10 @@ msgstr "Español"
 msgid "Turkish"
 msgstr "Turco"
 
+#: ui/dialogs/settings-dialog.slint:508
+msgid "Simplified Chinese"
+msgstr ""
+
 #: ui/dialogs/settings-dialog.slint:537
 msgid ""
 "general theme appearance palette language workspace layout renderer privacy "

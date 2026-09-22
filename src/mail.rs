@@ -804,13 +804,7 @@ impl CoreMailSource {
 
     pub async fn set_language(&self, language: &str) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
-        settings.language = match language {
-            "es" => "es",
-            "en" => "en",
-            "tr" => "tr",
-            _ => "system",
-        }
-        .to_owned();
+        settings.language = crate::normalized_language_preference(language).to_owned();
         self.core
             .set_settings(settings)
             .await
