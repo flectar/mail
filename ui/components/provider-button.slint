@@ -9,6 +9,7 @@ export component ProviderButton inherits Rectangle {
     in property <bool> colorize-icon: false;
     in property <length> icon-offset-x: 0px;
     in property <bool> enabled: true;
+    in property <string> tooltip-text: "";
     in property <color> foreground;
     in property <color> muted;
     in property <color> surface;
@@ -19,11 +20,10 @@ export component ProviderButton inherits Rectangle {
     height: 48px;
     border-radius: 8px;
     border-width: 1px;
-    border-color: root.button-border;
+    border-color: root.enabled ? root.button-border : root.button-border.transparentize(0.5);
     background: provider-hit.has-hover && root.enabled ? root.hover-surface : root.surface;
-    opacity: root.enabled ? 1 : 0.5;
     accessible-role: button;
-    accessible-label: root.text;
+    accessible-label: root.tooltip-text == "" ? root.text : root.text + ". " + root.tooltip-text;
     accessible-enabled: root.enabled;
     accessible-action-default => {
         if root.enabled {
@@ -37,6 +37,7 @@ export component ProviderButton inherits Rectangle {
         padding-right: 16px;
         spacing: 12px;
         cross-axis-alignment: center;
+        opacity: root.enabled ? 1 : 0.5;
 
         Rectangle {
             width: 20px;
@@ -71,8 +72,30 @@ export component ProviderButton inherits Rectangle {
     }
 
     provider-hit := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-        mouse-cursor: pointer;
+        clicked => {
+            if root.enabled {
+                root.clicked();
+            }
+        }
+        mouse-cursor: root.enabled ? pointer : default;
+    }
+
+    Rectangle {
+        visible: root.tooltip-text != "" && provider-hit.has-hover;
+        x: (parent.width - self.width) / 2;
+        y: -self.height - 6px;
+        width: tooltip-label.preferred-width + 16px;
+        height: 28px;
+        border-radius: 5px;
+        background: #292929;
+        z: 10000;
+
+        tooltip-label := Text {
+            text: root.tooltip-text;
+            color: white;
+            font-size: TypeScale.secondary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }
