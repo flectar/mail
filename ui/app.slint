@@ -148,6 +148,12 @@ export global I18n {
         if (key == "Message-opening preference updated for this session.") { return @tr("Message-opening preference updated for this session."); }
         if (key == "Message-opening preference saved.") { return @tr("Message-opening preference saved."); }
         if (key == "Could not save message-opening preference: {}") { return @tr("Could not save message-opening preference: {}", argument); }
+        if (key == "Contact suggestion preferences are active for this session.") { return @tr("Contact suggestion preferences are active for this session."); }
+        if (key == "Contact suggestion preferences saved.") { return @tr("Contact suggestion preferences saved."); }
+        if (key == "Could not save contact suggestion preferences: {}") { return @tr("Could not save contact suggestion preferences: {}", argument); }
+        if (key == "Contact storage is still starting. Try again shortly.") { return @tr("Contact storage is still starting. Try again shortly."); }
+        if (key == "Cleared {} suggested people.") { return @tr("Cleared {} suggested people.", argument); }
+        if (key == "Could not clear suggested people: {}") { return @tr("Could not clear suggested people: {}", argument); }
         if (key == "Theme updated for this session.") { return @tr("Theme updated for this session."); }
         if (key == "Theme preference saved.") { return @tr("Theme preference saved."); }
         if (key == "Could not save theme: {}") { return @tr("Could not save theme: {}", argument); }
@@ -279,6 +285,7 @@ export global I18n {
         if (key == "Could not save: contact storage is unavailable.") { return @tr("Could not save: contact storage is unavailable."); }
         if (key == "Could not save contact: {}") { return @tr("Could not save contact: {}", argument); }
         if (key == "Contact saved.") { return @tr("Contact saved."); }
+        if (key == "Saved to contacts.") { return @tr("Saved to contacts."); }
         if (key == "Could not delete: contact storage is unavailable.") { return @tr("Could not delete: contact storage is unavailable."); }
         if (key == "Could not delete contact: {}") { return @tr("Could not delete contact: {}", argument); }
         if (key == "Contact deleted.") { return @tr("Contact deleted."); }
@@ -498,6 +505,8 @@ export component AppWindow inherits Window {
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
+    callback save_contact_discovery_settings(bool, bool, bool);
+    callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback open_compose();
     callback close_compose();
@@ -639,11 +648,13 @@ export component AppWindow inherits Window {
     in-out property <string> contact_notes: "";
     in-out property <string> contact_tags: "";
     in-out property <bool> contact_favorite: false;
+    in property <bool> contact_is_suggested: false;
     in property <string> contact_initials: "?";
     in property <string> contact_interactions: "";
     in property <string> contact_last_interacted: "";
     in property <int> contact_total_count: 0;
     in property <int> contact_favorite_count: 0;
+    in property <int> contact_suggestion_count: 0;
     in property <string> calendar_month_title: "";
     in property <string> calendar_period_title: "";
     in property <string> calendar_week_label: "";
@@ -747,6 +758,9 @@ export component AppWindow inherits Window {
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
+    in-out property <bool> collect_outgoing_contacts: true;
+    in-out property <bool> collect_incoming_contacts: false;
+    in-out property <bool> suggest_learned_contacts: true;
     in-out property <bool> close_to_tray: false;
     in-out property <bool> account_setup_in_progress: false;
     in-out property <bool> account_form_open: false;
@@ -1252,7 +1266,8 @@ export component AppWindow inherits Window {
             sidebar-rows: root.contact_sidebar_rows;
             toggle-section(key, open) => { root.toggle-contact-section(key, open); }
             query: root.contact_search_query;
-            filter: root.contact_scope == "Favorites" ? "favorites" : "all";
+            filter: root.contact_scope == "Favorites" ? "favorites"
+                : root.contact_scope == "Suggestions" ? "suggestions" : "all";
             selected-scope: root.contact_scope;
             status: root.contact_save_status;
             can-load-more: root.contact_can_load_more;
@@ -1260,6 +1275,7 @@ export component AppWindow inherits Window {
             content-revision: root.contact_list_revision;
             total-count: root.contact_total_count;
             favorite-count: root.contact_favorite_count;
+            suggestion-count: root.contact_suggestion_count;
             has-selected: root.contact_has_selection;
             selected-id <=> root.contact_id;
             edit-name <=> root.contact_name;
@@ -1273,6 +1289,7 @@ export component AppWindow inherits Window {
             edit-notes <=> root.contact_notes;
             edit-tags <=> root.contact_tags;
             edit-favorite <=> root.contact_favorite;
+            is-suggested: root.contact_is_suggested;
             edit-initials: root.contact_initials;
             interaction-label: root.contact_interactions + (root.contact_last_interacted != "" ? " · " + root.contact_last_interacted : "");
             accent: root.accent;
@@ -1297,6 +1314,7 @@ export component AppWindow inherits Window {
             load-more => { root.load-more-contacts(); }
             select-filter(filter) => {
                 root.select-contact-scope(filter == "favorites" ? "Favorites"
+                    : filter == "suggestions" ? "Suggestions"
                     : filter == "all" ? "All contacts" : filter);
             }
             new-contact => { root.new-contact(); }
@@ -1447,6 +1465,9 @@ export component AppWindow inherits Window {
             notification_scope <=> root.notification_scope;
             sync_interval_minutes <=> root.sync_interval_minutes;
             mark_read_on_open <=> root.mark_read_on_open;
+            collect_outgoing_contacts <=> root.collect_outgoing_contacts;
+            collect_incoming_contacts <=> root.collect_incoming_contacts;
+            suggest_learned_contacts <=> root.suggest_learned_contacts;
             close_to_tray <=> root.close_to_tray;
             remote-images-enabled <=> root.remote-images-enabled;
             account_email <=> root.account_email;
@@ -1531,6 +1552,10 @@ export component AppWindow inherits Window {
             }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
+            save_contact_discovery_settings(outgoing, incoming, suggest) => {
+                root.save_contact_discovery_settings(outgoing, incoming, suggest);
+            }
+            clear_contact_suggestions => { return root.clear_contact_suggestions(); }
             set_close_to_tray(enabled) => { root.set_close_to_tray(enabled); }
             sync_mail => { root.sync_mail(); }
             sync_account(account-id) => { root.sync_account(account-id); }

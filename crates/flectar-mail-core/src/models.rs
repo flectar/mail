@@ -434,8 +434,8 @@ pub struct ContactRecord {
     /// Accounts that discovered this contact through sent or received mail.
     #[serde(default)]
     pub account_ids: Vec<i64>,
-    /// User-managed contacts remain available from every account scope, just
-    /// like account-scoped compose autocomplete.
+    /// True for a saved address-book entry, whether managed locally or backed
+    /// by CardDAV. False identifies a mail-derived suggestion.
     #[serde(default)]
     pub is_managed: bool,
 }
@@ -454,8 +454,11 @@ pub struct ContactRecordCursor {
 pub struct ContactRecordPage {
     pub records: Vec<ContactRecord>,
     pub next_cursor: Option<ContactRecordCursor>,
+    /// Saved/manual and CardDAV-backed address-book entries.
     pub total_count: usize,
     pub favorite_count: usize,
+    /// Mail-derived people that have not been promoted to the address book.
+    pub suggestion_count: usize,
     pub account_counts: Vec<(i64, usize)>,
 }
 
@@ -1249,6 +1252,20 @@ pub struct Settings {
     /// off (default) scopes suggestions to the account you're sending from.
     #[serde(default)]
     pub contact_suggest_all_accounts: bool,
+    /// Learn addresses from messages the user sends so they can be offered as
+    /// compose suggestions. These remain local suggestions until explicitly
+    /// promoted to the address book.
+    #[serde(default = "default_true")]
+    pub collect_outgoing_contacts: bool,
+    /// Learn human senders from received mail. Off by default because inboxes
+    /// contain newsletters, receipts, and unsolicited mail that should not
+    /// silently become part of the user's people data.
+    #[serde(default)]
+    pub collect_incoming_contacts: bool,
+    /// Include locally learned people alongside saved contacts in compose and
+    /// contact-aware search suggestions.
+    #[serde(default = "default_true")]
+    pub suggest_learned_contacts: bool,
     /// Show the unread count on the app icon (macOS Dock badge).
     #[serde(default = "default_true")]
     pub dock_badge_enabled: bool,
@@ -1425,6 +1442,9 @@ impl Default for Settings {
             ai_tier_categorize: default_tier_instant(),
             group_by_date: true,
             contact_suggest_all_accounts: false,
+            collect_outgoing_contacts: true,
+            collect_incoming_contacts: false,
+            suggest_learned_contacts: true,
             dock_badge_enabled: true,
             dock_badge_source: default_badge_source(),
             notification_scope: default_notification_scope(),

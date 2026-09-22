@@ -146,6 +146,16 @@ pub fn disconnect(conn: &Connection, account_id: i64) -> Result<()> {
     // Synced contacts stay useful locally. Removing mappings prevents later
     // edits from being sent to a server the user disconnected.
     conn.execute(
+        "UPDATE contacts SET is_managed=1
+         WHERE id IN (
+             SELECT o.contact_id
+             FROM carddav_objects o
+             JOIN carddav_addressbooks b ON b.id=o.addressbook_id
+             WHERE b.account_id=?1 AND o.contact_id IS NOT NULL AND o.deleted=0
+         )",
+        [account_id],
+    )?;
+    conn.execute(
         "DELETE FROM carddav_addressbooks WHERE account_id=?1",
         [account_id],
     )?;
@@ -195,6 +205,14 @@ pub fn retain_addressbooks(
     drop(statement);
     for (id, url) in books {
         if !urls.contains(&url) {
+            conn.execute(
+                "UPDATE contacts SET is_managed=1
+                 WHERE id IN (
+                     SELECT contact_id FROM carddav_objects
+                     WHERE addressbook_id=?1 AND contact_id IS NOT NULL AND deleted=0
+                 )",
+                [id],
+            )?;
             conn.execute("DELETE FROM carddav_addressbooks WHERE id=?1", [id])?;
         }
     }

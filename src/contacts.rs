@@ -25,6 +25,7 @@ pub(crate) struct ContactDirectoryState {
     pub(crate) next_cursor: Option<ContactRecordCursor>,
     pub(crate) total_count: usize,
     pub(crate) favorite_count: usize,
+    pub(crate) suggestion_count: usize,
     pub(crate) account_counts: HashMap<i64, usize>,
     pub(crate) editing_new: bool,
     pub(crate) using_core: bool,
@@ -44,6 +45,7 @@ impl ContactDirectoryState {
             next_cursor: None,
             total_count: 0,
             favorite_count: 0,
+            suggestion_count: 0,
             account_counts: HashMap::new(),
             editing_new: false,
             using_core,
@@ -84,6 +86,7 @@ impl ContactDirectoryState {
         self.next_cursor = page.next_cursor;
         self.total_count = page.total_count;
         self.favorite_count = page.favorite_count;
+        self.suggestion_count = page.suggestion_count;
         self.account_counts = page.account_counts.into_iter().collect();
         if self.selected_id.is_none() {
             self.selected_id = self.contacts.first().map(|contact| contact.id);
@@ -180,11 +183,13 @@ fn visible_contact_ids(directory: &ContactDirectoryState) -> Vec<i64> {
         .iter()
         .filter(|contact| {
             if directory.scope == "Favorites" {
-                contact.is_favorite
+                contact.is_managed && contact.is_favorite
+            } else if directory.scope == "Suggestions" {
+                !contact.is_managed
             } else if let Some(account_id) = scope_account_id(&directory.scope) {
-                contact_belongs_to_account(contact, account_id)
+                contact.is_managed && contact_belongs_to_account(contact, account_id)
             } else {
-                true
+                contact.is_managed
             }
         })
         .filter(|contact| contact_matches(contact, &directory.query))
@@ -221,6 +226,7 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
                 .into(),
                 last_contacted: contact_last_interacted(app, contact.last_interacted).into(),
                 favorite: contact.is_favorite,
+                suggested: !contact.is_managed,
                 selected: directory.selected_id == Some(contact.id) && !directory.editing_new,
             })
         })
@@ -245,6 +251,16 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
     };
     app.set_contact_total_count(total_count.min(i32::MAX as usize) as i32);
     app.set_contact_favorite_count(favorite_count.min(i32::MAX as usize) as i32);
+    let suggestion_count = if directory.using_core {
+        directory.suggestion_count
+    } else {
+        directory
+            .contacts
+            .iter()
+            .filter(|contact| !contact.is_managed)
+            .count()
+    };
+    app.set_contact_suggestion_count(suggestion_count.min(i32::MAX as usize) as i32);
     app.set_contact_can_load_more(if directory.using_core {
         directory.next_cursor.is_some()
     } else {
@@ -269,6 +285,7 @@ pub(crate) fn clear_contact_form(app: &AppWindow) {
     app.set_contact_notes("".into());
     app.set_contact_tags("".into());
     app.set_contact_favorite(false);
+    app.set_contact_is_suggested(false);
     app.set_contact_initials("?".into());
     app.set_contact_interactions(app.global::<I18n>().invoke_new_contact_entry());
     app.set_contact_last_interacted("".into());
@@ -287,6 +304,7 @@ fn apply_contact_form(app: &AppWindow, contact: &ContactRecord) {
     app.set_contact_notes(contact.notes.clone().into());
     app.set_contact_tags(contact.tags.clone().into());
     app.set_contact_favorite(contact.is_favorite);
+    app.set_contact_is_suggested(!contact.is_managed);
     app.set_contact_initials(record_initials(contact).into());
     app.set_contact_interactions(
         app.global::<I18n>()
@@ -440,7 +458,11 @@ fn make_contact_sidebar_rows(
         row(Kind::UnifiedSection, "unified"),
     ];
     if !collapsed.contains("unified") {
-        rows.extend([row(Kind::All, "all"), row(Kind::Favorites, "favorites")]);
+        rows.extend([
+            row(Kind::All, "all"),
+            row(Kind::Favorites, "favorites"),
+            row(Kind::Suggestions, "suggestions"),
+        ]);
     }
     if !accounts.is_empty() {
         rows.push(row(Kind::AccountsHeading, "accounts-heading"));
@@ -534,6 +556,7 @@ mod tests {
             next_cursor,
             total_count: 61,
             favorite_count: 0,
+            suggestion_count: 0,
             account_counts: vec![(1, 61)],
         }
     }

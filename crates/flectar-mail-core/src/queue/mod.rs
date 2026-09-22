@@ -674,6 +674,7 @@ async fn send_action(
         .await?;
     // mail-parser strips angle brackets from Message-IDs; store the same form
     // so the Sent-folder sync dedupes against this row instead of duplicating.
+    let sent_at = now_ms();
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
@@ -682,7 +683,7 @@ async fn send_action(
                 "UPDATE messages SET is_draft = 0, is_outgoing = 1, is_read = 1,
                         message_id = ?2, folder_id = COALESCE(?3, folder_id), uid = NULL, date = ?4
                  WHERE id = ?1",
-                rusqlite::params![draft_id, msg_id_bare, sent_folder_id, now_ms()],
+                rusqlite::params![draft_id, msg_id_bare, sent_folder_id, sent_at],
             )?;
             tx.execute(
                 "DELETE FROM drafts_meta WHERE message_id = ?1",
@@ -695,6 +696,7 @@ async fn send_action(
                 repo::threads::recompute(&tx, tid)?;
             }
             repo::search::index_message(&tx, draft_id)?;
+            repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
             tx.commit()?;
             Ok((tid, staged_paths))
         })

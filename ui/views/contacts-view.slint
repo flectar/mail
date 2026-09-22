@@ -44,6 +44,7 @@ export component ContactsView inherits Rectangle {
     in property <int> content-revision: 0;
     in property <int> total-count: 0;
     in property <int> favorite-count: 0;
+    in property <int> suggestion-count: 0;
     in property <bool> has-selected: false;
     in-out property <int> selected-id: 0;
     in-out property <string> edit-name: "";
@@ -57,6 +58,7 @@ export component ContactsView inherits Rectangle {
     in-out property <string> edit-notes: "";
     in-out property <string> edit-tags: "";
     in-out property <bool> edit-favorite: false;
+    in property <bool> is-suggested: false;
     in property <string> edit-initials: "?";
     in property <string> interaction-label: "";
     private property <bool> delete-confirming: false;
@@ -210,19 +212,25 @@ export component ContactsView inherits Rectangle {
                                 open: entry.open;
                                 toggled(open) => { root.toggle-section(entry.key, open); }
                             }
-                            if entry.kind == ContactSidebarRowKind.all || entry.kind == ContactSidebarRowKind.favorites || entry.kind == ContactSidebarRowKind.contacts: SidebarItem {
+                            if entry.kind == ContactSidebarRowKind.all || entry.kind == ContactSidebarRowKind.favorites || entry.kind == ContactSidebarRowKind.suggestions || entry.kind == ContactSidebarRowKind.contacts: SidebarItem {
                                 x: 0px;
                                 y: 0px;
                                 width: parent.width;
                                 label: entry.kind == ContactSidebarRowKind.all ? @tr("All contacts")
-                                    : entry.kind == ContactSidebarRowKind.favorites ? @tr("Favorites") : @tr("Contacts");
+                                    : entry.kind == ContactSidebarRowKind.favorites ? @tr("Favorites")
+                                    : entry.kind == ContactSidebarRowKind.suggestions ? @tr("Suggested") : @tr("Contacts");
                                 count: entry.kind == ContactSidebarRowKind.all ? (root.total-count > 0 ? root.total-count : "")
-                                    : entry.kind == ContactSidebarRowKind.favorites ? (root.favorite-count > 0 ? root.favorite-count : "") : entry.account.count;
+                                    : entry.kind == ContactSidebarRowKind.favorites ? (root.favorite-count > 0 ? root.favorite-count : "")
+                                    : entry.kind == ContactSidebarRowKind.suggestions ? (root.suggestion-count > 0 ? root.suggestion-count : "") : entry.account.count;
                                 scope: entry.kind == ContactSidebarRowKind.all ? "all"
-                                    : entry.kind == ContactSidebarRowKind.favorites ? "favorites" : "Account:" + entry.account.id;
-                                icon: entry.kind == ContactSidebarRowKind.favorites ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/filled/people.svg");
+                                    : entry.kind == ContactSidebarRowKind.favorites ? "favorites"
+                                    : entry.kind == ContactSidebarRowKind.suggestions ? "suggestions" : "Account:" + entry.account.id;
+                                icon: entry.kind == ContactSidebarRowKind.favorites ? @image-url("../icons/lucide/filled/star.svg")
+                                    : entry.kind == ContactSidebarRowKind.suggestions ? @image-url("../icons/lucide/outline/history.svg")
+                                    : @image-url("../icons/lucide/filled/people.svg");
                                 selected: entry.kind == ContactSidebarRowKind.all ? root.selected-scope == "All contacts"
-                                    : entry.kind == ContactSidebarRowKind.favorites ? root.selected-scope == "Favorites" : entry.account.selected;
+                                    : entry.kind == ContactSidebarRowKind.favorites ? root.selected-scope == "Favorites"
+                                    : entry.kind == ContactSidebarRowKind.suggestions ? root.selected-scope == "Suggestions" : entry.account.selected;
                                 sidebar-background: root.sidebar-bg;
                                 selection-background: root.accent-soft;
                                 accent-color: root.accent;
@@ -235,7 +243,7 @@ export component ContactsView inherits Rectangle {
                                 y: 0px;
                                 width: parent.width;
                                 height: 54px;
-                                text: @tr("People discovered from your conversations appear here automatically.");
+                                text: @tr("Suggested people stay local and separate until you save them as contacts.");
                                 color: root.muted-text;
                                 font-size: TypeScale.caption;
                                 wrap: word-wrap;
@@ -293,6 +301,7 @@ export component ContactsView inherits Rectangle {
                         filters: [
                             { title: @tr("All contacts"), value: "all" },
                             { title: @tr("Favorites"), value: "favorites" },
+                            { title: @tr("Suggested"), value: "suggestions" },
                         ];
                         filter-active: root.filter != "all";
                         filter-tooltip: @tr("Filter contacts");
@@ -388,7 +397,8 @@ export component ContactsView inherits Rectangle {
                                         y: 43px;
                                         width: parent.width;
                                         height: 18px;
-                                        text: contact.detail != "" ? contact.detail : contact.last_contacted;
+                                        text: contact.suggested ? @tr("Suggested from mail")
+                                            : contact.detail != "" ? contact.detail : contact.last_contacted;
                                         color: root.muted-text;
                                         font-size: TypeScale.caption;
                                         overflow: elide;
@@ -435,7 +445,9 @@ export component ContactsView inherits Rectangle {
                         x: 20px;
                         width: parent.width - 40px;
                         height: min(parent.height, 130px);
-                        text: root.query == "" ? @tr("No contacts yet. Create one or sync some mail.") : @tr("No contacts match this search.");
+                        text: root.query != "" ? @tr("No contacts match this search.")
+                            : root.selected-scope == "Suggestions" ? @tr("No suggested people yet. People you email can appear here for faster addressing.")
+                            : @tr("No contacts yet. Create one or connect an address book.");
                         color: root.muted-text;
                         font-size: TypeScale.secondary;
                         wrap: word-wrap;
@@ -524,7 +536,8 @@ export component ContactsView inherits Rectangle {
                             }
                         }
                         Text {
-                            text: root.selected-id > 0 ? @tr("Contact details") : @tr("New contact");
+                            text: root.is-suggested ? @tr("Suggested person")
+                                : root.selected-id > 0 ? @tr("Contact details") : @tr("New contact");
                             color: root.secondary-text;
                             font-size: TypeScale.caption;
                             font-weight: 700;
@@ -532,6 +545,7 @@ export component ContactsView inherits Rectangle {
                         }
                         Rectangle { horizontal-stretch: 1; }
                         ToolbarIconButton {
+                            visible: !root.is-suggested;
                             compact: root.compact;
                             icon: root.edit-favorite ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg");
                             icon-color: root.edit-favorite ? root.accent : root.secondary-text;
@@ -542,7 +556,7 @@ export component ContactsView inherits Rectangle {
                             clicked => { root.edit-favorite = !root.edit-favorite; }
                         }
                         if root.delete-confirming : Text {
-                            text: @tr("Delete this contact?");
+                            text: root.is-suggested ? @tr("Remove this suggestion?") : @tr("Delete this contact?");
                             color: root.body-text;
                             font-size: TypeScale.caption;
                             font-weight: 700;
@@ -553,7 +567,7 @@ export component ContactsView inherits Rectangle {
                             clicked => { root.delete-confirming = false; }
                         }
                         if root.delete-confirming : Button {
-                            text: @tr("Delete");
+                            text: root.is-suggested ? @tr("Remove") : @tr("Delete");
                             clicked => {
                                 root.delete-confirming = false;
                                 root.delete-contact(root.selected-id);
@@ -565,7 +579,7 @@ export component ContactsView inherits Rectangle {
                             icon: @image-url("../icons/lucide/outline/trash.svg");
                             icon-color: root.secondary-text;
                             hover-background: root.muted-control-bg;
-                            tooltip-text: @tr("Delete contact");
+                            tooltip-text: root.is-suggested ? @tr("Remove suggestion") : @tr("Delete contact");
                             clicked => { root.delete-confirming = true; }
                         }
                     }
@@ -619,6 +633,30 @@ export component ContactsView inherits Rectangle {
                         }
 
                         Rectangle { height: 8px; }
+                        if root.is-suggested : Rectangle {
+                            height: root.compact ? 66px : 52px;
+                            background: root.accent-soft;
+                            border-radius: 8px;
+                            HorizontalBox {
+                                padding: 12px;
+                                spacing: 10px;
+                                Image {
+                                    width: 18px;
+                                    height: 18px;
+                                    source: @image-url("../icons/lucide/outline/history.svg");
+                                    colorize: root.accent;
+                                    image-fit: contain;
+                                    accessible-role: none;
+                                }
+                                Text {
+                                    text: @tr("Learned from mail. Save this person to add them to your address book.");
+                                    color: root.body-text;
+                                    font-size: TypeScale.secondary;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
                         FieldLabel { label: @tr("NAME"); }
                         LineEdit { text <=> root.edit-name; placeholder-text: @tr("Full name"); }
                         FieldLabel { label: @tr("EMAIL"); }
@@ -680,7 +718,7 @@ export component ContactsView inherits Rectangle {
                             }
                             Rectangle { horizontal-stretch: 1; }
                             Button {
-                                text: @tr("Save contact");
+                                text: root.is-suggested ? @tr("Save to contacts") : @tr("Save contact");
                                 primary: true;
                                 clicked => {
                                     root.save-contact(

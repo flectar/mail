@@ -1779,6 +1779,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         let scope = match scope.as_str() {
             "Favorites" => "Favorites".to_owned(),
+            "Suggestions" => "Suggestions".to_owned(),
             value if value.starts_with("Account:") => value.to_owned(),
             _ => "All contacts".to_owned(),
         };
@@ -1921,6 +1922,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .iter()
                 .find(|contact| contact.id == i64::from(id))
                 .cloned();
+            let promoting_suggestion = previous
+                .as_ref()
+                .is_some_and(|contact| !contact.is_managed);
             let new_contact_accounts = contacts_for_save
                 .borrow()
                 .scope
@@ -1991,6 +1995,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             if let Some(core) = core {
                 let (scope, query, generation) = {
                     let mut directory = contacts_for_save.borrow_mut();
+                    if promoting_suggestion {
+                        directory.scope = "All contacts".to_owned();
+                    }
                     directory.begin_core_query();
                     directory.selected_id = Some(saved.id);
                     let generation = contact_load_generation_for_save.get().wrapping_add(1);
@@ -1999,7 +2006,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 };
                 contacts_loading_for_save.set(true);
                 app.set_contact_loading_more(true);
-                app.set_contact_save_status(UiMessage::plain("Contact saved."));
+                app.set_contact_save_status(if promoting_suggestion {
+                    UiMessage::plain("Saved to contacts.")
+                } else {
+                    UiMessage::plain("Contact saved.")
+                });
                 apply_contact_directory(&app, &contacts_for_save);
                 spawn_contact_page(
                     &runtime_for_save,

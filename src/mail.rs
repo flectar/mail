@@ -737,6 +737,29 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_contact_discovery_settings(
+        &self,
+        collect_outgoing: bool,
+        collect_incoming: bool,
+        suggest_learned: bool,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.collect_outgoing_contacts = collect_outgoing;
+        settings.collect_incoming_contacts = collect_incoming;
+        settings.suggest_learned_contacts = suggest_learned;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn clear_contact_suggestions(&self) -> Result<usize, String> {
+        self.core
+            .clear_contact_suggestions()
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_theme(&self, theme: &str) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.theme = match theme {
@@ -965,11 +988,19 @@ impl CoreMailSource {
         limit: i64,
     ) -> Result<ContactRecordPage, String> {
         let favorites_only = scope == "Favorites";
+        let suggestions_only = scope == "Suggestions";
         let account_id = scope
             .strip_prefix("Account:")
             .and_then(|value| value.parse().ok());
         self.core
-            .list_contact_record_page(query, account_id, favorites_only, cursor, limit)
+            .list_contact_record_page(
+                query,
+                account_id,
+                favorites_only,
+                suggestions_only,
+                cursor,
+                limit,
+            )
             .await
             .map_err(|error| error.to_string())
     }

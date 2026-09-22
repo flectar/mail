@@ -5,6 +5,19 @@ use crate::models::{
 use crate::search::fold;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
+/// A real address-book entry is explicitly saved or favorited in Flectar Mail,
+/// or backed by a live CardDAV object. Mail-derived identities deliberately
+/// stay outside this set until the user takes one of those explicit actions.
+fn saved_contact_predicate(alias: &str) -> String {
+    format!(
+        "({alias}.is_managed = 1 OR {alias}.is_favorite = 1 OR EXISTS (
+            SELECT 1 FROM carddav_objects co
+            WHERE co.contact_id = {alias}.id
+              AND co.remote_exists = 1 AND co.deleted = 0
+        ))"
+    )
+}
+
 fn record_from_row(row: &Row<'_>) -> rusqlite::Result<ContactRecord> {
     let account_ids = row
         .get::<_, String>(15)?
@@ -31,6 +44,48 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<ContactRecord> {
     })
 }
 
+/// Per-account boundaries prevent provider history backfills from being
+/// mistaken for new relationship activity. The defensive insert covers
+/// profiles created by unusual import paths that bypassed the account trigger.
+pub fn learning_boundaries(conn: &Connection, account_id: i64, now_ms: i64) -> Result<(i64, i64)> {
+    conn.execute(
+        "INSERT OR IGNORE INTO contact_learning_state
+             (account_id, outgoing_since, incoming_since)
+         VALUES (?1, ?2, ?2)",
+        params![account_id, now_ms],
+    )?;
+    conn.query_row(
+        "SELECT outgoing_since, incoming_since
+         FROM contact_learning_state WHERE account_id=?1",
+        [account_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .map_err(Into::into)
+}
+
+/// Starting a learning direction is intentionally prospective: messages that
+/// predate the opt-in never enter Suggestions if a provider backfills later.
+pub fn advance_learning_boundaries(
+    conn: &Connection,
+    outgoing: bool,
+    incoming: bool,
+    now_ms: i64,
+) -> Result<()> {
+    if outgoing {
+        conn.execute(
+            "UPDATE contact_learning_state SET outgoing_since=?1",
+            [now_ms],
+        )?;
+    }
+    if incoming {
+        conn.execute(
+            "UPDATE contact_learning_state SET incoming_since=?1",
+            [now_ms],
+        )?;
+    }
+    Ok(())
+}
+
 /// Record an address seen in mail headers on `account_id`'s mail. `sent` = we
 /// sent to them. Updates both the global `contacts` row (identity + global
 /// affinity used by search and sender_known) and the per-account
@@ -49,19 +104,22 @@ pub fn harvest(
     let email = addr.email.to_lowercase();
     let name = addr.name.as_deref().unwrap_or("");
     let folded = fold(&format!("{} {}", name, addr.email));
+    let saved = saved_contact_predicate("contacts");
     conn.execute(
-        "INSERT INTO contacts (email, name, folded, send_count, recv_count, last_interacted)
+        &format!(
+            "INSERT INTO contacts (email, name, folded, send_count, recv_count, last_interacted)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(email) DO UPDATE SET
-            name = CASE WHEN contacts.is_managed = 1 THEN contacts.name
+            name = CASE WHEN {saved} THEN contacts.name
                    ELSE COALESCE(NULLIF(excluded.name, ''), contacts.name) END,
             folded = CASE
-                WHEN contacts.is_managed = 0 AND NULLIF(excluded.name, '') IS NOT NULL
+                WHEN (NOT {saved} AND NULLIF(excluded.name, '') IS NOT NULL)
                 OR contacts.folded IS NULL
                 THEN excluded.folded ELSE contacts.folded END,
             send_count = contacts.send_count + ?4,
             recv_count = contacts.recv_count + ?5,
-            last_interacted = MAX(COALESCE(contacts.last_interacted, 0), ?6)",
+            last_interacted = MAX(COALESCE(contacts.last_interacted, 0), ?6)"
+        ),
         params![email, name, folded, sent as i64, (!sent) as i64, when_ms],
     )?;
     conn.execute(
@@ -74,6 +132,67 @@ pub fn harvest(
         params![email, account_id, sent as i64, (!sent) as i64, when_ms],
     )?;
     Ok(())
+}
+
+/// Learn all recipients of a successfully submitted local message exactly
+/// once. Provider send reconciliation may safely call this more than once.
+pub fn record_sent_recipients(
+    conn: &Connection,
+    account_id: i64,
+    message_id: i64,
+    when_ms: i64,
+) -> Result<usize> {
+    let row = conn
+        .query_row(
+            "SELECT contact_learning_recorded, to_json, cc_json, bcc_json
+             FROM messages WHERE id=?1 AND account_id=?2",
+            params![message_id, account_id],
+            |row| {
+                Ok((
+                    row.get::<_, bool>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((already_recorded, to_json, cc_json, bcc_json)) = row else {
+        return Err(crate::error::CoreError::NotFound(format!(
+            "message {message_id}"
+        )));
+    };
+    if already_recorded {
+        return Ok(0);
+    }
+
+    let settings = super::settings::get(conn)?;
+    let mut learned = 0;
+    if settings.collect_outgoing_contacts {
+        let own_addresses = super::sender_identities::list(conn, account_id)?
+            .into_iter()
+            .filter(|identity| identity.is_primary || identity.verification_status == "accepted")
+            .map(|identity| identity.email.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<_>>();
+        let mut recipients = Vec::new();
+        for json in [&to_json, &cc_json, &bcc_json] {
+            recipients.extend(serde_json::from_str::<Vec<Address>>(json).unwrap_or_default());
+        }
+        let mut seen = std::collections::HashSet::new();
+        for recipient in recipients {
+            let email = recipient.email.trim().to_ascii_lowercase();
+            if !email.is_empty() && !own_addresses.contains(&email) && seen.insert(email) {
+                harvest(conn, account_id, &recipient, true, when_ms)?;
+                learned += 1;
+            }
+        }
+    }
+    conn.execute(
+        "UPDATE messages SET contact_learning_recorded=1
+         WHERE id=?1 AND account_id=?2",
+        params![message_id, account_id],
+    )?;
+    Ok(learned)
 }
 
 /// One-time fill of `contacts.folded` for rows harvested before the column
@@ -139,6 +258,7 @@ fn record_where_clause(
     query: &str,
     account_id: Option<i64>,
     favorites_only: bool,
+    suggestions_only: bool,
     bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
 ) -> String {
     let mut clauses = Vec::new();
@@ -148,15 +268,31 @@ fn record_where_clause(
     if favorites_only {
         clauses.push("is_favorite = 1".to_owned());
     }
+    let saved = saved_contact_predicate("contacts");
+    clauses.push(if suggestions_only {
+        format!("NOT {saved} AND (send_count > 0 OR recv_count > 0)")
+    } else {
+        saved
+    });
     if let Some(account_id) = account_id {
         bind.push(Box::new(account_id));
-        clauses.push(format!(
-            "(is_managed = 1 OR EXISTS (
+        clauses.push(if suggestions_only {
+            format!(
+                "EXISTS (
+                    SELECT 1 FROM contact_accounts ca
+                    WHERE ca.contact_id = contacts.id AND ca.account_id = ?{}
+                )",
+                bind.len()
+            )
+        } else {
+            format!(
+                "(is_managed = 1 OR EXISTS (
                 SELECT 1 FROM contact_accounts ca
                 WHERE ca.contact_id = contacts.id AND ca.account_id = ?{}
-            ))",
-            bind.len()
-        ));
+                ))",
+                bind.len()
+            )
+        });
     }
     if clauses.is_empty() {
         "1 = 1".to_owned()
@@ -173,6 +309,7 @@ pub fn suggest(
     conn: &Connection,
     query: &str,
     account_id: Option<i64>,
+    include_suggestions: bool,
     limit: i64,
 ) -> Result<Vec<ContactSuggestion>> {
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -181,6 +318,9 @@ pub fn suggest(
     };
     // `contact_accounts` has no name/email/folded columns, so the folded WHERE
     // clause stays unambiguous; only the affinity columns get an alias.
+    let saved_filter = (!include_suggestions)
+        .then(|| format!(" AND {}", saved_contact_predicate("c")))
+        .unwrap_or_default();
     let sql = if let Some(aid) = account_id {
         bind.push(Box::new(aid));
         let aid_ix = bind.len();
@@ -193,6 +333,7 @@ pub fn suggest(
              LEFT JOIN contact_accounts ca
                ON ca.contact_id = c.id AND ca.account_id = ?{aid_ix}
              WHERE ({where_sql}) AND (ca.account_id IS NOT NULL OR c.is_managed = 1)
+                   {saved_filter}
              ORDER BY COALESCE(ca.send_count * 3 + ca.recv_count,
                                c.send_count * 3 + c.recv_count) DESC,
                       COALESCE(ca.last_interacted, c.last_interacted) DESC
@@ -202,8 +343,8 @@ pub fn suggest(
     } else {
         bind.push(Box::new(limit));
         format!(
-            "SELECT name, email, send_count * 3 + recv_count FROM contacts
-             WHERE {where_sql}
+            "SELECT name, email, send_count * 3 + recv_count FROM contacts c
+             WHERE {where_sql}{saved_filter}
              ORDER BY (send_count * 3 + recv_count) DESC, last_interacted DESC
              LIMIT ?{}",
             bind.len()
@@ -227,32 +368,37 @@ pub fn autocomplete(
     conn: &Connection,
     prefix: &str,
     account_id: Option<i64>,
+    include_suggestions: bool,
     limit: i64,
 ) -> Result<Vec<Address>> {
-    Ok(suggest(conn, prefix, account_id, limit)?
-        .into_iter()
-        .map(|c| Address {
-            name: c.name,
-            email: c.email,
-        })
-        .collect())
+    Ok(
+        suggest(conn, prefix, account_id, include_suggestions, limit)?
+            .into_iter()
+            .map(|c| Address {
+                name: c.name,
+                email: c.email,
+            })
+            .collect(),
+    )
 }
 
 /// List address-book records for the dedicated contacts workspace. An empty
 /// query returns the full directory; otherwise every folded token must match.
 pub fn list_records(conn: &Connection, query: &str, limit: i64) -> Result<Vec<ContactRecord>> {
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let where_sql = folded_clauses(query, &mut bind).unwrap_or_else(|| "1 = 1".to_owned());
+    let query_sql = folded_clauses(query, &mut bind).unwrap_or_else(|| "1 = 1".to_owned());
+    let saved = saved_contact_predicate("contacts");
     bind.push(Box::new(limit.clamp(1, 500)));
     let sql = format!(
         "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted, is_managed,
+                send_count * 3 + recv_count, last_interacted,
+                CASE WHEN {saved} THEN 1 ELSE 0 END,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
                           FROM contact_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
          FROM contacts
-         WHERE {where_sql}
+         WHERE ({query_sql}) AND {saved}
          ORDER BY is_favorite DESC,
                   CASE WHEN name IS NULL OR name = '' THEN email ELSE name END COLLATE NOCASE,
                   email COLLATE NOCASE,
@@ -275,13 +421,20 @@ pub fn list_record_page(
     query: &str,
     account_id: Option<i64>,
     favorites_only: bool,
+    suggestions_only: bool,
     cursor: Option<&ContactRecordCursor>,
     limit: i64,
 ) -> Result<ContactRecordPage> {
     let limit = limit.clamp(1, 100);
 
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-    let mut where_sql = record_where_clause(query, account_id, favorites_only, &mut bind);
+    let mut where_sql = record_where_clause(
+        query,
+        account_id,
+        favorites_only,
+        suggestions_only,
+        &mut bind,
+    );
     if let Some(cursor) = cursor {
         bind.push(Box::new(i64::from(cursor.is_favorite)));
         let favorite_index = bind.len();
@@ -308,10 +461,12 @@ pub fn list_record_page(
     }
     bind.push(Box::new(limit + 1));
     let limit_index = bind.len();
+    let saved = saved_contact_predicate("contacts");
     let sql = format!(
         "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted, is_managed,
+                send_count * 3 + recv_count, last_interacted,
+                CASE WHEN {saved} THEN 1 ELSE 0 END,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
                           FROM contact_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
@@ -336,26 +491,35 @@ pub fn list_record_page(
         records.truncate(limit as usize);
     }
 
-    let (total_count, favorite_count) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(is_favorite), 0) FROM contacts",
+    let (total_count, favorite_count, suggestion_count) = conn.query_row(
+        &format!(
+            "SELECT
+                COALESCE(SUM(CASE WHEN {saved} THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN {saved} AND is_favorite = 1 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN NOT {saved}
+                    AND (send_count > 0 OR recv_count > 0) THEN 1 ELSE 0 END), 0)
+             FROM contacts"
+        ),
         [],
-        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
     )?;
-    let mut account_stmt = conn.prepare(
-        "WITH managed(value) AS (
-             SELECT COUNT(*) FROM contacts WHERE is_managed = 1
-         ), discovered(account_id, value) AS (
-             SELECT ca.account_id, COUNT(DISTINCT ca.contact_id)
-             FROM contact_accounts ca
-             JOIN contacts c ON c.id = ca.contact_id
-             WHERE c.is_managed = 0
-             GROUP BY ca.account_id
-         )
-         SELECT a.id, managed.value + COALESCE(discovered.value, 0)
+    let saved_for_counts = saved_contact_predicate("c");
+    let mut account_stmt = conn.prepare(&format!(
+        "SELECT a.id, COUNT(DISTINCT c.id)
          FROM accounts a
-         CROSS JOIN managed
-         LEFT JOIN discovered ON discovered.account_id = a.id",
-    )?;
+         LEFT JOIN contacts c ON {saved_for_counts}
+           AND (c.is_managed = 1 OR EXISTS (
+                SELECT 1 FROM contact_accounts ca
+                WHERE ca.contact_id = c.id AND ca.account_id = a.id
+           ))
+         GROUP BY a.id"
+    ))?;
     let account_counts = account_stmt
         .query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?.max(0) as usize))
@@ -382,8 +546,31 @@ pub fn list_record_page(
         records,
         total_count: total_count.max(0) as usize,
         favorite_count: favorite_count.max(0) as usize,
+        suggestion_count: suggestion_count.max(0) as usize,
         account_counts,
     })
+}
+
+/// Remove mail-derived suggestion-only identities and erase interaction
+/// ranking from saved contacts. CardDAV/manual entries and their account
+/// associations remain intact.
+pub fn clear_suggestions(conn: &Connection, now_ms: i64) -> Result<usize> {
+    let saved = saved_contact_predicate("contacts");
+    let removed = conn.execute(&format!("DELETE FROM contacts WHERE NOT {saved}"), [])?;
+    conn.execute(
+        "UPDATE contacts
+         SET send_count = 0, recv_count = 0, last_interacted = NULL
+         WHERE send_count != 0 OR recv_count != 0 OR last_interacted IS NOT NULL",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE contact_accounts
+         SET send_count = 0, recv_count = 0, last_interacted = NULL
+         WHERE send_count != 0 OR recv_count != 0 OR last_interacted IS NOT NULL",
+        [],
+    )?;
+    advance_learning_boundaries(conn, true, true, now_ms)?;
+    Ok(removed)
 }
 
 /// Insert or update a user-managed contact and return the canonical stored row.
@@ -481,14 +668,18 @@ pub fn save_record(
             |row| row.get(0),
         )?
     };
+    let address_book = saved_contact_predicate("contacts");
     let mut saved = conn.query_row(
-        "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
+        &format!(
+            "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted, is_managed,
+                send_count * 3 + recv_count, last_interacted,
+                CASE WHEN {address_book} THEN 1 ELSE 0 END,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
                           FROM contact_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
-         FROM contacts WHERE id = ?1",
+         FROM contacts WHERE id = ?1"
+        ),
         [id],
         record_from_row,
     )?;
@@ -504,14 +695,18 @@ pub fn delete_record(conn: &Connection, id: i64) -> Result<()> {
 }
 
 pub fn get_record(conn: &Connection, id: i64) -> Result<Option<ContactRecord>> {
+    let address_book = saved_contact_predicate("contacts");
     conn.query_row(
-        "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
+        &format!(
+            "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted, is_managed,
+                send_count * 3 + recv_count, last_interacted,
+                CASE WHEN {address_book} THEN 1 ELSE 0 END,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
                           FROM contact_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
-         FROM contacts WHERE id = ?1",
+         FROM contacts WHERE id = ?1"
+        ),
         [id],
         record_from_row,
     )
@@ -581,13 +776,94 @@ mod tests {
             .unwrap();
         assert_eq!((send, recv), (2, 0));
 
-        let hits = autocomplete(&c, "ali", None, 10).unwrap();
+        let hits = autocomplete(&c, "ali", None, true, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].email, "alice@acme.com");
         // harvested name survives even when a later sighting had none
         assert_eq!(hits[0].name.as_deref(), Some("Alice"));
 
-        assert!(autocomplete(&c, "zzz", None, 10).unwrap().is_empty());
+        assert!(autocomplete(&c, "zzz", None, true, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn successful_send_learns_unique_recipients_exactly_once() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO sender_identities (
+               account_id,email,is_primary,is_provider_default,verification_status,last_synced_at
+             ) VALUES (1,'me@test.dev',1,1,'accepted',0)",
+            [],
+        )
+        .unwrap();
+        let (_, message_id) = testutil::seed_message(&c, "me@test.dev", "Sent", false);
+        c.execute(
+            "UPDATE messages SET to_json=?2,cc_json=?3,bcc_json=?4 WHERE id=?1",
+            params![
+                message_id,
+                serde_json::to_string(&[
+                    addr("alice@example.test", Some("Alice")),
+                    addr("BOB@example.test", Some("Bob")),
+                ])
+                .unwrap(),
+                serde_json::to_string(&[addr("ALICE@example.test", None)]).unwrap(),
+                serde_json::to_string(&[addr("me@test.dev", None)]).unwrap(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(record_sent_recipients(&c, 1, message_id, 500).unwrap(), 2);
+        assert_eq!(record_sent_recipients(&c, 1, message_id, 600).unwrap(), 0);
+        let learned = c
+            .prepare("SELECT email,send_count FROM contacts ORDER BY email")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            learned,
+            [
+                ("alice@example.test".into(), 1),
+                ("bob@example.test".into(), 1),
+            ]
+        );
+        assert!(
+            c.query_row(
+                "SELECT contact_learning_recorded FROM messages WHERE id=?1",
+                [message_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        );
+
+        let mut settings = super::super::settings::get(&c).unwrap();
+        settings.collect_outgoing_contacts = false;
+        super::super::settings::set(&c, &settings).unwrap();
+        let (_, disabled_message_id) = testutil::seed_message(&c, "me@test.dev", "Disabled", false);
+        c.execute(
+            "UPDATE messages SET to_json=?2 WHERE id=?1",
+            params![
+                disabled_message_id,
+                serde_json::to_string(&[addr("disabled@example.test", None)]).unwrap()
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            record_sent_recipients(&c, 1, disabled_message_id, 700).unwrap(),
+            0
+        );
+        assert_eq!(
+            c.query_row(
+                "SELECT COUNT(*) FROM contacts WHERE email='disabled@example.test'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -606,19 +882,19 @@ mod tests {
         harvest(&c, 2, &addr("carol@acme.com", Some("Carol")), true, 100).unwrap();
 
         // Account-scoped: each account only sees its own contact.
-        let a1 = autocomplete(&c, "a", Some(1), 10).unwrap();
+        let a1 = autocomplete(&c, "a", Some(1), true, 10).unwrap();
         assert_eq!(
             a1.iter().map(|h| h.email.as_str()).collect::<Vec<_>>(),
             ["alice@acme.com"]
         );
-        let a2 = autocomplete(&c, "a", Some(2), 10).unwrap();
+        let a2 = autocomplete(&c, "a", Some(2), true, 10).unwrap();
         assert_eq!(
             a2.iter().map(|h| h.email.as_str()).collect::<Vec<_>>(),
             ["carol@acme.com"]
         );
 
         // Global (view-all): both surface.
-        let all = autocomplete(&c, "a", None, 10).unwrap();
+        let all = autocomplete(&c, "a", None, true, 10).unwrap();
         assert_eq!(all.len(), 2);
     }
 
@@ -653,7 +929,7 @@ mod tests {
         assert_eq!(created.email, "ada@example.com");
         assert!(created.is_favorite);
         assert_eq!(
-            autocomplete(&c, "ada", Some(1), 20).unwrap()[0].email,
+            autocomplete(&c, "ada", Some(1), true, 20).unwrap()[0].email,
             "ada@example.com",
             "manually managed contacts remain available to account-scoped compose"
         );
@@ -678,6 +954,174 @@ mod tests {
     }
 
     #[test]
+    fn suggestions_stay_separate_until_saved() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        harvest(
+            &c,
+            1,
+            &addr("grace@example.com", Some("Grace Hopper")),
+            true,
+            100,
+        )
+        .unwrap();
+
+        let saved_page = list_record_page(&c, "", None, false, false, None, 25).unwrap();
+        let suggestion_page = list_record_page(&c, "", None, false, true, None, 25).unwrap();
+        assert!(saved_page.records.is_empty());
+        assert_eq!(saved_page.total_count, 0);
+        assert_eq!(suggestion_page.records.len(), 1);
+        assert_eq!(suggestion_page.suggestion_count, 1);
+        assert!(!suggestion_page.records[0].is_managed);
+        assert!(
+            autocomplete(&c, "grace", None, false, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(autocomplete(&c, "grace", None, true, 10).unwrap().len(), 1);
+
+        let promoted = save_record(&c, &suggestion_page.records[0], 200).unwrap();
+        assert!(promoted.is_managed);
+        assert_eq!(
+            list_record_page(&c, "", None, false, false, None, 25)
+                .unwrap()
+                .records
+                .len(),
+            1
+        );
+        assert!(
+            list_record_page(&c, "", None, false, true, None, 25)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn clearing_suggestions_preserves_saved_contacts_and_erases_affinity() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        harvest(
+            &c,
+            1,
+            &addr("saved@example.com", Some("Saved Person")),
+            true,
+            100,
+        )
+        .unwrap();
+        harvest(
+            &c,
+            1,
+            &addr("suggested@example.com", Some("Suggested Person")),
+            false,
+            150,
+        )
+        .unwrap();
+        let saved = get_record(
+            &c,
+            c.query_row(
+                "SELECT id FROM contacts WHERE email = 'saved@example.com'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        save_record(&c, &saved, 200).unwrap();
+
+        assert_eq!(clear_suggestions(&c, 300).unwrap(), 1);
+        let remaining = list_records(&c, "", 20).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].email, "saved@example.com");
+        assert_eq!(remaining[0].interactions, 0);
+        assert_eq!(remaining[0].last_interacted, None);
+        let account_affinity: (i64, i64, Option<i64>) = c
+            .query_row(
+                "SELECT send_count, recv_count, last_interacted
+                 FROM contact_accounts WHERE contact_id = ?1 AND account_id = 1",
+                [remaining[0].id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(account_affinity, (0, 0, None));
+        assert_eq!(learning_boundaries(&c, 1, 999).unwrap(), (300, 300));
+        advance_learning_boundaries(&c, false, true, 450).unwrap();
+        assert_eq!(learning_boundaries(&c, 1, 999).unwrap(), (300, 450));
+    }
+
+    #[test]
+    fn carddav_contacts_stay_saved_and_keep_remote_names_when_seen_in_mail() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let book_id = crate::db::repo::carddav::upsert_addressbook(
+            &c,
+            1,
+            "https://dav.example.test/addressbook/",
+            Some("Contacts"),
+            false,
+        )
+        .unwrap();
+        crate::db::repo::carddav::upsert_remote(
+            &c,
+            1,
+            book_id,
+            "/addressbook/grace.vcf",
+            Some("v1"),
+            "BEGIN:VCARD\r\nEND:VCARD\r\n",
+            &ContactRecord {
+                id: 0,
+                name: "Grace Hopper".into(),
+                email: "grace@example.com".into(),
+                phone: String::new(),
+                company: "Navy".into(),
+                job_title: String::new(),
+                website: String::new(),
+                birthday: String::new(),
+                postal_address: String::new(),
+                notes: String::new(),
+                tags: String::new(),
+                is_favorite: false,
+                interactions: 0,
+                last_interacted: None,
+                account_ids: vec![1],
+                is_managed: false,
+            },
+        )
+        .unwrap();
+
+        let listed = list_records(&c, "", 20).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].is_managed);
+        harvest(
+            &c,
+            1,
+            &addr("grace@example.com", Some("Header Alias")),
+            false,
+            250,
+        )
+        .unwrap();
+        let refreshed = get_record(&c, listed[0].id).unwrap().unwrap();
+        assert_eq!(refreshed.name, "Grace Hopper");
+        assert_eq!(refreshed.interactions, 1);
+        assert!(
+            list_record_page(&c, "", None, false, true, None, 25)
+                .unwrap()
+                .records
+                .is_empty()
+        );
+        assert_eq!(clear_suggestions(&c, 300).unwrap(), 0);
+        assert_eq!(
+            get_record(&c, listed[0].id).unwrap().unwrap().interactions,
+            0
+        );
+        crate::db::repo::carddav::disconnect(&c, 1).unwrap();
+        let disconnected = get_record(&c, listed[0].id).unwrap().unwrap();
+        assert!(disconnected.is_managed);
+        assert_eq!(list_records(&c, "", 20).unwrap().len(), 1);
+    }
+
+    #[test]
     fn directory_pages_are_strict_non_overlapping_batches() {
         let c = testutil::conn();
         testutil::seed_account(&c);
@@ -695,7 +1139,7 @@ mod tests {
             .unwrap();
         }
 
-        let first = list_record_page(&c, "", None, false, None, 25).unwrap();
+        let first = list_record_page(&c, "", None, false, true, None, 25).unwrap();
         harvest(
             &c,
             1,
@@ -704,8 +1148,10 @@ mod tests {
             100,
         )
         .unwrap();
-        let second = list_record_page(&c, "", None, false, first.next_cursor.as_ref(), 25).unwrap();
-        let third = list_record_page(&c, "", None, false, second.next_cursor.as_ref(), 25).unwrap();
+        let second =
+            list_record_page(&c, "", None, false, true, first.next_cursor.as_ref(), 25).unwrap();
+        let third =
+            list_record_page(&c, "", None, false, true, second.next_cursor.as_ref(), 25).unwrap();
         assert_eq!(first.records.len(), 25);
         assert_eq!(second.records.len(), 25);
         assert_eq!(third.records.len(), 11);
@@ -729,6 +1175,8 @@ mod tests {
                 .all(|contact| contact.email != "aardvark@example.com"),
             "the newly inserted head belongs before the cursor"
         );
-        assert_eq!(first.account_counts, vec![(1, 61)]);
+        assert_eq!(first.total_count, 0);
+        assert_eq!(first.suggestion_count, 61);
+        assert_eq!(first.account_counts, vec![(1, 0)]);
     }
 }

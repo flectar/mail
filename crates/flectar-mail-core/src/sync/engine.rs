@@ -1830,6 +1830,8 @@ async fn store_headers(
             let settings = repo::settings::get(&tx)?;
             let auto_labels = settings.auto_labels_enabled;
             let ai_categorize = settings.ai_categorize;
+            let (outgoing_learning_since, incoming_learning_since) =
+                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
             let account_emails = repo::sender_identities::list(&tx, account_id)?
                 .into_iter()
                 .filter(|identity| identity.is_verified())
@@ -1966,13 +1968,36 @@ async fn store_headers(
                 repo::threads::recompute(&tx, thread_id)?;
                 repo::search::index_message(&tx, msg_id)?;
 
-                // Harvest contacts.
-                let when = date_ms;
-                if is_outgoing {
-                    for a in parsed.to.iter().chain(parsed.cc.iter()) {
-                        repo::contacts::harvest(&tx, account_id, a, true, when)?;
+                // Learn compose suggestions without polluting the real address
+                // book. Outgoing recipients are the useful default; incoming
+                // senders require opt-in and exclude automated/junk mail.
+                let when = fh.internal_date_ms.unwrap_or(date_ms);
+                if is_outgoing
+                    && settings.collect_outgoing_contacts
+                    && when >= outgoing_learning_since
+                {
+                    let mut harvested_addresses = std::collections::HashSet::new();
+                    for address in parsed
+                        .to
+                        .iter()
+                        .chain(parsed.cc.iter())
+                        .chain(parsed.bcc.iter())
+                    {
+                        let email = address.email.to_ascii_lowercase();
+                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
+                            repo::contacts::harvest(&tx, account_id, address, true, when)?;
+                        }
                     }
-                } else if let Some(from) = &parsed.from {
+                } else if settings.collect_incoming_contacts
+                    && when >= incoming_learning_since
+                    && !parsed.is_automated
+                    && !matches!(
+                        folder_role.as_deref(),
+                        Some(roles::SPAM) | Some(roles::TRASH)
+                    )
+                    && let Some(from) = &parsed.from
+                    && !crate::mime::robot_sender(&from.email)
+                {
                     repo::contacts::harvest(&tx, account_id, from, false, when)?;
                 }
 

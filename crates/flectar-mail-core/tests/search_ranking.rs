@@ -68,13 +68,13 @@ fn suggest_matches_unaccented_input_ranked_by_affinity() {
     }
     repo::contacts::harvest(&conn, 1, &noise, false, 2000).unwrap();
 
-    let hits = repo::contacts::suggest(&conn, "be don dep", None, 5).unwrap();
+    let hits = repo::contacts::suggest(&conn, "be don dep", None, true, 5).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].email, "hello@begroup.vn");
     assert_eq!(hits[0].interactions, 10);
 
     // Single token: both match, the frequent contact first.
-    let hits = repo::contacts::suggest(&conn, "be", None, 5).unwrap();
+    let hits = repo::contacts::suggest(&conn, "be", None, true, 5).unwrap();
     assert_eq!(hits[0].email, "hello@begroup.vn");
     assert!(hits.iter().any(|c| c.email == "ben@example.com"));
 }
@@ -90,12 +90,12 @@ fn autocomplete_backfill_covers_pre_fold_rows() {
     .unwrap();
     // Row predates the folded column; suggest can't see it until backfill.
     assert!(
-        repo::contacts::suggest(&conn, "tran duc", None, 5)
+        repo::contacts::suggest(&conn, "tran duc", None, true, 5)
             .unwrap()
             .is_empty()
     );
     repo::contacts::backfill_folded(&conn).unwrap();
-    let hits = repo::contacts::suggest(&conn, "tran duc", None, 5).unwrap();
+    let hits = repo::contacts::suggest(&conn, "tran duc", None, true, 5).unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].email, "x@y.vn");
 }

@@ -11,6 +11,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/006_contact_recovery.sql"),
     include_str!("migrations/007_account_label_ownership.sql"),
     include_str!("migrations/008_sender_identities.sql"),
+    include_str!("migrations/009_contact_learning_clean_start.sql"),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -112,6 +113,7 @@ mod tests {
             "carddav_config",
             "carddav_objects",
             "contacts",
+            "contact_learning_state",
             "cross_store_operations",
             "draft_attachments",
             "drafts_meta",
@@ -239,6 +241,115 @@ mod tests {
                 "accepted".into(),
             )
         );
+    }
+
+    #[test]
+    fn contact_learning_migration_discards_legacy_suggestions_only() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        for (index, sql) in MIGRATIONS.iter().take(8).enumerate() {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", (index + 1) as i64)
+                .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (1,'me@example.test','imap','password','me','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contacts
+               (id,email,name,send_count,recv_count,last_interacted,is_favorite,is_managed)
+             VALUES
+               (1,'saved@example.test','Saved',4,2,100,0,1),
+               (2,'legacy@example.test','Legacy',0,9,200,0,0),
+               (3,'dav@example.test','CardDAV',1,1,300,0,0),
+               (4,'favorite@example.test','Favorite',2,0,400,1,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO contact_accounts
+               (contact_id,account_id,send_count,recv_count,last_interacted)
+             VALUES
+               (1,1,4,2,100),(2,1,0,9,200),(3,1,1,1,300),(4,1,2,0,400)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO carddav_addressbooks (id,account_id,url)
+             VALUES (1,1,'https://dav.example.test/contacts/')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO carddav_objects
+               (addressbook_id,contact_id,href,remote_exists,deleted)
+             VALUES (1,3,'/contacts/dav.vcf',1,0)",
+            [],
+        )
+        .unwrap();
+
+        let before = crate::models::now_ms();
+        run(&mut conn).unwrap();
+        let after = crate::models::now_ms();
+
+        let contacts = conn
+            .prepare(
+                "SELECT id,send_count,recv_count,last_interacted,is_managed
+                 FROM contacts ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            contacts,
+            [
+                (1, 0, 0, None, true),
+                (3, 0, 0, None, false),
+                (4, 0, 0, None, true),
+            ]
+        );
+        let boundaries: (i64, i64) = conn
+            .query_row(
+                "SELECT outgoing_since,incoming_since
+                 FROM contact_learning_state WHERE account_id=1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!((before - 1_000..=after + 1_000).contains(&boundaries.0));
+        assert_eq!(boundaries.0, boundaries.1);
+
+        conn.execute(
+            "INSERT INTO accounts (
+               id,email,provider,auth_kind,username,imap_host,imap_port,
+               smtp_host,smtp_port,created_at
+             ) VALUES (2,'new@example.test','imap','password','new','h',993,'h',587,0)",
+            [],
+        )
+        .unwrap();
+        let created: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_learning_state WHERE account_id=2",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(created, 1);
     }
 
     #[test]
@@ -504,7 +615,8 @@ mod tests {
         seed_mail_graph(&conn);
         for id in 1..=600 {
             conn.execute(
-                "INSERT INTO contacts(id, name, email) VALUES(?1, 'Café', ?2)",
+                "INSERT INTO contacts(id, name, email, is_managed)
+                 VALUES(?1, 'Café', ?2, 1)",
                 params![id, format!("person-{id}@example.com")],
             )
             .unwrap();

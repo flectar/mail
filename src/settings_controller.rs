@@ -98,6 +98,71 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_contacts = Rc::clone(state);
+    let runtime_for_contacts = Rc::clone(runtime);
+    app.on_save_contact_discovery_settings(move |outgoing, incoming, suggest| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_contacts.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Contact suggestion preferences are active for this session.",
+            ));
+            return;
+        };
+        match runtime_for_contacts.block_on(core.set_contact_discovery_settings(
+            outgoing, incoming, suggest,
+        )) {
+            Ok(()) => app.set_sync_status(UiMessage::plain(
+                "Contact suggestion preferences saved.",
+            )),
+            Err(error) => {
+                if let Ok(settings) = runtime_for_contacts.block_on(core.load_settings()) {
+                    app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+                    app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                    app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
+                }
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save contact suggestion preferences: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_clear_contacts = Rc::clone(state);
+    let runtime_for_clear_contacts = Rc::clone(runtime);
+    app.on_clear_contact_suggestions(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return false;
+        };
+        let Some(core) = state_for_clear_contacts.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Contact storage is still starting. Try again shortly.",
+            ));
+            return false;
+        };
+        match runtime_for_clear_contacts.block_on(core.clear_contact_suggestions()) {
+            Ok(removed) => {
+                app.set_sync_status(UiMessage::detail(
+                    "Cleared {} suggested people.",
+                    removed,
+                ));
+                app.invoke_search_contacts(app.get_contact_search_query());
+                true
+            }
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail(
+                    "Could not clear suggested people: {}",
+                    error,
+                ));
+                false
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_theme = Rc::clone(state);
     let runtime_for_theme = Rc::clone(runtime);
     app.on_save_theme(move |theme| {

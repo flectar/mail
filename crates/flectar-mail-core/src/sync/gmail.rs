@@ -1451,6 +1451,14 @@ async fn store_resources(
         .write(move |conn| {
             let tx = conn.transaction()?;
             let settings = repo::settings::get(&tx)?;
+            let (outgoing_learning_since, incoming_learning_since) =
+                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
+            let mut account_emails = repo::sender_identities::list(&tx, account_id)?
+                .into_iter()
+                .filter(|identity| identity.is_verified())
+                .map(|identity| identity.email.to_ascii_lowercase())
+                .collect::<HashSet<_>>();
+            account_emails.insert(account_email);
             let mut mappings = HashMap::<String, LabelMapping>::new();
             {
                 let mut stmt = tx.prepare(
@@ -1556,7 +1564,8 @@ async fn store_resources(
                     .as_ref()
                     .map(|address| address.email.to_ascii_lowercase())
                     .unwrap_or_default();
-                let is_outgoing = label_set.contains("SENT") || from_email == account_email;
+                let is_outgoing =
+                    label_set.contains("SENT") || account_emails.contains(&from_email);
                 let is_read = !label_set.contains("UNREAD");
                 let is_starred = label_set.contains("STARRED");
                 let is_draft = label_set.contains("DRAFT");
@@ -1661,11 +1670,33 @@ async fn store_resources(
                 }
                 repo::search::index_message(&tx, local_message_id)?;
 
-                if is_outgoing {
-                    for address in resource.headers.to.iter().chain(resource.headers.cc.iter()) {
-                        repo::contacts::harvest(&tx, account_id, address, true, date)?;
+                if inserted
+                    && is_outgoing
+                    && settings.collect_outgoing_contacts
+                    && resource.internal_date >= outgoing_learning_since
+                {
+                    let mut harvested_addresses = HashSet::new();
+                    for address in resource
+                        .headers
+                        .to
+                        .iter()
+                        .chain(resource.headers.cc.iter())
+                        .chain(resource.headers.bcc.iter())
+                    {
+                        let email = address.email.to_ascii_lowercase();
+                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
+                            repo::contacts::harvest(&tx, account_id, address, true, date)?;
+                        }
                     }
-                } else if let Some(from) = &resource.headers.from {
+                } else if inserted
+                    && settings.collect_incoming_contacts
+                    && resource.internal_date >= incoming_learning_since
+                    && !resource.headers.is_automated
+                    && !label_set.contains("SPAM")
+                    && !label_set.contains("TRASH")
+                    && let Some(from) = &resource.headers.from
+                    && !crate::mime::robot_sender(&from.email)
+                {
                     repo::contacts::harvest(&tx, account_id, from, false, date)?;
                 }
 
@@ -2926,6 +2957,7 @@ async fn finalize_sent_draft(
         .map(str::to_owned);
     let account_id = config.id;
     let message_id = message_id.trim_matches(['<', '>']).to_owned();
+    let sent_at = now_ms();
     let (thread_id, staged_paths) = ctx
         .db
         .write(move |conn| {
@@ -2959,7 +2991,7 @@ async fn finalize_sent_draft(
                     provider_message_id,
                     provider_thread_id,
                     message_id,
-                    now_ms(),
+                    sent_at,
                 ],
             )?;
             repo::gmail::set_message_folders(&tx, draft_id, &[sent_folder, all_folder])?;
@@ -2980,6 +3012,7 @@ async fn finalize_sent_draft(
                 repo::threads::recompute(&tx, thread_id)?;
             }
             repo::search::index_message(&tx, draft_id)?;
+            repo::contacts::record_sent_recipients(&tx, account_id, draft_id, sent_at)?;
             tx.commit()?;
             Ok((thread_id, staged_paths))
         })

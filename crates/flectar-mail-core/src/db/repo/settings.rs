@@ -42,6 +42,9 @@ mod tests {
         assert!(!d.load_remote_images);
         assert!(!d.monochrome_sidebar_icons);
         assert!(d.show_avatars);
+        assert!(d.collect_outgoing_contacts);
+        assert!(!d.collect_incoming_contacts);
+        assert!(d.suggest_learned_contacts);
         assert_eq!(d.workspace_layout, "default");
         assert_eq!(d.calendar_week_start, "monday");
         assert_eq!(d.theme_preset, "default");
@@ -128,6 +131,9 @@ mod tests {
         assert!(s.mark_read_on_open);
         assert!(!s.monochrome_sidebar_icons);
         assert!(s.show_avatars);
+        assert!(s.collect_outgoing_contacts);
+        assert!(!s.collect_incoming_contacts);
+        assert!(s.suggest_learned_contacts);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.calendar_week_start, "monday");
         assert_eq!(s.theme_preset, "default");

@@ -531,6 +531,9 @@ pub(super) fn register_data_management_callbacks(
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
                     "markReadOnOpen": settings.mark_read_on_open,
+                    "collectOutgoingContacts": settings.collect_outgoing_contacts,
+                    "collectIncomingContacts": settings.collect_incoming_contacts,
+                    "suggestLearnedContacts": settings.suggest_learned_contacts,
                     "notificationsEnabled": settings.notifications_enabled,
                     "notificationScope": settings.notification_scope,
                     "soundEnabled": settings.sound_enabled,
@@ -764,6 +767,24 @@ pub(super) fn register_data_management_callbacks(
                     settings.mark_read_on_open = enabled;
                 }
                 if let Some(enabled) = preferences
+                    .get("collectOutgoingContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.collect_outgoing_contacts = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("collectIncomingContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.collect_incoming_contacts = enabled;
+                }
+                if let Some(enabled) = preferences
+                    .get("suggestLearnedContacts")
+                    .and_then(|value| value.as_bool())
+                {
+                    settings.suggest_learned_contacts = enabled;
+                }
+                if let Some(enabled) = preferences
                     .get("notificationsEnabled")
                     .and_then(|value| value.as_bool())
                 {
@@ -894,6 +915,9 @@ pub(super) fn register_data_management_callbacks(
                 app.set_notification_scope(settings.notification_scope.clone().into());
                 app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
                 app.set_mark_read_on_open(settings.mark_read_on_open);
+                app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+                app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+                app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
                 state_for_backup_import.borrow_mut().mark_read_on_open =
                     settings.mark_read_on_open;
                 app.set_remote_images_enabled(

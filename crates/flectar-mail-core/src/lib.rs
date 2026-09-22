@@ -3922,7 +3922,14 @@ impl Core {
     ) -> Result<Vec<Address>> {
         self.db
             .read(move |conn| {
-                repo::contacts::autocomplete(conn, &prefix, account_id, limit.clamp(1, 50))
+                let settings = repo::settings::get(conn)?;
+                repo::contacts::autocomplete(
+                    conn,
+                    &prefix,
+                    account_id,
+                    settings.suggest_learned_contacts,
+                    limit.clamp(1, 50),
+                )
             })
             .await
     }
@@ -3937,7 +3944,16 @@ impl Core {
     ) -> Result<Vec<ContactSuggestion>> {
         let text = search::parse(&query).text;
         self.db
-            .read(move |conn| repo::contacts::suggest(conn, &text, None, limit.clamp(1, 20)))
+            .read(move |conn| {
+                let settings = repo::settings::get(conn)?;
+                repo::contacts::suggest(
+                    conn,
+                    &text,
+                    None,
+                    settings.suggest_learned_contacts,
+                    limit.clamp(1, 20),
+                )
+            })
             .await
     }
 
@@ -3959,6 +3975,7 @@ impl Core {
         query: String,
         account_id: Option<i64>,
         favorites_only: bool,
+        suggestions_only: bool,
         cursor: Option<ContactRecordCursor>,
         limit: i64,
     ) -> Result<ContactRecordPage> {
@@ -3969,11 +3986,29 @@ impl Core {
                     &query,
                     account_id,
                     favorites_only,
+                    suggestions_only,
                     cursor.as_ref(),
                     limit.clamp(1, 100),
                 )
             })
             .await
+    }
+
+    /// Clear local mail-derived people data without touching manual or
+    /// CardDAV-backed contacts.
+    pub async fn clear_contact_suggestions(&self) -> Result<usize> {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let removed = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let removed = repo::contacts::clear_suggestions(&tx, now_ms)?;
+                tx.commit()?;
+                Ok(removed)
+            })
+            .await?;
+        self.bus.emit(CoreEvent::ContactsUpdated { account_id: 0 });
+        Ok(removed)
     }
 
     pub async fn save_contact(&self, record: ContactRecord) -> Result<ContactRecord> {
@@ -3984,8 +4019,14 @@ impl Core {
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
+                let was_saved = if was_new {
+                    false
+                } else {
+                    repo::contacts::get_record(&tx, record.id)?
+                        .is_some_and(|existing| existing.is_managed)
+                };
                 let saved = repo::contacts::save_record(&tx, &record, now_ms)?;
-                if was_new {
+                if was_new || !was_saved {
                     if account_ids.len() == 1 {
                         repo::carddav::attach_new_contact(&tx, account_ids[0], saved.id)?;
                     }
@@ -4159,7 +4200,12 @@ impl Core {
             handle.abort();
         }
         self.db
-            .write(move |conn| repo::carddav::disconnect(conn, account_id))
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                repo::carddav::disconnect(&tx, account_id)?;
+                tx.commit()?;
+                Ok(())
+            })
             .await?;
         let _ =
             credentials::delete_async(self.credentials.clone(), account_id, Slot::CarddavPassword)
@@ -6613,14 +6659,26 @@ impl Core {
     }
 
     pub async fn set_settings(&self, settings: Settings) -> Result<()> {
+        let oauth_settings = settings.clone();
+        let now_ms = chrono::Utc::now().timestamp_millis();
         self.db
             .write(move |conn| {
-                repo::settings::set(conn, &settings)?;
-                // Keep the resolver in the same order as persisted writes.
-                apply_oauth_settings(&settings);
+                let tx = conn.transaction()?;
+                let previous = repo::settings::get(&tx)?;
+                repo::contacts::advance_learning_boundaries(
+                    &tx,
+                    !previous.collect_outgoing_contacts && settings.collect_outgoing_contacts,
+                    !previous.collect_incoming_contacts && settings.collect_incoming_contacts,
+                    now_ms,
+                )?;
+                repo::settings::set(&tx, &settings)?;
+                tx.commit()?;
                 Ok(())
             })
-            .await
+            .await?;
+        // Keep the resolver in the same order as persisted writes.
+        apply_oauth_settings(&oauth_settings);
+        Ok(())
     }
 
     /// Create or update a local mail profile without touching provider state.
