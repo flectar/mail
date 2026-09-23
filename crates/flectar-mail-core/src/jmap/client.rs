@@ -10,6 +10,7 @@ use url::Url;
 pub const CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 pub const MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 pub const SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
+const MAX_DISCOVERY_REDIRECTS: usize = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AuthenticationScheme {
@@ -108,7 +109,8 @@ pub async fn connect_with(
     let base_url = normalize_base_url(server, email)?;
     let url = Url::parse(&base_url)
         .map_err(|error| CoreError::Auth(format!("invalid JMAP server address: {error}")))?;
-    let host = url.host_str().unwrap_or_default().to_owned();
+    let (connect_base, session_url) = discover_connection_base(&url).await?;
+    let host = connect_base.host_str().unwrap_or_default().to_owned();
     let username = if username.trim().is_empty() {
         email.trim()
     } else {
@@ -117,7 +119,7 @@ pub async fn connect_with(
     // JMAP deliberately uses standard HTTP authentication without mandating a
     // scheme, and RFC 8620 discourages Basic. Prefer a usable Bearer header,
     // fall back once on 401, then remember only the scheme for this login.
-    let cache_key = format!("{base_url}\n{username}");
+    let cache_key = format!("{connect_base}\n{username}");
     let bearer_supported = secret.is_ascii()
         && reqwest::header::HeaderValue::from_bytes(format!("Bearer {secret}").as_bytes()).is_ok();
     let cached_scheme = authentication_schemes()
@@ -136,27 +138,36 @@ pub async fn connect_with(
         (AuthenticationScheme::Basic, true) => Some(AuthenticationScheme::Bearer),
         (AuthenticationScheme::Basic, false) => None,
     };
-    let mut client = match connect_authenticated(&base_url, &host, username, secret, first_scheme)
-        .await
-    {
-        Ok(client) => {
-            remember_authentication_scheme(&cache_key, first_scheme);
-            client
-        }
-        Err(error) if is_unauthorized(&error) => {
-            let Some(second_scheme) = second_scheme else {
-                return Err(map_error(error));
-            };
-            match connect_authenticated(&base_url, &host, username, secret, second_scheme).await {
-                Ok(client) => {
-                    remember_authentication_scheme(&cache_key, second_scheme);
-                    client
-                }
-                Err(error) => return Err(map_error(error)),
+    let mut client =
+        match connect_authenticated(connect_base.as_str(), &host, username, secret, first_scheme)
+            .await
+        {
+            Ok(client) => {
+                remember_authentication_scheme(&cache_key, first_scheme);
+                client
             }
-        }
-        Err(error) => return Err(map_error(error)),
-    };
+            Err(error) if is_unauthorized(&error) => {
+                let Some(second_scheme) = second_scheme else {
+                    return Err(map_error(error));
+                };
+                match connect_authenticated(
+                    connect_base.as_str(),
+                    &host,
+                    username,
+                    secret,
+                    second_scheme,
+                )
+                .await
+                {
+                    Ok(client) => {
+                        remember_authentication_scheme(&cache_key, second_scheme);
+                        client
+                    }
+                    Err(error) => return Err(map_error(error)),
+                }
+            }
+            Err(error) => return Err(map_error(error)),
+        };
 
     let session = client.session();
     if !session.has_capability(CORE_CAPABILITY) || !session.has_capability(MAIL_CAPABILITY) {
@@ -164,7 +175,7 @@ pub async fn connect_with(
             "server session does not advertise JMAP Core and Mail capabilities".into(),
         ));
     }
-    validate_session_endpoints(&session, &url)?;
+    validate_session_endpoints(&session, &session_url)?;
     if !session.has_capability(SUBMISSION_CAPABILITY) {
         return Err(CoreError::Jmap(
             "server does not advertise JMAP EmailSubmission".into(),
@@ -245,6 +256,97 @@ fn remember_authentication_scheme(cache_key: &str, scheme: AuthenticationScheme)
         .insert(cache_key.to_owned(), scheme);
 }
 
+/// Discover the Session before sending credentials. The upstream client can
+/// follow redirects on one host, so a cross-host redirect is usable only when
+/// the destination also publishes the same Session via its own well-known URL.
+async fn discover_connection_base(base_url: &Url) -> Result<(Url, Url)> {
+    let session_url = discover_session_url(base_url).await?;
+    if session_url.origin() == base_url.origin() {
+        return Ok((base_url.clone(), session_url));
+    }
+
+    let mut target_base = session_url.clone();
+    target_base.set_path("");
+    target_base.set_query(None);
+    target_base.set_fragment(None);
+    let target_session_url = discover_session_url(&target_base).await?;
+    if target_session_url != session_url {
+        return Err(CoreError::Jmap(
+            "redirected JMAP host does not publish the same Session through /.well-known/jmap"
+                .into(),
+        ));
+    }
+    Ok((target_base, session_url))
+}
+
+/// Resolve the well-known resource without sending credentials.
+async fn discover_session_url(base_url: &Url) -> Result<Url> {
+    let start = base_url
+        .join(&format!(
+            "{}/.well-known/jmap",
+            base_url.path().trim_end_matches('/')
+        ))
+        .map_err(|error| CoreError::Jmap(format!("invalid JMAP discovery URL: {error}")))?;
+    resolve_session_url(start, base_url.scheme() == "http").await
+}
+
+async fn resolve_session_url(mut current: Url, allow_local_http: bool) -> Result<Url> {
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| CoreError::Network(format!("JMAP discovery client failed: {error}")))?;
+    for redirect_count in 0..=MAX_DISCOVERY_REDIRECTS {
+        let response = http
+            .get(current.clone())
+            .send()
+            .await
+            .map_err(|error| CoreError::Network(format!("JMAP discovery failed: {error}")))?;
+        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            return Ok(current);
+        }
+        if redirect_count == MAX_DISCOVERY_REDIRECTS {
+            return Err(CoreError::Jmap(
+                "JMAP discovery redirected too many times".into(),
+            ));
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .ok_or_else(|| CoreError::Jmap("JMAP discovery redirect has no Location".into()))?
+            .to_str()
+            .map_err(|_| {
+                CoreError::Jmap("JMAP discovery redirect has an invalid Location".into())
+            })?;
+        let next = current
+            .join(location)
+            .map_err(|_| CoreError::Jmap("JMAP discovery redirect has an invalid URL".into()))?;
+        if next.host().is_none()
+            || !next.username().is_empty()
+            || next.password().is_some()
+            || next.fragment().is_some()
+        {
+            return Err(CoreError::Jmap(
+                "JMAP discovery redirected to an invalid URL".into(),
+            ));
+        }
+        let local_http = allow_local_http
+            && next.scheme() == "http"
+            && next.host().is_some_and(|host| match host {
+                url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+                url::Host::Ipv4(address) => address.is_loopback(),
+                url::Host::Ipv6(address) => address.is_loopback(),
+            });
+        if next.scheme() != "https" && !local_http {
+            return Err(CoreError::Jmap(
+                "JMAP discovery redirected to an insecure URL".into(),
+            ));
+        }
+        current = next;
+    }
+    unreachable!("the redirect limit returns an error")
+}
+
 async fn connect_authenticated(
     base_url: &str,
     host: &str,
@@ -259,11 +361,10 @@ async fn connect_authenticated(
     Client::new()
         .credentials(credentials)
         .timeout(std::time::Duration::from_secs(30))
-        // RFC 8620 permits the well-known resource to redirect. Limit the
-        // library to the origin the user selected; advertised endpoint URLs
-        // come from the authenticated Session resource itself.
+        // Public cross-host redirects are resolved before authentication.
+        // The library may follow same-host redirects from this well-known URL.
         .follow_redirects([host])
-        .connect(base_url)
+        .connect(base_url.trim_end_matches('/'))
         .await
 }
 
@@ -445,14 +546,16 @@ pub(crate) mod tests {
         let origin = format!("http://{address}");
         let body = session_body(&origin, with_submission);
         let task = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let _ = read_request_head(&mut stream).await;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).await.unwrap();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let _ = read_request_head(&mut stream).await;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
         });
         (origin, task)
     }
@@ -573,7 +676,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn bearer_token_authentication_is_supported() {
-        let (origin, server) = authentication_server("Bearer api-token", 1).await;
+        let (origin, server) = authentication_server("Bearer api-token", 2).await;
         connect_with(
             "me@example.test",
             "me@example.test",
@@ -584,13 +687,13 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        assert_eq!(server.await.unwrap(), ["Bearer api-token"]);
+        assert_eq!(server.await.unwrap(), ["", "Bearer api-token"]);
     }
 
     #[tokio::test]
     async fn basic_authentication_falls_back_once_and_is_cached() {
         let (origin, server) =
-            authentication_server("Basic bWVAZXhhbXBsZS50ZXN0OmFwcC1wYXNzd29yZA==", 3).await;
+            authentication_server("Basic bWVAZXhhbXBsZS50ZXN0OmFwcC1wYXNzd29yZA==", 5).await;
         for _ in 0..2 {
             connect_with(
                 "me@example.test",
@@ -606,8 +709,10 @@ pub(crate) mod tests {
         assert_eq!(
             server.await.unwrap(),
             [
+                "",
                 "Bearer app-password",
                 "Basic bWVAZXhhbXBsZS50ZXN0OmFwcC1wYXNzd29yZA==",
+                "",
                 "Basic bWVAZXhhbXBsZS50ZXN0OmFwcC1wYXNzd29yZA==",
             ]
         );
@@ -616,7 +721,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn secrets_that_cannot_be_bearer_headers_use_basic_directly() {
         let (origin, server) =
-            authentication_server("Basic bWVAZXhhbXBsZS50ZXN0OnDDpHNzd29yZA==", 1).await;
+            authentication_server("Basic bWVAZXhhbXBsZS50ZXN0OnDDpHNzd29yZA==", 2).await;
         connect_with(
             "me@example.test",
             "me@example.test",
@@ -629,7 +734,173 @@ pub(crate) mod tests {
 
         assert_eq!(
             server.await.unwrap(),
-            ["Basic bWVAZXhhbXBsZS50ZXN0OnDDpHNzd29yZA=="]
+            ["", "Basic bWVAZXhhbXBsZS50ZXN0OnDDpHNzd29yZA=="]
+        );
+    }
+
+    #[tokio::test]
+    async fn discovers_cross_host_redirect_via_destination_well_known_url() {
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_origin = format!("http://localhost:{}", target.local_addr().unwrap().port());
+        let session_url = format!("{target_origin}/jmap/session");
+        let session = session_body(&target_origin, true);
+        let target_task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..7 {
+                let (mut stream, _) = target.accept().await.unwrap();
+                let request = read_request_head(&mut stream).await;
+                let well_known = request.starts_with("GET /.well-known/jmap ");
+                let authenticated = request.contains("Bearer api-token");
+                requests.push(request);
+                let response = if well_known {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: /jmap/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned()
+                } else if authenticated {
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        session.len(),
+                        session
+                    )
+                } else {
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_owned()
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source_origin = format!("http://{}", source.local_addr().unwrap());
+        let redirect = format!(
+            "HTTP/1.1 302 Found\r\nLocation: {session_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        );
+        let source_task = tokio::spawn(async move {
+            let (mut stream, _) = source.accept().await.unwrap();
+            let request = read_request_head(&mut stream).await;
+            stream.write_all(redirect.as_bytes()).await.unwrap();
+            request
+        });
+
+        let connected = connect_with(
+            "me@example.test",
+            "me@example.test",
+            "api-token",
+            &source_origin,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            connected.client.session_url(),
+            format!("{target_origin}/.well-known/jmap")
+        );
+        assert_eq!(connected.base_url, source_origin);
+        assert_eq!(connected.account_id, "mail-account");
+        connected.client.refresh_session().await.unwrap();
+        let source_request = source_task.await.unwrap();
+        let target_requests = target_task.await.unwrap();
+        assert!(
+            !source_request
+                .to_ascii_lowercase()
+                .contains("authorization:")
+        );
+        assert!(target_requests[0].starts_with("GET /jmap/session "));
+        assert!(target_requests[1].starts_with("GET /.well-known/jmap "));
+        assert!(target_requests[2].starts_with("GET /jmap/session "));
+        assert!(
+            target_requests[..3]
+                .iter()
+                .all(|request| { !request.to_ascii_lowercase().contains("authorization:") })
+        );
+        assert!(
+            target_requests[3..]
+                .iter()
+                .all(|request| { request.contains("Bearer api-token") })
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_cross_host_target_without_matching_well_known_url() {
+        let target = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let target_origin = format!("http://localhost:{}", target.local_addr().unwrap().port());
+        let session_url = format!("{target_origin}/custom/session");
+        let target_task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = target.accept().await.unwrap();
+                let request = read_request_head(&mut stream).await;
+                requests.push(request);
+                stream
+                    .write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source_origin = format!("http://{}", source.local_addr().unwrap());
+        let source_task = tokio::spawn(async move {
+            let (mut stream, _) = source.accept().await.unwrap();
+            let request = read_request_head(&mut stream).await;
+            let redirect = format!(
+                "HTTP/1.1 302 Found\r\nLocation: {session_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(redirect.as_bytes()).await.unwrap();
+            request
+        });
+
+        let error = connect_with("me@example.test", "", "api-token", &source_origin, None)
+            .await
+            .err()
+            .expect("a different destination well-known URL must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("does not publish the same Session")
+        );
+        assert!(
+            !source_task
+                .await
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("authorization:")
+        );
+        let target_requests = target_task.await.unwrap();
+        assert!(target_requests[0].starts_with("GET /custom/session "));
+        assert!(target_requests[1].starts_with("GET /.well-known/jmap "));
+        assert!(
+            target_requests
+                .iter()
+                .all(|request| { !request.to_ascii_lowercase().contains("authorization:") })
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_discovery_redirect_to_cleartext_remote_host() {
+        let source = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source_origin = format!("http://{}", source.local_addr().unwrap());
+        let source_task = tokio::spawn(async move {
+            let (mut stream, _) = source.accept().await.unwrap();
+            let request = read_request_head(&mut stream).await;
+            stream
+                .write_all(b"HTTP/1.1 302 Found\r\nLocation: http://mail.example.test/session\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            request
+        });
+
+        let error = connect_with("me@example.test", "", "secret", &source_origin, None)
+            .await
+            .err()
+            .expect("cleartext remote redirect must fail");
+        assert!(error.to_string().contains("insecure URL"));
+        assert!(
+            !source_task
+                .await
+                .unwrap()
+                .to_ascii_lowercase()
+                .contains("authorization:")
         );
     }
 
