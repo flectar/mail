@@ -2,6 +2,7 @@ import { VerticalBox, HorizontalBox } from "std-widgets.slint";
 import { Button } from "button.slint";
 import { LineEdit } from "controls.slint";
 import { AppTheme } from "../design-system.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 
 export component OAuthBrowserHelp inherits VerticalBox {
@@ -17,8 +18,8 @@ export component OAuthBrowserHelp inherits VerticalBox {
     help-header := Rectangle {
         height: 36px;
         border-radius: 6px;
-        border-width: header-focus.has-focus ? 2px : 1px;
-        border-color: header-focus.has-focus ? AppTheme.accent : AppTheme.control-border;
+        border-width: header-focus.focus-visible ? 2px : 1px;
+        border-color: header-focus.focus-visible ? AppTheme.accent : AppTheme.control-border;
         background: header-hit.pressed ? AppTheme.muted-control-bg
             : header-hit.has-hover ? AppTheme.control-bg.brighter(AppTheme.dark ? 8% : 2%)
             : AppTheme.surface;
@@ -46,7 +47,7 @@ export component OAuthBrowserHelp inherits VerticalBox {
             vertical-alignment: center;
             overflow: elide;
         }
-        header-focus := FocusScope {
+        header-focus := FocusVisibleScope {
             accessible-role: button;
             accessible-label: root.launch-failed ? @tr("Browser did not open — show sign-in help") : @tr("Having trouble with browser sign-in?");
             accessible-expanded: root.expanded;
@@ -60,7 +61,7 @@ export component OAuthBrowserHelp inherits VerticalBox {
             }
         }
         header-hit := TouchArea {
-            clicked => { header-focus.focus(); root.expanded = !root.expanded; }
+            clicked => { header-focus.focus(); header-focus.pointer-activated(); root.expanded = !root.expanded; }
             mouse-cursor: pointer;
         }
     }

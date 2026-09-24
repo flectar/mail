@@ -1,4 +1,5 @@
-import { HorizontalBox, VerticalBox, ScrollView, Button as NativeButton } from "std-widgets.slint";
+import { HorizontalBox, VerticalBox, ScrollView } from "std-widgets.slint";
+import { Button } from "../components/button.slint";
 import { LineEdit } from "../components/controls.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
@@ -63,8 +64,8 @@ export component OAuthSetupDialog inherits Rectangle {
                 }
                 HorizontalBox {
                     spacing: 8px;
-                    NativeButton { text: @tr("Google"); primary: root.google; enabled: !root.saving; clicked => { root.google = true; root.save-error = ""; } }
-                    NativeButton { text: @tr("Microsoft"); primary: !root.google; enabled: !root.saving; clicked => { root.google = false; root.save-error = ""; } }
+                    Button { text: @tr("Google"); primary: root.google; enabled: !root.saving; clicked => { root.google = true; root.save-error = ""; } }
+                    Button { text: @tr("Microsoft"); primary: !root.google; enabled: !root.saving; clicked => { root.google = false; root.save-error = ""; } }
                 }
                 ScrollView {
                     vertical-stretch: 1;
@@ -122,8 +123,8 @@ export component OAuthSetupDialog inherits Rectangle {
                 }
                 HorizontalBox {
                     spacing: 8px;
-                    NativeButton { text: @tr("Cancel"); enabled: !root.saving; clicked => { root.open = false; } }
-                    save-button := NativeButton {
+                    Button { text: @tr("Cancel"); enabled: !root.saving; clicked => { root.open = false; } }
+                    save-button := Button {
                         text: root.saving ? @tr("Saving…") : @tr("Save settings");
                         primary: true;
                         enabled: !root.saving;

@@ -1,6 +1,7 @@
 import { HorizontalBox } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 
 // Application-owned button with deterministic geometry across compositors.
 export component Button inherits Rectangle {
@@ -13,14 +14,15 @@ export component Button inherits Rectangle {
     in property <bool> destructive: false;
     in property <bool> selected: false;
     in property <bool> enabled: true;
+    out property <bool> focus-visible: keyboard.focus-visible;
     callback clicked;
 
     height: 32px;
     min-width: 64px;
     border-radius: LayoutMetrics.corner-radius - 2px;
     forward-focus: keyboard;
-    border-width: keyboard.has-focus ? 2px : root.primary || root.destructive ? 0px : 1px;
-    border-color: keyboard.has-focus || root.selected ? AppTheme.accent : AppTheme.control-border;
+    border-width: keyboard.focus-visible ? 2px : root.primary || root.destructive ? 0px : 1px;
+    border-color: keyboard.focus-visible || root.selected ? AppTheme.accent : AppTheme.control-border;
     background: !root.enabled ? AppTheme.disabled-bg
         : root.destructive ? (button-area.pressed ? AppTheme.destructive-pressed : button-area.has-hover ? AppTheme.destructive-hover : AppTheme.destructive)
         : root.primary ? (button-area.pressed ? AppTheme.primary-pressed : button-area.has-hover ? AppTheme.primary-hover : AppTheme.primary)
@@ -66,7 +68,7 @@ export component Button inherits Rectangle {
         }
     }
 
-    keyboard := FocusScope {
+    keyboard := FocusVisibleScope {
         enabled: root.enabled;
         accessible-role: none;
         key-pressed(event) => {
@@ -76,7 +78,7 @@ export component Button inherits Rectangle {
     }
     button-area := TouchArea {
         enabled: root.enabled;
-        clicked => { keyboard.focus(); root.clicked(); }
+        clicked => { keyboard.focus(); keyboard.pointer-activated(); root.clicked(); }
         mouse-cursor: pointer;
     }
 }

@@ -1,12 +1,13 @@
 import { AccountMailPreferences } from "../components/account-mail-preferences.slint";
 import { ActionMenu, ActionMenuEntry } from "../components/action-menu.slint";
 import { ZoomControls } from "../components/zoom-controls.slint";
-import { Button as ReaderButton, CheckBox, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
+import { CheckBox, HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
 import { MailAttachments, EmailReader, EmailLink, EmailTile, MailLabelRow, ThreadMessageRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
@@ -1485,7 +1486,7 @@ export component MailReadingPane inherits Rectangle {
                                         height: 48px;
                                         padding: 0px;
                                         spacing: 8px;
-                                        attachment-focus := FocusScope {
+                                        attachment-focus := FocusVisibleScope {
                                             min-width: 0px;
                                             horizontal-stretch: 1;
                                             key-pressed(event) => {
@@ -1498,7 +1499,7 @@ export component MailReadingPane inherits Rectangle {
                                                 width: parent.width;
                                                 height: 44px;
                                                 border-radius: 7px;
-                                                background: attachment-hit.has-hover || attachment-focus.has-focus
+                                                background: attachment-hit.has-hover || attachment-focus.focus-visible
                                                     ? root.accent-soft
                                                     : transparent;
 
@@ -1540,7 +1541,7 @@ export component MailReadingPane inherits Rectangle {
                                                     text: attachment.name;
                                                     color: root.heading;
                                                     font-size: TypeScale.body;
-                                                    font-weight: attachment-focus.has-focus ? 600 : 500;
+                                                    font-weight: attachment-focus.focus-visible ? 600 : 500;
                                                     overflow: elide;
                                                     vertical-alignment: center;
                                                 }
@@ -1566,6 +1567,7 @@ export component MailReadingPane inherits Rectangle {
                                                     }
                                                     clicked => {
                                                         attachment-focus.focus();
+                                                        attachment-focus.pointer-activated();
                                                         MailAttachments.command(attachment.previewable ? "preview" : "download", attachment.id);
                                                     }
                                                     mouse-cursor: pointer;
@@ -1593,7 +1595,7 @@ export component MailReadingPane inherits Rectangle {
                                         for item in EmailReader.items : VerticalBox {
                                             width: reader-list.visible-width;
                                             padding: 16px; spacing: 0px;
-                                            if item.url != "" : ReaderButton {
+                                            if item.url != "" : Button {
                                                 text: item.name; accessible-label: item.name;
                                                 clicked => { root.open_email_link(item.url); }
                                             }

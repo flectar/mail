@@ -9,6 +9,7 @@ import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
 import { IconButton, LineEdit, RadioButton, Switch } from "../components/controls.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
+import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow } from "../components/settings-components.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
@@ -103,7 +104,7 @@ component SettingsSearch inherits Rectangle {
     }
 }
 
-component WorkspaceLayoutChoice inherits FocusScope {
+component WorkspaceLayoutChoice inherits FocusVisibleScope {
     in property <string> name;
     in property <bool> minimal: false;
     in property <bool> selected: false;
@@ -122,8 +123,8 @@ component WorkspaceLayoutChoice inherits FocusScope {
     }
     Rectangle {
         border-radius: 8px;
-        border-width: root.selected || root.has-focus ? 2px : 1px;
-        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border;
+        border-width: root.selected || root.focus-visible ? 2px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.accent : AppTheme.border;
         background: layout-hit.has-hover ? AppTheme.control-bg : AppTheme.surface-raised;
         Rectangle {
             x: 10px; y: 9px; width: parent.width - 20px; height: 34px;
@@ -139,11 +140,11 @@ component WorkspaceLayoutChoice inherits FocusScope {
             font-size: TypeScale.caption; font-weight: root.selected ? 700 : 600;
             horizontal-alignment: center; vertical-alignment: center;
         }
-        layout-hit := TouchArea { clicked => { root.chosen(); } mouse-cursor: pointer; }
+        layout-hit := TouchArea { clicked => { root.pointer-activated(); root.chosen(); } mouse-cursor: pointer; }
     }
 }
 
-component ProfileColorChoice inherits FocusScope {
+component ProfileColorChoice inherits FocusVisibleScope {
     in property <color> value;
     in property <bool> selected: false;
     in property <string> label;
@@ -166,11 +167,11 @@ component ProfileColorChoice inherits FocusScope {
         width: parent.width;
         height: parent.height;
         border-radius: self.width / 2;
-        border-width: root.selected || root.has-focus ? 3px : 1px;
-        border-color: root.selected || root.has-focus ? AppTheme.heading : AppTheme.border;
+        border-width: root.selected || root.focus-visible ? 3px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.heading : AppTheme.border;
         background: root.value;
     }
-    TouchArea { mouse-cursor: pointer; clicked => { root.focus(); root.chosen(); } }
+    TouchArea { mouse-cursor: pointer; clicked => { root.focus(); root.pointer-activated(); root.chosen(); } }
 }
 
 component StorageUsageCard inherits Rectangle {

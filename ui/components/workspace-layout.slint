@@ -2,6 +2,7 @@ import { HorizontalBox } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { LineEdit, ToolbarIconButton } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 
 export struct WorkspaceSearchFilter {
     title: string,
@@ -114,11 +115,11 @@ export component WorkspacePaneResizeHandle inherits Rectangle {
     width: LayoutMetrics.divider-width;
     horizontal-stretch: 0;
     z: 2;
-    background: resize-hit.pressed || resize-hit.has-hover || resize-focus.has-focus
+    background: resize-hit.pressed || resize-hit.has-hover || resize-focus.focus-visible
         ? root.active-color : root.divider-color;
     animate background { duration: 150ms; easing: ease-out; }
 
-    resize-focus := FocusScope {
+    resize-focus := FocusVisibleScope {
         x: -(LayoutMetrics.pane-resize-hit-width - root.width) / 2;
         y: 0px;
         width: LayoutMetrics.pane-resize-hit-width;
@@ -171,6 +172,7 @@ export component WorkspacePaneResizeHandle inherits Rectangle {
             pointer-event(event) => {
                 if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
                     resize-focus.focus();
+                    resize-focus.pointer-activated();
                     root.dragging = true;
                     root.drag-start-width = root.leading-width;
                     root.last-requested-width = root.leading-width;

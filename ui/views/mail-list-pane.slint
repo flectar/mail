@@ -4,6 +4,7 @@ import { EmailRow, MailDragApi, MailListEntry } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { FloatingActionButton, SelectionCheckBox, ToolbarIconButton } from "../components/controls.slint";
+import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
@@ -65,7 +66,7 @@ component MailGroupHeader inherits Rectangle {
 
     forward-focus: header-keyboard;
     background: header-hit.has-hover ? root.hover-color : root.surface;
-    border-width: header-keyboard.has-focus ? 2px : 0px;
+    border-width: header-keyboard.focus-visible ? 2px : 0px;
     border-color: root.focus-color;
     border-radius: 5px;
     accessible-role: button;
@@ -134,7 +135,7 @@ component MailGroupHeader inherits Rectangle {
         vertical-alignment: center;
         accessible-role: none;
     }
-    header-keyboard := FocusScope {
+    header-keyboard := FocusVisibleScope {
         accessible-role: none;
         key-pressed(event) => {
             if event.text == Key.Return || event.text == Key.Space {
@@ -154,7 +155,7 @@ component MailGroupHeader inherits Rectangle {
     }
     header-hit := TouchArea {
         mouse-cursor: pointer;
-        clicked => { header-keyboard.focus(); root.toggled(root.group-key); }
+        clicked => { header-keyboard.focus(); header-keyboard.pointer-activated(); root.toggled(root.group-key); }
     }
 }
 
@@ -178,7 +179,6 @@ export component MailListPane inherits Rectangle {
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     in property <int> content_revision: 0;
-    private property <bool> accordion-paused-pagination: false;
     in property <int> selection-count: 0;
     private property <bool> selection-mode: root.selection-count > 0;
     // Four pixels above and below the 40px controls keeps the selection row
@@ -219,7 +219,7 @@ export component MailListPane inherits Rectangle {
     animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
 
     pagination := InfiniteScrollController {
-        active: !root.accordion-paused-pagination;
+        active: true;
         can-load-more: root.can_load_more; loading: root.loading_more;
         row-count: root.emails.length; revision: root.content_revision;
         content-height: mail-list-scroll.content-height;
@@ -231,10 +231,9 @@ export component MailListPane inherits Rectangle {
         mail-list-scroll.content-y = 0px;
         pagination.reset();
     }
-    changed selected_scope => { root.accordion-paused-pagination = false; root.reset-pagination(); }
-    changed search_query => { root.accordion-paused-pagination = false; root.reset-pagination(); }
-    changed search_filter => { root.accordion-paused-pagination = false; root.reset-pagination(); }
-    changed group_mail_by_date => { root.accordion-paused-pagination = false; }
+    changed selected_scope => { root.reset-pagination(); }
+    changed search_query => { root.reset-pagination(); }
+    changed search_filter => { root.reset-pagination(); }
 
     pure function month-name(month: int) -> string {
         if month == 1 { return @tr("January"); }
@@ -446,13 +445,12 @@ export component MailListPane inherits Rectangle {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;
                             width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
-                            height: parent.height - (root.accordion-paused-pagination && root.can_load_more ? 54px : 0px);
+                            height: parent.height;
                             horizontal-scrollbar-policy: always-off;
                             mouse-drag-pan-enabled: root.compact;
                             accessible-label: root.scope_title;
                             accessible-item-count: root.emails.length;
                             scrolled => {
-                                root.accordion-paused-pagination = false;
                                 pagination.user-scrolled();
                             }
 
@@ -810,7 +808,7 @@ export component MailListPane inherits Rectangle {
 
                                             row-check := SelectionCheckBox {
                                                 // Keep the control in the keyboard focus order even before hover.
-                                                opacity: mail-data.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.has-focus)) ? 1 : 0;
+                                                opacity: mail-data.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.focus-visible)) ? 1 : 0;
                                                 enabled: !root.compact || root.selection-mode || mail-data.checked;
                                                 x: root.show-avatars ? 14px : 0px;
                                                 y: root.show-avatars ? (root.dense ? 8px : 12px) : (parent.height - self.height) / 2;
@@ -850,35 +848,12 @@ export component MailListPane inherits Rectangle {
                                     divider-color: root.border-subtle;
                                     focus-color: root.accent;
                                     toggled(key) => {
-                                        root.accordion-paused-pagination = true;
                                         root.toggle_mail_group(key);
                                     }
                                 }
                             }
-
                         }
-                        if root.accordion-paused-pagination && root.can_load_more : Rectangle {
-                                x: LayoutMetrics.list-row-inset;
-                                y: parent.height - self.height;
-                                width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
-                                height: 54px;
-                                background: root.surface;
-                                Rectangle {
-                                    width: parent.width;
-                                    height: LayoutMetrics.divider-width;
-                                    background: root.border-subtle;
-                                }
-                                Button {
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
-                                    width: 144px;
-                                    text: root.loading_more ? @tr("Loading…") : @tr("Load older mail");
-                                    enabled: !root.loading_more;
-                                    clicked => { root.load_more(); }
-                                }
-                            }
                         }
-
                         if root.loading && root.emails.length == 0 : Rectangle {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;

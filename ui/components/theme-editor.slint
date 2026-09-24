@@ -3,8 +3,9 @@ import { AppTheme, ThemeUtilities } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 import { Button } from "button.slint";
 import { LineEdit, RadioButton } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 
-component ThemePresetCard inherits FocusScope {
+component ThemePresetCard inherits FocusVisibleScope {
     in property <string> name;
     in property <color> preview-primary;
     in property <color> preview-page;
@@ -30,8 +31,8 @@ component ThemePresetCard inherits FocusScope {
 
     Rectangle {
         border-radius: 8px;
-        border-width: root.selected || root.has-focus ? 2px : 1px;
-        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border;
+        border-width: root.selected || root.focus-visible ? 2px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.accent : AppTheme.border;
         background: preset-hit.has-hover ? AppTheme.control-bg : AppTheme.surface;
 
         Rectangle {
@@ -75,13 +76,13 @@ component ThemePresetCard inherits FocusScope {
             overflow: elide;
         }
         preset-hit := TouchArea {
-            clicked => { root.chosen(); }
+            clicked => { root.pointer-activated(); root.chosen(); }
             mouse-cursor: pointer;
         }
     }
 }
 
-component ThemeModeCard inherits FocusScope {
+component ThemeModeCard inherits FocusVisibleScope {
     in property <string> name;
     in property <string> mode;
     in property <bool> selected: false;
@@ -101,8 +102,8 @@ component ThemeModeCard inherits FocusScope {
 
     Rectangle {
         border-radius: 8px;
-        border-width: root.selected || root.has-focus ? 2px : 1px;
-        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border;
+        border-width: root.selected || root.focus-visible ? 2px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.accent : AppTheme.border;
         background: mode-hit.has-hover ? AppTheme.control-bg : AppTheme.surface;
         Rectangle {
             x: 9px; y: 8px; width: parent.width - 18px; height: 32px;
@@ -122,11 +123,11 @@ component ThemeModeCard inherits FocusScope {
             font-size: TypeScale.caption; font-weight: root.selected ? 700 : 600;
             horizontal-alignment: center; vertical-alignment: center;
         }
-        mode-hit := TouchArea { clicked => { root.chosen(); } mouse-cursor: pointer; }
+        mode-hit := TouchArea { clicked => { root.pointer-activated(); root.chosen(); } mouse-cursor: pointer; }
     }
 }
 
-component ThemeColorChip inherits FocusScope {
+component ThemeColorChip inherits FocusVisibleScope {
     in property <string> name;
     in property <color> value;
     in property <bool> selected: false;
@@ -149,8 +150,8 @@ component ThemeColorChip inherits FocusScope {
 
     Rectangle {
         border-radius: 7px;
-        border-width: root.selected || root.has-focus ? 2px : 1px;
-        border-color: root.selected || root.has-focus ? AppTheme.accent : AppTheme.border-subtle;
+        border-width: root.selected || root.focus-visible ? 2px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.accent : AppTheme.border-subtle;
         background: chip-hit.has-hover ? AppTheme.control-bg : AppTheme.surface-raised;
         HorizontalBox {
             padding-left: 8px;
@@ -175,7 +176,7 @@ component ThemeColorChip inherits FocusScope {
             }
         }
         chip-hit := TouchArea {
-            clicked => { root.chosen(); }
+            clicked => { root.pointer-activated(); root.chosen(); }
             mouse-cursor: pointer;
         }
     }
@@ -223,7 +224,7 @@ export component RuntimeColorPicker inherits Rectangle {
         padding: 12px;
         spacing: 10px;
 
-        sv-map := FocusScope {
+        sv-map := FocusVisibleScope {
             height: 136px;
             focus-on-click: true;
             accessible-role: slider;
@@ -255,6 +256,7 @@ export component RuntimeColorPicker inherits Rectangle {
                     pointer-event(event) => {
                         if event.kind == PointerEventKind.down || (event.kind == PointerEventKind.move && self.pressed) {
                             sv-map.focus();
+                            sv-map.pointer-activated();
                             root.update-saturation-value(self.mouse-x, self.mouse-y);
                         }
                     }
@@ -274,14 +276,14 @@ export component RuntimeColorPicker inherits Rectangle {
                 }
                 Rectangle {
                     border-radius: 6px;
-                    border-width: sv-map.has-focus ? 2px : 1px;
-                    border-color: sv-map.has-focus ? AppTheme.accent : #ffffff44;
+                    border-width: sv-map.focus-visible ? 2px : 1px;
+                    border-color: sv-map.focus-visible ? AppTheme.accent : #ffffff44;
                     background: transparent;
                 }
             }
         }
 
-        hue-strip := FocusScope {
+        hue-strip := FocusVisibleScope {
             height: 20px;
             focus-on-click: true;
             accessible-role: slider;
@@ -307,6 +309,7 @@ export component RuntimeColorPicker inherits Rectangle {
                     pointer-event(event) => {
                         if event.kind == PointerEventKind.down || (event.kind == PointerEventKind.move && self.pressed) {
                             hue-strip.focus();
+                            hue-strip.pointer-activated();
                             root.update-hue(self.mouse-x);
                         }
                     }
@@ -326,8 +329,8 @@ export component RuntimeColorPicker inherits Rectangle {
                 }
                 Rectangle {
                     border-radius: 6px;
-                    border-width: hue-strip.has-focus ? 2px : 1px;
-                    border-color: hue-strip.has-focus ? AppTheme.accent : #ffffff44;
+                    border-width: hue-strip.focus-visible ? 2px : 1px;
+                    border-color: hue-strip.focus-visible ? AppTheme.accent : #ffffff44;
                     background: transparent;
                 }
             }

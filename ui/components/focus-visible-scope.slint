@@ -1,0 +1,23 @@
+// Keep keyboard focus visible without leaving an outline after pointer use.
+// Programmatic focus is visible as well, for controls reached by shortcuts.
+export component FocusVisibleScope inherits FocusScope {
+    private property <bool> keyboard-focus: false;
+    out property <bool> focus-visible: self.has-focus && self.keyboard-focus;
+
+    focus-gained(reason) => {
+        if reason == FocusReason.pointer-click {
+            self.keyboard-focus = false;
+        } else if reason == FocusReason.tab-navigation || reason == FocusReason.programmatic {
+            self.keyboard-focus = true;
+        }
+    }
+
+    capture-key-pressed(event) => {
+        self.keyboard-focus = true;
+        reject
+    }
+
+    // Explicit .focus() calls inside click handlers are reported as
+    // programmatic, so the caller clears the ring after such clicks.
+    public function pointer-activated() { self.keyboard-focus = false; }
+}

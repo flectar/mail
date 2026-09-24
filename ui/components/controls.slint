@@ -1,4 +1,5 @@
 import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 
 export component LineEdit inherits Rectangle {
@@ -141,7 +142,7 @@ export component Switch inherits Rectangle {
     height: 22px;
     border-radius: 11px;
     background: root.checked ? AppTheme.accent : AppTheme.control-border;
-    border-width: switch-focus.has-focus ? 2px : 0px;
+    border-width: switch-focus.focus-visible ? 2px : 0px;
     border-color: AppTheme.heading;
     opacity: root.enabled ? 1 : 0.45;
     animate background { duration: 140ms; easing: ease-out; }
@@ -156,7 +157,7 @@ export component Switch inherits Rectangle {
         animate x { duration: 180ms; easing: spring(0.18); }
     }
 
-    switch-focus := FocusScope {
+    switch-focus := FocusVisibleScope {
         width: parent.width;
         height: parent.height;
         enabled: root.enabled;
@@ -188,6 +189,7 @@ export component Switch inherits Rectangle {
             enabled: root.enabled;
             clicked => {
                 switch-focus.focus();
+                switch-focus.pointer-activated();
                 root.checked = !root.checked;
                 root.toggled();
             }
@@ -198,7 +200,7 @@ export component Switch inherits Rectangle {
 
 // Shared tri-state control for list selection. The component owns its hit
 // target and accessibility contract while callers decide when it is visible.
-export component SelectionCheckBox inherits FocusScope {
+export component SelectionCheckBox inherits FocusVisibleScope {
     in property <bool> checked: false;
     in property <bool> indeterminate: false;
     in property <bool> avatar-overlay: false;
@@ -231,7 +233,7 @@ export component SelectionCheckBox inherits FocusScope {
         width: 24px;
         height: 24px;
         border-radius: root.avatar-overlay ? self.width / 2 : 6px;
-        border-width: root.has-focus ? 2px : 0px;
+        border-width: root.focus-visible ? 2px : 0px;
         border-color: AppTheme.accent;
         background: root.avatar-overlay ? AppTheme.surface.with-alpha(0.72) : transparent;
         drop-shadow-blur: root.avatar-overlay ? 7px : 0px;
@@ -270,7 +272,7 @@ export component SelectionCheckBox inherits FocusScope {
         width: max(parent.width, 44px);
         height: max(parent.height, 44px);
         enabled: root.enabled;
-        clicked => { root.toggled(!root.checked); }
+        clicked => { root.pointer-activated(); root.toggled(!root.checked); }
         mouse-cursor: pointer;
     }
 }
@@ -349,11 +351,17 @@ export component IconButton inherits Rectangle {
     in property <bool> primary: false;
     in property <bool> active: false;
     in property <bool> interactive: true;
+    out property <bool> focus-visible: keyboard.focus-visible;
     in property <length> icon-size: LayoutMetrics.icon-size;
     in property <string> tooltip-text: "";
     in property <bool> tooltip-above: false;
     in property <bool> tooltip-align-left: false;
     callback clicked;
+
+    public function pointer-activated() {
+        keyboard.pointer-activated();
+        IconButtonInput.keyboard = false;
+    }
 
     width: 32px;
     height: 32px;
@@ -364,7 +372,7 @@ export component IconButton inherits Rectangle {
             ? (hit-area.pressed || root.active ? root.active-background : hit-area.has-hover ? root.hover-background : transparent)
             : root.active ? root.active-background : hit-area.has-hover ? root.hover-background : root.idle-background;
     forward-focus: keyboard;
-    border-width: keyboard.has-focus ? 2px : 0px;
+    border-width: keyboard.focus-visible ? 2px : 0px;
     border-color: AppTheme.accent;
     opacity: root.interactive ? 1 : 0.42;
     animate background { duration: 120ms; easing: ease-out; }
@@ -388,7 +396,7 @@ export component IconButton inherits Rectangle {
         animate y { duration: 140ms; easing: spring(0); }
     }
 
-    keyboard := FocusScope {
+    keyboard := FocusVisibleScope {
         enabled: root.interactive;
         changed has-focus => { if self.has-focus { IconButtonInput.keyboard = true; } }
         focus-on-tab-navigation: true;
@@ -406,7 +414,7 @@ export component IconButton inherits Rectangle {
     hit-area := TouchArea {
         enabled: root.interactive;
         moved => { IconButtonInput.keyboard = false; }
-        clicked => { keyboard.focus(); IconButtonInput.keyboard = false; root.clicked(); }
+        clicked => { keyboard.focus(); root.pointer-activated(); root.clicked(); }
         mouse-cursor: pointer;
     }
 

@@ -54,13 +54,14 @@ export component ActionMenu inherits Rectangle {
         }
     }
 
-    function activate-highlighted() {
+    function activate-highlighted(pointer: bool) {
         if root.highlighted-index < 0 || root.entries[root.highlighted-index].disabled {
             return;
         }
         let id = root.entries[root.highlighted-index].id;
         menu-popup.close();
         trigger.focus();
+        if pointer { trigger.pointer-activated(); }
         root.activated(id);
     }
 
@@ -130,7 +131,7 @@ export component ActionMenu inherits Rectangle {
                         return accept;
                     }
                     if event.text == Key.Return || event.text == Key.Space {
-                        root.activate-highlighted();
+                        root.activate-highlighted(false);
                         return accept;
                     }
                     if event.text == Key.Escape || event.text == Key.LeftArrow {
@@ -196,7 +197,7 @@ export component ActionMenu inherits Rectangle {
                                 accessible-item-index: index;
                                 accessible-action-default => {
                                     root.highlighted-index = index;
-                                    root.activate-highlighted();
+                                    root.activate-highlighted(false);
                                 }
                                 changed has-hover => {
                                     if self.has-hover && !entry.disabled {
@@ -205,7 +206,7 @@ export component ActionMenu inherits Rectangle {
                                 }
                                 clicked => {
                                     root.highlighted-index = index;
-                                    root.activate-highlighted();
+                                    root.activate-highlighted(true);
                                 }
                                 mouse-cursor: entry.disabled ? default : pointer;
                             }
