@@ -1,10 +1,10 @@
 use image::{DynamicImage, ImageReader, Limits, Rgba, RgbaImage, imageops::FilterType};
-use reqwest::{Client, Url, header::CONTENT_TYPE};
+use reqwest::{Client, StatusCode, Url, header::CONTENT_TYPE};
 use sha2::{Digest, Sha256};
 use std::{
     io::Cursor,
     net::IpAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 use tokio::io::AsyncReadExt;
@@ -78,7 +78,7 @@ pub struct FaviconLoader {
 }
 
 impl FaviconLoader {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(cache_root: &Path) -> Result<Self, String> {
         let client = Client::builder()
             .user_agent("Flectar Mail native sender icon/0.1")
             .connect_timeout(Duration::from_secs(3))
@@ -87,8 +87,7 @@ impl FaviconLoader {
             .build()
             .map_err(|error| format!("could not create favicon client: {error}"))?;
 
-        let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-        let cache_dir = base.join("flectar-mail").join("sender-icons");
+        let cache_dir = cache_root.join("sender-icons");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|error| format!("could not create favicon cache: {error}"))?;
 
@@ -104,11 +103,11 @@ impl FaviconLoader {
         domain: &str,
         small_pixel_side: u32,
         regular_pixel_side: u32,
-    ) -> Option<FaviconImages> {
+    ) -> Result<Option<FaviconImages>, String> {
         let cache_path = self.cache_path(domain);
         if let Some(bytes) = read_fresh(&cache_path, CACHE_TTL, MAX_ICON_BYTES).await {
             match decode_brand_icons(bytes, small_pixel_side, regular_pixel_side).await {
-                Ok(icons) => return Some(icons),
+                Ok(icons) => return Ok(Some(icons)),
                 Err(_) => {
                     let _ = tokio::fs::remove_file(&cache_path).await;
                 }
@@ -117,39 +116,59 @@ impl FaviconLoader {
 
         let missing_path = self.missing_path(domain);
         if is_fresh(&missing_path, MISSING_TTL).await {
-            return None;
+            return Ok(None);
         }
 
+        let mut retryable_error = None;
         for candidate in icon_domain_candidates(domain) {
-            let Some(bytes) = self.fetch_icon_bytes(&candidate).await else {
-                continue;
+            let bytes = match self.fetch_icon_bytes(&candidate).await {
+                Ok(Some(bytes)) => bytes,
+                Ok(None) => continue,
+                Err(error) => {
+                    retryable_error.get_or_insert(error);
+                    continue;
+                }
             };
-            let Ok(icons) =
-                decode_brand_icons(bytes.clone(), small_pixel_side, regular_pixel_side).await
-            else {
-                continue;
+            let icons = match decode_brand_icons(bytes.clone(), small_pixel_side, regular_pixel_side)
+                .await
+            {
+                Ok(icons) => icons,
+                Err(error) => {
+                    retryable_error.get_or_insert(error);
+                    continue;
+                }
             };
 
             // Cache the resolved brand asset under the original sender host.
             // Later rows therefore avoid both the exact-host and parent lookup.
             let _ = tokio::fs::write(&cache_path, bytes).await;
             let _ = tokio::fs::remove_file(&missing_path).await;
-            return Some(icons);
+            return Ok(Some(icons));
         }
 
+        if let Some(error) = retryable_error {
+            return Err(error);
+        }
         mark_missing(&missing_path).await;
-        None
+        Ok(None)
     }
 
-    async fn fetch_icon_bytes(&self, domain: &str) -> Option<Vec<u8>> {
+    async fn fetch_icon_bytes(&self, domain: &str) -> Result<Option<Vec<u8>>, String> {
         let url = format!("https://twenty-icons.com/{domain}/{SERVICE_ICON_SIZE}");
-        let response = self.client.get(url).send().await.ok()?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|length| length > MAX_ICON_BYTES)
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if !classify_icon_status(response.status())? {
+            return Ok(None);
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_ICON_BYTES)
         {
-            return None;
+            return Err("sender icon response is too large".into());
         }
         if let Some(content_type) = response
             .headers()
@@ -157,9 +176,12 @@ impl FaviconLoader {
             .and_then(|value| value.to_str().ok())
             && !content_type.to_ascii_lowercase().starts_with("image/")
         {
-            return None;
+            return Err("sender icon response is not an image".into());
         }
-        response_bytes_bounded(response, MAX_ICON_BYTES).await
+        response_bytes_bounded(response, MAX_ICON_BYTES)
+            .await
+            .map(Some)
+            .ok_or_else(|| "sender icon response could not be read within its size limit".into())
     }
 
     fn cache_path(&self, domain: &str) -> PathBuf {
@@ -169,7 +191,17 @@ impl FaviconLoader {
 
     fn missing_path(&self, domain: &str) -> PathBuf {
         self.cache_dir
-            .join(format!("{}.brand-v4.missing", cache_key(domain)))
+            .join(format!("{}.brand-v5.missing", cache_key(domain)))
+    }
+}
+
+fn classify_icon_status(status: StatusCode) -> Result<bool, String> {
+    if status.is_success() {
+        Ok(true)
+    } else if status == StatusCode::NOT_FOUND || status == StatusCode::GONE {
+        Ok(false)
+    } else {
+        Err(format!("sender icon service returned {status}"))
     }
 }
 
@@ -180,7 +212,7 @@ pub struct ProfileAvatarLoader {
 }
 
 impl ProfileAvatarLoader {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(cache_root: &Path) -> Result<Self, String> {
         let client = Client::builder()
             .user_agent("Flectar Mail native account avatar/0.1")
             .connect_timeout(Duration::from_secs(3))
@@ -188,8 +220,7 @@ impl ProfileAvatarLoader {
             .redirect(service_redirect_policy("googleusercontent.com"))
             .build()
             .map_err(|error| format!("could not create account-avatar client: {error}"))?;
-        let base = dirs::cache_dir().unwrap_or_else(std::env::temp_dir);
-        let cache_dir = base.join("flectar-mail").join("account-avatars");
+        let cache_dir = cache_root.join("account-avatars");
         std::fs::create_dir_all(&cache_dir)
             .map_err(|error| format!("could not create account-avatar cache: {error}"))?;
         Ok(Self { client, cache_dir })
@@ -512,6 +543,28 @@ async fn mark_missing(path: &PathBuf) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_loaders_use_the_platform_cache_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let cache_root = root.path().join("app-private-cache");
+        let sender_icons = FaviconLoader::new(&cache_root).unwrap();
+        let account_avatars = ProfileAvatarLoader::new(&cache_root).unwrap();
+
+        assert_eq!(sender_icons.cache_dir, cache_root.join("sender-icons"));
+        assert_eq!(account_avatars.cache_dir, cache_root.join("account-avatars"));
+        assert!(sender_icons.cache_dir.is_dir());
+        assert!(account_avatars.cache_dir.is_dir());
+    }
+
+    #[test]
+    fn only_confirmed_absence_is_negative_cached() {
+        assert!(classify_icon_status(StatusCode::OK).unwrap());
+        assert!(!classify_icon_status(StatusCode::NOT_FOUND).unwrap());
+        assert!(!classify_icon_status(StatusCode::GONE).unwrap());
+        assert!(classify_icon_status(StatusCode::TOO_MANY_REQUESTS).is_err());
+        assert!(classify_icon_status(StatusCode::SERVICE_UNAVAILABLE).is_err());
+    }
 
     fn test_brand_png() -> Vec<u8> {
         let mut image = RgbaImage::from_pixel(128, 128, Rgba([0, 0, 0, 0]));

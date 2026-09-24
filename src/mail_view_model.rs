@@ -1173,13 +1173,14 @@ pub(super) fn schedule_favicon_fetches(
         physical_pixel_side(SENDER_AVATAR_SMALL_SIDE, app.window().scale_factor()),
         physical_pixel_side(SENDER_AVATAR_REGULAR_SIDE, app.window().scale_factor()),
     );
-    let (loader, tx, pending_count) = {
+    let (loader, tx, pending_count, generation) = {
         let mut state = state.borrow_mut();
         if !state.remote_images_enabled {
             return;
         }
         if state.favicon_pixel_sides != pixel_sides {
             state.favicon_pixel_sides = pixel_sides;
+            state.favicon_generation = state.favicon_generation.wrapping_add(1);
             state.favicon_icons.clear();
             state.favicon_pending.clear();
             state.favicon_missing.clear();
@@ -1188,6 +1189,7 @@ pub(super) fn schedule_favicon_fetches(
             state.favicon_loader.clone(),
             state.favicon_tx.clone(),
             state.favicon_pending.len(),
+            state.favicon_generation,
         )
     };
     let Some(loader) = loader else {
@@ -1220,6 +1222,10 @@ pub(super) fn schedule_favicon_fetches(
             if state.favicon_icons.contains_key(domain)
                 || state.favicon_missing.contains(domain)
                 || state.favicon_pending.contains(domain)
+                || state
+                    .favicon_retry
+                    .get(domain)
+                    .is_some_and(|retry| retry.retry_at > std::time::Instant::now())
             {
                 continue;
             }
@@ -1233,12 +1239,13 @@ pub(super) fn schedule_favicon_fetches(
         let loader = loader.clone();
         let tx = tx.clone();
         runtime.spawn(async move {
-            let icons = loader.load(&domain, pixel_sides.0, pixel_sides.1).await;
+            let result = loader.load(&domain, pixel_sides.0, pixel_sides.1).await;
             let _ = tx
                 .send(FaviconUpdate {
                     domain,
                     pixel_sides,
-                    icons,
+                    generation,
+                    result,
                 })
                 .await;
         });

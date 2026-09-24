@@ -2169,7 +2169,6 @@ dependencies = [
  "cosmic-text",
  "cssparser",
  "data-url",
- "dirs",
  "flectar-mail-core",
  "fontique",
  "html5ever",

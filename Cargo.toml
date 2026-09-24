@@ -85,7 +85,6 @@ flectar-mail-core = { path = "crates/flectar-mail-core", default-features = fals
 # Slint 1.18 and Blitz beta.2 share Fontique 0.11. Keep dynamic Fontconfig
 # loading enabled explicitly so both rendering stacks agree on the native ABI.
 fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
-dirs = "6"
 chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }

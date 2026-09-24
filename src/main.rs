@@ -100,7 +100,7 @@ use std::{
     path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc::error::TryRecvError;
 use ui_dispatch::{UiSender, UiWake, bounded_ui_channel};
@@ -118,6 +118,11 @@ const SENDER_AVATAR_REGULAR_SIDE: f32 = 38.0;
 const ACCOUNT_AVATAR_SMALL_SIDE: f32 = 22.0;
 const ACCOUNT_AVATAR_REGULAR_SIDE: f32 = 38.0;
 const MAX_COMPOSE_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
+
+fn favicon_retry_delay(attempts: u8) -> Duration {
+    let exponent = attempts.saturating_sub(1).min(6);
+    Duration::from_secs((60_u64 << exponent).min(60 * 60))
+}
 
 fn favicon_bytes(images: &FaviconImages) -> usize {
     images
@@ -316,7 +321,14 @@ struct ComposeFile {
 struct FaviconUpdate {
     domain: String,
     pixel_sides: (u32, u32),
-    icons: Option<FaviconImages>,
+    generation: u64,
+    result: Result<Option<FaviconImages>, String>,
+}
+
+#[derive(Clone, Copy)]
+struct FaviconRetry {
+    attempts: u8,
+    retry_at: Instant,
 }
 
 struct ProfileAvatarUpdate {
@@ -545,7 +557,9 @@ struct InboxState {
     favicon_icons: HashMap<String, FaviconImages>,
     favicon_pending: HashSet<String>,
     favicon_missing: HashSet<String>,
+    favicon_retry: HashMap<String, FaviconRetry>,
     favicon_pixel_sides: (u32, u32),
+    favicon_generation: u64,
     favicon_tx: UiSender<FaviconUpdate>,
     connected_accounts: Vec<Account>,
     account_configs: Vec<AccountConfig>,
@@ -976,7 +990,9 @@ impl InboxState {
             favicon_icons: HashMap::new(),
             favicon_pending: HashSet::new(),
             favicon_missing: HashSet::new(),
+            favicon_retry: HashMap::new(),
             favicon_pixel_sides: (0, 0),
+            favicon_generation: 0,
             favicon_tx,
             connected_accounts: Vec::new(),
             account_configs: Vec::new(),
@@ -1049,12 +1065,12 @@ impl PlatformContext {
 
     pub fn app_private(
         data_root: PathBuf,
-        cache_root: PathBuf,
+        cache_dir: PathBuf,
         credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
         oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
     ) -> Self {
         Self {
-            paths: Paths::new(data_root.join("data"), cache_root.join("cache")),
+            paths: Paths::new(data_root.join("data"), cache_dir),
             documents: documents::default_provider(),
             credentials,
             oauth_redirects,
@@ -1361,7 +1377,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let profile_avatar_loader = if benchmark_disable_background {
         None
     } else {
-        match ProfileAvatarLoader::new() {
+        match ProfileAvatarLoader::new(&platform.paths.cache_dir) {
             Ok(loader) => Some(loader),
             Err(error) => {
                 eprintln!("account avatars unavailable: {error}");
@@ -3342,21 +3358,78 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             };
             let mut state = favicon_state.borrow_mut();
-            if update.pixel_sides != state.favicon_pixel_sides {
+            if update.generation != state.favicon_generation
+                || update.pixel_sides != state.favicon_pixel_sides
+            {
                 continue;
             }
             state.favicon_pending.remove(&update.domain);
             if !state.remote_images_enabled {
                 continue;
             }
-            let state = &mut *state;
-            insert_bounded_favicon_result(
-                &mut state.favicon_icons,
-                &mut state.favicon_missing,
-                update.domain,
-                update.icons,
-            );
+            let retry = match update.result {
+                Ok(icons) => {
+                    state.favicon_retry.remove(&update.domain);
+                    let state = &mut *state;
+                    insert_bounded_favicon_result(
+                        &mut state.favicon_icons,
+                        &mut state.favicon_missing,
+                        update.domain,
+                        icons,
+                    );
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "sender icon fetch failed; retry scheduled");
+                    let attempts = state
+                        .favicon_retry
+                        .get(&update.domain)
+                        .map_or(1, |retry| retry.attempts.saturating_add(1));
+                    let delay = favicon_retry_delay(attempts);
+                    let retry_at = Instant::now() + delay;
+                    if state.favicon_retry.len() >= MAX_FAVICON_CACHE_ENTRIES
+                        && !state.favicon_retry.contains_key(&update.domain)
+                        && let Some(victim) = state
+                            .favicon_retry
+                            .iter()
+                            .min_by_key(|(_, retry)| retry.retry_at)
+                            .map(|(domain, _)| domain.clone())
+                    {
+                        state.favicon_retry.remove(&victim);
+                    }
+                    state
+                        .favicon_retry
+                        .insert(update.domain.clone(), FaviconRetry { attempts, retry_at });
+                    Some((update.domain, retry_at, delay))
+                }
+            };
             changed = true;
+            drop(state);
+            if let Some((domain, retry_at, delay)) = retry {
+                let retry_app = favicon_app.clone();
+                let retry_state = Rc::downgrade(&favicon_state);
+                let retry_runtime = Rc::downgrade(&favicon_runtime);
+                Timer::single_shot(delay, move || {
+                    let (Some(app), Some(state), Some(runtime)) = (
+                        retry_app.upgrade(),
+                        retry_state.upgrade(),
+                        retry_runtime.upgrade(),
+                    ) else {
+                        return;
+                    };
+                    let still_current = state
+                        .borrow()
+                        .favicon_retry
+                        .get(&domain)
+                        .is_some_and(|retry| retry.retry_at == retry_at);
+                    if still_current {
+                        if let Some(retry) = state.borrow_mut().favicon_retry.get_mut(&domain) {
+                            retry.retry_at = Instant::now();
+                        }
+                        refresh_rows_only(&app, &state, &runtime);
+                    }
+                });
+            }
         }
 
         if let Some(app) = favicon_app.upgrade() {
@@ -3368,6 +3441,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let mut state = favicon_state.borrow_mut();
                 if state.favicon_pixel_sides != (0, 0) && state.favicon_pixel_sides != pixel_sides {
                     state.favicon_pixel_sides = pixel_sides;
+                    state.favicon_generation = state.favicon_generation.wrapping_add(1);
                     state.favicon_icons.clear();
                     state.favicon_pending.clear();
                     state.favicon_missing.clear();
@@ -3567,7 +3641,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 AccountPresentationSettings::from_settings(settings);
                         }
                         state.favicon_loader = if allow_remote_images {
-                            match FaviconLoader::new() {
+                            match FaviconLoader::new(&startup_paths_for_ui.cache_dir) {
                                 Ok(loader) => Some(loader),
                                 Err(error) => {
                                     eprintln!("sender icons unavailable: {error}");
@@ -4318,6 +4392,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let state_for_remote_images = Rc::clone(&state);
     let runtime_for_remote_images = Rc::clone(&runtime);
+    let remote_images_cache_dir = platform.paths.cache_dir.clone();
     app.on_set_remote_images(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -4342,6 +4417,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             return;
         }
 
+        let mut sender_icon_error = None;
         {
             let mut state = state_for_remote_images.borrow_mut();
             state.remote_images_enabled = enabled;
@@ -4349,14 +4425,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             state.favicon_icons.clear();
             state.favicon_pending.clear();
             state.favicon_missing.clear();
+            state.favicon_retry.clear();
+            state.favicon_generation = state.favicon_generation.wrapping_add(1);
             state.favicon_loader = if enabled {
-                match FaviconLoader::new() {
+                match FaviconLoader::new(&remote_images_cache_dir) {
                     Ok(loader) => Some(loader),
                     Err(error) => {
-                        app.set_sync_status(UiMessage::detail(
-                            "Remote sender icons unavailable: {}",
-                            error,
-                        ));
+                        sender_icon_error = Some(error);
                         None
                     }
                 }
@@ -4384,7 +4459,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
 
         app.set_remote_images_enabled(enabled);
-        app.set_sync_status(if enabled {
+        app.set_sync_status(if let Some(error) = sender_icon_error {
+            UiMessage::detail("Remote sender icons unavailable: {}", error)
+        } else if enabled {
             UiMessage::plain("Remote body images and sender favicons enabled.")
         } else {
             UiMessage::plain("Remote images blocked.")
@@ -7021,6 +7098,14 @@ mod calendar_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sender_icon_retry_delay_is_bounded() {
+        assert_eq!(favicon_retry_delay(1), Duration::from_secs(60));
+        assert_eq!(favicon_retry_delay(2), Duration::from_secs(120));
+        assert_eq!(favicon_retry_delay(7), Duration::from_secs(3600));
+        assert_eq!(favicon_retry_delay(u8::MAX), Duration::from_secs(3600));
+    }
 
     fn model_values(model: &VecModel<i32>) -> Vec<i32> {
         model.iter().collect()

@@ -81,12 +81,40 @@ mod observability {
 }
 
 #[cfg(target_os = "android")]
+fn app_cache_dir(app: &slint::android::AndroidApp) -> Result<std::path::PathBuf, String> {
+    use jni::{
+        JavaVM,
+        objects::{JObject, JString},
+    };
+
+    // NativeActivity supplies an app-private data path. Use Android's
+    // designated, purgeable cache directory for reconstructable data.
+    let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.map_err(|e| e.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
+    let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast()) };
+    let directory = env
+        .call_method(&activity, "getCacheDir", "()Ljava/io/File;", &[])
+        .and_then(|value| value.l())
+        .map_err(|e| e.to_string())?;
+    let path = env
+        .call_method(&directory, "getAbsolutePath", "()Ljava/lang/String;", &[])
+        .and_then(|value| value.l())
+        .map_err(|e| e.to_string())?;
+    let path: String = env
+        .get_string(&JString::from(path))
+        .map_err(|e| e.to_string())?
+        .into();
+    Ok(path.into())
+}
+
+#[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(app: slint::android::AndroidApp) {
     observability::install();
     let internal = app
         .internal_data_path()
         .expect("Android did not provide an app-private data directory");
+    let cache_dir = app_cache_dir(&app).expect("Android did not provide an app-private cache directory");
     tracing::info!(internal_data_path = %internal.display(), "resolved Android app-private root");
     let oauth_redirects = oauth::AndroidOAuthBroker::global(&app, &internal)
         .expect("failed to initialize Android OAuth services");
@@ -100,7 +128,7 @@ fn android_main(app: slint::android::AndroidApp) {
         documents::AndroidDocuments::new(&app).expect("failed to initialize document access");
     let mut platform = flectar_mail::PlatformContext::app_private(
         internal.clone(),
-        internal,
+        cache_dir,
         std::sync::Arc::new(credential_store),
         oauth_redirects,
     );

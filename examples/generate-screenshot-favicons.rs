@@ -17,7 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let loader = FaviconLoader::new()?;
+    let cache_dir = tempfile::tempdir()?;
+    let loader = FaviconLoader::new(cache_dir.path())?;
 
     for address in addresses {
         let address = address.to_string_lossy();
@@ -28,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let icons = runtime
-            .block_on(loader.load(&domain, 76, 76))
+            .block_on(loader.load(&domain, 76, 76))?
             .ok_or_else(|| format!("no favicon found for {domain}"))?;
         let icon = icons.regular;
         image::save_buffer_with_format(
