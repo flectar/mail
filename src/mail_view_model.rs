@@ -34,7 +34,7 @@ pub(super) fn refresh_from_source(
 fn merge_refreshed_mail_head(
     current: &[MailMessage],
     refreshed: Vec<MailMessage>,
-    next_cursor: Option<ThreadCursor>,
+    next_cursor: Option<MailCursor>,
     drop_ids: &[i32],
 ) -> (Vec<MailMessage>, bool) {
     if next_cursor.is_none() || current.len() <= PAGE_SIZE {
@@ -164,7 +164,7 @@ pub(super) fn append_mail_page(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Runtime,
-    cursor: ThreadCursor,
+    cursor: MailCursor,
     page: mail::MailPage,
 ) -> Result<(), String> {
     if !snapshot_is_current(state, page.account_revision) {
@@ -288,7 +288,7 @@ pub(super) fn render_current(
             filtered_messages(
                 &state.messages,
                 &state.scope,
-                &state.query,
+                if state.using_core { "" } else { &state.query },
                 &state.search_filter,
             ),
             state.page,
@@ -978,7 +978,7 @@ pub(super) fn refresh_rows_only(
             filtered_messages(
                 &state.messages,
                 &state.scope,
-                &state.query,
+                if state.using_core { "" } else { &state.query },
                 &state.search_filter,
             ),
             state.page,
@@ -1116,7 +1116,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
             filtered_messages(
                 &state.messages,
                 &state.scope,
-                &state.query,
+                if state.using_core { "" } else { &state.query },
                 &state.search_filter,
             ),
             state.page,
@@ -1642,10 +1642,10 @@ mod tests {
         let (merged, retained_tail) = merge_refreshed_mail_head(
             &current,
             refreshed,
-            Some(ThreadCursor {
+            Some(MailCursor::Thread(ThreadCursor {
                 last_message_at: 0,
                 thread_id: 23,
-            }),
+            })),
             &[],
         );
 
@@ -1683,10 +1683,10 @@ mod tests {
         let (merged, retained_tail) = merge_refreshed_mail_head(
             &current,
             refreshed,
-            Some(ThreadCursor {
+            Some(MailCursor::Thread(ThreadCursor {
                 last_message_at: 0,
                 thread_id: 23,
-            }),
+            })),
             &[40],
         );
 
@@ -1708,10 +1708,10 @@ mod tests {
         let (merged, _) = merge_refreshed_mail_head(
             &current,
             refreshed,
-            Some(ThreadCursor {
+            Some(MailCursor::Thread(ThreadCursor {
                 last_message_at: 0,
                 thread_id: 23,
-            }),
+            })),
             &[10],
         );
 

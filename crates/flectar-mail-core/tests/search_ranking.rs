@@ -225,6 +225,111 @@ fn chronological_search_considers_matches_beyond_the_relevance_candidate_cap() {
 }
 
 #[test]
+fn chronological_search_pages_every_matching_thread_once() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+    for offset in 0..61_i64 {
+        let id = 100 + offset;
+        // Several threads share the same timestamp; the thread id breaks ties.
+        insert_message(&conn, id, id, "Needle report", &sender, 1_000 + offset / 3);
+    }
+    // A second, older match in a first-page thread must not reappear later.
+    insert_message(&conn, 1_000, 160, "Needle follow-up", &sender, 100);
+
+    let q = search::parse("needle");
+    let mut cursor = None;
+    let mut seen = Vec::new();
+    loop {
+        let page = repo::search::chronological_page(&conn, &q, cursor, 25).unwrap();
+        assert!(page.threads.len() <= 25);
+        seen.extend(page.threads.iter().map(|thread| thread.id));
+        match page.next_cursor {
+            Some(next) => {
+                assert_ne!(cursor, Some(next));
+                cursor = Some(next);
+            }
+            None => break,
+        }
+    }
+    assert_eq!(seen.len(), 61);
+    assert_eq!(seen, (100..=160).rev().collect::<Vec<_>>());
+}
+
+#[test]
+fn chronological_search_paging_keeps_relaxed_fallback() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+    for offset in 0..28_i64 {
+        let id = 100 + offset;
+        insert_message(&conn, id, id, "Needle report", &sender, id);
+    }
+    let q = search::parse("needle missingword");
+    let first = repo::search::chronological_page(&conn, &q, None, 25).unwrap();
+    assert_eq!(first.threads.len(), 25);
+    let cursor = first.next_cursor.expect("there are more relaxed matches");
+    assert!(cursor.relaxed);
+    let second = repo::search::chronological_page(&conn, &q, Some(cursor), 25).unwrap();
+    assert_eq!(second.threads.len(), 3);
+    assert!(second.next_cursor.is_none());
+    let ids = first
+        .threads
+        .into_iter()
+        .chain(second.threads)
+        .map(|thread| thread.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, (100..128).rev().collect::<Vec<_>>());
+}
+
+#[test]
+fn chronological_search_cursor_uses_match_date_and_stops_at_exact_end() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+    insert_message(&conn, 100, 10, "Needle report", &sender, 1_000);
+    insert_message(&conn, 101, 20, "Needle report", &sender, 2_000);
+    insert_message(&conn, 102, 30, "Needle report", &sender, 3_000);
+    // This thread has newer activity, but its newest *match* is still old.
+    insert_message(&conn, 103, 10, "Unrelated update", &sender, 5_000);
+    conn.execute(
+        "UPDATE threads SET last_message_at = 5000 WHERE id = 10",
+        [],
+    )
+    .unwrap();
+
+    let q = search::parse("needle");
+    let first = repo::search::chronological_page(&conn, &q, None, 2).unwrap();
+    assert_eq!(
+        first.threads.iter().map(|row| row.id).collect::<Vec<_>>(),
+        [30, 20]
+    );
+    let second = repo::search::chronological_page(&conn, &q, first.next_cursor, 2).unwrap();
+    assert_eq!(
+        second.threads.iter().map(|row| row.id).collect::<Vec<_>>(),
+        [10]
+    );
+    assert!(second.next_cursor.is_none());
+
+    let exact = repo::search::chronological_page(&conn, &q, None, 3).unwrap();
+    assert_eq!(exact.threads.len(), 3);
+    assert!(exact.next_cursor.is_none());
+}
+
+#[test]
+fn chronological_operator_search_pages_without_full_text_terms() {
+    let conn = db();
+    let sender = addr("Reports", "reports@example.com");
+    for offset in 0..27_i64 {
+        let id = 100 + offset;
+        insert_message(&conn, id, id, "Status update", &sender, id);
+    }
+    let q = search::parse("from:reports@example.com");
+    let first = repo::search::chronological_page(&conn, &q, None, 25).unwrap();
+    assert_eq!(first.threads.len(), 25);
+    let second = repo::search::chronological_page(&conn, &q, first.next_cursor, 25).unwrap();
+    assert_eq!(second.threads.len(), 2);
+    assert!(second.next_cursor.is_none());
+}
+
+#[test]
 fn exclude_operator_drops_matching_threads() {
     let conn = db();
     let be = addr("BE GROUP", "hi@begroup.vn");

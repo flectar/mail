@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::models::{ThreadSummary, roles};
+use crate::models::{SearchCursor, SearchPage, ThreadSummary, roles};
 use crate::search::ParsedQuery;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
@@ -110,14 +110,8 @@ fn append_operator_clauses(
     }
 }
 
-/// Lexical branch: thread ids ranked by bm25 + recency or ordered strictly by
-/// newest match for timeline callers, capped at `cap`.
-fn structured_thread_ids_ordered(
-    conn: &Connection,
-    q: &ParsedQuery,
-    cap: i64,
-    chronological: bool,
-) -> Result<Vec<i64>> {
+/// Lexical branch: thread ids ranked by bm25 + recency, capped at `cap`.
+fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result<Vec<i64>> {
     if cap <= 0 {
         return Ok(Vec::new());
     }
@@ -126,28 +120,20 @@ fn structured_thread_ids_ordered(
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     // bm25() may only be evaluated in a query directly over the FTS table, so
-    // rank inside a subquery and join the results to messages. Chronological
-    // callers must retain every FTS match; applying the relevance candidate
-    // cap first could hide a newer, weaker match. They can join FTS directly
-    // because they do not evaluate bm25(). The ranked CTE must be MATERIALIZED:
+    // rank inside a subquery and join the results to messages. The ranked CTE must be MATERIALIZED:
     // if the planner flattens it into the outer join, bm25() loses its
     // full-text context and the query fails.
     let (cte, fts_join) = if q.fts.is_empty() {
         ("", "")
     } else {
         bind.push(Box::new(q.fts.clone()));
-        if chronological {
-            where_clauses.push("messages_fts MATCH ?1".into());
-            ("", "JOIN messages_fts ON messages_fts.rowid = m.id")
-        } else {
-            (
-                "WITH f AS MATERIALIZED (
+        (
+            "WITH f AS MATERIALIZED (
                     SELECT rowid AS mid, bm25(messages_fts, 4.0, 2.0, 2.0, 1.0) AS fts_rank
                     FROM messages_fts WHERE messages_fts MATCH ?1
                     ORDER BY fts_rank LIMIT 2000)",
-                "JOIN f ON f.mid = m.id",
-            )
-        }
+            "JOIN f ON f.mid = m.id",
+        )
     };
 
     append_operator_clauses(q, &mut where_clauses, &mut bind);
@@ -156,7 +142,7 @@ fn structured_thread_ids_ordered(
         return Ok(Vec::new());
     }
 
-    let rank_expr = if q.fts.is_empty() || chronological {
+    let rank_expr = if q.fts.is_empty() {
         "0.0"
     } else {
         "f.fts_rank"
@@ -166,28 +152,15 @@ fn structured_thread_ids_ordered(
     } else {
         format!("AND {}", where_clauses.join(" AND "))
     };
-    let sql = if chronological {
-        // Walking matches newest-first and de-duplicating below avoids a
-        // GROUP BY/MAX temporary table. The first occurrence of each thread
-        // is necessarily its newest matching message.
-        format!(
-            "{cte}
-             SELECT m.thread_id
-             FROM messages m {fts_join}
-             WHERE m.thread_id IS NOT NULL {where_sql}
-             ORDER BY m.date DESC, m.thread_id DESC"
-        )
-    } else {
-        format!(
-            "{cte}
+    let sql = format!(
+        "{cte}
              SELECT m.thread_id, MIN({rank_expr}) AS rank, MAX(m.date) AS d
              FROM messages m {fts_join}
              WHERE m.thread_id IS NOT NULL {where_sql}
              GROUP BY m.thread_id
              ORDER BY rank ASC, d DESC
              LIMIT {cap}"
-        )
-    };
+    );
 
     // prepare_cached: the SQL text repeats across keystrokes (only binds
     // change), so skip re-planning on every call.
@@ -206,10 +179,6 @@ fn structured_thread_ids_ordered(
         }
     }
     Ok(ids)
-}
-
-fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result<Vec<i64>> {
-    structured_thread_ids_ordered(conn, q, cap, false)
 }
 
 /// Lexical branch at message granularity: message ids ranked by bm25 + recency
@@ -517,13 +486,112 @@ pub fn search(conn: &Connection, q: &ParsedQuery, limit: i64) -> Result<Vec<Thre
 /// Timeline search for mail-list UIs. Matching semantics stay identical to
 /// lexical search, but the newest matching thread is always presented first.
 pub fn chronological(conn: &Connection, q: &ParsedQuery, limit: i64) -> Result<Vec<ThreadSummary>> {
-    let mut thread_ids = structured_thread_ids_ordered(conn, q, limit, true)?;
-    if thread_ids.is_empty() && !q.fts.is_empty() && q.fts_or != q.fts {
-        let mut relaxed = q.clone();
-        relaxed.fts = q.fts_or.clone();
-        thread_ids = structured_thread_ids_ordered(conn, &relaxed, limit, true)?;
+    Ok(chronological_page(conn, q, None, limit)?.threads)
+}
+
+/// One bounded page of chronological matches. Scan newest-first from the
+/// beginning so only each thread's newest matching message is considered.
+/// This also excludes older matches from threads shown on previous pages.
+pub fn chronological_page(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cursor: Option<SearchCursor>,
+    limit: i64,
+) -> Result<SearchPage> {
+    if limit <= 0 {
+        return Ok(SearchPage {
+            threads: Vec::new(),
+            next_cursor: None,
+        });
     }
-    hydrate(conn, &thread_ids)
+    let mut query = q.clone();
+    if cursor.is_some_and(|cursor| cursor.relaxed) {
+        query.fts = query.fts_or.clone();
+    }
+    let mut page = chronological_page_for_query(conn, &query, cursor, limit)?;
+    if page.threads.is_empty() && cursor.is_none() && !q.fts.is_empty() && q.fts_or != q.fts {
+        query.fts = query.fts_or.clone();
+        page = chronological_page_for_query(conn, &query, None, limit)?;
+        if let Some(next_cursor) = &mut page.next_cursor {
+            next_cursor.relaxed = true;
+        }
+    }
+    Ok(page)
+}
+
+/// Only the first `limit + 1` distinct threads beyond the cursor are needed.
+/// A thread's first occurrence is its newest matching message, so scanning
+/// from the top makes the cursor safe even when older messages also match.
+fn chronological_page_for_query(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cursor: Option<SearchCursor>,
+    limit: i64,
+) -> Result<SearchPage> {
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let fts_join = if q.fts.is_empty() {
+        ""
+    } else {
+        bind.push(Box::new(q.fts.clone()));
+        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
+        "JOIN messages_fts ON messages_fts.rowid = m.id"
+    };
+    append_operator_clauses(q, &mut where_clauses, &mut bind);
+    if where_clauses.len() == 1 {
+        return Ok(SearchPage {
+            threads: Vec::new(),
+            next_cursor: None,
+        });
+    }
+
+    let sql = format!(
+        "SELECT m.thread_id, m.date FROM messages m {fts_join}
+         WHERE {} ORDER BY m.date DESC, m.thread_id DESC",
+        where_clauses.join(" AND "),
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind.iter().map(|value| value.as_ref()).collect();
+    let mut rows = stmt.query(params_ref.as_slice())?;
+    let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+    let mut matches = Vec::with_capacity(page_size.min(200) + 1);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(row) = rows.next()? {
+        let thread_id = row.get::<_, i64>(0)?;
+        if !seen.insert(thread_id) {
+            continue;
+        }
+        let match_at = row.get::<_, i64>(1)?;
+        if cursor.is_some_and(|cursor| {
+            match_at > cursor.last_match_at
+                || (match_at == cursor.last_match_at && thread_id >= cursor.thread_id)
+        }) {
+            continue;
+        }
+        matches.push((thread_id, match_at));
+        if matches.len() > page_size {
+            break;
+        }
+    }
+    let has_more = matches.len() > page_size;
+    matches.truncate(page_size);
+    let next_cursor = if has_more {
+        matches
+            .last()
+            .map(|(thread_id, last_match_at)| SearchCursor {
+                last_match_at: *last_match_at,
+                thread_id: *thread_id,
+                relaxed: cursor.is_some_and(|cursor| cursor.relaxed),
+            })
+    } else {
+        None
+    };
+    let thread_ids = matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+    Ok(SearchPage {
+        threads: hydrate(conn, &thread_ids)?,
+        next_cursor,
+    })
 }
 
 /// Hybrid search: fuse the lexical (bm25) and semantic (vector KNN) branches

@@ -648,6 +648,22 @@ pub struct ThreadPage {
     pub next_cursor: Option<ThreadCursor>,
 }
 
+/// Position in a chronological search. `last_match_at` is the newest matching
+/// message in the thread, which can differ from the thread's last message.
+/// Keep the relaxed-query choice so every page uses the same match semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchCursor {
+    pub last_match_at: i64,
+    pub thread_id: i64,
+    pub relaxed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchPage {
+    pub threads: Vec<ThreadSummary>,
+    pub next_cursor: Option<SearchCursor>,
+}
+
 // Deliberately no `Debug`: it would print the account password.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

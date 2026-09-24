@@ -71,12 +71,15 @@ use flectar_mail_core::config::Paths;
 use flectar_mail_core::models::{
     Account, AccountConfig, AddPasswordAccountArgs, CalendarConnection, CardDavConnection,
     ContactRecord, ContactRecordCursor, ContactRecordPage, CreateEventArgs, DraftAttachmentIn,
-    Label, MailProfile, MailProtocol, Provider, Settings, Snippet, ThreadCursor, UpdateEventArgs,
+    Label, MailProfile, MailProtocol, Provider, Settings, Snippet, UpdateEventArgs,
 };
+#[cfg(test)]
+use flectar_mail_core::models::ThreadCursor;
 #[cfg(test)]
 use mail::fixture_messages;
 use mail::{
-    ComposeMessage, ComposeSource, CoreMailSource, MailMessage, MailboxEntry, display_preview,
+    ComposeMessage, ComposeSource, CoreMailSource, MailCursor, MailMessage, MailboxEntry,
+    display_preview,
 };
 use mail_groups::{MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry};
 use mail_render_projection::*;
@@ -359,7 +362,7 @@ struct MailListUpdate {
 enum MailListUpdateKind {
     Refresh,
     Pagination {
-        cursor: ThreadCursor,
+        cursor: MailCursor,
         generation: u64,
     },
 }
@@ -549,7 +552,7 @@ struct InboxState {
     search_filter: String,
     inbox_count: usize,
     page: usize,
-    next_cursor: Option<ThreadCursor>,
+    next_cursor: Option<MailCursor>,
     selected_id: Option<i32>,
     checked_ids: HashSet<i32>,
     rendered_id: Option<i32>,
@@ -1034,7 +1037,10 @@ impl InboxState {
             .save(WarmStartSnapshot::capture(WarmStartProjection {
                 scope: &self.scope,
                 inbox_count: self.inbox_count,
-                next_cursor: self.next_cursor,
+                next_cursor: self.next_cursor.and_then(|cursor| match cursor {
+                    MailCursor::Thread(cursor) => Some(cursor),
+                    MailCursor::Search(_) => None,
+                }),
                 accounts: &self.connected_accounts,
                 messages: &self.messages,
                 mailboxes: &self.mailboxes,
@@ -3561,7 +3567,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         state.using_core = true;
                         state.scope = snapshot.scope;
                         state.inbox_count = snapshot.inbox_count;
-                        state.next_cursor = snapshot.next_cursor;
+                        state.next_cursor = snapshot.next_cursor.map(MailCursor::Thread);
                         state.connected_accounts = snapshot.accounts;
                         state.messages = snapshot
                             .messages

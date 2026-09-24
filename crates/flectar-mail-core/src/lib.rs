@@ -5820,11 +5820,25 @@ impl Core {
         account_id: Option<i64>,
         limit: i64,
     ) -> Result<Vec<ThreadSummary>> {
+        Ok(self
+            .search_chronological_page(query, account_id, None, limit)
+            .await?
+            .threads)
+    }
+
+    /// Cursor-paginated chronological search for the native mail list.
+    pub async fn search_chronological_page(
+        &self,
+        query: String,
+        account_id: Option<i64>,
+        cursor: Option<models::SearchCursor>,
+        limit: i64,
+    ) -> Result<models::SearchPage> {
         let mut parsed = search::parse(&query);
         parsed.account_id = account_id;
         let limit = limit.clamp(1, 100);
         self.db
-            .read(move |conn| repo::search::chronological(conn, &parsed, limit))
+            .read(move |conn| repo::search::chronological_page(conn, &parsed, cursor, limit))
             .await
     }
 

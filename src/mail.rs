@@ -10,8 +10,8 @@ use flectar_mail_core::{
         ConnectCardDavArgs, ContactRecordCursor, ContactRecordPage, CreateEventArgs, CustomTheme,
         DraftAttachmentIn, FolderInfo, Label, MailHistory, MailProfile, MailboxBadgeCounts,
         MessageDetail, PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs,
-        QueueSendResult, SaveDraftArgs, Settings, Snippet, ThreadCursor, ThreadSummary, View,
-        normalized_workspace_list_pane_width,
+        QueueSendResult, SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor,
+        ThreadSummary, View, normalized_workspace_list_pane_width,
     },
 };
 #[cfg(test)]
@@ -173,9 +173,15 @@ pub struct MailPage {
     pub messages: Vec<MailMessage>,
     pub labels: Vec<Label>,
     pub mailboxes: Vec<MailboxEntry>,
-    pub next_cursor: Option<ThreadCursor>,
+    pub next_cursor: Option<MailCursor>,
     pub account_count: usize,
     pub unified_mailboxes: Vec<MailboxEntry>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MailCursor {
+    Thread(ThreadCursor),
+    Search(SearchCursor),
 }
 
 #[derive(Clone, Debug)]
@@ -195,7 +201,7 @@ pub struct MailMetadata {
 struct PageLoadContext<'a> {
     scope: &'a str,
     query: &'a str,
-    cursor: Option<ThreadCursor>,
+    cursor: Option<MailCursor>,
     limit: i64,
     include_counts: bool,
     accounts: &'a [Account],
@@ -278,7 +284,7 @@ impl CoreMailSource {
         &self,
         scope: &str,
         query: &str,
-        cursor: Option<ThreadCursor>,
+        cursor: Option<MailCursor>,
         limit: i64,
         include_counts: bool,
     ) -> Result<MailPage, String> {
@@ -424,6 +430,13 @@ impl CoreMailSource {
         let resolved = resolve_scope(scope, accounts, folders, &labels);
 
         let (threads, next_cursor) = if query.trim().is_empty() {
+            let cursor = match cursor {
+                None => None,
+                Some(MailCursor::Thread(cursor)) => Some(cursor),
+                Some(MailCursor::Search(_)) => {
+                    return Err("search cursor used for a mailbox".into());
+                }
+            };
             let page = self
                 .core
                 .list_threads(
@@ -436,17 +449,27 @@ impl CoreMailSource {
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-            (page.threads, page.next_cursor)
+            (page.threads, page.next_cursor.map(MailCursor::Thread))
         } else {
             // The mail list is a timeline: search narrows it, then presents
             // the newest matching threads first. Relevance-ranked retrieval
             // remains available to non-UI core consumers.
-            let results = self
+            let cursor = match cursor {
+                None => None,
+                Some(MailCursor::Search(cursor)) => Some(cursor),
+                Some(MailCursor::Thread(_)) => return Err("mailbox cursor used for search".into()),
+            };
+            let page = self
                 .core
-                .search_chronological(query.trim().to_owned(), resolved.account_id, limit)
+                .search_chronological_page(
+                    query.trim().to_owned(),
+                    resolved.account_id,
+                    cursor,
+                    limit,
+                )
                 .await
                 .map_err(|error| error.to_string())?;
-            (results, None)
+            (page.threads, page.next_cursor.map(MailCursor::Search))
         };
 
         let messages = threads
@@ -3129,6 +3152,79 @@ mod tests {
             validated_startup_scope("Label:33", &[], &[], &[account_label]),
             "AccountLabel:33"
         );
+    }
+}
+
+#[cfg(test)]
+mod search_pagination_adapter_tests {
+    use super::*;
+    use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
+
+    #[tokio::test]
+    async fn search_and_inbox_pages_keep_their_own_cursors() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = CoreMailSource::start(
+            Paths::for_tests(dir.path()),
+            Arc::new(DevelopmentFileCredentialStore::new(
+                dir.path().join("credentials.json"),
+            )),
+            Arc::new(flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default()),
+        )
+        .await
+        .unwrap();
+        source
+            .core
+            .db
+            .write(|conn| {
+                conn.execute(
+                    "INSERT INTO accounts (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
+                     VALUES (1,'fixture@example.test','imap','password','fixture','imap.example.test',993,'smtp.example.test',465,0)",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO folders (id,account_id,imap_name,role) VALUES (1,1,'INBOX','inbox')",
+                    [],
+                )?;
+                for id in 1..=27_i64 {
+                    conn.execute(
+                        "INSERT INTO threads (id,account_id,subject_norm,last_message_at,message_count)
+                         VALUES (?1,1,'needle paging',?1,1)",
+                        [id],
+                    )?;
+                    conn.execute(
+                        "INSERT INTO messages (id,account_id,thread_id,folder_id,uid,subject,from_addr,date,is_read,body_state)
+                         VALUES (?1,1,?1,1,?1,'Needle paging','sender@example.test',?1,1,'cached')",
+                        [id],
+                    )?;
+                    flectar_mail_core::db::repo::search::index_message(conn, id)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        for query in ["needle", ""] {
+            let first = source
+                .load_page("Unified Inbox", query, None, 25, false)
+                .await
+                .unwrap();
+            assert_eq!(first.messages.len(), 25);
+            let cursor = first.next_cursor.expect("more mail remains");
+            assert_eq!(matches!(cursor, MailCursor::Search(_)), !query.is_empty());
+            let second = source
+                .load_page("Unified Inbox", query, Some(cursor), 25, false)
+                .await
+                .unwrap();
+            assert_eq!(second.messages.len(), 2);
+            assert!(second.next_cursor.is_none());
+            let ids = first
+                .messages
+                .into_iter()
+                .chain(second.messages)
+                .map(|message| message.id)
+                .collect::<Vec<_>>();
+            assert_eq!(ids, (1..=27).rev().collect::<Vec<_>>());
+        }
     }
 }
 

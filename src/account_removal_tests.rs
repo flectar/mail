@@ -89,10 +89,10 @@ fn account_removal_clears_deleted_models_and_preserves_surviving_selection() {
         state.rendered_id = state.selected_id;
         state.preview_closed = false;
         state.checked_ids = state.messages.iter().map(|message| message.id).collect();
-        state.next_cursor = Some(ThreadCursor {
+        state.next_cursor = Some(MailCursor::Thread(ThreadCursor {
             last_message_at: 1,
             thread_id: 1,
-        });
+        }));
         state.page = 3;
         let first_id = state.messages[0].id;
         let state = Rc::new(RefCell::new(state));
