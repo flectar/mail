@@ -52,6 +52,8 @@ pub struct MailMessage {
     pub subject: String,
     pub preview: String,
     pub time: String,
+    /// Milliseconds since the Unix epoch, used for local-date list sections.
+    pub date_ms: i64,
     pub to: String,
     pub label: String,
     pub unread: bool,
@@ -88,6 +90,8 @@ impl MailMessage {
             subject: email.subject.to_owned(),
             preview: email.preview.to_owned(),
             time: email.time.to_owned(),
+            date_ms: (Local::now() - chrono::Duration::days(i64::from(email.id - 1)))
+                .timestamp_millis(),
             to: email.to.to_owned(),
             label: email.label.to_owned(),
             unread: email.unread,
@@ -825,6 +829,13 @@ impl CoreMailSource {
         settings.show_avatars = enabled;
         self.core
             .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_group_mail_by_date(&self, enabled: bool) -> Result<(), String> {
+        self.core
+            .set_group_mail_by_date(enabled)
             .await
             .map_err(|error| error.to_string())
     }
@@ -2064,6 +2075,7 @@ fn summary_to_message(
         subject: display_thread_subject(&thread.subject),
         preview: thread.snippet,
         time: relative_time(thread.last_message_at),
+        date_ms: thread.last_message_at,
         to: String::new(),
         label: if thread.unread_count > 0 {
             "UNREAD".to_owned()
@@ -2149,6 +2161,7 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail) -> MailMessage 
         subject: message.subject.clone(),
         preview: message.snippet.clone(),
         time: relative_time(message.date),
+        date_ms: message.date,
         to: message
             .to
             .first()

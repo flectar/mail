@@ -1,6 +1,7 @@
 //! Mail list/detail projection, paging, avatars, and rendered-email bridge.
 
 use super::*;
+use chrono::Datelike;
 
 pub(super) fn refresh_from_source(
     app: &AppWindow,
@@ -206,8 +207,11 @@ pub(super) fn select_message(
 ) -> Result<(), String> {
     {
         let mut state = state.borrow_mut();
-        if !state.messages.iter().any(|row| row.id == id) {
+        let Some(date_ms) = state.messages.iter().find(|row| row.id == id).map(|row| row.date_ms) else {
             return Ok(());
+        };
+        if state.query.trim().is_empty() && app.get_group_mail_by_date() {
+            state.mail_groups.reveal(&mail_group_key(date_ms, Local::now()));
         }
         state.selected_id = Some(id);
         state.preview_closed = false;
@@ -349,19 +353,39 @@ pub(super) fn render_current(
         app.set_rendering_info_open(false);
     }
 
-    let email_rows = Rc::clone(&state.borrow().email_rows);
+    let projected_rows = make_rows(
+        visible,
+        selected_id,
+        &checked_ids,
+        &favicon_icons,
+        &labels,
+        &account_presentation,
+    );
+    let (email_rows, mail_list_entries, list_projection) = {
+        let state = state.borrow();
+        (
+            Rc::clone(&state.email_rows),
+            Rc::clone(&state.mail_list_entries),
+            project_mail_list(
+                visible,
+                &projected_rows,
+                &state.mail_groups,
+                query.trim().is_empty() && app.get_group_mail_by_date(),
+                Local::now(),
+            ),
+        )
+    };
     reconcile_model_rows_by(
         &email_rows,
-        make_rows(
-            visible,
-            selected_id,
-            &checked_ids,
-            &favicon_icons,
-            &labels,
-            &account_presentation,
-        ),
+        projected_rows,
         |row| row.id,
         same_email_row,
+    );
+    reconcile_model_rows_by(
+        &mail_list_entries,
+        list_projection,
+        mail_list_entry_key,
+        same_mail_list_entry,
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
     refresh_sidebar(state);
@@ -765,7 +789,7 @@ pub(super) fn scope_matches(email: &MailMessage, scope: &str) -> bool {
 
 // Compare visible contents: empty Slint images are not reflexively equal,
 // and freshly projected label models have different identities.
-fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
+pub(super) fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
     a.id == b.id
         && a.account_id == b.account_id
         && a.account == b.account
@@ -800,6 +824,7 @@ pub(super) fn make_rows(
     labels: &[flectar_mail_core::models::Label],
     account_presentation: &AccountPresentationSettings,
 ) -> Vec<EmailRow> {
+    let now = Local::now();
     messages
         .iter()
         .map(|email| {
@@ -828,7 +853,7 @@ pub(super) fn make_rows(
                 has_favicon: favicon.is_some(),
                 subject: email.subject.clone().into(),
                 preview: display_preview(&email.preview).into(),
-                time: email.time.clone().into(),
+                time: mail_list_display_time(email.date_ms, &email.time, &now).into(),
                 unread: email.unread,
                 starred: email.starred,
                 has_attachments: email.has_attachments,
@@ -843,6 +868,27 @@ pub(super) fn make_rows(
             }
         })
         .collect()
+}
+
+fn mail_list_display_time(
+    date_ms: i64,
+    fallback: &str,
+    now: &chrono::DateTime<Local>,
+) -> String {
+    let Some(date) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(date_ms)
+        .filter(|_| date_ms > 0)
+        .map(|date| date.with_timezone(&Local))
+    else {
+        return fallback.to_owned();
+    };
+    let days = now.date_naive().signed_duration_since(date.date_naive()).num_days();
+    if (0..=1).contains(&days) {
+        date.format("%H:%M").to_string()
+    } else if date.year() == now.year() {
+        date.format("%b %-d").to_string()
+    } else {
+        date.format("%b %-d, %Y").to_string()
+    }
 }
 
 fn label_summary(ids: &[i64], labels: &[flectar_mail_core::models::Label]) -> String {
@@ -964,22 +1010,43 @@ pub(super) fn refresh_rows_only(
         state.checked_ids.clone()
     };
     let selected_email = selected_id.and_then(|id| visible.iter().find(|email| email.id == id));
-    let (email_rows, labels) = {
+    let (email_rows, mail_list_entries, labels) = {
         let state = state.borrow();
-        (Rc::clone(&state.email_rows), state.labels.clone())
+        (
+            Rc::clone(&state.email_rows),
+            Rc::clone(&state.mail_list_entries),
+            state.labels.clone(),
+        )
+    };
+    let projected_rows = make_rows(
+        visible,
+        selected_id,
+        &checked_ids,
+        &favicon_icons,
+        &labels,
+        &account_presentation,
+    );
+    let list_projection = {
+        let state = state.borrow();
+        project_mail_list(
+            visible,
+            &projected_rows,
+            &state.mail_groups,
+            state.query.trim().is_empty() && app.get_group_mail_by_date(),
+            Local::now(),
+        )
     };
     reconcile_model_rows_by(
         &email_rows,
-        make_rows(
-            visible,
-            selected_id,
-            &checked_ids,
-            &favicon_icons,
-            &labels,
-            &account_presentation,
-        ),
+        projected_rows,
         |row| row.id,
         same_email_row,
+    );
+    reconcile_model_rows_by(
+        &mail_list_entries,
+        list_projection,
+        mail_list_entry_key,
+        same_mail_list_entry,
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
     app.set_selected_account_uses_labels(selected_email.is_some_and(|email| {
@@ -1360,6 +1427,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn list_rows_show_clock_time_for_recent_mail_and_dates_for_older_mail() {
+        let at_noon = |year, month, day| {
+            let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(12, 0, 0)
+                .unwrap();
+            Local.from_local_datetime(&naive).single().unwrap()
+        };
+        let now = at_noon(2026, 1, 5);
+        assert_eq!(mail_list_display_time(now.timestamp_millis(), "Today", &now), "12:00");
+        assert_eq!(
+            mail_list_display_time(at_noon(2026, 1, 4).timestamp_millis(), "Yesterday", &now),
+            "12:00"
+        );
+        assert_eq!(
+            mail_list_display_time(at_noon(2025, 12, 20).timestamp_millis(), "Dec 20", &now),
+            "Dec 20, 2025"
+        );
+        assert_eq!(mail_list_display_time(0, "Cached", &now), "Cached");
+    }
+
+    #[test]
     fn unchanged_mail_rows_do_not_emit_updates() {
         use slint::private_unstable_api::re_exports::{
             ModelChangeListener, ModelChangeListenerContainer,
@@ -1470,6 +1559,7 @@ mod tests {
             subject: String::new(),
             preview: String::new(),
             time: String::new(),
+            date_ms: 0,
             to: String::new(),
             label: String::new(),
             unread: false,

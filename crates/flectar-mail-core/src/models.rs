@@ -1142,6 +1142,9 @@ pub struct Settings {
     /// unless the user explicitly turns them off.
     #[serde(default = "default_true")]
     pub show_avatars: bool,
+    /// Group the mail list into collapsible local-date sections.
+    #[serde(default = "default_true")]
+    pub group_mail_by_date: bool,
     /// Workspace presentation: "default" keeps lists and details side by
     /// side, while "minimal" navigates between those shared surfaces.
     /// `mailLayout` was the short-lived original key before Contacts shared
@@ -1415,6 +1418,7 @@ impl Default for Settings {
             theme_preset: default_theme_preset(),
             custom_theme: CustomTheme::default(),
             show_avatars: true,
+            group_mail_by_date: true,
             workspace_layout: default_workspace_layout(),
             workspace_list_pane_width: default_workspace_list_pane_width(),
             monochrome_sidebar_icons: false,
@@ -1721,6 +1725,7 @@ mod tests {
         assert!(s.signature_list.is_empty());
         assert_eq!(s.ai_base_url, crate::ai::DEFAULT_BASE_URL);
         assert!(s.show_avatars);
+        assert!(s.group_mail_by_date);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
     }
@@ -1735,6 +1740,7 @@ mod tests {
 
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
+        assert_eq!(serialized["groupMailByDate"], true);
         assert_eq!(
             serialized["workspaceListPaneWidth"],
             MIN_WORKSPACE_LIST_PANE_WIDTH

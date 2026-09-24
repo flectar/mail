@@ -6969,6 +6969,16 @@ impl Core {
             .await
     }
 
+    pub async fn set_group_mail_by_date(&self, enabled: bool) -> Result<()> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                settings.group_mail_by_date = enabled;
+                repo::settings::set(conn, &settings)
+            })
+            .await
+    }
+
     /// Persist one or both OAuth registrations in a single settings write.
     /// Read on the writer thread so unrelated preferences aren't overwritten
     /// by a stale settings snapshot while this operation waits for the DB.

@@ -49,6 +49,8 @@ pub(crate) struct WarmStartMessage {
     pub(crate) subject: String,
     pub(crate) preview: String,
     pub(crate) time: String,
+    #[serde(default)]
+    pub(crate) date_ms: i64,
     pub(crate) label: String,
     pub(crate) unread: bool,
     pub(crate) starred: bool,
@@ -77,6 +79,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             subject: message.subject.clone(),
             preview: message.preview.clone(),
             time: message.time.clone(),
+            date_ms: message.date_ms,
             label: message.label.clone(),
             unread: message.unread,
             starred: message.starred,
@@ -104,6 +107,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
             subject: message.subject,
             preview: message.preview,
             time: message.time,
+            date_ms: message.date_ms,
             to: String::new(),
             label: message.label,
             unread: message.unread,
@@ -649,6 +653,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_close_to_tray(settings.close_to_tray && !cfg!(feature = "flatpak"));
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
     app.set_show_avatars(settings.show_avatars);
+    app.set_group_mail_by_date(settings.group_mail_by_date);
     app.set_show_account_markers(settings.show_account_badges);
     app.set_workspace_layout(
         match settings.workspace_layout.as_str() {
@@ -724,6 +729,7 @@ mod warm_start_tests {
             subject: "Cached subject".into(),
             preview: "Cached preview".into(),
             time: "Today".into(),
+            date_ms: 1_700_000_000_000,
             to: "secret-recipient@example.com".into(),
             label: "UNREAD".into(),
             unread: true,

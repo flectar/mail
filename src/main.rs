@@ -18,6 +18,7 @@ mod files_controller;
 mod ios_documents;
 mod latest_load;
 mod mail;
+mod mail_groups;
 mod mail_render_projection;
 mod mail_setup;
 mod mail_view_model;
@@ -77,6 +78,7 @@ use mail::fixture_messages;
 use mail::{
     ComposeMessage, ComposeSource, CoreMailSource, MailMessage, MailboxEntry, display_preview,
 };
+use mail_groups::{MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry};
 use mail_render_projection::*;
 use mail_view_model::*;
 use renderer::{GpuEmailRenderer, RenderedEmail};
@@ -518,6 +520,8 @@ struct InboxState {
     conversation_rows: Rc<VecModel<ThreadMessageRow>>,
     labels: Vec<Label>,
     email_rows: Rc<VecModel<EmailRow>>,
+    mail_list_entries: Rc<VecModel<MailListEntry>>,
+    mail_groups: MailGroupState,
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
     mail_work: Option<mail_work::MailWork>,
@@ -952,6 +956,8 @@ impl InboxState {
             conversation_rows: Rc::new(VecModel::default()),
             labels: Vec::new(),
             email_rows: Rc::new(VecModel::default()),
+            mail_list_entries: Rc::new(VecModel::default()),
+            mail_groups: MailGroupState::default(),
             scope: "Unified Inbox".to_owned(),
             query: String::new(),
             search_filter: "All mail".to_owned(),
@@ -1569,6 +1575,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     app.set_emails(Rc::clone(&initial_state.email_rows).into());
+    app.set_mail_list_entries(Rc::clone(&initial_state.mail_list_entries).into());
     app.set_thread_messages(Rc::clone(&initial_state.conversation_rows).into());
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
@@ -4607,6 +4614,49 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let app_weak = app.as_weak();
+    let state_for_mail_group = Rc::clone(&state);
+    let runtime_for_mail_group = Rc::clone(&runtime);
+    app.on_toggle_mail_group(move |key| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if !app.get_group_mail_by_date() {
+            return;
+        }
+        let key = key.to_string();
+        let header_exists = state_for_mail_group
+            .borrow()
+            .mail_list_entries
+            .iter()
+            .any(|entry| entry.is_header && entry.group_key.as_str() == key);
+        if !header_exists {
+            return;
+        }
+        let motion_enabled = app.global::<MotionSettings>().get_enabled();
+        let generation = {
+            let mut state = state_for_mail_group.borrow_mut();
+            let (generation, _) = state.mail_groups.toggle(&key);
+            if !motion_enabled {
+                state.mail_groups.finish_transition(&key, generation);
+            }
+            generation
+        };
+        refresh_rows_only(&app, &state_for_mail_group, &runtime_for_mail_group);
+        if motion_enabled {
+            let state = Rc::clone(&state_for_mail_group);
+            let runtime = Rc::clone(&runtime_for_mail_group);
+            let app_weak = app.as_weak();
+            Timer::single_shot(Duration::from_millis(330), move || {
+                if state.borrow_mut().mail_groups.finish_transition(&key, generation)
+                    && let Some(app) = app_weak.upgrade()
+                {
+                    refresh_rows_only(&app, &state, &runtime);
+                }
+            });
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_action = Rc::clone(&state);
     let runtime_for_action = Rc::clone(&runtime);
     app.on_message_action(move |action| {
@@ -6606,6 +6656,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         {
             let mut state = state_for_search.borrow_mut();
             state.query = query.to_string();
+            state.mail_groups.clear();
             state.page = 1;
             state.next_cursor = None;
             state.selected_id = None;
@@ -6629,6 +6680,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         {
             let mut state = state_for_filter.borrow_mut();
             state.search_filter = filter.to_string();
+            state.mail_groups.clear();
             state.page = 1;
             state.selected_id = None;
             state.checked_ids.clear();
@@ -6655,6 +6707,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         {
             let mut state = state_for_scope.borrow_mut();
             state.scope = scope.to_string();
+            state.mail_groups.clear();
             state.page = 1;
             state.next_cursor = None;
             state.selected_id = None;
@@ -6840,6 +6893,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             }
         });
     }
+
+    // A mailbox left open overnight must promote its date sections and row
+    // timestamps without waiting for a network sync or a folder change.
+    let date_refresh_state = Rc::clone(&state);
+    let date_refresh_runtime = Rc::clone(&runtime);
+    let date_refresh_app = app.as_weak();
+    let last_local_date = Cell::new(Local::now().date_naive());
+    let date_refresh_timer = Timer::default();
+    date_refresh_timer.start(slint::TimerMode::Repeated, Duration::from_secs(60), move || {
+        let today = Local::now().date_naive();
+        if today != last_local_date.replace(today)
+            && let Some(app) = date_refresh_app.upgrade()
+        {
+            refresh_rows_only(&app, &date_refresh_state, &date_refresh_runtime);
+        }
+    });
 
     // The main window is already shown above and the independently compiled
     // tray participates in the same process-wide event loop. This is Slint's

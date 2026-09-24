@@ -1,10 +1,11 @@
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
-import { EmailRow, MailDragApi } from "../models.slint";
+import { EmailRow, MailDragApi, MailListEntry } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
+import { Button } from "../components/button.slint";
 import { FloatingActionButton, SelectionCheckBox, ToolbarIconButton } from "../components/controls.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
@@ -49,6 +50,114 @@ component MailListLabelChip inherits Rectangle {
     }
 }
 
+component MailGroupHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> group-key;
+    in property <int> message-count;
+    in property <bool> expanded;
+    in property <color> surface;
+    in property <color> hover-color;
+    in property <color> text-color;
+    in property <color> secondary-color;
+    in property <color> divider-color;
+    in property <color> focus-color;
+    callback toggled(string);
+
+    forward-focus: header-keyboard;
+    background: header-hit.has-hover ? root.hover-color : root.surface;
+    border-width: header-keyboard.has-focus ? 2px : 0px;
+    border-color: root.focus-color;
+    border-radius: 5px;
+    accessible-role: button;
+    accessible-id: "mail-group-" + root.group-key;
+    accessible-label: root.title + ", " + @tr("{n} message" | "{n} messages" % root.message-count);
+    accessible-expandable: true;
+    accessible-expanded: root.expanded;
+    accessible-action-default => { root.toggled(root.group-key); }
+    accessible-action-expand => { if !root.expanded { root.toggled(root.group-key); } }
+    animate background { duration: 150ms; easing: ease-out; enabled: MotionSettings.enabled; }
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    Image {
+        x: 11px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../icons/lucide/outline/chevron-right.svg");
+        colorize: root.secondary-color;
+        image-fit: contain;
+        opacity: root.expanded ? 0 : 1;
+        animate opacity { duration: 160ms; easing: spring(0); enabled: MotionSettings.enabled; }
+        accessible-role: none;
+    }
+    Image {
+        x: 11px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../icons/lucide/outline/chevron-down.svg");
+        colorize: root.secondary-color;
+        image-fit: contain;
+        opacity: root.expanded ? 1 : 0;
+        animate opacity { duration: 160ms; easing: spring(0); enabled: MotionSettings.enabled; }
+        accessible-role: none;
+    }
+    Text {
+        x: 34px;
+        y: 0px;
+        width: max(0px, parent.width - self.x - 52px);
+        height: parent.height;
+        text: root.title;
+        color: root.text-color;
+        font-size: TypeScale.caption;
+        font-weight: 650;
+        overflow: elide;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+    Text {
+        x: parent.width - self.width - 12px;
+        y: 0px;
+        width: 36px;
+        height: parent.height;
+        text: root.message-count;
+        color: root.secondary-color;
+        font-size: TypeScale.caption;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+    header-keyboard := FocusScope {
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.toggled(root.group-key);
+                return accept;
+            }
+            if event.text == Key.RightArrow && !root.expanded {
+                root.toggled(root.group-key);
+                return accept;
+            }
+            if event.text == Key.LeftArrow && root.expanded {
+                root.toggled(root.group-key);
+                return accept;
+            }
+            reject
+        }
+    }
+    header-hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { header-keyboard.focus(); root.toggled(root.group-key); }
+    }
+}
+
 export component MailListPane inherits Rectangle {
     in property <bool> compact: false;
     // Single-surface navigation is also used by the desktop Minimal layout;
@@ -58,6 +167,8 @@ export component MailListPane inherits Rectangle {
     in property <bool> dense: false;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
+    in property <[MailListEntry]> list_entries: [];
+    in property <bool> group_mail_by_date: true;
     in property <string> selected_scope: "Unified Inbox";
     in property <string> scope_title: selected_scope;
     in property <string> search_query: "";
@@ -66,6 +177,7 @@ export component MailListPane inherits Rectangle {
     in property <bool> can_load_more: false;
     in property <bool> loading_more: false;
     in property <int> content_revision: 0;
+    private property <bool> accordion-paused-pagination: false;
     in property <int> selection-count: 0;
     private property <bool> selection-mode: root.selection-count > 0;
     // Four pixels above and below the 40px controls keeps the selection row
@@ -98,13 +210,14 @@ export component MailListPane inherits Rectangle {
     callback open_compose();
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
+    callback toggle_mail_group(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
 
     animate bulk-toolbar-height { duration: 180ms; easing: spring(0); }
 
     pagination := InfiniteScrollController {
-        active: true;
+        active: !root.accordion-paused-pagination;
         can-load-more: root.can_load_more; loading: root.loading_more;
         row-count: root.emails.length; revision: root.content_revision;
         content-height: mail-list-scroll.content-height;
@@ -116,9 +229,39 @@ export component MailListPane inherits Rectangle {
         mail-list-scroll.content-y = 0px;
         pagination.reset();
     }
-    changed selected_scope => { root.reset-pagination(); }
-    changed search_query => { root.reset-pagination(); }
-    changed search_filter => { root.reset-pagination(); }
+    changed selected_scope => { root.accordion-paused-pagination = false; root.reset-pagination(); }
+    changed search_query => { root.accordion-paused-pagination = false; root.reset-pagination(); }
+    changed search_filter => { root.accordion-paused-pagination = false; root.reset-pagination(); }
+    changed group_mail_by_date => { root.accordion-paused-pagination = false; }
+
+    pure function month-name(month: int) -> string {
+        if month == 1 { return @tr("January"); }
+        if month == 2 { return @tr("February"); }
+        if month == 3 { return @tr("March"); }
+        if month == 4 { return @tr("April"); }
+        if month == 5 { return @tr("May"); }
+        if month == 6 { return @tr("June"); }
+        if month == 7 { return @tr("July"); }
+        if month == 8 { return @tr("August"); }
+        if month == 9 { return @tr("September"); }
+        if month == 10 { return @tr("October"); }
+        if month == 11 { return @tr("November"); }
+        if month == 12 { return @tr("December"); }
+        return @tr("Earlier");
+    }
+
+    pure function group-title(kind: string, month: int, year: int) -> string {
+        if kind == "today" { return @tr("Today"); }
+        if kind == "yesterday" { return @tr("Yesterday"); }
+        if kind == "this-week" { return @tr("This week"); }
+        if kind == "last-week" { return @tr("Last week"); }
+        if kind == "this-month" { return @tr("This month"); }
+        if kind == "last-month" { return @tr("Last month"); }
+        if kind == "month" {
+            return year == 0 ? root.month-name(month) : @tr("{} {}", root.month-name(month), year);
+        }
+        return @tr("Earlier");
+    }
 
                 width: LayoutMetrics.list-pane-width;
                 vertical-stretch: 1;
@@ -287,82 +430,105 @@ export component MailListPane inherits Rectangle {
                             x: LayoutMetrics.list-row-inset;
                             y: 0px;
                             width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
-                            height: parent.height;
+                            height: parent.height - (root.accordion-paused-pagination && root.can_load_more ? 54px : 0px);
                             horizontal-scrollbar-policy: always-off;
                             mouse-drag-pan-enabled: root.compact;
                             accessible-label: root.scope_title;
                             accessible-item-count: root.emails.length;
-                            scrolled => { pagination.user-scrolled(); }
+                            scrolled => {
+                                root.accordion-paused-pagination = false;
+                                pagination.user-scrolled();
+                            }
 
-                            for row[index] in root.emails : mail-row := Rectangle {
+                            for entry in root.list_entries : mail-row := Rectangle {
+                                private property <EmailRow> mail-data: entry.email;
+                                private property <bool> reveal-ready: !entry.reveal_row;
                                 private property <bool> touch-pending: false;
                                 private property <bool> long-press-triggered: false;
                                 private property <float> touch-start-x: 0;
                                 private property <float> touch-start-y: 0;
                                 width: mail-list-scroll.visible-width;
-                                height: root.dense ? 44px : 96px;
+                                height: entry.is_header ? (root.compact ? 44px : 40px)
+                                    : entry.show_row && (mail-row.reveal-ready || !MotionSettings.enabled)
+                                        ? (root.dense ? 44px : 96px) : 0px;
                                 border-radius: 6px;
                                 clip: true;
-                                opacity: row-drag.dragging ? 0.55 : 1;
-                                background: row.checked ? root.accent-soft : row.selected ? root.selected-row : root.surface;
+                                opacity: !entry.is_header && row-drag.dragging ? 0.55 : 1;
+                                background: entry.is_header ? root.surface : mail-data.checked ? root.accent-soft : mail-data.selected ? root.selected-row : root.surface;
                                 animate opacity { duration: 120ms; }
-                                accessible-role: list-item;
-                                accessible-label: @tr("{}, {}", row.sender, row.subject == "" ? @tr("(No subject)") : row.subject)
-                                    + ", " + row.account
-                                    + (row.account_profile == "" ? "" : ", " + @tr("Profile: {}", row.account_profile))
-                                    + (row.message_count > 1 ? ", " + @tr("{} messages", row.message_count) : "")
-                                    + (row.label_summary == "" ? "" : ", " + row.label_summary)
-                                    + (row.has_attachments ? ", " + @tr("Has attachments") : "")
-                                    + (row.has_replied ? ", " + @tr("Replied") : "");
-                                accessible-id: "mail-row-" + row.id;
-                                accessible-item-index: index;
-                                accessible-item-selectable: true;
-                                accessible-item-selected: root.selection-mode ? row.checked : row.selected;
-                                accessible-action-default => {
-                                    if (root.compact && root.selection-mode) {
-                                        root.set_email_checked(row.id, !row.checked);
-                                    } else {
-                                        root.select_email(row.id);
+                                animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+                                accessible-role: none;
+
+                                Rectangle {
+                                    visible: !entry.is_header && entry.show_row;
+                                    width: parent.width;
+                                    height: parent.height;
+                                    background: transparent;
+                                    accessible-role: list-item;
+                                    accessible-label: @tr("{}, {}", mail-data.sender, mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject)
+                                        + ", " + mail-data.account
+                                        + (mail-data.account_profile == "" ? "" : ", " + @tr("Profile: {}", mail-data.account_profile))
+                                        + (mail-data.message_count > 1 ? ", " + @tr("{} messages", mail-data.message_count) : "")
+                                        + (mail-data.label_summary == "" ? "" : ", " + mail-data.label_summary)
+                                        + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
+                                        + (mail-data.has_replied ? ", " + @tr("Replied") : "");
+                                    accessible-id: "mail-row-" + mail-data.id;
+                                    accessible-item-index: entry.email_index;
+                                    accessible-item-selectable: true;
+                                    accessible-item-selected: root.selection-mode ? mail-data.checked : mail-data.selected;
+                                    accessible-action-default => {
+                                        if (root.compact && root.selection-mode) {
+                                            root.set_email_checked(mail-data.id, !mail-data.checked);
+                                        } else {
+                                            root.select_email(mail-data.id);
+                                        }
                                     }
                                 }
 
                                 Timer {
+                                    interval: 16ms;
+                                    running: entry.reveal_row && !mail-row.reveal-ready;
+                                    triggered => { mail-row.reveal-ready = true; }
+                                }
+
+                                Timer {
                                     interval: 1s;
-                                    running: mail-row.touch-pending;
+                                    running: !entry.is_header && entry.show_row && mail-row.touch-pending;
                                     triggered => {
                                         mail-row.touch-pending = false;
                                         mail-row.long-press-triggered = true;
-                                        root.set_email_checked(row.id, true);
+                                        root.set_email_checked(mail-data.id, true);
                                     }
                                 }
 
                                 Rectangle {
-                                    visible: row.show_account_marker;
+                                    visible: !entry.is_header && mail-data.show_account_marker;
                                     x: 0px;
                                     y: 4px;
                                     width: 3px;
                                     height: parent.height - 8px;
                                     border-radius: 2px;
-                                    background: row.account_color;
+                                    background: mail-data.account_color;
                                     accessible-role: none;
                                 }
 
                                 Avatar {
-                                    visible: root.show-avatars;
+                                    visible: !entry.is_header && root.show-avatars;
                                     x: 14px;
                                     y: root.dense ? 8px : 12px;
                                     size: root.dense ? 28px : 38px;
-                                    source: root.dense ? row.favicon_small : row.favicon;
-                                    has-source: row.has_favicon;
-                                    fallback: row.initials;
+                                    source: root.dense ? mail-data.favicon_small : mail-data.favicon;
+                                    has-source: mail-data.has_favicon;
+                                    fallback: mail-data.initials;
                                     image-fit: contain;
-                                    background-color: row.has_favicon ? #ffffff : (row.selected ? root.avatar-selected-bg : root.avatar-bg);
-                                    foreground-color: row.selected ? root.accent : root.secondary-text;
-                                    avatar-border-width: row.has_favicon ? 1px : 0px;
+                                    background-color: mail-data.has_favicon ? #ffffff : (mail-data.selected ? root.avatar-selected-bg : root.avatar-bg);
+                                    foreground-color: mail-data.selected ? root.accent : root.secondary-text;
+                                    avatar-border-width: mail-data.has_favicon ? 1px : 0px;
                                     avatar-border-color: root.border;
                                 }
 
                                 Rectangle {
+                                    visible: !entry.is_header;
                                     x: root.show-avatars ? (root.dense ? 52px : 64px) : 14px;
                                     y: root.dense ? 0px : 8px;
                                     // Leave 24px on the right: 12px row
@@ -375,7 +541,7 @@ export component MailListPane inherits Rectangle {
                                         y: 0px;
                                         width: min(72px, self.preferred-width);
                                         height: root.dense ? 44px : 22px;
-                                        text: row.time;
+                                        text: mail-data.time;
                                         color: root.muted-text;
                                         font-size: TypeScale.caption;
                                         overflow: elide;
@@ -383,17 +549,17 @@ export component MailListPane inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     sender-indicators := HorizontalBox {
-                                        x: row.message_count > 1
+                                        x: mail-data.message_count > 1
                                             ? thread-count.x - self.width - (self.width > 0px ? 8px : 0px)
                                             : sender-time.x - self.width - 8px;
                                         y: 0px;
-                                        width: row.has_attachments && row.has_replied && row.message_count <= 1 ? 32px
-                                            : row.has_attachments || (row.has_replied && row.message_count <= 1) ? 14px : 0px;
+                                        width: mail-data.has_attachments && mail-data.has_replied && mail-data.message_count <= 1 ? 32px
+                                            : mail-data.has_attachments || (mail-data.has_replied && mail-data.message_count <= 1) ? 14px : 0px;
                                         height: root.dense ? 44px : 22px;
                                         spacing: 4px;
                                         cross-axis-alignment: center;
 
-                                        if row.has_attachments : Image {
+                                        if mail-data.has_attachments : Image {
                                             width: 14px;
                                             height: 14px;
                                             source: @image-url("../icons/lucide/outline/paperclip.svg");
@@ -401,7 +567,7 @@ export component MailListPane inherits Rectangle {
                                             image-fit: contain;
                                             accessible-role: none;
                                         }
-                                        if row.has_replied && row.message_count <= 1 : Image {
+                                        if mail-data.has_replied && mail-data.message_count <= 1 : Image {
                                             width: 14px;
                                             height: 14px;
                                             source: @image-url("../icons/lucide/outline/reply.svg");
@@ -411,15 +577,15 @@ export component MailListPane inherits Rectangle {
                                         }
                                     }
                                     thread-count := Rectangle {
-                                        visible: row.message_count > 1;
+                                        visible: mail-data.message_count > 1;
                                         x: sender-time.x - self.width - 8px;
                                         y: root.dense ? 10px : 2px;
-                                        width: row.message_count >= 100 ? 48px : row.message_count >= 10 ? 42px : 36px;
+                                        width: mail-data.message_count >= 100 ? 48px : mail-data.message_count >= 10 ? 42px : 36px;
                                         height: 22px;
                                         border-radius: 11px;
                                         background: root.accent-soft;
                                         accessible-role: text;
-                                        accessible-label: @tr("{} messages in this conversation", row.message_count);
+                                        accessible-label: @tr("{} messages in this conversation", mail-data.message_count);
 
                                         HorizontalBox {
                                             padding-left: 7px;
@@ -435,7 +601,7 @@ export component MailListPane inherits Rectangle {
                                                 accessible-role: none;
                                             }
                                             Text {
-                                                text: row.message_count;
+                                                text: mail-data.message_count;
                                                 color: root.accent;
                                                 font-size: TypeScale.caption;
                                                 font-weight: 700;
@@ -446,22 +612,22 @@ export component MailListPane inherits Rectangle {
                                     sender-title := Text {
                                         x: 0px;
                                         y: 0px;
-                                        width: row.message_count > 1
+                                        width: mail-data.message_count > 1
                                             ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
                                             : root.dense ? min(170px, max(0px, parent.width - 190px))
-                                            : row.has_attachments || row.has_replied
+                                            : mail-data.has_attachments || mail-data.has_replied
                                                 ? max(0px, sender-indicators.x - 8px)
                                                 : max(0px, sender-time.x - 22px);
                                         height: root.dense ? 44px : 22px;
-                                        text: row.sender;
+                                        text: mail-data.sender;
                                         color: root.heading;
                                         font-size: root.dense ? TypeScale.body : TypeScale.body-large;
-                                        font-weight: row.unread ? 700 : 500;
+                                        font-weight: mail-data.unread ? 700 : 500;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
                                     Rectangle {
-                                        visible: row.unread;
+                                        visible: mail-data.unread;
                                         x: root.dense
                                             ? min(sender-title.preferred-width + 6px, sender-title.width - 9px)
                                             : min(sender-title.preferred-width + 6px, sender-title.width - 9px);
@@ -476,10 +642,10 @@ export component MailListPane inherits Rectangle {
                                         y: root.dense ? 0px : 27px;
                                         width: root.dense ? min(260px, max(0px, sender-time.x - self.x - 56px)) : parent.width;
                                         height: root.dense ? 44px : 22px;
-                                        text: row.subject == "" ? @tr("(No subject)") : row.subject;
+                                        text: mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject;
                                         color: root.body-text;
                                         font-size: TypeScale.body;
-                                        font-weight: row.unread ? 700 : 500;
+                                        font-weight: mail-data.unread ? 700 : 500;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
@@ -489,7 +655,7 @@ export component MailListPane inherits Rectangle {
                                         y: 54px;
                                         width: 88px;
                                         height: 20px;
-                                        text: row.account;
+                                        text: mail-data.account;
                                         color: root.muted-text;
                                         font-size: TypeScale.caption;
                                         overflow: elide;
@@ -504,22 +670,22 @@ export component MailListPane inherits Rectangle {
                                         height: 22px;
                                         background: transparent;
                                         accessible-role: text;
-                                        accessible-label: @tr("Account: {}", row.account);
+                                        accessible-label: @tr("Account: {}", mail-data.account);
 
                                         Rectangle {
-                                            visible: row.show_account_marker;
+                                            visible: mail-data.show_account_marker;
                                             x: 0px;
                                             y: 8px;
                                             width: 6px;
                                             height: 6px;
                                             border-radius: 3px;
-                                            background: row.account_color;
+                                            background: mail-data.account_color;
                                         }
                                         Text {
-                                            x: row.show_account_marker ? 10px : 0px;
-                                            width: row.show_account_marker ? 38px : 48px;
+                                            x: mail-data.show_account_marker ? 10px : 0px;
+                                            width: mail-data.show_account_marker ? 38px : 48px;
                                             height: parent.height;
-                                            text: row.account;
+                                            text: mail-data.account;
                                             color: root.muted-text;
                                             font-size: TypeScale.caption;
                                             overflow: elide;
@@ -535,7 +701,7 @@ export component MailListPane inherits Rectangle {
                                         spacing: 4px;
                                         cross-axis-alignment: center;
 
-                                        for label[index] in row.labels : MailListLabelChip {
+                                        for label[index] in mail-data.labels : MailListLabelChip {
                                             visible: index < (root.dense ? 1 : 2);
                                             name: label.name;
                                             name-has-emoji: label.name_has_emoji;
@@ -543,18 +709,18 @@ export component MailListPane inherits Rectangle {
                                             text-color: root.heading;
                                             compact: root.dense;
                                         }
-                                        if row.labels.length > (root.dense ? 1 : 2) : Text {
+                                        if mail-data.labels.length > (root.dense ? 1 : 2) : Text {
                                             min-width: 22px;
                                             preferred-width: 22px;
                                             max-width: 22px;
-                                            text: "+" + (row.labels.length - (root.dense ? 1 : 2));
+                                            text: "+" + (mail-data.labels.length - (root.dense ? 1 : 2));
                                             color: root.secondary-text;
                                             font-size: TypeScale.caption;
                                             vertical-alignment: center;
                                         }
                                         Text {
                                             horizontal-stretch: 1;
-                                            text: row.preview;
+                                            text: mail-data.preview;
                                             color: root.faint-text;
                                             font-size: TypeScale.secondary;
                                             overflow: elide;
@@ -570,8 +736,9 @@ export component MailListPane inherits Rectangle {
                                 row-drag := DragArea {
                                     width: parent.width;
                                     height: parent.height;
-                                    enabled: !root.compact;
-                                    data: MailDragApi.make-transfer(row.id, row.account_id);
+                                    visible: !entry.is_header && entry.show_row;
+                                    enabled: !entry.is_header && !root.compact;
+                                    data: MailDragApi.make-transfer(mail-data.id, mail-data.account_id);
                                     allow-copy: true;
                                     allow-move: true;
 
@@ -595,7 +762,7 @@ export component MailListPane inherits Rectangle {
                                                         mail-row.long-press-triggered = false;
                                                         mail-row.touch-pending = true;
                                                     } else {
-                                                        root.select_email(row.id);
+                                                        root.select_email(mail-data.id);
                                                     }
                                                 }
                                                 if (root.compact
@@ -613,9 +780,9 @@ export component MailListPane inherits Rectangle {
                                                     mail-row.touch-pending = false;
                                                     if activate {
                                                         if root.selection-mode {
-                                                            root.set_email_checked(row.id, !row.checked);
+                                                            root.set_email_checked(mail-data.id, !mail-data.checked);
                                                         } else {
-                                                            root.select_email(row.id);
+                                                            root.select_email(mail-data.id);
                                                         }
                                                     }
                                                     mail-row.long-press-triggered = false;
@@ -627,33 +794,73 @@ export component MailListPane inherits Rectangle {
 
                                             row-check := SelectionCheckBox {
                                                 // Keep the control in the keyboard focus order even before hover.
-                                                opacity: row.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.has-focus)) ? 1 : 0;
-                                                enabled: !root.compact || root.selection-mode || row.checked;
+                                                opacity: mail-data.checked || root.selection-mode || (!root.compact && (row-hit.has-hover || self.has-focus)) ? 1 : 0;
+                                                enabled: !root.compact || root.selection-mode || mail-data.checked;
                                                 x: root.show-avatars ? 14px : 0px;
                                                 y: root.show-avatars ? (root.dense ? 8px : 12px) : (parent.height - self.height) / 2;
                                                 width: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
                                                 height: root.show-avatars ? (root.dense ? 28px : 38px) : 32px;
-                                                checked: row.checked;
+                                                checked: mail-data.checked;
                                                 avatar-overlay: root.show-avatars;
-                                                accessible-label: row.checked
-                                                    ? @tr("Deselect {}", row.sender)
-                                                    : @tr("Select {}", row.sender);
+                                                accessible-label: mail-data.checked
+                                                    ? @tr("Deselect {}", mail-data.sender)
+                                                    : @tr("Select {}", mail-data.sender);
                                                 animate opacity { duration: 120ms; }
-                                                toggled(checked) => { root.set_email_checked(row.id, checked); }
+                                                toggled(checked) => { root.set_email_checked(mail-data.id, checked); }
                                             }
                                         }
 
                                         Menu {
-                                            MenuItem { title: row.starred ? @tr("Remove star") : @tr("Star message"); activated => { root.message_action_for_email(row.id, row.starred ? "unstar" : "star"); } }
-                                            MenuItem { title: row.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(row.id, row.unread ? "mark_read" : "mark_unread"); } }
-                                            MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(row.id, "archive"); } }
-                                            MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(row.id, "spam"); } }
-                                            MenuItem { title: @tr("Move to trash"); activated => { root.message_action_for_email(row.id, "trash"); } }
+                                            MenuItem { title: mail-data.starred ? @tr("Remove star") : @tr("Star message"); activated => { root.message_action_for_email(mail-data.id, mail-data.starred ? "unstar" : "star"); } }
+                                            MenuItem { title: mail-data.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(mail-data.id, mail-data.unread ? "mark_read" : "mark_unread"); } }
+                                            MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
+                                            MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }
+                                            MenuItem { title: @tr("Move to trash"); activated => { root.message_action_for_email(mail-data.id, "trash"); } }
                                         }
                                     }
                                 }
+
+                                if entry.is_header : MailGroupHeader {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    title: root.group-title(entry.group_kind, entry.group_month, entry.group_year);
+                                    group-key: entry.group_key;
+                                    message-count: entry.group_count;
+                                    expanded: entry.expanded;
+                                    surface: root.surface;
+                                    hover-color: root.control-bg;
+                                    text-color: root.secondary-text;
+                                    secondary-color: root.muted-text;
+                                    divider-color: root.border-subtle;
+                                    focus-color: root.accent;
+                                    toggled(key) => {
+                                        root.accordion-paused-pagination = true;
+                                        root.toggle_mail_group(key);
+                                    }
+                                }
                             }
+
                         }
+                        if root.accordion-paused-pagination && root.can_load_more : Rectangle {
+                                x: LayoutMetrics.list-row-inset;
+                                y: parent.height - self.height;
+                                width: max(0px, parent.width - 2 * LayoutMetrics.list-row-inset);
+                                height: 54px;
+                                background: root.surface;
+                                Rectangle {
+                                    width: parent.width;
+                                    height: LayoutMetrics.divider-width;
+                                    background: root.border-subtle;
+                                }
+                                Button {
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 144px;
+                                    text: root.loading_more ? @tr("Loading…") : @tr("Load older mail");
+                                    enabled: !root.loading_more;
+                                    clicked => { root.load_more(); }
+                                }
+                            }
                         }
 
                         if root.loading && root.emails.length == 0 : Rectangle {

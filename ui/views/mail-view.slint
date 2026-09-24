@@ -1,5 +1,5 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { EmailLink, EmailRow, EmailTile, SidebarRow, MailLabelRow, ThreadMessageRow } from "../models.slint";
+import { EmailLink, EmailRow, EmailTile, SidebarRow, MailLabelRow, MailListEntry, ThreadMessageRow } from "../models.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
@@ -20,6 +20,8 @@ export component MailView inherits Rectangle {
     in property <bool> show-avatars: true;
     in property <bool> loading: false;
     in property <[EmailRow]> emails: [];
+    in property <[MailListEntry]> list_entries: [];
+    in property <bool> group_mail_by_date: true;
     in property <[ThreadMessageRow]> thread_messages: [];
     in property <int> selected_thread_index: 0;
     in property <[SidebarRow]> sidebar_rows: [];
@@ -131,6 +133,7 @@ export component MailView inherits Rectangle {
     callback message_action(string);
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
+    callback toggle_mail_group(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -211,6 +214,8 @@ export component MailView inherits Rectangle {
                 show-avatars: root.show-avatars;
                 loading: root.loading;
                 emails: root.emails;
+                list_entries: root.list_entries;
+                group_mail_by_date: root.group_mail_by_date;
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 search_query: root.search_query;
@@ -247,6 +252,7 @@ export component MailView inherits Rectangle {
                     root.message_action_for_email(id, action);
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
+                toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
@@ -432,6 +438,8 @@ export component MailView inherits Rectangle {
                 show-avatars: root.show-avatars;
                 dense: !root.compact;
                 emails: root.emails;
+                list_entries: root.list_entries;
+                group_mail_by_date: root.group_mail_by_date;
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 search_query: root.search_query;
@@ -473,6 +481,7 @@ export component MailView inherits Rectangle {
                     root.message_action_for_email(id, action);
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
+                toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }

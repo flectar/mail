@@ -14,7 +14,7 @@ import { TypeScale } from "typography.slint";
 export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
-import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailProfileRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
+import { AccountRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 export { ThreadMessageRow, StorageUsageRow } from "models.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
@@ -172,6 +172,9 @@ export global I18n {
         if (key == "Avatar preference updated for this session.") { return @tr("Avatar preference updated for this session."); }
         if (key == "Avatar preference saved.") { return @tr("Avatar preference saved."); }
         if (key == "Could not save avatar preference: {}") { return @tr("Could not save avatar preference: {}", argument); }
+        if (key == "Mail grouping is active for this session.") { return @tr("Mail grouping is active for this session."); }
+        if (key == "Mail grouping preference saved.") { return @tr("Mail grouping preference saved."); }
+        if (key == "Could not save mail grouping preference: {}") { return @tr("Could not save mail grouping preference: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
         if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
@@ -479,6 +482,7 @@ export component AppWindow inherits Window {
     callback message_action(string);
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
+    callback toggle_mail_group(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -493,6 +497,7 @@ export component AppWindow inherits Window {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_group_mail_by_date(bool);
     callback save_mail_profile(string, string, color) -> string;
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
@@ -601,6 +606,7 @@ export component AppWindow inherits Window {
     callback refresh-email-resources();
 
     in property <[EmailRow]> emails: [];
+    in property <[MailListEntry]> mail_list_entries: [];
     in property <[EmailTemplateRow]> compose_templates: [];
     in property <[ThreadMessageRow]> thread_messages: [];
     in property <int> selected_thread_index: 0;
@@ -748,6 +754,7 @@ export component AppWindow inherits Window {
     in property <[StorageUsageRow]> storage_usage: [];
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    in-out property <bool> group_mail_by_date: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
@@ -1099,6 +1106,8 @@ export component AppWindow inherits Window {
             list-pane-width-committed(width) => { root.save_workspace_list_pane_width(width); }
             show-avatars: root.show_avatars;
             emails: root.emails;
+            list_entries: root.mail_list_entries;
+            group_mail_by_date: root.group_mail_by_date;
             thread_messages: root.thread_messages;
             selected_thread_index: root.selected_thread_index;
             sidebar_rows: root.sidebar_rows;
@@ -1194,6 +1203,7 @@ export component AppWindow inherits Window {
             message_action(action) => { root.message_action(action); }
             message_action_for_email(id, action) => { root.message_action_for_email(id, action); }
             bulk_message_action(action) => { root.bulk_message_action(action); }
+            toggle_mail_group(key) => { root.toggle_mail_group(key); }
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
@@ -1484,6 +1494,7 @@ export component AppWindow inherits Window {
             settings_tab <=> root.settings_tab;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
+            group_mail_by_date <=> root.group_mail_by_date;
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
@@ -1581,6 +1592,7 @@ export component AppWindow inherits Window {
             }
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
+            save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
                 root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
             }

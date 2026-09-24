@@ -363,6 +363,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> settings_tab: "General";
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    in-out property <bool> group_mail_by_date: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
@@ -441,6 +442,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_group_mail_by_date(bool);
     callback save_mail_profile(string, string, color) -> string;
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
@@ -536,7 +538,7 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette language workspace layout renderer privacy remote images sync")
+            ? @tr("general theme appearance palette language workspace layout renderer privacy remote images sync group messages date inbox")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures")
             : section == "Contacts"
@@ -938,7 +940,7 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             Rectangle {
-                                height: root.compact ? 236px : 194px;
+                                height: root.compact ? 324px : 262px;
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -957,6 +959,19 @@ export component SettingsDialog inherits Rectangle {
                                         Text { text: @tr("DEFAULT"); color: root.accent; font-size: TypeScale.caption; font-weight: 700; }
                                     }
                                     Text { height: root.compact ? 34px : 17px; text: @tr("Combines incoming messages from every connected account."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Group messages by date");
+                                        description: @tr("Show collapsible date sections in the mail list.");
+                                        checked: root.group_mail_by_date;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.group_mail_by_date = checked;
+                                            root.save_group_mail_by_date(checked);
+                                        }
+                                    }
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     HorizontalBox {
                                         height: root.compact ? 68px : 48px;

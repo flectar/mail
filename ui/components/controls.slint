@@ -141,6 +141,8 @@ export component Switch inherits Rectangle {
     height: 22px;
     border-radius: 11px;
     background: root.checked ? AppTheme.accent : AppTheme.control-border;
+    border-width: switch-focus.has-focus ? 2px : 0px;
+    border-color: AppTheme.heading;
     opacity: root.enabled ? 1 : 0.45;
     animate background { duration: 140ms; easing: ease-out; }
 
@@ -154,20 +156,43 @@ export component Switch inherits Rectangle {
         animate x { duration: 180ms; easing: spring(0.18); }
     }
 
-    TouchArea {
-        x: (parent.width - max(parent.width, 44px)) / 2;
-        y: (parent.height - 44px) / 2;
-        width: max(parent.width, 44px);
-        height: 44px;
+    switch-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
+        enabled: root.enabled;
+        focus-on-click: true;
+        focus-on-tab-navigation: true;
         accessible-role: switch;
         accessible-label: root.control-label == "" ? (root.checked ? @tr("On") : @tr("Off")) : root.control-label;
         accessible-checked: root.checked;
-        enabled: root.enabled;
-        clicked => {
-            root.checked = !root.checked;
-            root.toggled();
+        accessible-action-default => {
+            if root.enabled {
+                root.checked = !root.checked;
+                root.toggled();
+            }
         }
-        mouse-cursor: pointer;
+        key-pressed(event) => {
+            if root.enabled && (event.text == Key.Return || event.text == Key.Space) {
+                root.checked = !root.checked;
+                root.toggled();
+                return accept;
+            }
+            reject
+        }
+        TouchArea {
+            x: (parent.width - max(parent.width, 44px)) / 2;
+            y: (parent.height - 44px) / 2;
+            width: max(parent.width, 44px);
+            height: 44px;
+            accessible-role: none;
+            enabled: root.enabled;
+            clicked => {
+                switch-focus.focus();
+                root.checked = !root.checked;
+                root.toggled();
+            }
+            mouse-cursor: pointer;
+        }
     }
 }
 

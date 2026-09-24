@@ -316,6 +316,34 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_date_groups = Rc::clone(state);
+    let runtime_for_date_groups = Rc::clone(runtime);
+    app.on_save_group_mail_by_date(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        state_for_date_groups.borrow_mut().mail_groups.clear();
+        refresh_rows_only(&app, &state_for_date_groups, &runtime_for_date_groups);
+        let Some(core) = state_for_date_groups.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Mail grouping is active for this session.",
+            ));
+            return;
+        };
+        match runtime_for_date_groups.block_on(core.set_group_mail_by_date(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Mail grouping preference saved.")),
+            Err(error) => {
+                app.set_group_mail_by_date(!enabled);
+                refresh_rows_only(&app, &state_for_date_groups, &runtime_for_date_groups);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save mail grouping preference: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_profiles = Rc::clone(state);
     let runtime_for_profiles = Rc::clone(runtime);
     app.on_save_mail_profile(move |profile_id, name, color| {

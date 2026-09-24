@@ -137,6 +137,7 @@ export component SettingsSwitchRow inherits Rectangle {
         Switch {
             checked: root.checked;
             enabled: root.enabled;
+            control-label: root.title;
             toggled => { root.toggled(self.checked); }
         }
     }

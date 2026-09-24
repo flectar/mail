@@ -120,6 +120,22 @@ export struct EmailRow {
     checked: bool,
 }
 
+// Section controls and messages share a virtualized ListView. Closing rows
+// stay in the model briefly at zero height so the accordion can settle.
+export struct MailListEntry {
+    is_header: bool,
+    group_key: string,
+    group_kind: string,
+    group_month: int,
+    group_year: int,
+    group_count: int,
+    expanded: bool,
+    show_row: bool,
+    reveal_row: bool,
+    email_index: int,
+    email: EmailRow,
+}
+
 export struct MailProfileRow {
     id: string,
     name: string,
