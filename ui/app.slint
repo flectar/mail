@@ -23,6 +23,7 @@ import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
+import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { MailView } from "views/mail-view.slint";
 export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
@@ -356,6 +357,7 @@ export global I18n {
 
     ui-message-actions(key, argument, second-argument, third-argument) => {
         if (key == "Message action completed.") { return @tr("Message action completed."); }
+        if (key == "Permanent deletion queued. Mail will disappear after the server confirms.") { return @tr("Permanent deletion queued. Mail will disappear after the server confirms."); }
         if (key == "Message action failed: {}") { return @tr("Message action failed: {}", argument); }
         if (key == "Message action failed: message is no longer available") { return @tr("Message action failed: message is no longer available"); }
         if (key == "Label added.") { return @tr("Label added."); }
@@ -483,6 +485,7 @@ export component AppWindow inherits Window {
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
+    callback empty_trash(int);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -677,6 +680,7 @@ export component AppWindow inherits Window {
     in-out property <int> calendar_event_color: 0;
     in property <string> selected_scope: "Unified Inbox";
     in property <string> selected_scope_title: "Unified Inbox";
+    in property <bool> trash_view: false;
     in-out property <bool> mail_sidebar_collapsed: false;
     in-out property <bool> contacts_sidebar_collapsed: false;
     in property <string> unified_count: "";
@@ -910,6 +914,15 @@ export component AppWindow inherits Window {
         && !(root.active_view == "files" && FilesUi.preview-open);
     private property <length> compact-primary-nav-height: LayoutMetrics.compact-navigation-height;
     private property <bool> folder-dialog-open: false;
+    private property <bool> trash-delete-open: false;
+    private property <string> trash-delete-kind: "";
+    private property <int> trash-delete-id: -1;
+
+    function confirm-trash-deletion(kind: string, id: int) {
+        root.trash-delete-kind = kind;
+        root.trash-delete-id = id;
+        root.trash-delete-open = true;
+    }
     private property <string> folder-dialog-item-kind: "folder";
     private property <string> folder-dialog-mode: "create";
     private property <int> folder-dialog-account-id: -1;
@@ -1010,6 +1023,10 @@ export component AppWindow inherits Window {
         if root.active_view == "files" && FilesUi.can-up && !FilesUi.busy { FilesUi.command("up", "", ""); return true; }
         if (root.folder-dialog-open) {
             root.folder-dialog-open = false;
+            return true;
+        }
+        if (root.trash-delete-open) {
+            root.trash-delete-open = false;
             return true;
         }
         if (!root.compact-layout) {
@@ -1121,6 +1138,7 @@ export component AppWindow inherits Window {
             active_view: root.active_view;
             selected_scope: root.selected_scope;
             selected_scope_title: root.selected_scope_title;
+            trash_view: root.trash_view;
             unified_count: root.unified_count;
             search_query: root.search_query;
             search_filter: root.search_filter;
@@ -1200,10 +1218,20 @@ export component AppWindow inherits Window {
             }
             load_more => { root.load_more(); }
             sync_mail => { root.sync_mail(); }
-            message_action(action) => { root.message_action(action); }
-            message_action_for_email(id, action) => { root.message_action_for_email(id, action); }
-            bulk_message_action(action) => { root.bulk_message_action(action); }
+            message_action(action) => {
+                if action == "delete_permanently" { root.confirm-trash-deletion("selected", -1); }
+                else { root.message_action(action); }
+            }
+            message_action_for_email(id, action) => {
+                if action == "delete_permanently" { root.confirm-trash-deletion("row", id); }
+                else { root.message_action_for_email(id, action); }
+            }
+            bulk_message_action(action) => {
+                if action == "delete_permanently" { root.confirm-trash-deletion("bulk", -1); }
+                else { root.bulk_message_action(action); }
+            }
             toggle_mail_group(key) => { root.toggle_mail_group(key); }
+            request_empty_trash(account-id) => { root.confirm-trash-deletion("empty", account-id); }
             set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
             set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             toggle_mail_label(id, applied) => { root.toggle_mail_label(id, applied); }
@@ -1731,6 +1759,38 @@ export component AppWindow inherits Window {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+        }
+    }
+
+    if root.trash-delete-open : ConfirmationDialog {
+        x: root.safe-area-insets.left;
+        y: root.safe-area-insets.top;
+        width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
+        height: root.height - root.safe-area-insets.top - root.safe-area-insets.bottom;
+        z: 16000;
+        open <=> root.trash-delete-open;
+        title: root.trash-delete-kind == "empty" ? @tr("Empty Trash?") : @tr("Delete permanently?");
+        subject: "";
+        description: root.trash-delete-kind == "empty"
+            ? root.trash-delete-id == 0 || (root.trash-delete-id < 0 && root.selected_scope == "Unified Trash")
+                ? @tr("Permanently delete all messages in Trash across every connected account?")
+                : @tr("Permanently delete all messages in this account’s Trash?")
+            : root.trash-delete-kind == "bulk"
+                ? @tr("Permanently delete the selected conversations from Trash?")
+                : @tr("Permanently delete this conversation from Trash?");
+        detail: @tr("This action cannot be undone.");
+        confirm-label: root.trash-delete-kind == "empty" ? @tr("Empty Trash") : @tr("Delete permanently");
+        icon: @image-url("icons/lucide/outline/trash.svg");
+        surface: root.surface;
+        dialog-border-color: root.border;
+        title-color: root.title-color;
+        body-color: root.body-text;
+        muted-color: root.muted-text;
+        confirmed => {
+            if root.trash-delete-kind == "empty" { root.empty_trash(root.trash-delete-id); }
+            else if root.trash-delete-kind == "bulk" { root.bulk_message_action("delete_permanently"); }
+            else if root.trash-delete-kind == "row" { root.message_action_for_email(root.trash-delete-id, "delete_permanently"); }
+            else { root.message_action("delete_permanently"); }
         }
     }
 

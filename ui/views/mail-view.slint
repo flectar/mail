@@ -36,6 +36,7 @@ export component MailView inherits Rectangle {
     in property <string> active_view: "mail";
     in property <string> selected_scope: "Unified Inbox";
     in property <string> selected_scope_title: "Unified Inbox";
+    in property <bool> trash_view: false;
     in property <string> unified_count: "";
     in property <string> search_query: "";
     in property <string> search_filter: "All mail";
@@ -134,6 +135,7 @@ export component MailView inherits Rectangle {
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
+    callback request_empty_trash(int);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
     callback toggle_mail_label(int, bool);
@@ -198,6 +200,7 @@ export component MailView inherits Rectangle {
                 }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
+                request-empty-trash(account-id) => { root.request_empty_trash(account-id); }
                 request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);
@@ -218,6 +221,7 @@ export component MailView inherits Rectangle {
                 group_mail_by_date: root.group_mail_by_date;
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
+                trash_view: root.trash_view;
                 search_query: root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
@@ -253,6 +257,7 @@ export component MailView inherits Rectangle {
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
+                request_empty_trash => { root.request_empty_trash(-1); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
@@ -311,6 +316,7 @@ export component MailView inherits Rectangle {
                 selected_starred: root.selected_starred;
                 selected_unread: root.selected_unread;
                 selected_is_draft: root.selected_is_draft;
+                trash_view: root.trash_view;
                 selected_sender_verification: root.selected_sender_verification;
                 remote-images-blocked: root.remote-images-blocked;
                 text_mode <=> root.text_mode;
@@ -442,6 +448,7 @@ export component MailView inherits Rectangle {
                 group_mail_by_date: root.group_mail_by_date;
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
+                trash_view: root.trash_view;
                 search_query: root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
@@ -482,6 +489,7 @@ export component MailView inherits Rectangle {
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
+                request_empty_trash => { root.request_empty_trash(-1); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
             }
@@ -530,6 +538,7 @@ export component MailView inherits Rectangle {
                 selected_starred: root.selected_starred;
                 selected_unread: root.selected_unread;
                 selected_is_draft: root.selected_is_draft;
+                trash_view: root.trash_view;
                 selected_sender_verification: root.selected_sender_verification;
                 remote-images-blocked: root.remote-images-blocked;
                 text_mode <=> root.text_mode;
@@ -638,6 +647,7 @@ export component MailView inherits Rectangle {
                 }
                 request-rename-folder(id, name) => { root.request_folder_rename(id, name); }
                 request-delete-folder(id, name) => { root.request_folder_delete(id, name); }
+                request-empty-trash(account-id) => { root.request_empty_trash(account-id); }
                 request-rename-label(id, name, color, account, global) => { root.request_label_rename(id, name, color, account, global); }
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);

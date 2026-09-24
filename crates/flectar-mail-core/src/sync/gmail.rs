@@ -33,6 +33,9 @@ const SYNC_PAGE_SIZE: usize = 100;
 // this comfortably below the per-user concurrency ceiling, leaving room for
 // one interactive reader request and other Gmail clients using the account.
 const BATCH_SIZE: usize = 10;
+// batchDelete is one Gmail API method call for many IDs, unlike a multipart
+// batch of individual requests. Keep request bodies bounded on mobile too.
+const TRASH_DELETE_BATCH_SIZE: usize = 500;
 const HISTORY_FETCH_CONCURRENCY: usize = 2;
 const HISTORY_PAGE_SIZE: usize = 500;
 // A full metadata page costs 5 units for messages.list plus 100 * 20 for
@@ -444,6 +447,60 @@ impl GmailApi {
             )
             .await,
         )
+    }
+
+    async fn delete_message_permanently(&self, message_id: &str) -> Result<()> {
+        ignore_not_found(
+            self.delete_json(&format!("{GMAIL_API}/messages/{}", urlencode(message_id)))
+                .await,
+        )
+    }
+
+    async fn empty_trash(&self) -> Result<()> {
+        let mut ids = std::collections::HashSet::new();
+        let mut page_token: Option<String> = None;
+        let mut seen_page_tokens = std::collections::HashSet::new();
+        loop {
+            let mut url =
+                format!("{GMAIL_API}/messages?labelIds=TRASH&includeSpamTrash=true&maxResults=500");
+            if let Some(token) = page_token.as_deref() {
+                url.push_str("&pageToken=");
+                url.push_str(&urlencode(token));
+            }
+            let page = self.get_json(&url).await?;
+            if let Some(messages) = page.get("messages").and_then(Value::as_array) {
+                for message in messages {
+                    if let Some(id) = message.get("id").and_then(Value::as_str) {
+                        ids.insert(id.to_owned());
+                    }
+                }
+            }
+            page_token = page
+                .get("nextPageToken")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match page_token.as_deref() {
+                None => break,
+                Some(token)
+                    if token.len() > MAX_GMAIL_PAGE_TOKEN_BYTES
+                        || !seen_page_tokens.insert(token.to_owned()) =>
+                {
+                    return Err(CoreError::Network(
+                        "Gmail returned an invalid Trash page cursor".into(),
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        let ids = ids.into_iter().collect::<Vec<_>>();
+        for batch in ids.chunks(TRASH_DELETE_BATCH_SIZE) {
+            self.post_json(
+                &format!("{GMAIL_API}/messages/batchDelete"),
+                &json!({ "ids": batch }),
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     async fn trash_thread(&self, thread_id: &str) -> Result<()> {
@@ -3070,6 +3127,44 @@ async fn apply_action(
     action: &repo::actions::PendingAction,
 ) -> Result<()> {
     match action.kind.as_str() {
+        "empty_trash" => {
+            let snapshot_ids = super::snapshot_trash_ids(ctx, config.id).await?;
+            api.empty_trash().await?;
+            return super::finish_empty_trash(ctx, config.id, snapshot_ids).await;
+        }
+        "delete_permanently" => {
+            let Some(message_id) = action.message_id else {
+                return Ok(());
+            };
+            if super::is_local_only_draft(ctx, message_id).await? {
+                return super::finish_permanent_delete(ctx, Some(message_id)).await;
+            }
+            let provider_ids: Option<(Option<String>, Option<String>)> = ctx
+                .db
+                .read(move |conn| {
+                    Ok(conn
+                        .query_row(
+                            "SELECT gm_msgid, gmail_draft_id FROM messages WHERE id = ?1",
+                            params![message_id],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )
+                        .optional()?)
+                })
+                .await?;
+            let Some((provider_id, draft_id)) = provider_ids else {
+                return Ok(());
+            };
+            if let Some(provider_id) = provider_id {
+                api.delete_message_permanently(&provider_id).await?;
+            } else if let Some(draft_id) = draft_id {
+                api.delete_draft(&draft_id).await?;
+            } else {
+                return Err(CoreError::Other(
+                    "message is waiting for its Gmail remote id".into(),
+                ));
+            }
+            return super::finish_permanent_delete(ctx, action.message_id).await;
+        }
         "snooze" | "unsnooze" => return Ok(()),
         "save_draft" => {
             let draft_id = action.payload["draftId"]

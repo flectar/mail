@@ -22,16 +22,26 @@ pub(super) struct MailWork {
 #[derive(Clone)]
 pub(super) enum Operation {
     Action(String),
+    EmptyTrash(Option<i64>),
     Drop(MailDropDestination),
     Label(i64, bool),
 }
 impl Operation {
+    fn queues_permanent_deletion(&self) -> bool {
+        match self {
+            Self::EmptyTrash(_) => true,
+            Self::Action(action) => action == "delete_permanently",
+            _ => false,
+        }
+    }
+
     fn moves(&self) -> bool {
         match self {
             Self::Action(a) => matches!(
                 a.as_str(),
                 "archive" | "spam" | "trash" | "not_spam" | "unarchive"
             ),
+            Self::EmptyTrash(_) => false,
             Self::Drop(MailDropDestination::Folder(_)) => true,
             Self::Drop(MailDropDestination::Action(a)) => Self::Action((*a).into()).moves(),
             _ => false,
@@ -40,6 +50,7 @@ impl Operation {
     async fn perform(&self, core: &CoreMailSource, thread: i64) -> Result<(), String> {
         match self {
             Self::Action(a) => core.perform_message_action(thread, a).await,
+            Self::EmptyTrash(account_id) => core.empty_trash(*account_id).await,
             Self::Label(id, add) => core.perform_label_action(thread, *id, *add).await,
             Self::Drop(MailDropDestination::Action(a)) => {
                 core.perform_message_action(thread, a).await
@@ -67,6 +78,7 @@ struct ActionResult {
     completed: Vec<i32>,
     moved: Vec<i32>,
     error: Option<String>,
+    deletion_queued: bool,
 }
 
 pub(super) fn register(
@@ -224,6 +236,9 @@ pub(super) fn register(
                 Some(error) => {
                     app.set_render_status(UiMessage::detail("Message action failed: {}", error))
                 }
+                None if result.deletion_queued => app.set_render_status(UiMessage::plain(
+                    "Permanent deletion queued. Mail will disappear after the server confirms.",
+                )),
                 None => app.set_render_status(UiMessage::plain("Message action completed.")),
             }
         }
@@ -337,12 +352,15 @@ where
         completed: vec![],
         moved: vec![],
         error: None,
+        deletion_queued: false,
     };
     for (id, thread, operation) in operations {
+        let deletion = operation.queues_permanent_deletion();
         result.ids.push(id);
         let moves = operation.moves();
         match perform(thread, operation).await {
             Ok(()) => {
+                result.deletion_queued |= deletion;
                 result.completed.push(id);
                 if moves {
                     result.moved.push(id);

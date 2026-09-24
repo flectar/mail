@@ -339,6 +339,7 @@ export component MailReadingPane inherits Rectangle {
     in property <bool> selected_starred: false;
     in property <bool> selected_unread: false;
     in property <bool> selected_is_draft: false;
+    in property <bool> trash_view: false;
     in property <string> selected_sender_verification: "";
     in property <bool> remote-images-blocked: false;
     in property <bool> print_supported: true;
@@ -347,7 +348,7 @@ export component MailReadingPane inherits Rectangle {
         { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
         { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
-        { id: "trash", title: @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> message-action-menu: [
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
@@ -362,7 +363,7 @@ export component MailReadingPane inherits Rectangle {
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
-        { id: "trash", title: @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> message-action-menu-no-print: [
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
@@ -376,7 +377,7 @@ export component MailReadingPane inherits Rectangle {
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
-        { id: "trash", title: @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     in-out property <bool> text_mode: false;
     in-out property <bool> source_mode: false;
@@ -667,8 +668,8 @@ export component MailReadingPane inherits Rectangle {
                                 icon-color: root.secondary-text;
                                 idle-background: root.control-bg;
                                 hover-background: root.muted-control-bg;
-                                tooltip-text: @tr("Move to trash");
-                                clicked => { root.message_action("trash"); }
+                                tooltip-text: root.trash_view ? @tr("Delete permanently") : @tr("Move to trash");
+                                clicked => { root.message_action(root.trash_view ? "delete_permanently" : "trash"); }
                             }
                             label-action := Rectangle {
                                 visible: !root.selected_is_draft;

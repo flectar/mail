@@ -527,6 +527,173 @@ async fn legacy_move_without_uidplus_never_uses_mailbox_wide_expunge() {
         .unwrap();
 }
 
+#[derive(Clone, Copy)]
+enum TrashFixture {
+    DeleteOneWithUidPlus,
+    DeleteOneWithoutUidPlus,
+    EmptyAll,
+}
+
+async fn trash_server(fixture: TrashFixture) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
+        let mut stream = BufReader::new(tls);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+
+        let login = line(&mut stream).await;
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+
+        let select = line(&mut stream).await;
+        assert!(
+            select.contains(" SELECT \"Trash\""),
+            "unexpected command: {select:?}"
+        );
+        let tag = select.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!(
+                    "* FLAGS (\\Seen \\Deleted)\r\n\
+                     * 2 EXISTS\r\n\
+                     * OK [UIDVALIDITY 1] valid\r\n\
+                     * OK [UIDNEXT 43] next\r\n\
+                     {tag} OK [READ-WRITE] selected\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        if !matches!(fixture, TrashFixture::EmptyAll) {
+            advertise_capabilities(
+                &mut stream,
+                if matches!(fixture, TrashFixture::DeleteOneWithUidPlus) {
+                    "IMAP4rev1 UIDPLUS"
+                } else {
+                    "IMAP4rev1"
+                },
+            )
+            .await;
+        }
+        match fixture {
+            TrashFixture::DeleteOneWithUidPlus => {
+                let store = line(&mut stream).await;
+                assert!(
+                    store.contains(" UID STORE 42 +FLAGS.SILENT (\\Deleted)"),
+                    "unexpected command: {store:?}"
+                );
+                let tag = store.split_whitespace().next().unwrap();
+                stream
+                    .write_all(format!("{tag} OK stored\r\n").as_bytes())
+                    .await
+                    .unwrap();
+                let expunge = line(&mut stream).await;
+                assert!(
+                    expunge.contains(" UID EXPUNGE 42"),
+                    "unexpected command: {expunge:?}"
+                );
+                let tag = expunge.split_whitespace().next().unwrap();
+                stream
+                    .write_all(format!("* 1 EXPUNGE\r\n{tag} OK expunged\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            TrashFixture::DeleteOneWithoutUidPlus => {}
+            TrashFixture::EmptyAll => {
+                let search = line(&mut stream).await;
+                assert!(
+                    search.contains(" UID SEARCH ALL"),
+                    "unexpected command: {search:?}"
+                );
+                let tag = search.split_whitespace().next().unwrap();
+                stream
+                    .write_all(format!("* SEARCH 41 42\r\n{tag} OK searched\r\n").as_bytes())
+                    .await
+                    .unwrap();
+                let store = line(&mut stream).await;
+                assert!(
+                    store.contains(" UID STORE 1:* +FLAGS.SILENT (\\Deleted)"),
+                    "unexpected command: {store:?}"
+                );
+                let tag = store.split_whitespace().next().unwrap();
+                stream
+                    .write_all(format!("{tag} OK stored\r\n").as_bytes())
+                    .await
+                    .unwrap();
+                let expunge = line(&mut stream).await;
+                assert!(
+                    expunge.contains(" EXPUNGE") && !expunge.contains(" UID EXPUNGE"),
+                    "unexpected command: {expunge:?}"
+                );
+                let tag = expunge.split_whitespace().next().unwrap();
+                stream
+                    .write_all(format!("* 1 EXPUNGE\r\n{tag} OK expunged\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+        }
+
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    (port, task)
+}
+
+async fn run_trash_fixture(fixture: TrashFixture) -> flectar_mail_core::error::Result<()> {
+    let (port, task) = trash_server(fixture).await;
+    let mut session = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::Tls),
+    )
+    .await
+    .unwrap();
+    imap::select(&mut session, "Trash").await.unwrap();
+    let result = match fixture {
+        TrashFixture::DeleteOneWithUidPlus | TrashFixture::DeleteOneWithoutUidPlus => {
+            imap::uid_delete_permanently(&mut session, 42).await
+        }
+        TrashFixture::EmptyAll => imap::empty_selected_trash(&mut session).await,
+    };
+    imap::logout(session).await;
+    task.await.unwrap();
+    result
+}
+
+#[tokio::test]
+async fn permanent_delete_uses_uid_expunge_for_only_the_selected_message() {
+    run_trash_fixture(TrashFixture::DeleteOneWithUidPlus)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn permanent_delete_without_uidplus_leaves_other_deleted_messages_untouched() {
+    let error = run_trash_fixture(TrashFixture::DeleteOneWithoutUidPlus)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("UIDPLUS"));
+}
+
+#[tokio::test]
+async fn empty_trash_expunge_covers_the_entire_selected_mailbox() {
+    run_trash_fixture(TrashFixture::EmptyAll).await.unwrap();
+}
+
 async fn smtp_connection(mode: ConnectionSecurity) {
     smtp_connection_with_certificate(mode, CERT).await;
 }

@@ -171,6 +171,7 @@ export component MailListPane inherits Rectangle {
     in property <bool> group_mail_by_date: true;
     in property <string> selected_scope: "Unified Inbox";
     in property <string> scope_title: selected_scope;
+    in property <bool> trash_view: false;
     in property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <bool> sync_in_progress: false;
@@ -211,6 +212,7 @@ export component MailListPane inherits Rectangle {
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
     callback toggle_mail_group(string);
+    callback request_empty_trash();
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
 
@@ -321,6 +323,20 @@ export component MailListPane inherits Rectangle {
                         }
                     }
 
+                    if root.trash_view && !root.selection-mode : Rectangle {
+                        height: 44px;
+                        background: root.surface;
+                        Button {
+                            width: 144px;
+                            x: parent.width - self.width - (root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset);
+                            y: 5px;
+                            height: 34px;
+                            text: @tr("Empty Trash…");
+                            destructive: true;
+                            clicked => { root.request_empty_trash(); }
+                        }
+                    }
+
                     bulk-toolbar := Rectangle {
                         height: root.bulk-toolbar-height;
                         background: root.surface;
@@ -386,9 +402,9 @@ export component MailListPane inherits Rectangle {
                                 icon: @image-url("../icons/lucide/outline/trash.svg");
                                 icon-color: root.secondary-text;
                                 hover-background: root.muted-control-bg;
-                                tooltip-text: @tr("Move to trash");
+                                tooltip-text: root.trash_view ? @tr("Delete selected permanently") : @tr("Move to trash");
                                 accessible-id: "bulk-trash-button";
-                                clicked => { root.bulk_message_action("trash"); }
+                                clicked => { root.bulk_message_action(root.trash_view ? "delete_permanently" : "trash"); }
                             }
                             bulk-more-menu := ContextMenuArea {
                                 x: 3 * LayoutMetrics.desktop-icon-button-size;
@@ -815,7 +831,7 @@ export component MailListPane inherits Rectangle {
                                             MenuItem { title: mail-data.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(mail-data.id, mail-data.unread ? "mark_read" : "mark_unread"); } }
                                             MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
                                             MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }
-                                            MenuItem { title: @tr("Move to trash"); activated => { root.message_action_for_email(mail-data.id, "trash"); } }
+                                            MenuItem { title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"); activated => { root.message_action_for_email(mail-data.id, root.trash_view ? "delete_permanently" : "trash"); } }
                                         }
                                     }
                                 }

@@ -392,6 +392,7 @@ pub(super) fn render_current(
     app.set_selected_scope_title(
         mailbox_scope_title(&scope, &mailboxes, &unified_mailboxes, &labels).into(),
     );
+    app.set_trash_view(is_trash_scope(&scope, &mailboxes, &unified_mailboxes));
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -1145,6 +1146,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
     app.set_selected_scope_title(
         mailbox_scope_title(&scope, &mailboxes, &unified_mailboxes, &labels).into(),
     );
+    app.set_trash_view(is_trash_scope(&scope, &mailboxes, &unified_mailboxes));
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -1420,6 +1422,17 @@ fn mailbox_scope_title(
     } else {
         scope.to_owned()
     }
+}
+
+fn is_trash_scope(
+    scope: &str,
+    mailboxes: &[MailboxEntry],
+    unified_mailboxes: &[MailboxEntry],
+) -> bool {
+    scope == "Unified Trash"
+        || mailboxes.iter().chain(unified_mailboxes).any(|mailbox| {
+            mailbox.scope == scope && mailbox.is_standard && mailbox.label == "Trash"
+        })
 }
 
 #[cfg(test)]

@@ -1337,6 +1337,44 @@ pub async fn expunge_all(session: &mut Session) -> Result<()> {
     with_deadline("EXPUNGE", METADATA_TIMEOUT, expunge_all_inner(session)).await
 }
 
+/// Expunge only the selected UID. A mailbox-wide EXPUNGE could also erase
+/// messages another client has marked deleted, so UIDPLUS is required.
+pub async fn uid_delete_permanently(session: &mut Session, uid: u32) -> Result<()> {
+    with_deadline("UID EXPUNGE", METADATA_TIMEOUT, async {
+        if uid == 0 {
+            return Err(CoreError::Imap("IMAP UID must be greater than zero".into()));
+        }
+        let capabilities = session.capabilities().await
+            .map_err(|error| CoreError::Imap(error.to_string()))?;
+        if !capabilities.has_str("UIDPLUS") {
+            return Err(CoreError::Imap(
+                "this IMAP server does not support safe permanent deletion of individual messages (UIDPLUS)".into(),
+            ));
+        }
+        store_flag_inner(session, uid, "\\Deleted", true).await?;
+        let stream = session.uid_expunge(uid.to_string()).await
+            .map_err(|error| CoreError::Imap(error.to_string()))?;
+        futures::pin_mut!(stream);
+        while let Some(item) = stream.next().await {
+            item.map_err(|error| CoreError::Imap(error.to_string()))?;
+        }
+        Ok(())
+    }).await
+}
+
+/// Empty the selected Trash mailbox. Mailbox-wide EXPUNGE is appropriate here
+/// because the user explicitly chose to remove every message in that mailbox.
+pub async fn empty_selected_trash(session: &mut Session) -> Result<()> {
+    with_deadline("EMPTY TRASH", METADATA_TIMEOUT, async {
+        if uid_search_all(session).await?.is_empty() {
+            return Ok(());
+        }
+        store_flag_set_inner(session, "1:*", "\\Deleted", true).await?;
+        expunge_all_inner(session).await
+    })
+    .await
+}
+
 async fn expunge_all_inner(session: &mut Session) -> Result<()> {
     let stream = session
         .expunge()

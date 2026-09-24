@@ -38,6 +38,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback request-create-label(int, string, int, string);
     callback request-rename-folder(int, string);
     callback request-delete-folder(int, string);
+    callback request-empty-trash(int);
     callback request-rename-label(int, string, color, string, bool);
     callback request-delete-label(int, string, string, bool, bool);
 
@@ -240,6 +241,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         count: entry.mailbox.count;
                         scope: entry.mailbox.scope;
                         account-id: entry.mailbox.account_id;
+                        can-empty-trash: entry.mailbox.scope == "Unified Trash";
                         folder-id: entry.mailbox.folder_id;
                         mail-drop-enabled: entry.mailbox.scope == "Unified Starred"
                             || entry.mailbox.scope == "Unified Archive"
@@ -266,6 +268,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                             : entry.mailbox.scope == "Unified Archive" ? MailIconPalette.archive
                             : MailIconPalette.drafts;
                         clicked(scope) => { root.select-scope(scope); }
+                        empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
 
                     if entry.kind == SidebarRowKind.categories-section: SidebarSectionHeader {
@@ -437,12 +440,16 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         has-children: entry.mailbox.has_children;
                         expanded: entry.mailbox.expanded;
                         folder-menu-enabled: entry.mailbox.folder_id >= 0
+                            && !(entry.mailbox.is_standard && entry.mailbox.label == "Trash")
                             && (entry.mailbox.can_create_children
                             || (!entry.mailbox.is_standard && entry.mailbox.can_rename)
                             || (!entry.mailbox.is_standard && entry.mailbox.can_delete));
                         can-create-child: entry.mailbox.can_create_children;
                         can-rename: !entry.mailbox.is_standard && entry.mailbox.can_rename;
                         can-delete: !entry.mailbox.is_standard && entry.mailbox.can_delete;
+                        can-empty-trash: entry.mailbox.is_standard
+                            && entry.mailbox.label == "Trash"
+                            && entry.mailbox.folder_id >= 0;
                         mail-drop-enabled: entry.mailbox.is_selectable
                             && ((entry.mailbox.folder_id >= 0
                             && entry.mailbox.label != "Sent"
@@ -489,6 +496,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         }
                         rename-folder(folder-id, name) => { root.request-rename-folder(folder-id, name); }
                         delete-folder(folder-id, name) => { root.request-delete-folder(folder-id, name); }
+                        empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
 
                     if entry.kind == SidebarRowKind.account-labels-section: SidebarSectionHeader {

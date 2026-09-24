@@ -1091,6 +1091,14 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn empty_trash(&self, account_id: Option<i64>) -> Result<(), String> {
+        self.core
+            .empty_trash(account_id)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn perform_label_action(
         &self,
         thread_id: i64,

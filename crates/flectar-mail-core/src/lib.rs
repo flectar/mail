@@ -3024,6 +3024,63 @@ impl Core {
         Ok(ActionResult { action_ids })
     }
 
+    /// Queue a provider-side purge of Trash for one account or all accounts.
+    /// The provider enumerates the whole mailbox, including mail outside the
+    /// local history window and messages not loaded in the UI.
+    pub async fn empty_trash(&self, account_id: Option<i64>) -> Result<ActionResult> {
+        let queued = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut stmt = tx.prepare(
+                    "SELECT account_id, id FROM folders WHERE role = 'trash'
+                 AND (?1 IS NULL OR account_id = ?1)",
+                )?;
+                let folders = stmt
+                    .query_map(rusqlite::params![account_id], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                drop(stmt);
+                if folders.is_empty() {
+                    return Err(CoreError::NotFound(
+                        "Trash folder is not available yet".into(),
+                    ));
+                }
+                let mut queued = Vec::new();
+                for (account_id, folder_id) in folders {
+                    let active: bool = tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM pending_actions
+                     WHERE account_id = ?1 AND kind = 'empty_trash'
+                       AND state IN ('pending','inflight'))",
+                        rusqlite::params![account_id],
+                        |row| row.get(0),
+                    )?;
+                    if !active {
+                        let action_id = repo::actions::enqueue(
+                            &tx,
+                            account_id,
+                            "empty_trash",
+                            None,
+                            None,
+                            &serde_json::json!({"folderId": folder_id}),
+                            None,
+                        )?;
+                        queued.push((action_id, account_id));
+                    }
+                }
+                tx.commit()?;
+                Ok(queued)
+            })
+            .await?;
+        for &(_, account_id) in &queued {
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        Ok(ActionResult {
+            action_ids: queued.into_iter().map(|(id, _)| id).collect(),
+        })
+    }
+
     pub async fn undo_last(&self) -> Result<bool> {
         let cutoff = now_ms() - 30_000;
         let last = self
@@ -7435,7 +7492,10 @@ fn apply_thread_action(
     // Most thread actions intentionally ignore drafts. Archive and Trash are
     // exceptions: users can file or discard a draft from the Drafts view, and
     // excluding it here made the optimistic removal snap back on reconciliation.
-    let include_drafts = matches!(kind, ActionKind::Archive | ActionKind::Trash);
+    let include_drafts = matches!(
+        kind,
+        ActionKind::Archive | ActionKind::Trash | ActionKind::DeletePermanently
+    );
     let mut stmt = tx.prepare(
         "SELECT m.id, m.folder_id, m.uid, m.is_read, m.is_starred, COALESCE(f.role,'')
          FROM messages m LEFT JOIN folders f ON f.id = m.folder_id
@@ -7504,6 +7564,41 @@ fn apply_thread_action(
     }
 
     match kind {
+        ActionKind::DeletePermanently => {
+            for (id, f, u, _r, _s, role) in &msgs {
+                let in_trash = role == roles::TRASH
+                    || tx.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM message_folders mf
+                     JOIN folders folder ON folder.id = mf.folder_id
+                     WHERE mf.message_id = ?1 AND folder.role = 'trash')",
+                        rusqlite::params![id],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                if !in_trash {
+                    continue;
+                }
+                let already_queued: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM pending_actions
+                     WHERE message_id = ?1 AND kind = 'delete_permanently'
+                       AND state IN ('pending','inflight'))",
+                    rusqlite::params![id],
+                    |row| row.get(0),
+                )?;
+                if already_queued {
+                    continue;
+                }
+                let aid = repo::actions::enqueue(
+                    &tx,
+                    account_id,
+                    kind.as_str(),
+                    Some(*id),
+                    Some(thread_id),
+                    &serde_json::json!({"folderId": f, "uid": u}),
+                    None,
+                )?;
+                out.push((aid, account_id));
+            }
+        }
         ActionKind::MarkRead | ActionKind::MarkUnread => {
             let target_read = kind == ActionKind::MarkRead;
             for (id, _f, _u, is_read, _s, _role) in &msgs {
@@ -7735,6 +7830,180 @@ fn apply_thread_action(
 #[cfg(test)]
 mod move_action_validation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn empty_trash_does_not_remove_mail_added_during_provider_purge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let old_id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, imap_name, role)
+                     VALUES (2, 1, 'Trash', 'trash')",
+                    [],
+                )?;
+                let (_, id) = db::testutil::seed_message(conn, "sender@test.dev", "old", false);
+                conn.execute(
+                    "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+                    rusqlite::params![id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let ctx = core.sync_ctx();
+        let snapshot = sync::snapshot_trash_ids(&ctx, 1).await.unwrap();
+        let new_id = core
+            .db
+            .write(|conn| {
+                let (_, id) = db::testutil::seed_message(conn, "sender@test.dev", "new", false);
+                conn.execute(
+                    "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+                    rusqlite::params![id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        sync::finish_empty_trash(&ctx, 1, snapshot).await.unwrap();
+        let (old, new) = core
+            .db
+            .read(move |conn| {
+                Ok((
+                    repo::messages::get_row(conn, old_id)?,
+                    repo::messages::get_row(conn, new_id)?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(old.is_none());
+        assert!(new.is_some());
+    }
+
+    #[tokio::test]
+    async fn local_draft_purge_cleans_attachment_but_remote_move_waits_for_trash_uid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let staged_path = core
+            .paths
+            .draft_attachments_dir()
+            .join("test")
+            .join("file.txt");
+        std::fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+        std::fs::write(&staged_path, b"attachment").unwrap();
+        let staged_path_string = staged_path.to_string_lossy().into_owned();
+        let draft_id = core
+            .db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, imap_name, role)
+                     VALUES (2, 1, 'Trash', 'trash')",
+                    [],
+                )?;
+                let (_, draft_id) =
+                    db::testutil::seed_message(conn, "sender@test.dev", "draft", false);
+                conn.execute(
+                    "UPDATE messages SET is_draft = 1, uid = NULL, folder_id = 2 WHERE id = ?1",
+                    rusqlite::params![draft_id],
+                )?;
+                conn.execute(
+                    "INSERT INTO drafts_meta (message_id) VALUES (?1)",
+                    rusqlite::params![draft_id],
+                )?;
+                conn.execute(
+                    "INSERT INTO draft_attachments (draft_id, file_path, filename)
+                     VALUES (?1, ?2, 'file.txt')",
+                    rusqlite::params![draft_id, staged_path_string],
+                )?;
+                Ok(draft_id)
+            })
+            .await
+            .unwrap();
+        let ctx = core.sync_ctx();
+        assert!(sync::is_local_only_draft(&ctx, draft_id).await.unwrap());
+        let unlinked_remote_draft = core
+            .db
+            .write(|conn| {
+                let (_, id) = db::testutil::seed_message(conn, "sender@test.dev", "remote", false);
+                conn.execute(
+                    "UPDATE messages SET is_draft = 1, uid = NULL, folder_id = 2 WHERE id = ?1",
+                    rusqlite::params![id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        assert!(
+            !sync::is_local_only_draft(&ctx, unlinked_remote_draft)
+                .await
+                .unwrap()
+        );
+        core.db
+            .write(move |conn| {
+                repo::actions::enqueue(
+                    conn,
+                    1,
+                    "trash",
+                    Some(draft_id),
+                    None,
+                    &serde_json::json!({"srcUid": 42}),
+                    None,
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(!sync::is_local_only_draft(&ctx, draft_id).await.unwrap());
+        sync::finish_permanent_delete(&ctx, Some(draft_id))
+            .await
+            .unwrap();
+        assert!(!staged_path.exists());
+        assert!(
+            core.db
+                .read(move |conn| repo::messages::get_row(conn, draft_id))
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn permanent_delete_queues_only_trash_messages_and_keeps_them_until_confirmed() {
+        let mut conn = db::testutil::conn();
+        db::testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, imap_name, role)
+                      VALUES (2, 1, 'Trash', 'trash')",
+            [],
+        )
+        .unwrap();
+        let (thread_id, inbox_id) =
+            db::testutil::seed_message(&conn, "sender@test.dev", "conversation", false);
+        let (_, trash_id) =
+            db::testutil::seed_message(&conn, "sender@test.dev", "old reply", false);
+        conn.execute(
+            "UPDATE messages SET thread_id = ?1, folder_id = 2, uid = 42 WHERE id = ?2",
+            rusqlite::params![thread_id, trash_id],
+        )
+        .unwrap();
+
+        let actions =
+            apply_thread_action(&mut conn, thread_id, ActionKind::DeletePermanently, None).unwrap();
+        assert_eq!(actions.len(), 1);
+        let action = repo::actions::get(&conn, actions[0].0).unwrap().unwrap();
+        assert_eq!(action.message_id, Some(trash_id));
+        assert_eq!(action.kind, "delete_permanently");
+        assert!(repo::messages::get_row(&conn, trash_id).unwrap().is_some());
+        assert!(repo::messages::get_row(&conn, inbox_id).unwrap().is_some());
+        assert!(
+            apply_thread_action(&mut conn, thread_id, ActionKind::DeletePermanently, None)
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     #[test]
     fn move_rejects_a_folder_owned_by_another_account_without_local_mutation() {

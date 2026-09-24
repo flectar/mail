@@ -811,13 +811,18 @@ fn perform_mail_list_action(
     _runtime: &tokio::runtime::Runtime,
     trigger_id: i32,
     action: &str,
+    use_checked_selection: bool,
 ) -> Result<(), String> {
     let (core, operations) = {
         let state = state.borrow();
         if !state.using_core {
             return Err("mail account is not ready".to_owned());
         }
-        let ids = mail_operation_ids(&state.messages, &state.checked_ids, trigger_id);
+        let ids = if use_checked_selection {
+            mail_operation_ids(&state.messages, &state.checked_ids, trigger_id)
+        } else {
+            vec![trigger_id]
+        };
         let operations = ids
             .into_iter()
             .map(|id| {
@@ -4683,6 +4688,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             &runtime_for_row_action,
             id,
             &action,
+            action != "delete_permanently",
         ) {
             app.set_render_status(UiMessage::detail("Message action failed: {}", error));
         }
@@ -4710,7 +4716,37 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             &runtime_for_bulk_action,
             trigger_id,
             &action,
+            true,
         ) {
+            app.set_render_status(UiMessage::detail("Message action failed: {}", error));
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_empty_trash = Rc::clone(&state);
+    app.on_empty_trash(move |requested_account_id| {
+        let Some(app) = app_weak.upgrade() else { return; };
+        let request = {
+            let state = state_for_empty_trash.borrow();
+            if !state.using_core { return; }
+            let account_id = if requested_account_id == 0 ||
+                (requested_account_id < 0 && state.scope == "Unified Trash") {
+                None
+            } else if requested_account_id > 0 {
+                Some(i64::from(requested_account_id))
+            } else {
+                match state.mailboxes.iter().find(|mailbox| {
+                    mailbox.scope == state.scope && mailbox.is_standard && mailbox.label == "Trash"
+                }) {
+                    Some(mailbox) => Some(mailbox.account_id),
+                    None => return,
+                }
+            };
+            state.core.clone().map(|core| (core, account_id))
+        };
+        let Some((core, account_id)) = request else { return; };
+        if let Err(error) = mail_work::enqueue(&state_for_empty_trash, core,
+            vec![(-1, 0, mail_work::Operation::EmptyTrash(account_id))]) {
             app.set_render_status(UiMessage::detail("Message action failed: {}", error));
         }
     });

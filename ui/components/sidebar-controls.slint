@@ -73,6 +73,7 @@ export component SidebarItem inherits SidebarRowSurface {
     in property <bool> can-create-child: false;
     in property <bool> can-rename: false;
     in property <bool> can-delete: false;
+    in property <bool> can-empty-trash: false;
     in property <bool> label-manageable: false;
     in property <bool> label-can-create-child: false;
     in property <bool> label-is-global: false;
@@ -91,6 +92,7 @@ export component SidebarItem inherits SidebarRowSurface {
     callback new-subfolder(int, int, string);
     callback rename-folder(int, string);
     callback delete-folder(int, string);
+    callback empty-trash(int);
     callback new-child-label(int, int, string, string);
     callback rename-label(int, string, color, string, bool);
     callback delete-label(int, string, string, bool, bool);
@@ -194,6 +196,18 @@ export component SidebarItem inherits SidebarRowSurface {
                 title: @tr("Delete folder");
                 enabled: root.can-delete;
                 activated => { root.delete-folder(root.folder-id, root.label); }
+            }
+        }
+    }
+
+    if root.can-empty-trash: ContextMenuArea {
+        x: 22px;
+        width: parent.width - 22px;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("Empty Trash…");
+                activated => { root.empty-trash(root.account-id); }
             }
         }
     }

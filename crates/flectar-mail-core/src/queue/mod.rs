@@ -204,6 +204,9 @@ fn is_permanent(error: &CoreError) -> bool {
         // used both `NO ...` and `no: ...` display forms across versions.
         CoreError::Imap(message) => {
             let message = message.trim().to_ascii_lowercase();
+            if message.starts_with("this imap server does not support safe permanent deletion") {
+                return true;
+            }
             ["no", "bad"].iter().any(|status| {
                 message == *status
                     || message
@@ -347,6 +350,73 @@ async fn execute_one(
         ))
     })?;
     match action.kind.as_str() {
+        "empty_trash" => {
+            let folder_id = action.payload["folderId"]
+                .as_i64()
+                .ok_or_else(|| CoreError::NotFound("Trash folder for queued purge".into()))?;
+            let folder = ctx
+                .db
+                .read(move |conn| repo::folders::get(conn, folder_id))
+                .await?
+                .ok_or_else(|| CoreError::NotFound("Trash folder".into()))?;
+            if folder.account_id != config.id
+                || folder.role.as_deref() != Some(crate::models::roles::TRASH)
+            {
+                return Err(CoreError::Other(
+                    "queued Trash folder does not match this account".into(),
+                ));
+            }
+            let snapshot_ids = crate::sync::snapshot_trash_ids(ctx, config.id).await?;
+            imap::select(session, &folder.imap_name).await?;
+            imap::empty_selected_trash(session).await?;
+            crate::sync::finish_empty_trash(ctx, config.id, snapshot_ids).await
+        }
+        "delete_permanently" => {
+            let Some(message_id) = action.message_id else {
+                return Ok(());
+            };
+            if crate::sync::is_local_only_draft(ctx, message_id).await? {
+                return crate::sync::finish_permanent_delete(ctx, Some(message_id)).await;
+            }
+            let row = ctx
+                .db
+                .read(move |conn| repo::messages::get_row(conn, message_id))
+                .await?;
+            let Some(row) = row else {
+                return Ok(());
+            };
+            let (Some(folder_id), Some(uid)) = (row.folder_id, row.uid) else {
+                return Err(CoreError::Other(
+                    "message is waiting for its Trash UID".into(),
+                ));
+            };
+            let uid = u32::try_from(uid)
+                .ok()
+                .filter(|uid| *uid > 0)
+                .ok_or_else(|| CoreError::NotFound("valid Trash UID".into()))?;
+            let folder = ctx
+                .db
+                .read(move |conn| repo::folders::get(conn, folder_id))
+                .await?
+                .ok_or_else(|| CoreError::NotFound("Trash folder".into()))?;
+            if folder.account_id != config.id
+                || folder.role.as_deref() != Some(crate::models::roles::TRASH)
+            {
+                return Err(CoreError::NotFound("message is no longer in Trash".into()));
+            }
+            let selected = imap::select(session, &folder.imap_name).await?;
+            match (folder.uidvalidity, selected.uid_validity) {
+                (Some(stored), Some(remote)) if stored == remote => {}
+                _ => {
+                    return Err(CoreError::Imap(
+                        "Trash UIDVALIDITY changed or is unavailable; waiting for mailbox sync"
+                            .into(),
+                    ));
+                }
+            }
+            imap::uid_delete_permanently(session, uid).await?;
+            crate::sync::finish_permanent_delete(ctx, action.message_id).await
+        }
         "mark_read" => flag_action(ctx, session, action, "\\Seen", true).await,
         "mark_unread" => flag_action(ctx, session, action, "\\Seen", false).await,
         "star" => flag_action(ctx, session, action, "\\Flagged", true).await,

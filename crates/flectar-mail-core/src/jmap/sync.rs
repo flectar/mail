@@ -1101,6 +1101,59 @@ async fn execute_action(
 ) -> Result<()> {
     let remote_id = remote_message(ctx, action.message_id).await?;
     match action.kind.as_str() {
+        "empty_trash" => {
+            let folder_id = action.payload["folderId"]
+                .as_i64()
+                .ok_or_else(|| CoreError::Jmap("Trash purge has no mailbox".into()))?;
+            let folder = ctx
+                .db
+                .read(move |conn| repo::folders::get(conn, folder_id))
+                .await?
+                .ok_or_else(|| CoreError::NotFound("Trash mailbox".into()))?;
+            if folder.account_id != config.id || folder.role.as_deref() != Some(roles::TRASH) {
+                return Err(CoreError::Jmap(
+                    "Trash purge mailbox belongs to another account".into(),
+                ));
+            }
+            let mailbox_id = folder
+                .jmap_id
+                .ok_or_else(|| CoreError::Jmap("Trash mailbox has no remote id".into()))?;
+            let snapshot_ids = crate::sync::snapshot_trash_ids(ctx, config.id).await?;
+            let ids = query_mailbox_ids(c, &mailbox_id).await?;
+            let batch_size = c
+                .client
+                .session()
+                .core_capabilities()
+                .map_or(1, |caps| caps.max_objects_in_set().clamp(1, 500));
+            for batch in ids.chunks(batch_size) {
+                let mut request = c.client.build();
+                request
+                    .set_email()
+                    .account_id(&c.account_id)
+                    .destroy(batch.iter().cloned());
+                let mut response = request.send_set_email().await.map_err(client::map_error)?;
+                for id in batch {
+                    match response.destroyed(id) {
+                        Ok(()) => {}
+                        Err(jmap_client::Error::Set(error))
+                            if error.type_ == SetErrorType::NotFound => {}
+                        Err(error) => return Err(client::map_error(error)),
+                    }
+                }
+            }
+            crate::sync::finish_empty_trash(ctx, config.id, snapshot_ids).await
+        }
+        "delete_permanently" => {
+            if let Some(message_id) = action.message_id {
+                if crate::sync::is_local_only_draft(ctx, message_id).await? {
+                    return crate::sync::finish_permanent_delete(ctx, Some(message_id)).await;
+                }
+            }
+            if let Some(remote_id) = linked_or_retry(&remote_id)? {
+                destroy_email_if_present(c, remote_id).await?;
+            }
+            crate::sync::finish_permanent_delete(ctx, action.message_id).await
+        }
         "mark_read" | "mark_unread" | "star" | "unstar" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
                 return Ok(());
@@ -1177,6 +1230,60 @@ async fn execute_action(
             "unsupported queued JMAP action: {other}"
         ))),
     }
+}
+
+async fn query_mailbox_ids(c: &ConnectedClient, mailbox_id: &str) -> Result<Vec<String>> {
+    'restart: for _ in 0..MAX_QUERY_RESTARTS {
+        let mut ids = Vec::new();
+        let mut state: Option<String> = None;
+        let mut total: Option<usize> = None;
+        loop {
+            let position = i32::try_from(ids.len())
+                .map_err(|_| CoreError::Jmap("Trash contains too many messages".into()))?;
+            let mut request = c.client.build();
+            request
+                .query_email()
+                .account_id(&c.account_id)
+                .position(position)
+                .limit(PAGE)
+                .calculate_total(true)
+                .sort([jmap_client::email::query::Comparator::received_at().descending()])
+                .filter(jmap_client::email::query::Filter::in_mailbox(mailbox_id));
+            let mut response = request
+                .send_query_email()
+                .await
+                .map_err(client::map_error)?;
+            let page_state = response.query_state().to_owned();
+            let page_total = response
+                .total()
+                .ok_or_else(|| CoreError::Jmap("Trash query omitted its total".into()))?;
+            if response.position() != position
+                || state.as_ref().is_some_and(|s| s != &page_state)
+                || total.is_some_and(|n| n != page_total)
+            {
+                continue 'restart;
+            }
+            state.get_or_insert(page_state);
+            total.get_or_insert(page_total);
+            let page = response.take_ids();
+            if page.is_empty() && ids.len() < page_total {
+                continue 'restart;
+            }
+            ids.extend(page);
+            if ids.len() == page_total {
+                if ids.iter().collect::<HashSet<_>>().len() != ids.len() {
+                    continue 'restart;
+                }
+                return Ok(ids);
+            }
+            if ids.len() > page_total {
+                continue 'restart;
+            }
+        }
+    }
+    Err(CoreError::Jmap(
+        "Trash changed repeatedly while loading it; retrying later".into(),
+    ))
 }
 
 async fn apply_message_mutation<T>(

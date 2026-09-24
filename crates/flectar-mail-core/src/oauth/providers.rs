@@ -32,15 +32,9 @@ pub struct OAuthProviderConfig {
 pub const GOOGLE: OAuthProviderConfig = OAuthProviderConfig {
     auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
     token_url: "https://oauth2.googleapis.com/token",
-    // Gmail accounts use the native REST API (sync, labels, drafts and send),
-    // not IMAP/SMTP. `gmail.modify` is the least-privileged scope covering that
-    // complete feature set without granting permanent-delete access.
-    scopes: &[
-        "https://www.googleapis.com/auth/gmail.modify",
-        "openid",
-        "email",
-        "profile",
-    ],
+    // Gmail's permanent-delete endpoint requires the full mail scope. Existing
+    // gmail.modify grants must be reauthorized before deletion can succeed.
+    scopes: &["https://mail.google.com/", "openid", "email", "profile"],
     client_id_env: "FLECTAR_GOOGLE_DESKTOP_CLIENT_ID",
     client_secret_env: "FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET",
 };
