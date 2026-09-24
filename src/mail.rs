@@ -1669,7 +1669,14 @@ fn mailbox_entries(accounts: &[Account], folders: &[FolderInfo]) -> Vec<MailboxE
                     .unwrap_or(-1);
                 // Special-use mailboxes remain pinned roots, matching the
                 // standard ordering used by major desktop mail clients.
-                (folder.id, if role_folder_ids.contains(&folder.id) { -1 } else { parent_id })
+                (
+                    folder.id,
+                    if role_folder_ids.contains(&folder.id) {
+                        -1
+                    } else {
+                        parent_id
+                    },
+                )
             })
             .collect::<std::collections::HashMap<_, _>>();
         let mut children = std::collections::HashMap::<i64, Vec<&FolderInfo>>::new();
