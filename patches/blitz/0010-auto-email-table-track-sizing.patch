@@ -1,0 +1,174 @@
+diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
+index 7ff3810..0c77d8c 100644
+--- a/crates/blitz-dom/src/layout/table.rs
++++ b/crates/blitz-dom/src/layout/table.rs
+@@ -29,6 +29,7 @@ pub struct TableContext {
+     pub style: taffy::Style<Atom>,
+     pub cells: Vec<TableCell>,
+     pub rows: Vec<TableRow>,
++    pub is_fixed: bool,
+     pub computed_grid_info: AtomicRefCell<Option<DetailedGridInfo<Atom>>>,
+     pub border_style: Option<ServoArc<Border>>,
+     pub border_collapse: BorderCollapse,
+@@ -109,7 +110,14 @@ pub(crate) fn build_table_context(
+             &mut first_cell_border,
+         );
+     }
+-    column_sizes.resize(col as usize, style_helpers::auto());
++    column_sizes.resize(
++        col as usize,
++        if is_fixed {
++            style_helpers::auto()
++        } else {
++            auto_table_column()
++        },
++    );
+ 
+     style.grid_template_columns = column_sizes.into_iter().map(|dim| dim.into()).collect();
+     style.grid_template_rows = vec![style_helpers::auto(); row as usize];
+@@ -177,6 +185,7 @@ pub(crate) fn build_table_context(
+             style,
+             cells,
+             rows,
++            is_fixed,
+             computed_grid_info: AtomicRefCell::new(None),
+             border_collapse,
+             border_style: first_cell_border,
+@@ -337,7 +346,6 @@ fn push_table_cell(
+     }
+ 
+     let node = &mut doc.nodes[node_id];
+-    let stylo_style = &node.primary_styles().unwrap();
+     let colspan: u16 = use_spans
+         .then(|| node.attr(local_name!("colspan")))
+         .flatten()
+@@ -349,37 +357,62 @@ fn push_table_cell(
+         .and_then(|val| val.parse::<u16>().ok())
+         .map(|v| v.clamp(1, 65534))
+         .unwrap_or(1);
+-    let mut style = stylo_taffy::to_taffy_style(stylo_style);
++    let (mut style, cell_border) = {
++        let stylo_style = node.primary_styles().unwrap();
++        (
++            stylo_taffy::to_taffy_style(&stylo_style),
++            stylo_style.clone_border(),
++        )
++    };
+ 
+     if first_cell_border.is_none() {
+-        *first_cell_border = Some(stylo_style.clone_border());
++        *first_cell_border = Some(cell_border.clone());
+     }
+ 
+     if *row == 1 {
+-        let column = match style.size.width.tag() {
+-            taffy::CompactLength::LENGTH_TAG => {
++        let column = if !is_fixed {
++            // Widths on cells in an auto-layout table are minimum suggestions,
++            // not fixed grid tracks. Allow the track to grow beyond that hint
++            // when its content needs more room.
++            if style.size.width.tag() == taffy::CompactLength::LENGTH_TAG {
+                 let len = style.size.width.value();
+                 let padding = style.padding.resolve_or_zero(None, resolve_calc_value);
+                 let border = style.border.resolve_or_zero(None, resolve_calc_value);
+-                match style.box_sizing {
+-                    taffy::BoxSizing::ContentBox => style_helpers::length(
+-                        len + padding.left + padding.right + border.left + border.right,
+-                    ),
+-                    taffy::BoxSizing::BorderBox => style_helpers::length(len),
+-                }
++                let suggested = match style.box_sizing {
++                    taffy::BoxSizing::ContentBox => {
++                        len + padding.left + padding.right + border.left + border.right
++                    }
++                    taffy::BoxSizing::BorderBox => len,
++                };
++                style_helpers::minmax(
++                    taffy::MinTrackSizingFunction::length(suggested),
++                    taffy::MaxTrackSizingFunction::auto(),
++                )
++            } else {
++                auto_table_column()
+             }
+-            taffy::CompactLength::PERCENT_TAG => {
+-                if is_fixed {
++        } else {
++            match style.size.width.tag() {
++                taffy::CompactLength::LENGTH_TAG => {
++                    let len = style.size.width.value();
++                    let padding = style.padding.resolve_or_zero(None, resolve_calc_value);
++                    let border = style.border.resolve_or_zero(None, resolve_calc_value);
++                    match style.box_sizing {
++                        taffy::BoxSizing::ContentBox => style_helpers::length(
++                            len + padding.left + padding.right + border.left + border.right,
++                        ),
++                        taffy::BoxSizing::BorderBox => style_helpers::length(len),
++                    }
++                }
++                taffy::CompactLength::PERCENT_TAG => {
+                     style_helpers::percent(style.size.width.value())
+-                } else {
+-                    style_helpers::auto()
+                 }
++                taffy::CompactLength::AUTO_TAG => style_helpers::auto(),
++                // Dimension values are always length, percentage, auto or calc(),
++                // so any other tag is a calc() value. Pass it through so that
++                // Taffy resolves it against the table's inner width.
++                _ => style.size.width.into(),
+             }
+-            taffy::CompactLength::AUTO_TAG => style_helpers::auto(),
+-            // Dimension values are always length, percentage, auto or calc(),
+-            // so any other tag is a calc() value. Pass it through so that
+-            // Taffy resolves it against the table's inner width.
+-            _ => style.size.width.into(),
+         };
+         columns.push(column);
+     }
+@@ -390,7 +423,7 @@ fn push_table_cell(
+     // collapsed-border conflict algorithm; retaining real edges is a faithful
+     // fallback for asymmetric borders and avoids dropping them entirely.
+     if border_collapse == BorderCollapse::Collapse {
+-        let border = stylo_style.clone_border();
++        let border = &cell_border;
+         let visible_width = |border_style: BorderStyle, width: app_units::Au| {
+             if border_style.none_or_hidden() {
+                 0.0
+@@ -437,6 +470,16 @@ fn push_table_cell(
+     *col += colspan;
+ }
+ 
++fn auto_table_column() -> TrackSizingFunction {
++    // The minimum content width of an unbroken identifier may exceed the
++    // viewport. Let unconstrained columns shrink so `overflow-wrap:break-word`
++    // can wrap those identifiers after the table receives its final width.
++    style_helpers::minmax(
++        taffy::MinTrackSizingFunction::length(0.0),
++        taffy::MaxTrackSizingFunction::auto(),
++    )
++}
++
+ pub struct RangeIter(Range<usize>);
+ 
+ impl Iterator for RangeIter {
+@@ -498,7 +541,20 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_> {
+     ) -> taffy::LayoutOutput {
+         let cell = &self.ctx.cells[usize::from(node_id)];
+         let node_id = crate::taffy_node_id(cell.node_id);
+-        self.doc.compute_child_layout(node_id, inputs)
++        // The document layout pass restores the authored cell width after the
++        // table context is built. For auto table sizing, that width is a track
++        // suggestion, not a constraint on measuring the cell's contents.
++        let width = self.doc.nodes[cell.node_id].style().size.width;
++        let measure_without_width =
++            !self.ctx.is_fixed && width.tag() == taffy::CompactLength::LENGTH_TAG;
++        if measure_without_width {
++            self.doc.nodes[cell.node_id].style_mut().size.width = style_helpers::auto();
++        }
++        let output = self.doc.compute_child_layout(node_id, inputs);
++        if measure_without_width {
++            self.doc.nodes[cell.node_id].style_mut().size.width = width;
++        }
++        output
+     }
+ }
+ 

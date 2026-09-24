@@ -7,3 +7,4 @@
 0007-inline-float-layout.patch
 0008-email-rendering-and-image-performance.patch
 0009-disable-email-font-hinting.patch
+0010-auto-email-table-track-sizing.patch

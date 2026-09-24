@@ -53,13 +53,13 @@ const MIN_EMAIL_ZOOM: f32 = 0.5;
 #[cfg(any(feature = "gpu-renderer", test))]
 const MAX_GPU_EMAIL_NODES: usize = 4_096;
 
-// Keep ordinary prose, URLs, code identifiers and auto-layout table cells
-// inside the reading viewport. These are user-agent rules, so an authored
-// fixed-width design can still opt into its own layout and auto-fit, while
-// ordinary structured messages reflow like they do in webmail clients.
+// Keep long prose, URLs and code identifiers inside the reading viewport.
+// `break-word` only breaks a word when the actual line needs it; unlike
+// `anywhere`, it preserves the word's intrinsic width while an email table
+// chooses its columns. Authored fixed-width designs can still use auto-fit.
 const EMAIL_USER_AGENT_STYLE: &str = r#"
   a:any-link { color: #0969da; cursor: pointer; }
-  html, body { overflow-wrap: anywhere; word-break: normal; }
+  html, body { overflow-wrap: break-word; word-break: normal; }
   table { max-width: 100%; }
 "#;
 

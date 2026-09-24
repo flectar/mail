@@ -1252,3 +1252,87 @@ fn long_table_content_reflows_at_readable_zoom() {
         "the complete issue body must remain reachable"
     );
 }
+
+#[test]
+fn workflow_status_table_keeps_header_and_job_columns_readable() {
+    let html = r#"<body style="margin:0;font:14px Arial,sans-serif">
+      <table width="450" style="border-collapse:collapse;width:450px;max-width:100%"><tr><td>
+        <table style="border-collapse:collapse;width:100%;text-align:left">
+          <tr>
+            <th id="status" style="width:24px;padding:16px 0 16px 16px">Status</th>
+            <th id="job" style="width:100%;padding:16px">Job</th>
+            <th style="white-space:nowrap;padding:16px 16px 16px 0">Observations</th>
+          </tr>
+          <tr><td style="padding:16px 0 16px 16px">●</td>
+            <td style="width:100%;padding:16px">Demo workflow / Compile and validate</td>
+            <td style="white-space:nowrap;padding:16px 16px 16px 0">1</td></tr>
+        </table>
+      </td></tr></table>
+    </body>"#;
+    let mut r = renderer(html);
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    let doc = &r.email.as_ref().unwrap().document;
+    let status = doc
+        .get_node(doc.get_element_by_id("status").unwrap())
+        .unwrap();
+    let job = doc.get_node(doc.get_element_by_id("job").unwrap()).unwrap();
+    assert!(
+        status.final_layout().size.width >= 53.0,
+        "Status should fit as a word, width={}",
+        status.final_layout().size.width
+    );
+    assert!(
+        status.final_layout().size.height < 90.0,
+        "Status should not form a vertical column, height={}",
+        status.final_layout().size.height
+    );
+    assert!(
+        job.absolute_position(0.0, 0.0).x
+            >= status.absolute_position(0.0, 0.0).x + status.final_layout().size.width - 1.0
+    );
+}
+
+#[test]
+fn notification_table_keeps_name_and_heading_readable() {
+    let html = r#"<body style="max-width:420px;margin:0 auto;font:16px Arial,sans-serif">
+      <table id="email_table" align="center" style="border-collapse:collapse;max-width:420px;margin:0 auto"><tr><td>
+        <table width="100%" style="border-collapse:collapse"><tr>
+          <td width="16" style="display:block;width:16px">&nbsp;&nbsp;&nbsp;</td><td>
+            <table width="100%" style="border-collapse:collapse"><tr>
+              <td width="32"><img width="32" height="32" alt="Logo"></td>
+              <td id="recipient" width="32" style="line-height:21px"><a>Example Recipient</a></td>
+              <td width="32"><img width="32" height="32" alt="Avatar"></td>
+            </tr></table>
+          </td><td width="16" style="display:block;width:16px">&nbsp;&nbsp;&nbsp;</td>
+        </tr><tr><td width="16" style="display:block;width:16px">&nbsp;</td><td>
+          <table width="100%" style="border-collapse:collapse"><tr><td id="heading" align="center">
+            <a style="font-size:24px;line-height:24px">You have <b>2 updates to review today</b></a>
+          </td></tr></table>
+        </td><td width="16" style="display:block;width:16px">&nbsp;</td></tr></table>
+      </td></tr></table>
+    </body>"#;
+    let mut r = renderer(html);
+    r.render_cpu_if_needed(600, 600, 1.0).unwrap();
+    let doc = &r.email.as_ref().unwrap().document;
+    let recipient = doc
+        .get_node(doc.get_element_by_id("recipient").unwrap())
+        .unwrap();
+    let heading = doc
+        .get_node(doc.get_element_by_id("heading").unwrap())
+        .unwrap();
+    assert!(
+        recipient.final_layout().size.width >= 80.0,
+        "recipient column should fit the name, width={}",
+        recipient.final_layout().size.width
+    );
+    assert!(
+        recipient.final_layout().size.height < 65.0,
+        "recipient name should not form a vertical column, height={}",
+        recipient.final_layout().size.height
+    );
+    assert!(
+        heading.final_layout().size.width >= 250.0,
+        "notification heading should have a useful line width, width={}",
+        heading.final_layout().size.width
+    );
+}
