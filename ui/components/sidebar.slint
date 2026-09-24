@@ -9,7 +9,7 @@ import {
     CollapsibleWorkspaceSidebar,
     WorkspaceMiniHeading,
 } from "workspace-layout.slint";
-import { LayoutMetrics, MailIconPalette } from "../design-system.slint";
+import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
 export component MailSidebar inherits CollapsibleWorkspaceSidebar {
@@ -179,14 +179,24 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                 // The repeater must be a direct ListView child: nesting it in
                 // a layout disables virtualization. Rust supplies only expanded rows.
                 for entry in root.rows: Rectangle {
+                    private property <bool> reveal-ready: !entry.reveal_row;
                     width: max(0px, mailbox-scroll.visible-width - LayoutMetrics.sidebar-scrollbar-gutter);
-                    height: entry.kind == SidebarRowKind.unified-heading ? 21px
+                    height: !entry.show_row || (entry.reveal_row && !self.reveal-ready && MotionSettings.enabled) ? 0px
+                        : entry.kind == SidebarRowKind.unified-heading ? 21px
                         : entry.kind == SidebarRowKind.accounts-heading ? 25px
                         : entry.kind == SidebarRowKind.account ? (entry.mailbox.detail == "" ? 35px : 45px)
                         : entry.kind == SidebarRowKind.unified-section || entry.kind == SidebarRowKind.unified-inbox ? 35px
                         : entry.kind == SidebarRowKind.folder && entry.mailbox.label == "Inbox" ? 35px
                         : 31px;
                     background: transparent;
+                    clip: true;
+                    animate height { duration: 230ms; easing: spring(0); enabled: MotionSettings.enabled; }
+
+                    Timer {
+                        interval: 16ms;
+                        running: entry.reveal_row && !parent.reveal-ready && MotionSettings.enabled;
+                        triggered => { parent.reveal-ready = true; }
+                    }
 
                     if entry.kind == SidebarRowKind.unified-heading: WorkspaceMiniHeading {
                         x: 0px;
@@ -198,6 +208,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.unified-section: SidebarSectionHeader {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("All Inboxes");
@@ -213,6 +224,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.unified-inbox: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Inbox");
@@ -235,6 +247,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.unified-mailbox: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: entry.mailbox.label;
@@ -273,6 +286,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.categories-section: SidebarSectionHeader {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Categories");
@@ -290,6 +304,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.important: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Important");
@@ -309,6 +324,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.other: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Other");
@@ -328,6 +344,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.category: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: entry.label.name;
@@ -350,6 +367,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.global-labels-section: SidebarSectionHeader {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Labels");
@@ -367,6 +385,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.global-label: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: entry.label.name;
@@ -409,6 +428,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.account: SidebarSectionHeader {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: entry.mailbox.label;
@@ -428,6 +448,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.folder: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
 
@@ -501,6 +522,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.account-labels-section: SidebarSectionHeader {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("Labels");
@@ -518,6 +540,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.account-label: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: entry.label.display_name;
@@ -561,6 +584,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.new-folder: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("New folder");
@@ -577,6 +601,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
 
                     if entry.kind == SidebarRowKind.new-label: SidebarItem {
                         x: 0px;
+                        interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
                         label: @tr("New label");

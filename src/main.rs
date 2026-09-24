@@ -85,7 +85,7 @@ use renderer::{GpuEmailRenderer, RenderedEmail};
 use renderer_input_controller::register_renderer_input_callbacks;
 use rich_compose::{ComposeSelection, RichComposeDocument};
 use settings_controller::register_settings_preference_callbacks;
-use sidebar_model::{SidebarModel, refresh_sidebar};
+use sidebar_model::{SidebarAnimation, SidebarModel, refresh_sidebar, refresh_sidebar_with_motion};
 use slint::{DataTransfer, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, VecModel};
 use startup::{
     PendingCoreUpdates, StartupCalendarSnapshot, StartupSnapshot, StartupUpdate,
@@ -542,6 +542,7 @@ struct InboxState {
     initialized_sidebar_accounts: HashSet<i64>,
     initialized_sidebar_folders: HashSet<i64>,
     sidebar_rows: Rc<SidebarModel>,
+    sidebar_animation: Rc<SidebarAnimation>,
     folder_filter: String,
     scope: String,
     query: String,
@@ -966,6 +967,7 @@ impl InboxState {
             initialized_sidebar_accounts: HashSet::new(),
             initialized_sidebar_folders: HashSet::new(),
             sidebar_rows: Rc::new(SidebarModel::default()),
+            sidebar_animation: Rc::new(SidebarAnimation::default()),
             folder_filter: String::new(),
             inbox_count: 0,
             messages: Vec::new(),
@@ -2790,6 +2792,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let section_toggle_state = Rc::clone(&state);
+    let section_toggle_app = app.as_weak();
     app.on_toggle_sidebar_section(move |key, open| {
         if open {
             section_toggle_state
@@ -2802,10 +2805,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .collapsed_sidebar_sections
                 .insert(key.to_string());
         }
-        refresh_sidebar(&section_toggle_state);
+        let animate = section_toggle_app
+            .upgrade()
+            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+        refresh_sidebar_with_motion(&section_toggle_state, animate);
     });
 
     let folder_toggle_state = Rc::clone(&state);
+    let folder_toggle_app = app.as_weak();
     app.on_toggle_folder(move |folder_id, expanded| {
         let folder_id = i64::from(folder_id);
         if expanded {
@@ -2819,7 +2826,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .collapsed_folder_ids
                 .insert(folder_id);
         }
-        refresh_sidebar(&folder_toggle_state);
+        let animate = folder_toggle_app
+            .upgrade()
+            .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+        refresh_sidebar_with_motion(&folder_toggle_state, animate);
     });
 
     let folder_filter_state = Rc::clone(&state);

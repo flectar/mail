@@ -2,6 +2,132 @@
 use super::*;
 
 pub(super) type SidebarModel = crate::retained_model::RetainedModel<SidebarRow>;
+const MAX_ANIMATED_SIDEBAR_ROWS: usize = 256;
+
+// Keep closing descendants in the virtualized model until their heights have
+// sprung to zero. The canonical projection still contains only expanded rows.
+#[derive(Default)]
+pub(super) struct SidebarAnimation {
+    target: RefCell<Vec<SidebarRow>>,
+    generation: Cell<u64>,
+}
+
+impl SidebarAnimation {
+    pub(super) fn reconcile(
+        self: &Rc<Self>,
+        model: &Rc<SidebarModel>,
+        rows: Vec<SidebarRow>,
+        animate: bool,
+    ) {
+        let previous = self.target.borrow();
+        let changed = animate && accordion_changed(&previous, &rows);
+        let changed_row_count = if changed {
+            let previous_keys = previous
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<HashSet<_>>();
+            let next_keys = rows
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<HashSet<_>>();
+            previous_keys.symmetric_difference(&next_keys).count()
+        } else {
+            0
+        };
+        drop(previous);
+        *self.target.borrow_mut() = rows.clone();
+        // Only explicit accordion toggles animate. Search and data refreshes
+        // replace the projection immediately, so stale rows cannot linger.
+        // Large trees keep the retained model's batched range update path.
+        if !changed || changed_row_count > MAX_ANIMATED_SIDEBAR_ROWS {
+            self.generation.set(self.generation.get().wrapping_add(1));
+            model.reconcile(rows);
+            return;
+        }
+        let current = model.iter().collect::<Vec<_>>();
+        let projected = transition_rows(current, rows, true);
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        model.reconcile(projected);
+        let animation = Rc::downgrade(self);
+        let model = Rc::downgrade(model);
+        Timer::single_shot(Duration::from_millis(260), move || {
+            if let (Some(animation), Some(model)) = (animation.upgrade(), model.upgrade()) {
+                if animation.generation.get() == generation {
+                    model.reconcile(animation.target.borrow().clone());
+                }
+            }
+        });
+    }
+}
+
+fn accordion_changed(before: &[SidebarRow], after: &[SidebarRow]) -> bool {
+    let previous = before
+        .iter()
+        .map(|row| (row.key.to_string(), row))
+        .collect::<HashMap<_, _>>();
+    after.iter().any(|row| {
+        previous.get(row.key.as_str()).is_some_and(|old| {
+            (matches!(
+                row.kind,
+                SidebarRowKind::UnifiedSection
+                    | SidebarRowKind::Account
+                    | SidebarRowKind::CategoriesSection
+                    | SidebarRowKind::GlobalLabelsSection
+                    | SidebarRowKind::AccountLabelsSection
+            ) && old.open != row.open)
+                || (row.kind == SidebarRowKind::Folder
+                    && old.mailbox.expanded != row.mailbox.expanded)
+                || (row.kind == SidebarRowKind::AccountLabel
+                    && old.label.expanded != row.label.expanded)
+        })
+    })
+}
+
+fn transition_rows(
+    current: Vec<SidebarRow>,
+    rows: Vec<SidebarRow>,
+    reveal_new: bool,
+) -> Vec<SidebarRow> {
+    let current_keys = current
+        .iter()
+        .map(|row| row.key.to_string())
+        .collect::<HashSet<_>>();
+    let target_keys = rows
+        .iter()
+        .map(|row| row.key.to_string())
+        .collect::<HashSet<_>>();
+    let mut before = HashMap::<String, Vec<SidebarRow>>::new();
+    let mut trailing = Vec::new();
+    let mut next = None;
+    for mut row in current.into_iter().rev() {
+        if target_keys.contains(row.key.as_str()) {
+            next = Some(row.key.to_string());
+        } else {
+            row.show_row = false;
+            row.reveal_row = false;
+            if let Some(key) = &next {
+                before.entry(key.clone()).or_default().push(row);
+            } else {
+                trailing.push(row);
+            }
+        }
+    }
+    let mut result = Vec::with_capacity(
+        rows.len() + before.values().map(Vec::len).sum::<usize>() + trailing.len(),
+    );
+    for mut row in rows {
+        if let Some(mut closing) = before.remove(row.key.as_str()) {
+            closing.reverse();
+            result.extend(closing);
+        }
+        row.reveal_row = reveal_new && !current_keys.contains(row.key.as_str());
+        result.push(row);
+    }
+    trailing.reverse();
+    result.extend(trailing);
+    result
+}
 
 impl SidebarModel {
     fn reconcile(&self, rows: Vec<SidebarRow>) {
@@ -65,6 +191,8 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
     a.key == b.key
         && a.kind == b.kind
         && a.open == b.open
+        && a.show_row == b.show_row
+        && a.reveal_row == b.reveal_row
         && a.label == b.label
         && *account_id == other.account_id
         && *folder_id == other.folder_id
@@ -92,6 +220,10 @@ fn same_row(a: &SidebarRow, b: &SidebarRow) -> bool {
 }
 
 pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
+    refresh_sidebar_with_motion(state, false);
+}
+
+pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, animate: bool) {
     let mut state = state.borrow_mut();
     let account_ids = state
         .mailboxes
@@ -172,8 +304,9 @@ pub(super) fn refresh_sidebar(state: &Rc<RefCell<InboxState>>) {
     };
     // Model notifications can synchronously inspect application state.
     let model = Rc::clone(&state.sidebar_rows);
+    let animation = Rc::clone(&state.sidebar_animation);
     drop(state);
-    model.reconcile(rows);
+    animation.reconcile(&model, rows, animate);
 }
 
 fn make_filtered_sidebar_rows(
@@ -293,6 +426,7 @@ fn row(kind: SidebarRowKind, key: impl Into<slint::SharedString>) -> SidebarRow 
     SidebarRow {
         kind,
         key: key.into(),
+        show_row: true,
         ..Default::default()
     }
 }
@@ -715,13 +849,7 @@ mod tests {
     fn account_without_root_creation_right_has_no_new_folder_action() {
         let mut rows_input = accounts(1, 0);
         rows_input[0].can_create_children = false;
-        let rows = make_sidebar_rows(
-            rows_input,
-            vec![],
-            vec![],
-            &HashSet::new(),
-            &HashSet::new(),
-        );
+        let rows = make_sidebar_rows(rows_input, vec![], vec![], &HashSet::new(), &HashSet::new());
         assert!(!rows.iter().any(|row| row.kind == Kind::NewFolder));
     }
 
@@ -784,7 +912,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             [1, 4]
         );
-        assert!(!collapsed.iter().find(|row| row.label.id == 1).unwrap().label.expanded);
+        assert!(
+            !collapsed
+                .iter()
+                .find(|row| row.label.id == 1)
+                .unwrap()
+                .label
+                .expanded
+        );
     }
 
     #[test]
@@ -986,6 +1121,139 @@ mod tests {
             assert_rows_equal(&model.iter().collect::<Vec<_>>(), &rows);
         }
     }
+
+    #[test]
+    fn accordion_transition_keeps_closing_rows_in_order_and_reveals_new_rows() {
+        let account = section(Kind::Account, "account:1", &HashSet::new());
+        let mut closed_account = account.clone();
+        closed_account.open = false;
+        let category = section(Kind::CategoriesSection, "categories", &HashSet::new());
+        let mut closed_category = category.clone();
+        closed_category.open = false;
+        let open = vec![
+            category.clone(),
+            row(Kind::Category, "category:1"),
+            account.clone(),
+            row(Kind::Folder, "folder:1"),
+            row(Kind::Folder, "folder:2"),
+            row(Kind::Account, "account:2"),
+        ];
+        let closed = vec![
+            closed_category,
+            closed_account,
+            row(Kind::Account, "account:2"),
+        ];
+        assert!(accordion_changed(&open, &closed));
+        let closing = transition_rows(open.clone(), closed.clone(), true);
+        assert_eq!(
+            closing
+                .iter()
+                .map(|row| row.key.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "categories",
+                "category:1",
+                "account:1",
+                "folder:1",
+                "folder:2",
+                "account:2"
+            ]
+        );
+        assert!(
+            closing
+                .iter()
+                .filter(|row| !row.show_row)
+                .all(|row| { matches!(row.key.as_str(), "category:1" | "folder:1" | "folder:2") })
+        );
+        assert_eq!(closing.iter().filter(|row| !row.show_row).count(), 3);
+
+        let reopening = transition_rows(closing, open, true);
+        assert!(reopening.iter().all(|row| row.show_row && !row.reveal_row));
+        let fresh = transition_rows(closed, reopening, true);
+        assert!(
+            fresh
+                .iter()
+                .filter(|row| row.reveal_row)
+                .all(|row| { matches!(row.key.as_str(), "category:1" | "folder:1" | "folder:2") })
+        );
+        assert_eq!(fresh.iter().filter(|row| row.reveal_row).count(), 3);
+
+        let mut folder = row(Kind::Folder, "folder:tree");
+        folder.mailbox.expanded = true;
+        let mut collapsed_folder = folder.clone();
+        collapsed_folder.mailbox.expanded = false;
+        assert!(accordion_changed(&[folder], &[collapsed_folder]));
+
+        let mut label = row(Kind::AccountLabel, "gmail-label:1:7");
+        label.label.expanded = true;
+        let mut collapsed_label = label.clone();
+        collapsed_label.label.expanded = false;
+        assert!(accordion_changed(&[label], &[collapsed_label]));
+    }
+
+    #[test]
+    fn large_accordion_uses_batched_model_reconciliation() {
+        let model = Rc::new(SidebarModel::default());
+        let animation = Rc::new(SidebarAnimation::default());
+        let mut open = vec![section(Kind::Account, "account:1", &HashSet::new())];
+        open.extend((0..1_000).map(|id| row(Kind::Folder, format!("folder:{id}"))));
+        animation.reconcile(&model, open, false);
+        let closed = vec![section(
+            Kind::Account,
+            "account:1",
+            &HashSet::from(["account:1".into()]),
+        )];
+        animation.reconcile(&model, closed.clone(), true);
+        assert_eq!(model.row_count(), 1);
+        assert_rows_equal(&model.iter().collect::<Vec<_>>(), &closed);
+    }
+
+    #[test]
+    fn large_same_size_replacement_does_not_retain_old_rows() {
+        let model = Rc::new(SidebarModel::default());
+        let animation = Rc::new(SidebarAnimation::default());
+        let mut previous = vec![section(Kind::Account, "account:1", &HashSet::new())];
+        previous.extend((0..300).map(|id| row(Kind::Folder, format!("old:{id}"))));
+        animation.reconcile(&model, previous, false);
+        let mut replacement = vec![section(
+            Kind::Account,
+            "account:1",
+            &HashSet::from(["account:1".into()]),
+        )];
+        replacement.extend((0..300).map(|id| row(Kind::Folder, format!("new:{id}"))));
+        animation.reconcile(&model, replacement.clone(), true);
+        assert_rows_equal(&model.iter().collect::<Vec<_>>(), &replacement);
+    }
+
+    #[test]
+    fn refresh_cancels_closing_rows_and_rapid_reopen_restores_them() {
+        let model = Rc::new(SidebarModel::default());
+        let animation = Rc::new(SidebarAnimation::default());
+        let open = vec![
+            section(Kind::CategoriesSection, "categories", &HashSet::new()),
+            row(Kind::Important, "important"),
+            row(Kind::Other, "other"),
+            row(Kind::AccountsHeading, "accounts-heading"),
+        ];
+        let closed = vec![
+            section(
+                Kind::CategoriesSection,
+                "categories",
+                &HashSet::from(["categories".into()]),
+            ),
+            row(Kind::AccountsHeading, "accounts-heading"),
+        ];
+        animation.reconcile(&model, open.clone(), false);
+        animation.reconcile(&model, closed.clone(), true);
+        assert_eq!(model.iter().filter(|row| !row.show_row).count(), 2);
+        animation.reconcile(&model, open.clone(), true);
+        assert_rows_equal(&model.iter().collect::<Vec<_>>(), &open);
+
+        animation.reconcile(&model, closed, true);
+        let filtered = vec![row(Kind::Account, "account:1")];
+        animation.reconcile(&model, filtered.clone(), false);
+        assert_rows_equal(&model.iter().collect::<Vec<_>>(), &filtered);
+    }
 }
 
 #[cfg(test)]
@@ -1036,36 +1304,50 @@ mod interaction_tests {
             "global-labels".into(),
         ])));
         let model = Rc::new(SidebarModel::default());
-        model.reconcile(make_sidebar_rows(
-            mailboxes.clone(),
-            vec![],
-            vec![],
-            &HashSet::new(),
-            &collapsed.borrow(),
-        ));
+        let animation = Rc::new(SidebarAnimation::default());
+        animation.reconcile(
+            &model,
+            make_sidebar_rows(
+                mailboxes.clone(),
+                vec![],
+                vec![],
+                &HashSet::new(),
+                &collapsed.borrow(),
+            ),
+            false,
+        );
         app.set_sidebar_rows(model.clone().into());
         let model_for_click = model.clone();
+        let animation_for_click = animation.clone();
         let collapsed_for_click = collapsed.clone();
+        let motion_for_click = app.as_weak();
         app.on_toggle_sidebar_section(move |key, open| {
             if open {
                 collapsed_for_click.borrow_mut().remove(key.as_str());
             } else {
                 collapsed_for_click.borrow_mut().insert(key.to_string());
             }
-            model_for_click.reconcile(make_sidebar_rows(
-                mailboxes.clone(),
-                vec![],
-                vec![],
-                &HashSet::new(),
-                &collapsed_for_click.borrow(),
-            ));
+            let animate = motion_for_click
+                .upgrade()
+                .is_some_and(|app| app.global::<MotionSettings>().get_enabled());
+            animation_for_click.reconcile(
+                &model_for_click,
+                make_sidebar_rows(
+                    mailboxes.clone(),
+                    vec![],
+                    vec![],
+                    &HashSet::new(),
+                    &collapsed_for_click.borrow(),
+                ),
+                animate,
+            );
         });
         app.show().unwrap();
-        let draw = || {
-            // Finish smooth wheel/width animations without wall-clock sleeps.
-            clock.set(clock.get() + Duration::from_secs(1));
+        let draw_after = |elapsed: Duration| {
+            clock.set(clock.get() + elapsed);
             slint::platform::update_timers_and_animations();
             window.request_redraw();
+            let mut frame = Vec::new();
             window.draw_if_needed(|renderer| {
                 let size = window.size();
                 let mut pixels =
@@ -1076,7 +1358,7 @@ mod interaction_tests {
                     std::fs::create_dir_all(&directory).unwrap();
                     let bytes: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
                     image::save_buffer(
-                        directory.join(format!("frame-{:02}.png", clock.get().as_secs())),
+                        directory.join(format!("frame-{:05}.png", clock.get().as_millis())),
                         &bytes,
                         size.width,
                         size.height,
@@ -1084,9 +1366,14 @@ mod interaction_tests {
                     )
                     .unwrap();
                 }
+                frame = pixels;
             });
+            frame
         };
-        let click = |x, y| {
+        let draw = || {
+            draw_after(Duration::from_secs(1));
+        };
+        let dispatch_click = |x, y| {
             let position = slint::LogicalPosition::new(x, y);
             app.window().dispatch_event(WindowEvent::PointerPressed {
                 position,
@@ -1096,12 +1383,67 @@ mod interaction_tests {
                 position,
                 button: PointerEventButton::Left,
             });
+        };
+        let click = |x, y| {
+            dispatch_click(x, y);
             draw();
         };
-        draw();
+        let closed_frame = draw_after(Duration::from_secs(1));
         assert!(model.row_count() > 1_000);
         const CATEGORY_HEADER_CENTER_Y: f32 = 169.;
         const ACCOUNT_HEADER_CENTER_Y: f32 = 232.;
+        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(!collapsed.borrow().contains("categories"));
+        assert!(
+            model
+                .iter()
+                .any(|row| row.kind == SidebarRowKind::Important && row.reveal_row)
+        );
+        draw_after(Duration::from_millis(16));
+        let opening_frame = draw_after(Duration::from_millis(100));
+        let opened_frame = draw_after(Duration::from_millis(250));
+        let sidebar_region = |pixels: &[slint::Rgb8Pixel]| {
+            pixels
+                .chunks(1320)
+                .skip(180)
+                .take(130)
+                .flat_map(|line| line[..250].iter().map(|pixel| (pixel.r, pixel.g, pixel.b)))
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(
+            sidebar_region(&opening_frame),
+            sidebar_region(&closed_frame)
+        );
+        assert_ne!(
+            sidebar_region(&opening_frame),
+            sidebar_region(&opened_frame)
+        );
+        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(collapsed.borrow().contains("categories"));
+        assert!(
+            model
+                .iter()
+                .any(|row| row.kind == SidebarRowKind::Important && !row.show_row)
+        );
+        let closing_frame = draw_after(Duration::from_millis(100));
+        assert_ne!(
+            sidebar_region(&closing_frame),
+            sidebar_region(&closed_frame)
+        );
+        assert_ne!(
+            sidebar_region(&closing_frame),
+            sidebar_region(&opened_frame)
+        );
+        draw();
+        app.global::<MotionSettings>().set_enabled(false);
+        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(!collapsed.borrow().contains("categories"));
+        assert!(model.iter().all(|row| !row.reveal_row));
+        dispatch_click(140., CATEGORY_HEADER_CENTER_Y);
+        assert!(collapsed.borrow().contains("categories"));
+        assert!(model.iter().all(|row| row.show_row));
+        app.global::<MotionSettings>().set_enabled(true);
+        draw();
         click(140., ACCOUNT_HEADER_CENTER_Y);
         assert!(collapsed.borrow().contains("account:1"));
         assert!(model.row_count() < 10);

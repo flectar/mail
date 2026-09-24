@@ -53,6 +53,7 @@ component SidebarCountBadge inherits Rectangle {
 // A folder row is shared by unified and account sections so indentation,
 // selection, hover, and counts remain consistent throughout the tree.
 export component SidebarItem inherits SidebarRowSurface {
+    in property <bool> interactive: true;
     in property <string> label;
     in property <string> accessible-name: root.label;
     in property <string> count;
@@ -150,6 +151,7 @@ export component SidebarItem inherits SidebarRowSurface {
     }
 
     row-hit := TouchArea {
+        enabled: root.interactive;
         accessible-role: button;
         accessible-label: root.accessible-name;
         accessible-checked: root.selected;
@@ -159,6 +161,7 @@ export component SidebarItem inherits SidebarRowSurface {
     }
 
     if root.has-children: TouchArea {
+        enabled: root.interactive;
         x: max(0px, root.left-padding - 22px);
         y: 0px;
         width: 22px;
@@ -175,7 +178,7 @@ export component SidebarItem inherits SidebarRowSurface {
         mouse-cursor: pointer;
     }
 
-    if root.folder-menu-enabled: ContextMenuArea {
+    if root.interactive && root.folder-menu-enabled: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
@@ -200,7 +203,7 @@ export component SidebarItem inherits SidebarRowSurface {
         }
     }
 
-    if root.can-empty-trash: ContextMenuArea {
+    if root.interactive && root.can-empty-trash: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
@@ -212,7 +215,7 @@ export component SidebarItem inherits SidebarRowSurface {
         }
     }
 
-    if root.label-manageable && root.label-can-create-child: ContextMenuArea {
+    if root.interactive && root.label-manageable && root.label-can-create-child: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
@@ -235,7 +238,7 @@ export component SidebarItem inherits SidebarRowSurface {
         }
     }
 
-    if root.label-manageable && !root.label-can-create-child: ContextMenuArea {
+    if root.interactive && root.label-manageable && !root.label-can-create-child: ContextMenuArea {
         x: 22px;
         width: parent.width - 22px;
         height: parent.height;
@@ -255,7 +258,7 @@ export component SidebarItem inherits SidebarRowSurface {
     mail-drop-target := DropArea {
         width: parent.width;
         height: parent.height;
-        enabled: root.mail-drop-enabled;
+        enabled: root.interactive && root.mail-drop-enabled;
         can-drop(event) => {
             MailDragApi.can-drop-on-mailbox(
                 event.data,
@@ -280,6 +283,7 @@ export component SidebarItem inherits SidebarRowSurface {
 
 // Expansion belongs to the host model so recycled headers retain their state.
 export component SidebarSectionHeader inherits SidebarRowSurface {
+    in property <bool> interactive: true;
     in property <string> label;
     in property <string> detail;
     in property <string> avatar;
@@ -364,6 +368,7 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
 
 
     header-hit := TouchArea {
+        enabled: root.interactive;
         accessible-role: button;
         accessible-label: root.label;
         accessible-expanded: root.open;
