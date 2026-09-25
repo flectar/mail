@@ -285,7 +285,7 @@ pub(super) fn apply_rich_compose(
     app: &AppWindow,
     document: &RichComposeDocument,
     selection: ComposeSelection,
-    editor: &mut CosmicComposeEditor,
+    editor: &mut LazyComposeEditor,
 ) {
     app.set_compose_body(document.text().into());
     apply_rich_compose_state(app, document, selection);
@@ -296,8 +296,11 @@ pub(super) fn apply_compose_editor_surface(
     app: &AppWindow,
     document: &RichComposeDocument,
     selection: ComposeSelection,
-    editor: &mut CosmicComposeEditor,
+    editor: &mut LazyComposeEditor,
 ) {
+    if app.get_render_suspended() || !app.get_compose_open() {
+        return;
+    }
     let width = app.get_compose_editor_width().max(1.0);
     let viewport_height = app.get_compose_editor_viewport_height().max(1.0);
     let (width, viewport_height) = if width <= 1.0 || viewport_height <= 1.0 {
@@ -459,14 +462,15 @@ pub(super) fn clear_compose(
     app: &AppWindow,
     files: &Rc<RefCell<Vec<ComposeFile>>>,
     document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<CosmicComposeEditor>>,
+    editor: &Rc<RefCell<LazyComposeEditor>>,
     contacts: &Rc<RefCell<Vec<flectar_mail_core::models::Address>>>,
 ) {
     files.borrow_mut().clear();
     app.global::<AccountMailPreferences>()
         .invoke_composer_reset();
     document.borrow_mut().reset();
-    editor.borrow_mut().reset();
+    editor.borrow_mut().release();
+    app.set_compose_editor_tiles(ModelRc::default());
     contacts.borrow_mut().clear();
     apply_compose_files(app, &[]);
     apply_compose_contacts(app, &[]);
@@ -480,12 +484,7 @@ pub(super) fn clear_compose(
     app.set_compose_body("".into());
     app.set_compose_notice(UiMessage::EMPTY);
     app.set_compose_notice_is_error(false);
-    apply_rich_compose(
-        app,
-        &document.borrow(),
-        ComposeSelection::default(),
-        &mut editor.borrow_mut(),
-    );
+    apply_rich_compose_state(app, &document.borrow(), ComposeSelection::default());
 }
 
 #[cfg(test)]

@@ -235,7 +235,7 @@ pub(super) fn register(
     state: &Rc<RefCell<InboxState>>,
     runtime: &Rc<tokio::runtime::Runtime>,
     document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<CosmicComposeEditor>>,
+    editor: &Rc<RefCell<LazyComposeEditor>>,
 ) {
     let ui = app.global::<AccountMailPreferences>();
     ui.set_desktop_supported(!cfg!(any(target_os = "android", target_os = "ios")));
@@ -854,7 +854,7 @@ fn register_composer(
     state: &Rc<RefCell<InboxState>>,
     tasks: &UiWork,
     document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<CosmicComposeEditor>>,
+    editor: &Rc<RefCell<LazyComposeEditor>>,
 ) {
     // Only replace the exact unedited block we inserted. User edits are never
     // discarded when switching identity or selecting a different signature.

@@ -24,7 +24,7 @@ pub(super) fn create_and_register_window_lifecycle(
         let app_for_tray = app.as_weak();
         tray.on_show_window(move || {
             if let Some(app) = app_for_tray.upgrade() {
-                let _ = app.show();
+                show_from_tray(&app);
             }
         });
         let app_for_tray_quit = app.as_weak();
@@ -45,6 +45,7 @@ pub(super) fn create_and_register_window_lifecycle(
             return slint::CloseRequestResponse::KeepWindowShown;
         }
         if app.get_close_to_tray() {
+            prepare_for_tray(&app);
             slint::CloseRequestResponse::HideWindow
         } else {
             let _ = slint::quit_event_loop();
@@ -53,6 +54,31 @@ pub(super) fn create_and_register_window_lifecycle(
     });
 
     Ok(tray)
+}
+
+pub(super) fn prepare_for_tray(app: &AppWindow) {
+    app.invoke_suspend_rendering(true);
+    // Run after Slint has destroyed the native surface and processed pending
+    // property changes that may still own image references.
+    slint::Timer::single_shot(Duration::from_millis(250), release_free_memory);
+}
+
+pub(super) fn show_from_tray(app: &AppWindow) {
+    if let Err(error) = app.show() {
+        eprintln!("could not restore window: {error}");
+        return;
+    }
+    app.invoke_suspend_rendering(false);
+    app.window().request_redraw();
+}
+
+fn release_free_memory() {
+    // Only return already-free allocator pages at this explicit idle boundary;
+    // do not periodically purge working caches or discard live mapped pages.
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
 pub(super) fn register_window_preference_callbacks(

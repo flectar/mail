@@ -27,7 +27,17 @@ from typing import Any
 
 
 METRIC_PREFIX = "FLECTAR_STARTUP_METRIC "
-RESOURCE_KEYS = ("Pss", "Pss_Anon", "Private_Dirty")
+RESOURCE_KEYS = (
+    "Rss",
+    "Pss",
+    "Pss_Anon",
+    "Pss_File",
+    "Pss_Shmem",
+    "Private_Clean",
+    "Private_Dirty",
+    "Shared_Clean",
+    "Shared_Dirty",
+)
 
 
 def command_output(*command: str) -> str:

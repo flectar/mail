@@ -625,6 +625,9 @@ export component AppWindow inherits Window {
     // that presentation milestone separate from startup-ready, which guards
     // every callback that can touch local storage.
     in property <bool> startup_hydrated: false;
+    private property <int> compose-back-request: 0;
+    in property <bool> render-suspended: false;
+    callback suspend-rendering(bool);
     in property <bool> startup_ready: false;
     in property <bool> startup_failed: false;
     in property <LocalizedMessage> startup-message;
@@ -809,10 +812,10 @@ export component AppWindow inherits Window {
     in property <bool> compose_strike_active: false;
     in property <bool> compose_code_active: false;
     in property <string> compose_active_link_url: "";
-    out property <length> compose_editor_width: compose-dialog.compose_editor_width;
-    out property <length> compose_editor_viewport_height: compose-dialog.compose_editor_viewport_height;
-    out property <length> compose_editor_scroll_y: compose-dialog.compose_editor_scroll_y;
-    out property <string> compose_editor_preedit_text: compose-dialog.compose_editor_preedit_text;
+    in-out property <length> compose_editor_width;
+    in-out property <length> compose_editor_viewport_height;
+    in-out property <length> compose_editor_scroll_y;
+    in-out property <string> compose_editor_preedit_text;
     out property <color> compose_editor_text_color: root.body-text;
     out property <color> compose_editor_link_color: root.accent;
     out property <color> compose_editor_selection_color: root.accent;
@@ -1033,7 +1036,7 @@ export component AppWindow inherits Window {
             return false;
         }
         if (root.compose_open) {
-            compose-dialog.back-requested();
+            root.compose-back-request += 1;
             return true;
         }
         if (root.calendar_editor_open) {
@@ -1060,17 +1063,24 @@ export component AppWindow inherits Window {
         return false;
     }
 
+    changed compose_open => {
+        if (!root.compose_open) {
+            root.compose-back-request = 0;
+            root.compose_editor_scroll_y = 0px;
+            root.compose_editor_preedit_text = "";
+        }
+    }
+
     changed theme-mode => {
         Palette.color-scheme = root.theme-mode == "dark" ? ColorScheme.dark
             : root.theme-mode == "light" ? ColorScheme.light
             : ColorScheme.unknown;
     }
 
-    Rectangle {
-        // Paint the useful application chrome immediately. Data models hydrate
-        // in the background; first-run onboarding replaces this shell only
-        // after the account query has completed.
-        visible: !root.startup_ready || root.connected_accounts.length > 0;
+    if root.connected_accounts.length > 0 : Rectangle {
+        // Do not construct the mailbox on a fresh profile. `visible: false`
+        // retains the entire tree, and constructing it before the account
+        // query touches code and assets that onboarding never needs.
         x: root.safe-area-insets.left;
         y: root.safe-area-insets.top;
         width: root.width - root.safe-area-insets.left - root.safe-area-insets.right;
@@ -1660,7 +1670,10 @@ export component AppWindow inherits Window {
         }
         }
 
-        compose-dialog := ComposeDialog {
+        if root.compose_open : ComposeDialog {
+
+            in property <int> back-request: root.compose-back-request;
+            changed back-request => { if (self.back-request > 0) { self.back-requested(); } }
             compact: root.compact-layout;
             attachment-picker-supported: root.document_apis_supported;
             x: 0px;
@@ -1730,7 +1743,13 @@ export component AppWindow inherits Window {
             compose_editor_key_event(key, control, shift, alt, meta) => {
                 root.compose_editor_key_event(key, control, shift, alt, meta)
             }
-            compose_editor_layout_changed => { root.compose_editor_layout_changed(); }
+            compose_editor_layout_changed(width, height, scroll-y, preedit) => {
+                root.compose_editor_width = width;
+                root.compose_editor_viewport_height = height;
+                root.compose_editor_scroll_y = scroll-y;
+                root.compose_editor_preedit_text = preedit;
+                root.compose_editor_layout_changed();
+            }
             search_compose_contacts(query, account-id) => { root.search_compose_contacts(query, account-id); }
             select_compose_contact(index, recipients) => root.select_compose_contact(index, recipients);
             refresh_email_templates => { root.refresh_email_templates(); }

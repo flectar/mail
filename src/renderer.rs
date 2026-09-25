@@ -146,6 +146,7 @@ pub struct RenderedEmail {
 }
 
 pub struct GpuEmailRenderer {
+    suspended: bool,
     email: Option<PreparedEmail>,
     #[cfg(feature = "gpu-renderer")]
     renderer: Option<vello::Renderer>,
@@ -204,6 +205,7 @@ pub struct GpuEmailRenderer {
 impl Default for GpuEmailRenderer {
     fn default() -> Self {
         Self {
+            suspended: false,
             email: None,
             #[cfg(feature = "gpu-renderer")]
             renderer: None,
@@ -430,6 +432,25 @@ impl GpuEmailRenderer {
         self.click_count = 0;
         self.last_pointer_down = None;
         self.update_image_priorities();
+    }
+
+    /// Keep the document, selection and scroll position, but release pixels
+    /// and raster scratch space while the native window is in the tray.
+    pub fn set_suspended(&mut self, suspended: bool) {
+        self.suspended = suspended;
+        if suspended {
+            self.tiles.clear();
+            self.cpu_painter = None;
+            if let Some(email) = self.email.as_mut() {
+                email.paint_cache.clear();
+            }
+            #[cfg(feature = "gpu-renderer")]
+            {
+                self.scene = vello::Scene::new();
+            }
+        }
+        self.last_size = None;
+        self.dirty = self.email.is_some();
     }
 
     pub fn clear(&mut self) {
@@ -699,7 +720,7 @@ impl GpuEmailRenderer {
     }
 
     pub fn needs_repaint(&self) -> bool {
-        self.dirty || self.paint_dirty || self.region_dirty
+        !self.suspended && (self.dirty || self.paint_dirty || self.region_dirty)
     }
 
     /// Configure automatic fitting for either renderer.
@@ -757,6 +778,9 @@ impl GpuEmailRenderer {
         height: u32,
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
+        if self.suspended {
+            return Ok(None);
+        }
         let start = render_timings_enabled().then(Instant::now);
         let layouts = self.layout_count;
         let tiles = self.tile_count;
@@ -939,7 +963,7 @@ impl GpuEmailRenderer {
         height: f32,
         scale: f32,
     ) -> Result<Option<RenderedEmail>, String> {
-        if self.email.is_none() {
+        if self.suspended || self.email.is_none() {
             return Ok(None);
         }
         let start = render_timings_enabled().then(Instant::now);
@@ -2112,6 +2136,48 @@ mod tests {
             render_prepared_cpu(&mut long, 520, 900, 1.0).expect("long email should render");
         assert_eq!(long_frame.height, 1812);
         assert_eq!(long_frame.tiles.len(), 4);
+    }
+
+    #[test]
+    fn tray_releases_pixels_and_restores_scrolled_document() {
+        let mut renderer = GpuEmailRenderer::default();
+        renderer.set_email(
+            prepare_email_html("<body><div style='height:5000px'>Retained document</div></body>")
+                .unwrap(),
+        );
+        renderer.set_visible_region(1500.0, 400.0);
+        let frame = renderer
+            .render_cpu_if_needed(520, 400, 1.0)
+            .unwrap()
+            .unwrap();
+        let positions: Vec<_> = frame.tiles.iter().map(|t| (t.y, t.height)).collect();
+        drop(frame);
+        assert!(renderer.cpu_painter.is_some());
+        renderer.set_suspended(true);
+        assert!(renderer.tiles.is_empty());
+        assert!(renderer.cpu_painter.is_none());
+        assert!(renderer.has_document());
+        assert!(!renderer.needs_repaint());
+        assert!(
+            renderer
+                .render_cpu_if_needed(520, 400, 1.0)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(renderer.visible_scroll_y, 1500.0);
+        renderer.set_suspended(false);
+        let restored = renderer
+            .render_cpu_if_needed(520, 400, 1.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            positions,
+            restored
+                .tiles
+                .iter()
+                .map(|t| (t.y, t.height))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

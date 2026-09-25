@@ -98,13 +98,31 @@ impl StartupMetrics {
                 return;
             };
             match app.window().take_snapshot() {
-                Ok(frame) => metrics.emit_once(
-                    event,
-                    json!({
-                        "width": frame.width(),
-                        "height": frame.height(),
-                    }),
-                ),
+                Ok(frame) => {
+                    if let Some(directory) = std::env::var_os("FLECTAR_BENCHMARK_SCREENSHOT_DIR") {
+                        let directory = std::path::PathBuf::from(directory);
+                        let result = std::fs::create_dir_all(&directory).and_then(|_| {
+                            image::save_buffer(
+                                directory.join(format!("{event}.png")),
+                                frame.as_bytes(),
+                                frame.width(),
+                                frame.height(),
+                                image::ColorType::Rgba8,
+                            )
+                            .map_err(std::io::Error::other)
+                        });
+                        if let Err(error) = result {
+                            eprintln!("benchmark screenshot: {error}");
+                        }
+                    }
+                    metrics.emit_once(
+                        event,
+                        json!({
+                            "width": frame.width(),
+                            "height": frame.height(),
+                        }),
+                    )
+                }
                 Err(error) => metrics.emit_once(
                     event,
                     json!({
@@ -115,9 +133,37 @@ impl StartupMetrics {
         });
     }
 
-    pub(crate) fn schedule_benchmark_exit(&self) {
+    pub(crate) fn schedule_benchmark_exit(&self, app: slint::Weak<AppWindow>) {
         if !self.enabled() {
             return;
+        }
+        // Opt-in lifecycle measurement uses exactly the production tray
+        // release/restore paths, without requiring a desktop tray host.
+        if let Some(interval) = std::env::var("FLECTAR_BENCHMARK_TRAY_INTERVAL_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|n| (1000..=30_000).contains(n))
+        {
+            let weak = app.clone();
+            let metrics = self.clone();
+            slint::Timer::single_shot(Duration::from_millis(interval), move || {
+                if let Some(app) = weak.upgrade() {
+                    crate::window_controller::prepare_for_tray(&app);
+                    match app.hide() {
+                        Ok(()) => metrics.emit("tray_hidden", json!({})),
+                        Err(error) => {
+                            metrics.emit("tray_error", json!({"error": error.to_string()}))
+                        }
+                    }
+                }
+            });
+            let metrics = self.clone();
+            slint::Timer::single_shot(Duration::from_millis(interval * 2), move || {
+                if let Some(app) = app.upgrade() {
+                    crate::window_controller::show_from_tray(&app);
+                    metrics.schedule_rendered_frame(app.as_weak(), "tray_restored_frame");
+                }
+            });
         }
         let Some(delay_ms) = std::env::var("FLECTAR_BENCHMARK_EXIT_AFTER_MS")
             .ok()

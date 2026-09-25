@@ -4,11 +4,14 @@ use crate::rich_compose::{
 use cosmic_text::{
     Action, Attrs, Buffer, Color as CosmicColor, Cursor, Edit, Editor, Family, FontSystem, Metrics,
     Motion, PhysicalGlyph, Renderer, Selection, Shaping, Style, SwashCache, SwashContent,
-    UnderlineStyle, Weight, Wrap,
+    UnderlineStyle, Weight, Wrap, fontdb::Source,
 };
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 use std::{
+    cell::OnceCell,
     collections::BTreeMap,
+    ops::{Deref, DerefMut},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -81,13 +84,44 @@ pub struct CosmicComposeEditor {
     click_count: u8,
 }
 
+/// Construct the font database only when a composer action needs its surface.
+/// Most sessions reach the mailbox without opening the composer.
+#[derive(Default)]
+pub struct LazyComposeEditor(OnceCell<CosmicComposeEditor>);
+
+impl LazyComposeEditor {
+    /// The document owns text, selection and undo history independently.
+    pub fn release(&mut self) {
+        self.0.take();
+    }
+}
+
+impl Deref for LazyComposeEditor {
+    type Target = CosmicComposeEditor;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get_or_init(CosmicComposeEditor::default)
+    }
+}
+
+impl DerefMut for LazyComposeEditor {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.get_or_init(CosmicComposeEditor::default);
+        self.0.get_mut().expect("compose editor was initialized")
+    }
+}
+
 impl Default for CosmicComposeEditor {
     fn default() -> Self {
         let mut font_system = FontSystem::new();
         // The composer is rasterized by cosmic-text rather than Slint, so it
         // must register the same bundled UI font independently. System fonts
         // remain available as fallbacks for glyphs outside the font's coverage.
-        font_system.db_mut().load_font_data(UI_FONT_DATA.to_vec());
+        // The bytes already live in the executable for Slint. Share them with
+        // fontdb instead of copying the 4 MiB font into the heap.
+        font_system
+            .db_mut()
+            .load_font_source(Source::Binary(Arc::new(UI_FONT_DATA)));
         let buffer = Buffer::new(
             &mut font_system,
             Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),
@@ -878,6 +912,26 @@ mod tests {
                 valid_offset(text, offset) as i32
             );
         }
+    }
+
+    #[test]
+    fn lazy_editor_releases_fonts_without_discarding_document_history() {
+        let mut editor = LazyComposeEditor::default();
+        assert!(editor.0.get().is_none());
+        editor.release();
+        assert!(editor.0.get().is_none());
+        let mut document = RichComposeDocument::default();
+        document.synchronize("draft", 5, 5);
+        document.insert_text(" preserved");
+        editor.reset();
+        assert!(editor.0.get().is_some());
+        editor.release();
+        assert!(editor.0.get().is_none());
+        assert_eq!(document.text(), "draft preserved");
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), "draft");
+        editor.reset();
+        assert!(editor.0.get().is_some());
     }
 
     #[test]

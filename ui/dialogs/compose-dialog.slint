@@ -49,10 +49,6 @@ export component ComposeDialog inherits Rectangle {
     in property <bool> compose_strike_active: false;
     in property <bool> compose_code_active: false;
     in property <string> compose_active_link_url: "";
-    out property <length> compose_editor_width: composer.editor-width;
-    out property <length> compose_editor_viewport_height: composer.editor-viewport-height;
-    out property <length> compose_editor_scroll_y: composer.editor-scroll-y;
-    out property <string> compose_editor_preedit_text: composer.editor-preedit-text;
     callback close_compose();
     callback back-requested();
     callback save_compose(int, string, string, string, string, string, bool);
@@ -65,7 +61,7 @@ export component ComposeDialog inherits Rectangle {
     callback compose_history(string);
     callback compose_editor_pointer_event(float, float, string, bool, bool, bool, bool);
     callback compose_editor_key_event(string, bool, bool, bool, bool) -> bool;
-    callback compose_editor_layout_changed;
+    callback compose_editor_layout_changed(length, length, length, string);
     callback search_compose_contacts(string, int);
     callback select_compose_contact(int, string) -> string;
     callback refresh_email_templates();
@@ -74,6 +70,17 @@ export component ComposeDialog inherits Rectangle {
     callback delete_email_template(int) -> bool;
 
     back-requested => { composer.back-requested(); }
+
+    // A conditional component's initial layout is not a property *change*.
+    // Publish it once after instantiation as well as on subsequent resizes.
+    Timer {
+        interval: 1ms;
+        running: true;
+        triggered => {
+            self.running = false;
+            root.compose_editor_layout_changed(composer.editor-width, composer.editor-viewport-height, composer.editor-scroll-y, composer.editor-preedit-text);
+        }
+    }
 
     visible: root.compose_open;
     background: root.compact ? root.surface : #00000066;
@@ -161,7 +168,7 @@ export component ComposeDialog inherits Rectangle {
         editor-key-event(key, control, shift, alt, meta) => {
             root.compose_editor_key_event(key, control, shift, alt, meta)
         }
-        editor-layout-changed => { root.compose_editor_layout_changed(); }
+        editor-layout-changed => { root.compose_editor_layout_changed(composer.editor-width, composer.editor-viewport-height, composer.editor-scroll-y, composer.editor-preedit-text); }
         search-contacts(query, account-id) => { root.search_compose_contacts(query, account-id); }
         select-contact(index, recipients) => root.select_compose_contact(index, recipients);
         refresh-templates => { root.refresh_email_templates(); }

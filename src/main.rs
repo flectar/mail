@@ -58,7 +58,7 @@ use calendar::{
 };
 use chrono::{Duration as ChronoDuration, Local, NaiveDate, NaiveTime, TimeZone};
 use compose_controller::*;
-use compose_editor::{ComposeEditorStyle, CosmicComposeEditor, RenderedComposeEditor};
+use compose_editor::{ComposeEditorStyle, LazyComposeEditor, RenderedComposeEditor};
 use contacts::{
     ContactDirectoryState, apply_contact_directory, apply_contact_rows, clear_contact_form,
 };
@@ -1267,6 +1267,8 @@ pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::
 
 pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> {
     let startup_metrics = StartupMetrics::from_environment();
+    let benchmark_tray = startup_metrics.enabled()
+        && std::env::var_os("FLECTAR_BENCHMARK_TRAY_INTERVAL_MS").is_some();
     let benchmark_disable_background =
         std::env::var("FLECTAR_BENCHMARK_DISABLE_SYNC").as_deref() == Ok("1");
     normalize_appimage_environment();
@@ -3753,7 +3755,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     );
                     startup_metrics_for_ui
                         .schedule_rendered_frame(app.as_weak(), "core_ready_frame");
-                    startup_metrics_for_ui.schedule_benchmark_exit();
+                    startup_metrics_for_ui.schedule_benchmark_exit(app.as_weak());
                 }
                 StartupUpdate::MailMetadata(result) => match result {
                     Ok(metadata) => {
@@ -5099,7 +5101,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let compose_files = Rc::new(RefCell::new(Vec::<ComposeFile>::new()));
     let compose_document = Rc::new(RefCell::new(RichComposeDocument::default()));
-    let compose_editor = Rc::new(RefCell::new(CosmicComposeEditor::default()));
+    let compose_editor = Rc::new(RefCell::new(LazyComposeEditor::default()));
     let compose_contacts = Rc::new(RefCell::new(
         Vec::<flectar_mail_core::models::Address>::new(),
     ));
@@ -5113,11 +5115,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let compose_templates = Rc::new(RefCell::new(Vec::<Snippet>::new()));
     account_mail_preferences::register(&app, &state, &runtime, &compose_document, &compose_editor);
     apply_compose_files(&app, &compose_files.borrow());
-    {
-        let document = compose_document.borrow();
-        let mut editor = compose_editor.borrow_mut();
-        apply_rich_compose(&app, &document, ComposeSelection::default(), &mut editor);
-    }
     apply_compose_contacts(&app, &[]);
     apply_email_templates(&app, &[]);
 
@@ -5326,6 +5323,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let intent_for_open = Rc::clone(&compose_intent);
+    let document_for_open = Rc::clone(&compose_document);
+    let editor_for_open = Rc::clone(&compose_editor);
     app.on_open_compose(move || {
         if let Some(app) = app_weak.upgrade() {
             if app.get_compose_open() {
@@ -5340,6 +5339,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_compose_notice(UiMessage::EMPTY);
             app.set_compose_notice_is_error(false);
             app.set_compose_open(true);
+            let document = document_for_open.borrow();
+            apply_rich_compose(
+                &app,
+                &document,
+                document.selection(),
+                &mut editor_for_open.borrow_mut(),
+            );
         }
     });
 
@@ -5851,6 +5857,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        if !app.get_compose_open() || app.get_render_suspended() {
+            return;
+        }
         let Ok(document) = document_for_editor_layout.try_borrow() else {
             return;
         };
@@ -7030,12 +7039,61 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let date_refresh_app = app.as_weak();
     let last_local_date = Cell::new(Local::now().date_naive());
     let date_refresh_timer = Timer::default();
-    date_refresh_timer.start(slint::TimerMode::Repeated, Duration::from_secs(60), move || {
-        let today = Local::now().date_naive();
-        if today != last_local_date.replace(today)
-            && let Some(app) = date_refresh_app.upgrade()
-        {
-            refresh_rows_only(&app, &date_refresh_state, &date_refresh_runtime);
+    date_refresh_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(60),
+        move || {
+            let today = Local::now().date_naive();
+            if today != last_local_date.replace(today)
+                && let Some(app) = date_refresh_app.upgrade()
+            {
+                refresh_rows_only(&app, &date_refresh_state, &date_refresh_runtime);
+            }
+        },
+    );
+
+    let visibility_app = app.as_weak();
+    let visibility_renderer = email_renderer.clone();
+    let visibility_editor = compose_editor.clone();
+    let visibility_document = compose_document.clone();
+    app.on_suspend_rendering(move |suspended| {
+        let Some(app) = visibility_app.upgrade() else {
+            return;
+        };
+        if app.get_render_suspended() == suspended {
+            return;
+        }
+        app.set_render_suspended(suspended);
+        visibility_renderer.borrow_mut().set_suspended(suspended);
+        if suspended {
+            app.set_email_tiles(ModelRc::default());
+            app.set_compose_editor_tiles(ModelRc::default());
+            visibility_editor.borrow_mut().release();
+        } else {
+            if !use_wgpu {
+                let (width, height) = email_viewport_size(&app);
+                match visibility_renderer.borrow_mut().render_cpu_if_needed(
+                    width,
+                    height,
+                    app.window().scale_factor(),
+                ) {
+                    Ok(Some(frame)) => apply_cpu_frame(&app, frame),
+                    Ok(None) => {}
+                    Err(error) => app.set_render_status(UiMessage::detail(
+                        "Email resource render failed: {}",
+                        error,
+                    )),
+                }
+            }
+            if app.get_compose_open() {
+                let document = visibility_document.borrow();
+                apply_rich_compose(
+                    &app,
+                    &document,
+                    document.selection(),
+                    &mut visibility_editor.borrow_mut(),
+                );
+            }
         }
     });
 
@@ -7043,7 +7101,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // tray participates in the same process-wide event loop. This is Slint's
     // documented multi-component pattern; calling AppWindow::run() here would
     // redundantly show the main window a second time.
-    slint::run_event_loop().map_err(|error| {
+    let event_loop_result = if benchmark_tray {
+        slint::run_event_loop_until_quit()
+    } else {
+        slint::run_event_loop()
+    };
+    event_loop_result.map_err(|error| {
         renderer_preferences::startup_error(error, use_wgpu && !gpu_startup_completed.get())
     })?;
     if let Some(error) = gpu_startup_error.borrow_mut().take() {
