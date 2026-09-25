@@ -1144,10 +1144,10 @@ async fn execute_action(
             crate::sync::finish_empty_trash(ctx, config.id, snapshot_ids).await
         }
         "delete_permanently" => {
-            if let Some(message_id) = action.message_id {
-                if crate::sync::is_local_only_draft(ctx, message_id).await? {
-                    return crate::sync::finish_permanent_delete(ctx, Some(message_id)).await;
-                }
+            if let Some(message_id) = action.message_id
+                && crate::sync::is_local_only_draft(ctx, message_id).await?
+            {
+                return crate::sync::finish_permanent_delete(ctx, Some(message_id)).await;
             }
             if let Some(remote_id) = linked_or_retry(&remote_id)? {
                 destroy_email_if_present(c, remote_id).await?;

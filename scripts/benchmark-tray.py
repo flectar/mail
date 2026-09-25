@@ -21,7 +21,7 @@ startup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(startup)
 
 
-def run(binary, screenshots):
+def run(binary, screenshots, include_mappings=False):
     with tempfile.TemporaryDirectory(prefix="flectar-tray-benchmark-") as root:
         env = dict(os.environ, XDG_DATA_HOME=root + "/data", XDG_CACHE_HOME=root + "/cache",
                    FLECTAR_RENDERER="cpu", FLECTAR_STARTUP_METRICS="1",
@@ -33,7 +33,7 @@ def run(binary, screenshots):
                                    stdout=subprocess.DEVNULL, text=True)
         messages = queue.Queue()
         threading.Thread(target=startup.stderr_reader, args=(process.stderr, messages), daemon=True).start()
-        events, tail, phases = {}, [], {}
+        events, tail, phases, phase_mappings = {}, [], {}, {}
         try:
             for phase, event in [("visible", "core_ready_frame"), ("tray", "tray_hidden"),
                                  ("restored", "tray_restored_frame")]:
@@ -46,15 +46,23 @@ def run(binary, screenshots):
                 resources = startup.read_proc_resources(process.pid)
                 resources["idle_cpu_percent"] = (startup.read_cpu_seconds(process.pid) - cpu) / (time.monotonic() - began) * 100
                 phases[phase] = resources
+                if include_mappings:
+                    phase_mappings[phase] = startup.read_proc_mappings(process.pid, binary)
             process.wait(timeout=8)
             startup.drain_messages(messages, events, tail)
             if process.returncode:
                 raise RuntimeError(tail)
+            renderer = events.get("renderer_selected", {})
+            if renderer.get("active") != "cpu" or renderer.get("wgpu_initialized") is not False:
+                raise RuntimeError(f"expected CPU renderer without WGPU, got {renderer}")
         finally:
             if process.poll() is None:
                 process.terminate()
                 process.wait(timeout=5)
-        return dict(phases=phases, events=events, stderr_tail=tail)
+        result = dict(phases=phases, events=events)
+        if include_mappings:
+            result["phase_mappings"] = phase_mappings
+        return result
 
 
 def main():
@@ -63,16 +71,20 @@ def main():
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--screenshots", type=Path)
+    parser.add_argument("--include-mappings", action="store_true",
+                        help="Include anonymized per-mapping /proc smaps counters for each phase.")
     args = parser.parse_args()
     if args.rounds < 1:
         parser.error("rounds must be positive")
     binary = args.binary.resolve()
     runs = []
     for index in range(args.rounds):
-        result = run(binary, args.screenshots / str(index + 1) if args.screenshots else None)
+        result = run(binary, args.screenshots / str(index + 1) if args.screenshots else None,
+                     args.include_mappings)
         runs.append(result)
         print(json.dumps(result["phases"]), flush=True)
     report = dict(binary=str(binary), binary_sha256=startup.file_sha256(binary),
+                  include_mappings=args.include_mappings,
                   display=os.environ.get("DISPLAY"), wayland_display=os.environ.get("WAYLAND_DISPLAY"),
                   platform=startup.platform.platform(), screenshots=bool(args.screenshots), runs=runs,
                   medians={phase: {key: statistics.median(r["phases"][phase][key] for r in runs)

@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import queue
+import re
 import shutil
 import statistics
 import subprocess
@@ -27,6 +28,7 @@ from typing import Any
 
 
 METRIC_PREFIX = "FLECTAR_STARTUP_METRIC "
+RENDERER_PREFIX = "FLECTAR_RENDERER "
 RESOURCE_KEYS = (
     "Rss",
     "Pss",
@@ -37,6 +39,21 @@ RESOURCE_KEYS = (
     "Private_Dirty",
     "Shared_Clean",
     "Shared_Dirty",
+    "Swap",
+    "SwapPss",
+)
+SMAPS_HEADER = re.compile(r"^[0-9a-f]+-[0-9a-f]+\s")
+MAPPING_KEYS = (
+    "Size",
+    "Rss",
+    "Pss",
+    "Anonymous",
+    "Private_Clean",
+    "Private_Dirty",
+    "Shared_Clean",
+    "Shared_Dirty",
+    "Swap",
+    "SwapPss",
 )
 
 
@@ -68,13 +85,84 @@ def read_proc_resources(pid: int) -> dict[str, int]:
     for line in smaps.splitlines():
         name, separator, remainder = line.partition(":")
         if separator and name in RESOURCE_KEYS:
-            resources[f"{name.lower()}_kib"] = int(remainder.split()[0])
+            field = "swap_pss" if name == "SwapPss" else name.lower()
+            resources[f"{field}_kib"] = int(remainder.split()[0])
     for line in Path(f"/proc/{pid}/status").read_text(encoding="utf-8").splitlines():
         if line.startswith("Threads:"):
             resources["threads"] = int(line.split()[1])
             break
     resources["file_descriptors"] = len(list(Path(f"/proc/{pid}/fd").iterdir()))
     return resources
+
+
+def mapping_kind(path: str, executable: Path) -> str:
+    path = path.removesuffix(" (deleted)")
+    if path == str(executable):
+        return "executable"
+    if path == "[heap]":
+        return "heap"
+    if path.startswith("[stack"):
+        return "stack"
+    if path.startswith("/SYSV") or (
+        (path.startswith("/dev/shm/") or "memfd:" in path)
+        and any(name in path.lower() for name in ("wayland", "x11", "slint", "softbuffer"))
+    ):
+        return "shared_surface_candidate"
+    if path.startswith("/dev/shm/") or "memfd:" in path or path.startswith("[anon_shmem"):
+        return "shared_memory"
+    if not path or path.startswith("[anon"):
+        return "anonymous"
+    if path.startswith("["):
+        return "kernel_mapping"
+    name = path.rsplit("/", 1)[-1].lower()
+    if name.endswith((".ttf", ".ttc", ".otf", ".otc")):
+        return "font_file"
+    if name.endswith((".db", ".sqlite", ".sqlite3", "-wal", "-shm")):
+        return "database_file"
+    if ".so" in name and (name.endswith(".so") or ".so." in name):
+        return "shared_library"
+    return "other_file"
+
+
+def parse_smaps(contents: str, executable: Path) -> dict[str, Any]:
+    """Return per-mapping counters without retaining process or profile paths."""
+    mappings: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for line in contents.splitlines():
+        if SMAPS_HEADER.match(line):
+            fields = line.split(maxsplit=5)
+            if len(fields) < 5:
+                raise ValueError("invalid smaps header")
+            if current is not None:
+                mappings.append(current)
+            current = {
+                "kind": mapping_kind(fields[5] if len(fields) == 6 else "", executable),
+                "permissions": fields[1],
+            }
+            continue
+        if current is None:
+            continue
+        name, separator, value = line.partition(":")
+        if separator and name in MAPPING_KEYS:
+            field = "swap_pss" if name == "SwapPss" else name.lower()
+            current[f"{field}_kib"] = int(value.split()[0])
+    if current is not None:
+        mappings.append(current)
+
+    by_kind: dict[str, dict[str, int]] = {}
+    for mapping in mappings:
+        totals = by_kind.setdefault(mapping["kind"], {"mapping_count": 0})
+        totals["mapping_count"] += 1
+        for key, value in mapping.items():
+            if key.endswith("_kib"):
+                totals[key] = totals.get(key, 0) + value
+    return {"mapping_count": len(mappings), "by_kind": by_kind, "mappings": mappings}
+
+
+def read_proc_mappings(pid: int, executable: Path) -> dict[str, Any]:
+    return parse_smaps(
+        Path(f"/proc/{pid}/smaps").read_text(encoding="utf-8"), executable
+    )
 
 
 def read_cpu_seconds(pid: int) -> float:
@@ -87,6 +175,29 @@ def stderr_reader(stream: Any, messages: queue.Queue[str]) -> None:
     for line in iter(stream.readline, ""):
         messages.put(line.rstrip("\n"))
     messages.put("")
+
+
+def record_stderr_line(
+    line: str, events: dict[str, dict[str, Any]], stderr_tail: list[str]
+) -> None:
+    for prefix, name in ((METRIC_PREFIX, None), (RENDERER_PREFIX, "renderer_selected")):
+        if not line.startswith(prefix):
+            continue
+        try:
+            payload = json.loads(line[len(prefix) :])
+            if not isinstance(payload, dict):
+                break
+            if name is None:
+                events[payload["event"]] = payload
+                return
+            if payload.get("event") == "selected":
+                events[name] = payload
+                return
+        except (json.JSONDecodeError, KeyError):
+            break
+    if line:
+        stderr_tail.append(line)
+        del stderr_tail[:-40]
 
 
 def wait_for_metric(
@@ -109,15 +220,7 @@ def wait_for_metric(
             continue
         if not line:
             continue
-        if line.startswith(METRIC_PREFIX):
-            try:
-                payload = json.loads(line[len(METRIC_PREFIX) :])
-                events[payload["event"]] = payload
-                continue
-            except (json.JSONDecodeError, KeyError):
-                pass
-        stderr_tail.append(line)
-        del stderr_tail[:-40]
+        record_stderr_line(line, events, stderr_tail)
     if wanted not in events:
         tail = "\n".join(stderr_tail[-12:])
         raise RuntimeError(f"timed out waiting for {wanted!r}; recent stderr:\n{tail}")
@@ -133,16 +236,7 @@ def drain_messages(
             line = messages.get_nowait()
         except queue.Empty:
             return
-        if line.startswith(METRIC_PREFIX):
-            try:
-                payload = json.loads(line[len(METRIC_PREFIX) :])
-                events[payload["event"]] = payload
-                continue
-            except (json.JSONDecodeError, KeyError):
-                pass
-        if line:
-            stderr_tail.append(line)
-            del stderr_tail[:-40]
+        record_stderr_line(line, events, stderr_tail)
 
 
 def run_once(
@@ -153,6 +247,7 @@ def run_once(
     idle_seconds: float,
     timeout_seconds: float,
     round_number: int,
+    include_mappings: bool = False,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="flectar-startup-benchmark-") as temporary:
         root = Path(temporary)
@@ -167,6 +262,7 @@ def run_once(
                 "XDG_DATA_HOME": str(data_home),
                 "XDG_CACHE_HOME": str(cache_home),
                 "FLECTAR_STARTUP_METRICS": "1",
+                "FLECTAR_RENDERER": "cpu",
                 "FLECTAR_BENCHMARK_DISABLE_SYNC": "1",
                 "FLECTAR_BENCHMARK_EXIT_AFTER_MS": str(
                     int((settle_seconds + idle_seconds) * 1000) + 1500
@@ -210,6 +306,9 @@ def run_once(
             idle_elapsed = time.monotonic() - idle_started
             final_cpu = read_cpu_seconds(process.pid)
             resources = read_proc_resources(process.pid)
+            mapping_report = (
+                read_proc_mappings(process.pid, binary) if include_mappings else None
+            )
             resources["idle_cpu_percent"] = (
                 max(0.0, final_cpu - initial_cpu) / idle_elapsed * 100.0
             )
@@ -217,6 +316,9 @@ def run_once(
             resources["idle_settle_seconds"] = settle_seconds
             process.wait(timeout=5)
             drain_messages(messages, events, stderr_tail)
+            renderer = events.get("renderer_selected", {})
+            if renderer.get("active") != "cpu" or renderer.get("wgpu_initialized") is not False:
+                raise RuntimeError(f"expected CPU renderer without WGPU, got {renderer}")
             if process.returncode != 0:
                 raise RuntimeError(
                     f"application exited with {process.returncode}:\n"
@@ -237,15 +339,17 @@ def run_once(
             if "elapsed_ms" in payload
         }
         warm_event = events.get("warm_cache_loaded", {})
-        return {
+        result = {
             "round": round_number,
             "pid": process.pid,
             "warm_cache_hit": bool(warm_event.get("hit", False)),
             "milestones_ms": milestones,
             "idle": resources,
             "events": events,
-            "stderr_tail": stderr_tail,
         }
+        if mapping_report is not None:
+            result["mapping_report"] = mapping_report
+        return result
 
 
 def median(values: list[float | int]) -> float | None:
@@ -302,6 +406,11 @@ def main() -> None:
     parser.add_argument("--idle-seconds", type=float, default=5.0)
     parser.add_argument("--timeout-seconds", type=float, default=45.0)
     parser.add_argument(
+        "--include-mappings",
+        action="store_true",
+        help="Include anonymized per-mapping /proc smaps counters and category totals.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("target/startup-benchmark/startup-benchmark.json"),
@@ -344,6 +453,7 @@ def main() -> None:
         "python": platform.python_version(),
         "display": os.environ.get("DISPLAY"),
         "wayland_display": os.environ.get("WAYLAND_DISPLAY"),
+        "renderer_requested": "cpu",
     }
     runs = []
     for round_number in range(1, args.rounds + 1):
@@ -355,6 +465,7 @@ def main() -> None:
             args.idle_seconds,
             args.timeout_seconds,
             round_number,
+            args.include_mappings,
         )
         runs.append(result)
         print(
@@ -367,7 +478,7 @@ def main() -> None:
         )
 
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "identity": identity,
         "configuration": {
@@ -375,12 +486,9 @@ def main() -> None:
             "settle_seconds": args.settle_seconds,
             "idle_seconds": args.idle_seconds,
             "timeout_seconds": args.timeout_seconds,
-            "profile_data_dir": str(args.profile_data_dir.resolve())
-            if args.profile_data_dir
-            else None,
-            "profile_cache_dir": str(args.profile_cache_dir.resolve())
-            if args.profile_cache_dir
-            else None,
+            "include_mappings": args.include_mappings,
+            "profile_data_supplied": args.profile_data_dir is not None,
+            "profile_cache_supplied": args.profile_cache_dir is not None,
         },
         "summary": summarize(runs),
         "runs": runs,

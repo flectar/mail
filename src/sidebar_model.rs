@@ -52,10 +52,10 @@ impl SidebarAnimation {
         let animation = Rc::downgrade(self);
         let model = Rc::downgrade(model);
         Timer::single_shot(Duration::from_millis(260), move || {
-            if let (Some(animation), Some(model)) = (animation.upgrade(), model.upgrade()) {
-                if animation.generation.get() == generation {
-                    model.reconcile(animation.target.borrow().clone());
-                }
+            if let (Some(animation), Some(model)) = (animation.upgrade(), model.upgrade())
+                && animation.generation.get() == generation
+            {
+                model.reconcile(animation.target.borrow().clone());
             }
         });
     }

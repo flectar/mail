@@ -77,6 +77,7 @@ jobs:
               if "target" not in path.parts:
                   ET.parse(path)
           PY
+          python3 scripts/test-benchmark-startup.py
           python3 ui/icons/lucide/generate.py --check
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify

@@ -1,6 +1,6 @@
 use slint::platform::{
-    software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
     Platform, PointerEventButton, WindowAdapter, WindowEvent,
+    software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
 };
 use slint::{ModelRc, VecModel};
 use std::{cell::Cell, rc::Rc};

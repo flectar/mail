@@ -222,41 +222,49 @@ fn reconcile_model_rows_by<T: Clone + 'static, K: Eq + std::hash::Hash>(
     key: impl Fn(&T) -> K,
     same: impl Fn(&T, &T) -> bool,
 ) {
-    let mut current = model.iter().collect::<Vec<_>>();
+    let current_len = model.row_count();
 
     if rows.is_empty() {
-        if !current.is_empty() {
+        if current_len != 0 {
             model.clear();
         }
         return;
     }
-    if current.is_empty() {
+    if current_len == 0 {
         model.extend(rows);
         return;
     }
 
-    let shared_prefix = current
-        .iter()
-        .zip(&rows)
-        .take_while(|(old, new)| key(old) == key(new))
-        .count();
-    if shared_prefix == current.len().min(rows.len()) {
-        for index in 0..shared_prefix {
-            if !same(&current[index], &rows[index]) {
-                model.set_row_data(index, rows[index].clone());
-            }
+    // Most refreshes keep the same row IDs. Inspect one old row at a time so
+    // their strings/images are not all cloned into a second retained vector.
+    let common_len = current_len.min(rows.len());
+    let mut changed = Vec::new();
+    let mut shared_prefix = 0;
+    for (index, row) in rows.iter().take(common_len).enumerate() {
+        let old = model.row_data(index).expect("index is within row_count");
+        if key(&old) != key(row) {
+            break;
         }
-        if rows.len() > current.len() {
-            model.extend(rows[current.len()..].iter().cloned());
+        if !same(&old, row) {
+            changed.push(index);
+        }
+        shared_prefix += 1;
+    }
+    if shared_prefix == common_len {
+        for index in changed {
+            model.set_row_data(index, rows[index].clone());
+        }
+        if rows.len() > current_len {
+            model.extend(rows[current_len..].iter().cloned());
         } else {
-            while current.len() > rows.len() {
-                current.pop();
-                model.remove(current.len());
+            for index in (rows.len()..current_len).rev() {
+                model.remove(index);
             }
         }
         return;
     }
 
+    let mut current = model.iter().collect::<Vec<_>>();
     // Unrelated result sets should reset in one notification. Related sets
     // (new mail inserted, a thread removed, or rows reordered) are edited by
     // id so Slint can keep the visible delegate anchored.
@@ -7204,6 +7212,81 @@ mod tests {
 
         reconcile_model_rows(&model, vec![0, 2, 3, 4], |value| *value);
         assert_eq!(model_values(&model), [0, 2, 3, 4]);
+    }
+
+    #[test]
+    fn unchanged_model_refresh_does_not_clone_all_retained_rows() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Default)]
+        struct CloneCounts {
+            live: AtomicUsize,
+            peak: AtomicUsize,
+        }
+
+        impl CloneCounts {
+            fn add(&self) {
+                let live = self.live.fetch_add(1, Ordering::Relaxed) + 1;
+                self.peak.fetch_max(live, Ordering::Relaxed);
+            }
+        }
+
+        struct Row {
+            id: usize,
+            payload: String,
+            counts: Arc<CloneCounts>,
+        }
+
+        impl Row {
+            fn new(id: usize, counts: &Arc<CloneCounts>) -> Self {
+                counts.add();
+                Self {
+                    id,
+                    payload: "x".repeat(1024),
+                    counts: counts.clone(),
+                }
+            }
+        }
+
+        impl Clone for Row {
+            fn clone(&self) -> Self {
+                self.counts.add();
+                Self {
+                    id: self.id,
+                    payload: self.payload.clone(),
+                    counts: self.counts.clone(),
+                }
+            }
+        }
+
+        impl Drop for Row {
+            fn drop(&mut self) {
+                self.counts.live.fetch_sub(1, Ordering::Relaxed);
+            }
+        }
+
+        let counts = Arc::new(CloneCounts::default());
+        let model = VecModel::from(
+            (0..1_000)
+                .map(|id| Row::new(id, &counts))
+                .collect::<Vec<_>>(),
+        );
+        let rows = (0..1_000)
+            .map(|id| Row::new(id, &counts))
+            .collect::<Vec<_>>();
+        let initial_live = counts.live.load(Ordering::Relaxed);
+        counts.peak.store(initial_live, Ordering::Relaxed);
+
+        reconcile_model_rows_by(&model, rows, |row| row.id, |a, b| a.payload == b.payload);
+
+        assert_eq!(model.row_count(), 1_000);
+        assert!(
+            counts.peak.load(Ordering::Relaxed) <= initial_live + 2,
+            "refresh should hold only one temporary row clone at a time"
+        );
     }
 
     #[test]
