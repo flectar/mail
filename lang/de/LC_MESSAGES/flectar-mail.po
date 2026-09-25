@@ -3,165 +3,167 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-09-22 23:42+0000\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2026-09-24 11:59+0000\n"
+"Last-Translator: Christoph Seibel <christoph_seibel@t-online.de>\n"
+"Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
+"mail/de/>\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 2026.9.1\n"
 
 #: ui/app.slint:67
 msgid "Jan"
-msgstr ""
+msgstr "Jan"
 
 #: ui/app.slint:67
 msgid "January"
-msgstr ""
+msgstr "Januar"
 
 #: ui/app.slint:68
 msgid "Feb"
-msgstr ""
+msgstr "Feb"
 
 #: ui/app.slint:68
 msgid "February"
-msgstr ""
+msgstr "Februar"
 
 #: ui/app.slint:69
 msgid "Mar"
-msgstr ""
+msgstr "März"
 
 #: ui/app.slint:69
 msgid "March"
-msgstr ""
+msgstr "März"
 
 #: ui/app.slint:70
 msgid "Apr"
-msgstr ""
+msgstr "Apr"
 
 #: ui/app.slint:70
 msgid "April"
-msgstr ""
+msgstr "April"
 
 #: ui/app.slint:71
 msgid "May"
-msgstr ""
+msgstr "Mai"
 
 #: ui/app.slint:72
 msgid "Jun"
-msgstr ""
+msgstr "Jun"
 
 #: ui/app.slint:72
 msgid "June"
-msgstr ""
+msgstr "Juni"
 
 #: ui/app.slint:73
 msgid "Jul"
-msgstr ""
+msgstr "Jul"
 
 #: ui/app.slint:73
 msgid "July"
-msgstr ""
+msgstr "Juli"
 
 #: ui/app.slint:74
 msgid "Aug"
-msgstr ""
+msgstr "Aug"
 
 #: ui/app.slint:74
 msgid "August"
-msgstr ""
+msgstr "August"
 
 #: ui/app.slint:75
 msgid "Sep"
-msgstr ""
+msgstr "Sept"
 
 #: ui/app.slint:75
 msgid "September"
-msgstr ""
+msgstr "September"
 
 #: ui/app.slint:76
 msgid "Oct"
-msgstr ""
+msgstr "Okt"
 
 #: ui/app.slint:76
 msgid "October"
-msgstr ""
+msgstr "Oktober"
 
 #: ui/app.slint:77
 msgid "Nov"
-msgstr ""
+msgstr "Nov"
 
 #: ui/app.slint:77
 msgid "November"
-msgstr ""
+msgstr "November"
 
 #: ui/app.slint:78
 msgid "Dec"
-msgstr ""
+msgstr "Dez"
 
 #: ui/app.slint:78
 msgid "December"
-msgstr ""
+msgstr "Dezember"
 
 #: ui/app.slint:83 ui/components/calendar.slint:635
 msgid "Mon"
-msgstr ""
+msgstr "Mo"
 
 #: ui/app.slint:84 ui/components/calendar.slint:635
 msgid "Tue"
-msgstr ""
+msgstr "Di"
 
 #: ui/app.slint:85 ui/components/calendar.slint:635
 msgid "Wed"
-msgstr ""
+msgstr "Mi"
 
 #: ui/app.slint:86 ui/components/calendar.slint:635
 msgid "Thu"
-msgstr ""
+msgstr "Do"
 
 #: ui/app.slint:87 ui/components/calendar.slint:635
 msgid "Fri"
-msgstr ""
+msgstr "Fr"
 
 #: ui/app.slint:88 ui/components/calendar.slint:635
 msgid "Sat"
-msgstr ""
+msgstr "Sa"
 
 #: ui/app.slint:89 ui/components/calendar.slint:635
 msgid "Sun"
-msgstr ""
+msgstr "So"
 
 #: ui/app.slint:92
 msgid "All day"
-msgstr ""
+msgstr "Den ganzen Tag"
 
 #: ui/app.slint:93
 msgid "(untitled event)"
-msgstr ""
+msgstr "(unbenanntes Ereignis)"
 
 #: ui/app.slint:94
 msgid "No conversation history"
-msgstr ""
+msgstr "Kein Gesprächsverlauf"
 
 #: ui/app.slint:95
 msgid "Conversation history available"
-msgstr ""
+msgstr "Gesprächsverlauf verfügbar"
 
 #: ui/app.slint:96
 msgid "New address-book entry"
-msgstr ""
+msgstr "Neuer Adressbuch-Eintrag"
 
 #: ui/app.slint:97 ui/app.slint:784 ui/components/composer-fields.slint:62
 #: ui/dialogs/compose-dialog.slint:36
 msgid "No connected account"
-msgstr ""
+msgstr "Kein verknüpftes Konto"
 
 #: ui/app.slint:99
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{eine} Interaktion"
+msgstr[1] "{mehrere} Interaktionen"
 
 #: ui/app.slint:102
 msgid "Last contacted {} {}, {}"
@@ -169,19 +171,19 @@ msgstr ""
 
 #: ui/app.slint:104 ui/app.slint:325
 msgid "Loading local data…"
-msgstr ""
+msgstr "Lade lokale Daten…"
 
 #: ui/app.slint:105 ui/app.slint:326
 msgid "Local data ready."
-msgstr ""
+msgstr "Lokale Daten bereit."
 
 #: ui/app.slint:106
 msgid "Local data is unavailable: {}"
-msgstr ""
+msgstr "Lokale Daten nicht verfügbar: {}"
 
 #: ui/app.slint:107
 msgid "Could not display local mail: {}"
-msgstr ""
+msgstr "Lokale Mails nicht anzeigbar: {}"
 
 #: ui/app.slint:138
 msgid "An unexpected interface message occurred."
