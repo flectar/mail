@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 command -v slint-tr-extractor >/dev/null || {
-  echo "slint-tr-extractor 1.18.0 is required" >&2
+  echo "slint-tr-extractor 1.18.1 is required" >&2
   exit 1
 }
 command -v msgmerge >/dev/null || {
