@@ -15,7 +15,7 @@ use jmap_client::core::error::MethodErrorType;
 use jmap_client::core::response::{EmailGetResponse, MailboxGetResponse};
 use jmap_client::core::set::{SetErrorType, SetObject};
 use jmap_client::email::{Email, Header, HeaderValue, Property as EmailProperty};
-use jmap_client::mailbox::Role;
+use jmap_client::mailbox::{Property as MailboxProperty, Role};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::{mpsc, watch};
@@ -193,7 +193,15 @@ fn role(value: Role) -> Option<&'static str> {
 
 async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) -> Result<()> {
     let mut request = c.client.build();
-    request.get_mailbox().account_id(&c.account_id);
+    // Counters (totalEmails, unreadThreads, ...) are computed locally; asking
+    // for them makes the server count every mailbox of a large account.
+    request.get_mailbox().account_id(&c.account_id).properties([
+        MailboxProperty::Id,
+        MailboxProperty::Name,
+        MailboxProperty::ParentId,
+        MailboxProperty::Role,
+        MailboxProperty::MyRights,
+    ]);
     let mut response: MailboxGetResponse = request
         .send_get_mailbox()
         .await
