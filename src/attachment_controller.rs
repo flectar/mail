@@ -55,7 +55,7 @@ pub(crate) fn project(app: &AppWindow, email: &MailMessage, same: bool) {
         .set_rows(ModelRc::new(VecModel::from(rows)));
     for id in thumbnail_ids {
         app.global::<MailAttachments>()
-            .invoke_command("thumbnail".into(), id.into());
+            .invoke_command("thumbnail".into(), id);
     }
 }
 
