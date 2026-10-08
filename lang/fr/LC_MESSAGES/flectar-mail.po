@@ -3,199 +3,197 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-08 15:01+0000\n"
-"PO-Revision-Date: 2026-09-24 11:59+0000\n"
-"Last-Translator: Christoph Seibel <christoph_seibel@t-online.de>\n"
-"Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
-"mail/de/>\n"
-"Language: de\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: Automatically generated\n"
+"Language-Team: none\n"
+"Language: fr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"Plural-Forms: nplurals=2; plural=n > 1;\n"
 
 #: ui/app.slint:74
 msgid "Jan"
-msgstr "Jan"
+msgstr ""
 
 #: ui/app.slint:74 ui/views/mail-list-pane.slint:291
 msgid "January"
-msgstr "Januar"
+msgstr ""
 
 #: ui/app.slint:75
 msgid "Feb"
-msgstr "Feb"
+msgstr ""
 
 #: ui/app.slint:75 ui/views/mail-list-pane.slint:292
 msgid "February"
-msgstr "Februar"
+msgstr ""
 
 #: ui/app.slint:76
 msgid "Mar"
-msgstr "März"
+msgstr ""
 
 #: ui/app.slint:76 ui/views/mail-list-pane.slint:293
 msgid "March"
-msgstr "März"
+msgstr ""
 
 #: ui/app.slint:77
 msgid "Apr"
-msgstr "Apr"
+msgstr ""
 
 #: ui/app.slint:77 ui/views/mail-list-pane.slint:294
 msgid "April"
-msgstr "April"
+msgstr ""
 
 #: ui/app.slint:78 ui/views/mail-list-pane.slint:295
 msgid "May"
-msgstr "Mai"
+msgstr ""
 
 #: ui/app.slint:79
 msgid "Jun"
-msgstr "Jun"
+msgstr ""
 
 #: ui/app.slint:79 ui/views/mail-list-pane.slint:296
 msgid "June"
-msgstr "Juni"
+msgstr ""
 
 #: ui/app.slint:80
 msgid "Jul"
-msgstr "Jul"
+msgstr ""
 
 #: ui/app.slint:80 ui/views/mail-list-pane.slint:297
 msgid "July"
-msgstr "Juli"
+msgstr ""
 
 #: ui/app.slint:81
 msgid "Aug"
-msgstr "Aug"
+msgstr ""
 
 #: ui/app.slint:81 ui/views/mail-list-pane.slint:298
 msgid "August"
-msgstr "August"
+msgstr ""
 
 #: ui/app.slint:82
 msgid "Sep"
-msgstr "Sept"
+msgstr ""
 
 #: ui/app.slint:82 ui/views/mail-list-pane.slint:299
 msgid "September"
-msgstr "September"
+msgstr ""
 
 #: ui/app.slint:83
 msgid "Oct"
-msgstr "Okt"
+msgstr ""
 
 #: ui/app.slint:83 ui/views/mail-list-pane.slint:300
 msgid "October"
-msgstr "Oktober"
+msgstr ""
 
 #: ui/app.slint:84
 msgid "Nov"
-msgstr "Nov"
+msgstr ""
 
 #: ui/app.slint:84 ui/views/mail-list-pane.slint:301
 msgid "November"
-msgstr "November"
+msgstr ""
 
 #: ui/app.slint:85
 msgid "Dec"
-msgstr "Dez"
+msgstr ""
 
 #: ui/app.slint:85 ui/views/mail-list-pane.slint:302
 msgid "December"
-msgstr "Dezember"
+msgstr ""
 
 #: ui/app.slint:90 ui/components/calendar.slint:665
 msgid "Mon"
-msgstr "Mo"
+msgstr ""
 
 #: ui/app.slint:91 ui/components/calendar.slint:665
 msgid "Tue"
-msgstr "Di"
+msgstr ""
 
 #: ui/app.slint:92 ui/components/calendar.slint:665
 msgid "Wed"
-msgstr "Mi"
+msgstr ""
 
 #: ui/app.slint:93 ui/components/calendar.slint:665
 msgid "Thu"
-msgstr "Do"
+msgstr ""
 
 #: ui/app.slint:94 ui/components/calendar.slint:665
 msgid "Fri"
-msgstr "Fr"
+msgstr ""
 
 #: ui/app.slint:95 ui/components/calendar.slint:665
 msgid "Sat"
-msgstr "Sa"
+msgstr ""
 
 #: ui/app.slint:96 ui/components/calendar.slint:665
 msgid "Sun"
-msgstr "So"
+msgstr ""
 
 #: ui/app.slint:100
 msgid "Monday"
-msgstr "Montag"
+msgstr ""
 
 #: ui/app.slint:101
 msgid "Tuesday"
-msgstr "Dienstag"
+msgstr ""
 
 #: ui/app.slint:102
 msgid "Wednesday"
-msgstr "Mittwoch"
+msgstr ""
 
 #: ui/app.slint:103
 msgid "Thursday"
-msgstr "Donnerstag"
+msgstr ""
 
 #: ui/app.slint:104
 msgid "Friday"
-msgstr "Freitag"
+msgstr ""
 
 #: ui/app.slint:105
 msgid "Saturday"
-msgstr "Samstag"
+msgstr ""
 
 #: ui/app.slint:106
 msgid "Sunday"
-msgstr "Sonntag"
+msgstr ""
 
 #: ui/app.slint:109
 msgid "{} · {} {}"
-msgstr "{} · {} {}"
+msgstr ""
 
 #: ui/app.slint:112
 msgid "All day"
-msgstr "Den ganzen Tag"
+msgstr ""
 
 #: ui/app.slint:113
 msgid "(untitled event)"
-msgstr "(unbenanntes Ereignis)"
+msgstr ""
 
 #: ui/app.slint:114
 msgid "No conversation history"
-msgstr "Kein Gesprächsverlauf"
+msgstr ""
 
 #: ui/app.slint:115
 msgid "Conversation history available"
-msgstr "Gesprächsverlauf verfügbar"
+msgstr ""
 
 #: ui/app.slint:116
 msgid "New address-book entry"
-msgstr "Neuer Adressbuch-Eintrag"
+msgstr ""
 
 #: ui/app.slint:117 ui/app.slint:831 ui/components/composer-fields.slint:62
 #: ui/dialogs/compose-dialog.slint:36
 msgid "No connected account"
-msgstr "Kein verknüpftes Konto"
+msgstr ""
 
 #: ui/app.slint:119
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
-msgstr[0] "{n} Interaktion"
-msgstr[1] "{n} Interaktionen"
+msgstr[0] ""
+msgstr[1] ""
 
 #: ui/app.slint:122
 msgid "Last contacted {} {}, {}"
@@ -203,19 +201,19 @@ msgstr ""
 
 #: ui/app.slint:124 ui/app.slint:353
 msgid "Loading local data…"
-msgstr "Lade lokale Daten…"
+msgstr ""
 
 #: ui/app.slint:125 ui/app.slint:354
 msgid "Local data ready."
-msgstr "Lokale Daten bereit."
+msgstr ""
 
 #: ui/app.slint:126
 msgid "Local data is unavailable: {}"
-msgstr "Lokale Daten nicht verfügbar: {}"
+msgstr ""
 
 #: ui/app.slint:127
 msgid "Could not display local mail: {}"
-msgstr "Lokale Mails nicht anzeigbar: {}"
+msgstr ""
 
 #: ui/app.slint:158
 msgid "An unexpected interface message occurred."
@@ -780,7 +778,7 @@ msgstr ""
 
 #: ui/app.slint:325 ui/components/calendar-agenda.slint:233
 msgid "Local calendar"
-msgstr "Lokaler Kalender"
+msgstr ""
 
 #: ui/app.slint:326 ui/components/calendar.slint:270
 #: ui/components/calendar.slint:318 ui/components/calendar.slint:432
@@ -1607,11 +1605,11 @@ msgstr ""
 
 #: ui/components/calendar-agenda.slint:39
 msgid "Filter calendars · {} hidden"
-msgstr "Kalender filtern · {} ausgeblendet"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:39
 msgid "Filter calendars"
-msgstr "Kalender filtern"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:67 ui/components/calendar.slint:539
 msgid "Show calendars"
@@ -1623,7 +1621,7 @@ msgstr ""
 
 #: ui/components/calendar-agenda.slint:70
 msgid "Filters only affect this agenda."
-msgstr "Filter gelten nur für diese Agenda."
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:210 ui/components/calendar.slint:559
 #: ui/views/mail-list-pane.slint:307
@@ -1633,12 +1631,12 @@ msgstr ""
 #: ui/components/calendar-agenda.slint:212 ui/components/calendar.slint:573
 msgid "{n} event"
 msgid_plural "{n} events"
-msgstr[0] "{n} Termin"
-msgstr[1] "{n} Termine"
+msgstr[0] ""
+msgstr[1] ""
 
 #: ui/components/calendar-agenda.slint:235
 msgid "Cancelled"
-msgstr "Abgesagt"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:255 ui/components/calendar.slint:62
 #: ui/components/calendar.slint:699
@@ -1647,27 +1645,27 @@ msgstr ""
 
 #: ui/components/calendar-agenda.slint:266
 msgid "Now · {}"
-msgstr "Jetzt · {}"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:269
 msgid "Nothing else is scheduled this month."
-msgstr "Für diesen Monat sind keine weiteren Termine geplant."
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:283
 msgid "No events match your filters"
-msgstr "Keine Termine entsprechen deinen Filtern"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:283
 msgid "No events this month"
-msgstr "Keine Termine in diesem Monat"
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:284
 msgid "Show more calendars to see their events."
-msgstr "Blende weitere Kalender ein, um ihre Termine zu sehen."
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:284
 msgid "Create an event to start planning your month."
-msgstr "Erstelle einen Termin, um deinen Monat zu planen."
+msgstr ""
 
 #: ui/components/calendar-agenda.slint:288 ui/views/files-view.slint:541
 msgid "Reset filters"
@@ -1801,11 +1799,11 @@ msgstr ""
 
 #: ui/components/calendar.slint:558 ui/components/calendar.slint:739
 msgid "Agenda"
-msgstr "Agenda"
+msgstr ""
 
 #: ui/components/calendar.slint:572 ui/components/calendar.slint:751
 msgid "Local time · {}"
-msgstr "Ortszeit · {}"
+msgstr ""
 
 #: ui/components/calendar.slint:594
 msgid "LOCAL"
@@ -2399,43 +2397,43 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:444
 msgid "Light · Text on canvas"
-msgstr "Hell · Text auf Hintergrund"
+msgstr ""
 
 #: ui/components/theme-editor.slint:445
 msgid "Light · Text on surface"
-msgstr "Hell · Text auf Oberfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:446
 msgid "Light · Secondary text on canvas"
-msgstr "Hell · Sekundärer Text auf Hintergrund"
+msgstr ""
 
 #: ui/components/theme-editor.slint:447
 msgid "Light · Secondary text on surface"
-msgstr "Hell · Sekundärer Text auf Oberfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:448
 msgid "Light · Primary button text"
-msgstr "Hell · Text auf primärer Schaltfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:449
 msgid "Dark · Text on canvas"
-msgstr "Dunkel · Text auf Hintergrund"
+msgstr ""
 
 #: ui/components/theme-editor.slint:450
 msgid "Dark · Text on surface"
-msgstr "Dunkel · Text auf Oberfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:451
 msgid "Dark · Secondary text on canvas"
-msgstr "Dunkel · Sekundärer Text auf Hintergrund"
+msgstr ""
 
 #: ui/components/theme-editor.slint:452
 msgid "Dark · Secondary text on surface"
-msgstr "Dunkel · Sekundärer Text auf Oberfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:453
 msgid "Dark · Primary button text"
-msgstr "Dunkel · Text auf primärer Schaltfläche"
+msgstr ""
 
 #: ui/components/theme-editor.slint:582
 msgid "Theme"
@@ -2515,19 +2513,17 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:725
 msgid "Checked text contrast meets 4.5:1 · minimum {}:1"
-msgstr "Geprüfter Textkontrast erreicht 4.5:1 · Minimum {}:1"
+msgstr ""
 
 #: ui/components/theme-editor.slint:726
 msgid ""
 "Low contrast · 4.5:1 is recommended for text. You can still save this "
 "palette."
 msgstr ""
-"Geringer Kontrast · Für Text wird 4.5:1 empfohlen. Sie können diese Palette "
-"trotzdem speichern."
 
 #: ui/components/theme-editor.slint:739
 msgid "{} · {}:1"
-msgstr "{} · {}:1"
+msgstr ""
 
 #: ui/components/theme-editor.slint:751
 msgid "Reset this palette"
