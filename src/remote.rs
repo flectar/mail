@@ -528,6 +528,7 @@ fn validated_image_work(bytes: &[u8]) -> Option<ImageWorkEstimate> {
         })
 }
 
+#[cfg(any(feature = "remote-content", test))]
 fn validated_pixel_count(bytes: &[u8]) -> Option<u64> {
     validated_image_work(bytes).map(|work| work.pixels)
 }
