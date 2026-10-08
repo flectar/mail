@@ -1758,6 +1758,8 @@ dependencies = [
  "sha2",
  "slint",
  "slint-build",
+ "stylo",
+ "stylo_traits",
  "sys-locale",
  "tempfile",
  "tokio",
