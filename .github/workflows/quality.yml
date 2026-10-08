@@ -103,17 +103,19 @@ jobs:
         run: cargo check -p flectar-mail --no-default-features --features remote-content --locked
       - name: Lint without warnings
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Validate the Spanish catalog
+      - name: Validate translations
         shell: bash
         run: |
           cargo install slint-tr-extractor --version 1.18.1 --locked
           bash scripts/check-translations.sh
-          msgfmt --check --check-header --check-format \
-            -o /tmp/flectar-mail-es.mo \
-            lang/es/LC_MESSAGES/flectar-mail.po
-          test -z "$(msgattrib --untranslated --no-obsolete lang/es/LC_MESSAGES/flectar-mail.po)"
-          test -z "$(msgattrib --only-fuzzy --no-obsolete lang/es/LC_MESSAGES/flectar-mail.po)"
-          test -z "$(msgattrib --only-obsolete lang/es/LC_MESSAGES/flectar-mail.po)"
+          for language in es ru; do
+            catalog="lang/$language/LC_MESSAGES/flectar-mail.po"
+            msgfmt --check --check-header --check-format \
+              -o "/tmp/flectar-mail-$language.mo" "$catalog"
+            test -z "$(msgattrib --untranslated --no-obsolete "$catalog")"
+            test -z "$(msgattrib --only-fuzzy --no-obsolete "$catalog")"
+            test -z "$(msgattrib --only-obsolete "$catalog")"
+          done
       - name: Run the default test suite
         run: cargo test --workspace --all-targets --locked
       - name: Exercise the mobile PDF renderer with bundled PDFium on the host

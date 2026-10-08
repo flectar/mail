@@ -78,6 +78,7 @@ pub fn ui_language_name(code: &str) -> Option<&'static str> {
     match code {
         "en" => Some("English"),
         "es" => Some("Spanish"),
+        "ru" | "ru-RU" | "ru_RU" => Some("Russian"),
         "fr" => Some("French"),
         "zh" | "zh-Hans" | "zh_Hans" => Some("Simplified Chinese"),
         "vi" => Some("Vietnamese"),
@@ -1308,6 +1309,22 @@ pub fn draft_prompt_voiced(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn russian_ui_language_sets_the_response_language() {
+        for code in ["ru", "ru-RU", "ru_RU"] {
+            let language = ui_language_name(code);
+            assert_eq!(language, Some("Russian"));
+            let cfg = AiConfig {
+                base_url: DEFAULT_BASE_URL.to_owned(),
+                model: DEFAULT_MODEL.to_owned(),
+                api_key: String::new(),
+                language: language.map(str::to_owned),
+                usage_sink: None,
+            };
+            assert!(language_directive(&cfg).contains("Russian"));
+        }
+    }
 
     #[test]
     fn ai_credentials_require_a_safe_endpoint_url() {

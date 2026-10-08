@@ -908,6 +908,7 @@ fn normalized_language_preference(language: &str) -> &'static str {
         "en" => "en",
         "es" => "es",
         "tr" => "tr",
+        "ru" | "ru-RU" | "ru_RU" => "ru",
         "zh" | "zh-Hans" | "zh_Hans" => "zh_Hans",
         _ => "system",
     }
@@ -923,6 +924,9 @@ fn bundled_language_for_locale(locale: &str) -> Option<&'static str> {
     }
     if language.eq_ignore_ascii_case("tr") {
         return Some("tr");
+    }
+    if language.eq_ignore_ascii_case("ru") {
+        return Some("ru");
     }
     if !language.eq_ignore_ascii_case("zh") {
         return None;
@@ -7487,6 +7491,9 @@ mod tests {
 
     #[test]
     fn language_preferences_use_the_bundled_catalog_name() {
+        assert_eq!(normalized_language_preference("ru"), "ru");
+        assert_eq!(normalized_language_preference("ru-RU"), "ru");
+        assert_eq!(normalized_language_preference("ru_RU"), "ru");
         assert_eq!(normalized_language_preference("zh_Hans"), "zh_Hans");
         assert_eq!(normalized_language_preference("zh-Hans"), "zh_Hans");
         assert_eq!(normalized_language_preference("zh"), "zh_Hans");
@@ -7498,6 +7505,11 @@ mod tests {
         for (locale, expected) in [
             ("es_MX.UTF-8", Some("es")),
             ("tr-TR", Some("tr")),
+            ("ru", Some("ru")),
+            ("ru_RU.UTF-8", Some("ru")),
+            ("ru-RU", Some("ru")),
+            ("ru_UA", Some("ru")),
+            ("RU-ru", Some("ru")),
             ("zh", Some("zh_Hans")),
             ("zh_CN.UTF-8", Some("zh_Hans")),
             ("zh_SG", Some("zh_Hans")),
