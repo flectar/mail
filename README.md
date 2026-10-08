@@ -8,7 +8,7 @@
   </p>
   <div align="center">
     <h3>Email, made fast again</h3>
-    <p>Built from the ground up for speed. Flectar Mail delivers native performance, instant startup, and as little as 20 MB of RAM.</p>
+    <p>Built from the ground up for speed. Flectar Mail delivers native performance, instant startup, and as little as 100 MB of RAM.</p>
   </div>
   <p>
     <a href="https://flectar.com">Website</a> ·
@@ -41,7 +41,7 @@ fraction of the memory of a typical web-based mail client.
 
 - **Fast from the first click.** A native interface and local-first data path
   get you to your inbox without waiting on a browser runtime.
-- **As little as 20 MB of RAM.** Flectar Mail is deliberately designed to keep
+- **As little as 100 MB of RAM.** Flectar Mail is deliberately designed to keep
   memory use low, even with a full-featured inbox at your fingertips.
 - **Everything in one place.** Move between mail, calendars, and contacts
   without stitching together separate apps.
@@ -85,7 +85,7 @@ S/MIME and mobile OpenPGP are not currently supported.
 > Some messages, especially those with complex or unusual markup and CSS, may
 > not render correctly yet.
 
-To keep the client fully native and memory usage around 20 MB, Flectar Mail
+To keep the client fully native and memory usage around 100 MB, Flectar Mail
 renders email HTML with [Blitz](https://github.com/DioxusLabs/blitz), a Rust
 HTML/CSS renderer from the Dioxus team, instead of embedding a browser or
 WebView.
