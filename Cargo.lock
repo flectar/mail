@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "flectar-mail"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "anyrender",
  "anyrender_vello",

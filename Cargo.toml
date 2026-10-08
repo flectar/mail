@@ -19,7 +19,7 @@ parley = { path = "crates/parley" }
 
 [package]
 name = "flectar-mail"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 description = "A native email client built with Rust, Slint, and Blitz"
 license = "AGPL-3.0-only"
 repository = "https://github.com/flectar/mail"
