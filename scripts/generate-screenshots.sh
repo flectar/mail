@@ -67,6 +67,7 @@ render() {
   local calendar_mode="${11:-week}"
   local style="fluent"
   local data_file="$temporary_dir/$output_name.json"
+  local email_tiles
 
   if [[ "$theme" == "dark" ]]; then
     style="fluent-dark"
@@ -93,6 +94,7 @@ render() {
       | .workspace_layout = $workspace_layout
       | .screenshot_theme_preset = $theme_preset
       | .active_view = $active_view
+      | .startup_hydrated = true
       | .calendar_view_mode = $calendar_mode
       | .calendar_period_title = (if $calendar_mode == "agenda" then .calendar_month_title else .calendar_period_title end)
       | .settings_open = ($settings_tab != "")
@@ -113,6 +115,7 @@ render() {
       | .email_tiles |= map(.image = $demo_email)
       | .selected_favicon = favicon_path(.selected_address)
       | .selected_has_favicon = true
+      | .contacts |= map(.suggested = (.suggested // false))
       | .connected_accounts |= map(
           .mail_protocol = (.mail_protocol // "")
           | .profile_id = (if .id == 2 then "support" else "work" end)
@@ -138,7 +141,9 @@ render() {
           {"id": "support", "name": "Support", "color": "#ea580c", "account_count": 1}
         ]
       | .sidebar_rows |= map(
-          .mailbox.is_selectable = (if .mailbox.is_selectable == null then true else .mailbox.is_selectable end)
+          .show_row = true
+          | .reveal_row = false
+          | .mailbox.is_selectable = (if .mailbox.is_selectable == null then true else .mailbox.is_selectable end)
           | .mailbox.can_create_children = (.mailbox.can_create_children // false)
           | .mailbox.can_rename = (.mailbox.can_rename // false)
           | .mailbox.can_delete = (.mailbox.can_delete // false)
@@ -194,6 +199,21 @@ render() {
           | .favicon_small = favicon_path(.address)
           | .has_favicon = true
         )
+      # The viewer runs no Rust projection or accordion initialization.
+      # Build the ungrouped list from the fully prepared email rows.
+      | .mail_list_entries = (.emails | to_entries | map({
+          is_header: false,
+          group_key: "",
+          group_kind: "",
+          group_month: 0,
+          group_year: 0,
+          group_count: 0,
+          expanded: false,
+          show_row: true,
+          reveal_row: false,
+          email_index: .key,
+          email: .value
+        }))
       | .selected_address as $selected_address
       | .thread_messages = (if $show_threads then (.thread_messages // []) else [] end)
       | .thread_messages |= map(
@@ -204,7 +224,18 @@ render() {
       | .selected_thread_index = (if $show_threads then (.selected_thread_index // 0) else 0 end)
     ' "$fixture" > "$data_file"
 
+  # Compile the body images into the preview. Runtime image properties can
+  # still be empty when the headless viewer takes its first snapshot.
+  email_tiles="$(jq -r '
+    [.email_tiles[] | "{image: @image-url(" + (.image | tojson)
+      + "), y: " + (.y | tostring) + ", height: " + (.height | tostring) + "}"]
+    | "[" + join(", ") + "]"
+  ' "$data_file")"
+  jq 'del(.email_tiles)' "$data_file" > "$data_file.tmp"
+  mv "$data_file.tmp" "$data_file"
+
   sed \
+    -e "s|in property <\[EmailTile\]> email_tiles: \[\];|in property <[EmailTile]> email_tiles: ${email_tiles};|" \
     -e "s/preferred-width: 1320px/preferred-width: ${width}px/" \
     -e "s/preferred-height: 800px/preferred-height: ${height}px/" \
     -e "s/in-out property <string> theme_mode: \"system\";/in-out property <string> theme_mode: \"${theme}\";\n    in-out property <string> screenshot_theme_preset: \"${theme_preset}\";/" \
@@ -212,15 +243,6 @@ render() {
     "$ui" > "$temporary_ui"
 
   echo "Rendering $output_name.png"
-  # Slint can snapshot before runtime-loaded images have populated the
-  # software renderer's cache. A discarded first render keeps the committed
-  # screenshot deterministic without replacing editable SVG sources.
-  SLINT_SCALE_FACTOR=2 slint-viewer \
-    --style "$style" \
-    --size "${width}x${height}" \
-    --load-data "$data_file" \
-    --screenshot "$temporary_dir/$output_name-warmup.png" \
-    "$temporary_ui"
   SLINT_SCALE_FACTOR=2 slint-viewer \
     --style "$style" \
     --size "${width}x${height}" \
