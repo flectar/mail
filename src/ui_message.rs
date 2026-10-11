@@ -52,7 +52,16 @@ impl UiMessage {
 
     fn as_slint(&self) -> LocalizedMessage {
         LocalizedMessage {
-            key: self.key.into(),
+            key: {
+                #[cfg(target_env = "ohos")]
+                {
+                    self.key.replace("Flectar Mail", "飞鸿邮箱").into()
+                }
+                #[cfg(not(target_env = "ohos"))]
+                {
+                    self.key.into()
+                }
+            },
             argument: self.argument.as_str().into(),
             second_argument: self.second_argument.as_str().into(),
             third_argument: self.third_argument.as_str().into(),

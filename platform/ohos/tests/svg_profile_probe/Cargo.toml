@@ -1,0 +1,46 @@
+[package]
+name = "feihong-svg-profile-probe"
+version = "0.0.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+resvg = { version = "=0.48.1", default-features = false, features = ["text", "raster-images", "svgz"] }
+bytemuck = "=1.25.2"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+debug-assertions = true
+incremental = false
+
+[profile.dev.package.feihong-svg-profile-probe]
+opt-level = 2
+
+[profile.svg-opt3]
+inherits = "dev"
+opt-level = 0
+debug = 1
+debug-assertions = true
+incremental = false
+
+[profile.svg-opt3.package.feihong-svg-profile-probe]
+opt-level = 2
+
+[profile.svg-opt3.package.bytemuck]
+opt-level = 3
+[profile.svg-opt3.package."tiny-skia:0.12.0"]
+opt-level = 3
+[profile.svg-opt3.package."tiny-skia-path:0.12.0"]
+opt-level = 3
+[profile.svg-opt3.package.resvg]
+opt-level = 3
+[profile.svg-opt3.package.usvg]
+opt-level = 3
+[profile.svg-opt3.package.kurbo]
+opt-level = 3
+[profile.svg-opt3.package.svgtypes]
+opt-level = 3
+[profile.svg-opt3.package.strict-num]
+opt-level = 3

@@ -1,0 +1,29 @@
+// Retain rendered content while its container moves, then commit one layout
+// at the final viewport. Other backends retain their existing 50 ms throttle.
+export component ViewportRenderScheduler inherits Rectangle {
+    in property <length> viewport-width;
+    in property <length> viewport-height;
+    in property <bool> available: false;
+    in property <bool> debounce: false;
+    callback commit();
+    private property <bool> pending: false;
+
+    width: 0px;
+    height: 0px;
+    visible: false;
+
+    function schedule() {
+        root.pending = true;
+        if root.debounce { viewport-timer.restart(); }
+    }
+    changed viewport-width => { root.schedule(); }
+    changed viewport-height => { root.schedule(); }
+    viewport-timer := Timer {
+        interval: 50ms;
+        running: root.pending;
+        triggered => {
+            root.pending = false;
+            if root.available { root.commit(); }
+        }
+    }
+}

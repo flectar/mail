@@ -103,6 +103,8 @@ pub enum SyncCmd {
         message_id: i64,
     },
     RunActions,
+    /// Wake an IDLE/poll wait so the retained platform gate can be observed.
+    Suspend,
     Shutdown,
 }
 
@@ -323,6 +325,7 @@ async fn run_send_dispatcher(
     let account_id = config.id;
     tracing::debug!(account_id, "SMTP dispatcher started");
     loop {
+        ctx.bus.wait_for_platform_active().await;
         match queue::execute_due_sends(&ctx, &config).await {
             Ok(result) => {
                 if result.processed != 0 {
@@ -410,6 +413,12 @@ async fn run_body_fetcher(
     let mut session: Option<Session> = None;
     let mut deferred = std::collections::VecDeque::new();
     loop {
+        if !ctx.bus.platform_is_active() {
+            // Drop the socket rather than issue fresh network commands during
+            // suspend. A read already in progress reaches this boundary first.
+            session = None;
+        }
+        ctx.bus.wait_for_platform_active().await;
         let command = match deferred.pop_front() {
             Some(command) => command,
             None => match rx.recv().await {
@@ -417,6 +426,7 @@ async fn run_body_fetcher(
                 None => break,
             },
         };
+        ctx.bus.wait_for_platform_active().await;
         let first = match command {
             PriorityFetchCmd::Attachment {
                 attachment_id,
@@ -770,6 +780,12 @@ async fn run_actor(
     let mut cycle_due;
 
     loop {
+        if !ctx.bus.platform_is_active() {
+            session = None;
+            supports_idle = None;
+            set_state(&ctx, account_id, "paused").await;
+        }
+        ctx.bus.wait_for_platform_active().await;
         // 1. Ensure a connection.
         if session.is_none() {
             match connect(&ctx, &config).await {
@@ -851,11 +867,14 @@ async fn run_actor(
                     }
                     return;
                 }
-                SyncCmd::RunActions => {}
+                SyncCmd::RunActions | SyncCmd::Suspend => {}
                 // AccountHandle routes these to the dedicated reader; keep the
                 // arm defensive for direct/internal senders.
                 SyncCmd::FetchBody { .. } => {}
             }
+        }
+        if !ctx.bus.platform_is_active() {
+            continue;
         }
         let Some(mut s) = session.take() else {
             tracing::error!(
@@ -951,7 +970,7 @@ async fn run_actor(
             }
         }
 
-        if rerun_immediately {
+        if rerun_immediately || !ctx.bus.platform_is_active() {
             continue;
         }
 
@@ -1005,7 +1024,8 @@ async fn run_actor(
                                         // Backstop timeout or a sync/action
                                         // nudge: next iteration runs a cycle.
                                         imap::IdleOutcome::Timeout
-                                        | imap::IdleOutcome::Command(SyncCmd::RunActions) => {}
+                                        | imap::IdleOutcome::Command(SyncCmd::RunActions)
+                                        | imap::IdleOutcome::Command(SyncCmd::Suspend) => {}
                                         imap::IdleOutcome::Command(SyncCmd::SyncNow {
                                             complete,
                                         }) => {
@@ -1097,6 +1117,7 @@ async fn run_actor(
                         // Commands need a full cycle (folder sync / action replay).
                         break;
                     }
+                    Ok(Some(SyncCmd::Suspend)) => break,
                     Ok(Some(SyncCmd::FetchBody { message_id })) => {
                         if session.is_some() {
                             if let Err(e) =
@@ -1694,6 +1715,10 @@ async fn run_history_backfill(
     let account_id = config.id;
     let mut session: Option<Session> = None;
     loop {
+        if !ctx.bus.platform_is_active() {
+            session = None;
+        }
+        ctx.bus.wait_for_platform_active().await;
         let (closed, settings_changed) = tokio::select! {
             result = tokio::time::timeout(
                 std::time::Duration::from_secs(CYCLE_SECS),
@@ -1705,6 +1730,9 @@ async fn run_history_backfill(
             return; // channel closed: account removed / shutdown
         }
         while rx.try_recv().is_ok() {} // coalesce piled-up nudges
+        if !ctx.bus.platform_is_active() {
+            continue;
+        }
         if settings_changed {
             settings_rx.borrow_and_update();
             // The settings write initially reopens every folder, but an
@@ -1730,7 +1758,7 @@ async fn run_history_backfill(
         // HISTORY_CHUNK extension - until nothing is left or the connection
         // breaks. One step per pass keeps folders progressing evenly.
         'work: loop {
-            if settings_rx.has_changed().unwrap_or(true) {
+            if settings_rx.has_changed().unwrap_or(true) || !ctx.bus.platform_is_active() {
                 break 'work;
             }
             let mut progressed = match retry_one_header_failure(&ctx, &config, &mut session).await {
@@ -1762,6 +1790,9 @@ async fn run_history_backfill(
             });
 
             for folder in ordered {
+                if !ctx.bus.platform_is_active() {
+                    break 'work;
+                }
                 if folder.role.as_deref() == Some(roles::ALL) && config.provider != Provider::Gmail
                 {
                     continue;
@@ -2796,6 +2827,7 @@ async fn run_backfill_pool(
 ) {
     let account_id = config.id;
     loop {
+        ctx.bus.wait_for_platform_active().await;
         let closed = tokio::select! {
             result = tokio::time::timeout(
                 std::time::Duration::from_secs(CYCLE_SECS),
@@ -2808,6 +2840,9 @@ async fn run_backfill_pool(
         }
         // Coalesce nudges that piled up while the previous drain ran.
         while rx.try_recv().is_ok() {}
+        if !ctx.bus.platform_is_active() {
+            continue;
+        }
         if let Err(e) = drain_missing_bodies(&ctx, &config, &mut settings_rx).await {
             tracing::warn!(account_id, error = %e, "body backfill: drain failed");
         }
@@ -2839,7 +2874,13 @@ async fn drain_missing_bodies(
         // Hold one shared page slot through worker completion. This bounds
         // queued IDs across accounts and always takes the planning permit
         // before any worker can take the body-byte permit.
+        if !ctx.bus.platform_is_active() {
+            return Ok(());
+        }
         let plan_page = Arc::new(reserve_background_plan_page().await);
+        if !ctx.bus.platform_is_active() {
+            return Ok(());
+        }
         let mail_history = settings_rx.borrow_and_update().mail_history;
         let cutoff_ms = mail_history.cutoff_ms_at(now_ms());
         let folders = ctx
@@ -3000,6 +3041,9 @@ async fn body_worker(
     settings_rx: watch::Receiver<crate::models::AccountSettings>,
 ) -> Result<()> {
     let account_id = config.id;
+    if !ctx.bus.platform_is_active() {
+        return Ok(());
+    }
     let mut session = match connect(&ctx, &config).await {
         Ok(s) => s,
         Err(e) => {
@@ -3009,7 +3053,7 @@ async fn body_worker(
     };
     let mut selected: Option<(String, Option<i64>)> = None;
     loop {
-        if settings_rx.has_changed().unwrap_or(false) {
+        if settings_rx.has_changed().unwrap_or(false) || !ctx.bus.platform_is_active() {
             break;
         }
         let chunk = queue.lock().await.pop_front();

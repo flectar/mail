@@ -267,10 +267,16 @@ impl CoreMailSource {
         let core = Core::start_mail_ui_with_platform(paths, credentials, oauth_redirects)
             .await
             .map_err(|error| error.to_string())?;
-        Ok(Self {
-            core: Arc::new(core),
+        Ok(Self::from_core(Arc::new(core)))
+    }
+
+    /// Attach the UI adapter to a native host's retained Core. Its original
+    /// actor runtime must remain alive; UI callbacks may use another runtime.
+    pub fn from_core(core: Arc<Core>) -> Self {
+        Self {
+            core,
             account_revision: Arc::default(),
-        })
+        }
     }
 
     /// Release background synchronization only after Slint has accepted the

@@ -19,10 +19,10 @@ impl Drop for SyncWorker {
         self.0.abort();
     }
 }
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 static SUSPEND: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub(crate) fn suspend() {
     crate::pdf_preview::cancel_active();
     if let Some(suspend) = SUSPEND.get() {
@@ -38,7 +38,7 @@ pub(crate) fn register(
     scratch_root: std::path::PathBuf,
 ) {
     app.global::<FilesUi>().set_pdf_supported(true);
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let weak = app.as_weak();
         let _ = SUSPEND.set(Box::new(move || {
@@ -371,7 +371,15 @@ pub(crate) fn register(
                     Ok(ServiceOutput::Status("File selection cancelled.".into()))
                 }
                 Ok(_) if action == "pdf-page" => Ok(ServiceOutput::Status(String::new())),
-                Ok(path) => files::progress::track(progress,dir.execute(&core, &action, &a, &b, selected, path.as_ref().map(|v| v.path().to_owned()))).await,
+                Ok(path) => {
+                    let display_name = path.as_ref()
+                        .and_then(|document| document.display_name())
+                        .map(str::to_owned);
+                    let local_path = path.as_ref().map(|document| document.path().to_owned());
+                    files::progress::track(progress, dir.execute_with_display_name(
+                        &core, &action, &a, &b, selected, local_path, display_name,
+                    )).await
+                },
             };
             if action == "download" && result.is_ok()
                 && let Some(path) = export_path {

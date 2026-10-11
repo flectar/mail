@@ -1,3 +1,11 @@
+> **鸿蒙派生版本：飞鸿邮箱。** 本仓库在 Flectar Mail 基线
+> `bc0f966846a6d1758bb39ea54a24be4de6cad8d7` 上实现 Rust／Slint 原生移植。
+> 请先阅读[鸿蒙构建与安装说明](platform/ohos/README.md)和
+> [当前实机验收状态](platform/ohos/CURRENT-STATUS.md)。ARM64 开发包已在一台
+> MatePad Pro 上测试，手机、PC 和全部功能验收尚未完成。本派生版本并非 Flectar
+> 出品，亦未得到其赞助或支持；保留 [AGPL 许可](LICENSE)及
+> [上游商标说明](TRADEMARKS.md)。下文保留上游 README，所述平台和功能不代表鸿蒙验收结果。
+
 <div align="center">
   <img src="resources/app-icon/flectar-mail-masked.png" width="88" alt="Flectar Mail 徽标">
   <h1 align="center">

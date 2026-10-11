@@ -2,12 +2,12 @@
 //! worker with cooperative cancellation. Both load only the packaged PDFium
 //! library on first preview and return one bounded RGBA page.
 //! No PDF scripts, links, forms actions, or document attachments are executed.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 use std::sync::Arc;
 
 pub(crate) const MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_EDGE: u32 = 2880;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 const MAGIC: &[u8; 4] = b"FPD1";
 
 #[derive(Debug)]
@@ -26,7 +26,7 @@ fn dimensions(width: u32, height: u32) -> Result<usize, String> {
     Ok(width as usize * height as usize * 4)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub(crate) async fn render(data: Arc<Vec<u8>>, index: u32, zoom: u32) -> Result<Page, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     if data.len() > MAX_DOCUMENT_BYTES || !(50..=200).contains(&zoom) {
@@ -107,19 +107,19 @@ pub(crate) async fn render(data: Arc<Vec<u8>>, index: u32, zoom: u32) -> Result<
         })?
 }
 
-#[cfg(any(test, target_os = "android", target_os = "ios"))]
+#[cfg(any(test, target_os = "android", target_os = "ios", target_env = "ohos"))]
 #[path = "pdf_preview_mobile.rs"]
 mod mobile;
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub use mobile::cancel_active;
 #[cfg(target_os = "android")]
 pub use mobile::configure_android;
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub(crate) use mobile::render;
 
 /// Called by the thin desktop launcher BEFORE PlatformContext or the UI exists.
 /// The reserved argument alone enables the worker; documents arrive only via stdin.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub fn run_worker_if_requested() -> Option<i32> {
     if std::env::args_os().nth(1).as_deref() != Some(std::ffi::OsStr::new("--render-pdf-page")) {
         return None;
@@ -127,7 +127,7 @@ pub fn run_worker_if_requested() -> Option<i32> {
     Some(if worker().is_ok() { 0 } else { 1 })
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn worker() -> Result<(), Box<dyn std::error::Error>> {
     use pdfium_render::prelude::*;
     use std::io::{Read, Write};
@@ -148,7 +148,7 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
         {
             return Err("Could not constrain PDF renderer".into());
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
         {
             let memory = libc::rlimit {
                 rlim_cur: 768 * 1024 * 1024,
@@ -173,7 +173,7 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
     let library = library_path(&executable)?;
     let pdfium = Pdfium::new(Pdfium::bind_to_library(library)?);
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     sandbox()?;
     let document = pdfium.load_pdf_from_byte_slice(&data, None)?;
     let count = u32::try_from(document.pages().len())?;
@@ -205,7 +205,7 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
 // Files arrive through stdin; only system font directories remain readable.
 // Fail closed if the kernel cannot enforce the sandbox. Seccomp complements
 // Landlock by denying networking, process creation, ptrace and signal delivery.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
     use landlock::{
         ABI, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, RulesetStatus,
@@ -289,11 +289,11 @@ fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn library_path(executable: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let directory = executable.parent().ok_or("Missing application directory")?;
     let name = pdfium_render::prelude::Pdfium::pdfium_platform_library_name();
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     {
         // Linux packages keep private libraries out of the executable directory.
         for libdir in ["../lib64/flectar-mail", "../lib/flectar-mail"] {

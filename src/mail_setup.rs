@@ -13,7 +13,7 @@ pub(super) fn register(app: &AppWindow, _runtime: &Rc<tokio::runtime::Runtime>) 
         if app.get_account_setup_in_progress() {
             return;
         }
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
         {
             let weak = app.as_weak();
             runtime.spawn(async move {
@@ -44,6 +44,39 @@ pub(super) fn register(app: &AppWindow, _runtime: &Rc<tokio::runtime::Runtime>) 
                     }
                 });
             });
+        }
+        #[cfg(target_env = "ohos")]
+        {
+            let weak = app.as_weak();
+            let runtime = Rc::clone(&runtime);
+            if let Some(host) = crate::platform_services::current() {
+                runtime.spawn(async move {
+                    let imported = tokio::task::spawn_blocking(move || host.import_file()).await;
+                    let result = match imported {
+                        Ok(Ok(Some(document))) => read_certificate(document.path()).await,
+                        Ok(Ok(None)) => return,
+                        Ok(Err(error)) => Err(error),
+                        Err(error) => Err(error.to_string()),
+                    };
+                    let _ = weak.upgrade_in_event_loop(move |app| {
+                        if app.get_account_setup_in_progress() {
+                            return;
+                        }
+                        match result {
+                            Ok(pem) => {
+                                app.set_trusted_certificate_pem(pem.into());
+                                app.set_sync_status(UiMessage::plain(
+                                    "Certificate imported. Connect to verify the server.",
+                                ));
+                            }
+                            Err(error) => app.set_sync_status(UiMessage::detail(
+                                "Certificate import failed: {}",
+                                error,
+                            )),
+                        }
+                    });
+                });
+            }
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         app.set_sync_status(UiMessage::plain(

@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/renderer-probe"]
-exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/parley", "crates/parley_emoji"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/parley", "crates/parley_emoji", "crates/jmap-client", "crates/wgpu-hal-ohos29", "platform/ohos/rust"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -51,6 +51,7 @@ gpu-renderer = [
 # runtime setting remains off by default. `--no-default-features` omits all
 # remote body-image loading code for a capability-free minimal build.
 remote-content = []
+embedded-openpgp = ["flectar-mail-core/embedded-openpgp"]
 # The Flatpak sandbox omits Slint's legacy StatusNotifierItem integration.
 # Native packages retain the system tray and close-to-tray behavior.
 flatpak = []
@@ -92,7 +93,7 @@ chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
 keyboard-types = "0.7"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2"] }
 sha2 = "0.10"
 serde.workspace = true
 serde_json.workspace = true
@@ -102,10 +103,9 @@ tempfile = "3"
 # Linux enables both Wayland and X11; Apple and Windows use their native winit
 # integrations. Android supplies its dedicated activity backend separately.
 # The `gpu-renderer` feature adds WGPU and exposes its device/queue to Vello.
-slint = { version = "1.18.1", default-features = false, features = [
+slint = { version = "=1.18.1", default-features = false, features = [
     "std",
     "renderer-software",
-    "system-tray",
     "unstable-fontique-011",
     "compat-1-2",
 ] }
@@ -121,16 +121,26 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(target_env = "ohos")'.dependencies]
+i-slint-core = { version = "=1.18.1", default-features = false, features = ["std", "image-decoders", "svg"] }
+# anyrender disables Vello CPU's defaults. Align its existing version to retain
+# PNG bitmap color glyphs (sbix/CBDT) on the native CPU rendering path.
+vello_cpu = { version = "=0.1.0", default-features = false, features = ["png"] }
+zip = { version = "8.6", default-features = false }
+
+[target.'cfg(not(target_env = "ohos"))'.dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["system-tray"] }
+
+[target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit"] }
+slint = { version = "=1.18.1", default-features = false, features = ["backend-winit"] }
 
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "ios"))'.dependencies]
-slint = { version = "1.18.1", default-features = false, features = ["backend-winit"] }
+slint = { version = "=1.18.1", default-features = false, features = ["backend-winit"] }
 
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.16", default-features = false, features = ["tokio", "xdg-portal"] }
 
@@ -155,12 +165,15 @@ auto_link_exclude_list = [
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "slint-build", "winresource", "cc"]
+ignored = ["fontique_0_11", "vello_cpu", "slint-build", "winresource", "cc"]
 
 [build-dependencies]
 cc = "1"
-slint-build = "1.18.1"
+slint-build = "=1.18.1"
 winresource = "0.1"
+
+[dev-dependencies]
+zip = { version = "8.6", default-features = false }
 
 [profile.release]
 opt-level = 3

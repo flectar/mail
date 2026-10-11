@@ -1,5 +1,6 @@
 # Rust build output and locally packaged artifacts
 /target/
+**/target/
 /.flatpak-builder/
 /libs/
 /.artifacts/
@@ -24,3 +25,20 @@
 # Temporary UI previews and local review captures
 /ui/.*.slint
 /settings-accounts-*.png
+
+# HarmonyOS generated files and local signing configuration
+/platform/ohos/.cache/
+/platform/ohos/.hvigor/
+/platform/ohos/oh_modules/
+/platform/ohos/entry/.cxx/
+/platform/ohos/entry/build/
+/platform/ohos/entry/oh_modules/
+/platform/ohos/local.properties
+/platform/ohos/build-profile.local.json5
+/platform/ohos/.signing/
+/platform/ohos/entry/libs/
+/platform/ohos/entry/src/main/resources/rawfile/licenses/
+/platform/ohos/entry/src/main/resources/rawfile/pdfium-licenses/
+__pycache__/
+# Local test mailbox credentials supplied by the developer.
+/.tmp

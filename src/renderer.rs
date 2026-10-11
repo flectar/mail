@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod appearance_tests;
 mod interaction;
+#[cfg(any(target_env = "ohos", test))]
+mod opaque_tile;
 #[cfg(test)]
 mod regression;
 mod semantics;
@@ -1310,6 +1312,29 @@ fn render_cpu_tile_cached(
 ) -> Result<RenderedEmailTile, String> {
     let logical_y = index as f32 * EMAIL_TILE_HEIGHT;
     let logical_tile_height = (content_height - logical_y).clamp(1.0, EMAIL_TILE_HEIGHT);
+    render_cpu_area_cached(
+        painter,
+        size,
+        email,
+        logical_width,
+        logical_y,
+        logical_tile_height,
+        index,
+        scale_factor,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_cpu_area_cached(
+    painter: &mut Option<VelloCpuImageRenderer>,
+    size: &mut (u32, u32),
+    email: &mut PreparedEmail,
+    logical_width: f32,
+    logical_y: f32,
+    logical_tile_height: f32,
+    index: u32,
+    scale_factor: f32,
+) -> Result<RenderedEmailTile, String> {
     let physical_width = (logical_width * scale_factor).ceil().max(1.0) as u32;
     let physical_tile_height = (logical_tile_height * scale_factor).ceil().max(1.0) as u32;
     if physical_width > 16384 || physical_tile_height > 8192 {
@@ -1378,8 +1403,15 @@ fn render_cpu_tile_cached(
             start.elapsed().saturating_sub(rendered).as_secs_f64() * 1000.0
         );
     }
+    // Slint's software renderer can skip covered background commands only
+    // when a canvas is represented as RGB8. Keep this platform-specific:
+    // other renderers retain the upstream RGBA image representation.
+    #[cfg(target_env = "ohos")]
+    let image = opaque_tile::canvas_image(pixels);
+    #[cfg(not(target_env = "ohos"))]
+    let image = slint::Image::from_rgba8(pixels);
     Ok(RenderedEmailTile {
-        image: slint::Image::from_rgba8(pixels),
+        image,
         y: logical_y / logical_width,
         height: logical_tile_height / logical_width,
     })
@@ -1574,6 +1606,79 @@ pub fn prepare_email_html(html: &str) -> Result<PreparedEmail, String> {
     prepare_email_html_with_provider(html, None)
 }
 
+#[cfg(target_env = "ohos")]
+static PREWARMED_EMAIL_FONT_CTX: std::sync::OnceLock<parley::FontContext> =
+    std::sync::OnceLock::new();
+
+#[cfg(all(target_env = "ohos", debug_assertions))]
+static EMAIL_FONT_DIAGNOSTICS: std::sync::OnceLock<fn(&str)> = std::sync::OnceLock::new();
+
+#[cfg(target_env = "ohos")]
+pub(crate) fn configure_email_font_diagnostics(logger: fn(&str)) {
+    #[cfg(debug_assertions)]
+    let _ = EMAIL_FONT_DIAGNOSTICS.set(logger);
+    #[cfg(not(debug_assertions))]
+    let _ = logger;
+}
+
+#[cfg(target_env = "ohos")]
+fn email_font_diagnostics() -> Option<fn(&str)> {
+    #[cfg(debug_assertions)]
+    {
+        EMAIL_FONT_DIAGNOSTICS.get().copied()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
+/// Prepare the independent email font collection during background startup.
+/// The owner thread only checks a completed publication; it never waits here.
+#[cfg(target_env = "ohos")]
+pub(crate) fn prewarm_email_font_ctx(runtime: &tokio::runtime::Handle) {
+    if PREWARMED_EMAIL_FONT_CTX.get().is_some() {
+        return;
+    }
+    runtime.spawn_blocking(|| {
+        let logger = email_font_diagnostics();
+        let started = logger.map(|_| Instant::now());
+        let result = std::panic::catch_unwind(create_email_font_ctx);
+        let succeeded = result.is_ok();
+        let published = result
+            .ok()
+            .is_some_and(|font_ctx| PREWARMED_EMAIL_FONT_CTX.set(font_ctx).is_ok());
+        if let (Some(logger), Some(started)) = (logger, started) {
+            logger(&format!(
+                "FeihongFontInit background=1 success={} published={} bootstrap_ms={:.2}",
+                u8::from(succeeded),
+                u8::from(published),
+                started.elapsed().as_secs_f64() * 1000.0,
+            ));
+        }
+    });
+}
+
+fn initial_email_font_ctx() -> parley::FontContext {
+    #[cfg(target_env = "ohos")]
+    {
+        let logger = email_font_diagnostics();
+        let started = logger.map(|_| Instant::now());
+        let ready = PREWARMED_EMAIL_FONT_CTX.get();
+        let font_ctx = ready.cloned().unwrap_or_else(create_email_font_ctx);
+        if let (Some(logger), Some(started)) = (logger, started) {
+            logger(&format!(
+                "FeihongFontInit background=0 ready={} bootstrap_ms={:.2}",
+                u8::from(ready.is_some()),
+                started.elapsed().as_secs_f64() * 1000.0,
+            ));
+        }
+        font_ctx
+    }
+    #[cfg(not(target_env = "ohos"))]
+    create_email_font_ctx()
+}
+
 /// Build the Parley `FontContext` used for email bodies.
 ///
 /// On macOS, fontique maps the "sans-serif" generic family to "Helvetica".
@@ -1591,7 +1696,7 @@ pub fn prepare_email_html(html: &str) -> Result<PreparedEmail, String> {
 /// wholesale-replaced on updates, so the logic can't be shared by extracting
 /// a helper there. Keep the two in sync by hand if either changes.
 fn build_email_font_ctx() -> parley::FontContext {
-    thread_local! { static FONTS: parley::FontContext = create_email_font_ctx(); }
+    thread_local! { static FONTS: parley::FontContext = initial_email_font_ctx(); }
     FONTS.with(Clone::clone)
 }
 fn create_email_font_ctx() -> parley::FontContext {
@@ -1613,6 +1718,27 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
     font_ctx
         .collection
         .register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
+
+    #[cfg(target_env = "ohos")]
+    for path in crate::platform_services::font_paths() {
+        if let Ok(bytes) = std::fs::read(path) {
+            let families = font_ctx
+                .collection
+                .register_fonts(Blob::new(Arc::new(bytes)), None);
+            for script in [*b"Hani", *b"Hans", *b"Hant", *b"Zyyy"] {
+                let key = FallbackKey::new(Script::from_bytes(script), None);
+                let mut fallbacks: Vec<_> = font_ctx.collection.fallback_families(key).collect();
+                for (family, _) in &families {
+                    if !fallbacks.contains(family) {
+                        fallbacks.push(*family);
+                    }
+                }
+                font_ctx
+                    .collection
+                    .set_fallbacks(key, fallbacks.into_iter());
+            }
+        }
+    }
 
     // Keep the host's preferred sans-serif families, then use the font that is
     // already bundled for the composer as the guaranteed final fallback.
@@ -2744,4 +2870,54 @@ mod tests {
             .count();
         assert_eq!(dark_opaque_pixels, 0);
     }
+}
+
+/// Rasterize one A4 page at a time with the same Blitz/Vello CPU pipeline.
+#[cfg(any(target_env = "ohos", test))]
+pub(crate) fn print_pages(
+    html: &str,
+    mut consume: impl FnMut(u32, u32, slint::Image) -> Result<(), String>,
+) -> Result<(), String> {
+    const WIDTH: f32 = 760.0;
+    const HEIGHT: f32 = 1075.0;
+    const SCALE: f32 = 1.5;
+    let renderer = GpuEmailRenderer::default();
+    // Print retains the upstream sanitized document. Remote image loading stays
+    // under the reader's existing policy; printing never grants a new fetch.
+    let mut email = renderer.prepare_email_html(html, false)?;
+    email.document.set_viewport(Viewport::new(
+        (WIDTH * SCALE) as u32,
+        (HEIGHT * SCALE) as u32,
+        SCALE,
+        email.appearance.colors.scheme(),
+    ));
+    email.appearance.resolve(&mut email.document);
+    email.paint_cache.clear();
+    let content_height = content_surface_height(&email.document);
+    if !content_height.is_finite() || content_height >= MAX_EMAIL_SURFACE_HEIGHT {
+        return Err("This message exceeds the print page limit".into());
+    }
+    let count = (content_height / HEIGHT).ceil().max(1.0) as u32;
+    if count > 96 {
+        return Err("This message exceeds the print page limit".into());
+    }
+    let mut painter = None;
+    let mut size = (0, 0);
+    for page in 0..count {
+        let y = page as f32 * HEIGHT;
+        let height = (content_height - y).clamp(1.0, HEIGHT);
+        let image = render_cpu_area_cached(
+            &mut painter,
+            &mut size,
+            &mut email,
+            WIDTH,
+            y,
+            height,
+            page,
+            SCALE,
+        )?
+        .image;
+        consume(page, count, image)?;
+    }
+    Ok(())
 }

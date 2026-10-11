@@ -153,6 +153,23 @@ impl FilesService {
         selected: i32,
         local_path: Option<PathBuf>,
     ) -> Result<Output> {
+        self.execute_with_display_name(core, action, a, b, selected, local_path, None)
+            .await
+    }
+
+    /// Preserve a native document's original leaf name independently of its
+    /// private staging path. The existing path-only entry point stays valid.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_with_display_name(
+        &mut self,
+        core: &Core,
+        action: &str,
+        a: &str,
+        b: &str,
+        selected: i32,
+        local_path: Option<PathBuf>,
+        display_name: Option<String>,
+    ) -> Result<Output> {
         // Mail metadata reads must remain responsive during a large remote
         // tree scan. They use Mail's own SQLite queue and do not touch file
         // content or remote mutations. Other commands share the lifecycle gate.
@@ -204,6 +221,15 @@ impl FilesService {
                     }
                     let payload: serde_json::Value =
                         serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+                    let display_name = payload
+                        .get("displayName")
+                        .filter(|value| !value.is_null())
+                        .map(|value| {
+                            let name = value.as_str().ok_or("Invalid upload display name.")?;
+                            files::validate_name(name).map_err(|error| error.to_string())?;
+                            Ok::<_, String>(name)
+                        })
+                        .transpose()?;
                     let mut pending = FilesService {
                         accounts: self.accounts.clone(),
                         account: self.account,
@@ -282,6 +308,7 @@ impl FilesService {
                         payload["b"].as_str().unwrap_or(""),
                         0,
                         path,
+                        display_name,
                     )
                     .await;
                     super::store::finish(
@@ -353,6 +380,7 @@ impl FilesService {
                 | "unlock"
         );
         let mut local_path = local_path;
+        let mut display_name = display_name;
         let job = if mutation {
             self.init(core).await?;
             let account = self.account_id().ok_or("Select an account.")?;
@@ -397,21 +425,21 @@ impl FilesService {
                 super::store::finish(&core.files_db, id, "preparing", None)
                     .await
                     .map_err(|e| e.to_string())?;
-                let staged: Result<PathBuf> = async {
+                let staged: Result<(PathBuf, String)> = async {
                     let source = local_path.as_ref().ok_or("Choose an upload file.")?;
+                    let name = upload_name(source, display_name.as_deref())?;
                     let directory = core.paths.files_staging_dir(account).join(id.to_string());
                     tokio::fs::create_dir_all(&directory)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let destination =
-                        directory.join(source.file_name().ok_or("Invalid file name.")?);
+                    let destination = directory.join("upload");
                     files::save_cached_file(source, &destination)
                         .await
                         .map_err(|e| e.to_string())?;
-                    Ok(destination)
+                    Ok((destination, name))
                 }
                 .await;
-                let destination = match staged {
+                let (destination, name) = match staged {
                     Ok(path) => path,
                     Err(error) => {
                         super::store::finish(&core.files_db, id, "failed", Some(error.clone()))
@@ -421,7 +449,9 @@ impl FilesService {
                     }
                 };
                 local_path = Some(destination.clone());
+                display_name = Some(name.clone());
                 let mut payload = payload;
+                payload["displayName"] = json!(name);
                 payload["stagedName"] = json!(
                     destination
                         .file_name()
@@ -452,7 +482,17 @@ impl FilesService {
         } else {
             None
         };
-        let result = perform(self, core, action, a, b, selected, local_path).await;
+        let result = perform(
+            self,
+            core,
+            action,
+            a,
+            b,
+            selected,
+            local_path,
+            display_name.as_deref(),
+        )
+        .await;
         if let Some(id) = job {
             super::store::finish(
                 &core.files_db,
@@ -778,6 +818,15 @@ impl FilesService {
     }
 }
 
+fn upload_name(path: &Path, display_name: Option<&str>) -> Result<String> {
+    let name = display_name
+        .map(str::to_owned)
+        .unwrap_or_else(|| safe_name(&path.file_name().unwrap_or_default().to_string_lossy()));
+    files::validate_name(&name).map_err(|error| error.to_string())?;
+    Ok(name)
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn perform(
     dir: &mut FilesService,
     core: &Core,
@@ -786,6 +835,7 @@ async fn perform(
     b: &str,
     selected: i32,
     local_path: Option<PathBuf>,
+    display_name: Option<&str>,
 ) -> Result<Output> {
     // Account removal invalidates an authenticated session before any action.
     let old_account = dir.account_id();
@@ -1182,9 +1232,10 @@ async fn perform(
                 None
             };
             let path = local_path.ok_or("Choose a file to upload.")?;
-            let name = node.as_ref().map(|n| n.name.clone()).unwrap_or_else(|| {
-                safe_name(&path.file_name().unwrap_or_default().to_string_lossy())
-            });
+            let name = match node.as_ref() {
+                Some(node) => node.name.clone(),
+                None => upload_name(&path, display_name)?,
+            };
             let parent = dir.parent();
             match dir.client.as_mut().ok_or("Storage is disconnected.")? {
                 FileClient::Jmap(c) => {

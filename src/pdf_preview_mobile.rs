@@ -64,7 +64,9 @@ fn library_path() -> Result<PathBuf, String> {
         .parent()
         .map(|p| p.join("Frameworks/PDFium.framework/PDFium"))
         .ok_or_else(|| "Missing application bundle.".into());
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(target_env = "ohos")]
+    return Ok(PathBuf::from("libpdfium.so"));
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     std::env::var_os("FLECTAR_TEST_PDFIUM")
         .map(PathBuf::from)
         .ok_or_else(|| "Set FLECTAR_TEST_PDFIUM for the native integration test.".into())

@@ -526,7 +526,7 @@ pub async fn post_form(url: &str, form: &[(String, String)]) -> Result<String> {
     const MAX_OAUTH_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
     static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
         once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
+            crate::http_tls::client_builder()
                 .connect_timeout(std::time::Duration::from_secs(15))
                 .timeout(std::time::Duration::from_secs(30))
                 .redirect(reqwest::redirect::Policy::none())

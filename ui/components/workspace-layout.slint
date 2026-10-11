@@ -29,7 +29,7 @@ export component WorkspaceFrame inherits Rectangle {
     height: max(0px, root.available-height - (root.compact && root.reserve-compact-navigation ? LayoutMetrics.compact-navigation-height : 0px));
     background: AppTheme.page-bg;
     clip: true;
-    opacity: 0.72 + root.reveal-progress * 0.28;
+    opacity: MotionSettings.software-rendering ? 1 : 0.72 + root.reveal-progress * 0.28;
 
     // Each conditionally-instantiated workspace gets a short entrance. This
     // provides a native view-transition feel while its data model hydrates.
@@ -43,7 +43,7 @@ export component WorkspaceFrame inherits Rectangle {
     }
     animate x { duration: 240ms; easing: spring(0); enabled: MotionSettings.enabled; }
     animate height { duration: 220ms; easing: spring(0); enabled: MotionSettings.enabled; }
-    animate opacity { duration: 180ms; easing: ease-out; enabled: MotionSettings.enabled; }
+    animate opacity { duration: 180ms; easing: ease-out; enabled: MotionSettings.enabled && !MotionSettings.software-rendering; }
 
     @children
 }

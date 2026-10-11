@@ -450,6 +450,21 @@ pub(super) fn print_selected_message(state: &Rc<RefCell<InboxState>>) -> Result<
             .ok_or_else(|| "message body is not ready".to_owned())?
     };
     let printable = crate::email_document::export_html(&html, true);
+    #[cfg(target_env = "ohos")]
+    {
+        let host =
+            crate::platform_services::current().ok_or("Native printing service unavailable")?;
+        let path = host.export_path("message.pdf")?;
+        let result = crate::printing::write_mail_pdf(&path, &printable)
+            .and_then(|()| host.print_file(&path, "飞鸿邮箱邮件"));
+        // PrintKit retains access to the source while its dialog/job is open.
+        // Keep it for this session; a later launch prunes exports older than a day.
+        if result.is_err() {
+            let _ = std::fs::remove_file(&path);
+        }
+        result
+    }
+    #[cfg(not(target_env = "ohos"))]
     open_temporary_html("flectar-mail-print-", &printable)
 }
 
@@ -490,18 +505,41 @@ pub(super) fn open_selected_message_in_browser(
 fn open_temporary_html(prefix: &str, html: &str) -> Result<(), String> {
     use std::io::Write;
 
-    let mut file = tempfile::Builder::new()
-        .prefix(prefix)
-        .suffix(".html")
-        .tempfile()
-        .map_err(|error| error.to_string())?;
+    let builder = tempfile::Builder::new();
+    let mut builder = builder;
+    builder.prefix(prefix).suffix(".html");
+    let host = crate::platform_services::current();
+    let directory = host
+        .as_ref()
+        .map(|host| host.export_path("message.html"))
+        .transpose()?
+        .and_then(|p| p.parent().map(std::path::Path::to_owned));
+    let mut file = if let Some(directory) = directory {
+        builder.tempfile_in(directory)
+    } else {
+        builder.tempfile()
+    }
+    .map_err(|error| error.to_string())?;
     file.write_all(html.as_bytes())
         .and_then(|_| file.flush())
         .map_err(|error| error.to_string())?;
     let (_file, path) = file.keep().map_err(|error| error.error.to_string())?;
+    #[cfg(not(target_env = "ohos"))]
     let url = reqwest::Url::from_file_path(&path)
         .map_err(|()| "could not convert the temporary HTML path to a URL".to_owned())?;
-    if let Err(error) = webbrowser::open(url.as_str()) {
+    let opened = if let Some(host) = host {
+        host.export_file(&path, "message.html").map(|_| ())
+    } else {
+        #[cfg(not(target_env = "ohos"))]
+        {
+            webbrowser::open(url.as_str()).map_err(|e| e.to_string())
+        }
+        #[cfg(target_env = "ohos")]
+        {
+            Err("Native document service unavailable".into())
+        }
+    };
+    if let Err(error) = opened {
         let _ = std::fs::remove_file(path);
         return Err(error.to_string());
     }

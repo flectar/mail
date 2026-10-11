@@ -8,7 +8,15 @@ const DESKTOP_OAUTH_ENV: [&str; 3] = [
 ];
 
 fn main() {
-    let workspace_env = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env");
+    // Native packaging can supply an existing stable file when the optional
+    // workspace .env is absent. The host reselects this path for each build,
+    // so adding/removing .env changes the tracked override rather than making
+    // Cargo watch a nonexistent file forever.
+    println!("cargo:rerun-if-env-changed=FLECTAR_OAUTH_BUILD_ENV_FILE");
+    let workspace_env = std::env::var_os("FLECTAR_OAUTH_BUILD_ENV_FILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env"));
     println!("cargo:rerun-if-changed={}", workspace_env.display());
 
     let file_values = std::fs::read_to_string(&workspace_env)

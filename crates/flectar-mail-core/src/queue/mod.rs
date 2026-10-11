@@ -85,7 +85,7 @@ async fn execute_actions(
     for action in due {
         // This is a cooperative budget: never abandon an action midway through
         // an IMAP/SMTP command, but do not start another after the slice expires.
-        if started.elapsed() >= MAX_SLICE_DURATION {
+        if started.elapsed() >= MAX_SLICE_DURATION || !ctx.bus.platform_is_active() {
             break;
         }
 

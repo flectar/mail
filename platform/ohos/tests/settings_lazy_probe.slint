@@ -1,0 +1,87 @@
+import { SettingsDialog } from "SETTINGS_SOURCE";
+import { AccountRow } from "MODELS_SOURCE";
+import { AppTheme, MotionSettings } from "DESIGN_SOURCE";
+export { AppTheme, MotionSettings }
+
+export component SettingsProbe inherits Window {
+    width: 1280px; height: 560px;
+    background: AppTheme.page-bg;
+    in-out property <bool> construct: false;
+    in-out property <bool> open: true;
+    in-out property <string> tab: "General";
+    in property <[AccountRow]> accounts;
+    in-out property <string> email: "";
+    in-out property <string> password: "";
+    in-out property <string> caldav-password: "";
+    in-out property <int> caldav-id: -1;
+    in-out property <string> profile-name: "";
+    in-out property <int> picker-id: -1;
+    in-out property <bool> profile-open: false;
+    in-out property <bool> picker-open: false;
+    in-out property <bool> imap-open: false;
+    private property <int> command-epoch: 0;
+    private property <string> command-kind: "";
+    private property <string> command-name: "";
+    private property <float> command-value: 0;
+    private property <bool> command-flag: false;
+    private property <color> command-color;
+    callback created(string);
+    callback scrolled(string, float);
+    pure callback matches(string, string) -> bool;
+    callback scroll(string, float, bool);
+    callback search(string);
+    callback preview(color);
+    callback modal(string, bool);
+    callback report();
+    scroll(page, value, write) => {
+        root.command-kind = "scroll";
+        root.command-name = page;
+        root.command-value = value;
+        root.command-flag = write;
+        root.command-epoch += 1;
+    }
+    search(value) => {
+        root.command-kind = "search"; root.command-name = value;
+        root.command-epoch += 1;
+    }
+    preview(value) => {
+        root.command-kind = "preview"; root.command-color = value;
+        root.command-epoch += 1;
+    }
+    modal(kind, open) => {
+        root.command-kind = "modal"; root.command-name = kind; root.command-flag = open;
+        root.command-epoch += 1;
+    }
+    report => { root.command-kind = "report"; root.command-epoch += 1; }
+
+    // Like AppWindow, configure globals/tab/observers before first construction.
+    if root.construct : SettingsDialog {
+        width: parent.width; height: parent.height;
+        settings_open <=> root.open;
+        settings_tab <=> root.tab;
+        connected_accounts: root.accounts;
+        account_email <=> root.email;
+        account_password <=> root.password;
+        caldav_password <=> root.caldav-password;
+        accent: AppTheme.accent; accent-soft: AppTheme.accent-soft;
+        body-text: AppTheme.body; border-subtle: AppTheme.border-subtle;
+        faint-text: AppTheme.faint; heading: AppTheme.heading;
+        muted-text: AppTheme.muted; page-bg: AppTheme.page-bg;
+        secondary-text: AppTheme.secondary; sidebar-bg: AppTheme.sidebar-bg;
+        surface: AppTheme.surface; surface-raised: AppTheme.surface-raised;
+        title-color: AppTheme.title;
+        contract-created(name) => { root.created(name); }
+        contract-scrolled(name, value) => { root.scrolled(name, value); }
+        contract-status(caldav, profile, picker, profile-open, picker-open, imap-open) => {
+            root.caldav-id = caldav; root.profile-name = profile; root.picker-id = picker;
+            root.profile-open = profile-open; root.picker-open = picker-open; root.imap-open = imap-open;
+        }
+        contract-command-epoch: root.command-epoch;
+        contract-command-kind: root.command-kind;
+        contract-command-name: root.command-name;
+        contract-command-value: root.command-value;
+        contract-command-flag: root.command-flag;
+        contract-command-color: root.command-color;
+        settings-search-matches(terms, query) => { root.matches(terms, query); }
+    }
+}

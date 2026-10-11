@@ -1,5 +1,6 @@
-//! OpenPGP/MIME via the installed GnuPG 2.x engine. Private keys and passphrases
-//! stay with gpg-agent; account settings contain only public fingerprints.
+//! OpenPGP/MIME with an injectable cryptographic engine. Desktop defaults to
+//! GnuPG; sandboxed hosts install the embedded engine before starting Core.
+//! Account settings contain public fingerprints, never private keys.
 use crate::{
     Core,
     db::{Db, repo},
@@ -7,8 +8,21 @@ use crate::{
     models::Address,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf, process::Stdio, time::Duration};
+#[cfg(not(target_env = "ohos"))]
+use std::process::Stdio;
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
+#[cfg(not(target_env = "ohos"))]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[cfg(feature = "embedded-openpgp")]
+mod embedded;
+#[cfg(feature = "embedded-openpgp")]
+pub use embedded::EmbeddedOpenPgpBackend;
 
 const MAX_CRYPTO_BYTES: usize = 100 * 1024 * 1024;
 const MAX_STATUS_BYTES: usize = 1024 * 1024;
@@ -59,18 +73,137 @@ fn fingerprint(value: &str, allow_empty: bool) -> Result<String> {
     }
 }
 
-#[derive(Clone, Default)]
+/// Private certificates are stored by the host's secure credential service.
+/// Values are transferable secret-key certificates, indexed by full primary
+/// fingerprint. Implementations must protect values at rest and fail closed.
+pub trait OpenPgpKeyStore: Send + Sync {
+    fn load(&self, fingerprint: &str) -> Result<Option<Vec<u8>>>;
+    fn store(&self, fingerprint: &str, certificate: &[u8]) -> Result<()>;
+    fn delete(&self, fingerprint: &str) -> Result<()>;
+    fn list(&self) -> Result<Vec<String>>;
+}
+
+/// Typed operations keep the MIME wrapper independent of a subprocess CLI.
+pub enum OpenPgpOperation {
+    Generate {
+        email: String,
+    },
+    List {
+        secret: bool,
+        fingerprint: Option<String>,
+    },
+    Import {
+        certificate: Vec<u8>,
+    },
+    Export {
+        fingerprint: String,
+    },
+    Check {
+        fingerprint: String,
+        email: String,
+        secret: bool,
+        capability: char,
+    },
+    Sign {
+        fingerprint: String,
+        data: Vec<u8>,
+    },
+    Encrypt {
+        fingerprints: Vec<String>,
+        data: Vec<u8>,
+    },
+    Decrypt {
+        data: Vec<u8>,
+    },
+    Verify {
+        signature: Vec<u8>,
+        data: Vec<u8>,
+    },
+}
+
+/// Status follows the small, documented GnuPG status subset used by the MIME
+/// layer. Success must never be returned before authenticating the entire
+/// message and rejecting invalid, expired, revoked, or unknown signatures.
+#[derive(Default)]
+pub struct OpenPgpOutput {
+    pub data: Vec<u8>,
+    pub status: String,
+}
+
+pub trait OpenPgpBackend: Send + Sync {
+    /// Runs on a blocking worker, allowing the host to unlock protected keys.
+    fn execute(&self, operation: OpenPgpOperation) -> Result<OpenPgpOutput>;
+}
+
+static PLATFORM_BACKEND: OnceLock<Arc<dyn OpenPgpBackend>> = OnceLock::new();
+
+/// Install once, before startup, so settings, sending, and queued drafts use
+/// the same engine. Replacing a live engine/key store is intentionally rejected.
+pub fn install_platform_backend(backend: Arc<dyn OpenPgpBackend>) -> Result<()> {
+    PLATFORM_BACKEND
+        .set(backend)
+        .map_err(|_| error("The platform engine is already initialized"))
+}
+
+#[derive(Clone)]
 pub struct Gpg {
     // Test engines use isolated keyrings. Production uses the user's GnuPG home.
     home: Option<PathBuf>,
+    backend: Option<Arc<dyn OpenPgpBackend>>,
+}
+impl Default for Gpg {
+    fn default() -> Self {
+        Self {
+            home: None,
+            backend: PLATFORM_BACKEND.get().cloned(),
+        }
+    }
 }
 impl Gpg {
-    async fn run(&self, args: &[String], input: Option<&[u8]>) -> Result<(Vec<u8>, String)> {
-        if cfg!(any(target_os = "android", target_os = "ios")) {
-            return Err(error("OpenPGP requires desktop GnuPG"));
+    pub fn with_backend(backend: Arc<dyn OpenPgpBackend>) -> Self {
+        Self {
+            home: None,
+            backend: Some(backend),
         }
+    }
+
+    async fn run(&self, args: &[String], input: Option<&[u8]>) -> Result<(Vec<u8>, String)> {
         if input.is_some_and(|data| data.len() > MAX_CRYPTO_BYTES) {
             return Err(error("Message exceeds the 100 MiB OpenPGP limit"));
+        }
+        if let Some(backend) = &self.backend {
+            let operation = backend_operation(args, input)?;
+            let backend = backend.clone();
+            let result = tokio::task::spawn_blocking(move || backend.execute(operation))
+                .await
+                .map_err(|_| error("The embedded engine stopped unexpectedly"))??;
+            if result.data.len() > MAX_CRYPTO_BYTES || result.status.len() > MAX_STATUS_BYTES {
+                return Err(error("OpenPGP output exceeds the size limit"));
+            }
+            return Ok((result.data, result.status));
+        }
+        #[cfg(target_env = "ohos")]
+        {
+            Err(error(
+                "The platform OpenPGP engine has not been initialized",
+            ))
+        }
+        #[cfg(not(target_env = "ohos"))]
+        {
+            self.run_external(args, input).await
+        }
+    }
+
+    #[cfg(not(target_env = "ohos"))]
+    async fn run_external(
+        &self,
+        args: &[String],
+        input: Option<&[u8]>,
+    ) -> Result<(Vec<u8>, String)> {
+        if cfg!(any(target_os = "android", target_os = "ios")) {
+            return Err(error(
+                "Install a platform OpenPGP engine before starting the app",
+            ));
         }
         let status_file = tempfile::NamedTempFile::new()?;
         let mut cmd = tokio::process::Command::new("gpg");
@@ -240,6 +373,19 @@ impl Gpg {
         capability: char,
     ) -> Result<()> {
         let key = fingerprint(key, false)?;
+        if let Some(backend) = &self.backend {
+            let backend = backend.clone();
+            let operation = OpenPgpOperation::Check {
+                fingerprint: key,
+                email: email.to_owned(),
+                secret,
+                capability,
+            };
+            tokio::task::spawn_blocking(move || backend.execute(operation))
+                .await
+                .map_err(|_| error("The embedded engine stopped unexpectedly"))??;
+            return Ok(());
+        }
         let (data, _) = self
             .run(
                 &[
@@ -359,6 +505,76 @@ impl Gpg {
         }
         Ok([headers, entity].concat())
     }
+}
+
+fn backend_operation(args: &[String], input: Option<&[u8]>) -> Result<OpenPgpOperation> {
+    let has = |flag: &str| args.iter().any(|arg| arg == flag);
+    let value = |flag: &str| {
+        args.iter()
+            .position(|arg| arg == flag)
+            .and_then(|index| args.get(index + 1))
+            .cloned()
+            .ok_or_else(|| error("Missing embedded engine argument"))
+    };
+    let data = || input.unwrap_or_default().to_vec();
+    Ok(if has("--quick-generate-key") {
+        OpenPgpOperation::Generate {
+            email: value("--quick-generate-key")?,
+        }
+    } else if has("--list-keys") || has("--list-secret-keys") {
+        let flag = if has("--list-secret-keys") {
+            "--list-secret-keys"
+        } else {
+            "--list-keys"
+        };
+        let fpr = args
+            .iter()
+            .position(|arg| arg == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned();
+        OpenPgpOperation::List {
+            secret: has("--list-secret-keys"),
+            fingerprint: fpr,
+        }
+    } else if has("--import") {
+        OpenPgpOperation::Import {
+            certificate: data(),
+        }
+    } else if has("--export") {
+        OpenPgpOperation::Export {
+            fingerprint: value("--export")?,
+        }
+    } else if has("--detach-sign") {
+        OpenPgpOperation::Sign {
+            fingerprint: value("--local-user")?,
+            data: data(),
+        }
+    } else if has("--encrypt") {
+        let fingerprints = args
+            .windows(2)
+            .filter(|pair| pair[0] == "--recipient")
+            .map(|pair| pair[1].clone())
+            .collect();
+        OpenPgpOperation::Encrypt {
+            fingerprints,
+            data: data(),
+        }
+    } else if has("--decrypt") {
+        OpenPgpOperation::Decrypt { data: data() }
+    } else if has("--verify") {
+        // Signature files are created by the MIME wrapper, never by a message.
+        let path = value("--verify")?;
+        let signature = std::fs::read(path)?;
+        if signature.len() > MAX_CRYPTO_BYTES {
+            return Err(error("Signature exceeds the size limit"));
+        }
+        OpenPgpOperation::Verify {
+            signature,
+            data: data(),
+        }
+    } else {
+        return Err(error("Unsupported embedded engine operation"));
+    })
 }
 
 fn validate_listing(listing: &str, key: &str, email: &str, capability: char) -> Result<()> {
@@ -999,6 +1215,7 @@ mod tests {
         .unwrap();
         let gpg = Gpg {
             home: Some(home.path().to_owned()),
+            backend: None,
         };
         let key = gpg.generate_key("generated@example.org").await.unwrap();
         gpg.check_key(&key, "generated@example.org", true, 'S')
@@ -1021,6 +1238,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let gpg = Gpg {
             home: Some(home.path().to_owned()),
+            backend: None,
         };
         let alice = generate(&gpg, "Alice <alice@example.org>").await;
         let bob = generate(&gpg, "Bob <bob@example.org>").await;
@@ -1083,6 +1301,7 @@ mod tests {
         let other_home = tempfile::tempdir().unwrap();
         let receiver = Gpg {
             home: Some(other_home.path().to_owned()),
+            backend: None,
         };
         assert!(receiver.open_message(&protected, None).await.is_err());
         receiver.import_key(&secret).await.unwrap();
@@ -1135,6 +1354,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let gpg = Gpg {
             home: Some(home.path().to_owned()),
+            backend: None,
         };
         let key = generate(&gpg, "Alice <alice@example.org>").await;
         let (encrypted, _) = gpg

@@ -123,6 +123,10 @@ impl Default for CosmicComposeEditor {
         font_system
             .db_mut()
             .load_font_source(Source::Binary(Arc::new(UI_FONT_DATA)));
+        #[cfg(target_env = "ohos")]
+        for path in crate::platform_services::font_paths() {
+            let _ = font_system.db_mut().load_font_file(path);
+        }
         let buffer = Buffer::new(
             &mut font_system,
             Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),

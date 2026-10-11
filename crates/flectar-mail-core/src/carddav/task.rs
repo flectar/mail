@@ -40,12 +40,14 @@ pub fn spawn(
         // without delaying the first contact sync behind another discovery.
         let mut last_collection_refresh_ms = crate::models::now_ms();
         loop {
+            bus.wait_for_platform_active().await;
             let delay = crate::sync::engine::configured_sync_interval(&db).await;
             let alive = tokio::select! { message = rx.recv() => message.is_some(), _ = tokio::time::sleep(delay) => true };
             if !alive {
                 break;
             }
             while rx.try_recv().is_ok() {}
+            bus.wait_for_platform_active().await;
             let refresh_collections = crate::models::now_ms() - last_collection_refresh_ms
                 >= COLLECTION_REFRESH_SECS * 1_000;
             let result = run_cycle(

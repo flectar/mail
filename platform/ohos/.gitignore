@@ -1,0 +1,16 @@
+.hvigor/
+.cache/
+.signing/
+.idea/
+oh_modules/
+build/
+entry/build/
+local.properties
+**/.cxx/
+**/target/
+entry/libs/
+entry/src/main/resources/rawfile/licenses/
+entry/src/main/resources/rawfile/pdfium-licenses/
+*.p12
+*.p7b
+*.cer

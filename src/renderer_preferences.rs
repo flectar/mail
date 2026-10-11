@@ -38,7 +38,11 @@ struct Preference {
 
 pub(crate) const GPU_SUPPORTED: bool = cfg!(all(
     feature = "gpu-renderer",
-    not(any(target_os = "android", target_os = "ios"))
+    not(any(
+        target_os = "android",
+        target_os = "ios",
+        target_env = "ohos"
+    ))
 ));
 
 pub(crate) fn load(path: &Path) -> RendererMode {
@@ -100,7 +104,11 @@ pub(crate) fn register(
     settings.set_preferred(preferred.key().into());
     settings.set_active(if gpu { "gpu" } else { "cpu" }.into());
     settings.set_gpu_supported(supported);
-    settings.set_available(!cfg!(any(target_os = "android", target_os = "ios")));
+    settings.set_available(!cfg!(any(
+        target_os = "android",
+        target_os = "ios",
+        target_env = "ohos"
+    )));
     let weak = app.as_weak();
     settings.on_choose(move |value| {
         let Some(app) = weak.upgrade() else {
@@ -158,7 +166,7 @@ pub(crate) fn initialize_step<T>(
         .map_err(|error| startup_error(error, true))
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub(crate) fn select_backend(mode: RendererMode) -> Result<bool, Box<dyn std::error::Error>> {
     #[cfg(feature = "gpu-renderer")]
     if mode == RendererMode::Gpu {
@@ -185,7 +193,7 @@ pub(crate) fn select_backend(mode: RendererMode) -> Result<bool, Box<dyn std::er
     Ok(false)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 pub(crate) fn restart_cpu(error: &dyn std::error::Error) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("GPU initialization failed; restarting once in CPU / Low Memory mode: {error}");
     let mut command = std::process::Command::new(std::env::current_exe()?);

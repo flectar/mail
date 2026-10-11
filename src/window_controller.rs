@@ -10,12 +10,27 @@ use crate::tray_ui::FlectarTray;
 pub(super) fn create_and_register_window_lifecycle(
     app: &AppWindow,
 ) -> Result<Option<FlectarTray>, slint::PlatformError> {
-    #[cfg(not(any(target_os = "android", target_os = "ios", feature = "flatpak")))]
+    #[cfg(not(any(
+        target_os = "android",
+        target_os = "ios",
+        target_env = "ohos",
+        feature = "flatpak"
+    )))]
     let tray = Some(FlectarTray::new()?);
-    #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "ios",
+        target_env = "ohos",
+        feature = "flatpak"
+    ))]
     let tray: Option<FlectarTray> = None;
 
-    #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
+    #[cfg(any(
+        target_os = "android",
+        target_os = "ios",
+        target_env = "ohos",
+        feature = "flatpak"
+    ))]
     app.set_close_to_tray(false);
 
     if let Some(tray) = tray.as_ref() {
@@ -108,6 +123,7 @@ pub(super) fn register_window_preference_callbacks(
         if cfg!(any(
             target_os = "android",
             target_os = "ios",
+            target_env = "ohos",
             feature = "flatpak"
         )) {
             app.set_close_to_tray(false);

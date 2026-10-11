@@ -437,7 +437,7 @@ async fn pinned_public_client(url: &reqwest::Url) -> Option<reqwest::Client> {
     if let Some(client) = cache.lock().ok()?.get(&key) {
         return Some(client.clone());
     }
-    let mut builder = reqwest::Client::builder()
+    let mut builder = flectar_mail_core::http_tls::client_builder()
         .no_proxy()
         .user_agent("Flectar Mail bounded remote image loader/0.1")
         .connect_timeout(Duration::from_secs(4))
@@ -995,7 +995,7 @@ mod tests {
                 stream.write_all(&body).unwrap();
             });
             let actual = rt.block_on(async {
-                let response = reqwest::Client::builder()
+                let response = flectar_mail_core::http_tls::client_builder()
                     .no_proxy()
                     .timeout(std::time::Duration::from_secs(2))
                     .build()

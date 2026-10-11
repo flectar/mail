@@ -70,7 +70,7 @@ impl HttpTransport {
         let base = validated_url(base_url)?;
         let origin = base.origin();
         let redirect_origin = origin.clone();
-        let client = reqwest::Client::builder()
+        let client = crate::http_tls::client_builder()
             .user_agent("flectar-mail-carddav/0.1")
             .timeout(std::time::Duration::from_secs(45))
             .redirect(reqwest::redirect::Policy::custom(move |attempt| {

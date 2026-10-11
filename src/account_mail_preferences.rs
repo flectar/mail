@@ -724,7 +724,10 @@ fn register_keys_and_reader(app: &AppWindow, state: &Rc<RefCell<InboxState>>, ta
 
 // Mobile keeps the shared UI result interface, but key actions return an
 // unsupported-platform error until a native OpenPGP backend is available.
-#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+#[cfg_attr(
+    any(target_os = "android", target_os = "ios", target_env = "ohos"),
+    allow(dead_code)
+)]
 enum KeyResult {
     Generated(String),
     Inventory(String),
@@ -768,14 +771,12 @@ async fn key_action(action: &str, fingerprint: &str, email: &str) -> Result<KeyR
             )))
         }
         "import" | "open" => {
-            let Some(file) = rfd::AsyncFileDialog::new()
-                .set_title(if action == "import" {
-                    "Import OpenPGP key"
-                } else {
-                    "Open OpenPGP message"
-                })
-                .pick_file()
-                .await
+            let Some(file) = pick_security_document(if action == "import" {
+                "Import OpenPGP key"
+            } else {
+                "Open OpenPGP message"
+            })
+            .await?
             else {
                 return Ok(KeyResult::Done("Cancelled.".into()));
             };
@@ -814,12 +815,7 @@ async fn key_action(action: &str, fingerprint: &str, email: &str) -> Result<KeyR
                 .export_public_key(fingerprint)
                 .await
                 .map_err(|e| e.to_string())?;
-            if let Some(file) = rfd::AsyncFileDialog::new()
-                .set_file_name("public-key.asc")
-                .save_file()
-                .await
-            {
-                file.write(&data).await.map_err(|e| e.to_string())?;
+            if save_security_document("public-key.asc", data).await? {
                 Ok(KeyResult::Done("Public key exported.".into()))
             } else {
                 Ok(KeyResult::Done("Cancelled.".into()))
@@ -834,15 +830,67 @@ async fn key_action(_: &str, _: &str, _: &str) -> Result<KeyResult, String> {
 }
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 async fn export_message(data: Vec<u8>) -> Result<(), String> {
-    if let Some(file) = rfd::AsyncFileDialog::new()
-        .set_title("Save decrypted message (contains private content)")
-        .set_file_name("decrypted-message.eml")
-        .save_file()
+    save_security_document("decrypted-message.eml", data)
         .await
+        .map(|_| ())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn pick_security_document(
+    title: &str,
+) -> Result<Option<crate::documents::ImportedDocument>, String> {
+    #[cfg(target_env = "ohos")]
     {
-        file.write(&data).await.map_err(|e| e.to_string())?;
+        let _ = title;
+        let host =
+            crate::platform_services::current().ok_or("Native document provider unavailable")?;
+        tokio::task::spawn_blocking(move || host.import_file())
+            .await
+            .map_err(|e| e.to_string())?
     }
-    Ok(())
+    #[cfg(not(target_env = "ohos"))]
+    {
+        Ok(rfd::AsyncFileDialog::new()
+            .set_title(title)
+            .pick_file()
+            .await
+            .map(|f| crate::documents::ImportedDocument::source(f.path().to_owned())))
+    }
+}
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn save_security_document(name: &str, data: Vec<u8>) -> Result<bool, String> {
+    #[cfg(target_env = "ohos")]
+    {
+        let host =
+            crate::platform_services::current().ok_or("Native document provider unavailable")?;
+        let path = host.export_path(name)?;
+        let name = name.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let result = std::fs::write(&path, data)
+                .map_err(|e| e.to_string())
+                .and_then(|()| host.export_file(&path, &name));
+            let _ = std::fs::remove_file(&path);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::remove_dir(parent);
+            }
+            result
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_env = "ohos"))]
+    {
+        if let Some(file) = rfd::AsyncFileDialog::new()
+            .set_file_name(name)
+            .save_file()
+            .await
+        {
+            file.write(&data).await.map_err(|e| e.to_string())?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 #[cfg(any(target_os = "android", target_os = "ios"))]
 async fn export_message(_: Vec<u8>) -> Result<(), String> {

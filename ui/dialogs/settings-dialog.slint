@@ -15,7 +15,7 @@ import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow } from "../components/settings-components.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, LayoutMetrics, SettingsIconPalette } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, SettingsIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
 
 // Use the same focusable controls in both account-card layouts.
@@ -425,6 +425,19 @@ export component SettingsDialog inherits Rectangle {
     private property <bool> compact-nav-open: false;
     private property <bool> clear-contact-suggestions-confirming: false;
     private property <string> settings-search-query: "";
+    // CPU settings need only the selected page initially. Once constructed,
+    // retain each page/modal for this dialog's lifetime, including its scroll
+    // and control state. General stays eager for ThemeEditor's preview rollback.
+    private property <bool> contacts-page-loaded: false;
+    private property <bool> accounts-page-loaded: false;
+    private property <bool> data-page-loaded: false;
+    private property <bool> notifications-page-loaded: false;
+    private property <bool> shortcuts-page-loaded: false;
+    private property <bool> about-page-loaded: false;
+    private property <bool> caldav-modal-loaded: false;
+    private property <bool> imap-modal-loaded: false;
+    private property <bool> profile-editor-modal-loaded: false;
+    private property <bool> account-profile-picker-modal-loaded: false;
     private property <bool> profile-editor-open: false;
     private property <string> profile-editor-id: "";
     private property <string> profile-editor-name: "";
@@ -1178,7 +1191,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    contacts-settings-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.contacts-page-loaded || root.settings_tab == "Contacts" : contacts-settings-scroll := ScrollView {
+                        init => { root.contacts-page-loaded = true; }
                         visible: root.settings_tab == "Contacts";
                         width: parent.width;
                         height: parent.height;
@@ -1329,7 +1343,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    accounts-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.accounts-page-loaded || root.settings_tab == "Accounts" : accounts-scroll := ScrollView {
+                        init => { root.accounts-page-loaded = true; }
                         visible: root.settings_tab == "Accounts";
                         width: parent.width;
                         height: parent.height;
@@ -1788,7 +1803,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    data-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.data-page-loaded || root.settings_tab == "Data" : data-scroll := ScrollView {
+                        init => { root.data-page-loaded = true; }
                         visible: root.settings_tab == "Data";
                         width: parent.width;
                         height: parent.height;
@@ -1867,7 +1883,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    notifications-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.notifications-page-loaded || root.settings_tab == "Notifications" : notifications-scroll := ScrollView {
+                        init => { root.notifications-page-loaded = true; }
                         visible: root.settings_tab == "Notifications";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -1916,7 +1933,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    shortcuts-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.shortcuts-page-loaded || root.settings_tab == "Shortcuts" : shortcuts-scroll := ScrollView {
+                        init => { root.shortcuts-page-loaded = true; }
                         visible: root.settings_tab == "Shortcuts";
                         width: parent.width; height: parent.height;
                         mouse-drag-pan-enabled: root.compact;
@@ -1935,7 +1953,8 @@ export component SettingsDialog inherits Rectangle {
                         }
                     }
 
-                    about-scroll := ScrollView {
+                    if !MotionSettings.software-rendering || root.about-page-loaded || root.settings_tab == "About" : about-scroll := ScrollView {
+                        init => { root.about-page-loaded = true; }
                         visible: root.settings_tab == "About";
                         width: parent.width;
                         height: parent.height;
@@ -2147,7 +2166,8 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !MotionSettings.software-rendering || root.caldav-modal-loaded || (root.settings_open && root.caldav_account_id > 0) : Rectangle {
+            init => { root.caldav-modal-loaded = true; }
             visible: root.settings_open && root.caldav_account_id > 0;
             width: parent.width;
             height: parent.height;
@@ -2278,7 +2298,8 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !MotionSettings.software-rendering || root.imap-modal-loaded || (root.settings_open && root.imap_form_open) : Rectangle {
+            init => { root.imap-modal-loaded = true; }
             visible: root.settings_open && root.imap_form_open;
             width: parent.width;
             height: parent.height;
@@ -2447,7 +2468,8 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !MotionSettings.software-rendering || root.profile-editor-modal-loaded || (root.settings_open && root.profile-editor-open) : Rectangle {
+            init => { root.profile-editor-modal-loaded = true; }
             visible: root.settings_open && root.profile-editor-open;
             width: parent.width;
             height: parent.height;
@@ -2576,7 +2598,8 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        Rectangle {
+        if !MotionSettings.software-rendering || root.account-profile-picker-modal-loaded || (root.settings_open && root.account-profile-picker-open) : Rectangle {
+            init => { root.account-profile-picker-modal-loaded = true; }
             visible: root.settings_open && root.account-profile-picker-open;
             width: parent.width;
             height: parent.height;

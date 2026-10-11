@@ -8,7 +8,7 @@ use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::models::{AccountConfig, Provider, SenderIdentity, now_ms};
 use crate::{Core, http_body};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -132,7 +132,7 @@ impl Core {
         &self,
         account: &AccountConfig,
     ) -> Result<Vec<SenderIdentity>> {
-        let http = Client::builder()
+        let http = crate::http_tls::client_builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(45))
             .redirect(reqwest::redirect::Policy::none())

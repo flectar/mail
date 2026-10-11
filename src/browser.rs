@@ -1,8 +1,8 @@
 //! Open the system browser without leaking AppImage libraries into host programs.
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 use std::process::{Command, Stdio};
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn host_command(program: &str) -> Command {
     let mut command = Command::new(program);
     restore_library_path(
@@ -17,7 +17,7 @@ fn host_command(program: &str) -> Command {
     command
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn restore_library_path(command: &mut Command, bundled: bool, path: Option<std::ffi::OsString>) {
     if !bundled {
         return;
@@ -32,7 +32,7 @@ fn restore_library_path(command: &mut Command, bundled: bool, path: Option<std::
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn launch(mut command: Command) -> Result<(), String> {
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     // xdg-open may exit before the browser starts, or live as long as the browser.
@@ -54,7 +54,7 @@ fn launch(mut command: Command) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 fn open_with_desktop_portal(address: &url::Url) -> Result<(), String> {
     let address = address.clone();
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -81,7 +81,7 @@ pub(super) fn open(url: &str) -> Result<(), String> {
         return Err("Sign-in requires an HTTPS address".into());
     }
     let url = address.as_str();
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     {
         // The portal is the reliable route from AppImages and desktop
         // containers to the user's host browser. Keep command-based fallbacks
@@ -98,7 +98,11 @@ pub(super) fn open(url: &str) -> Result<(), String> {
         gio.args(["open", url]);
         launch(gio).map_err(|_| "Could not open the default browser".into())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_env = "ohos")]
+    return crate::platform_services::current()
+        .ok_or("Native browser service unavailable")?
+        .open_url(url);
+    #[cfg(not(any(target_os = "linux", target_env = "ohos")))]
     webbrowser::open(url).map_err(|e| e.to_string())
 }
 

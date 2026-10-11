@@ -1,0 +1,142 @@
+[package]
+name = "feihong-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "AGPL-3.0-only"
+publish = false
+
+[lib]
+name = "feihong_rust"
+crate-type = ["staticlib", "rlib"]
+
+[features]
+default = ["application"]
+application = ["dep:flectar-mail"]
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "renderer-software", "unstable-fontique-011", "compat-1-2"] }
+i-slint-core = { version = "=1.18.1", default-features = false, features = ["std"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
+flectar-mail = { path = "../../..", default-features = false, features = ["remote-content", "embedded-openpgp"], optional = true }
+
+[workspace]
+
+[patch.crates-io]
+blitz-dom = { path = "../../../crates/blitz-dom" }
+blitz-paint = { path = "../../../crates/blitz-paint" }
+parley = { path = "../../../crates/parley" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+strip = "symbols"
+
+[profile.dev]
+debug = 1
+
+# Slint's generated application is large. Keep its debug code generation split
+# even when the reproducible device builder disables incremental artifacts.
+[profile.dev.package.flectar-mail]
+codegen-units = 256
+opt-level = 2
+
+# A debug HAP retains assertions, input diagnostics and debug symbols, but the
+# multi-megapixel CPU drawing path must not execute unoptimized pixel loops.
+# These overrides are local to the OHOS workspace, leaving upstream profiles
+# and protocol behavior unchanged.
+[profile.dev.package.feihong-rust]
+opt-level = 2
+
+[profile.dev.package.i-slint-core]
+opt-level = 3
+
+[profile.dev.package.i-slint-renderer-software]
+opt-level = 3
+
+# Slint's SVG rasterizer is a separate CPU pipeline. Device sampling found
+# its unoptimized SIMD casts and pixel stages dominating workspace motion.
+# Keep debug assertions, but optimize the entire vector drawing chain.
+[profile.dev.package.bytemuck]
+opt-level = 3
+
+[profile.dev.package."tiny-skia:0.11.4"]
+opt-level = 3
+
+[profile.dev.package."tiny-skia:0.12.0"]
+opt-level = 3
+
+[profile.dev.package."tiny-skia-path:0.11.4"]
+opt-level = 3
+
+[profile.dev.package."tiny-skia-path:0.12.0"]
+opt-level = 3
+
+[profile.dev.package.resvg]
+opt-level = 3
+
+[profile.dev.package.usvg]
+opt-level = 3
+
+[profile.dev.package.kurbo]
+opt-level = 3
+
+[profile.dev.package.svgtypes]
+opt-level = 3
+
+[profile.dev.package.strict-num]
+opt-level = 3
+
+[profile.dev.package.vello_cpu]
+opt-level = 3
+
+[profile.dev.package.vello_common]
+opt-level = 3
+
+[profile.dev.package.anyrender_vello_cpu]
+opt-level = 3
+
+[profile.dev.package.blitz-dom]
+opt-level = 3
+
+[profile.dev.package.blitz-paint]
+opt-level = 3
+
+[profile.dev.package.parley]
+opt-level = 3
+
+[profile.dev.package.fontique]
+opt-level = 3
+
+[profile.dev.package.swash]
+opt-level = 3
+
+# Text shaping and glyph metrics still traverse these tables even when the
+# higher-level Parley/Skrifa crates are optimized. This is the font pipeline
+# sampled in Slint UI and the Blitz reader; keep the separate editor versions
+# unchanged and retain debug assertions.
+[profile.dev.package."read-fonts:0.41.0"]
+opt-level = 3
+
+[profile.dev.package."font-types:0.12.6"]
+opt-level = 3
+
+[profile.dev.package."harfrust:0.12.0"]
+opt-level = 3
+
+[profile.dev.package."skrifa:0.40.0"]
+opt-level = 3
+
+[profile.dev.package."skrifa:0.44.0"]
+opt-level = 3
+
+[profile.dev.package."taffy:0.10.1"]
+opt-level = 3
+
+[profile.dev.package."taffy:0.14.0"]
+opt-level = 3

@@ -105,7 +105,7 @@ struct HistoryPage {
 
 impl GmailApi {
     fn new(ctx: SyncCtx, account: AccountConfig) -> Result<Self> {
-        let http = Client::builder()
+        let http = crate::http_tls::client_builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(HTTP_TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
@@ -3521,6 +3521,9 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) 
         .read(move |conn| repo::actions::due(conn, account_id, now_ms(), LIMIT))
         .await?;
     for action in actions {
+        if !ctx.bus.platform_is_active() {
+            break;
+        }
         let action_id = action.id;
         if action.kind == "save_draft" {
             let draft_id = action.payload["draftId"].as_i64().or(action.message_id);
@@ -3659,6 +3662,7 @@ async fn run_actor(
     let mut backoff = 1u64;
 
     loop {
+        ctx.bus.wait_for_platform_active().await;
         while let Ok(command) = rx.try_recv() {
             match command {
                 SyncCmd::SyncNow { complete } => {
@@ -3668,10 +3672,13 @@ async fn run_actor(
                     }
                 }
                 SyncCmd::Shutdown => return,
-                SyncCmd::RunActions | SyncCmd::FetchBody { .. } => {}
+                SyncCmd::RunActions | SyncCmd::Suspend | SyncCmd::FetchBody { .. } => {}
             }
         }
 
+        if !ctx.bus.platform_is_active() {
+            continue;
+        }
         set_state(&ctx, account_id, "syncing").await;
         let mail_history = settings_rx.borrow_and_update().mail_history;
         let result = async {
@@ -3756,7 +3763,7 @@ async fn run_actor(
             }
         };
 
-        if rerun {
+        if rerun || !ctx.bus.platform_is_active() {
             continue;
         }
         match tokio::time::timeout(delay, rx.recv()).await {
@@ -3767,7 +3774,7 @@ async fn run_actor(
                     waiters.push(complete);
                 }
             }
-            Ok(Some(SyncCmd::RunActions)) | Err(_) => {}
+            Ok(Some(SyncCmd::RunActions | SyncCmd::Suspend)) | Err(_) => {}
             Ok(Some(SyncCmd::FetchBody { .. })) => {}
         }
     }
@@ -3783,6 +3790,7 @@ async fn run_reader(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
         }
     };
     while let Some(command) = rx.recv().await {
+        ctx.bus.wait_for_platform_active().await;
         match command {
             PriorityFetchCmd::Attachment {
                 attachment_id,

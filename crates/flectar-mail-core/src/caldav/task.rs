@@ -44,6 +44,7 @@ pub fn spawn(
     tokio::spawn(async move {
         let mut last_collection_refresh_ms = 0;
         loop {
+            bus.wait_for_platform_active().await;
             let poll_delay = crate::sync::engine::configured_sync_interval(&mail_db).await;
             let woke = tokio::select! {
                 m = rx.recv() => m.is_some(),
@@ -54,6 +55,7 @@ pub fn spawn(
             }
             // Drain coalesced nudges.
             while rx.try_recv().is_ok() {}
+            bus.wait_for_platform_active().await;
 
             let refresh_collections =
                 now_ms() - last_collection_refresh_ms >= COLLECTION_REFRESH_SECS * 1_000;

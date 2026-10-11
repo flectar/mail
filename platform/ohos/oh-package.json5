@@ -1,0 +1,8 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "feihong-mail",
+  "version": "0.1.0",
+  "description": "飞鸿邮箱 — the Flectar Mail Rust and Slint application for HarmonyOS.",
+  "dependencies": {},
+  "devDependencies": {}
+}

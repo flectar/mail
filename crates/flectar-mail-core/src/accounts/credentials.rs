@@ -5,10 +5,10 @@
 use crate::error::{CoreError, Result};
 use std::sync::Arc;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 const SERVICE: &str = "flectar-mail";
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 const MAX_INSECURE_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
@@ -102,7 +102,7 @@ pub struct SystemCredentialStore;
 /// compiled only for tests and debug builds and must never be used for a
 /// distributable application.
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 #[derive(Debug, Clone)]
@@ -111,7 +111,7 @@ pub struct DevelopmentFileCredentialStore {
 }
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 impl DevelopmentFileCredentialStore {
@@ -120,7 +120,7 @@ impl DevelopmentFileCredentialStore {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn entry(account_id: i64, slot: &Slot) -> Result<keyring::Entry> {
     let user = format!("{account_id}:{}", slot.as_str());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
@@ -136,22 +136,22 @@ fn entry(account_id: i64, slot: &Slot) -> Result<keyring::Entry> {
 const MAX_SECRET_UTF16: usize = 1024;
 #[cfg(all(
     not(target_os = "windows"),
-    not(any(target_os = "android", target_os = "ios"))
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos"))
 ))]
 const MAX_SECRET_UTF16: usize = usize::MAX;
 
 // A NUL-prefixed header no real token or password starts with. When present in
 // the primary entry it means the value is split across `<slot>:c0..cN` entries.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 const CHUNK_MARKER: &str = "\u{0}flectar-mail-chunks:";
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 const GENERATION_CHUNK_MARKER: &str = "\u{0}flectar-mail-chunks:v2:";
 
 // Chunk sanity cap; MAX_SECRET_UTF16 * this is far beyond any real secret.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 const MAX_CHUNKS: usize = 512;
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn chunk_entry(account_id: i64, slot: &Slot, index: usize) -> Result<keyring::Entry> {
     let user = format!("{account_id}:{}:c{index}", slot.as_str());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
@@ -168,7 +168,7 @@ fn generation_chunk_entry(
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn parse_generation_chunk_header(head: &str) -> Result<Option<(u8, usize)>> {
     let Some(header) = head.strip_prefix(GENERATION_CHUNK_MARKER) else {
         return Ok(None);
@@ -190,7 +190,7 @@ fn parse_generation_chunk_header(head: &str) -> Result<Option<(u8, usize)>> {
 
 /// Split on char boundaries so no chunk exceeds `max_units` UTF-16 code units
 /// (what the Windows blob limit counts). Returns a single chunk when it fits.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn split_utf16_chunks(secret: &str, max_units: usize) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut cur = String::new();
@@ -210,7 +210,7 @@ fn split_utf16_chunks(secret: &str, max_units: usize) -> Vec<String> {
 
 /// Delete `<slot>:c{index}` entries starting at `start`. Chunks are written
 /// contiguously, so stop at the first missing index and surface storage errors.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn delete_chunks_from(account_id: i64, slot: &Slot, start: usize) -> Result<()> {
     for index in start..start + MAX_CHUNKS {
         match chunk_entry(account_id, slot, index)?.delete_credential() {
@@ -244,7 +244,7 @@ fn delete_generation_chunks_from(
 /// JSON.
 /// Release builds ignore this variable.
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 fn insecure_file() -> Option<std::path::PathBuf> {
@@ -255,14 +255,14 @@ fn insecure_file() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 static INSECURE_FILE_LOCK: once_cell::sync::Lazy<std::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 fn file_map(path: &std::path::Path) -> Result<std::collections::HashMap<String, String>> {
@@ -286,7 +286,7 @@ fn file_map(path: &std::path::Path) -> Result<std::collections::HashMap<String, 
 }
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 fn file_save(
@@ -321,7 +321,7 @@ fn file_save(
 }
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 fn slot_key(account_id: i64, slot: &Slot) -> String {
@@ -329,7 +329,7 @@ fn slot_key(account_id: i64, slot: &Slot) -> String {
 }
 
 #[cfg(all(
-    not(any(target_os = "android", target_os = "ios")),
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos")),
     any(test, debug_assertions)
 ))]
 impl CredentialStore for DevelopmentFileCredentialStore {
@@ -372,7 +372,7 @@ impl CredentialStore for DevelopmentFileCredentialStore {
 
 /// Keyring calls are blocking (D-Bus on Linux); call from spawn_blocking in async paths.
 fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = (account_id, slot, secret);
         return Err(CoreError::CredentialStoreUnavailable(
@@ -380,7 +380,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
         ));
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         #[cfg(any(test, debug_assertions))]
         if let Some(path) = insecure_file() {
@@ -474,7 +474,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
 }
 
 fn system_load(account_id: i64, slot: Slot) -> Result<String> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = (account_id, slot);
         return Err(CoreError::CredentialStoreUnavailable(
@@ -482,7 +482,7 @@ fn system_load(account_id: i64, slot: Slot) -> Result<String> {
         ));
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         #[cfg(any(test, debug_assertions))]
         if let Some(path) = insecure_file() {
@@ -498,7 +498,7 @@ fn system_load(account_id: i64, slot: Slot) -> Result<String> {
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
     let head = match entry(account_id, slot)?.get_password() {
         Ok(secret) => secret,
@@ -553,7 +553,7 @@ fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
 }
 
 fn system_delete_all(account_id: i64) -> Result<()> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = account_id;
         return Err(CoreError::CredentialStoreUnavailable(
@@ -561,7 +561,7 @@ fn system_delete_all(account_id: i64) -> Result<()> {
         ));
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         #[cfg(any(test, debug_assertions))]
         if let Some(path) = insecure_file() {
@@ -590,7 +590,7 @@ fn system_delete_all(account_id: i64) -> Result<()> {
 }
 
 fn system_delete(account_id: i64, slot: Slot) -> Result<()> {
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let _ = (account_id, slot);
         return Err(CoreError::CredentialStoreUnavailable(
@@ -598,7 +598,7 @@ fn system_delete(account_id: i64, slot: Slot) -> Result<()> {
         ));
     }
 
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     {
         #[cfg(any(test, debug_assertions))]
         if let Some(path) = insecure_file() {

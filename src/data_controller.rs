@@ -341,39 +341,68 @@ fn read_account_backup(path: &std::path::Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn pick_backup_export_path(title: String, filter: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+fn pick_backup_export_path(title: String, filter: String) -> Result<Option<PathBuf>, String> {
+    Ok(rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(format!(
             "flectar-mail-backup-{}.json",
             Local::now().format("%Y-%m-%d")
         ))
         .add_filter(filter, &["json"])
-        .save_file()
+        .save_file())
+}
+
+#[cfg(target_env = "ohos")]
+fn pick_backup_export_path(_title: String, _filter: String) -> Result<Option<PathBuf>, String> {
+    let name = format!(
+        "feihong-mail-backup-{}.json",
+        Local::now().format("%Y-%m-%d")
+    );
+    crate::platform_services::current()
+        .ok_or_else(|| "The native document provider is not initialized.".to_owned())?
+        .export_path(&name)
+        .map(Some)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn pick_backup_export_path(_title: String, _filter: String) -> Option<PathBuf> {
-    None
+fn pick_backup_export_path(_title: String, _filter: String) -> Result<Option<PathBuf>, String> {
+    Err("The platform host does not provide document export.".into())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn pick_backup_import_path(title: String, filter: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+fn pick_backup_import_document(
+    title: String,
+    filter: String,
+) -> Result<Option<crate::documents::ImportedDocument>, String> {
+    Ok(rfd::FileDialog::new()
         .set_title(title)
         .add_filter(filter, &["json"])
         .pick_file()
+        .map(crate::documents::ImportedDocument::source))
+}
+
+#[cfg(target_env = "ohos")]
+fn pick_backup_import_document(
+    _title: String,
+    _filter: String,
+) -> Result<Option<crate::documents::ImportedDocument>, String> {
+    crate::platform_services::current()
+        .ok_or_else(|| "The native document provider is not initialized.".to_owned())?
+        .import_file()
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn pick_backup_import_path(_title: String, _filter: String) -> Option<PathBuf> {
-    None
+fn pick_backup_import_document(
+    _title: String,
+    _filter: String,
+) -> Result<Option<crate::documents::ImportedDocument>, String> {
+    Err("The platform host does not provide document import.".into())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
+fn pick_database_snapshot_path(title: String) -> Result<Option<PathBuf>, String> {
+    Ok(rfd::FileDialog::new()
         .set_title(title)
         .pick_folder()
         .map(|directory| {
@@ -381,12 +410,131 @@ fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
                 "flectar-mail-snapshot-{}",
                 Local::now().format("%Y-%m-%d-%H%M%S")
             ))
-        })
+        }))
+}
+
+#[cfg(target_env = "ohos")]
+fn pick_database_snapshot_path(_title: String) -> Result<Option<PathBuf>, String> {
+    let name = format!(
+        "feihong-mail-snapshot-{}",
+        Local::now().format("%Y-%m-%d-%H%M%S")
+    );
+    crate::platform_services::current()
+        .ok_or_else(|| "The native document provider is not initialized.".to_owned())?
+        .export_path(&name)
+        .map(Some)
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn pick_database_snapshot_path(_title: String) -> Option<PathBuf> {
-    None
+fn pick_database_snapshot_path(_title: String) -> Result<Option<PathBuf>, String> {
+    Err("The platform host does not provide document export.".into())
+}
+
+#[cfg(any(target_env = "ohos", test))]
+struct PrivateExportCleanup {
+    path: PathBuf,
+    directory: bool,
+    armed: bool,
+}
+
+#[cfg(any(target_env = "ohos", test))]
+impl Drop for PrivateExportCleanup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if self.directory {
+            let _ = std::fs::remove_dir_all(&self.path);
+        } else {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+#[cfg(target_env = "ohos")]
+fn export_native_file(path: &std::path::Path) -> Result<bool, String> {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Export filename is not valid UTF-8.".to_owned())?;
+    crate::platform_services::current()
+        .ok_or_else(|| "The native document provider is not initialized.".to_owned())?
+        .export_file(path, name)
+}
+
+/// Archive only the verified snapshot tree, without following links or exposing
+/// host paths. Storing entries avoids adding a native compression dependency.
+#[cfg(any(target_env = "ohos", test))]
+fn archive_snapshot(directory: &std::path::Path, archive: &std::path::Path) -> Result<(), String> {
+    use std::io::Write;
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+    let mut open_options = std::fs::OpenOptions::new();
+    open_options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        open_options.mode(0o600);
+    }
+    let output = open_options
+        .open(archive)
+        .map_err(|error| error.to_string())?;
+    let mut partial = PrivateExportCleanup {
+        path: archive.to_owned(),
+        directory: false,
+        armed: true,
+    };
+    let mut writer = ZipWriter::new(output);
+    let options = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Stored)
+        .large_file(true)
+        .unix_permissions(0o600);
+    let mut pending = vec![directory.to_owned()];
+    while let Some(parent) = pending.pop() {
+        let mut entries = std::fs::read_dir(&parent)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            let kind = entry.file_type().map_err(|error| error.to_string())?;
+            if kind.is_dir() {
+                pending.push(path);
+            } else if kind.is_file() {
+                let relative = path
+                    .strip_prefix(directory)
+                    .map_err(|error| error.to_string())?;
+                let name = relative
+                    .to_str()
+                    .ok_or_else(|| "Snapshot path is not valid UTF-8.".to_owned())?;
+                writer
+                    .start_file(name.replace('\\', "/"), options)
+                    .map_err(|error| error.to_string())?;
+                let mut input = std::fs::File::open(&path).map_err(|error| error.to_string())?;
+                std::io::copy(&mut input, &mut writer).map_err(|error| error.to_string())?;
+            } else {
+                return Err("Snapshot contains a symbolic link or special file.".into());
+            }
+        }
+    }
+    let mut output = writer.finish().map_err(|error| error.to_string())?;
+    output.flush().map_err(|error| error.to_string())?;
+    output.sync_all().map_err(|error| error.to_string())?;
+    partial.armed = false;
+    Ok(())
+}
+
+#[cfg(target_env = "ohos")]
+fn export_native_snapshot(directory: PathBuf) -> Result<bool, String> {
+    let archive = directory.with_extension("zip");
+    archive_snapshot(&directory, &archive)?;
+    let _cleanup = PrivateExportCleanup {
+        path: archive.clone(),
+        directory: false,
+        armed: true,
+    };
+    export_native_file(&archive)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -480,19 +628,26 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         }
-        let Some(path) = pick_backup_export_path(
+        let path = match pick_backup_export_path(
             translated(
                 &app,
                 &UiMessage::plain("Export Flectar Mail account backup"),
             )
             .to_string(),
             translated(&app, &UiMessage::plain("Flectar Mail backup")).to_string(),
-        ) else {
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document export.",
-            ));
-            return;
+        ) {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not export backup: {}", error));
+                return;
+            }
+        };
+        #[cfg(target_env = "ohos")]
+        let _cleanup = PrivateExportCleanup {
+            path: path.clone(),
+            directory: false,
+            armed: true,
         };
 
         let preferences = core
@@ -577,10 +732,20 @@ pub(super) fn register_data_management_callbacks(
         match serde_json::to_vec_pretty(&backup)
             .map_err(|error| error.to_string())
             .and_then(|bytes| std::fs::write(&path, bytes).map_err(|error| error.to_string()))
-        {
-            Ok(()) => app.set_sync_status(UiMessage::plain(
+            .and_then(|()| {
+                #[cfg(target_env = "ohos")]
+                {
+                    export_native_file(&path)
+                }
+                #[cfg(not(target_env = "ohos"))]
+                {
+                    Ok(true)
+                }
+            }) {
+            Ok(true) => app.set_sync_status(UiMessage::plain(
                 "Backup exported. Passwords and OAuth tokens were not included.",
             )),
+            Ok(false) => {}
             Err(error) => {
                 app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
             }
@@ -601,26 +766,67 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        let Some(path) = pick_database_snapshot_path(
+        let path = match pick_database_snapshot_path(
             translated(
                 &app,
                 &UiMessage::plain("Choose where to export the database snapshot"),
             )
             .to_string(),
-        ) else {
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document export.",
-            ));
-            return;
+        ) {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail(
+                    "Could not export database snapshot: {}",
+                    error,
+                ));
+                return;
+            }
         };
 
         app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
         let updates = updates_for_database_snapshot.clone();
         runtime_for_database_snapshot.spawn(async move {
+            #[cfg(target_env = "ohos")]
+            let _cleanup = PrivateExportCleanup {
+                path: path.clone(),
+                directory: true,
+                armed: true,
+            };
             let display_path = path.display().to_string();
-            let message = match core.create_database_snapshot(path).await {
-                Ok(_) => UiMessage::detail("Database snapshot exported to {}.", display_path),
+            let message = match core.create_database_snapshot(path.clone()).await {
+                Ok(_) => {
+                    #[cfg(target_env = "ohos")]
+                    {
+                        let _ = display_path;
+                        let name = path
+                            .with_extension("zip")
+                            .file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned();
+                        match tokio::task::spawn_blocking(move || export_native_snapshot(path))
+                            .await
+                        {
+                            Ok(Ok(true)) => {
+                                UiMessage::detail("Database snapshot exported to {}.", name)
+                            }
+                            Ok(Ok(false)) => {
+                                UiMessage::plain("Database snapshot export cancelled.")
+                            }
+                            Ok(Err(error)) => {
+                                UiMessage::detail("Could not export database snapshot: {}", error)
+                            }
+                            Err(error) => {
+                                UiMessage::detail("Could not export database snapshot: {}", error)
+                            }
+                        }
+                    }
+                    #[cfg(not(target_env = "ohos"))]
+                    {
+                        UiMessage::detail("Database snapshot exported to {}.", display_path)
+                    }
+                }
                 Err(error) => UiMessage::detail("Could not export database snapshot: {}", error),
             };
             let _ = updates
@@ -653,23 +859,24 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        let Some(path) = pick_backup_import_path(
+        let document = match pick_backup_import_document(
             translated(
                 &app,
                 &UiMessage::plain("Import Flectar Mail account backup"),
             )
             .to_string(),
             translated(&app, &UiMessage::plain("Flectar Mail backup")).to_string(),
-        ) else {
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document import.",
-            ));
-            return;
+        ) {
+            Ok(Some(document)) => document,
+            Ok(None) => return,
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not import backup: {}", error));
+                return;
+            }
         };
 
         let result = (|| -> Result<(usize, Settings, Vec<Account>, Vec<AccountConfig>), String> {
-            let bytes = read_account_backup(&path)?;
+            let bytes = read_account_backup(document.path())?;
             let backup: serde_json::Value =
                 serde_json::from_slice(&bytes).map_err(|error| format!("invalid JSON: {error}"))?;
             if backup.get("format").and_then(|value| value.as_str())
@@ -941,9 +1148,9 @@ pub(super) fn register_data_management_callbacks(
                 app.set_remote_images_enabled(
                     settings.load_remote_images && cfg!(feature = "remote-content"),
                 );
-                #[cfg(not(any(target_os = "android", target_os = "ios", feature = "flatpak")))]
+                #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos", feature = "flatpak")))]
                 app.set_close_to_tray(settings.close_to_tray);
-                #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
+                #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos", feature = "flatpak"))]
                 app.set_close_to_tray(false);
                 app.set_sync_status(if imported == 0 {
                     UiMessage::detail(
@@ -1032,7 +1239,8 @@ pub(super) fn register_data_management_callbacks(
                     }
                     apply_calendar(&app, &data_reset_calendar.borrow(), today);
                     app.set_theme_mode("system".into());
-                    app.global::<MessageColors>().set_preference("system".into());
+                    app.global::<MessageColors>()
+                        .set_preference("system".into());
                     app.set_monochrome_sidebar_icons(false);
                     app.set_show_avatars(true);
                     app.set_show_account_markers(false);
@@ -1086,6 +1294,84 @@ pub(super) fn register_data_management_callbacks(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_archive_preserves_database_manifest_and_nested_payload_bytes() {
+        use std::io::Read;
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = root.path().join("snapshot");
+        std::fs::create_dir_all(snapshot.join("file_transfers/account/file")).unwrap();
+        for (name, bytes) in [
+            ("manifest.json", b"{\"version\":2}".as_slice()),
+            ("mail.sqlite3", b"mail database".as_slice()),
+            ("calendar.sqlite3", b"calendar database".as_slice()),
+            ("files.sqlite3", b"files database".as_slice()),
+            (
+                "file_transfers/account/file/body",
+                b"private payload".as_slice(),
+            ),
+        ] {
+            std::fs::write(snapshot.join(name), bytes).unwrap();
+        }
+        let destination = root.path().join("snapshot.zip");
+        archive_snapshot(&snapshot, &destination).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(destination).unwrap()).unwrap();
+        assert_eq!(archive.len(), 5);
+        for (name, expected) in [
+            ("manifest.json", "{\"version\":2}"),
+            ("file_transfers/account/file/body", "private payload"),
+        ] {
+            let mut actual = String::new();
+            archive
+                .by_name(name)
+                .unwrap()
+                .read_to_string(&mut actual)
+                .unwrap();
+            assert_eq!(actual, expected);
+        }
+        assert!(
+            archive
+                .file_names()
+                .all(|name| !name.starts_with('/') && !name.contains(".."))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_archive_rejects_links_and_removes_cancelled_staging() {
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = root.path().join("snapshot");
+        std::fs::create_dir(&snapshot).unwrap();
+        let outside = root.path().join("outside");
+        std::fs::write(&outside, "private data outside snapshot").unwrap();
+        std::os::unix::fs::symlink(&outside, snapshot.join("alias")).unwrap();
+        let destination = root.path().join("snapshot.zip");
+        {
+            let _cleanup = PrivateExportCleanup {
+                path: destination.clone(),
+                directory: false,
+                armed: true,
+            };
+            let error = archive_snapshot(&snapshot, &destination).unwrap_err();
+            assert!(error.contains("symbolic link"));
+        }
+        assert!(!destination.exists());
+        assert!(outside.exists());
+    }
+
+    #[test]
+    fn snapshot_archive_does_not_overwrite_existing_export() {
+        let root = tempfile::tempdir().unwrap();
+        let snapshot = root.path().join("snapshot");
+        std::fs::create_dir(&snapshot).unwrap();
+        let destination = root.path().join("snapshot.zip");
+        std::fs::write(&destination, "original backup").unwrap();
+        assert!(archive_snapshot(&snapshot, &destination).is_err());
+        assert_eq!(
+            std::fs::read_to_string(destination).unwrap(),
+            "original backup"
+        );
+    }
 
     #[test]
     fn storage_scan_lifetime_follows_settings_visibility() {

@@ -19,6 +19,7 @@ pub mod googlecal;
 pub mod graph;
 pub mod graphcal;
 mod http_body;
+pub mod http_tls;
 pub mod imap;
 pub mod jmap;
 pub mod mail_security;
@@ -318,6 +319,9 @@ pub struct Core {
     credentials: CredentialStoreHandle,
     oauth_redirects: OAuthRedirectBrokerHandle,
     handles: Arc<RwLock<HashMap<i64, AccountHandle>>>,
+    /// Retained startup result for native headless/background hosts. A watch
+    /// value avoids losing completion when a caller subscribes after startup.
+    mail_workers_startup: tokio::sync::watch::Sender<Option<std::result::Result<(), String>>>,
     cal_handles: Arc<RwLock<HashMap<i64, caldav::task::CalTaskHandle>>>,
     card_handles: Arc<RwLock<HashMap<i64, carddav::task::CardDavTaskHandle>>>,
     /// Per-attachment single-flight locks. Concurrent preview/open/save calls
@@ -421,6 +425,7 @@ impl Core {
             credentials,
             oauth_redirects,
             handles: Arc::new(RwLock::new(HashMap::new())),
+            mail_workers_startup: tokio::sync::watch::channel(None).0,
             cal_handles: Arc::new(RwLock::new(HashMap::new())),
             card_handles: Arc::new(RwLock::new(HashMap::new())),
             attachment_locks: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -543,6 +548,8 @@ impl Core {
                     Err(e) => {
                         events::sync_diagnostic("startup_accounts", None, e.code());
                         tracing::error!("listing accounts for startup sync: {e}");
+                        core.mail_workers_startup
+                            .send_replace(Some(Err(e.to_string())));
                         return;
                     }
                 };
@@ -550,6 +557,7 @@ impl Core {
                     core.spawn_actor(cfg).await;
                 }
                 events::sync_diagnostic("startup_workers", None, "ready");
+                core.mail_workers_startup.send_replace(Some(Ok(())));
                 // Calendar sync tasks for accounts with a connected CalDAV server.
                 if core.paths.calendar_db_file().exists()
                     && let Ok(cal_accounts) = core
@@ -1260,6 +1268,53 @@ impl Core {
     pub fn notify_ui_ready(&self) {
         events::sync_diagnostic("ui_ready", None, "notified");
         self.ui_ready.notify_one();
+    }
+
+    /// Wait until deferred mail-account workers exist before invoking a
+    /// headless sync. Empty profiles complete immediately. Startup failures
+    /// and a stalled UI-ready gate are reported instead of silently syncing
+    /// an empty handle map. Native headless hosts first call notify_ui_ready().
+    pub async fn wait_for_mail_workers(&self, timeout: std::time::Duration) -> Result<()> {
+        let accounts = self
+            .db
+            .read(|conn| repo::accounts::list_configs(conn))
+            .await?;
+        if accounts.is_empty() {
+            return Ok(());
+        }
+        let mut startup = self.mail_workers_startup.subscribe();
+        let wait = async {
+            loop {
+                let state = startup.borrow_and_update().clone();
+                if let Some(Err(ref message)) = state {
+                    return Err(CoreError::Other(format!(
+                        "Mail worker startup failed: {message}"
+                    )));
+                }
+                // Also covers accounts created before the deferred startup
+                // task runs: account creation already spawns their workers.
+                let handles = self.handles.read().await;
+                if accounts
+                    .iter()
+                    .all(|account| handles.contains_key(&account.id))
+                {
+                    return Ok(());
+                }
+                drop(handles);
+                if matches!(state, Some(Ok(()))) {
+                    return Err(CoreError::Other(
+                        "Mail worker startup completed with missing accounts".into(),
+                    ));
+                }
+                startup
+                    .changed()
+                    .await
+                    .map_err(|_| CoreError::Other("Mail worker startup stopped".into()))?;
+            }
+        };
+        tokio::time::timeout(timeout, wait)
+            .await
+            .map_err(|_| CoreError::Other("Timed out waiting for mail workers".into()))?
     }
 
     /// Finish the rollback for an account whose process stopped after
@@ -2027,7 +2082,42 @@ impl Core {
         .await
     }
 
+    /// Set the native host's permission to start automatic network work.
+    /// The gate is retained for current and subsequently spawned workers.
+    /// Suspending wakes IMAP IDLE and closes that connection at the next safe
+    /// boundary. An already running protocol operation/cycle is allowed to
+    /// finish; this is a policy acknowledgement, not a drained-worker barrier.
+    pub async fn set_platform_active(&self, active: bool) {
+        self.bus.set_platform_active(active);
+        let handles = self.handles.read().await;
+        for handle in handles.values() {
+            handle.send(if active {
+                SyncCmd::SyncNow { complete: None }
+            } else {
+                SyncCmd::Suspend
+            });
+        }
+        drop(handles);
+        if active {
+            for handle in self.cal_handles.read().await.values() {
+                handle.nudge();
+            }
+            for handle in self.card_handles.read().await.values() {
+                handle.nudge();
+            }
+        }
+    }
+
+    pub fn platform_is_active(&self) -> bool {
+        self.bus.platform_is_active()
+    }
+
     pub async fn sync_now(&self, account_id: Option<i64>) -> Result<()> {
+        if !self.platform_is_active() {
+            return Err(CoreError::Other(
+                "platform network workers are suspended".into(),
+            ));
+        }
         events::sync_diagnostic("refresh", account_id, "requested");
         let receivers = {
             let handles = self.handles.read().await;
@@ -9001,6 +9091,120 @@ mod account_backup_import_tests {
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].sync_state, "needs_reauth");
         assert_eq!(configs[0].imap_host, "imap.example.com");
+    }
+}
+
+#[cfg(all(
+    test,
+    not(any(target_env = "ohos", target_os = "android", target_os = "ios"))
+))]
+mod mail_worker_readiness_tests {
+    use super::*;
+
+    async fn core(temp: &std::path::Path) -> Core {
+        let paths = Paths::for_tests(temp);
+        Core::start_mail_ui_with_credentials(
+            paths.clone(),
+            Arc::new(credentials::DevelopmentFileCredentialStore::new(
+                paths.data_dir.join("test-credentials.json"),
+            )),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn empty_profile_is_ready_without_releasing_the_ui_gate() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = core(temp.path()).await;
+        core.wait_for_mail_workers(std::time::Duration::ZERO)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn deferred_workers_report_timeout_and_retained_startup_result() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = core(temp.path()).await;
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert!(
+            core.wait_for_mail_workers(std::time::Duration::from_millis(10))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Timed out")
+        );
+        core.mail_workers_startup
+            .send_replace(Some(Err("test startup failure".into())));
+        assert!(
+            core.wait_for_mail_workers(std::time::Duration::from_secs(1))
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("test startup failure")
+        );
+        core.mail_workers_startup.send_replace(None);
+        core.notify_ui_ready();
+        core.wait_for_mail_workers(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        // A later subscriber gets the retained result, not a lost notification.
+        core.wait_for_mail_workers(std::time::Duration::from_secs(1))
+            .await
+            .unwrap();
+        for handle in core.handles.write().await.drain().map(|(_, handle)| handle) {
+            handle.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn suspended_dispatcher_leaves_due_smtp_action_unclaimed() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = core(temp.path()).await;
+        let action_id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                repo::actions::enqueue(conn, 1, "send", None, None, &serde_json::json!({}), None)
+            })
+            .await
+            .unwrap();
+        core.set_platform_active(false).await;
+        let config = core.list_account_configs().await.unwrap().remove(0);
+        let result = queue::execute_due_sends(&core.sync_ctx(), &config)
+            .await
+            .unwrap();
+        assert_eq!(result.processed, 0);
+        assert!(result.due_remaining);
+        assert_eq!(
+            core.db
+                .read(move |conn| Ok(repo::actions::get(conn, action_id)?.unwrap().state))
+                .await
+                .unwrap(),
+            "pending"
+        );
+        assert!(
+            core.sync_now(None)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("suspended")
+        );
+        // Starting a worker while already suspended must retain the same gate.
+        core.notify_ui_ready();
+        core.wait_for_mail_workers(std::time::Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert!(!core.platform_is_active());
+        for handle in core.handles.write().await.drain().map(|(_, handle)| handle) {
+            handle.abort();
+        }
     }
 }
 

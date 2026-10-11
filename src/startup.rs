@@ -541,10 +541,14 @@ pub(crate) async fn load_startup_snapshot(
     paths: Paths,
     credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
     oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
+    existing_core: Option<Arc<flectar_mail_core::Core>>,
     preferred_scope: &str,
     metrics: &StartupMetrics,
 ) -> Result<StartupSnapshot, String> {
-    let core = CoreMailSource::start(paths, credentials, oauth_redirects).await?;
+    let core = match existing_core {
+        Some(core) => CoreMailSource::from_core(core),
+        None => CoreMailSource::start(paths, credentials, oauth_redirects).await?,
+    };
     metrics.emit("core_opened", serde_json::Value::Null);
     let (mail, configs, settings) = tokio::join!(
         // Counts walk every mailbox and can dominate startup on a large local

@@ -86,6 +86,7 @@ impl From<anyhow::Error> for CoreError {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 impl From<keyring::Error> for CoreError {
     fn from(e: keyring::Error) -> Self {
         match e {

@@ -1,3 +1,13 @@
+> **HarmonyOS derivative: 飞鸿邮箱 (Feihong Mail).** This repository includes a
+> Rust/Slint port based on Flectar Mail commit `bc0f966846a6d1758bb39ea54a24be4de6cad8d7`.
+> See the [HarmonyOS build and installation guide](platform/ohos/README.md) and
+> [current device validation status](platform/ohos/CURRENT-STATUS.md). The ARM64
+> development build has been tested on one MatePad Pro; phone, PC and full feature
+> acceptance remain pending. This derivative is not produced, sponsored or
+> supported by Flectar. [AGPL license](LICENSE) and [trademark policy](TRADEMARKS.md)
+> remain applicable. The original upstream README follows; its platform and
+> feature claims are not HarmonyOS acceptance results.
+
 <div align="center">
   <img src="resources/app-icon/flectar-mail-masked.png" width="88" alt="Flectar Mail logo">
   <h1 align="center">

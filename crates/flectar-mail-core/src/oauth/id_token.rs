@@ -492,7 +492,7 @@ fn cache_ttl(headers: &reqwest::header::HeaderMap) -> Duration {
 
 fn oidc_http_client() -> Result<&'static reqwest::Client> {
     static HTTP: Lazy<std::result::Result<reqwest::Client, String>> = Lazy::new(|| {
-        reqwest::Client::builder()
+        crate::http_tls::client_builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::none())

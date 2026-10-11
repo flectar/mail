@@ -79,7 +79,7 @@ pub struct FaviconLoader {
 
 impl FaviconLoader {
     pub fn new(cache_root: &Path) -> Result<Self, String> {
-        let client = Client::builder()
+        let client = flectar_mail_core::http_tls::client_builder()
             .user_agent("Flectar Mail native sender icon/0.1")
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(8))
@@ -129,15 +129,15 @@ impl FaviconLoader {
                     continue;
                 }
             };
-            let icons = match decode_brand_icons(bytes.clone(), small_pixel_side, regular_pixel_side)
-                .await
-            {
-                Ok(icons) => icons,
-                Err(error) => {
-                    retryable_error.get_or_insert(error);
-                    continue;
-                }
-            };
+            let icons =
+                match decode_brand_icons(bytes.clone(), small_pixel_side, regular_pixel_side).await
+                {
+                    Ok(icons) => icons,
+                    Err(error) => {
+                        retryable_error.get_or_insert(error);
+                        continue;
+                    }
+                };
 
             // Cache the resolved brand asset under the original sender host.
             // Later rows therefore avoid both the exact-host and parent lookup.
@@ -213,7 +213,7 @@ pub struct ProfileAvatarLoader {
 
 impl ProfileAvatarLoader {
     pub fn new(cache_root: &Path) -> Result<Self, String> {
-        let client = Client::builder()
+        let client = flectar_mail_core::http_tls::client_builder()
             .user_agent("Flectar Mail native account avatar/0.1")
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(8))
@@ -552,7 +552,10 @@ mod tests {
         let account_avatars = ProfileAvatarLoader::new(&cache_root).unwrap();
 
         assert_eq!(sender_icons.cache_dir, cache_root.join("sender-icons"));
-        assert_eq!(account_avatars.cache_dir, cache_root.join("account-avatars"));
+        assert_eq!(
+            account_avatars.cache_dir,
+            cache_root.join("account-avatars")
+        );
         assert!(sender_icons.cache_dir.is_dir());
         assert!(account_avatars.cache_dir.is_dir());
     }

@@ -1,0 +1,6 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "HarmonyOS Stage lifecycle and native Slint surface.",
+  "dependencies": {"libfeihong.so":"file:./src/main/cpp/types/libfeihong"}
+}

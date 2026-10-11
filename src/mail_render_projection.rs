@@ -390,7 +390,14 @@ pub(super) fn open_email_link(url: &str) -> Result<(), String> {
     };
     match scheme.to_ascii_lowercase().as_str() {
         "http" | "https" | "mailto" | "tel" => {
-            webbrowser::open(url.trim()).map_err(|error| error.to_string())?;
+            if let Some(host) = crate::platform_services::current() {
+                host.open_url(url.trim())?;
+            } else {
+                #[cfg(not(target_env = "ohos"))]
+                webbrowser::open(url.trim()).map_err(|error| error.to_string())?;
+                #[cfg(target_env = "ohos")]
+                return Err("Native browser service unavailable".into());
+            }
             Ok(())
         }
         _ => Err("unsupported link type".into()),

@@ -42,6 +42,9 @@ export global LayoutMetrics {
 // without changing the motion users see in the application.
 export global MotionSettings {
     in-out property <bool> enabled: true;
+    // Software rendering keeps motion, but avoids blending whole workspaces
+    // and message canvases on every animation frame.
+    in-out property <bool> software-rendering: false;
 }
 
 // Mail actions and their matching sidebar destinations share one semantic

@@ -47,7 +47,7 @@ export component WorkspaceListTransition inherits Rectangle {
         y: 0px;
         width: parent.width;
         height: parent.height;
-        opacity: 0.24 + root.reveal-progress * 0.76;
+        opacity: MotionSettings.software-rendering ? 1 : 0.24 + root.reveal-progress * 0.76;
 
         animate x {
             duration: 220ms;
@@ -57,7 +57,7 @@ export component WorkspaceListTransition inherits Rectangle {
         animate opacity {
             duration: 180ms;
             easing: ease-out;
-            enabled: MotionSettings.enabled && root.reveal-progress > 0;
+            enabled: MotionSettings.enabled && !MotionSettings.software-rendering && root.reveal-progress > 0;
         }
 
         @children

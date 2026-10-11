@@ -1,7 +1,7 @@
 //! Core events broadcast to the native host and forwarded to the Slint UI.
 
 use serde::Serialize;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::models::SyncStatus;
 
@@ -123,12 +123,18 @@ pub enum CoreEvent {
 #[derive(Clone)]
 pub struct EventBus {
     tx: broadcast::Sender<CoreEvent>,
+    // Retained per-Core state: workers created after a native suspend must
+    // observe it too. Desktop hosts leave the default active value unchanged.
+    platform_active: watch::Sender<bool>,
 }
 
 impl EventBus {
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(1024);
-        EventBus { tx }
+        EventBus {
+            tx,
+            platform_active: watch::channel(true).0,
+        }
     }
 
     pub fn emit(&self, ev: CoreEvent) {
@@ -150,10 +156,58 @@ impl EventBus {
     pub fn subscribe(&self) -> broadcast::Receiver<CoreEvent> {
         self.tx.subscribe()
     }
+
+    pub(crate) fn set_platform_active(&self, active: bool) {
+        self.platform_active.send_replace(active);
+    }
+
+    pub(crate) fn platform_is_active(&self) -> bool {
+        *self.platform_active.borrow()
+    }
+
+    pub(crate) fn platform_activity(&self) -> watch::Receiver<bool> {
+        self.platform_active.subscribe()
+    }
+
+    pub(crate) async fn wait_for_platform_active(&self) {
+        let mut activity = self.platform_activity();
+        // wait_for checks the retained value before sleeping, so resume cannot
+        // be lost between this check and installing the waiter.
+        let _ = activity.wait_for(|active| *active).await;
+    }
 }
 
 impl Default for EventBus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod platform_activity_tests {
+    use super::EventBus;
+
+    #[tokio::test]
+    async fn retained_suspend_blocks_late_workers_and_resume_is_not_lost() {
+        let bus = EventBus::new();
+        let separate_core = EventBus::new();
+        bus.set_platform_active(false);
+        assert!(separate_core.platform_is_active());
+        let late_worker = bus.clone();
+        let mut worker = tokio::spawn(async move {
+            late_worker.wait_for_platform_active().await;
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), &mut worker)
+                .await
+                .is_err()
+        );
+        bus.set_platform_active(true);
+        tokio::time::timeout(std::time::Duration::from_secs(1), worker)
+            .await
+            .unwrap()
+            .unwrap();
+        // A resume before subscribing must also let new workers proceed.
+        bus.wait_for_platform_active().await;
     }
 }

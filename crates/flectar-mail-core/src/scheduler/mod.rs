@@ -26,7 +26,11 @@ pub fn spawn(
     tokio::spawn(async move {
         let mut nudged_until: i64 = 0;
         loop {
+            bus.wait_for_platform_active().await;
             tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
+            if !bus.platform_is_active() {
+                continue;
+            }
             // An empty welcome has nothing timed to dispatch. Waiting here
             // keeps the just-released SQLite reader cache closed. New mail
             // account actors and an opened calendar store activate the same

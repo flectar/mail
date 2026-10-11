@@ -3,7 +3,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Slint 1.18 normally keeps X11's software surface when hidden. Use its
     // window recreation path for tray mode, as it already does on Wayland.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     if std::env::var_os("SLINT_DESTROY_WINDOW_ON_HIDE").is_none() {
         // SAFETY: the desktop entry point has not started any threads or
         // initialized libraries yet. Never mutate this from a tray callback.

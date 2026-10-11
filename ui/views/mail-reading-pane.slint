@@ -14,6 +14,7 @@ import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { MessageColors } from "../message-colors.slint";
+import { ViewportRenderScheduler } from "../components/viewport-render-scheduler.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -475,7 +476,6 @@ export component MailReadingPane inherits Rectangle {
         else { email-focus.focus(); }
     }
 
-    private property <bool> viewport-pending: false;
     private property <int> transition-message-id: EmailReader.message-id;
     private property <float> animated-content-reveal: 1;
     private property <float> content-reveal: MotionSettings.enabled ? root.animated-content-reveal : 1;
@@ -517,12 +517,13 @@ export component MailReadingPane inherits Rectangle {
                 : root.email-scroll-y - root.message-body-y;
         }
     }
-    changed email-viewport-width => { root.viewport-pending = true; }
-    changed email-viewport-height => { root.viewport-pending = true; }
-    Timer { interval: 50ms; running: root.viewport-pending; triggered => {
-        root.viewport-pending = false;
-        if EmailReader.available { EmailReader.command("viewport"); }
-    } }
+    ViewportRenderScheduler {
+        viewport-width: root.email-viewport-width;
+        viewport-height: root.email-viewport-height;
+        available: EmailReader.available;
+        debounce: MotionSettings.software-rendering;
+        commit => { EmailReader.command("viewport"); }
+    }
     Timer {
         interval: 16ms;
         running: MotionSettings.enabled && root.content-reveal-pending;
@@ -938,11 +939,11 @@ export component MailReadingPane inherits Rectangle {
                         padding-bottom: 0px;
                         padding-left: root.compact ? 12px : 24px;
                         spacing: 0px;
-                        opacity: 0.28 + root.content-reveal * 0.72;
+                        opacity: MotionSettings.software-rendering ? 1 : 0.28 + root.content-reveal * 0.72;
                         animate opacity {
                             duration: 190ms;
                             easing: ease-out;
-                            enabled: MotionSettings.enabled && root.content-reveal > 0;
+                            enabled: MotionSettings.enabled && !MotionSettings.software-rendering && root.content-reveal > 0;
                         }
 
                         Text {
@@ -1671,6 +1672,8 @@ export component MailReadingPane inherits Rectangle {
                                     background: root.surface;
 
                                     Rectangle {
+                                        x: 0px;
+                                        y: 0px;
                                         width: parent.width;
                                         height: 1px;
                                         background: root.border-subtle;
@@ -1682,7 +1685,7 @@ export component MailReadingPane inherits Rectangle {
                                         padding-bottom: root.compact ? 4px : 5px;
                                         padding-left: 10px;
                                         spacing: 4px;
-                                        alignment: start;
+                                        alignment: stretch;
                                         cross-axis-alignment: center;
 
                                         if !root.selected_is_draft : ReaderControl {

@@ -14,7 +14,7 @@ impl Transport {
     pub fn new(endpoint: &str, user: &str, secret: &str) -> Result<Self> {
         let url = validated_url(endpoint)?;
         Ok(Self {
-            http: Client::builder()
+            http: crate::http_tls::client_builder()
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(120))
                 .redirect(reqwest::redirect::Policy::none())

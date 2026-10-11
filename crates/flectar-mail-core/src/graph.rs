@@ -18,7 +18,7 @@ const MAX_GRAPH_CALENDARS: usize = 10_000;
 fn graph_http_client() -> Result<&'static reqwest::Client> {
     static HTTP: once_cell::sync::Lazy<std::result::Result<reqwest::Client, String>> =
         once_cell::sync::Lazy::new(|| {
-            reqwest::Client::builder()
+            crate::http_tls::client_builder()
                 .user_agent("flectar-mail-graph/0.1")
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .timeout(std::time::Duration::from_secs(30))

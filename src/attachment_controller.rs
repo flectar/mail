@@ -15,9 +15,9 @@ use std::{
     },
 };
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 static SUSPEND: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub(crate) fn suspend() {
     if let Some(suspend) = SUSPEND.get() {
         suspend();
@@ -208,7 +208,7 @@ pub(crate) fn register(
     }));
     let generation = Arc::new(AtomicU64::new(0));
     let weak = app.as_weak();
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
     {
         let weak = weak.clone();
         let _ = SUSPEND.set(Box::new(move || {

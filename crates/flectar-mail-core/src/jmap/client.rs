@@ -227,7 +227,7 @@ pub async fn connect_with(
     client.set_default_account_id(account_id.clone());
     let mut download_headers = client.headers().clone();
     download_headers.remove(reqwest::header::CONTENT_TYPE);
-    let download_http = reqwest::Client::builder()
+    let download_http = crate::http_tls::client_builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
@@ -291,7 +291,7 @@ async fn discover_session_url(base_url: &Url) -> Result<Url> {
 }
 
 async fn resolve_session_url(mut current: Url, allow_local_http: bool) -> Result<Url> {
-    let http = reqwest::Client::builder()
+    let http = crate::http_tls::client_builder()
         .timeout(std::time::Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()

@@ -27,7 +27,10 @@ mod mail_work;
 mod message_appearance;
 mod oauth_browser;
 pub mod pdf_preview;
+pub mod platform_services;
 mod preview_controls;
+#[cfg(any(target_env = "ohos", test))]
+mod printing;
 mod reader_clipboard;
 #[cfg(test)]
 mod reader_validation;
@@ -317,18 +320,20 @@ fn reconcile_model_rows_by<T: Clone + 'static, K: Eq + std::hash::Hash>(
     }
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
 fn pick_compose_attachment_paths(title: String) -> Option<Vec<PathBuf>> {
     rfd::FileDialog::new().set_title(title).pick_files()
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 fn pick_compose_attachment_paths(_title: String) -> Option<Vec<PathBuf>> {
     None
 }
 
 #[derive(Clone, Debug)]
 struct ComposeFile {
+    // Own the native import until the attachment has been staged or removed.
+    _source: Option<Arc<documents::ImportedDocument>>,
     path: PathBuf,
     filename: String,
     size: u64,
@@ -883,7 +888,10 @@ fn perform_mail_list_action(
     )
 }
 
-#[cfg(any(test, not(any(target_os = "android", target_os = "ios"))))]
+#[cfg(any(
+    test,
+    not(any(target_os = "android", target_os = "ios", target_env = "ohos"))
+))]
 fn parse_preview_window_size(value: &str) -> Result<slint::LogicalSize, String> {
     let normalized = value.trim().to_ascii_lowercase();
     let (width, height) = normalized
@@ -944,7 +952,9 @@ fn bundled_language_for_locale(locale: &str) -> Option<&'static str> {
 
 fn apply_language(app: &AppWindow, preference: &str) {
     let language_mode = normalized_language_preference(preference);
-    let system_locale = sys_locale::get_locale();
+    let system_locale = platform_services::current()
+        .and_then(|host| host.system_locale())
+        .or_else(sys_locale::get_locale);
     let selected = match language_mode {
         "system" => system_locale
             .as_deref()
@@ -1065,6 +1075,10 @@ impl InboxState {
 
 #[derive(Clone)]
 pub struct PlatformContext {
+    /// A native host may retain a headless Core and its actor runtime between
+    /// OS work windows. Reuse it when the UI opens the same private profile.
+    pub existing_core: Option<Arc<flectar_mail_core::Core>>,
+    pub services: Option<Arc<dyn platform_services::PlatformServices>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1076,6 +1090,8 @@ impl PlatformContext {
         let paths = Paths::default_dirs()?;
         let credentials = desktop_credential_store(&paths);
         Ok(Self {
+            existing_core: None,
+            services: None,
             paths,
             documents: documents::default_provider(),
             credentials,
@@ -1092,6 +1108,8 @@ impl PlatformContext {
         oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
     ) -> Self {
         Self {
+            existing_core: None,
+            services: None,
             paths: Paths::new(data_root.join("data"), cache_dir),
             documents: documents::default_provider(),
             credentials,
@@ -1103,7 +1121,7 @@ impl PlatformContext {
 fn desktop_credential_store(
     paths: &Paths,
 ) -> flectar_mail_core::accounts::credentials::CredentialStoreHandle {
-    #[cfg(all(target_os = "linux", debug_assertions))]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos"), debug_assertions))]
     if isolated_container_without_secret_service() {
         let path = paths.data_dir.join("credentials-v1.json");
         tracing::warn!(
@@ -1114,12 +1132,12 @@ fn desktop_credential_store(
             flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(path),
         );
     }
-    #[cfg(not(all(target_os = "linux", debug_assertions)))]
+    #[cfg(not(all(target_os = "linux", not(target_env = "ohos"), debug_assertions)))]
     let _ = paths;
     Arc::new(flectar_mail_core::accounts::credentials::SystemCredentialStore)
 }
 
-#[cfg(all(target_os = "linux", debug_assertions))]
+#[cfg(all(target_os = "linux", not(target_env = "ohos"), debug_assertions))]
 fn isolated_container_without_secret_service() -> bool {
     let container = std::env::var("container")
         .unwrap_or_default()
@@ -1189,6 +1207,7 @@ fn spawn_startup_load(
     paths: Paths,
     credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
     oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
+    existing_core: Option<Arc<flectar_mail_core::Core>>,
     startup_tx: UiSender<StartupUpdate>,
     metrics: StartupMetrics,
 ) {
@@ -1235,6 +1254,7 @@ fn spawn_startup_load(
             paths,
             credentials,
             oauth_redirects,
+            existing_core,
             &preferred_scope,
             &metrics,
         )
@@ -1269,7 +1289,7 @@ fn spawn_startup_load(
 /// CPU process, releasing the failed device and keeping the saved choice intact.
 pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> {
     let result = run(platform);
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if let Err(error) = &result
         && error.is::<renderer_preferences::GpuStartupError>()
         && std::env::var_os("FLECTAR_GPU_FALLBACK").is_none()
@@ -1280,11 +1300,13 @@ pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::
 }
 
 pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> {
+    platform_services::install(platform.services.clone());
     let startup_metrics = StartupMetrics::from_environment();
     let benchmark_tray = startup_metrics.enabled()
         && std::env::var_os("FLECTAR_BENCHMARK_TRAY_INTERVAL_MS").is_some();
     let benchmark_disable_background =
         std::env::var("FLECTAR_BENCHMARK_DISABLE_SYNC").as_deref() == Ok("1");
+    #[cfg(not(target_env = "ohos"))]
     normalize_appimage_environment();
 
     let renderer_preference_path = platform.paths.data_dir.join("renderer.json");
@@ -1298,12 +1320,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             "gpu_supported": renderer_preferences::GPU_SUPPORTED,
         })
     );
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     let use_wgpu = renderer_preferences::select_backend(requested_renderer)?;
 
     // Android installs its backend in android_main before entering this shared
     // function. iOS uses Slint's documented winit + Skia combination.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_env = "ohos"))]
     let use_wgpu = false;
 
     #[cfg(target_os = "ios")]
@@ -1332,7 +1354,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // window managers can associate the native window with the installed icon.
     #[cfg(all(
         unix,
-        not(any(target_os = "android", target_os = "ios", target_os = "macos"))
+        not(any(
+            target_os = "android",
+            target_os = "ios",
+            target_env = "ohos",
+            target_os = "macos"
+        ))
     ))]
     slint::set_xdg_app_id("com.flectar.mail")?;
 
@@ -1350,11 +1377,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // Register the deterministic emoji face before any initial text is measured.
     configure_emoji_font_fallback()?;
 
+    // Native platform fonts were configured before entering run(). Bootstrap
+    // the independent HTML font collection while the mailbox shell starts.
+    #[cfg(target_env = "ohos")]
+    renderer::prewarm_email_font_ctx(runtime.handle());
+
     // Construct the window before opening or migrating either database. Seed
     // the one geometry preference visible in the inert mailbox shell through a
     // zero-wait read-only lookup, then map the first frame at its saved width.
     // Full settings validation still happens during normal background startup.
     let app = renderer_preferences::initialize_step(use_wgpu, AppWindow::new)?;
+    #[cfg(target_env = "ohos")]
+    app.global::<MotionSettings>().set_software_rendering(!use_wgpu);
+    #[cfg(target_env = "ohos")]
+    apply_language(&app, "system");
     app.global::<MailListNavigation>()
         .on_target(mail_navigation::target);
     if let Some(width) = flectar_mail_core::startup_workspace_list_pane_width(&platform.paths) {
@@ -1377,8 +1413,22 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             crate::preview_controls::zoom(&action, current, minimum, maximum)
         });
     theme::register_theme_utilities(&app);
-    app.set_print_supported(!cfg!(any(target_os = "android", target_os = "ios")));
-    app.set_document_apis_supported(!cfg!(any(target_os = "android", target_os = "ios")));
+    app.set_print_supported(
+        platform.services.is_some()
+            || !cfg!(any(
+                target_os = "android",
+                target_os = "ios",
+                target_env = "ohos"
+            )),
+    );
+    app.set_document_apis_supported(
+        platform.services.is_some()
+            || !cfg!(any(
+                target_os = "android",
+                target_os = "ios",
+                target_env = "ohos"
+            )),
+    );
     renderer_preferences::initialize_step(use_wgpu, || app.show())?;
     startup_metrics.emit(
         "window_shown",
@@ -1432,7 +1482,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     {
         eprintln!("email images unavailable: {error}");
     }
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))]
     if let Some(value) = std::env::var_os("FLECTAR_PREVIEW_SIZE") {
         match value.to_str().map(parse_preview_window_size) {
             Some(Ok(size)) => app.window().set_size(size),
@@ -2015,9 +2065,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .iter()
                 .find(|contact| contact.id == i64::from(id))
                 .cloned();
-            let promoting_suggestion = previous
-                .as_ref()
-                .is_some_and(|contact| !contact.is_managed);
+            let promoting_suggestion = previous.as_ref().is_some_and(|contact| !contact.is_managed);
             let new_contact_accounts = contacts_for_save
                 .borrow()
                 .scope
@@ -3676,6 +3724,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     {
                         let mut state = startup_state.borrow_mut();
                         state.core = Some(core.clone());
+                        if let Some(services) = platform_services::current() {
+                            services.core_started(core.file_core(), startup_runtime.handle().clone());
+                        }
                         state.connected_accounts = accounts;
                         state.account_configs = account_configs;
                         state.scope = scope;
@@ -3741,7 +3792,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
                     if let Some(settings) = settings.as_ref() {
                         apply_settings(&app, settings);
-                        #[cfg(any(target_os = "android", target_os = "ios", feature = "flatpak"))]
+                        #[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos", feature = "flatpak"))]
                         app.set_close_to_tray(false);
                         if let Some(tray) =
                             startup_tray.as_ref().and_then(|tray| tray.upgrade())
@@ -3959,6 +4010,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let retry_paths = platform.paths.clone();
     let retry_credentials = platform.credentials.clone();
     let retry_oauth_redirects = platform.oauth_redirects.clone();
+    let retry_existing_core = platform.existing_core.clone();
     let retry_tx = startup_tx.clone();
     let retry_app = app.as_weak();
     let retry_metrics = startup_metrics.clone();
@@ -3973,6 +4025,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             retry_paths.clone(),
             retry_credentials.clone(),
             retry_oauth_redirects.clone(),
+            retry_existing_core.clone(),
             retry_tx.clone(),
             retry_metrics.clone(),
         );
@@ -3982,6 +4035,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.paths.clone(),
         platform.credentials.clone(),
         platform.oauth_redirects.clone(),
+        platform.existing_core.clone(),
         startup_tx,
         startup_metrics.clone(),
     );
@@ -4075,9 +4129,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     calendar
                         .sources
                         .retain(|source| source.account_id != account_id);
-                    calendar
-                        .accounts
-                        .retain(|account| account.id != account_id);
+                    calendar.accounts.retain(|account| account.id != account_id);
                 }
             }
             if let Some(snapshot) = update.accounts.filter(|snapshot| {
@@ -4146,7 +4198,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_imap_host("".into());
                 app.set_smtp_host("".into());
             }
-            if let Some(removal) = update.account_removal.as_mut().filter(|removal| removal.removed) {
+            if let Some(removal) = update
+                .account_removal
+                .as_mut()
+                .filter(|removal| removal.removed)
+            {
                 let current_page = {
                     let mut state = ui_task_state.borrow_mut();
                     if let Some(metadata) = removal
@@ -4768,7 +4824,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let runtime = Rc::clone(&runtime_for_mail_group);
             let app_weak = app.as_weak();
             Timer::single_shot(Duration::from_millis(330), move || {
-                if state.borrow_mut().mail_groups.finish_transition(&key, generation)
+                if state
+                    .borrow_mut()
+                    .mail_groups
+                    .finish_transition(&key, generation)
                     && let Some(app) = app_weak.upgrade()
                 {
                     refresh_rows_only(&app, &state, &runtime);
@@ -4841,12 +4900,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let state_for_empty_trash = Rc::clone(&state);
     app.on_empty_trash(move |requested_account_id| {
-        let Some(app) = app_weak.upgrade() else { return; };
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
         let request = {
             let state = state_for_empty_trash.borrow();
-            if !state.using_core { return; }
-            let account_id = if requested_account_id == 0 ||
-                (requested_account_id < 0 && state.scope == "Unified Trash") {
+            if !state.using_core {
+                return;
+            }
+            let account_id = if requested_account_id == 0
+                || (requested_account_id < 0 && state.scope == "Unified Trash")
+            {
                 None
             } else if requested_account_id > 0 {
                 Some(i64::from(requested_account_id))
@@ -4909,100 +4973,100 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let runtime_for_save_label = Rc::clone(&runtime);
     app.on_save_mail_label(
         move |label_id, owner_account_id, name, color, global, parent_label_id| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        let (core, thread_id, selected_account_id, parent_path) = {
-            let state = state_for_save_label.borrow();
-            let selected = state
-                .selected_id
-                .and_then(|id| state.messages.iter().find(|message| message.id == id));
-            (
-                state.core.clone(),
-                selected.and_then(|message| message.thread_id),
-                selected.map(|message| message.account_id),
-                if parent_label_id >= 0 {
-                    state
-                        .labels
-                        .iter()
-                        .find(|label| {
-                            label.id == i64::from(parent_label_id)
-                                && !label.is_auto
-                                && label.owner_account_id == Some(i64::from(owner_account_id))
-                        })
-                        .map(|label| label.name.clone())
-                        .ok_or_else(|| "the parent label no longer exists".to_owned())
-                        .map(Some)
-                } else {
-                    Ok(None)
-                },
-            )
-        };
-        let existing_id = (label_id >= 0).then_some(i64::from(label_id));
-        let color = format!(
-            "#{:02x}{:02x}{:02x}",
-            color.red(),
-            color.green(),
-            color.blue()
-        );
-        let result: Result<bool, String> = (|| {
-            let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
-            let parent_path = parent_path?;
-            let leaf = name.trim();
-            if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
-                return Err(
-                    "label names cannot contain '/'; create each nesting level separately"
-                        .to_owned(),
-                );
-            }
-            let full_name = if existing_id.is_none()
-                && let Some(parent_path) = parent_path
-            {
-                format!("{}/{leaf}", parent_path.trim_end_matches('/'))
-            } else {
-                leaf.to_owned()
+            let Some(app) = app_weak.upgrade() else {
+                return;
             };
-            let label = runtime_for_save_label.block_on(core.save_label(
-                existing_id,
-                &full_name,
-                color.as_str(),
-                if existing_id.is_none() && !global {
-                    Some(if owner_account_id >= 0 {
-                        i64::from(owner_account_id)
+            let (core, thread_id, selected_account_id, parent_path) = {
+                let state = state_for_save_label.borrow();
+                let selected = state
+                    .selected_id
+                    .and_then(|id| state.messages.iter().find(|message| message.id == id));
+                (
+                    state.core.clone(),
+                    selected.and_then(|message| message.thread_id),
+                    selected.map(|message| message.account_id),
+                    if parent_label_id >= 0 {
+                        state
+                            .labels
+                            .iter()
+                            .find(|label| {
+                                label.id == i64::from(parent_label_id)
+                                    && !label.is_auto
+                                    && label.owner_account_id == Some(i64::from(owner_account_id))
+                            })
+                            .map(|label| label.name.clone())
+                            .ok_or_else(|| "the parent label no longer exists".to_owned())
+                            .map(Some)
                     } else {
-                        selected_account_id.ok_or_else(|| {
-                            "select a message before creating an account label".to_owned()
-                        })?
-                    })
+                        Ok(None)
+                    },
+                )
+            };
+            let existing_id = (label_id >= 0).then_some(i64::from(label_id));
+            let color = format!(
+                "#{:02x}{:02x}{:02x}",
+                color.red(),
+                color.green(),
+                color.blue()
+            );
+            let result: Result<bool, String> = (|| {
+                let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
+                let parent_path = parent_path?;
+                let leaf = name.trim();
+                if existing_id.is_none() && owner_account_id >= 0 && leaf.contains('/') {
+                    return Err(
+                        "label names cannot contain '/'; create each nesting level separately"
+                            .to_owned(),
+                    );
+                }
+                let full_name = if existing_id.is_none()
+                    && let Some(parent_path) = parent_path
+                {
+                    format!("{}/{leaf}", parent_path.trim_end_matches('/'))
                 } else {
-                    None
-                },
-            ))?;
-            if existing_id.is_none() && owner_account_id < 0 {
-                let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
-                runtime_for_save_label
-                    .block_on(core.perform_label_action(thread_id, label.id, true))?;
+                    leaf.to_owned()
+                };
+                let label = runtime_for_save_label.block_on(core.save_label(
+                    existing_id,
+                    &full_name,
+                    color.as_str(),
+                    if existing_id.is_none() && !global {
+                        Some(if owner_account_id >= 0 {
+                            i64::from(owner_account_id)
+                        } else {
+                            selected_account_id.ok_or_else(|| {
+                                "select a message before creating an account label".to_owned()
+                            })?
+                        })
+                    } else {
+                        None
+                    },
+                ))?;
+                if existing_id.is_none() && owner_account_id < 0 {
+                    let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
+                    runtime_for_save_label
+                        .block_on(core.perform_label_action(thread_id, label.id, true))?;
+                }
+                refresh_from_source(
+                    &app,
+                    &state_for_save_label,
+                    &runtime_for_save_label,
+                    true,
+                    &[],
+                )?;
+                Ok(existing_id.is_some())
+            })();
+            match result {
+                Ok(true) => app.set_render_status(UiMessage::plain("Label updated.")),
+                Ok(false) if owner_account_id >= 0 => {
+                    app.set_render_status(UiMessage::plain("Label created."))
+                }
+                Ok(false) => app.set_render_status(UiMessage::plain("Label created and added.")),
+                Err(error) => {
+                    app.set_render_status(UiMessage::detail("Could not save label: {}", error))
+                }
             }
-            refresh_from_source(
-                &app,
-                &state_for_save_label,
-                &runtime_for_save_label,
-                true,
-                &[],
-            )?;
-            Ok(existing_id.is_some())
-        })();
-        match result {
-            Ok(true) => app.set_render_status(UiMessage::plain("Label updated.")),
-            Ok(false) if owner_account_id >= 0 => {
-                app.set_render_status(UiMessage::plain("Label created."))
-            }
-            Ok(false) => app.set_render_status(UiMessage::plain("Label created and added.")),
-            Err(error) => {
-                app.set_render_status(UiMessage::detail("Could not save label: {}", error))
-            }
-        }
-    },
+        },
     );
 
     let app_weak = app.as_weak();
@@ -5484,6 +5548,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         .map(|metadata| metadata.len())
                         .unwrap_or_default();
                     ComposeFile {
+                        _source: None,
                         path,
                         filename: attachment.filename.clone(),
                         size,
@@ -5630,18 +5695,27 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        #[cfg(target_env = "ohos")]
+        let imported = match platform_services::current()
+            .ok_or_else(|| "Native document picker unavailable".to_string())
+            .and_then(|host| host.import_file())
+        {
+            Ok(Some(document)) => Some(Arc::new(document)),
+            Ok(None) => return,
+            Err(error) => {
+                app.set_compose_notice(UiMessage::detail("Could not attach file: {}", error));
+                app.set_compose_notice_is_error(true);
+                return;
+            }
+        };
+        #[cfg(not(target_env = "ohos"))]
+        let imported: Option<Arc<documents::ImportedDocument>> = None;
+        #[cfg(target_env = "ohos")]
+        let paths = vec![imported.as_ref().unwrap().path().to_owned()];
+        #[cfg(not(target_env = "ohos"))]
         let Some(paths) = pick_compose_attachment_paths(
             translated(&app, &UiMessage::plain("Attach files to this email")).to_string(),
-        ) else {
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                app.set_compose_notice(UiMessage::plain(
-                    "The platform host does not provide a document picker.",
-                ));
-                app.set_compose_notice_is_error(true);
-            }
-            return;
-        };
+        ) else { return; };
 
         let mut compose_files = files_for_picker.borrow_mut();
         let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
@@ -5663,13 +5737,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 skipped += 1;
                 continue;
             }
-            let Some(filename) = path.file_name().map(|name| name.to_string_lossy().into_owned())
+            let Some(filename) = imported
+                .as_ref()
+                .and_then(|document| document.display_name().map(str::to_owned))
+                .or_else(|| path.file_name().map(|name| name.to_string_lossy().into_owned()))
             else {
                 skipped += 1;
                 continue;
             };
             total_size += metadata.len();
             compose_files.push(ComposeFile {
+                _source: imported.clone(),
                 path,
                 filename,
                 size: metadata.len(),
@@ -7152,6 +7230,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    #[cfg(target_env = "ohos")]
+    APPLICATION_WINDOW.with(|slot| *slot.borrow_mut() = Some(app.as_weak()));
+
     // The main window is already shown above and the independently compiled
     // tray participates in the same process-wide event loop. This is Slint's
     // documented multi-component pattern; calling AppWindow::run() here would
@@ -7584,7 +7665,7 @@ mod tests {
 
 /// Mobile hosts release preview bytes/bitmaps and request cooperative native
 /// cancellation when backgrounded or under memory pressure.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+#[cfg(any(target_os = "android", target_os = "ios", target_env = "ohos"))]
 pub fn suspend_file_preview() {
     files_controller::suspend();
     attachment_controller::suspend();
@@ -7594,4 +7675,33 @@ pub fn suspend_file_preview() {
 #[unsafe(no_mangle)]
 extern "C" fn flectar_suspend_pdf_preview() {
     suspend_file_preview();
+}
+
+#[cfg(target_env = "ohos")]
+thread_local! {
+    static APPLICATION_WINDOW: RefCell<Option<slint::Weak<AppWindow>>> = const { RefCell::new(None) };
+}
+
+/// Called on the Slint owner thread by the OHOS backend.
+#[cfg(target_env = "ohos")]
+pub fn set_application_foreground(foreground: bool) {
+    APPLICATION_WINDOW.with(|slot| {
+        if let Some(app) = slot.borrow().as_ref().and_then(slint::Weak::upgrade) {
+            app.invoke_suspend_rendering(!foreground);
+        }
+    });
+    if let Some(services) = platform_services::current() {
+        services.foreground_changed(foreground);
+    }
+}
+
+#[cfg(target_env = "ohos")]
+pub fn configure_platform_fonts(paths: &[String]) {
+    platform_services::configure_fonts(paths);
+}
+
+/// Optional numeric font initialization spans for an explicitly diagnosed run.
+#[cfg(target_env = "ohos")]
+pub fn configure_platform_font_diagnostics(logger: fn(&str)) {
+    renderer::configure_email_font_diagnostics(logger);
 }

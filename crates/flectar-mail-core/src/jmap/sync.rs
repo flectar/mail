@@ -54,6 +54,7 @@ async fn actor(
     let mut waiters = Vec::new();
     let mut retry = 1u64;
     loop {
+        ctx.bus.wait_for_platform_active().await;
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
                 SyncCmd::Shutdown => return,
@@ -62,6 +63,9 @@ async fn actor(
                 } => waiters.push(done),
                 _ => {}
             }
+        }
+        if !ctx.bus.platform_is_active() {
+            continue;
         }
         if settings.has_changed().unwrap_or(false) {
             config.settings = settings.borrow_and_update().clone();
@@ -98,6 +102,9 @@ async fn actor(
                 None
             }
         };
+        if !ctx.bus.platform_is_active() {
+            continue;
+        }
         let normal = configured_sync_interval(&ctx.db).await;
         let delay = if retry == 1 {
             normal
@@ -1043,6 +1050,9 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedCli
         .read(move |conn| repo::actions::due(conn, account_id, now_ms(), 20))
         .await?;
     for action in actions {
+        if !ctx.bus.platform_is_active() {
+            break;
+        }
         let action_id = action.id;
         if !ctx
             .db
@@ -2056,6 +2066,7 @@ async fn mark_submission_accepted(
 
 async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<PriorityFetchCmd>) {
     while let Some(command) = rx.recv().await {
+        ctx.bus.wait_for_platform_active().await;
         match command {
             PriorityFetchCmd::Body(message_id) => {
                 if let Err(error) = fetch_body(&ctx, &config, message_id).await {

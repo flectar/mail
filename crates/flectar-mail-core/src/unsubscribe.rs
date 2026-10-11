@@ -162,7 +162,7 @@ pub async fn post_one_click(url: &str) -> Result<()> {
             "unsubscribe endpoint resolved to a non-public address".into(),
         ));
     }
-    let mut client = reqwest::Client::builder()
+    let mut client = crate::http_tls::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
