@@ -3,10 +3,10 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-08 15:01+0000\n"
-"PO-Revision-Date: 2026-09-24 11:59+0000\n"
-"Last-Translator: 6uu1 <translate.flectar.com@696988.xyz>\n"
-"Language-Team: Chinese (Simplified Han script) <https://translate.flectar."
-"com/projects/flectar-mail/mail/zh_Hans/>\n"
+"PO-Revision-Date: 2026-10-15 02:03+0000\n"
+"Last-Translator: Taivas Jumala <taivas_jumala@yafoss.org>\n"
+"Language-Team: Chinese (Simplified Han script) <https://"
+"translate.flectar.com/projects/flectar-mail/mail/zh_Hans/>\n"
 "Language: zh_Hans\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -290,15 +290,15 @@ msgstr "主题偏好已保存。"
 
 #: ui/app.slint:183
 msgid "Message appearance updated for this session."
-msgstr ""
+msgstr "本次会话的消息显示已更新。"
 
 #: ui/app.slint:184
 msgid "Message appearance preference saved."
-msgstr ""
+msgstr "邮件外观偏好已保存。"
 
 #: ui/app.slint:185
 msgid "Could not save message appearance: {}"
-msgstr ""
+msgstr "无法保存邮件外观偏好：{}"
 
 #: ui/app.slint:186
 msgid "Could not save theme: {}"
@@ -378,19 +378,19 @@ msgstr "无法保存窗口框架偏好：{}"
 
 #: ui/app.slint:205
 msgid "At most {} tabs can be open. Close a tab to open another."
-msgstr ""
+msgstr "最多可以打开 {} 个标签页。关闭一个标签页后可打开另一个。"
 
 #: ui/app.slint:206
 msgid "Mail grouping is active for this session."
-msgstr ""
+msgstr "本次会话已启用邮件分组。"
 
 #: ui/app.slint:207
 msgid "Mail grouping preference saved."
-msgstr ""
+msgstr "邮件分组偏好已保存。"
 
 #: ui/app.slint:208
 msgid "Could not save mail grouping preference: {}"
-msgstr ""
+msgstr "无法保存邮件分组偏好设置：{}"
 
 #: ui/app.slint:209
 msgid "Profile changes require local mail data."
@@ -980,7 +980,7 @@ msgstr "邮件操作已完成。"
 #: ui/app.slint:392
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
-msgstr ""
+msgstr "已添加到永久删除队列。邮件将在服务器确认后消失。"
 
 #: ui/app.slint:393
 msgid "Message action failed: {}"
@@ -1339,7 +1339,7 @@ msgstr "全局标签（仅本地）"
 
 #: ui/app.slint:1932
 msgid "Empty Trash?"
-msgstr ""
+msgstr "清空回收站？"
 
 #: ui/app.slint:1932 ui/views/files-view.slint:538
 msgid "Delete permanently?"
@@ -1348,19 +1348,19 @@ msgstr "永久删除？"
 #: ui/app.slint:1936
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
-msgstr ""
+msgstr "永久删除每个已连接帐户的回收站中的所有邮件？"
 
 #: ui/app.slint:1937
 msgid "Permanently delete all messages in this account’s Trash?"
-msgstr ""
+msgstr "是否永久删除此帐户的回收站中的所有邮件？"
 
 #: ui/app.slint:1939
 msgid "Permanently delete the selected conversations from Trash?"
-msgstr ""
+msgstr "是否从回收站中永久删除选定的对话？"
 
 #: ui/app.slint:1940
 msgid "Permanently delete this conversation from Trash?"
-msgstr ""
+msgstr "是否从回收站中永久删除此对话？"
 
 #: ui/app.slint:1941 ui/components/calendar.slint:926
 msgid "This action cannot be undone."
@@ -1368,7 +1368,7 @@ msgstr "此操作无法撤销。"
 
 #: ui/app.slint:1942
 msgid "Empty Trash"
-msgstr ""
+msgstr "清空回收站"
 
 #: ui/app.slint:1942 ui/views/files-view.slint:620
 msgid "Delete permanently"
@@ -1400,51 +1400,51 @@ msgstr "复制诊断信息"
 
 #: ui/components/account-mail-preferences.slint:100
 msgid "Server allows any address at this domain"
-msgstr ""
+msgstr "服务器允许此域名中的任何地址"
 
 #: ui/components/account-mail-preferences.slint:103
 msgid "Awaiting verification by the provider; cannot be selected yet"
-msgstr ""
+msgstr "等待提供商验证；尚不能选择"
 
 #: ui/components/account-mail-preferences.slint:106
 msgid "The server refused the last message from this address: {}"
-msgstr ""
+msgstr "服务器拒绝了来自此地址的最后一封邮件：{}"
 
 #: ui/components/account-mail-preferences.slint:106
 msgid "The server refused the last message from this address"
-msgstr ""
+msgstr "服务器拒绝了来自此地址的最后一条消息"
 
 #: ui/components/account-mail-preferences.slint:109
 msgid "Sign-in address · replies go to {}"
-msgstr ""
+msgstr "登录地址 · 回复转到{}"
 
 #: ui/components/account-mail-preferences.slint:109
 msgid "Sign-in address"
-msgstr ""
+msgstr "登录地址"
 
 #: ui/components/account-mail-preferences.slint:113
 msgid "Added by you · accepted by the server · replies go to {}"
-msgstr ""
+msgstr "由您添加 · 被服务器接受 · 回复转到{}"
 
 #: ui/components/account-mail-preferences.slint:113
 msgid "Added by you · accepted by the server"
-msgstr ""
+msgstr "由您添加 · 被服务器接受"
 
 #: ui/components/account-mail-preferences.slint:115
 msgid "Added by you · not used yet · replies go to {}"
-msgstr ""
+msgstr "由您添加 · 尚未使用 · 回复转到{}"
 
 #: ui/components/account-mail-preferences.slint:115
 msgid "Added by you · not used yet"
-msgstr ""
+msgstr "由您添加 · 尚未使用"
 
 #: ui/components/account-mail-preferences.slint:117
 msgid "Provided by the server · replies go to {}"
-msgstr ""
+msgstr "由服务器提供 · 回复转到{}"
 
 #: ui/components/account-mail-preferences.slint:117
 msgid "Provided by the server"
-msgstr ""
+msgstr "由服务器提供"
 
 #: ui/components/account-mail-preferences.slint:121
 msgid "Sender identities, signatures & OpenPGP"
@@ -1494,20 +1494,22 @@ msgid ""
 "Gmail decides which addresses you can send from. Add an address in Gmail "
 "settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
+"Gmail 决定您可以从哪些地址发送邮件。请在 Gmail 设置中的帐户 › 发送邮件方式下"
+"添加地址，然后刷新发件人身份。"
 
 #: ui/components/account-mail-preferences.slint:163
 msgid "Edit sender address"
-msgstr ""
+msgstr "编辑发件人地址"
 
 #: ui/components/account-mail-preferences.slint:163
 msgid "Add a sender address"
-msgstr ""
+msgstr "添加发件人地址"
 
 #: ui/components/account-mail-preferences.slint:167
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
-msgstr ""
+msgstr "您的服务器允许您从显示为通配符的域中的任何地址发送。添加您要选择的地址。"
 
 #: ui/components/account-mail-preferences.slint:168
 msgid ""
@@ -1515,6 +1517,8 @@ msgid ""
 "server decides when you send; Flectar shows whether it accepted the last "
 "message."
 msgstr ""
+"添加一个别名或另一个邮件服务器允许您发送的地址。服务器决定您何时发送；Flectar"
+"显示它是否接受最后一条消息。"
 
 #: ui/components/account-mail-preferences.slint:170
 #: ui/dialogs/settings-dialog.slint:2596 ui/views/onboarding-view.slint:257
@@ -1523,31 +1527,31 @@ msgstr "电子邮件地址"
 
 #: ui/components/account-mail-preferences.slint:170
 msgid "alias@example.com"
-msgstr ""
+msgstr "alias@example.com"
 
 #: ui/components/account-mail-preferences.slint:171
 msgid "Sender name"
-msgstr ""
+msgstr "发件人名称"
 
 #: ui/components/account-mail-preferences.slint:171
 msgid "Name shown to recipients (optional)"
-msgstr ""
+msgstr "显示给收件人的姓名（可选）"
 
 #: ui/components/account-mail-preferences.slint:172
 msgid "Reply-to address"
-msgstr ""
+msgstr "回复地址"
 
 #: ui/components/account-mail-preferences.slint:172
 msgid "Where replies should go (optional)"
-msgstr ""
+msgstr "回复应发送至何处 (可选)"
 
 #: ui/components/account-mail-preferences.slint:176
 msgid "Save sender address"
-msgstr ""
+msgstr "保存发件人地址"
 
 #: ui/components/account-mail-preferences.slint:176
 msgid "Add sender address"
-msgstr ""
+msgstr "添加发件人地址"
 
 #: ui/components/account-mail-preferences.slint:177
 #: ui/dialogs/folder-dialog.slint:125 ui/dialogs/settings-dialog.slint:1928
@@ -2415,7 +2419,7 @@ msgstr "删除文件夹"
 
 #: ui/components/sidebar-controls.slint:212
 msgid "Empty Trash…"
-msgstr ""
+msgstr "清空回收站…"
 
 #: ui/components/sidebar-controls.slint:224
 msgid "New nested label"
@@ -2695,15 +2699,15 @@ msgstr "主导航"
 
 #: ui/components/workspace-navigation.slint:401
 msgid "New tab"
-msgstr ""
+msgstr "新标签页"
 
 #: ui/components/workspace-navigation.slint:529
 msgid "Close tab"
-msgstr ""
+msgstr "关闭标签页"
 
 #: ui/components/workspace-navigation.slint:573
 msgid "Tabs"
-msgstr ""
+msgstr "标签页"
 
 #: ui/components/zoom-controls.slint:19
 msgid "Zoom out"
@@ -3145,15 +3149,15 @@ msgstr "无法刷新存储用量，请重试。"
 
 #: ui/dialogs/settings-dialog.slint:406 ui/dialogs/settings-dialog.slint:415
 msgid "Paid"
-msgstr ""
+msgstr "已支付"
 
 #: ui/dialogs/settings-dialog.slint:407 ui/dialogs/settings-dialog.slint:416
 msgid "Coming soon"
-msgstr ""
+msgstr "即将推出"
 
 #: ui/dialogs/settings-dialog.slint:443
 msgid "Learn more"
-msgstr ""
+msgstr "了解更多"
 
 #: ui/dialogs/settings-dialog.slint:619
 msgid "Every minute"
@@ -3224,6 +3228,8 @@ msgid ""
 "general theme appearance palette language workspace layout window frameless "
 "title bar renderer privacy remote images sync group messages date inbox"
 msgstr ""
+"通用 主题 外观 配色 语言 工作区 布局 窗口 无边框 标题栏 渲染器 隐私 远程图片 "
+"同步 分组消息 日期 收件箱"
 
 #: ui/dialogs/settings-dialog.slint:676
 msgid ""
@@ -3257,7 +3263,7 @@ msgstr "存储 数据 用量 邮件 附件 文件 数据库 备份 快照 导入
 msgid ""
 "services flectar base account sign in subscription paid sync devices "
 "business email custom domain mailbox"
-msgstr ""
+msgstr "服务 Flectar 基础账户 登录 付费订阅 设备同步 企业邮箱 自定义域名 邮箱"
 
 #: ui/dialogs/settings-dialog.slint:687
 msgid "about version credits contributors license flectar"
@@ -3298,7 +3304,7 @@ msgstr "存储"
 #: ui/dialogs/settings-dialog.slint:934 ui/dialogs/settings-dialog.slint:2095
 #: ui/dialogs/settings-dialog.slint:2375
 msgid "Services"
-msgstr ""
+msgstr "服务"
 
 #: ui/dialogs/settings-dialog.slint:935 ui/dialogs/settings-dialog.slint:2182
 #: ui/dialogs/settings-dialog.slint:2376
@@ -3311,15 +3317,15 @@ msgstr "管理外观、隐私和同步。"
 
 #: ui/dialogs/settings-dialog.slint:971
 msgid "Message appearance"
-msgstr ""
+msgstr "消息外观"
 
 #: ui/dialogs/settings-dialog.slint:972
 msgid "Choose the background and text colors used to read messages."
-msgstr ""
+msgstr "选择用于阅读消息的背景和文本颜色。"
 
 #: ui/dialogs/settings-dialog.slint:973
 msgid "Follow app theme"
-msgstr ""
+msgstr "遵循应用主题"
 
 #: ui/dialogs/settings-dialog.slint:1030
 msgid "Interface"
@@ -3391,11 +3397,11 @@ msgstr "汇总所有已连接账户收到的邮件。"
 
 #: ui/dialogs/settings-dialog.slint:1138
 msgid "Group messages by date"
-msgstr ""
+msgstr "按日期对消息进行分组"
 
 #: ui/dialogs/settings-dialog.slint:1139
 msgid "Show collapsible date sections in the mail list."
-msgstr ""
+msgstr "在邮件列表中显示可折叠日期部分。"
 
 #: ui/dialogs/settings-dialog.slint:1156
 msgid "Mark messages as read when opened"
@@ -3931,101 +3937,107 @@ msgstr "#"
 msgid ""
 "Optional paid services from Flectar. Flectar Mail stays free and works "
 "without them."
-msgstr ""
+msgstr "来自 Flectar 的可选付费服务。Flectar Mail 保持免费，无需这些服务即可使用。"
 
 #: ui/dialogs/settings-dialog.slint:2101
 msgid "Flectar account"
-msgstr ""
+msgstr "Flectar 账户"
 
 #: ui/dialogs/settings-dialog.slint:2101
 msgid "Not signed in"
-msgstr ""
+msgstr "未登录"
 
 #: ui/dialogs/settings-dialog.slint:2103
 msgid ""
 "Services are managed with your Flectar account on base.flectar.com. Signing "
 "in will open your browser, and no mail passwords are shared."
 msgstr ""
+"服务通过您在 base.flectar.com 上的 Flectar 账户进行管理。登录将打开您的浏览器"
+"，且不会共享任何邮件密码。"
 
 #: ui/dialogs/settings-dialog.slint:2108
 msgid "Sign in with Flectar"
-msgstr ""
+msgstr "使用 Flectar 登录"
 
 #: ui/dialogs/settings-dialog.slint:2108
 msgid "Sign-in coming soon"
-msgstr ""
+msgstr "登录功能即将上线"
 
 #: ui/dialogs/settings-dialog.slint:2120
 msgid "Flectar Mail Sync"
-msgstr ""
+msgstr "Flectar 邮件同步"
 
 #: ui/dialogs/settings-dialog.slint:2121
 msgid "Your setup on every device"
-msgstr ""
+msgstr "您的每台设备上的设置"
 
 #: ui/dialogs/settings-dialog.slint:2122
 msgid ""
 "Sign in on a new phone or computer and your accounts, calendars, contacts, "
 "and preferences are ready without setting them up again."
 msgstr ""
+"在新手机或计算机上登录，您的账户、日历、联系人及偏好设置无需再次设置即可准备"
+"就绪。"
 
 #: ui/dialogs/settings-dialog.slint:2124
 msgid "Mail accounts, profiles, and signatures"
-msgstr ""
+msgstr "邮件账户、个人资料和签名"
 
 #: ui/dialogs/settings-dialog.slint:2125
 msgid "Calendar and contact connections"
-msgstr ""
+msgstr "日历与联系人连接"
 
 #: ui/dialogs/settings-dialog.slint:2126
 msgid "Themes, layout, and notification preferences"
-msgstr ""
+msgstr "主题、布局和通知偏好"
 
 #: ui/dialogs/settings-dialog.slint:2127
 msgid "Account credentials, encrypted on this device before upload"
-msgstr ""
+msgstr "账户凭据，上传前已在此设备上加密"
 
 #: ui/dialogs/settings-dialog.slint:2129
 msgid ""
 "Your messages stay with your mail provider. Sync only carries your Flectar "
 "Mail setup."
-msgstr ""
+msgstr "您的消息将保留在您的邮件服务商处。同步仅同步您的 Flectar Mail 配置。"
 
 #: ui/dialogs/settings-dialog.slint:2144
 msgid "Business Email"
-msgstr ""
+msgstr "商业邮箱"
 
 #: ui/dialogs/settings-dialog.slint:2145
 msgid "Mailboxes on your own domain"
-msgstr ""
+msgstr "您自有域名上的邮箱"
 
 #: ui/dialogs/settings-dialog.slint:2146
 msgid ""
 "Professional addresses such as you@yourcompany.com, hosted on Flectar "
 "infrastructure and managed from Flectar Base."
 msgstr ""
+"例如 you@yourcompany.com 的专业邮箱地址，托管于 Flectar 基础设施并由 Flectar "
+"Base 管理。"
 
 #: ui/dialogs/settings-dialog.slint:2148
 msgid "Connect a domain you already own"
-msgstr ""
+msgstr "连接您已拥有的域名"
 
 #: ui/dialogs/settings-dialog.slint:2149
 msgid "Create and manage mailboxes for your team"
-msgstr ""
+msgstr "为您的团队创建和管理邮箱"
 
 #: ui/dialogs/settings-dialog.slint:2150
 msgid "New mailboxes appear in Flectar Mail automatically"
-msgstr ""
+msgstr "新邮箱将自动出现在 Flectar Mail 中"
 
 #: ui/dialogs/settings-dialog.slint:2152
 msgid "Billed per mailbox through Flectar Base."
-msgstr ""
+msgstr "通过 Flectar Base 按邮箱计费。"
 
 #: ui/dialogs/settings-dialog.slint:2164
 msgid ""
 "These services are in development. Plans and availability will be announced "
 "on flectar.com."
-msgstr ""
+msgstr "这些服务正处于开发阶段。相关计划及可用性信息将于 flectar.com 公布。"
 
 #: ui/dialogs/settings-dialog.slint:2183
 msgid "Flectar Mail, its makers, and its community."
@@ -4959,35 +4971,35 @@ msgstr "确认为已完成"
 #: ui/views/mail-list-pane.slint:75
 msgid "{n} message"
 msgid_plural "{n} messages"
-msgstr[0] ""
+msgstr[0] "{n}条消息"
 
 #: ui/views/mail-list-pane.slint:304 ui/views/mail-list-pane.slint:317
 msgid "Earlier"
-msgstr ""
+msgstr "更早以前"
 
 #: ui/views/mail-list-pane.slint:309
 msgid "Yesterday"
-msgstr ""
+msgstr "昨天"
 
 #: ui/views/mail-list-pane.slint:310
 msgid "This week"
-msgstr ""
+msgstr "本周"
 
 #: ui/views/mail-list-pane.slint:311
 msgid "Last week"
-msgstr ""
+msgstr "上周"
 
 #: ui/views/mail-list-pane.slint:312
 msgid "This month"
-msgstr ""
+msgstr "本月"
 
 #: ui/views/mail-list-pane.slint:313
 msgid "Last month"
-msgstr ""
+msgstr "上个月"
 
 #: ui/views/mail-list-pane.slint:315
 msgid "{} {}"
-msgstr ""
+msgstr "{} {}"
 
 #: ui/views/mail-list-pane.slint:349
 msgid "Show folders"
@@ -5032,7 +5044,7 @@ msgstr "移到垃圾邮件"
 
 #: ui/views/mail-list-pane.slint:443
 msgid "Delete selected permanently"
-msgstr ""
+msgstr "永久删除选定项"
 
 #: ui/views/mail-list-pane.slint:456 ui/views/mail-reading-pane.slint:917
 msgid "More message actions"
@@ -5090,7 +5102,7 @@ msgstr "取消选择 {}"
 
 #: ui/views/mail-list-pane.slint:913
 msgid "Open in new tab"
-msgstr ""
+msgstr "在新标签页打开"
 
 #: ui/views/mail-list-pane.slint:917 ui/views/mail-reading-pane.slint:371
 msgid "Archive"
@@ -5099,7 +5111,7 @@ msgstr "归档"
 #: ui/views/mail-list-pane.slint:919 ui/views/mail-reading-pane.slint:357
 #: ui/views/mail-reading-pane.slint:388
 msgid "Delete permanently…"
-msgstr ""
+msgstr "永久删除…"
 
 #: ui/views/mail-list-pane.slint:976 ui/views/onboarding-view.slint:130
 msgid "Opening your mailbox…"
@@ -5165,12 +5177,12 @@ msgstr "查看纯文本"
 #: ui/views/mail-reading-pane.slint:356 ui/views/mail-reading-pane.slint:369
 #: ui/views/mail-reading-pane.slint:1143
 msgid "Use message appearance"
-msgstr ""
+msgstr "使用消息外观"
 
 #: ui/views/mail-reading-pane.slint:356 ui/views/mail-reading-pane.slint:369
 #: ui/views/mail-reading-pane.slint:1143
 msgid "Show original colors"
-msgstr ""
+msgstr "显示原始颜色"
 
 #: ui/views/mail-reading-pane.slint:363 ui/views/mail-reading-pane.slint:379
 msgid "Decrypt / verify OpenPGP"
