@@ -49,3 +49,10 @@ pub(crate) fn lower_current_thread_priority() {
 
 /// Preview lifecycle is owned by the ArkTS shell.
 pub(crate) fn install_preview_lifecycle() {}
+
+/// Directory the email (Blitz/Parley) renderer loads fonts from. OpenHarmony
+/// ships no Fontconfig, so the fontique system backend is disabled and the
+/// platform fonts must be scanned explicitly.
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    Some(std::path::Path::new("/system/fonts"))
+}

@@ -20,6 +20,12 @@ mod ohos;
 #[cfg(target_env = "ohos")]
 pub use ohos::*;
 
+/// Desktop reach system fonts through the fontique system backend.
+#[cfg(desktop)]
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    None
+}
+
 /// Build the platform context for the process launcher in src/desktop.rs.
 #[cfg(desktop)]
 pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::error::CoreError> {
