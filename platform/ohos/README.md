@@ -6,20 +6,48 @@ it, and the ArkTS hap shell used to build and install both the backend demo
 and the mail application. It mirrors `platform/android`; the shared UI and
 application code stay at the repository root.
 
+**Maintainer:** [springmin](https://github.com/springmin).
+
+## How it plugs into the architecture
+
+The application selects behaviour through the capability aliases declared in
+`build.rs` (`mobile`, `desktop`, `linux_desktop`, ...), never through an
+operating-system name. OpenHarmony is one of the `mobile` platforms:
+
+- `build.rs` defines `mobile = any(target_os = "android", target_os = "ios",
+  target_env = "ohos")` and keeps OHOS out of `desktop`/`linux_desktop`.
+- `src/platform/ohos.rs` is the application-side platform module: the share
+  target for data exported from the sandbox, the system monospace family, and
+  the TLS/system-font switches the shared code asks the platform about.
+- This tree is the only place that may name OpenHarmony: the host builds a
+  [`PlatformContext`](../README.md) (app-private paths, a document provider, a
+  credential store and an OAuth redirect broker) and calls
+  `flectar_mail::run`.
+
+`scripts/check-platform-gates.py` (run in `quality.yml`) rejects operating
+system names outside `src/platform/` and the build scripts, so new call sites
+must use the aliases.
+
 ## Layout
 
 | Path | What it is |
 |------|------------|
-| `backend/` | `slint-ohos-backend`: Slint `Platform`/`WindowAdapter` for a single XComponent window. Software renderer by default, experimental femtovg/wgpu GPU path, input translation, IME hooks, clipboard, file dialogs, system fonts. |
-| `mail/` | `flectar-mail-ohos` cdylib: NAPI module that starts the application and exposes the ArkTS bridge (file pickers, clipboard, IME text, notifications, dynamic exports). |
+| `backend/` | `slint-ohos-backend`: Slint `Platform`/`WindowAdapter` for a single XComponent window. Software renderer by default, experimental femtovg/wgpu GPU path, input translation, IME hooks, clipboard, system fonts. |
+| `mail/` | `flectar-mail-ohos` cdylib: NAPI module that builds the `PlatformContext` (app-private paths, `DocumentProvider` over the ArkTS pickers, Asset Store credential store, loopback OAuth broker), starts the application, and exposes the ArkTS bridge (file pickers, clipboard, IME text, external links). |
 | `demo/` | `slint-ohos-demo`: minimal cdylib used as a smoke target for backend changes. |
 | `shell/` | DevEco shell project (ArkTS). `page-templates/Index.mail.ets` is the real app page and `page-templates/Index.demo.ets` the demo page; `build-hap.sh` copies the selected template to `shell/entry/src/main/ets/pages/Index.ets`. |
 | `scripts/env.sh` | Environment: SDK paths, `hdc`, `hap-sign-tool`, `LD_LIBRARY_PATH` for lld. Source it before any `cargo` command in this workspace. |
 | `scripts/build-hap.sh` | End-to-end build: Rust cdylib → ArkTS `modules.abc` → hap staging → re-packed resources → signing. `APP=mail` or `APP=demo`. |
 | `scripts/run-device.sh` | Installs the built hap, starts it and streams filtered logs (demo by default). |
-| `scripts/cfg-ohos-align.py` | Mechanical helper that adds `target_env = "ohos"` to the platform cfg gates (M3 convergence). |
 | `scripts/fetch-pdfium.sh` | Fetches the prebuilt `libpdfium.so` used by the PDF preview. |
 | `prebuilt/arm64/` | Prebuilt native libraries that ride inside the hap (signature covers `libs/**`). |
+
+The workspace repeats the root `[patch.crates-io]` entries because this
+directory is a cargo workspace of its own, and it depends on the application
+with `default-features = false` (the host only drives the library; the
+desktop binary is not built). The OpenHarmony fontique patch is not vendored
+here: it lives in the root `patches/fontique/` queue next to the Blitz and
+Parley queues.
 
 ## Prerequisites
 
@@ -50,6 +78,16 @@ hdc shell "aa start -a EntryAbility -b com.example.myapplication"
 `bm install -r -d` is deliberate: `hdc install` rejects the hap ("install
 version downgrade") because the shared bundle name carries the DevEco
 project's version code.
+
+## CI
+
+The platform is tier 3: it is built by a manually dispatched workflow
+(`.github/workflows/ohos.yml`), not on every pull request. The HarmonyOS SDK
+and hvigor are not anonymously downloadable, so the build job targets a
+self-hosted runner with the prerequisites above. Dispatch runs build unsigned
+(`SKIP_SIGN=1`); `sign: true` switches to `RELEASE_SIGN=1`, which consumes the
+`FLECTAR_OHOS_*` repository secrets through `hap-sign-tool` and never touches
+the pull request context.
 
 ## Why the hap is re-packed by hand
 
@@ -94,7 +132,12 @@ handled (and asserted) in the script, do not "simplify" them away:
   keyboard events are translated (key codes to text, modifiers, auto-repeat)
   in `backend/src/xcomponent.rs`.
 - **Data**: the application keeps its data under the standard bundle data
-  path; database snapshots export through the system save dialog.
+  path. Import/export goes through the system document picker via the host
+  `DocumentProvider`; the credentials live in the system Asset Store, never
+  in plain files. Compose attachments, account backups and database snapshots
+  still use desktop file dialogs inside the application, so they report "no
+  picker" on mobile until they are routed through the document provider
+  (tracked upstream).
 
 ## Tests
 

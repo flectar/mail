@@ -5,11 +5,17 @@
 # flectar-mail shell (both share the ArkTS project; the XComponent page
 # template selects the native library).
 #
-# Signing uses the DevEco auto-signing material under
-# $HOME/Documents/ohos/config (bound to this machine's UDID) through the
-# ohos-workload sign-huawei.sh helper. The encrypted store password is read at
-# run time from the DevEco project that generated the material; it is never
-# stored in this repository.
+# Signing modes:
+#   default         DevEco auto-signing material under $HOME/Documents/ohos/config
+#                   (bound to this machine's UDID) through the ohos-workload
+#                   sign-huawei.sh helper. The encrypted store password is read
+#                   at run time from the DevEco project that generated the
+#                   material; it is never stored in this repository.
+#   RELEASE_SIGN=1  AGC release material passed through the environment
+#                   (RELEASE_P12, RELEASE_CERT, RELEASE_PROFILE, key alias and
+#                   passwords) and applied by hap-sign-tool directly.
+#   SKIP_SIGN=1     Stop at the unsigned hap (build-only CI and pull-request
+#                   checks, which must never touch signing material).
 set -e
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -42,13 +48,15 @@ NODE_BIN="$(command -v node || true)"
 HVIGOR_JS="${HVIGOR_JS:-$HOME/arkts-build/node_modules/@ohos/hvigor/bin/hvigor.js}"
 JAVA_HOME="${JAVA_HOME:-$HOME/.harmonybrew/opt/openjdk@17}"
 DEVECO_PROJECT_PROFILE="$HOME/Documents/DevEcoStudioProjects/MyApplication/build-profile.json5"
-SIGN_CFG="$HOME/Documents/ohos/config"
-SIGN_HELPER="$HOME/springsources/ohos-workload/scripts/sign-huawei.sh"
+SIGN_CFG="${SIGN_CFG:-$HOME/Documents/ohos/config}"
+SIGN_HELPER="${SIGN_HELPER:-$HOME/springsources/ohos-workload/scripts/sign-huawei.sh}"
 HVIGOR_LOG="$BUILD_DIR/hvigor.log"
 
 [ -f "$HVIGOR_JS" ] || die "hvigor not found: $HVIGOR_JS"
 [ -d "$JAVA_HOME" ] || die "JAVA_HOME not found: $JAVA_HOME"
-[ -f "$SIGN_HELPER" ] || die "sign helper not found: $SIGN_HELPER"
+if [ "${SKIP_SIGN:-0}" != "1" ] && [ "${RELEASE_SIGN:-0}" != "1" ]; then
+    [ -f "$SIGN_HELPER" ] || die "sign helper not found: $SIGN_HELPER"
+fi
 
 mkdir -p "$BUILD_DIR"
 
@@ -265,7 +273,7 @@ PY
 # and cannot load it from a deflated entry — the app then has no resources at
 # all (raw "$string:" labels, default launcher icon, 9001001 lookups).
 log "packing unsigned hap"
-rm -f "$UNSIGNED"
+rm -f "$UNSIGNED" "$SIGNED"
 python3 - "$UNSIGNED" "$STAGE" <<'PY'
 import os, sys, zipfile
 out, stage = sys.argv[1], sys.argv[2]
@@ -284,12 +292,16 @@ PY
 log "unsigned: $UNSIGNED ($(stat -c%s "$UNSIGNED") bytes)"
 
 # 5. sign --------------------------------------------------------------------
-# Default: the DevEco debug material (bound to this machine's UDID) through the
-# ohos-workload helper. RELEASE_SIGN=1 switches to the AGC release material
-# supplied through the environment:
+# SKIP_SIGN=1 stops at the unsigned hap (build-only CI; pull request checks
+# never touch signing material). Default: the DevEco debug material (bound to
+# this machine's UDID) through the ohos-workload helper. RELEASE_SIGN=1
+# switches to the AGC release material supplied through the environment:
 #   RELEASE_P12 (keystore) RELEASE_CERT (app certificate) RELEASE_PROFILE (signed .p7b)
 #   RELEASE_KEY_ALIAS RELEASE_KEY_PWD RELEASE_STORE_PWD
-if [ "${RELEASE_SIGN:-0}" = "1" ]; then
+if [ "${SKIP_SIGN:-0}" = "1" ]; then
+    log "SKIP_SIGN=1: keeping the unsigned hap"
+    SIGNED="$UNSIGNED"
+elif [ "${RELEASE_SIGN:-0}" = "1" ]; then
     : "${RELEASE_P12:?RELEASE_SIGN=1 needs RELEASE_P12 (AGC keystore .p12)}"
     : "${RELEASE_CERT:?RELEASE_SIGN=1 needs RELEASE_CERT (AGC app certificate)}"
     : "${RELEASE_PROFILE:?RELEASE_SIGN=1 needs RELEASE_PROFILE (signed .p7b profile)}"
@@ -316,4 +328,4 @@ else
         || die "signing failed"
 fi
 
-log "signed hap: $SIGNED"
+log "hap: $SIGNED"
