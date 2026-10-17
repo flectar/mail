@@ -42,14 +42,4 @@ impl DocumentProvider for OhosDocuments {
             }
         })
     }
-
-    fn archive(&self, directory: PathBuf) -> DocumentFuture<Option<PathBuf>> {
-        Box::pin(async move {
-            let archive = directory.with_extension("zip");
-            let source = directory.to_string_lossy().into_owned();
-            let target = archive.to_string_lossy().into_owned();
-            super::bridge::zip_folder(source, target).await?;
-            Ok(Some(archive))
-        })
-    }
 }

@@ -260,17 +260,16 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         flectar_mail::flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default(),
     );
 
-    let mut platform =
-        flectar_mail::PlatformContext::app_private(internal, cache, credentials, oauth);
-    // Authorization addresses go through the ArkTS bridge: OHOS reaches the
-    // system browser with a Want, which the page exposes as `openUrl`.
-    flectar_mail::set_url_opener(bridge::open_url);
-    // Soft-keyboard control for Slint's editable fields and system
-    // notifications for new mail.
+    // Import/export go through the system document picker; authorization and
+    // external addresses go through the ArkTS bridge (OHOS reaches the system
+    // browser with a Want, which the page exposes as `openUrl`).
+    let documents: Arc<dyn flectar_mail::documents::DocumentProvider> =
+        Arc::new(documents::OhosDocuments);
+    flectar_mail::set_external_url_opener(bridge::open_url);
+    // Soft-keyboard control for Slint's editable fields.
     slint_ohos_backend::ime::set_hooks(bridge::show_ime, bridge::hide_ime);
-    flectar_mail::set_notification_publisher(bridge::notify);
-    // Import/export go through the system document picker likewise.
-    platform.documents = Arc::new(documents::OhosDocuments);
+    let platform =
+        flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())
