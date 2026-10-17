@@ -341,58 +341,458 @@ fn read_account_backup(path: &std::path::Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-#[cfg(desktop)]
-fn pick_backup_export_path(title: String, filter: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title(title)
-        .set_file_name(format!(
-            "flectar-mail-backup-{}.json",
-            Local::now().format("%Y-%m-%d")
-        ))
-        .add_filter(filter, &["json"])
-        .save_file()
+
+/// Applies an account backup the host already imported. The caller keeps the
+/// imported document alive until this returns.
+fn import_account_backup_document(
+    app: &AppWindow,
+    path: &std::path::Path,
+    core: &CoreMailSource,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &Rc<tokio::runtime::Runtime>,
+) {
+    let result = (|| -> Result<(usize, Settings, Vec<Account>, Vec<AccountConfig>), String> {
+        let bytes = read_account_backup(path)?;
+        let backup: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|error| format!("invalid JSON: {error}"))?;
+        if backup.get("format").and_then(|value| value.as_str())
+            != Some("flectar-mail-account-backup")
+        {
+            return Err("this is not a Flectar Mail account backup".into());
+        }
+        if backup.get("version").and_then(|value| value.as_u64()) != Some(1) {
+            return Err("this backup version is not supported".into());
+        }
+        if backup
+            .get("includesCredentials")
+            .and_then(|value| value.as_bool())
+            == Some(true)
+        {
+            return Err("backups containing credentials are not accepted".into());
+        }
+        let configs = serde_json::from_value::<Vec<PortableAccountConfig>>(
+            backup
+                .get("accounts")
+                .cloned()
+                .ok_or_else(|| "backup has no accounts list".to_owned())?,
+        )
+        .map_err(|error| format!("invalid account data: {error}"))?;
+        if configs.len() > 100 {
+            return Err("backup contains more than 100 accounts".into());
+        }
+        let imported_emails = configs
+            .iter()
+            .map(|config| config.email.trim().to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let portable_profiles = portable_mail_profiles(&backup, &imported_emails)?;
+        let has_portable_profiles = portable_profiles.is_some();
+        let portable_profiles = portable_profiles.unwrap_or_default();
+        let portable_colors = portable_account_colors(&backup, &imported_emails)?;
+        let has_portable_colors = portable_colors.is_some();
+        let portable_colors = portable_colors.unwrap_or_default();
+
+        let mut settings = runtime.block_on(core.load_settings())?;
+        if let Some(preferences) = backup.get("preferences") {
+            if let Some(theme) = preferences.get("theme").and_then(|value| value.as_str())
+                && matches!(theme, "system" | "carbon" | "snow" | "dark" | "light")
+            {
+                settings.theme = theme.to_owned();
+            }
+            if let Some(enabled) = preferences
+                .get("monochromeSidebarIcons")
+                .and_then(|value| value.as_bool())
+            {
+                settings.monochrome_sidebar_icons = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("showAvatars")
+                .and_then(|value| value.as_bool())
+            {
+                settings.show_avatars = enabled;
+            }
+            if let Some(frame) = preferences
+                .get("windowFrame")
+                .and_then(|value| value.as_str())
+                && matches!(frame, "system" | "integrated")
+            {
+                settings.window_frame = frame.to_owned();
+            }
+            if let Some(layout) = preferences
+                .get("workspaceLayout")
+                .or_else(|| preferences.get("mailLayout"))
+                .and_then(|value| value.as_str())
+                && matches!(layout, "default" | "minimal")
+            {
+                settings.workspace_layout = layout.to_owned();
+            }
+            if let Some(preference) = preferences
+                .get("messageAppearance")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::MessageAppearance::parse)
+            {
+                settings.message_appearance = preference;
+            }
+            if let Some(width) = preferences
+                .get("workspaceListPaneWidth")
+                .and_then(|value| value.as_i64())
+            {
+                settings.workspace_list_pane_width =
+                    normalized_workspace_list_pane_width(width);
+            }
+            if let Some(language) = preferences
+                .get("language")
+                .and_then(|value| value.as_str())
+                && language.len() <= 32
+            {
+                settings.language = language.to_owned();
+            }
+            if let Some(week_start) = preferences
+                .get("calendarWeekStart")
+                .and_then(|value| value.as_str())
+                && matches!(week_start, "sunday" | "monday")
+            {
+                settings.calendar_week_start = week_start.to_owned();
+            }
+            if let Some(enabled) = preferences
+                .get("loadRemoteImages")
+                .and_then(|value| value.as_bool())
+            {
+                settings.load_remote_images = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("markReadOnOpen")
+                .and_then(|value| value.as_bool())
+            {
+                settings.mark_read_on_open = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("collectOutgoingContacts")
+                .and_then(|value| value.as_bool())
+            {
+                settings.collect_outgoing_contacts = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("collectIncomingContacts")
+                .and_then(|value| value.as_bool())
+            {
+                settings.collect_incoming_contacts = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("contactSuggestAllAccounts")
+                .and_then(|value| value.as_bool())
+            {
+                settings.contact_suggest_all_accounts = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("suggestLearnedContacts")
+                .and_then(|value| value.as_bool())
+            {
+                settings.suggest_learned_contacts = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("notificationsEnabled")
+                .and_then(|value| value.as_bool())
+            {
+                settings.notifications_enabled = enabled;
+            }
+            if let Some(scope) = preferences
+                .get("notificationScope")
+                .and_then(|value| value.as_str())
+                && matches!(scope, "important" | "all")
+            {
+                settings.notification_scope = scope.to_owned();
+            }
+            if let Some(enabled) = preferences
+                .get("soundEnabled")
+                .and_then(|value| value.as_bool())
+            {
+                settings.sound_enabled = enabled;
+            }
+            if let Some(minutes) = preferences
+                .get("syncIntervalMinutes")
+                .and_then(|value| value.as_i64())
+                && matches!(minutes, 1 | 5 | 15)
+            {
+                settings.sync_interval_minutes = minutes;
+            }
+            if let Some(enabled) = preferences
+                .get("closeToTray")
+                .and_then(|value| value.as_bool())
+            {
+                settings.close_to_tray = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("showAccountMarkers")
+                .and_then(|value| value.as_bool())
+            {
+                settings.show_account_badges = enabled;
+            }
+        }
+
+        let imported = runtime
+            .block_on(core.import_account_configs(configs))?;
+        runtime.block_on(core.save_settings(settings.clone()))?;
+        let accounts = runtime.block_on(core.load_accounts())?;
+        let configs = runtime.block_on(core.load_account_configs())?;
+        let account_ids = accounts
+            .iter()
+            .map(|account| (account.email.trim().to_ascii_lowercase(), account.id))
+            .collect::<HashMap<_, _>>();
+        if has_portable_colors {
+            for email in &imported_emails {
+                if let Some(account_id) = account_ids.get(email) {
+                    runtime
+                        .block_on(core.set_account_color(*account_id, None))?;
+                }
+            }
+            for (email, color) in portable_colors {
+                if let Some(account_id) = account_ids.get(&email) {
+                    runtime
+                        .block_on(core.set_account_color(*account_id, Some(color)))?;
+                }
+            }
+        }
+        if has_portable_profiles {
+            for email in &imported_emails {
+                if let Some(account_id) = account_ids.get(email) {
+                    runtime
+                        .block_on(core.assign_account_profile(*account_id, None))?;
+                }
+            }
+        }
+        for profile in portable_profiles {
+            let current = runtime.block_on(core.load_settings())?;
+            let existing_id = current
+                .mail_profiles
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(profile.name.trim()))
+                .map(|candidate| candidate.id.clone());
+            let (_, saved) = runtime.block_on(core.save_mail_profile(
+                existing_id,
+                profile.name,
+                profile.color,
+            ))?;
+            for email in profile.account_emails {
+                if let Some(account_id) = account_ids.get(&email.trim().to_ascii_lowercase()) {
+                    runtime.block_on(core.assign_account_profile(
+                        *account_id,
+                        Some(saved.id.clone()),
+                    ))?;
+                }
+            }
+        }
+        settings = runtime.block_on(core.load_settings())?;
+        Ok((imported, settings, accounts, configs))
+    })();
+
+    match result {
+        Ok((imported, settings, accounts, configs)) => {
+            let total = accounts.len();
+            apply_language(app, &settings.language);
+            state.borrow_mut().account_presentation =
+                AccountPresentationSettings::from_settings(&settings);
+            update_connected_accounts(
+                app,
+                state,
+                runtime,
+                accounts,
+                configs,
+            );
+            refresh_rows_only(app, state, runtime);
+            app.set_theme_mode(
+                match settings.theme.as_str() {
+                    "carbon" | "dark" => "dark",
+                    "snow" | "light" => "light",
+                    _ => "system",
+                }
+                .into(),
+            );
+            app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
+            app.global::<MessageColors>()
+                .set_preference(settings.message_appearance.as_str().into());
+            app.set_show_avatars(settings.show_avatars);
+            app.set_show_account_markers(settings.show_account_badges);
+            crate::window_chrome::apply_preference(
+                app,
+                crate::window_chrome::WindowFrame::parse(&settings.window_frame),
+            );
+            app.set_workspace_layout(settings.workspace_layout.clone().into());
+            app.set_workspace_list_pane_width(
+                normalized_workspace_list_pane_width(settings.workspace_list_pane_width)
+                    as f32,
+            );
+            app.set_notifications_enabled(settings.notifications_enabled);
+            app.set_notification_sound_enabled(settings.sound_enabled);
+            app.set_notification_scope(settings.notification_scope.clone().into());
+            app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
+            app.set_mark_read_on_open(settings.mark_read_on_open);
+            app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
+            app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
+            app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
+            app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
+            state.borrow_mut().mark_read_on_open =
+                settings.mark_read_on_open;
+            app.set_remote_images_enabled(
+                settings.load_remote_images && cfg!(feature = "remote-content"),
+            );
+            #[cfg(not(any(mobile, feature = "flatpak")))]
+            app.set_close_to_tray(settings.close_to_tray);
+            #[cfg(any(mobile, feature = "flatpak"))]
+            app.set_close_to_tray(false);
+            app.set_sync_status(if imported == 0 {
+                UiMessage::detail(
+                    "Backup imported. All {} account configurations already existed.",
+                    total,
+                )
+            } else {
+                UiMessage::detail(
+                    "Imported {} account configurations. Open Accounts and sign in to each one.",
+                    imported,
+                )
+            });
+        }
+        Err(error) => {
+            app.set_sync_status(UiMessage::detail("Could not import backup: {}", error))
+        }
+    }
 }
 
-#[cfg(mobile)]
-fn pick_backup_export_path(_title: String, _filter: String) -> Option<PathBuf> {
-    None
+// --- staging helpers --------------------------------------------------------
+
+/// A provider export reads from an app-private staging file; the host copies
+/// it to whatever destination its picker offers.
+async fn export_document_bytes(
+    documents: &std::sync::Arc<dyn documents::DocumentProvider>,
+    staging_dir: PathBuf,
+    bytes: Vec<u8>,
+    name: String,
+) -> Result<bool, String> {
+    let staging = staging_dir.join(&name);
+    let result = async {
+        tokio::fs::create_dir_all(&staging_dir)
+            .await
+            .map_err(|error| format!("creating {}: {error}", staging_dir.display()))?;
+        tokio::fs::write(&staging, bytes)
+            .await
+            .map_err(|error| format!("writing {}: {error}", staging.display()))?;
+        documents.export(staging.clone(), name).await
+    }
+    .await;
+    let _ = tokio::fs::remove_file(&staging).await;
+    result
 }
 
-#[cfg(desktop)]
-fn pick_backup_import_path(title: String, filter: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter(filter, &["json"])
-        .pick_file()
+/// Database snapshot staging must stay outside the application data and cache
+/// roots: Core refuses to write a snapshot inside them.
+fn snapshot_staging_root(paths: &Paths) -> PathBuf {
+    let temporary = std::env::temp_dir();
+    if temporary.starts_with(&paths.data_dir) || temporary.starts_with(&paths.cache_dir) {
+        // Android points TMPDIR at the app cache; stage beside the data root.
+        return paths
+            .data_dir
+            .parent()
+            .map(|parent| parent.join("snapshot-staging"))
+            .unwrap_or_else(|| temporary.join("flectar-mail-snapshot"));
+    }
+    temporary.join("flectar-mail-snapshot")
 }
 
-#[cfg(mobile)]
-fn pick_backup_import_path(_title: String, _filter: String) -> Option<PathBuf> {
-    None
-}
-
-#[cfg(desktop)]
-fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
-        .set_title(title)
-        .pick_folder()
-        .map(|directory| {
-            directory.join(format!(
-                "flectar-mail-snapshot-{}",
-                Local::now().format("%Y-%m-%d-%H%M%S")
-            ))
+/// Creates the verified snapshot in staging, archives it as one file and hands
+/// it to the document provider (mobile hosts export files, not folders).
+async fn export_database_snapshot(
+    core: &CoreMailSource,
+    documents: std::sync::Arc<dyn documents::DocumentProvider>,
+    staging_root: PathBuf,
+) -> Result<bool, String> {
+    let name = format!(
+        "flectar-mail-snapshot-{}.zip",
+        Local::now().format("%Y-%m-%d-%H%M%S")
+    );
+    let directory = staging_root.join(name.trim_end_matches(".zip"));
+    let archive = staging_root.join(&name);
+    let result = async {
+        tokio::fs::create_dir_all(&staging_root)
+            .await
+            .map_err(|error| format!("creating {}: {error}", staging_root.display()))?;
+        let _ = tokio::fs::remove_dir_all(&directory).await;
+        core.create_database_snapshot(directory.clone())
+            .await
+            .map_err(|error| error.to_string())?;
+        let directory_for_archive = directory.clone();
+        let archive_for_zip = archive.clone();
+        tokio::task::spawn_blocking(move || {
+            archive_snapshot_directory(&directory_for_archive, &archive_for_zip)
         })
+        .await
+        .map_err(|error| error.to_string())??;
+        documents.export(archive.clone(), name.clone()).await
+    }
+    .await;
+    let _ = tokio::fs::remove_dir_all(&directory).await;
+    let _ = tokio::fs::remove_file(&archive).await;
+    result
 }
 
-#[cfg(mobile)]
-fn pick_database_snapshot_path(_title: String) -> Option<PathBuf> {
-    None
+/// The zip crate runs without compression features: snapshots are dense
+/// SQLite stores plus already-compressed attachments.
+fn archive_snapshot_directory(
+    directory: &std::path::Path,
+    archive: &std::path::Path,
+) -> Result<(), String> {
+    fn append(
+        zip: &mut zip::ZipWriter<std::fs::File>,
+        root: &std::path::Path,
+        directory: &std::path::Path,
+        options: zip::write::SimpleFileOptions,
+    ) -> Result<(), String> {
+        let mut entries = std::fs::read_dir(directory)
+            .map_err(|error| format!("reading {}: {error}", directory.display()))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if entry
+                .file_type()
+                .map(|kind| kind.is_symlink())
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let name = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                zip.add_directory(format!("{name}/"), options)
+                    .map_err(|error| error.to_string())?;
+                append(zip, root, &path, options)?;
+            } else {
+                zip.start_file(name, options)
+                    .map_err(|error| error.to_string())?;
+                let mut source = std::fs::File::open(&path)
+                    .map_err(|error| format!("reading {}: {error}", path.display()))?;
+                std::io::copy(&mut source, zip).map_err(|error| error.to_string())?;
+            }
+        }
+        Ok(())
+    }
+    let file = std::fs::File::create(archive)
+        .map_err(|error| format!("creating {}: {error}", archive.display()))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored);
+    append(&mut zip, directory, directory, options)?;
+    zip.finish().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn register_data_management_callbacks(
     app: &AppWindow,
     paths: &Paths,
+    documents: &std::sync::Arc<dyn documents::DocumentProvider>,
     state: &Rc<RefCell<InboxState>>,
     runtime: &Rc<tokio::runtime::Runtime>,
     ui_task_tx: &UiSender<UiTaskUpdate>,
@@ -466,6 +866,8 @@ pub(super) fn register_data_management_callbacks(
     let app_weak = app.as_weak();
     let state_for_backup = Rc::clone(state);
     let runtime_for_backup = Rc::clone(runtime);
+    let documents_for_backup = documents.clone();
+    let paths_for_backup = paths.clone();
     app.on_export_account_backup(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -480,21 +882,6 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         }
-        let Some(path) = pick_backup_export_path(
-            translated(
-                &app,
-                &UiMessage::plain("Export Flectar Mail account backup"),
-            )
-            .to_string(),
-            translated(&app, &UiMessage::plain("Flectar Mail backup")).to_string(),
-        ) else {
-            #[cfg(mobile)]
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document export.",
-            ));
-            return;
-        };
-
         let preferences = core
             .as_ref()
             .and_then(|core| runtime_for_backup.block_on(core.load_settings()).ok())
@@ -575,16 +962,39 @@ pub(super) fn register_data_management_callbacks(
             "accounts": accounts,
             "preferences": preferences
         });
-        match serde_json::to_vec_pretty(&backup)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| std::fs::write(&path, bytes).map_err(|error| error.to_string()))
-        {
-            Ok(()) => app.set_sync_status(UiMessage::plain(
-                "Backup exported. Passwords and OAuth tokens were not included.",
-            )),
+        let bytes = match serde_json::to_vec_pretty(&backup) {
+            Ok(bytes) => bytes,
             Err(error) => {
-                app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
+                app.set_sync_status(UiMessage::detail("Could not export backup: {}", error));
+                return;
             }
+        };
+        let name = format!(
+            "flectar-mail-backup-{}.json",
+            Local::now().format("%Y-%m-%d")
+        );
+        let documents = documents_for_backup.clone();
+        let staging_dir = paths_for_backup.temp_dir();
+        let app_weak = app.as_weak();
+        let spawned = slint::spawn_local(async move {
+            let result = export_document_bytes(&documents, staging_dir, bytes, name).await;
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            match result {
+                Ok(true) => app.set_sync_status(UiMessage::plain(
+                    "Backup exported. Passwords and OAuth tokens were not included.",
+                )),
+                Ok(false) => {}
+                Err(error) => {
+                    app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
+                }
+            }
+        });
+        if spawned.is_err() {
+            app.set_sync_status(UiMessage::plain(
+                "The platform host does not provide document export.",
+            ));
         }
     });
 
@@ -592,6 +1002,8 @@ pub(super) fn register_data_management_callbacks(
     let state_for_database_snapshot = Rc::clone(state);
     let runtime_for_database_snapshot = Rc::clone(runtime);
     let updates_for_database_snapshot = ui_task_tx.clone();
+    let documents_for_database_snapshot = documents.clone();
+    let paths_for_database_snapshot = paths.clone();
     app.on_export_database_snapshot(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -602,27 +1014,17 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        let Some(path) = pick_database_snapshot_path(
-            translated(
-                &app,
-                &UiMessage::plain("Choose where to export the database snapshot"),
-            )
-            .to_string(),
-        ) else {
-            #[cfg(mobile)]
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document export.",
-            ));
-            return;
-        };
-
         app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
         let updates = updates_for_database_snapshot.clone();
+        let documents = documents_for_database_snapshot.clone();
+        let staging_root = snapshot_staging_root(&paths_for_database_snapshot);
         runtime_for_database_snapshot.spawn(async move {
-            let display_path = path.display().to_string();
-            let message = match core.create_database_snapshot(path).await {
-                Ok(_) => UiMessage::detail("Database snapshot exported to {}.", display_path),
-                Err(error) => UiMessage::detail("Could not export database snapshot: {}", error),
+            let message = match export_database_snapshot(&core, documents, staging_root).await {
+                Ok(true) => UiMessage::plain("Database snapshot exported."),
+                Ok(false) => UiMessage::plain("Database snapshot export cancelled."),
+                Err(error) => {
+                    UiMessage::detail("Could not export database snapshot: {}", error)
+                }
             };
             let _ = updates
                 .send(UiTaskUpdate {
@@ -644,6 +1046,7 @@ pub(super) fn register_data_management_callbacks(
     let app_weak = app.as_weak();
     let state_for_backup_import = Rc::clone(state);
     let runtime_for_backup_import = Rc::clone(runtime);
+    let documents_for_backup_import = documents.clone();
     app.on_import_account_backup(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -654,325 +1057,37 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        let Some(path) = pick_backup_import_path(
-            translated(
-                &app,
-                &UiMessage::plain("Import Flectar Mail account backup"),
-            )
-            .to_string(),
-            translated(&app, &UiMessage::plain("Flectar Mail backup")).to_string(),
-        ) else {
-            #[cfg(mobile)]
+        let documents = documents_for_backup_import.clone();
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state_for_backup_import);
+        let runtime = Rc::clone(&runtime_for_backup_import);
+        // The provider handshake runs on the UI thread's executor; the import
+        // keeps its synchronous shape so the existing state updates stay on
+        // the main loop.
+        let spawned = slint::spawn_local(async move {
+            let imported = documents.import().await;
+            let Some(app) = app_weak.upgrade() else {
+                return;
+            };
+            let document = match imported {
+                Ok(Some(document)) => document,
+                Ok(None) => return,
+                Err(error) => {
+                    app.set_sync_status(UiMessage::detail(
+                        "Could not import backup: {}",
+                        error,
+                    ));
+                    return;
+                }
+            };
+            import_account_backup_document(&app, document.path(), &core, &state, &runtime);
+        });
+        if spawned.is_err() {
             app.set_sync_status(UiMessage::plain(
                 "The platform host does not provide document import.",
             ));
-            return;
-        };
-
-        let result = (|| -> Result<(usize, Settings, Vec<Account>, Vec<AccountConfig>), String> {
-            let bytes = read_account_backup(&path)?;
-            let backup: serde_json::Value =
-                serde_json::from_slice(&bytes).map_err(|error| format!("invalid JSON: {error}"))?;
-            if backup.get("format").and_then(|value| value.as_str())
-                != Some("flectar-mail-account-backup")
-            {
-                return Err("this is not a Flectar Mail account backup".into());
-            }
-            if backup.get("version").and_then(|value| value.as_u64()) != Some(1) {
-                return Err("this backup version is not supported".into());
-            }
-            if backup
-                .get("includesCredentials")
-                .and_then(|value| value.as_bool())
-                == Some(true)
-            {
-                return Err("backups containing credentials are not accepted".into());
-            }
-            let configs = serde_json::from_value::<Vec<PortableAccountConfig>>(
-                backup
-                    .get("accounts")
-                    .cloned()
-                    .ok_or_else(|| "backup has no accounts list".to_owned())?,
-            )
-            .map_err(|error| format!("invalid account data: {error}"))?;
-            if configs.len() > 100 {
-                return Err("backup contains more than 100 accounts".into());
-            }
-            let imported_emails = configs
-                .iter()
-                .map(|config| config.email.trim().to_ascii_lowercase())
-                .collect::<HashSet<_>>();
-            let portable_profiles = portable_mail_profiles(&backup, &imported_emails)?;
-            let has_portable_profiles = portable_profiles.is_some();
-            let portable_profiles = portable_profiles.unwrap_or_default();
-            let portable_colors = portable_account_colors(&backup, &imported_emails)?;
-            let has_portable_colors = portable_colors.is_some();
-            let portable_colors = portable_colors.unwrap_or_default();
-
-            let mut settings = runtime_for_backup_import.block_on(core.load_settings())?;
-            if let Some(preferences) = backup.get("preferences") {
-                if let Some(theme) = preferences.get("theme").and_then(|value| value.as_str())
-                    && matches!(theme, "system" | "carbon" | "snow" | "dark" | "light")
-                {
-                    settings.theme = theme.to_owned();
-                }
-                if let Some(enabled) = preferences
-                    .get("monochromeSidebarIcons")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.monochrome_sidebar_icons = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("showAvatars")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.show_avatars = enabled;
-                }
-                if let Some(frame) = preferences
-                    .get("windowFrame")
-                    .and_then(|value| value.as_str())
-                    && matches!(frame, "system" | "integrated")
-                {
-                    settings.window_frame = frame.to_owned();
-                }
-                if let Some(layout) = preferences
-                    .get("workspaceLayout")
-                    .or_else(|| preferences.get("mailLayout"))
-                    .and_then(|value| value.as_str())
-                    && matches!(layout, "default" | "minimal")
-                {
-                    settings.workspace_layout = layout.to_owned();
-                }
-                if let Some(preference) = preferences
-                    .get("messageAppearance")
-                    .and_then(|value| value.as_str())
-                    .and_then(flectar_mail_core::models::MessageAppearance::parse)
-                {
-                    settings.message_appearance = preference;
-                }
-                if let Some(width) = preferences
-                    .get("workspaceListPaneWidth")
-                    .and_then(|value| value.as_i64())
-                {
-                    settings.workspace_list_pane_width =
-                        normalized_workspace_list_pane_width(width);
-                }
-                if let Some(language) = preferences
-                    .get("language")
-                    .and_then(|value| value.as_str())
-                    && language.len() <= 32
-                {
-                    settings.language = language.to_owned();
-                }
-                if let Some(week_start) = preferences
-                    .get("calendarWeekStart")
-                    .and_then(|value| value.as_str())
-                    && matches!(week_start, "sunday" | "monday")
-                {
-                    settings.calendar_week_start = week_start.to_owned();
-                }
-                if let Some(enabled) = preferences
-                    .get("loadRemoteImages")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.load_remote_images = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("markReadOnOpen")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.mark_read_on_open = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("collectOutgoingContacts")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.collect_outgoing_contacts = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("collectIncomingContacts")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.collect_incoming_contacts = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("contactSuggestAllAccounts")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.contact_suggest_all_accounts = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("suggestLearnedContacts")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.suggest_learned_contacts = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("notificationsEnabled")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.notifications_enabled = enabled;
-                }
-                if let Some(scope) = preferences
-                    .get("notificationScope")
-                    .and_then(|value| value.as_str())
-                    && matches!(scope, "important" | "all")
-                {
-                    settings.notification_scope = scope.to_owned();
-                }
-                if let Some(enabled) = preferences
-                    .get("soundEnabled")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.sound_enabled = enabled;
-                }
-                if let Some(minutes) = preferences
-                    .get("syncIntervalMinutes")
-                    .and_then(|value| value.as_i64())
-                    && matches!(minutes, 1 | 5 | 15)
-                {
-                    settings.sync_interval_minutes = minutes;
-                }
-                if let Some(enabled) = preferences
-                    .get("closeToTray")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.close_to_tray = enabled;
-                }
-                if let Some(enabled) = preferences
-                    .get("showAccountMarkers")
-                    .and_then(|value| value.as_bool())
-                {
-                    settings.show_account_badges = enabled;
-                }
-            }
-
-            let imported = runtime_for_backup_import
-                .block_on(core.import_account_configs(configs))?;
-            runtime_for_backup_import.block_on(core.save_settings(settings.clone()))?;
-            let accounts = runtime_for_backup_import.block_on(core.load_accounts())?;
-            let configs = runtime_for_backup_import.block_on(core.load_account_configs())?;
-            let account_ids = accounts
-                .iter()
-                .map(|account| (account.email.trim().to_ascii_lowercase(), account.id))
-                .collect::<HashMap<_, _>>();
-            if has_portable_colors {
-                for email in &imported_emails {
-                    if let Some(account_id) = account_ids.get(email) {
-                        runtime_for_backup_import
-                            .block_on(core.set_account_color(*account_id, None))?;
-                    }
-                }
-                for (email, color) in portable_colors {
-                    if let Some(account_id) = account_ids.get(&email) {
-                        runtime_for_backup_import
-                            .block_on(core.set_account_color(*account_id, Some(color)))?;
-                    }
-                }
-            }
-            if has_portable_profiles {
-                for email in &imported_emails {
-                    if let Some(account_id) = account_ids.get(email) {
-                        runtime_for_backup_import
-                            .block_on(core.assign_account_profile(*account_id, None))?;
-                    }
-                }
-            }
-            for profile in portable_profiles {
-                let current = runtime_for_backup_import.block_on(core.load_settings())?;
-                let existing_id = current
-                    .mail_profiles
-                    .iter()
-                    .find(|candidate| candidate.name.eq_ignore_ascii_case(profile.name.trim()))
-                    .map(|candidate| candidate.id.clone());
-                let (_, saved) = runtime_for_backup_import.block_on(core.save_mail_profile(
-                    existing_id,
-                    profile.name,
-                    profile.color,
-                ))?;
-                for email in profile.account_emails {
-                    if let Some(account_id) = account_ids.get(&email.trim().to_ascii_lowercase()) {
-                        runtime_for_backup_import.block_on(core.assign_account_profile(
-                            *account_id,
-                            Some(saved.id.clone()),
-                        ))?;
-                    }
-                }
-            }
-            settings = runtime_for_backup_import.block_on(core.load_settings())?;
-            Ok((imported, settings, accounts, configs))
-        })();
-
-        match result {
-            Ok((imported, settings, accounts, configs)) => {
-                let total = accounts.len();
-                apply_language(&app, &settings.language);
-                state_for_backup_import.borrow_mut().account_presentation =
-                    AccountPresentationSettings::from_settings(&settings);
-                update_connected_accounts(
-                    &app,
-                    &state_for_backup_import,
-                    &runtime_for_backup_import,
-                    accounts,
-                    configs,
-                );
-                refresh_rows_only(&app, &state_for_backup_import, &runtime_for_backup_import);
-                app.set_theme_mode(
-                    match settings.theme.as_str() {
-                        "carbon" | "dark" => "dark",
-                        "snow" | "light" => "light",
-                        _ => "system",
-                    }
-                    .into(),
-                );
-                app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
-                app.global::<MessageColors>()
-                    .set_preference(settings.message_appearance.as_str().into());
-                app.set_show_avatars(settings.show_avatars);
-                app.set_show_account_markers(settings.show_account_badges);
-                crate::window_chrome::apply_preference(
-                    &app,
-                    crate::window_chrome::WindowFrame::parse(&settings.window_frame),
-                );
-                app.set_workspace_layout(settings.workspace_layout.clone().into());
-                app.set_workspace_list_pane_width(
-                    normalized_workspace_list_pane_width(settings.workspace_list_pane_width)
-                        as f32,
-                );
-                app.set_notifications_enabled(settings.notifications_enabled);
-                app.set_notification_sound_enabled(settings.sound_enabled);
-                app.set_notification_scope(settings.notification_scope.clone().into());
-                app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
-                app.set_mark_read_on_open(settings.mark_read_on_open);
-                app.set_collect_outgoing_contacts(settings.collect_outgoing_contacts);
-                app.set_collect_incoming_contacts(settings.collect_incoming_contacts);
-                app.set_contact_suggest_all_accounts(settings.contact_suggest_all_accounts);
-                app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
-                state_for_backup_import.borrow_mut().mark_read_on_open =
-                    settings.mark_read_on_open;
-                app.set_remote_images_enabled(
-                    settings.load_remote_images && cfg!(feature = "remote-content"),
-                );
-                #[cfg(not(any(mobile, feature = "flatpak")))]
-                app.set_close_to_tray(settings.close_to_tray);
-                #[cfg(any(mobile, feature = "flatpak"))]
-                app.set_close_to_tray(false);
-                app.set_sync_status(if imported == 0 {
-                    UiMessage::detail(
-                        "Backup imported. All {} account configurations already existed.",
-                        total,
-                    )
-                } else {
-                    UiMessage::detail(
-                        "Imported {} account configurations. Open Accounts and sign in to each one.",
-                        imported,
-                    )
-                });
-            }
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail("Could not import backup: {}", error))
-            }
         }
+
     });
 
     let (data_reset_raw_tx, data_reset_rx) = bounded_ui_channel::<Result<(), String>>();
