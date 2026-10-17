@@ -76,6 +76,8 @@ base64 = "0.22"
 percent-encoding = "2"
 data-url = "0.3"
 html5ever = "0.40"
+# Snapshot archives one verified database snapshot for the document provider.
+zip = { version = "9.0.4", default-features = false }
 cssparser = "0.38"
 # Match Blitz's Stylo version when adapting resolved CSS colors and gradients.
 style = { package = "stylo", version = "=0.22.0" }

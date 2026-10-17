@@ -39,9 +39,20 @@ impl Drop for DocumentRequestGuard {
         (std::mem::replace(&mut self.0, Box::new(|| {})))();
     }
 }
-pub trait DocumentProvider: Send + Sync {
+pub trait DocumentProvider: Send + Sync + 'static {
     fn import(&self) -> DocumentFuture<Option<ImportedDocument>>;
     fn export(&self, path: PathBuf, name: String) -> DocumentFuture<bool>;
+    /// Import several documents for one user action (compose attachments).
+    /// Hosts whose picker selects multiple files at once override this; the
+    /// default imports one document per request, so a single-document picker
+    /// never opens twice for one action. Each returned document owns its copy,
+    /// so the caller must keep them alive until Core has staged the files.
+    fn import_many(
+        self: std::sync::Arc<Self>,
+        _limit: usize,
+    ) -> DocumentFuture<Vec<ImportedDocument>> {
+        Box::pin(async move { Ok(self.import().await?.into_iter().collect()) })
+    }
 }
 /// Desktop file dialogs. Mobile hosts inject their own provider through
 /// `PlatformContext::app_private`.
@@ -68,6 +79,25 @@ impl DocumentProvider for DesktopDocuments {
                 .pick_file()
                 .await
                 .map(|f| ImportedDocument::source(f.path().to_owned())))
+        })
+    }
+    fn import_many(
+        self: std::sync::Arc<Self>,
+        limit: usize,
+    ) -> DocumentFuture<Vec<ImportedDocument>> {
+        Box::pin(async move {
+            Ok(rfd::AsyncFileDialog::new()
+                .set_title("Upload files")
+                .pick_files()
+                .await
+                .map(|files| {
+                    files
+                        .into_iter()
+                        .take(limit)
+                        .map(|file| ImportedDocument::source(file.path().to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default())
         })
     }
     fn export(&self, path: PathBuf, name: String) -> DocumentFuture<bool> {
@@ -154,6 +184,60 @@ mod tests {
         assert!(!path.exists());
         assert_eq!(drops.load(Ordering::SeqCst), 1);
         assert_eq!(cancelled.load(Ordering::SeqCst), 1);
+    }
+
+    struct FakeDocuments {
+        directory: PathBuf,
+        imports: AtomicUsize,
+        cancel_after: usize,
+    }
+
+    impl DocumentProvider for FakeDocuments {
+        fn import(&self) -> DocumentFuture<Option<ImportedDocument>> {
+            let seen = self.imports.fetch_add(1, Ordering::SeqCst);
+            let cancel = seen >= self.cancel_after;
+            let path = self.directory.join(format!("import-{seen}"));
+            Box::pin(async move {
+                if cancel {
+                    return Ok(None);
+                }
+                std::fs::write(&path, b"attachment").unwrap();
+                Ok(Some(ImportedDocument::temporary(path, |path| {
+                    let _ = std::fs::remove_file(path);
+                })))
+            })
+        }
+        fn export(&self, _path: PathBuf, _name: String) -> DocumentFuture<bool> {
+            Box::pin(async { Ok(false) })
+        }
+    }
+
+    #[tokio::test]
+    async fn import_many_uses_one_picker_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = Arc::new(FakeDocuments {
+            directory: directory.path().to_owned(),
+            imports: AtomicUsize::new(0),
+            cancel_after: usize::MAX,
+        });
+        let documents = provider.clone().import_many(20).await.unwrap();
+        assert_eq!(documents.len(), 1);
+        assert_eq!(provider.imports.load(Ordering::SeqCst), 1);
+        drop(documents);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn import_many_returns_empty_when_the_picker_is_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = Arc::new(FakeDocuments {
+            directory: directory.path().to_owned(),
+            imports: AtomicUsize::new(0),
+            cancel_after: 0,
+        });
+        let documents = provider.clone().import_many(20).await.unwrap();
+        assert!(documents.is_empty());
+        assert_eq!(provider.imports.load(Ordering::SeqCst), 1);
     }
 
     #[test]

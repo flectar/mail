@@ -73,10 +73,6 @@ Hosts that launch through `src/desktop.rs` (desktop and iOS) also provide
 
 ### Known gaps
 
-- Compose attachments, account backups and database snapshots still use
-  desktop file dialogs directly. On `mobile` they report that the host has no
-  picker. Routing them through `DocumentProvider` will make them available to
-  every host.
 - iOS has no Keychain-backed `CredentialStore` yet and uses
   `UnavailableCredentialStore`.
 
