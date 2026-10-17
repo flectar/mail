@@ -4,6 +4,7 @@ mod account_mail_preferences;
 mod account_removal_tests;
 mod attachment_controller;
 mod browser;
+pub use browser::set_external_url_opener;
 mod calendar;
 mod compose_controller;
 mod compose_editor;

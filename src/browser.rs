@@ -1,4 +1,17 @@
 //! Open the system browser without leaking AppImage libraries into host programs.
+
+use std::sync::OnceLock;
+
+/// Opener installed by a platform integration that cannot hand addresses to a
+/// helper process (for example, a host-managed sandbox without
+/// `xdg-open`-style tools). The first registration wins.
+static EXTERNAL_OPENER: OnceLock<fn(&str) -> Result<(), String>> = OnceLock::new();
+
+/// Install the opener used by [`open_external`].
+pub fn set_external_url_opener(opener: fn(&str) -> Result<(), String>) {
+    let _ = EXTERNAL_OPENER.set(opener);
+}
+
 #[cfg(linux_desktop)]
 use std::process::{Command, Stdio};
 
@@ -100,6 +113,18 @@ pub(super) fn open(url: &str) -> Result<(), String> {
     }
     #[cfg(not(linux_desktop))]
     webbrowser::open(url).map_err(|e| e.to_string())
+}
+
+/// Open an address that only needs to reach the system browser: links clicked
+/// in a mail, project pages. Unlike [`open`] — the provider authorization
+/// entry point, which insists on a validated HTTPS sign-in address — this
+/// passes the address through as-is and prefers a platform-installed opener
+/// when one exists.
+pub(super) fn open_external(url: &str) -> Result<(), String> {
+    if let Some(opener) = EXTERNAL_OPENER.get() {
+        return opener(url);
+    }
+    webbrowser::open(url).map_err(|error| error.to_string())
 }
 
 #[cfg(all(test, linux_desktop))]
