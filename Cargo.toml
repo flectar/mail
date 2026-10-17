@@ -159,7 +159,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry", "NSString", "NSUserDefaults"] }
 
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.16", default-features = false, features = ["tokio", "xdg-portal"] }
 
