@@ -5729,6 +5729,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let picking_for_error = Rc::clone(&picking_for_picker);
         let spawned = slint::spawn_local(async move {
             let imported = documents.import_many(MAX_COMPOSE_ATTACHMENT_FILES).await;
+            match &imported {
+                Ok(documents) => tracing::info!(
+                    count = documents.len(),
+                    "compose: attachment import finished"
+                ),
+                Err(error) => tracing::warn!(%error, "compose: attachment import failed"),
+            }
             picking.set(false);
             let Some(app) = app_weak.upgrade() else {
                 return;

@@ -734,6 +734,7 @@ async fn export_database_snapshot(
         core.create_database_snapshot(directory.clone())
             .await
             .map_err(|error| error.to_string())?;
+        tracing::info!("snapshot: verified copies created");
         let directory_for_archive = directory.clone();
         let archive_for_zip = archive.clone();
         tokio::task::spawn_blocking(move || {
@@ -741,7 +742,9 @@ async fn export_database_snapshot(
         })
         .await
         .map_err(|error| error.to_string())??;
+        tracing::info!("snapshot: archive written");
         let exported = documents.export(archive.clone(), name.clone()).await?;
+        tracing::info!(exported, "snapshot: provider export finished");
         Ok(exported.then_some(name))
     }
     .await;
@@ -1035,6 +1038,7 @@ pub(super) fn register_data_management_callbacks(
         let updates = updates_for_database_snapshot.clone();
         let documents = documents_for_database_snapshot.clone();
         let staging_root = snapshot_staging_root(&paths_for_database_snapshot);
+        tracing::info!(root = %staging_root.display(), "snapshot: export started");
         runtime_for_database_snapshot.spawn(async move {
             let message = match export_database_snapshot(&core, documents, staging_root).await {
                 Ok(Some(name)) => {

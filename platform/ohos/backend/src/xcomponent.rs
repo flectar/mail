@@ -157,13 +157,12 @@ unsafe extern "C" fn on_surface_hide(
     _component: *mut ffi::OH_NativeXComponent,
     _window: *mut c_void,
 ) {
+    // Only stop *submitting* frames: a hidden window can stop the compositor
+    // from consuming buffers, and a blocking buffer request would freeze the
+    // render thread. The surface gate is left alone here, so a missed show
+    // callback cannot leave the window permanently undrawn.
     if let Some(visible) = VISIBLE.get() {
         visible.store(false, Ordering::Relaxed);
-    }
-    // Stop the render loop before the compositor stops consuming buffers;
-    // presenting into a hidden window can block on the buffer queue.
-    if let Some(gate) = GATE.get() {
-        gate.begin_destroy();
     }
     send(BackendEvent::SurfaceHidden);
 }
@@ -210,6 +209,11 @@ unsafe extern "C" fn dispatch_touch_event(
     component: *mut ffi::OH_NativeXComponent,
     window: *mut c_void,
 ) {
+    // Any input means the window is interactive again; re-arm presentation in
+    // case the surface show callback was missed (modal dialogs, focus moves).
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
+    }
     // SAFETY: zeroed is a valid bit pattern for this POD struct.
     let mut touch: ffi::OH_NativeXComponent_TouchEvent = unsafe { core::mem::zeroed() };
     // SAFETY: pointers provided by the callback contract.
@@ -239,6 +243,9 @@ unsafe extern "C" fn dispatch_touch_event(
 }
 
 unsafe extern "C" fn on_key_event(component: *mut ffi::OH_NativeXComponent, _window: *mut c_void) {
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
+    }
     let mut event: *mut ffi::OH_NativeXComponent_KeyEvent = core::ptr::null_mut();
     // SAFETY: pointers provided by the callback contract.
     if unsafe { ffi::OH_NativeXComponent_GetKeyEvent(component, &mut event) } != 0
