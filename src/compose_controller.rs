@@ -542,11 +542,15 @@ pub(super) fn complete_compose_recipient(
 pub(super) fn clear_compose(
     app: &AppWindow,
     files: &Rc<RefCell<Vec<ComposeFile>>>,
+    imports: &Rc<RefCell<Vec<Option<documents::ImportedDocument>>>>,
     document: &Rc<RefCell<RichComposeDocument>>,
     editor: &Rc<RefCell<LazyComposeEditor>>,
     contacts: &Rc<RefCell<Vec<flectar_mail_core::models::Address>>>,
 ) {
     files.borrow_mut().clear();
+    // Releases host-owned import copies once Core has staged the attachments
+    // (drafts and sends copy the files before this runs).
+    imports.borrow_mut().clear();
     app.global::<AccountMailPreferences>()
         .invoke_composer_reset();
     document.borrow_mut().reset();

@@ -68,3 +68,8 @@ pub(crate) fn install_preview_lifecycle() {
     // flectar_suspend_pdf_preview; registration has no other preconditions.
     unsafe { install_pdf_lifecycle_observers() }
 }
+
+/// Android and iOS reach system fonts through the fontique system backend.
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    None
+}

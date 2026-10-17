@@ -1,0 +1,38 @@
+# OpenHarmony platform workspace.
+#
+# This mirrors the layout of `platform/android`: a separate cargo workspace that
+# builds the OHOS shell artifacts (a cdylib loaded by the ArkTS hap) on top of
+# the shared `flectar-mail` library. It is NOT part of the root workspace.
+[workspace]
+members = ["backend", "demo", "mail"]
+resolver = "3"
+
+[workspace.dependencies]
+slint = { version = "=1.18.1", default-features = false, features = [
+    "std",
+    "renderer-software",
+    # Slint requires a matching forward-compatibility feature at compile time.
+    "compat-1-18",
+    # The backend registers system fonts into Slint's shared fontique
+    # collection (the OHOS font fallback for CJK text).
+    "unstable-fontique-011",
+    # Experimental GPU path: the femtovg renderer on wgpu 30 (EGL/GLES on
+    # OHOS). Attempted by default at runtime with an automatic fallback to the
+    # software renderer (disable the attempt with FLECTAR_OHOS_SOFTWARE=1).
+    "renderer-femtovg-wgpu",
+    "unstable-wgpu-30",
+] }
+
+# OpenHarmony is `target_os = "linux"` without Fontconfig. The patch queue in
+# `patches/fontique/` drops fontique's fontconfig backend (and its link-time
+# dependency) for `target_env = "ohos"`; the backend registers system fonts.
+#
+# The blitz/parley/fontique patches mirror the root workspace: the application
+# code depends on APIs from the patched copies (crates/{blitz-dom,blitz-paint,
+# parley,fontique}), which the crates.io releases do not carry. Patches are
+# workspace-local, so the nested workspace must repeat them.
+[patch.crates-io]
+fontique = { path = "../../crates/fontique" }
+blitz-dom = { path = "../../crates/blitz-dom" }
+blitz-paint = { path = "../../crates/blitz-paint" }
+parley = { path = "../../crates/parley" }

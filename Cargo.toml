@@ -19,6 +19,8 @@ blitz-dom = { path = "crates/blitz-dom" }
 blitz-paint = { path = "crates/blitz-paint" }
 # Slint still uses Parley 0.11.1; Blitz's Parley 0.12 is already fixed upstream.
 parley = { path = "crates/parley" }
+# OpenHarmony ships no Fontconfig; see patches/fontique/README.md.
+fontique = { path = "crates/fontique" }
 
 [package]
 name = "flectar-mail"
@@ -76,6 +78,8 @@ base64 = "0.22"
 percent-encoding = "2"
 data-url = "0.3"
 html5ever = "0.40"
+# Snapshot archives one verified database snapshot for the document provider.
+zip = { version = "9.0.4", default-features = false }
 cssparser = "0.38"
 # Match Blitz's Stylo version when adapting resolved CSS colors and gradients.
 style = { package = "stylo", version = "=0.22.0" }
@@ -159,7 +163,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry", "NSString", "NSUserDefaults"] }
 
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 rfd = { version = "0.16", default-features = false, features = ["tokio", "xdg-portal"] }
 
