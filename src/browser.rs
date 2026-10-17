@@ -2,10 +2,13 @@
 
 use std::sync::OnceLock;
 
+/// Signature of a platform-installed opener for external addresses.
+type ExternalUrlOpener = fn(&str) -> Result<(), String>;
+
 /// Opener installed by a platform integration that cannot hand addresses to a
 /// helper process (for example, a host-managed sandbox without
 /// `xdg-open`-style tools). The first registration wins.
-static EXTERNAL_OPENER: OnceLock<fn(&str) -> Result<(), String>> = OnceLock::new();
+static EXTERNAL_OPENER: OnceLock<ExternalUrlOpener> = OnceLock::new();
 
 /// Install the opener used by [`open_external`].
 pub fn set_external_url_opener(opener: fn(&str) -> Result<(), String>) {
