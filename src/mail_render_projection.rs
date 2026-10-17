@@ -390,7 +390,7 @@ pub(super) fn open_email_link(url: &str) -> Result<(), String> {
     };
     match scheme.to_ascii_lowercase().as_str() {
         "http" | "https" | "mailto" | "tel" => {
-            webbrowser::open(url.trim()).map_err(|error| error.to_string())?;
+            crate::browser::open_external(url.trim())?;
             Ok(())
         }
         _ => Err("unsupported link type".into()),
