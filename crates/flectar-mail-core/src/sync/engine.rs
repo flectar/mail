@@ -3528,7 +3528,7 @@ async fn record_content_failure_details(ctx: &SyncCtx, failures: Vec<(i64, Strin
     if failures.is_empty() {
         return Ok(());
     }
-    let retry_at = now_ms() + 60_000;
+    let now = now_ms();
     ctx.db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -3536,7 +3536,16 @@ async fn record_content_failure_details(ctx: &SyncCtx, failures: Vec<(i64, Strin
                 if current_body_row(&tx, message_id)?.is_none() {
                     continue;
                 }
-                repo::sync_failures::record_content(&tx, message_id, Some(retry_at), &detail)?;
+                // Widen the retry as attempts pile up: a body that never
+                // decodes (or that the server expunged while the row lingers)
+                // must not re-run every minute forever.
+                let attempts = repo::sync_failures::content_attempts(&tx, message_id).unwrap_or(0);
+                let delay = match attempts {
+                    0..=5 => 60_000,
+                    6..=20 => 15 * 60_000,
+                    _ => 24 * 60 * 60_000,
+                };
+                repo::sync_failures::record_content(&tx, message_id, Some(now + delay), &detail)?;
             }
             tx.commit()?;
             Ok(())

@@ -84,6 +84,20 @@ pub fn record_content(
     record_content_at(conn, message_id, next_retry_at, error, now_ms())
 }
 
+/// Attempt count of the content-stage failure for a message (`0` when none has
+/// been recorded yet). Callers use it to widen the retry backoff so a body
+/// that keeps failing does not re-run every minute forever.
+pub fn content_attempts(conn: &Connection, message_id: i64) -> Result<i64> {
+    Ok(conn
+        .query_row(
+            "SELECT attempts FROM sync_failures WHERE stage = 'content' AND message_id = ?1",
+            params![message_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(0))
+}
+
 pub fn record_content_at(
     conn: &Connection,
     message_id: i64,
@@ -221,5 +235,19 @@ mod tests {
         c.execute("DELETE FROM messages WHERE id = ?1", params![message_id])
             .unwrap();
         assert!(get(&c, id).unwrap().is_none());
+    }
+
+    #[test]
+    fn content_attempts_counts_recorded_failures() {
+        let c = testutil::conn();
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        testutil::seed_account(&c);
+        let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "Attempts", false);
+
+        assert_eq!(content_attempts(&c, message_id).unwrap(), 0);
+        record_content_at(&c, message_id, None, "decode", 10).unwrap();
+        assert_eq!(content_attempts(&c, message_id).unwrap(), 1);
+        record_content_at(&c, message_id, None, "decode", 20).unwrap();
+        assert_eq!(content_attempts(&c, message_id).unwrap(), 2);
     }
 }
