@@ -15,7 +15,10 @@
 
 use core::ffi::c_void;
 use core::ptr::{NonNull, null_mut};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{
+    Arc, Condvar, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use slint::platform::software_renderer::{PremultipliedRgbaColor, SoftwareRenderer};
@@ -115,15 +118,20 @@ pub struct Presenter {
     /// never pay for a full-window rasterization.
     frame: Vec<PremultipliedRgbaColor>,
     frame_size: (u32, u32),
+    /// Set by the XComponent surface show/hide callbacks. Guarded here as well
+    /// as by the surface gate: a hidden window can stop the compositor from
+    /// consuming buffers, which makes the buffer request block.
+    visible: Arc<AtomicBool>,
 }
 
 impl Presenter {
-    pub fn new() -> Self {
+    pub fn new(visible: Arc<AtomicBool>) -> Self {
         Self {
             window: null_mut(),
             configured: false,
             frame: Vec::new(),
             frame_size: (0, 0),
+            visible,
         }
     }
 
@@ -212,6 +220,11 @@ impl Presenter {
         if rect_count == 0 {
             // Nothing changed: the compositor keeps showing the previous frame.
             return PresentOutcome::Presented;
+        }
+        if !self.visible.load(Ordering::Relaxed) {
+            // Presenting into a hidden window can block the compositor buffer
+            // queue; the retained frame is repainted when the surface returns.
+            return PresentOutcome::Skipped;
         }
 
         // SAFETY: the pointer is valid between Surface and SurfaceDestroyed and
@@ -307,7 +320,7 @@ impl Presenter {
 
 impl Default for Presenter {
     fn default() -> Self {
-        Self::new()
+        Self::new(Arc::new(AtomicBool::new(true)))
     }
 }
 

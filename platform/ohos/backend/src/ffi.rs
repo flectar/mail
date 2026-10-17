@@ -378,6 +378,14 @@ unsafe extern "C" {
         component: *mut OH_NativeXComponent,
         callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),
     ) -> i32;
+    pub fn OH_NativeXComponent_RegisterSurfaceShowCallback(
+        component: *mut OH_NativeXComponent,
+        callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),
+    ) -> i32;
+    pub fn OH_NativeXComponent_RegisterSurfaceHideCallback(
+        component: *mut OH_NativeXComponent,
+        callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),
+    ) -> i32;
     pub fn OH_NativeXComponent_GetKeyEvent(
         component: *mut OH_NativeXComponent,
         keyEvent: *mut *mut OH_NativeXComponent_KeyEvent,

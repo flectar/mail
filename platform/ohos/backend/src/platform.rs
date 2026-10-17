@@ -33,6 +33,7 @@ pub struct OhosPlatform {
     window: RefCell<Option<Rc<OhosWindow>>>,
     gate: Arc<SurfaceGate>,
     quit: Arc<AtomicBool>,
+    visible: Arc<AtomicBool>,
     /// Drawn-frame times + RSS, reported to hilog once a minute.
     perf: crate::perf::FrameStats,
 }
@@ -43,6 +44,7 @@ impl OhosPlatform {
         event_rx: Receiver<BackendEvent>,
         gate: Arc<SurfaceGate>,
         quit: Arc<AtomicBool>,
+        visible: Arc<AtomicBool>,
     ) -> Self {
         Self {
             start_time: Instant::now(),
@@ -51,6 +53,7 @@ impl OhosPlatform {
             window: RefCell::new(None),
             gate,
             quit,
+            visible,
             perf: crate::perf::FrameStats::default(),
         }
     }
@@ -60,7 +63,7 @@ impl OhosPlatform {
             return Err(PlatformError::NoEventLoopProvider);
         };
 
-        let mut presenter = Presenter::new();
+        let mut presenter = Presenter::new(self.visible.clone());
         let mut surface_size: Option<PhysicalSize> = None;
         let mut next_frame = Instant::now();
 
@@ -159,6 +162,17 @@ impl OhosPlatform {
                 if let Some(w) = self.window.borrow().as_ref() {
                     w.dispatch_key(text, down, repeat);
                 }
+            }
+            BackendEvent::SurfaceHidden => {
+                // The gate already blocks drawing; keep the retained frame so
+                // the window can repaint immediately when it comes back.
+                crate::log::info("surface hidden; render loop paused");
+            }
+            BackendEvent::SurfaceShown => {
+                if let Some(w) = self.window.borrow().as_ref() {
+                    w.invalidate_frame();
+                }
+                crate::log::info("surface shown; repaint requested");
             }
             BackendEvent::Task(task) => task(),
             BackendEvent::Wake => {}

@@ -47,7 +47,8 @@ pub fn start(
 ) -> Result<(), std::io::Error> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let gate = present::SurfaceGate::new();
-    xcomponent::install(event_tx.clone(), gate.clone());
+    let visible = Arc::new(AtomicBool::new(true));
+    xcomponent::install(event_tx.clone(), gate.clone(), visible.clone());
     let quit = Arc::new(AtomicBool::new(false));
 
     std::thread::Builder::new()
@@ -55,7 +56,7 @@ pub fn start(
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
             log::info("slint thread started");
-            let platform = platform::OhosPlatform::new(event_tx, event_rx, gate, quit);
+            let platform = platform::OhosPlatform::new(event_tx, event_rx, gate, quit, visible);
             if let Err(err) = slint::platform::set_platform(Box::new(platform)) {
                 log::error(&format!("set_platform failed: {err}"));
                 return;

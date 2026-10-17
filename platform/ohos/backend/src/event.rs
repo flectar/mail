@@ -49,6 +49,13 @@ pub enum BackendEvent {
     /// The surface is going away. The Slint thread must stop using the pointer
     /// and then acknowledge (see `present::SurfaceGate`).
     SurfaceDestroyed,
+    /// The window became invisible (another window covers it, the app went to
+    /// the background, or a system picker opened). Presenting into a hidden
+    /// window can block on the compositor's buffer queue, so the render loop
+    /// keeps the last frame until the surface is shown again.
+    SurfaceHidden,
+    /// The window is visible again; repaint from the retained frame.
+    SurfaceShown,
     /// A touch event in physical surface coordinates.
     Touch { x: f32, y: f32, phase: TouchPhase },
     /// A keyboard event translated to Slint's key-text representation.
@@ -77,6 +84,8 @@ impl core::fmt::Debug for BackendEvent {
                 )
             }
             BackendEvent::SurfaceDestroyed => write!(f, "SurfaceDestroyed"),
+            BackendEvent::SurfaceHidden => write!(f, "SurfaceHidden"),
+            BackendEvent::SurfaceShown => write!(f, "SurfaceShown"),
             BackendEvent::Touch { x, y, phase } => {
                 write!(f, "Touch {{ x: {x}, y: {y}, phase: {phase:?} }}")
             }

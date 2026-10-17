@@ -18,6 +18,10 @@ use crate::present::SurfaceGate;
 
 static EVENTS: OnceLock<Mutex<Sender<BackendEvent>>> = OnceLock::new();
 static GATE: OnceLock<Arc<SurfaceGate>> = OnceLock::new();
+/// Whether the window is currently visible. Presenting into a hidden window
+/// can block on the compositor's buffer queue, so frames are skipped until
+/// the surface is shown again.
+static VISIBLE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
 /// Touch diagnostics: log the first few events so input delivery is visible in
 /// hilog without flooding it.
@@ -69,9 +73,10 @@ const DESTROY_ACK_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Install the channel and gate used by the callbacks. Must run on the OHOS
 /// main thread before the first surface callback can fire.
-pub fn install(tx: Sender<BackendEvent>, gate: Arc<SurfaceGate>) {
+pub fn install(tx: Sender<BackendEvent>, gate: Arc<SurfaceGate>, visible: Arc<AtomicBool>) {
     let _ = EVENTS.set(Mutex::new(tx));
     let _ = GATE.set(gate);
+    let _ = VISIBLE.set(visible);
 }
 
 pub(crate) fn send(event: BackendEvent) {
@@ -110,6 +115,14 @@ pub unsafe fn register(component: *mut ffi::OH_NativeXComponent) -> i32 {
     let rc_key =
         unsafe { ffi::OH_NativeXComponent_RegisterKeyEventCallback(component, on_key_event) };
     crate::log::info(&format!("register XComponent key callback: rc={rc_key}"));
+    // SAFETY: same live component; the callbacks have the required C signature.
+    let rc_show =
+        unsafe { ffi::OH_NativeXComponent_RegisterSurfaceShowCallback(component, on_surface_show) };
+    let rc_hide =
+        unsafe { ffi::OH_NativeXComponent_RegisterSurfaceHideCallback(component, on_surface_hide) };
+    crate::log::info(&format!(
+        "register XComponent surface show/hide callbacks: {rc_show}/{rc_hide}"
+    ));
     rc
 }
 
@@ -127,9 +140,40 @@ unsafe extern "C" fn on_surface_changed(
     surface_event(component, window);
 }
 
+unsafe extern "C" fn on_surface_show(
+    _component: *mut ffi::OH_NativeXComponent,
+    _window: *mut c_void,
+) {
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
+    }
+    if let Some(gate) = GATE.get() {
+        gate.surface_up();
+    }
+    send(BackendEvent::SurfaceShown);
+}
+
+unsafe extern "C" fn on_surface_hide(
+    _component: *mut ffi::OH_NativeXComponent,
+    _window: *mut c_void,
+) {
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(false, Ordering::Relaxed);
+    }
+    // Stop the render loop before the compositor stops consuming buffers;
+    // presenting into a hidden window can block on the buffer queue.
+    if let Some(gate) = GATE.get() {
+        gate.begin_destroy();
+    }
+    send(BackendEvent::SurfaceHidden);
+}
+
 fn surface_event(component: *mut ffi::OH_NativeXComponent, window: *mut c_void) {
     if window.is_null() {
         return;
+    }
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
     }
     let mut width: u64 = 0;
     let mut height: u64 = 0;
