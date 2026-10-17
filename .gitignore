@@ -30,3 +30,6 @@
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+
+# hvigor build metadata (the OHOS shell build regenerates it)
+.hvigor/
