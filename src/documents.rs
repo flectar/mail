@@ -260,7 +260,7 @@ mod tests {
             imports: AtomicUsize::new(0),
             cancel_after: 0,
         });
-        let documents = provider.import_many(20).await.unwrap();
+        let documents = provider.clone().import_many(20).await.unwrap();
         assert!(documents.is_empty());
         assert_eq!(provider.imports.load(Ordering::SeqCst), 1);
     }
