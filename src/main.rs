@@ -1394,7 +1394,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     theme::register_theme_utilities(&app);
     app.set_print_supported(!cfg!(mobile));
-    app.set_document_apis_supported(!cfg!(mobile));
+    // Every host provides a document provider now: desktop dialogs on desktop,
+    // the system picker on mobile. The document entry points (compose
+    // attachments, account backups, database snapshots) stay available.
+    app.set_document_apis_supported(true);
     renderer_preferences::initialize_step(use_wgpu, || app.show())?;
     startup_metrics.emit(
         "window_shown",
@@ -5733,9 +5736,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let documents = match imported {
                 Ok(documents) => documents,
                 Err(error) => {
-                    app.set_compose_notice(UiMessage::detail(
-                        "The platform host could not provide a document picker: {}",
-                        error,
+                    tracing::warn!(%error, "compose attachment picker failed");
+                    app.set_compose_notice(UiMessage::plain(
+                        "The platform host does not provide a document picker.",
                     ));
                     app.set_compose_notice_is_error(true);
                     return;

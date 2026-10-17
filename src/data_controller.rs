@@ -703,7 +703,7 @@ async fn export_database_snapshot(
     core: &CoreMailSource,
     documents: std::sync::Arc<dyn documents::DocumentProvider>,
     staging_root: PathBuf,
-) -> Result<bool, String> {
+) -> Result<Option<String>, String> {
     // Unique per export (pid + sequence): the staging root may live in a
     // shared temporary directory, so a predictable name could be pre-created.
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -741,7 +741,8 @@ async fn export_database_snapshot(
         })
         .await
         .map_err(|error| error.to_string())??;
-        documents.export(archive.clone(), name.clone()).await
+        let exported = documents.export(archive.clone(), name.clone()).await?;
+        Ok(exported.then_some(name))
     }
     .await;
     let _ = tokio::fs::remove_dir_all(&directory).await;
@@ -1036,8 +1037,11 @@ pub(super) fn register_data_management_callbacks(
         let staging_root = snapshot_staging_root(&paths_for_database_snapshot);
         runtime_for_database_snapshot.spawn(async move {
             let message = match export_database_snapshot(&core, documents, staging_root).await {
-                Ok(true) => UiMessage::plain("Database snapshot exported."),
-                Ok(false) => UiMessage::plain("Database snapshot export cancelled."),
+                Ok(Some(name)) => {
+                    UiMessage::detail("Database snapshot exported to {}.", name)
+                }
+                // Cancelled at the picker: return the status line to idle.
+                Ok(None) => UiMessage::plain("Local data ready."),
                 Err(error) => {
                     UiMessage::detail("Could not export database snapshot: {}", error)
                 }

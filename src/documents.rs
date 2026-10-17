@@ -43,23 +43,15 @@ pub trait DocumentProvider: Send + Sync + 'static {
     fn import(&self) -> DocumentFuture<Option<ImportedDocument>>;
     fn export(&self, path: PathBuf, name: String) -> DocumentFuture<bool>;
     /// Import several documents for one user action (compose attachments).
-    /// Hosts whose picker selects multiple files override this; the default
-    /// asks again until the picker is cancelled or `limit` is reached. Each
-    /// returned document owns its copy, so the caller must keep them alive
-    /// until Core has staged the files.
-    fn import_many(self: std::sync::Arc<Self>, limit: usize) -> DocumentFuture<Vec<ImportedDocument>> {
-        Box::pin(async move {
-            let mut documents = Vec::new();
-            while documents.len() < limit {
-                match self.import().await {
-                    Ok(Some(document)) => documents.push(document),
-                    Ok(None) => break,
-                    Err(error) if documents.is_empty() => return Err(error),
-                    Err(_) => break,
-                }
-            }
-            Ok(documents)
-        })
+    /// Hosts whose picker selects multiple files at once override this; the
+    /// default imports one document per request, so a single-document picker
+    /// never opens twice for one action. Each returned document owns its copy,
+    /// so the caller must keep them alive until Core has staged the files.
+    fn import_many(
+        self: std::sync::Arc<Self>,
+        _limit: usize,
+    ) -> DocumentFuture<Vec<ImportedDocument>> {
+        Box::pin(async move { Ok(self.import().await?.into_iter().collect()) })
     }
 }
 /// Desktop file dialogs. Mobile hosts inject their own provider through
@@ -221,32 +213,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn import_many_stops_at_the_picker_cancellation() {
-        let directory = tempfile::tempdir().unwrap();
-        let provider = Arc::new(FakeDocuments {
-            directory: directory.path().to_owned(),
-            imports: AtomicUsize::new(0),
-            cancel_after: 2,
-        });
-        let documents = provider.clone().import_many(5).await.unwrap();
-        assert_eq!(documents.len(), 2);
-        // Two picks plus the cancellation that ended the loop.
-        assert_eq!(provider.imports.load(Ordering::SeqCst), 3);
-        drop(documents);
-        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
-    }
-
-    #[tokio::test]
-    async fn import_many_honors_the_limit() {
+    async fn import_many_uses_one_picker_request() {
         let directory = tempfile::tempdir().unwrap();
         let provider = Arc::new(FakeDocuments {
             directory: directory.path().to_owned(),
             imports: AtomicUsize::new(0),
             cancel_after: usize::MAX,
         });
-        let documents = provider.clone().import_many(2).await.unwrap();
-        assert_eq!(documents.len(), 2);
-        assert_eq!(provider.imports.load(Ordering::SeqCst), 2);
+        let documents = provider.clone().import_many(20).await.unwrap();
+        assert_eq!(documents.len(), 1);
+        assert_eq!(provider.imports.load(Ordering::SeqCst), 1);
+        drop(documents);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn import_many_returns_empty_when_the_picker_is_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        let provider = Arc::new(FakeDocuments {
+            directory: directory.path().to_owned(),
+            imports: AtomicUsize::new(0),
+            cancel_after: 0,
+        });
+        let documents = provider.import_many(20).await.unwrap();
+        assert!(documents.is_empty());
+        assert_eq!(provider.imports.load(Ordering::SeqCst), 1);
     }
 
     #[test]
