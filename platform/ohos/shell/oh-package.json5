@@ -1,0 +1,10 @@
+{
+  modelVersion: '6.0.2',
+  name: 'slint_ohos_demo',
+  version: '1.0.0',
+  description: 'Slint OHOS M2 demo shell',
+  main: '',
+  author: '',
+  license: 'AGPL-3.0-only',
+  dependencies: {},
+}
