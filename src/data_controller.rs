@@ -976,18 +976,27 @@ pub(super) fn register_data_management_callbacks(
             app.set_sync_status(UiMessage::detail("Could not export backup: {}", error));
             return;
         }
-        let outcome =
-            runtime_for_backup.block_on(documents_for_backup.export(staging.clone(), name));
-        let _ = std::fs::remove_file(&staging);
-        match outcome {
-            Ok(true) => app.set_sync_status(UiMessage::plain(
-                "Backup exported. Passwords and OAuth tokens were not included.",
-            )),
-            Ok(false) => {}
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
-            }
-        }
+        let app_weak = app.as_weak();
+        let staging_for_cleanup = staging.clone();
+        documents::with_document_future(
+            &runtime_for_backup,
+            documents_for_backup.export(staging.clone(), name),
+            move |outcome| {
+                let _ = std::fs::remove_file(&staging_for_cleanup);
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                match outcome {
+                    Ok(true) => app.set_sync_status(UiMessage::plain(
+                        "Backup exported. Passwords and OAuth tokens were not included.",
+                    )),
+                    Ok(false) => {}
+                    Err(error) => {
+                        app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
+                    }
+                }
+            },
+        );
     });
 
     let app_weak = app.as_weak();
@@ -1053,23 +1062,29 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        // The host picker runs in its own window while this thread waits; the
-        // ArkTS bridge delivers the staged copy, so waiting cannot deadlock.
-        let imported = runtime_for_backup_import.block_on(documents_for_backup_import.import());
-        let document = match imported {
-            Ok(Some(document)) => document,
-            Ok(None) => return,
-            Err(error) => {
-                app.set_sync_status(UiMessage::detail("Could not import backup: {}", error));
-                return;
-            }
-        };
-        import_account_backup_document(
-            &app,
-            document.path(),
-            &core,
-            &state_for_backup_import,
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state_for_backup_import);
+        let runtime = Rc::clone(&runtime_for_backup_import);
+        documents::with_document_future(
             &runtime_for_backup_import,
+            documents_for_backup_import.import(),
+            move |imported| {
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                let document = match imported {
+                    Ok(Some(document)) => document,
+                    Ok(None) => return,
+                    Err(error) => {
+                        app.set_sync_status(UiMessage::detail(
+                            "Could not import backup: {}",
+                            error,
+                        ));
+                        return;
+                    }
+                };
+                import_account_backup_document(&app, document.path(), &core, &state, &runtime);
+            },
         );
     });
 

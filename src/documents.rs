@@ -39,6 +39,31 @@ impl Drop for DocumentRequestGuard {
         (std::mem::replace(&mut self.0, Box::new(|| {})))();
     }
 }
+/// Run a document-provider future and hand its result to `on_ready`.
+///
+/// Mobile hosts block the calling (Slint) thread while their system picker
+/// window is up: the host bridge delivers the result from another thread, and
+/// keeping the presentation thread quiet is what the platform needs while the
+/// picker covers the window. Desktops must keep the event loop running for the
+/// native file dialog, so the future is driven by the local executor there and
+/// `on_ready` runs on the UI thread.
+pub(crate) fn with_document_future<T: 'static>(
+    runtime: &tokio::runtime::Runtime,
+    future: impl std::future::Future<Output = T> + 'static,
+    on_ready: impl FnOnce(T) + 'static,
+) {
+    #[cfg(mobile)]
+    {
+        let output = runtime.block_on(future);
+        on_ready(output);
+    }
+    #[cfg(desktop)]
+    {
+        let _ = runtime.handle();
+        let _ = slint::spawn_local(async move { on_ready(future.await) });
+    }
+}
+
 pub trait DocumentProvider: Send + Sync + 'static {
     fn import(&self) -> DocumentFuture<Option<ImportedDocument>>;
     fn export(&self, path: PathBuf, name: String) -> DocumentFuture<bool>;
