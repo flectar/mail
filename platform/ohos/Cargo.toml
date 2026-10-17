@@ -33,7 +33,7 @@ slint = { version = "=1.18.1", default-features = false, features = [
 # which the crates.io releases do not carry. Patches are workspace-local, so the
 # nested workspace must repeat them.
 [patch.crates-io]
-fontique = { path = "vendor/fontique" }
+fontique = { path = "../../crates/fontique" }
 blitz-dom = { path = "../../crates/blitz-dom" }
 blitz-paint = { path = "../../crates/blitz-paint" }
 parley = { path = "../../crates/parley" }

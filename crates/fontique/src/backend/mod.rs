@@ -12,7 +12,7 @@ mod system;
 mod system;
 
 // OpenHarmony keeps `target_os = "linux"` but ships no Fontconfig; the vendored
-// patch (see `platform/ohos/vendor/fontique`) excludes the fontconfig backend
+// patch (see `patches/fontique`) excludes the fontconfig backend
 // for `target_env = "ohos"` so the dummy system backend is used instead.
 #[cfg(all(feature = "system", any(target_os = "linux", target_os = "freebsd"), not(target_env = "ohos")))]
 #[path = "fontconfig.rs"]

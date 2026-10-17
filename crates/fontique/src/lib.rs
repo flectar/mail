@@ -3,7 +3,7 @@
 
 //! Font enumeration and fallback.
 
-// Vendored for OHOS (see platform/ohos/Cargo.toml). The upstream crate uses
+// Vendored for OHOS (see `patches/fontique`). The upstream crate uses
 // the now-deprecated `Script::from_str_unchecked` throughout its script table;
 // silence the churn locally instead of patching hundreds of call sites.
 #![allow(deprecated)]

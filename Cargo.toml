@@ -19,6 +19,8 @@ blitz-dom = { path = "crates/blitz-dom" }
 blitz-paint = { path = "crates/blitz-paint" }
 # Slint still uses Parley 0.11.1; Blitz's Parley 0.12 is already fixed upstream.
 parley = { path = "crates/parley" }
+# OpenHarmony ships no Fontconfig; see patches/fontique/README.md.
+fontique = { path = "crates/fontique" }
 
 [package]
 name = "flectar-mail"
