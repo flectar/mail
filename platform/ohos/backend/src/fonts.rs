@@ -1,6 +1,6 @@
 //! System font registration for the OHOS backend.
 //!
-//! OpenHarmony ships no Fontconfig and the vendored fontique patch disables its
+//! OpenHarmony ships no Fontconfig and the fontique patch queue disables its
 //! system backend, so the shared fontique collection starts empty. Fonts are
 //! registered here from `/system/fonts` (the platform's font directory) and a
 //! Han (CJK) fallback is wired so Chinese text renders in the Slint UI and in

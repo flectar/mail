@@ -24,10 +24,8 @@
         skills: [{ entities: ['entity.system.home'], actions: ['ohos.want.action.home'] }],
       },
     ],
-    // Socket access for IMAP/SMTP/OAuth. Notifications need no manifest
-    // permission; the app asks the user through
-    // `notificationManager.requestEnableNotification` at startup. The
-    // packaging step in scripts/build-hap.sh re-asserts this list (deduped).
+    // Socket access for IMAP/SMTP/OAuth — the only permission the port needs.
+    // The packaging step in scripts/build-hap.sh re-asserts this list (deduped).
     requestPermissions: [{ name: 'ohos.permission.INTERNET' }],
   },
 }

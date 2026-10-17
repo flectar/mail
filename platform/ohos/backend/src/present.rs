@@ -184,7 +184,12 @@ impl Presenter {
             h: 0,
         }; MAX_FLUSH_RECTS];
         let mut rect_count = 0usize;
-        for (position, size) in dirty.iter().take(MAX_FLUSH_RECTS) {
+        let mut overflowed = false;
+        for (position, size) in dirty.iter() {
+            if rect_count == MAX_FLUSH_RECTS {
+                overflowed = true;
+                break;
+            }
             rects[rect_count] = ffi::Rect {
                 x: position.x,
                 y: position.y,
@@ -192,6 +197,17 @@ impl Presenter {
                 h: size.height,
             };
             rect_count += 1;
+        }
+        if overflowed {
+            // More damage than the fixed array holds: declare the whole frame
+            // damaged instead of leaving regions unflushed (stale pixels).
+            rects[0] = ffi::Rect {
+                x: 0,
+                y: 0,
+                w: width,
+                h: height,
+            };
+            rect_count = 1;
         }
         if rect_count == 0 {
             // Nothing changed: the compositor keeps showing the previous frame.

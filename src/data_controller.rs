@@ -704,16 +704,32 @@ async fn export_database_snapshot(
     documents: std::sync::Arc<dyn documents::DocumentProvider>,
     staging_root: PathBuf,
 ) -> Result<bool, String> {
-    let name = format!(
-        "flectar-mail-snapshot-{}.zip",
+    // Unique per export (pid + sequence): the staging root may live in a
+    // shared temporary directory, so a predictable name could be pre-created.
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let unique = format!(
+        "flectar-mail-snapshot-{}-{sequence}-{}",
+        std::process::id(),
         Local::now().format("%Y-%m-%d-%H%M%S")
     );
-    let directory = staging_root.join(name.trim_end_matches(".zip"));
+    let name = format!("{unique}.zip");
+    let directory = staging_root.join(&unique);
     let archive = staging_root.join(&name);
     let result = async {
         tokio::fs::create_dir_all(&staging_root)
             .await
             .map_err(|error| format!("creating {}: {error}", staging_root.display()))?;
+        // The snapshot is private mailbox data; keep it unreadable to other
+        // users of a shared temporary directory.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &staging_root,
+                std::fs::Permissions::from_mode(0o700),
+            );
+        }
         let _ = tokio::fs::remove_dir_all(&directory).await;
         core.create_database_snapshot(directory.clone())
             .await

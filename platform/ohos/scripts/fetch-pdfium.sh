@@ -13,6 +13,17 @@ PLATFORM_DIR=$(dirname "$HERE")
 PREBUILT="$PLATFORM_DIR/prebuilt"
 TARGET="$PREBUILT/arm64/libpdfium.so"
 URL="https://gitcode.com/OpenHarmonyPCDeveloper/ohos_pdfium/releases/download/7947/pdfium-7947-ohos-prebuilt.tar.gz"
+# Pinned archive checksum: the prebuilt runs inside the app, so never extract
+# an unverified download.
+EXPECTED_SHA256="85126a7d9ddd1be6b5cc8ff84e9027777f36345ce8dcae1c6cd58262d6ae4fd5"
+
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
+    fi
+}
 
 if [ -f "$TARGET" ]; then
     echo "pdfium already present: $TARGET"
@@ -23,7 +34,15 @@ mkdir -p "$PREBUILT/arm64"
 TMP="$PREBUILT/pdfium-7947-ohos-prebuilt.tar.gz"
 if [ ! -f "$TMP" ]; then
     echo "downloading: $URL"
-    curl -L --retry 3 -o "$TMP" "$URL"
+    curl -fL --retry 3 -o "$TMP" "$URL"
+fi
+actual=$(sha256_of "$TMP")
+if [ "$actual" != "$EXPECTED_SHA256" ]; then
+    echo "checksum mismatch for $TMP" >&2
+    echo "  expected: $EXPECTED_SHA256" >&2
+    echo "  actual:   $actual" >&2
+    rm -f "$TMP"
+    exit 1
 fi
 tar -xzf "$TMP" -C "$PREBUILT"
 mv "$PREBUILT/pdfium-7947-ohos-prebuilt/lib/libpdfium.so" "$TARGET"

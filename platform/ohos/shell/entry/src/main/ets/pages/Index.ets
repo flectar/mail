@@ -1,21 +1,17 @@
 import { common, Want } from '@kit.AbilityKit';
-import { BusinessError, zlib } from '@kit.BasicServicesKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
-import { notificationManager } from '@kit.NotificationKit';
 
 // Services the native module invokes from Rust; the closures run on the ArkTS
-// UI thread through a thread-safe function. `pickOpen`/`pickSave`/`zipFolder`
-// are request/response: the page reports the outcome through
-// `submitBridgeResult`.
+// UI thread through a thread-safe function. `pickOpen`/`pickSave` are
+// request/response: the page reports the outcome through `submitBridgeResult`.
 interface FlectarBridge {
   openUrl: (url: string) => void;
   pickOpen: (requestId: number) => void;
   pickSave: (requestId: number, sourcePath: string, suggestedName: string) => void;
-  zipFolder: (requestId: number, sourceDir: string, targetZip: string) => void;
   showIme: () => void;
   hideIme: () => void;
-  notify: (title: string, body: string) => void;
 }
 
 // The exports of the native XComponent module (`onLoad` hands them over).
@@ -35,7 +31,6 @@ struct Index {
 
   aboutToAppear(): void {
     this.probeResources();
-    this.requestNotificationPermission();
   }
 
   // The IME controller is process-scoped; its listeners capture this page, so
@@ -111,17 +106,11 @@ struct Index {
       pickSave: (requestId: number, sourcePath: string, suggestedName: string): void => {
         this.pickSave(requestId, sourcePath, suggestedName);
       },
-      zipFolder: (requestId: number, sourceDir: string, targetZip: string): void => {
-        this.zipFolder(requestId, sourceDir, targetZip);
-      },
       showIme: (): void => {
         this.showIme();
       },
       hideIme: (): void => {
         this.hideIme();
-      },
-      notify: (title: string, body: string): void => {
-        this.notify(title, body);
       },
     });
   }
@@ -131,6 +120,14 @@ struct Index {
   }
 
   private openUrl(url: string): void {
+    // Links come from mail content; only hand web and dialer schemes to the
+    // system. Everything else (file:, app:, custom schemes) stays in-app.
+    const separator = url.indexOf(':');
+    const scheme = separator > 0 ? url.substring(0, separator).toLowerCase() : '';
+    if (scheme !== 'http' && scheme !== 'https' && scheme !== 'mailto' && scheme !== 'tel') {
+      console.error(`[flectar] refusing to open a non-web address (scheme '${scheme}')`);
+      return;
+    }
     const abilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     const want: Want = {
       action: 'ohos.want.action.viewData',
@@ -201,25 +198,6 @@ struct Index {
     }
   }
 
-  // Archive a directory (the database snapshot) next to itself with the
-  // system zlib, so one save dialog can deliver the whole snapshot.
-  private async zipFolder(requestId: number, sourceDir: string, targetZip: string): Promise<void> {
-    try {
-      const options: zlib.Options = {
-        level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION,
-        memLevel: zlib.MemLevel.MEM_LEVEL_DEFAULT,
-        strategy: zlib.CompressStrategy.COMPRESS_STRATEGY_DEFAULT_STRATEGY,
-      };
-      await zlib.compressFile(sourceDir, targetZip, options);
-      console.info('[flectar] archived a directory for export');
-      this.reportBridgeResult(requestId, targetZip, '');
-    } catch (error) {
-      const failure = error as BusinessError;
-      console.error(`[flectar] archive failed: ${failure.code} ${failure.message}`);
-      this.reportBridgeResult(requestId, '', failure.message ?? 'archive failed');
-    }
-  }
-
   // Slint enables the input method when an editable field gains focus. The
   // controller refuses event subscription until it is attached, so attach
   // first and register the text callbacks once it succeeds.
@@ -287,39 +265,6 @@ struct Index {
     }
   }
 
-  // Ask the user once to allow notifications for this app.
-  private requestNotificationPermission(): void {
-    try {
-      notificationManager.requestEnableNotification(this.getUIContext().getHostContext() as common.UIAbilityContext)
-        .then((): void => {
-          console.info('[flectar] notifications enabled');
-        })
-        .catch((error: BusinessError): void => {
-          console.error(`[flectar] notifications not enabled: ${error.code}`);
-        });
-    } catch (error) {
-      console.error('[flectar] notification setup failed');
-    }
-  }
-
-  private notify(title: string, body: string): void {
-    try {
-      const request: notificationManager.NotificationRequest = {
-        id: Date.now() % 2147483647,
-        content: {
-          notificationContentType:
-            notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-          normal: { title, text: body },
-        },
-      };
-      notificationManager.publish(request).catch((error: BusinessError): void => {
-        console.error(`[flectar] notification publish failed: ${error.code}`);
-      });
-    } catch (error) {
-      console.error(`[flectar] notification failed: ${(error as BusinessError).message}`);
-    }
-  }
-
   // Copy a picked (URI-granted) file into the app cache so native code never
   // touches provider URIs.
   /**
@@ -338,7 +283,11 @@ struct Index {
       console.info(`[flectar] stage: mkdir reported ${failure.code}; continuing`);
     }
     const segments = uri.split('/');
-    const name = segments.length > 0 ? segments[segments.length - 1] : 'document';
+    const raw = segments.length > 0 ? segments[segments.length - 1] : 'document';
+    // The picker chooses the file name; keep it to a conservative character
+    // set and length so it cannot escape the cache directory.
+    const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_').substring(0, 96);
+    const name = cleaned.length > 0 ? cleaned : 'document';
     const destination = `${directory}/${Date.now()}-${name}`;
     const source = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {

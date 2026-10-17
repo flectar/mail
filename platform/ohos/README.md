@@ -109,9 +109,6 @@ handled (and asserted) in the script, do not "simplify" them away:
    injects them from the compiler's `id_defined.json`, together with the
    device types (2in1/tablet/phone), `ohos.permission.INTERNET` (without it
    every socket fails with EPERM) and the HarmonyOS 6.1 SDK coordinates.
-   Notifications need no manifest permission: the app asks the user through
-   `notificationManager.requestEnableNotification` and publishes through
-   `@kit.NotificationKit`.
 
 ## Runtime notes
 

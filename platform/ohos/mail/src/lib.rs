@@ -1,14 +1,13 @@
 //! Flectar Mail shell for OpenHarmony.
 //!
 //! Mirrors `platform/android/src/lib.rs`: a thin cdylib that builds the
-//! [`PlatformContext`] (app-private paths, a credential store, the OAuth
-//! broker) and hands it to `flectar_mail::run`, while the UI runs on the
-//! `slint-ohos-backend` platform.
+//! `PlatformContext` (app-private paths, the Asset Store credential store, the
+//! host document provider and the OAuth broker) and hands it to
+//! `flectar_mail::run`, while the UI runs on the `slint-ohos-backend` platform.
 //!
-//! M3 scope: compile and boot on device with app-private file storage and a
-//! minimal credential store. System-backed services (OHOS asset store, Want
-//! based OAuth, file pickers, PDFium) are M4 work; see
-//! `docs/plans/2026-10-11-ohos-m3-mail-integration.md`.
+//! The ArkTS page owns the services native code cannot reach: opening the
+//! system browser with a Want, the document pickers and the soft keyboard. See
+//! `platform/ohos/README.md` for build, packaging and device notes.
 
 #![allow(non_camel_case_types)]
 
@@ -234,20 +233,14 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     fs::create_dir_all(&internal)?;
     fs::create_dir_all(&cache)?;
 
-    // Diagnostics: one asset put/get/remove cycle per launch (TODO: drop once
-    // the backend is proven across devices).
-    match slint_ohos_backend::asset::self_test() {
-        Ok(()) => slint_ohos_backend::ohos_info!("mail: asset store self-test ok"),
-        Err(err) => slint_ohos_backend::ohos_error!("mail: asset store self-test failed: {err}"),
-    }
-
-    let credentials: Arc<dyn CredentialStore> = if std::env::var_os(
-        "FLECTAR_ALLOW_FILE_CREDENTIALS",
-    )
-    .is_some()
-    {
+    // Credentials live in the system Asset Store. Debug builds may opt into a
+    // plaintext file store on devices where the asset service is unavailable;
+    // release builds never take that path, even with the variable set.
+    let allow_file_store =
+        cfg!(debug_assertions) && std::env::var_os("FLECTAR_ALLOW_FILE_CREDENTIALS").is_some();
+    let credentials: Arc<dyn CredentialStore> = if allow_file_store {
         slint_ohos_backend::ohos_info!(
-            "mail: FLECTAR_ALLOW_FILE_CREDENTIALS set; using the file credential store (development only)"
+            "mail: FLECTAR_ALLOW_FILE_CREDENTIALS set; using the file credential store (debug only)"
         );
         Arc::new(OhosFileCredentialStore::new(
             internal.join("credentials-v1.json"),
@@ -276,16 +269,15 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
 }
 
 // ---------------------------------------------------------------------------
-// Minimal credential store (M3)
+// Debug-only fallback credential store
 // ---------------------------------------------------------------------------
 
-/// App-private JSON credential store.
+/// App-private JSON credential store for debug builds.
 ///
-/// TODO(M4): move secrets into an OHOS system facility (asset store / HUKS)
-/// before any release build; this file-backed fallback exists so the M3 boot
-/// has durable credentials. The file lives in the app sandbox
-/// (`files/credentials-v1.json`), mirrors the shape of the core's
-/// `DevelopmentFileCredentialStore`, and never logs secret material.
+/// Release builds always use the system Asset Store (see `run_mail`). This
+/// fallback keeps development on devices without a working asset service
+/// usable; it mirrors the core's `DevelopmentFileCredentialStore` and never
+/// logs secret material.
 struct OhosFileCredentialStore {
     path: PathBuf,
 }

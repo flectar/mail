@@ -25,10 +25,8 @@ use tokio::sync::oneshot;
 static OPEN_URL: AtomicUsize = AtomicUsize::new(0);
 static PICK_OPEN: AtomicUsize = AtomicUsize::new(0);
 static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
-static ZIP_FOLDER: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
-static NOTIFY: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -78,10 +76,8 @@ pub(super) unsafe extern "C" fn set_bridge(
         install_property(env, argv[0], b"openUrl\0", &OPEN_URL, call_open_url);
         install_property(env, argv[0], b"pickOpen\0", &PICK_OPEN, call_pick_open);
         install_property(env, argv[0], b"pickSave\0", &PICK_SAVE, call_pick_save);
-        install_property(env, argv[0], b"zipFolder\0", &ZIP_FOLDER, call_zip_folder);
         install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_zero_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
-        install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
         undefined(env)
     }
 }
@@ -184,37 +180,6 @@ pub(super) async fn pick_save(
     Ok((!path.is_empty()).then_some(path))
 }
 
-/// Compress `source_path` (a directory) into `target_zip` through the ArkTS
-/// zlib API. `Ok(())` when the archive exists.
-pub(super) async fn zip_folder(source_path: String, target_zip: String) -> Result<(), String> {
-    let id = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
-    let (sender, receiver) = oneshot::channel();
-    pending()
-        .lock()
-        .map_err(|_| "the picker registry is poisoned".to_owned())?
-        .insert(id, sender);
-    let guard = PendingGuard(id);
-    let request = ZipRequest {
-        id,
-        source: source_path,
-        target: target_zip,
-    };
-    call_closure(&ZIP_FOLDER, "zipFolder", request)?;
-    let archive = await_result(receiver).await?;
-    drop(guard);
-    if archive.is_empty() {
-        return Err("the archiver produced no file".to_owned());
-    }
-    Ok(())
-}
-
-/// Arguments of one `zipFolder` call, boxed into the thread-safe-function data.
-struct ZipRequest {
-    id: i64,
-    source: String,
-    target: String,
-}
-
 /// Arguments of one `pickSave` call, boxed into the thread-safe-function data.
 struct SaveRequest {
     id: i64,
@@ -240,21 +205,6 @@ pub(super) fn show_ime() {
 /// Lower the system keyboard through the ArkTS hook.
 pub(super) fn hide_ime() {
     let _ = call_closure(&HIDE_IME, "hideIme", ());
-}
-
-/// Publish a system notification through the ArkTS hook.
-pub(super) fn notify(title: &str, body: &str) {
-    let request = NotifyRequest {
-        title: title.to_owned(),
-        body: body.to_owned(),
-    };
-    let _ = call_closure(&NOTIFY, "notify", request);
-}
-
-/// Arguments of one `notify` call.
-struct NotifyRequest {
-    title: String,
-    body: String,
 }
 
 /// `imeCommit(text)`: committed text from the soft keyboard.
@@ -483,30 +433,6 @@ unsafe extern "C" fn call_pick_save(
     }
 }
 
-/// JS-thread half of [`zip_folder`].
-unsafe extern "C" fn call_zip_folder(
-    env: napi_env,
-    js_callback: napi_value,
-    _context: *mut c_void,
-    data: *mut c_void,
-) {
-    // SAFETY: `data` is the `ZipRequest` boxed in `zip_folder`; this callback
-    // owns it.
-    let request = unsafe { Box::from_raw(data.cast::<ZipRequest>()) };
-    // SAFETY: NAPI calls are made on the JS thread with live handles, and the
-    // argument strings outlive the call.
-    unsafe {
-        let (Some(id), Some(source), Some(target)) = (
-            int_value(env, request.id),
-            string_value(env, request.source.as_bytes()),
-            string_value(env, request.target.as_bytes()),
-        ) else {
-            return;
-        };
-        call_with_args(env, js_callback, &[id, source, target], "zipFolder");
-    }
-}
-
 /// JS-thread half of [`show_ime`] and [`hide_ime`] (zero arguments).
 unsafe extern "C" fn call_zero_arg(
     env: napi_env,
@@ -519,29 +445,6 @@ unsafe extern "C" fn call_zero_arg(
     let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
     // SAFETY: NAPI call on the JS thread.
     unsafe { call_with_args(env, js_callback, &[], "notice") };
-}
-
-/// JS-thread half of [`notify`].
-unsafe extern "C" fn call_notify(
-    env: napi_env,
-    js_callback: napi_value,
-    _context: *mut c_void,
-    data: *mut c_void,
-) {
-    // SAFETY: `data` is the `NotifyRequest` boxed in `notify`; this callback
-    // owns it.
-    let request = unsafe { Box::from_raw(data.cast::<NotifyRequest>()) };
-    // SAFETY: NAPI calls are made on the JS thread with live handles, and the
-    // argument strings outlive the call.
-    unsafe {
-        let (Some(title), Some(body)) = (
-            string_value(env, request.title.as_bytes()),
-            string_value(env, request.body.as_bytes()),
-        ) else {
-            return;
-        };
-        call_with_args(env, js_callback, &[title, body], "notify");
-    }
 }
 
 unsafe fn string_value(env: napi_env, bytes: &[u8]) -> Option<napi_value> {
