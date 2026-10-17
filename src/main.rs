@@ -5713,106 +5713,95 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let files_for_picker = Rc::clone(&compose_files);
     let imports_for_picker = Rc::clone(&compose_imports);
     let documents_for_picker = platform.documents.clone();
-    let picking_for_picker = Rc::new(Cell::new(false));
+    let runtime_for_picker = Rc::clone(&runtime);
     app.on_pick_compose_attachments(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        if picking_for_picker.replace(true) {
+        // The host picker runs in its own window while this thread waits; the
+        // ArkTS bridge delivers the staged copy back, so waiting here cannot
+        // deadlock the event loop. Keeping the composer still while the picker
+        // is open is also what keeps the presentation thread out of a hidden
+        // window's buffer queue.
+        let imported = runtime_for_picker.block_on(
+            documents_for_picker
+                .clone()
+                .import_many(MAX_COMPOSE_ATTACHMENT_FILES),
+        );
+        match &imported {
+            Ok(documents) => tracing::info!(
+                count = documents.len(),
+                "compose: attachment import finished"
+            ),
+            Err(error) => tracing::warn!(%error, "compose: attachment import failed"),
+        }
+        let documents = match imported {
+            Ok(documents) => documents,
+            Err(error) => {
+                tracing::warn!(%error, "compose: attachment picker failed");
+                app.set_compose_notice(UiMessage::plain(
+                    "The platform host does not provide a document picker.",
+                ));
+                app.set_compose_notice_is_error(true);
+                return;
+            }
+        };
+        if documents.is_empty() {
             return;
         }
-        let documents = documents_for_picker.clone();
-        let app_weak = app.as_weak();
-        let files = Rc::clone(&files_for_picker);
-        let imports = Rc::clone(&imports_for_picker);
-        let picking = Rc::clone(&picking_for_picker);
-        let picking_for_error = Rc::clone(&picking_for_picker);
-        let spawned = slint::spawn_local(async move {
-            let imported = documents.import_many(MAX_COMPOSE_ATTACHMENT_FILES).await;
-            match &imported {
-                Ok(documents) => tracing::info!(
-                    count = documents.len(),
-                    "compose: attachment import finished"
-                ),
-                Err(error) => tracing::warn!(%error, "compose: attachment import failed"),
+        let mut compose_files = files_for_picker.borrow_mut();
+        let mut compose_imports = imports_for_picker.borrow_mut();
+        let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
+        let mut added = 0usize;
+        let mut skipped = 0usize;
+        for document in documents {
+            let path = std::fs::canonicalize(document.path())
+                .unwrap_or_else(|_| document.path().to_path_buf());
+            if compose_files.iter().any(|file| file.path == path) {
+                skipped += 1;
+                continue;
             }
-            picking.set(false);
-            let Some(app) = app_weak.upgrade() else {
-                return;
+            let Ok(metadata) = std::fs::metadata(&path) else {
+                skipped += 1;
+                continue;
             };
-            let documents = match imported {
-                Ok(documents) => documents,
-                Err(error) => {
-                    tracing::warn!(%error, "compose attachment picker failed");
-                    app.set_compose_notice(UiMessage::plain(
-                        "The platform host does not provide a document picker.",
-                    ));
-                    app.set_compose_notice_is_error(true);
-                    return;
-                }
+            if !metadata.is_file()
+                || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
+            {
+                skipped += 1;
+                continue;
+            }
+            let Some(filename) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+            else {
+                skipped += 1;
+                continue;
             };
-            if documents.is_empty() {
-                return;
-            }
-            let mut compose_files = files.borrow_mut();
-            let mut compose_imports = imports.borrow_mut();
-            let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
-            let mut added = 0usize;
-            let mut skipped = 0usize;
-            for document in documents {
-                let path = std::fs::canonicalize(document.path())
-                    .unwrap_or_else(|_| document.path().to_path_buf());
-                if compose_files.iter().any(|file| file.path == path) {
-                    skipped += 1;
-                    continue;
-                }
-                let Ok(metadata) = std::fs::metadata(&path) else {
-                    skipped += 1;
-                    continue;
-                };
-                if !metadata.is_file()
-                    || total_size.saturating_add(metadata.len()) > MAX_COMPOSE_ATTACHMENT_BYTES
-                {
-                    skipped += 1;
-                    continue;
-                }
-                let Some(filename) = path.file_name().map(|name| name.to_string_lossy().into_owned())
-                else {
-                    skipped += 1;
-                    continue;
-                };
-                total_size += metadata.len();
-                compose_files.push(ComposeFile {
-                    path,
-                    filename,
-                    size: metadata.len(),
-                });
-                compose_imports.push(Some(document));
-                added += 1;
-            }
-            apply_compose_files(&app, &compose_files);
-            if skipped == 0 {
-                app.set_compose_notice(if added == 1 {
-                    UiMessage::plain("Added 1 attachment.")
-                } else {
-                    UiMessage::detail("Added {} attachments.", added)
-                });
-                app.set_compose_notice_is_error(false);
+            total_size += metadata.len();
+            compose_files.push(ComposeFile {
+                path,
+                filename,
+                size: metadata.len(),
+            });
+            compose_imports.push(Some(document));
+            added += 1;
+        }
+        apply_compose_files(&app, &compose_files);
+        if skipped == 0 {
+            app.set_compose_notice(if added == 1 {
+                UiMessage::plain("Added 1 attachment.")
             } else {
-                app.set_compose_notice(UiMessage::arguments(
-                    "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
-                    added,
-                    skipped,
-                ));
-                app.set_compose_notice_is_error(added == 0);
-            }
-        });
-        if spawned.is_err() {
-            picking_for_error.set(false);
-            app.set_compose_notice(UiMessage::plain(
-                "The platform host does not provide a document picker.",
+                UiMessage::detail("Added {} attachments.", added)
+            });
+            app.set_compose_notice_is_error(false);
+        } else {
+            app.set_compose_notice(UiMessage::arguments(
+                "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).",
+                added,
+                skipped,
             ));
-            app.set_compose_notice_is_error(true);
+            app.set_compose_notice_is_error(added == 0);
         }
     });
 
@@ -6290,7 +6279,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let runtime_for_account = Rc::clone(&runtime);
     let ui_task_tx_for_account = ui_task_tx.clone();
     oauth_browser::register(&app, platform.oauth_redirects.clone());
-    mail_setup::register(&app, &runtime);
+    mail_setup::register(&app, &runtime, &platform.documents);
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);

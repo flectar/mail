@@ -659,42 +659,17 @@ fn import_account_backup_document(
 
 // --- staging helpers --------------------------------------------------------
 
-/// A provider export reads from an app-private staging file; the host copies
-/// it to whatever destination its picker offers.
-async fn export_document_bytes(
-    documents: &std::sync::Arc<dyn documents::DocumentProvider>,
-    staging_dir: PathBuf,
-    bytes: Vec<u8>,
-    name: String,
-) -> Result<bool, String> {
-    let staging = staging_dir.join(&name);
-    let result = async {
-        tokio::fs::create_dir_all(&staging_dir)
-            .await
-            .map_err(|error| format!("creating {}: {error}", staging_dir.display()))?;
-        tokio::fs::write(&staging, bytes)
-            .await
-            .map_err(|error| format!("writing {}: {error}", staging.display()))?;
-        documents.export(staging.clone(), name).await
-    }
-    .await;
-    let _ = tokio::fs::remove_file(&staging).await;
-    result
-}
-
 /// Database snapshot staging must stay outside the application data and cache
 /// roots: Core refuses to write a snapshot inside them.
 fn snapshot_staging_root(paths: &Paths) -> PathBuf {
-    let temporary = std::env::temp_dir();
-    if temporary.starts_with(&paths.data_dir) || temporary.starts_with(&paths.cache_dir) {
-        // Android points TMPDIR at the app cache; stage beside the data root.
-        return paths
-            .data_dir
-            .parent()
-            .map(|parent| parent.join("snapshot-staging"))
-            .unwrap_or_else(|| temporary.join("flectar-mail-snapshot"));
-    }
-    temporary.join("flectar-mail-snapshot")
+    // Beside the data root: Core refuses snapshot destinations inside its data
+    // and cache trees, and the host copies the archive out afterwards. This is
+    // also where the pre-rebuild port staged snapshots on device.
+    paths
+        .data_dir
+        .parent()
+        .map(|parent| parent.join("exports"))
+        .unwrap_or_else(|| std::env::temp_dir().join("flectar-mail-snapshot"))
 }
 
 /// Creates the verified snapshot in staging, archives it as one file and hands
@@ -993,28 +968,25 @@ pub(super) fn register_data_management_callbacks(
             "flectar-mail-backup-{}.json",
             Local::now().format("%Y-%m-%d")
         );
-        let documents = documents_for_backup.clone();
-        let staging_dir = paths_for_backup.temp_dir();
-        let app_weak = app.as_weak();
-        let spawned = slint::spawn_local(async move {
-            let result = export_document_bytes(&documents, staging_dir, bytes, name).await;
-            let Some(app) = app_weak.upgrade() else {
-                return;
-            };
-            match result {
-                Ok(true) => app.set_sync_status(UiMessage::plain(
-                    "Backup exported. Passwords and OAuth tokens were not included.",
-                )),
-                Ok(false) => {}
-                Err(error) => {
-                    app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
-                }
+        // Write an app-private copy, then let the host picker choose the
+        // destination. The picker runs in its own window while this thread
+        // waits, matching the other document flows.
+        let staging = paths_for_backup.temp_dir().join(&name);
+        if let Err(error) = std::fs::write(&staging, &bytes) {
+            app.set_sync_status(UiMessage::detail("Could not export backup: {}", error));
+            return;
+        }
+        let outcome =
+            runtime_for_backup.block_on(documents_for_backup.export(staging.clone(), name));
+        let _ = std::fs::remove_file(&staging);
+        match outcome {
+            Ok(true) => app.set_sync_status(UiMessage::plain(
+                "Backup exported. Passwords and OAuth tokens were not included.",
+            )),
+            Ok(false) => {}
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not export backup: {}", error))
             }
-        });
-        if spawned.is_err() {
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document export.",
-            ));
         }
     });
 
@@ -1081,37 +1053,24 @@ pub(super) fn register_data_management_callbacks(
             ));
             return;
         };
-        let documents = documents_for_backup_import.clone();
-        let app_weak = app.as_weak();
-        let state = Rc::clone(&state_for_backup_import);
-        let runtime = Rc::clone(&runtime_for_backup_import);
-        // The provider handshake runs on the UI thread's executor; the import
-        // keeps its synchronous shape so the existing state updates stay on
-        // the main loop.
-        let spawned = slint::spawn_local(async move {
-            let imported = documents.import().await;
-            let Some(app) = app_weak.upgrade() else {
+        // The host picker runs in its own window while this thread waits; the
+        // ArkTS bridge delivers the staged copy, so waiting cannot deadlock.
+        let imported = runtime_for_backup_import.block_on(documents_for_backup_import.import());
+        let document = match imported {
+            Ok(Some(document)) => document,
+            Ok(None) => return,
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not import backup: {}", error));
                 return;
-            };
-            let document = match imported {
-                Ok(Some(document)) => document,
-                Ok(None) => return,
-                Err(error) => {
-                    app.set_sync_status(UiMessage::detail(
-                        "Could not import backup: {}",
-                        error,
-                    ));
-                    return;
-                }
-            };
-            import_account_backup_document(&app, document.path(), &core, &state, &runtime);
-        });
-        if spawned.is_err() {
-            app.set_sync_status(UiMessage::plain(
-                "The platform host does not provide document import.",
-            ));
-        }
-
+            }
+        };
+        import_account_backup_document(
+            &app,
+            document.path(),
+            &core,
+            &state_for_backup_import,
+            &runtime_for_backup_import,
+        );
     });
 
     let (data_reset_raw_tx, data_reset_rx) = bounded_ui_channel::<Result<(), String>>();
