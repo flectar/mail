@@ -3,6 +3,9 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { notificationManager } from '@kit.NotificationKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+
+const NOTIFICATION_TAG = 'FlectarOhos';
 
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
@@ -33,7 +36,6 @@ struct Index {
 
   aboutToAppear(): void {
     this.probeResources();
-    this.requestNotificationPermission();
   }
 
   // The IME controller is process-scoped; its listeners capture this page, so
@@ -271,21 +273,9 @@ struct Index {
     }
   }
 
-  // Ask the user once to allow notifications for this app.
-  private requestNotificationPermission(): void {
-    try {
-      notificationManager.requestEnableNotification(this.getUIContext().getHostContext() as common.UIAbilityContext)
-        .then((): void => {
-          console.info('[flectar] notifications enabled');
-        })
-        .catch((error: BusinessError): void => {
-          console.error(`[flectar] notifications not enabled: ${error.code}`);
-        });
-    } catch (error) {
-      console.error('[flectar] notification setup failed');
-    }
-  }
-
+  // New-mail notification, published by the native module through the
+  // publisher installed on the platform context. The permission itself is
+  // requested by EntryAbility once the page has loaded.
   private notify(title: string, body: string): void {
     try {
       const request: notificationManager.NotificationRequest = {
@@ -296,11 +286,17 @@ struct Index {
           normal: { title, text: body },
         },
       };
-      notificationManager.publish(request).catch((error: BusinessError): void => {
-        console.error(`[flectar] notification publish failed: ${error.code}`);
-      });
+      notificationManager.publish(request)
+        .then((): void => {
+          hilog.info(0x0000, NOTIFICATION_TAG, 'notification published');
+        })
+        .catch((error: BusinessError): void => {
+          hilog.error(0x0000, NOTIFICATION_TAG,
+            'notification publish failed: %{public}d %{public}s', error.code, error.message);
+        });
     } catch (error) {
-      console.error(`[flectar] notification failed: ${(error as BusinessError).message}`);
+      hilog.error(0x0000, NOTIFICATION_TAG,
+        'notification failed: %{public}s', (error as BusinessError).message);
     }
   }
 

@@ -33,6 +33,16 @@ const TOUCH_LOG_LIMIT: u32 = 40;
 static KEY_LOGGED: AtomicU32 = AtomicU32::new(0);
 const KEY_LOG_LIMIT: u32 = 12;
 
+/// Wheel diagnostics: log the first few scroll events with the raw platform
+/// value, so the unit and sign can be checked against a device.
+static SCROLL_LOGGED: AtomicU32 = AtomicU32::new(0);
+const SCROLL_LOG_LIMIT: u32 = 10;
+
+/// A mouse wheel notch reports 15 degrees per scroll step. Slint scrolls 50
+/// logical pixels per wheel line (the same step the desktop backend uses), so
+/// a notch moves about three text lines.
+const LOGICAL_PX_PER_WHEEL_DEGREE: f32 = 50.0 / 15.0;
+
 /// Modifier state used for character translation: OHOS key events carry only
 /// key codes, not text.
 static KEY_SHIFT: AtomicBool = AtomicBool::new(false);
@@ -123,6 +133,19 @@ pub unsafe fn register(component: *mut ffi::OH_NativeXComponent) -> i32 {
     crate::log::info(&format!(
         "register XComponent surface show/hide callbacks: {rc_show}/{rc_hide}"
     ));
+    // Wheel and touchpad scrolling: the XComponent UI input callback is the
+    // only native path for axis events (touch reaches DispatchTouchEvent, but
+    // axis events do not).
+    // SAFETY: same live component; the callback has the required C signature
+    // and only reads the axis event handed to it by the loader.
+    let rc_axis = unsafe {
+        ffi::OH_NativeXComponent_RegisterUIInputEventCallback(
+            component,
+            on_axis_event,
+            ffi::ARKUI_UIINPUTEVENT_TYPE_AXIS,
+        )
+    };
+    crate::log::info(&format!("register XComponent axis callback: rc={rc_axis}"));
     rc
 }
 
@@ -239,6 +262,50 @@ unsafe extern "C" fn dispatch_touch_event(
         x: touch.x,
         y: touch.y,
         phase,
+    });
+}
+
+/// Wheel and touchpad scrolling arrives only through the XComponent UI input
+/// callback; the touch callback never sees axis events.
+unsafe extern "C" fn on_axis_event(
+    _component: *mut ffi::OH_NativeXComponent,
+    event: *mut ffi::ArkUI_UIInputEvent,
+    _type: i32,
+) {
+    if event.is_null() {
+        return;
+    }
+    // Any input means the window is interactive again (see the touch handler).
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
+    }
+    // SAFETY: `event` is a live axis event owned by the loader for the
+    // duration of this callback.
+    let action = unsafe { ffi::OH_ArkUI_AxisEvent_GetAxisAction(event) };
+    // BEGIN and UPDATE carry the incremental value; END and CANCEL do not.
+    if action != ffi::UI_AXIS_EVENT_ACTION_BEGIN && action != ffi::UI_AXIS_EVENT_ACTION_UPDATE {
+        return;
+    }
+    let vertical = unsafe { ffi::OH_ArkUI_AxisEvent_GetVerticalAxisValue(event) } as f32;
+    let horizontal = unsafe { ffi::OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event) } as f32;
+    if vertical == 0.0 && horizontal == 0.0 {
+        return;
+    }
+    let x = unsafe { ffi::OH_ArkUI_PointerEvent_GetX(event) };
+    let y = unsafe { ffi::OH_ArkUI_PointerEvent_GetY(event) };
+    let seen = SCROLL_LOGGED.fetch_add(1, Ordering::Relaxed);
+    if seen < SCROLL_LOG_LIMIT {
+        crate::log::info(&format!(
+            "scroll #{seen}: action={action} raw=({horizontal:.2}, {vertical:.2}) at ({x:.0}, {y:.0})"
+        ));
+    }
+    // Positive platform values scroll forward, toward the start of the
+    // content, which is also Slint's positive delta.
+    send(BackendEvent::Scroll {
+        x,
+        y,
+        delta_x: horizontal * LOGICAL_PX_PER_WHEEL_DEGREE,
+        delta_y: vertical * LOGICAL_PX_PER_WHEEL_DEGREE,
     });
 }
 

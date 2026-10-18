@@ -132,14 +132,18 @@ handled (and asserted) in the script, do not "simplify" them away:
   unless it is explicitly summoned; the built-in IME uses `Alt+Shift`.
 - **Input**: XComponent touch events drive Slint's pointer handling; physical
   keyboard events are translated (key codes to text, modifiers, auto-repeat)
-  in `backend/src/xcomponent.rs`.
+  in `backend/src/xcomponent.rs`, and wheel/touchpad axis events reach the
+  same module through the XComponent UI input callback (Slint's flickables
+  then scroll without any application-side change).
+- **Notifications**: the ability requests notification permission once the
+  page has loaded (asking earlier is rejected by the system), and new mail
+  from the sync engine is published through `@kit.NotificationKit` when the
+  in-app notifications setting is on. A refusal is final at the system level;
+  the user can re-enable notifications in the system settings.
 - **Data**: the application keeps its data under the standard bundle data
   path. Import/export goes through the system document picker via the host
-  `DocumentProvider`; the credentials live in the system Asset Store, never
-  in plain files. Compose attachments, account backups and database snapshots
-  still use desktop file dialogs inside the application, so they report "no
-  picker" on mobile until they are routed through the document provider
-  (tracked upstream).
+  `DocumentProvider`, and credentials live in the system Asset Store, never
+  in plain files.
 
 ## Tests
 

@@ -158,6 +158,16 @@ impl OhosPlatform {
                     w.dispatch_touch(x, y, phase);
                 }
             }
+            BackendEvent::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => {
+                if let Some(w) = self.window.borrow().as_ref() {
+                    w.dispatch_scroll(x, y, delta_x, delta_y);
+                }
+            }
             BackendEvent::Key { text, down, repeat } => {
                 if let Some(w) = self.window.borrow().as_ref() {
                     w.dispatch_key(text, down, repeat);

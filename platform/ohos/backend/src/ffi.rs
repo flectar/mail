@@ -305,6 +305,22 @@ pub struct OH_NativeXComponent_KeyEvent {
     _private: [u8; 0],
 }
 
+/// Opaque UI input event from `OH_NativeXComponent_RegisterUIInputEventCallback`
+/// (arkui/ui_input_event.h).
+#[repr(C)]
+pub struct ArkUI_UIInputEvent {
+    _private: [u8; 0],
+}
+
+/// `ArkUI_UIInputEvent_Type`: the callback registration only supports axis
+/// events on an XComponent.
+pub const ARKUI_UIINPUTEVENT_TYPE_AXIS: i32 = 2;
+
+/// `UI_AXIS_EVENT_ACTION_*`: the BEGIN and UPDATE phases carry an incremental
+/// wheel/touchpad scroll value.
+pub const UI_AXIS_EVENT_ACTION_BEGIN: i32 = 1;
+pub const UI_AXIS_EVENT_ACTION_UPDATE: i32 = 2;
+
 pub const OH_NATIVEXCOMPONENT_KEY_ACTION_DOWN: i32 = 0;
 pub const OH_NATIVEXCOMPONENT_KEY_ACTION_UP: i32 = 1;
 
@@ -378,6 +394,27 @@ unsafe extern "C" {
         component: *mut OH_NativeXComponent,
         callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),
     ) -> i32;
+    pub fn OH_NativeXComponent_RegisterUIInputEventCallback(
+        component: *mut OH_NativeXComponent,
+        callback: unsafe extern "C" fn(
+            component: *mut OH_NativeXComponent,
+            event: *mut ArkUI_UIInputEvent,
+            type_: i32,
+        ),
+        type_: i32,
+    ) -> i32;
+    /// Axis (mouse wheel / touchpad) accessors for the event handed to the UI
+    /// input callback. Wheel values are in degrees (a notch reports 15
+    /// degrees times the user's scroll-step setting); touchpad values are in
+    /// pixels. Positive values scroll forward (toward the start of the
+    /// content).
+    pub fn OH_ArkUI_AxisEvent_GetAxisAction(event: *const ArkUI_UIInputEvent) -> i32;
+    pub fn OH_ArkUI_AxisEvent_GetVerticalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
+    pub fn OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
+    /// Position of a directional input event (touch, mouse or axis) relative
+    /// to the component, in physical pixels.
+    pub fn OH_ArkUI_PointerEvent_GetX(event: *const ArkUI_UIInputEvent) -> f32;
+    pub fn OH_ArkUI_PointerEvent_GetY(event: *const ArkUI_UIInputEvent) -> f32;
     pub fn OH_NativeXComponent_RegisterSurfaceShowCallback(
         component: *mut OH_NativeXComponent,
         callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),

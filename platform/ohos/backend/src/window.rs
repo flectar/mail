@@ -224,6 +224,26 @@ impl OhosWindow {
         let _ = self.window.dispatch_event_with_result(event);
     }
 
+    /// Translate one wheel/touchpad scroll into a Slint scroll event.
+    ///
+    /// The position is a physical XComponent coordinate and is scaled like a
+    /// touch; the deltas are already logical pixels (the caller converts the
+    /// platform's wheel unit).
+    pub fn dispatch_scroll(&self, x: f32, y: f32, delta_x: f32, delta_y: f32) {
+        let scale = {
+            let factor = self.window.scale_factor();
+            if factor > 0.0 { factor } else { 1.0 }
+        };
+        let position = LogicalPosition::new(x / scale, y / scale);
+        let _ = self
+            .window
+            .dispatch_event_with_result(WindowEvent::PointerScrolled {
+                position,
+                delta_x,
+                delta_y,
+            });
+    }
+
     /// Translate one keyboard event into a Slint key event.
     pub fn dispatch_key(&self, text: slint::SharedString, down: bool, repeat: bool) {
         let event = if down {

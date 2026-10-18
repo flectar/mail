@@ -58,6 +58,14 @@ pub enum BackendEvent {
     SurfaceShown,
     /// A touch event in physical surface coordinates.
     Touch { x: f32, y: f32, phase: TouchPhase },
+    /// A mouse wheel / touchpad scroll in physical surface coordinates; the
+    /// deltas are logical pixels, positive toward the start of the content.
+    Scroll {
+        x: f32,
+        y: f32,
+        delta_x: f32,
+        delta_y: f32,
+    },
     /// A keyboard event translated to Slint's key-text representation.
     Key {
         text: SharedString,
@@ -88,6 +96,17 @@ impl core::fmt::Debug for BackendEvent {
             BackendEvent::SurfaceShown => write!(f, "SurfaceShown"),
             BackendEvent::Touch { x, y, phase } => {
                 write!(f, "Touch {{ x: {x}, y: {y}, phase: {phase:?} }}")
+            }
+            BackendEvent::Scroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            } => {
+                write!(
+                    f,
+                    "Scroll {{ x: {x}, y: {y}, delta_x: {delta_x}, delta_y: {delta_y} }}"
+                )
             }
             // The translated text is deliberately omitted: it may contain
             // characters typed into password fields.

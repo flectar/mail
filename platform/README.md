@@ -52,6 +52,7 @@ host-provided service:
 | `credentials` | System keychain (`SystemCredentialStore`) | Implements `CredentialStore` with the platform keystore |
 | `oauth_redirects` | Loopback redirect broker | Implements `OAuthRedirectBroker` (app links, custom schemes) |
 | `external_urls` | System URL launcher | `ExternalUrlOpener::new` with the host's native URL bridge |
+| `notification_publisher` | Disabled by default | `NotificationPublisher::new` with the host's system notification service |
 
 Mobile hosts use `PlatformContext::app_private(data_root, cache_dir, documents,
 credentials, oauth_redirects)`, which keeps durable data below
@@ -85,6 +86,7 @@ provides these crate-internal items, which shared code calls without a `cfg`:
 | `pdfium_library()` | Path of the bundled PDFium library. |
 | `lower_current_thread_priority()` | Run the PDF worker thread at background priority. |
 | `install_preview_lifecycle()` | Register for background/memory-pressure notifications, which must call `flectar_mail::suspend_file_preview()`. |
+| `email_font_dir()` | Platform font directory for the email (Blitz/Parley) renderer on hosts without Fontconfig; `None` when the fontique system backend provides the fonts. |
 
 Hosts that launch through `src/desktop.rs` (desktop and iOS) also provide
 `platform::launch_context()`.

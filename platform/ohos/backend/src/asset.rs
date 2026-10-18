@@ -27,6 +27,7 @@ const CONFLICT_OVERWRITE: u32 = 0;
 
 const ASSET_SUCCESS: i32 = 0;
 const ASSET_NOT_FOUND: i32 = 24000002;
+const ASSET_CRYPTO_ERROR: i32 = 24000009;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -95,8 +96,8 @@ fn number_attr(tag: u32, value: u32) -> AssetAttr {
     }
 }
 
-/// Stores (or overwrites) `secret` under `alias`.
-pub fn put(alias: &str, secret: &str) -> Result<(), String> {
+/// Adds `secret` under `alias`, overwriting an existing entry.
+fn add(alias: &str, secret: &str) -> Result<(), i32> {
     let alias_bytes = alias.as_bytes();
     let secret_bytes = secret.as_bytes();
     let attrs = [
@@ -110,11 +111,34 @@ pub fn put(alias: &str, secret: &str) -> Result<(), String> {
     // SAFETY: the attrs array borrows `alias_bytes`/`secret_bytes` for the
     // duration of this synchronous call; the service copies them.
     let rc = unsafe { OH_Asset_Add(attrs.as_ptr(), attrs.len() as u32) };
-    if rc == ASSET_SUCCESS {
-        Ok(())
-    } else {
-        Err(format!("asset add failed: {rc}"))
+    if rc == ASSET_SUCCESS { Ok(()) } else { Err(rc) }
+}
+
+/// Stores (or overwrites) `secret` under `alias`.
+pub fn put(alias: &str, secret: &str) -> Result<(), String> {
+    let failed = match add(alias, secret) {
+        Ok(()) => return Ok(()),
+        Err(rc) => rc,
+    };
+    // Reinstalling under a different signing identity leaves rows the asset
+    // service can no longer decrypt: overwriting one fails with
+    // `ASSET_CRYPTO_ERROR`, while queries report it as missing. Deleting by
+    // alias does not need the old secret, so drop the stale row and add a
+    // fresh one.
+    if failed != ASSET_CRYPTO_ERROR {
+        return Err(format!("asset add failed: {failed}"));
     }
+    let alias_bytes = alias.as_bytes();
+    let query = [bytes_attr(TAG_ALIAS, alias_bytes)];
+    // SAFETY: the query borrows `alias_bytes` for this synchronous call.
+    let rc = unsafe { OH_Asset_Remove(query.as_ptr(), query.len() as u32) };
+    if rc != ASSET_SUCCESS && rc != ASSET_NOT_FOUND {
+        return Err(format!("asset remove failed: {rc}"));
+    }
+    crate::log::info(&format!(
+        "asset: dropped stale entry {alias} (crypto error {failed}) and retried"
+    ));
+    add(alias, secret).map_err(|rc| format!("asset add failed: {rc}"))
 }
 
 /// Loads the secret stored under `alias`. `Ok(None)` when absent.
