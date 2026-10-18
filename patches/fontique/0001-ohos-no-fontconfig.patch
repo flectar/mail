@@ -1,0 +1,60 @@
+diff --git a/crates/fontique/Cargo.toml b/crates/fontique/Cargo.toml
+index 9e53546..39c9c50 100644
+--- a/crates/fontique/Cargo.toml
++++ b/crates/fontique/Cargo.toml
+@@ -93,7 +93,7 @@ default-features = false
+ [dependencies.smallvec]
+ version = "1.15.1"
+ 
+-[target.'cfg(any(target_os = "linux", target_os="freebsd"))'.dependencies.yeslogic-fontconfig-sys]
++[target.'cfg(all(any(target_os = "linux", target_os="freebsd"), not(target_env = "ohos")))'.dependencies.yeslogic-fontconfig-sys]
+ version = "6.0.0"
+ optional = true
+ 
+diff --git a/crates/fontique/src/backend/mod.rs b/crates/fontique/src/backend/mod.rs
+index 43cdc39..ef96050 100644
+--- a/crates/fontique/src/backend/mod.rs
++++ b/crates/fontique/src/backend/mod.rs
+@@ -11,7 +11,10 @@ mod system;
+ #[path = "coretext.rs"]
+ mod system;
+ 
+-#[cfg(all(feature = "system", any(target_os = "linux", target_os = "freebsd")))]
++// OpenHarmony keeps `target_os = "linux"` but ships no Fontconfig; the vendored
++// patch (see `patches/fontique`) excludes the fontconfig backend
++// for `target_env = "ohos"` so the dummy system backend is used instead.
++#[cfg(all(feature = "system", any(target_os = "linux", target_os = "freebsd"), not(target_env = "ohos")))]
+ #[path = "fontconfig.rs"]
+ mod system;
+ 
+@@ -34,9 +37,13 @@ use super::source::SourcePathMap;
+ 
+ pub(crate) use system::SystemFonts;
+ 
+-// Dummy system font backend for targets like wasm32-unknown-unknown
++// Dummy system font backend for targets like wasm32-unknown-unknown.
++// OpenHarmony is folded in here explicitly: it reports `target_os = "linux"`,
++// but the fontconfig backend is excluded for it (see the vendored patch notes
++// above), so the dummy backend must claim `target_env = "ohos"`.
+ #[cfg(any(
+     not(feature = "system"),
++    target_env = "ohos",
+     not(any(
+         target_os = "windows",
+         target_os = "linux",
+diff --git a/crates/fontique/src/lib.rs b/crates/fontique/src/lib.rs
+index f367af2..1430f6b 100644
+--- a/crates/fontique/src/lib.rs
++++ b/crates/fontique/src/lib.rs
+@@ -3,6 +3,11 @@
+ 
+ //! Font enumeration and fallback.
+ 
++// Vendored for OHOS (see `patches/fontique`). The upstream crate uses
++// the now-deprecated `Script::from_str_unchecked` throughout its script table;
++// silence the churn locally instead of patching hundreds of call sites.
++#![allow(deprecated)]
++
+ // LINEBENDER LINT SET - lib.rs - v4
+ // See https://linebender.org/wiki/canonical-lints/
+ // These lints shouldn't apply to examples or tests.

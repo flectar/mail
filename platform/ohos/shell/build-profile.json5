@@ -1,0 +1,23 @@
+{
+  app: {
+    products: [
+      {
+        name: 'default',
+        compileSdkVersion: '26.0.0',
+        compatibleSdkVersion: '18',
+        targetSdkVersion: '26.0.0',
+        runtimeOS: 'OpenHarmony',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: false,
+          },
+        },
+      },
+    ],
+    buildModeSet: [{ name: 'debug' }, { name: 'release' }],
+  },
+  modules: [
+    { name: 'entry', srcPath: './entry', targets: [{ name: 'default', applyToProducts: ['default'] }] },
+  ],
+}

@@ -12,7 +12,7 @@ fn main() {
     // Keep `mobile` identical to the application's build.rs; see
     // platform/README.md.
     cfg_aliases! {
-        mobile: { any(target_os = "android", target_os = "ios") },
+        mobile: { any(target_os = "android", target_os = "ios", target_env = "ohos") },
         desktop: { not(mobile) },
         // rustix exposes renameat2/renameatx_np with RENAME_NOREPLACE here.
         rename_noreplace: { any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios") },

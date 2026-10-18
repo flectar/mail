@@ -1,0 +1,67 @@
+// OHOS M2 demo surface.
+//
+// Proves three things on device:
+//  1. Slint software rendering into the XComponent surface (colors + text),
+//  2. touch input (tap counter),
+//  3. a continuous frame source (animation-tick() requests a redraw every
+//     frame; the backend throttles it to ~60 Hz).
+import "../../../../resources/fonts/google-sans-flex/GoogleSansFlex-VariableFont_GRAD,ROND,opsz,slnt,wdth,wght.ttf";
+
+export component Demo inherits Window {
+    in-out property <int> taps: 0;
+    // Seconds since the backend started; recomputed every frame, which keeps
+    // Slint requesting redraws.
+    private property <float> seconds: (animation-tick() / 1ms) / 1000.0;
+
+    title: "Flectar OHOS demo";
+    default-font-family: "Google Sans Flex";
+    preferred-width: 720px;
+    preferred-height: 480px;
+    background: #0f1218;
+
+    TouchArea {
+        clicked => { root.taps += 1; }
+    }
+
+    // Bobbing accent: proves smooth frame delivery (2 s period).
+    Rectangle {
+        width: 96px;
+        height: 96px;
+        border-radius: 18px;
+        background: #4f8cff;
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2 + 40px * Math.sin(root.seconds * 180deg);
+    }
+
+    Text {
+        x: 0;
+        width: root.width;
+        y: 48px;
+        horizontal-alignment: center;
+        color: #e8ecf3;
+        font-size: 26px;
+        text: "Flectar Mail · OHOS M2";
+    }
+
+    Text {
+        x: 0;
+        width: root.width;
+        y: root.height - 72px;
+        horizontal-alignment: center;
+        color: #93a4bd;
+        font-size: 18px;
+        text: "taps: " + root.taps;
+    }
+
+    // System-font fallback probe: requires /system/fonts registration plus the
+    // Han fallback (FZHeiT); without them this line renders as tofu boxes.
+    Text {
+        x: 0;
+        width: root.width;
+        y: root.height - 120px;
+        horizontal-alignment: center;
+        color: #c8d4e6;
+        font-size: 20px;
+        text: "中文渲染测试：你好，鸿蒙 · 字体回退";
+    }
+}

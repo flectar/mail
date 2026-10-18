@@ -2,10 +2,16 @@
 //! material; private keys must never enter account settings or backups.
 use super::*;
 
-pub(super) fn register(app: &AppWindow, _runtime: &Rc<tokio::runtime::Runtime>) {
+pub(super) fn register(
+    app: &AppWindow,
+    _runtime: &Rc<tokio::runtime::Runtime>,
+    _documents: &std::sync::Arc<dyn crate::documents::DocumentProvider>,
+) {
     let weak = app.as_weak();
-    #[cfg(desktop)]
+    #[cfg(any(desktop, mobile))]
     let runtime = Rc::clone(_runtime);
+    #[cfg(mobile)]
+    let documents = std::sync::Arc::clone(_documents);
     app.on_import_mail_certificate(move || {
         let Some(app) = weak.upgrade() else {
             return;
@@ -46,13 +52,34 @@ pub(super) fn register(app: &AppWindow, _runtime: &Rc<tokio::runtime::Runtime>) 
             });
         }
         #[cfg(mobile)]
-        app.set_sync_status(UiMessage::plain(
-            "Paste the PEM certificate into the certificate field.",
-        ));
+        {
+            // The host picker runs in its own window while this thread waits;
+            // read the staged copy while the ImportedDocument guard owns it.
+            let outcome = runtime.block_on(async {
+                let Some(document) = documents.import().await? else {
+                    return Ok::<Option<String>, String>(None);
+                };
+                let pem = read_certificate(document.path()).await?;
+                Ok(Some(pem))
+            });
+            match outcome {
+                Ok(Some(pem)) => {
+                    app.set_trusted_certificate_pem(pem.into());
+                    app.set_sync_status(UiMessage::plain(
+                        "Certificate imported. Connect to verify the server.",
+                    ));
+                }
+                Ok(None) => {}
+                Err(error) => app.set_sync_status(UiMessage::detail(
+                    "Certificate import failed: {}",
+                    error,
+                )),
+            }
+        }
     });
 }
 
-#[cfg(desktop)]
+#[cfg(any(desktop, mobile))]
 async fn read_certificate(path: &std::path::Path) -> Result<String, String> {
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(path)
