@@ -72,13 +72,23 @@ APP=mail PROFILE=release CARGO_BUILD_JOBS=4 sh platform/ohos/scripts/build-hap.s
 
 hdc file send platform/ohos/build/flectar_mail_ohos-signed.hap /data/local/tmp/flectar.hap
 hdc shell "bm install -r -d -p /data/local/tmp/flectar.hap"
-hdc shell "aa start -a EntryAbility -b com.flectar.mail_ohos"
+hdc shell "aa start -a EntryAbility -b com.flectar.mail"
 ```
 
-The bundle name defaults to `com.flectar.mail_ohos`. The DevEco
-auto-signing material is bound to the bundle it was issued for, so until the
-profile is regenerated for the new name pass the previous bundle:
-`BUNDLE=com.example.myapplication`.
+The bundle name defaults to `com.flectar.mail`. Release builds are signed
+with the AGC material through `hap-sign-tool`:
+
+```sh
+RELEASE_SIGN=1 \
+RELEASE_P12=release.p12 RELEASE_CERT=com.flectar.mail.cer \
+RELEASE_PROFILE=FlectarMailProfileRelease.p7b \
+RELEASE_KEY_ALIAS=releasekey RELEASE_KEY_PWD=... RELEASE_STORE_PWD=... \
+APP=mail PROFILE=release sh platform/ohos/scripts/build-hap.sh
+```
+
+Without `RELEASE_SIGN=1` the script uses the DevEco auto-signing material,
+which is bound to the bundle it was issued for: if that material was generated
+for a different name, pass `BUNDLE=<that name>` for local debug builds.
 
 `bm install -r -d` is deliberate: `hdc install` rejects the hap ("install
 version downgrade") because the shared bundle name carries the DevEco

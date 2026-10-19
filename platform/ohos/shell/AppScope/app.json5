@@ -1,7 +1,7 @@
 {
   app: {
     // Bundle name; build-hap.sh can override it with BUNDLE=...
-    bundleName: 'com.flectar.mail_ohos',
+    bundleName: 'com.flectar.mail',
     vendor: 'example',
     versionCode: 4,
     versionName: '1.0.0',

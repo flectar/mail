@@ -33,7 +33,7 @@ BUILD_DIR="$PLATFORM_DIR/build"
 STAGE="$BUILD_DIR/hap-stage"
 # The DevEco auto-signing material is bundle-bound: override BUNDLE (for
 # example with the previous name) until the signing profile is regenerated.
-BUNDLE="${BUNDLE:-com.flectar.mail_ohos}"
+BUNDLE="${BUNDLE:-com.flectar.mail}"
 
 # APP selects which native module the shell loads (page template + cdylib).
 APP="${APP:-demo}"

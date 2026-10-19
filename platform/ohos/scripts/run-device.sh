@@ -11,7 +11,7 @@ PLATFORM_DIR=$(dirname "$HERE")
 . "$HERE/env.sh"
 
 HAP="${1:-$PLATFORM_DIR/build/slint_ohos_demo-signed.hap}"
-BUNDLE="${BUNDLE:-com.flectar.mail_ohos}"
+BUNDLE="${BUNDLE:-com.flectar.mail}"
 
 [ -f "$HAP" ] || { echo "[run-device] hap not found: $HAP (run build-hap.sh first)" >&2; exit 1; }
 
