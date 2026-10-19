@@ -5,7 +5,7 @@ import { inputMethod } from '@kit.IMEKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
-const NOTIFICATION_TAG = 'FlectarOhos';
+const LOG_TAG = 'FlectarOhos';
 
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
@@ -49,7 +49,8 @@ struct Index {
       controller.off('insertText');
       controller.off('deleteLeft');
     } catch (error) {
-      console.error('[flectar] IME listener cleanup failed');
+      hilog.error(0x0000, LOG_TAG, 'IME listener cleanup failed: %{public}s',
+        (error as BusinessError).message);
     }
     this.imeAttached = false;
   }
@@ -86,10 +87,12 @@ struct Index {
       const manager = context.resourceManager;
       const label = manager.getStringSync($r('app.string.EntryAbility_label').id);
       const icon = manager.getMediaContentSync($r('app.media.app_icon').id);
-      console.info(`[flectar] resource probe: app_name='${label}' icon=${icon.byteLength} bytes`);
+      hilog.info(0x0000, LOG_TAG, 'resource probe: app_name=%{public}s icon=%{public}d bytes',
+        label, icon.byteLength);
     } catch (error) {
       const failure = error as BusinessError;
-      console.error(`[flectar] resource probe failed: code ${failure.code} ${failure.message}`);
+      hilog.error(0x0000, LOG_TAG, 'resource probe failed: %{public}d %{public}s',
+        failure.code, failure.message);
     }
   }
 
@@ -99,7 +102,7 @@ struct Index {
   private installBridge(context: object): void {
     const nativeModule = context as FlectarNativeModule;
     if (nativeModule.setBridge === undefined) {
-      console.error('[flectar] native module has no setBridge');
+      hilog.error(0x0000, LOG_TAG, 'native module has no setBridge');
       return;
     }
     this.nativeModule = nativeModule;
@@ -138,7 +141,7 @@ struct Index {
     const separator = url.indexOf(':');
     const scheme = separator > 0 ? url.substring(0, separator).toLowerCase() : '';
     if (scheme !== 'http' && scheme !== 'https' && scheme !== 'mailto' && scheme !== 'tel') {
-      console.error(`[flectar] refusing to open a non-web address (scheme '${scheme}')`);
+      hilog.error(0x0000, LOG_TAG, 'refusing to open a non-web address (scheme=%{public}s)', scheme);
       return;
     }
     const abilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -149,10 +152,10 @@ struct Index {
     };
     abilityContext.startAbility(want)
       .then((): void => {
-        console.info('[flectar] opened the sign-in page in the system browser');
+        hilog.info(0x0000, LOG_TAG, 'opened the sign-in page in the system browser');
       })
       .catch((error: BusinessError): void => {
-        console.error(`[flectar] could not open the system browser: ${error.message}`);
+        hilog.error(0x0000, LOG_TAG, 'could not open the system browser: %{public}s', error.message);
       });
   }
 
@@ -170,11 +173,12 @@ struct Index {
         return;
       }
       const staged = this.stageCopy(context, uris[0]);
-      console.info(`[flectar] picker imported a document (${uris.length} picked)`);
+      hilog.info(0x0000, LOG_TAG, 'picker imported a document (%{public}d picked)', uris.length);
       this.reportBridgeResult(requestId, staged, '');
     } catch (error) {
       const failure = error as BusinessError;
-      console.error(`[flectar] document picker failed: ${failure.code} ${failure.message}`);
+      hilog.error(0x0000, LOG_TAG, 'document picker failed: %{public}d %{public}s',
+        failure.code, failure.message);
       this.reportBridgeResult(requestId, '', failure.message ?? 'document picker failed');
     }
   }
@@ -202,11 +206,12 @@ struct Index {
       } finally {
         fileIo.closeSync(destination);
       }
-      console.info('[flectar] picker exported a document');
+      hilog.info(0x0000, LOG_TAG, 'picker exported a document');
       this.reportBridgeResult(requestId, uris[0], '');
     } catch (error) {
       const failure = error as BusinessError;
-      console.error(`[flectar] document save failed: ${failure.code} ${failure.message}`);
+      hilog.error(0x0000, LOG_TAG, 'document save failed: %{public}d %{public}s',
+        failure.code, failure.message);
       this.reportBridgeResult(requestId, '', failure.message ?? 'document save failed');
     }
   }
@@ -220,7 +225,8 @@ struct Index {
       if (this.imeAttached) {
         controller.showTextInput(inputMethod.RequestKeyboardReason.TOUCH)
           .catch((error: BusinessError): void => {
-            console.error(`[flectar] IME show failed: ${error.code} ${error.message}`);
+            hilog.error(0x0000, LOG_TAG, 'IME show failed: %{public}d %{public}s',
+              error.code, error.message);
             if (error.code === 12800009 || error.code === 12800003) {
               // The service dropped the client (detached), e.g. after the app
               // left the foreground. Clear the flag and attach again so the
@@ -252,12 +258,14 @@ struct Index {
         controller.on('deleteLeft', (length: number): void => {
           this.nativeModule?.imeDelete?.(length);
         });
-        console.info('[flectar] IME attached');
+        hilog.info(0x0000, LOG_TAG, 'IME attached');
       }).catch((error: BusinessError): void => {
-        console.error(`[flectar] IME attach failed: ${error.code} ${error.message}`);
+        hilog.error(0x0000, LOG_TAG, 'IME attach failed: %{public}d %{public}s',
+          error.code, error.message);
       });
     } catch (error) {
-      console.error(`[flectar] IME setup failed: ${(error as BusinessError).message}`);
+      hilog.error(0x0000, LOG_TAG, 'IME setup failed: %{public}s',
+        (error as BusinessError).message);
     }
   }
 
@@ -267,14 +275,14 @@ struct Index {
     }
     try {
       inputMethod.getController().hideTextInput().catch((error: BusinessError): void => {
-        console.error(`[flectar] IME hide failed: ${error.code}`);
+        hilog.error(0x0000, LOG_TAG, 'IME hide failed: %{public}d', error.code);
         if (error.code === 12800009 || error.code === 12800003) {
           // Already detached on the service side; forget the local state.
           this.imeAttached = false;
         }
       });
     } catch (error) {
-      console.error('[flectar] IME hide failed');
+      hilog.error(0x0000, LOG_TAG, 'IME hide failed');
     }
   }
 
@@ -293,14 +301,14 @@ struct Index {
       };
       notificationManager.publish(request)
         .then((): void => {
-          hilog.info(0x0000, NOTIFICATION_TAG, 'notification published');
+          hilog.info(0x0000, LOG_TAG, 'notification published');
         })
         .catch((error: BusinessError): void => {
-          hilog.error(0x0000, NOTIFICATION_TAG,
+          hilog.error(0x0000, LOG_TAG,
             'notification publish failed: %{public}d %{public}s', error.code, error.message);
         });
     } catch (error) {
-      hilog.error(0x0000, NOTIFICATION_TAG,
+      hilog.error(0x0000, LOG_TAG,
         'notification failed: %{public}s', (error as BusinessError).message);
     }
   }
@@ -320,17 +328,17 @@ struct Index {
       manager.requestPermissionsFromUser(context, permissions)
         .then((result: PermissionRequestResult): void => {
           const granted = result.authResults.length > 0 && result.authResults[0] === 0;
-          hilog.info(0x0000, NOTIFICATION_TAG, `pasteboard permission granted: ${granted}`);
+          hilog.info(0x0000, LOG_TAG, `pasteboard permission granted: ${granted}`);
           if (!granted) {
             this.showPasteboardNotice();
           }
         })
         .catch((error: BusinessError): void => {
-          hilog.error(0x0000, NOTIFICATION_TAG,
+          hilog.error(0x0000, LOG_TAG,
             'pasteboard permission request failed: %{public}d', error.code);
         });
     } catch (error) {
-      hilog.error(0x0000, NOTIFICATION_TAG, 'pasteboard permission request failed');
+      hilog.error(0x0000, LOG_TAG, 'pasteboard permission request failed');
     }
   }
 
@@ -341,7 +349,7 @@ struct Index {
         duration: 3000,
       });
     } catch (error) {
-      hilog.error(0x0000, NOTIFICATION_TAG, 'pasteboard notice failed');
+      hilog.error(0x0000, LOG_TAG, 'pasteboard notice failed');
     }
   }
 
@@ -360,7 +368,7 @@ struct Index {
       // previous import leaves it behind), unlike Node's recursive mkdir. That
       // is harmless; a genuinely unusable directory surfaces in the open below.
       const failure = error as BusinessError;
-      console.info(`[flectar] stage: mkdir reported ${failure.code}; continuing`);
+      hilog.info(0x0000, LOG_TAG, 'stage: mkdir reported %{public}d; continuing', failure.code);
     }
     const segments = uri.split('/');
     const raw = segments.length > 0 ? segments[segments.length - 1] : 'document';
