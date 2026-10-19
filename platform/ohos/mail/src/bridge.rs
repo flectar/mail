@@ -28,6 +28,7 @@ static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static NOTIFY: AtomicUsize = AtomicUsize::new(0);
+static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -80,6 +81,13 @@ pub(super) unsafe extern "C" fn set_bridge(
         install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_zero_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
         install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
+        install_property(
+            env,
+            argv[0],
+            b"requestPasteboard\0",
+            &REQUEST_PASTEBOARD,
+            call_zero_arg,
+        );
         undefined(env)
     }
 }
@@ -207,6 +215,12 @@ pub(super) fn show_ime() {
 /// Lower the system keyboard through the ArkTS hook.
 pub(super) fn hide_ime() {
     let _ = call_closure(&HIDE_IME, "hideIme", ());
+}
+
+/// Ask the page to request the pasteboard permission (called from the
+/// clipboard fallback on a denied read).
+pub(super) fn request_pasteboard() {
+    let _ = call_closure(&REQUEST_PASTEBOARD, "requestPasteboard", ());
 }
 
 /// Publish a system notification through the ArkTS hook.

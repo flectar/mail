@@ -7,6 +7,16 @@
 
 use core::ffi::{CStr, c_int};
 use std::ffi::CString;
+use std::sync::OnceLock;
+
+/// Hook installed by the shell to ask for `ohos.permission.READ_PASTEBOARD`
+/// after a denied read. Tests and hosts without a bridge leave it unset.
+static PERMISSION_HOOK: OnceLock<fn()> = OnceLock::new();
+
+/// Install the hook that requests the pasteboard permission from the user.
+pub fn set_permission_hook(hook: fn()) {
+    let _ = PERMISSION_HOOK.set(hook);
+}
 
 use crate::ffi;
 
@@ -28,6 +38,12 @@ pub fn read_text() -> Option<String> {
             // denial (e.g. 201: missing READ_PASTEBOARD).
             if status != 0 {
                 crate::log::error(&format!("clipboard: read failed (status {status})"));
+                // 201 is "permission denied": let the shell ask the user once.
+                if status == 201
+                    && let Some(hook) = PERMISSION_HOOK.get()
+                {
+                    (hook)();
+                }
             }
         } else {
             let plain = ffi::OH_UdsPlainText_Create();

@@ -260,6 +260,8 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         Arc::new(documents::OhosDocuments);
     // Soft-keyboard control for Slint's editable fields.
     slint_ohos_backend::ime::set_hooks(bridge::show_ime, bridge::hide_ime);
+    // A denied paste asks for the pasteboard ACL permission once (see clipboard.rs).
+    slint_ohos_backend::clipboard::set_permission_hook(bridge::request_pasteboard);
     let mut platform =
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);

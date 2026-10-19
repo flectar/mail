@@ -2,6 +2,10 @@
   "string": [
     { "name": "module_desc", "value": "Flectar Mail for HarmonyOS" },
     { "name": "EntryAbility_desc", "value": "Flectar Mail for HarmonyOS" },
-    { "name": "EntryAbility_label", "value": "Flectar Mail for HarmonyOS" }
+    { "name": "EntryAbility_label", "value": "Flectar Mail for HarmonyOS" },
+    {
+      "name": "pasteboard_permission_reason",
+      "value": "Used to paste the copied text into the message body, subject and recipient fields."
+    }
   ]
 }

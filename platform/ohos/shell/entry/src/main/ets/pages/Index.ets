@@ -1,4 +1,4 @@
-import { common, Want } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, PermissionRequestResult, Permissions, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
@@ -17,6 +17,7 @@ interface FlectarBridge {
   showIme: () => void;
   hideIme: () => void;
   notify: (title: string, body: string) => void;
+  requestPasteboard: () => void;
 }
 
 // The exports of the native XComponent module (`onLoad` hands them over).
@@ -33,6 +34,7 @@ interface FlectarNativeModule {
 struct Index {
   private nativeModule: FlectarNativeModule | undefined = undefined;
   private imeAttached: boolean = false;
+  private pasteboardPermissionRequested: boolean = false;
 
   aboutToAppear(): void {
     this.probeResources();
@@ -119,6 +121,9 @@ struct Index {
       },
       notify: (title: string, body: string): void => {
         this.notify(title, body);
+      },
+      requestPasteboard: (): void => {
+        this.requestPasteboardPermission();
       },
     });
   }
@@ -297,6 +302,46 @@ struct Index {
     } catch (error) {
       hilog.error(0x0000, NOTIFICATION_TAG,
         'notification failed: %{public}s', (error as BusinessError).message);
+    }
+  }
+
+  // The clipboard is readable only with the ACL permission
+  // ohos.permission.READ_PASTEBOARD. Native code asks for it after the first
+  // denied paste; granting takes effect for the next paste.
+  private requestPasteboardPermission(): void {
+    if (this.pasteboardPermissionRequested) {
+      return;
+    }
+    this.pasteboardPermissionRequested = true;
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const manager = abilityAccessCtrl.createAtManager();
+      const permissions: Permissions[] = ['ohos.permission.READ_PASTEBOARD'];
+      manager.requestPermissionsFromUser(context, permissions)
+        .then((result: PermissionRequestResult): void => {
+          const granted = result.authResults.length > 0 && result.authResults[0] === 0;
+          hilog.info(0x0000, NOTIFICATION_TAG, `pasteboard permission granted: ${granted}`);
+          if (!granted) {
+            this.showPasteboardNotice();
+          }
+        })
+        .catch((error: BusinessError): void => {
+          hilog.error(0x0000, NOTIFICATION_TAG,
+            'pasteboard permission request failed: %{public}d', error.code);
+        });
+    } catch (error) {
+      hilog.error(0x0000, NOTIFICATION_TAG, 'pasteboard permission request failed');
+    }
+  }
+
+  private showPasteboardNotice(): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({
+        message: 'Clipboard access is off; enable it in Settings to paste.',
+        duration: 3000,
+      });
+    } catch (error) {
+      hilog.error(0x0000, NOTIFICATION_TAG, 'pasteboard notice failed');
     }
   }
 

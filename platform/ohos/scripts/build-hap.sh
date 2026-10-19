@@ -256,9 +256,10 @@ cp -r "$RES_OUT/resources" "$STAGE/resources"
 # requestPermissions: without ohos.permission.INTERNET every socket operation
 # (loopback OAuth listener, IMAP/SMTP) fails with EPERM, which surfaces as
 # "OAuth failed: io error: Operation not permitted (os error 1)".
-# READ_PASTEBOARD is deliberately absent: this device's installer rejects it
-# for normal apps (ACL-only, "grant request permissions failed"), so clipboard
-# reads stay unavailable; clipboard writes need no permission.
+# READ_PASTEBOARD is declared by the module: pasting needs it, but the hap
+# only installs with an ACL-enabled profile that lists the permission
+# (otherwise the installer reports "grant request permissions failed").
+# Copying needs no permission.
 # SDK coordinates: the resource compiler only emits the V2 `resources.index`
 # the device can load for HarmonyOS targets; DevEco-built haps carry these
 # exact values.
@@ -286,6 +287,14 @@ module.setdefault("libIsolation", True)
 permissions = module.setdefault("requestPermissions", [])
 if not any(entry.get("name") == "ohos.permission.INTERNET" for entry in permissions):
     permissions.append({"name": "ohos.permission.INTERNET"})
+# The packing tool resolves `$string:` reasons through the resource table; the
+# permission dialog needs the numeric reasonId.
+for entry in permissions:
+    reason = entry.get("reason")
+    if isinstance(reason, str) and reason.startswith("$string:"):
+        key = "string:" + reason[len("$string:"):]
+        if key in ids:
+            entry["reasonId"] = ids[key]
 app = manifest["app"]
 app["bundleName"] = bundle_name
 app["compileSdkVersion"] = "6.1.0.105"

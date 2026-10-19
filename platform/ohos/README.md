@@ -156,6 +156,12 @@ handled (and asserted) in the script, do not "simplify" them away:
   from the sync engine is published through `@kit.NotificationKit` when the
   in-app notifications setting is on. A refusal is final at the system level;
   the user can re-enable notifications in the system settings.
+- **Clipboard**: copying needs no permission, but pasting reads the system
+  pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
+  (restricted) permission. The module declares it and the page requests it on
+  the first denied paste. The signing profile must list the permission in
+  `acls.allowed-acls`; a hap built without such a profile fails to install
+  with "grant request permissions failed".
 - **Data**: the application keeps its data under the standard bundle data
   path. Import/export goes through the system document picker via the host
   `DocumentProvider`, and credentials live in the system Asset Store, never
