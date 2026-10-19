@@ -1887,6 +1887,7 @@ name = "flectar-mail-ohos"
 version = "0.1.0"
 dependencies = [
  "flectar-mail",
+ "libc",
  "serde_json",
  "slint-ohos-backend",
  "tokio",

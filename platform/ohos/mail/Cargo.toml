@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [dependencies]
+libc = "0.2"
 flectar-mail = { path = "../../..", default-features = false, features = ["remote-content", "gpu-renderer"] }
 slint-ohos-backend = { path = "../backend" }
 serde_json = "1"

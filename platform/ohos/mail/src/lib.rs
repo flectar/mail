@@ -216,6 +216,31 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
     }
 }
 
+/// Point the shared application at the native libraries installed beside this
+/// cdylib (the hap's `libs/<abi>`), so PDF preview can load the bundled
+/// `libpdfium.so` instead of reporting "not configured".
+fn configure_native_libraries() -> std::result::Result<(), String> {
+    // Resolve our own module path instead of trusting the page or a document.
+    let mut info: libc::Dl_info = unsafe { core::mem::zeroed() };
+    let symbol = register_module as *const libc::c_void;
+    // SAFETY: `info` is a valid out-parameter and the symbol lives in this
+    // module for the process lifetime.
+    if unsafe { libc::dladdr(symbol, &mut info) } == 0 || info.dli_fname.is_null() {
+        return Err("could not resolve the native library directory".into());
+    }
+    // SAFETY: dladdr filled dli_fname with a NUL-terminated path that stays
+    // valid while the module is loaded.
+    let raw = unsafe { core::ffi::CStr::from_ptr(info.dli_fname) };
+    let path = raw
+        .to_str()
+        .map_err(|_| "the native library path is not UTF-8")?;
+    let directory = std::path::Path::new(path)
+        .parent()
+        .ok_or("the native library path has no directory")?;
+    slint_ohos_backend::ohos_info!("mail: native libraries in {}", directory.display());
+    flectar_mail::platform::configure_pdfium(directory.to_path_buf())
+}
+
 /// Runs on the Slint thread spawned by the backend.
 fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Application stderr is not reliably visible on device; route panics to
@@ -227,6 +252,8 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
             .unwrap_or_else(|| "unknown location".into());
         slint_ohos_backend::ohos_error!("mail: panic at {location}: {info}");
     }));
+
+    configure_native_libraries()?;
 
     let internal = PathBuf::from(APP_DATA_ROOT);
     let cache = PathBuf::from(APP_CACHE_ROOT);
