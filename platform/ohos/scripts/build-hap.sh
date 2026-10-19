@@ -35,6 +35,40 @@ STAGE="$BUILD_DIR/hap-stage"
 # example with the previous name) until the signing profile is regenerated.
 BUNDLE="${BUNDLE:-com.flectar.mail}"
 
+# The hap carries the application version: versionName is the root crate
+# version and versionCode is derived from it so store uploads stay monotonic
+# (a prerelease sorts below its release). VERSION_NAME/VERSION_CODE override.
+APP_VERSION="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$REPO_DIR/Cargo.toml" | head -n 1)"
+[ -n "$APP_VERSION" ] || die "cannot read the application version from Cargo.toml"
+VERSION_NAME="${VERSION_NAME:-$APP_VERSION}"
+VERSION_CORE="${APP_VERSION%%-*}"
+VERSION_CORE="${VERSION_CORE%%+*}"
+VERSION_PRE=""
+case "$APP_VERSION" in
+    *-*) VERSION_PRE="${APP_VERSION#*-}"; VERSION_PRE="${VERSION_PRE%%+*}" ;;
+esac
+IFS=. read -r V_MAJOR V_MINOR V_PATCH <<EOF
+$VERSION_CORE
+EOF
+case "$V_MAJOR$V_MINOR$V_PATCH" in
+    *[!0-9]*|"") die "unsupported application version: $APP_VERSION" ;;
+esac
+if [ -z "${VERSION_CODE:-}" ]; then
+    VERSION_CODE=$(( V_MAJOR * 10000000 + V_MINOR * 100000 + V_PATCH * 1000 ))
+    if [ -n "$VERSION_PRE" ]; then
+        VERSION_PRE_NUM="${VERSION_PRE##*.}"
+        case "$VERSION_PRE_NUM" in
+            *[!0-9]*|"") VERSION_PRE_NUM=1 ;;
+        esac
+        [ "$VERSION_PRE_NUM" -ge 1 ] && [ "$VERSION_PRE_NUM" -le 998 ] || VERSION_PRE_NUM=998
+        VERSION_CODE=$((VERSION_CODE + VERSION_PRE_NUM))
+    else
+        VERSION_CODE=$((VERSION_CODE + 999))
+    fi
+fi
+[ "$VERSION_CODE" -gt 0 ] && [ "$VERSION_CODE" -le 2147483647 ] || die "versionCode out of range: $VERSION_CODE"
+log "version: $VERSION_NAME ($VERSION_CODE)"
+
 # APP selects which native module the shell loads (page template + cdylib).
 APP="${APP:-demo}"
 case "$APP" in
@@ -115,6 +149,8 @@ cp "$APP_JSON5" "$APP_JSON5_BAK"
 restore_app_json5() { mv "$APP_JSON5_BAK" "$APP_JSON5" 2>/dev/null || true; }
 trap restore_app_json5 EXIT INT TERM
 sed -i "s/bundleName: '[^']*'/bundleName: '$BUNDLE'/" "$APP_JSON5"
+sed -i "s/versionCode: [0-9]*/versionCode: $VERSION_CODE/" "$APP_JSON5"
+sed -i "s/versionName: '[^']*'/versionName: '$VERSION_NAME'/" "$APP_JSON5"
 log "hvigor assembleHap (compile step; PackageHap failure is tolerated)"
 ( cd "$SHELL_DIR" && \
   env -i PATH="$(dirname "$NODE_BIN"):$JAVA_HOME/bin:/usr/bin:/bin" HOME="$HOME" \
