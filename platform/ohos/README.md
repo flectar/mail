@@ -194,18 +194,19 @@ HarmonyOS 7.0.0.111 (API 26), 2-in-1 (HUAWEI MateBook Pro):
 - CJK glyphs in mail bodies (Blitz/Parley) and the compose editor.
 - Compose attachments, account-backup export, database-snapshot export and
   certificate import through the system pickers.
-- External links, system notifications, wheel/touchpad scrolling, and Asset
-  Store credentials including recovery from a stale row after reinstalling.
+- External links, system notifications, wheel/touchpad scrolling, Asset Store
+  credentials including recovery from a stale row after reinstalling, and PDF
+  attachment preview through the bundled PDFium.
 - Fresh install signed with the AGC release and debug profiles under the AGC
   bundle.
 
 ## Known limitations
 
-- Clipboard paste needs the ACL permission `ohos.permission.READ_PASTEBOARD`
-  (application pending). A hap that declares it installs only with a signing
-  profile whose `acls.allowed-acls` lists it.
-- Backup and snapshot import, PDF preview and multi-account setups are not yet
-  exercised on device.
+- Clipboard paste uses the ACL permission `ohos.permission.READ_PASTEBOARD`
+  (approved). A hap that declares it installs only with a signing profile
+  whose `acls.allowed-acls` lists it.
+- Backup and snapshot import and multi-account setups are not yet exercised on
+  device.
 - The clipboard path reads plain text only: no rich text, images or
   drag-and-drop.
 - The soft keyboard is summoned explicitly (Alt+Shift on 2-in-1) because the
