@@ -55,7 +55,7 @@ struct Index {
     this.imeAttached = false;
   }
 
-  build() {
+  build(): void {
     Column() {
       XComponent({
         id: 'flectar_mail_surface',
@@ -282,7 +282,8 @@ struct Index {
         }
       });
     } catch (error) {
-      hilog.error(0x0000, LOG_TAG, 'IME hide failed');
+      hilog.error(0x0000, LOG_TAG, 'IME hide failed: %{public}s',
+        (error as BusinessError).message);
     }
   }
 
@@ -338,7 +339,8 @@ struct Index {
             'pasteboard permission request failed: %{public}d', error.code);
         });
     } catch (error) {
-      hilog.error(0x0000, LOG_TAG, 'pasteboard permission request failed');
+      hilog.error(0x0000, LOG_TAG, 'pasteboard permission request failed: %{public}s',
+        (error as BusinessError).message);
     }
   }
 
@@ -349,7 +351,8 @@ struct Index {
         duration: 3000,
       });
     } catch (error) {
-      hilog.error(0x0000, LOG_TAG, 'pasteboard notice failed');
+      hilog.error(0x0000, LOG_TAG, 'pasteboard notice failed: %{public}s',
+        (error as BusinessError).message);
     }
   }
 
@@ -371,7 +374,7 @@ struct Index {
       hilog.info(0x0000, LOG_TAG, 'stage: mkdir reported %{public}d; continuing', failure.code);
     }
     const segments = uri.split('/');
-    const raw = segments.length > 0 ? segments[segments.length - 1] : 'document';
+    const raw = segments.pop() ?? 'document';
     // The picker chooses the file name; keep it to a conservative character
     // set and length so it cannot escape the cache directory.
     const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_').substring(0, 96);
