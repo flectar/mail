@@ -4,8 +4,12 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { preferences } from '@kit.ArkData';
+import { webview } from '@kit.ArkWeb';
 
 const LOG_TAG = 'FlectarOhos';
+const PRIVACY_STORE = 'flectar_ohos';
+const PRIVACY_KEY = 'privacy_accepted';
 
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
@@ -18,6 +22,7 @@ interface FlectarBridge {
   hideIme: () => void;
   notify: (title: string, body: string) => void;
   requestPasteboard: () => void;
+  openPrivacyPolicy: () => void;
 }
 
 // The exports of the native XComponent module (`onLoad` hands them over).
@@ -35,9 +40,14 @@ struct Index {
   private nativeModule: FlectarNativeModule | undefined = undefined;
   private imeAttached: boolean = false;
   private pasteboardPermissionRequested: boolean = false;
+  @State private showPrivacyPolicy: boolean = false;
+  @State private privacyChecked: boolean = false;
+  @State private privacyAccepted: boolean = false;
+  private privacyController: webview.WebviewController = new webview.WebviewController();
 
   aboutToAppear(): void {
     this.probeResources();
+    this.loadPrivacyConsent();
   }
 
   // The IME controller is process-scoped; its listeners capture this page, so
@@ -55,9 +65,102 @@ struct Index {
     this.imeAttached = false;
   }
 
-  build(): void {
+  @Builder
+  privacyConsentView(): void {
+    Column({ space: 14 }) {
+      Text('隐私政策 / Privacy Policy')
+        .fontSize(20)
+        .fontWeight(700)
+        .fontColor('#1C1C1E')
+      Scroll() {
+        Text('欢迎使用 Flectar Mail。\n\n' +
+          'Flectar Mail 在本机处理您的邮件、附件与账户数据，不会上传至 Flectar 服务器。' +
+          '剪贴板仅在您主动粘贴时读取纯文本。详情请阅读《隐私政策》。\n\n' +
+          'Flectar Mail processes your mail, attachments and account data locally on this ' +
+          'device and does not upload them to Flectar servers. The clipboard is read only ' +
+          'when you paste. See the Privacy Policy for details.')
+          .fontSize(14)
+          .lineHeight(22)
+          .fontColor('#3C3C43')
+      }
+      .width('100%')
+      .layoutWeight(1)
+      Button('查看隐私政策 / View privacy policy')
+        .width('100%')
+        .height(44)
+        .backgroundColor('#F1F1F4')
+        .fontColor('#0A59F7')
+        .onClick((): void => {
+          this.showPrivacyPolicy = true;
+        })
+      Button('同意并继续 / Agree and continue')
+        .width('100%')
+        .height(44)
+        .onClick((): void => {
+          this.acceptPrivacy();
+        })
+      Button('不同意 / Decline')
+        .width('100%')
+        .height(44)
+        .backgroundColor('#F1F1F4')
+        .fontColor('#66666E')
+        .onClick((): void => {
+          this.declinePrivacy();
+        })
+    }
+    .padding(24)
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#FFFFFF')
+    .bindContentCover(this.showPrivacyPolicy, this.privacyPolicyView(), {
+      modalTransition: ModalTransition.DEFAULT,
+    })
+  }
+
+  @Builder
+  privacyPolicyView(): void {
     Column() {
-      XComponent({
+      Row({ space: 8 }) {
+        Button('Back')
+          .height(36)
+          .onClick((): void => {
+            this.showPrivacyPolicy = false;
+          })
+        Text('Privacy policy')
+          .fontSize(18)
+          .fontWeight(600)
+          .fontColor('#1C1C1E')
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .backgroundColor('#FFFFFF')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+
+      Web({ src: $rawfile('privacy.html'), controller: this.privacyController })
+        .width('100%')
+        .layoutWeight(1)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#FFFFFF')
+  }
+
+  build(): void {
+    if (!this.privacyChecked) {
+      Column() {
+        LoadingProgress()
+          .width(48)
+          .height(48)
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('#FFFFFF')
+    } else if (!this.privacyAccepted) {
+      this.privacyConsentView()
+    } else {
+      Column() {
+        XComponent({
         id: 'flectar_mail_surface',
         type: XComponentType.SURFACE,
         libraryname: 'flectar_mail_ohos',
@@ -71,9 +174,13 @@ struct Index {
             this.installBridge(context);
           }
         })
+      }
+      .width('100%')
+      .height('100%')
+      .bindContentCover(this.showPrivacyPolicy, this.privacyPolicyView(), {
+        modalTransition: ModalTransition.DEFAULT,
+      })
     }
-    .width('100%')
-    .height('100%')
   }
 
   // Diagnostic: resolves the app's own resources once per launch, so a hap
@@ -127,6 +234,9 @@ struct Index {
       },
       requestPasteboard: (): void => {
         this.requestPasteboardPermission();
+      },
+      openPrivacyPolicy: (): void => {
+        this.openPrivacyPolicy();
       },
     });
   }
@@ -342,6 +452,48 @@ struct Index {
       hilog.error(0x0000, LOG_TAG, 'pasteboard permission request failed: %{public}s',
         (error as BusinessError).message);
     }
+  }
+
+  // The consent screen gates the XComponent: no native module (and therefore
+  // no account or mail processing) starts before the user agrees.
+  private async loadPrivacyConsent(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      this.privacyAccepted = (await store.get(PRIVACY_KEY, false)) as boolean;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy preferences unavailable: %{public}s',
+        (error as BusinessError).message);
+      this.privacyAccepted = false;
+    } finally {
+      this.privacyChecked = true;
+    }
+  }
+
+  private async acceptPrivacy(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, true);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be stored: %{public}s',
+        (error as BusinessError).message);
+    }
+    this.privacyAccepted = true;
+  }
+
+  private declinePrivacy(): void {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    context.terminateSelf().catch((error: BusinessError): void => {
+      hilog.error(0x0000, LOG_TAG, 'could not stop after declining privacy: %{public}s',
+        error.message);
+    });
+  }
+
+  // Shows the bundled privacy policy (About and onboarding rows).
+  private openPrivacyPolicy(): void {
+    this.showPrivacyPolicy = true;
   }
 
   private showPasteboardNotice(): void {

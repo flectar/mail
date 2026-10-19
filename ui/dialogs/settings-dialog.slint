@@ -2290,6 +2290,16 @@ export component SettingsDialog inherits Rectangle {
                                     padding-bottom: 0px;
                                     spacing: 0px;
                                     SettingsLinkRow {
+                                        text: @tr("Privacy policy");
+                                        description: @tr("How Flectar Mail handles your data");
+                                        icon: @image-url("../icons/lucide/outline/lock.svg");
+                                        accent: root.accent;
+                                        body-text: root.body-text;
+                                        muted-text: root.faint-text;
+                                        hover-background: root.accent-soft;
+                                        clicked => { root.open-link("https://flectar.com/legal/privacy/"); }
+                                    }
+                                    SettingsLinkRow {
                                         text: @tr("Flectar");
                                         description: @tr("Company website");
                                         icon: @image-url("../../resources/app-icon/flectar-mail-masked.svg");

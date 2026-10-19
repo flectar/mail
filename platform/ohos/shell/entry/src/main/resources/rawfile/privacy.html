@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flectar Mail — 隐私政策 / Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  [hidden] { display: none !important; }
+  body { margin: 0 auto; max-width: 760px; padding: 24px 20px 64px;
+         font-family: system-ui, -apple-system, "HarmonyOS Sans", "Noto Sans", sans-serif;
+         line-height: 1.65; color: #1c1c1e; background: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e5e5e7; background: #111113; }
+    a { color: #7aa7ff; }
+    code { background: #26262a; }
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 0.6rem; }
+  h3 { font-size: 1.05rem; margin: 1.4rem 0 0.4rem; }
+  p, li { font-size: 0.95rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin: 0.25rem 0; }
+  header p, .meta { color: #6b6b70; margin-top: 0; }
+  code { font-family: ui-monospace, monospace; background: #f2f2f5;
+          padding: 1px 4px; border-radius: 4px; font-size: 0.85em; }
+  a { color: #0a59f7; }
+  hr { border: 0; border-top: 1px solid #e2e2e6; margin: 2.5rem 0; }
+  .lang-switch { text-align: right; font-size: 0.85rem; margin-bottom: 4px; }
+  .lang-switch a { color: #6b6b70; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="lang-switch"><a href="#" data-set="zh">中文</a> · <a href="#" data-set="en">English</a></div>
+
+<div data-lang="zh">
+  <h1>隐私政策</h1>
+  
+  
+  <p class="meta">更新日期：2026 年 10 月 19 日　生效日期：2026 年 10 月 19 日</p>
+  <p>本政策适用于 Flectar Mail 应用（以下简称“本应用”）。如本政策与英文版本存在不一致，以本简体中文版为准。本应用为本地优先的邮件客户端，邮件内容在您的设备上处理，不上传至 Flectar 服务器。</p>
+
+  <h3>一、个人信息处理者</h3>
+  <p>名称：Flectar（西班牙）。联系方式：<a href="mailto:privacy@flectar.com">privacy@flectar.com</a>；电话 (+34) 614 05 79 79；地址：Málaga, Spain。</p>
+
+  <h3>二、我们如何收集和使用个人信息</h3>
+  <ul>
+    <li><strong>邮件账户与登录：</strong>您的邮箱地址、用户名、密码或 OAuth 刷新令牌。密码与令牌仅保存在设备系统安全凭据存储（HarmonyOS 为系统 Asset Store），不会写入明文文件、不会包含在导出内容中，也不会发送给 Flectar。</li>
+    <li><strong>邮件收发与同步：</strong>邮件内容、附件、联系人与日历数据由本应用在设备本地处理与保存。使用 Google/Microsoft 登录时，登录过程由对应服务商完成，适用其隐私政策。</li>
+    <li><strong>通知：</strong>新邮件提醒由本应用在本地生成，不使用推送服务。</li>
+    <li><strong>剪贴板：</strong>仅在您主动粘贴时读取系统剪贴板中的纯文本，且仅用于插入当前输入框；不存储、不记录日志、不上传，不在后台读取或监听剪贴板变化。</li>
+    <li><strong>导入与导出：</strong>仅在您主动操作时，通过系统文件选择器读取或保存文件；备份与数据库快照包含本地邮件与设置，但不包含密码或 OAuth 令牌。</li>
+  </ul>
+  <p>我们不会收集与上述功能无关的信息：不收集您的通讯录、精确位置、设备标识符（IMEI/OAID 等）、应用列表或生物识别信息，也不进行广告推送、个性化推荐或自动化决策。</p>
+
+  <h3>三、系统权限清单</h3>
+  <ul>
+    <li><code>ohos.permission.INTERNET</code>（网络访问）：用于邮件同步、发送邮件与账户登录；拒绝后无法收发邮件。</li>
+    <li><code>ohos.permission.READ_PASTEBOARD</code>（读取剪贴板）：仅在您主动粘贴时读取纯文本，用于插入输入框；拒绝后仅无法粘贴，其他功能不受影响。</li>
+    <li>通知权限（可选）：用于新邮件提醒；拒绝后不影响收发邮件。</li>
+  </ul>
+  <p>本应用不申请相机、麦克风、位置、通讯录、日历、电话或存储权限；文件通过系统文件选择器获取。</p>
+
+  <h3>四、第三方 SDK 清单</h3>
+  <p>本应用未集成任何第三方 SDK（包括统计分析、广告、崩溃上报类 SDK），不会通过 SDK 向第三方提供个人信息。</p>
+
+  <h3>五、对外提供与共享</h3>
+  <p>我们不会向 Flectar 服务器上传您的邮件内容，也不会将您的个人信息出售或提供给广告商。为实现功能，本应用会直接连接：</p>
+  <ul>
+    <li>您配置的邮件服务商（IMAP/SMTP），用于收发邮件；</li>
+    <li>Google/Microsoft 的 OAuth 服务，用于登录（由您主动发起）。</li>
+  </ul>
+  <p>上述服务商对数据的处理适用其各自的隐私政策。</p>
+
+  <h3>六、存储地点与保存期限</h3>
+  <p>邮件、附件、草稿、联系人与日历数据保存在您的设备本地，保存期限由您控制：在您删除账户、清除本地数据或卸载应用时删除。Flectar 服务器不保存您的邮件内容。</p>
+
+  <h3>七、数据出境</h3>
+  <p>Flectar 不接收您的邮件内容；本应用由您的设备直接连接您选择的邮件服务商。如该服务商位于中国境外，数据传输发生于您与该服务商之间，适用其隐私政策。</p>
+
+  <h3>八、您的权利</h3>
+  <ul>
+    <li><strong>查阅与复制：</strong>在应用内查看邮件；通过“设置 → 存储”导出备份或数据库快照。</li>
+    <li><strong>更正与删除：</strong>在应用内编辑或删除邮件、联系人与日历数据；通过“设置 → 存储 → 删除全部本地数据”清除全部本地数据；卸载应用将删除应用数据。</li>
+    <li><strong>撤回同意：</strong>在系统“设置 → 隐私 → 权限管理”中关闭剪贴板或通知权限；在应用设置中关闭通知。</li>
+    <li><strong>注销：</strong>本应用不要求注册 Flectar 账户；您可以移除已添加的邮箱账户并删除全部本地数据，即完成注销与数据删除。</li>
+  </ul>
+  <p>我们将在收到请求后 <strong>15 个工作日</strong>内完成核查与处理。</p>
+
+  <h3>九、未成年人保护</h3>
+  <p>本应用不面向不满十四周岁的未成年人。若您为不满十四周岁的未成年人，请在监护人陪同下阅读本政策，并在取得监护人同意后使用本应用。若我们发现在未取得监护人同意的情况下收集了儿童个人信息，将尽快删除。</p>
+
+  <h3>十、安全措施</h3>
+  <p>账户凭据保存在系统安全凭据存储；应用数据位于系统应用沙箱；网络传输使用 TLS。我们采取合理措施保护数据安全，但无法保证绝对安全。</p>
+
+  <h3>十一、投诉与举报</h3>
+  <p>如您对本政策或个人信息处理有投诉、建议或疑问，请发送邮件至 <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>。我们将在 <strong>15 个工作日</strong>内受理并处理。您也可以向履行个人信息保护职责的监管部门投诉、举报。</p>
+
+  <h3>十二、政策更新</h3>
+  <p>本政策更新时，我们会修改本页面的更新日期；涉及处理目的、方式、种类等重大变更时，我们会通过应用内提示等适当方式通知您并重新取得同意（如适用）。</p>
+
+  <h3>十三、联系我们</h3>
+  <p>Flectar，Attn: Data Protection Officer，<a href="mailto:privacy@flectar.com">privacy@flectar.com</a>，Málaga, Spain。</p>
+
+</div>
+
+<div data-lang="en" hidden>
+  <h1>Privacy Policy</h1>
+  
+  <h2>Flectar Mail (application supplement)</h2>
+  <p>This section explains how the Flectar Mail application handles data on your
+  device. It supplements the Flectar Privacy Policy below. The canonical policy
+  is published at <a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a>.</p>
+  <ul>
+    <li><strong>Local-first storage.</strong> Messages, attachments, drafts,
+    contacts and calendars are stored in the application's private sandbox on
+    your device. Mail content and attachments are not uploaded to Flectar
+    servers.</li>
+    <li><strong>Credentials.</strong> Account passwords and OAuth refresh tokens
+    are kept in the operating system's secure credential store (on HarmonyOS,
+    the system Asset Store). They are never written to plain files, included in
+    exports, or sent to Flectar.</li>
+    <li><strong>Network connections.</strong> The application connects directly
+    to your mail provider (IMAP/SMTP) and, when you sign in with Google or
+    Microsoft, to their OAuth endpoints. Those providers process your data
+    under their own privacy policies.</li>
+    <li><strong>Notifications.</strong> New-mail notifications are produced
+    locally by the application's sync engine; no push service is involved.</li>
+    <li><strong>Clipboard.</strong> When you paste, the application reads plain
+    text from the system clipboard. On HarmonyOS this requires the
+    <code>ohos.permission.READ_PASTEBOARD</code> permission. The text is
+    inserted only into the field you are editing; it is not stored, logged or
+    uploaded. The application does not read the clipboard in the background or
+    monitor clipboard changes.</li>
+    <li><strong>Permissions.</strong> Network access (sync, sending, sign-in),
+    clipboard access (paste) and notification permission (optional). No camera,
+    microphone, location, contacts, calendar, phone or storage permissions;
+    files are chosen through the system document picker.</li>
+    <li><strong>Third-party SDKs.</strong> None. The application contains no
+    analytics, advertising or crash-reporting SDKs.</li>
+    <li><strong>Exports and backups.</strong> Created only when you ask for
+    them; they contain local mail and settings but not passwords or OAuth
+    tokens, and you choose the destination with the system picker.</li>
+    <li><strong>Children.</strong> The application is not directed to children
+    under 14; a guardian must consent for users below that age.</li>
+    <li><strong>Rights, complaints and contact.</strong> Export, correct or
+    delete your data in the app (Settings, Storage), withdraw permission in the
+    system settings, and contact
+    <a href="mailto:privacy@flectar.com">privacy@flectar.com</a> for any request
+    or complaint; we respond within 15 working days.</li>
+  </ul>
+
+  <hr>
+  <h2>Flectar Privacy Policy (official text)</h2>
+  <header><h1>Privacy Policy</h1><p>Last updated: January 2, 2026</p></header><p>At Flectar (&quot;Company&quot;, &quot;we&quot;, &quot;us&quot;, or &quot;our&quot;), we are committed to protecting your privacy and ensuring the security of your personal information. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you visit our website, use our services, or interact with us in any way. Please read this Privacy Policy carefully. By using our Services, you consent to the practices described in this policy.</p><!-- Section 1: Information We Collect --><section><h2>1. Information We Collect</h2><p>We collect different types of information depending on how you interact with us. This section describes the categories of personal information we may collect.</p><h3>1.1 Information You Provide Directly</h3><p>We collect information that you voluntarily provide to us when you:</p><ul><li>Contact us through our website, email, phone, or other communication channels</li><li>Request a quote, consultation, or information about our services</li><li>Engage our services and enter into a business relationship with us</li><li>Subscribe to our newsletter or marketing communications</li><li>Participate in surveys, promotions, or events</li><li>Apply for employment or submit your resume</li><li>Provide feedback or testimonials about our services</li></ul><p>This information may include:</p><ul><li>Contact information: name, email address, phone number, mailing address</li><li>Professional information: company name, job title, industry, company size</li><li>Account credentials: username, password (encrypted)</li><li>Financial information: billing address, payment card details (processed securely by our payment providers)</li><li>Project information: requirements, specifications, files, and materials you provide</li><li>Communication records: emails, chat logs, call recordings (with consent), and support tickets</li><li>Any other information you choose to provide</li></ul><h3>1.2 Information Collected Automatically</h3><p>When you visit our website or use our online services, we automatically collect certain information about your device and your visit, including:</p><ul><li>Device information: IP address, device type, operating system, browser type and version, screen resolution, device identifiers</li><li>Usage information: pages visited, time spent on each page, clickstream data, referring and exit pages, date and time of visit</li><li>Location information: approximate geographic location based on IP address, country, region, and city</li><li>Connection information: internet service provider, connection speed, network type</li></ul><p>We collect this information using cookies, web beacons, and similar technologies. For more information, please see our Cookie Policy.</p><h3>1.3 Information from Third Parties</h3><p>We may receive information about you from third-party sources, including:</p><ul><li>Business partners and referral sources who recommend our services</li><li>Social media platforms when you interact with our social media presence or use social login features</li><li>Analytics providers who help us understand website traffic and user behavior</li><li>Marketing partners who assist with advertising and lead generation</li><li>Publicly available sources such as company websites, LinkedIn, and business directories</li><li>Credit reporting agencies and fraud prevention services (for business clients)</li></ul></section><!-- Section 2: How We Use Your Information --><section><h2>2. How We Use Your Information</h2><p>We use the information we collect for various legitimate business purposes. Below is a detailed explanation of how we use your personal information:</p><h3>2.1 Providing and Improving Our Services</h3><ul><li>To provide, operate, and maintain our services as requested</li><li>To process and fulfill service requests, including project delivery and support</li><li>To communicate with you about projects, services, account matters, and support inquiries</li><li>To personalize your experience and deliver content relevant to your interests</li><li>To improve, develop, and enhance our services, website, and user experience</li><li>To conduct research and analysis to better understand our clients and market</li></ul><h3>2.2 Marketing and Communications</h3><ul><li>To send you marketing communications about our services, promotions, and events (with your consent where required)</li><li>To send newsletters and industry insights you have subscribed to</li><li>To invite you to participate in surveys, research, or feedback programs</li><li>To display targeted advertisements on third-party platforms</li><li>To measure the effectiveness of our marketing campaigns</li></ul><h3>2.3 Security and Legal Compliance</h3><ul><li>To protect the security and integrity of our systems, services, and data</li><li>To detect, prevent, and address fraud, security threats, and technical issues</li><li>To verify your identity and prevent unauthorized access</li><li>To comply with legal obligations, regulations, and lawful requests from authorities</li><li>To enforce our terms of service and other agreements</li><li>To protect our rights, property, and safety, and that of our clients and others</li></ul></section><!-- Section 3: Legal Basis for Processing (GDPR) --><section><h2>3. Legal Basis for Processing (GDPR)</h2><p>If you are located in the European Economic Area (EEA), United Kingdom, or Switzerland, we are required to have a valid legal basis for processing your personal data. We rely on the following legal bases:</p><h3>3.1 Contract Performance</h3><p>Processing is necessary to fulfill our contractual obligations to you or to take steps at your request before entering into a contract. This includes providing our services, processing payments, and communicating about your projects.</p><h3>3.2 Legitimate Interests</h3><p>Processing is necessary for our legitimate business interests, provided these interests are not overridden by your fundamental rights and freedoms. Our legitimate interests include:</p><ul><li>Operating, improving, and promoting our business and services</li><li>Understanding how our website and services are used</li><li>Sending marketing communications to existing clients about similar services</li><li>Protecting our business from fraud and security threats</li><li>Establishing, exercising, or defending legal claims</li></ul><h3>3.3 Consent</h3><p>For certain processing activities, we rely on your explicit consent, which you may withdraw at any time. This includes:</p><ul><li>Sending marketing communications to individuals who are not existing clients</li><li>Using non-essential cookies and similar tracking technologies</li><li>Processing sensitive personal data (if applicable)</li></ul><h3>3.4 Legal Obligation</h3><p>Processing is necessary to comply with our legal obligations, such as tax reporting, responding to lawful requests from authorities, and maintaining records as required by law.</p></section><!-- Section 4: Information Sharing and Disclosure --><section><h2>4. Information Sharing and Disclosure</h2><p>We do not sell, trade, or rent your personal information to third parties for their own marketing purposes. We may share your information only in the following circumstances:</p><h3>4.1 Service Providers and Partners</h3><p>We may share your information with trusted third-party service providers who perform services on our behalf, including:</p><ul><li>Cloud hosting and infrastructure providers (e.g., AWS, Google Cloud, Cloudflare)</li><li>Payment processors and financial institutions</li><li>Email delivery and communication platforms</li><li>Analytics and performance monitoring services</li><li>Customer relationship management (CRM) systems</li><li>Professional services (legal, accounting, consulting)</li></ul><p>These providers are contractually obligated to protect your information, use it only for the purposes for which it was disclosed, and comply with applicable data protection laws.</p><h3>4.2 Business Transfers</h3><p>If Flectar is involved in a merger, acquisition, reorganization, sale of assets, or bankruptcy, your information may be transferred as part of that transaction. We will notify you via email and/or prominent notice on our website of any change in ownership or uses of your personal information, as well as any choices you may have regarding your information.</p><h3>4.3 Legal Requirements and Protection</h3><p>We may disclose your information if required to do so by law or in response to valid legal requests, including:</p><ul><li>To comply with a subpoena, court order, or other legal process</li><li>To respond to requests from government or regulatory authorities</li><li>To protect and defend our rights, property, or safety</li><li>To protect the safety of our clients, employees, or the public</li><li>To investigate potential violations of our terms or policies</li><li>To detect, prevent, or address fraud, security, or technical issues</li></ul><h3>4.4 With Your Consent</h3><p>We may share your information with third parties when you have given us your explicit consent to do so, or when you direct us to share information with specific parties.</p></section><!-- Section 5: International Data Transfers --><section><h2>5. International Data Transfers</h2><p>Flectar is headquartered in Spain, and we process and store data primarily within the European Economic Area (EEA). However, your information may be transferred to, and processed in, countries other than the country in which you reside, including countries that may have different data protection laws.</p><p>When we transfer personal data outside the EEA, UK, or Switzerland, we ensure appropriate safeguards are in place to protect your information, including:</p><ul><li>Standard Contractual Clauses (SCCs) approved by the European Commission</li><li>Binding Corporate Rules for transfers within corporate groups</li><li>Adequacy decisions by the European Commission for transfers to countries with adequate protection</li><li>Your explicit consent for specific transfers</li></ul><p>You may request a copy of the safeguards we use for international transfers by contacting us using the information provided below.</p></section><!-- Section 6: Data Retention --><section><h2>6. Data Retention</h2><p>We retain your personal information for as long as necessary to fulfill the purposes for which it was collected, including to satisfy legal, accounting, or reporting requirements. The retention period depends on the nature of the information and the purposes for which it is processed.</p><p>Our general retention periods are as follows:</p><ul><li>Client project data and contracts: 7 years after project completion (for legal and tax compliance)</li><li>Financial and billing records: 7 years (as required by Spanish tax law)</li><li>Marketing contacts: Until you unsubscribe or request deletion, plus 2 years of inactivity</li><li>Website analytics data: 26 months (standard Google Analytics retention)</li><li>Support tickets and communications: 3 years after resolution</li><li>Job applications: 2 years after the application process concludes</li></ul><p>When personal information is no longer needed, we will securely delete or anonymize it. In some cases, we may anonymize your information for research or statistical purposes, in which case we may use this information indefinitely without further notice.</p></section><!-- Section 7: Your Privacy Rights --><section><h2>7. Your Privacy Rights</h2><p>Depending on your location, you may have certain rights regarding your personal information. We are committed to helping you exercise these rights.</p><h3>7.1 Rights Under GDPR (EEA, UK, Switzerland)</h3><p>If you are located in the European Economic Area, United Kingdom, or Switzerland, you have the following rights under the General Data Protection Regulation (GDPR) and equivalent local laws:</p><dl><dt><strong>Right of Access</strong></dt><dd>You have the right to request a copy of the personal data we hold about you, along with information about how we process it.</dd><dt><strong>Right to Rectification</strong></dt><dd>You have the right to request that we correct any inaccurate or incomplete personal data we hold about you.</dd><dt><strong>Right to Erasure (Right to be Forgotten)</strong></dt><dd>You have the right to request that we delete your personal data in certain circumstances, such as when it is no longer necessary for the purposes for which it was collected.</dd><dt><strong>Right to Restriction of Processing</strong></dt><dd>You have the right to request that we restrict the processing of your personal data in certain circumstances, such as while we verify the accuracy of your data.</dd><dt><strong>Right to Data Portability</strong></dt><dd>You have the right to receive your personal data in a structured, commonly used, and machine-readable format, and to transmit it to another controller where technically feasible.</dd><dt><strong>Right to Object</strong></dt><dd>You have the right to object to the processing of your personal data where we rely on legitimate interests, and for direct marketing purposes.</dd><dt><strong>Right to Withdraw Consent</strong></dt><dd>Where we process your personal data based on your consent, you have the right to withdraw that consent at any time without affecting the lawfulness of processing based on consent before its withdrawal.</dd><dt><strong>Right to Lodge a Complaint</strong></dt><dd>You have the right to lodge a complaint with a supervisory authority, in particular in the EU Member State of your habitual residence, place of work, or place of the alleged infringement. In Spain, the supervisory authority is the Agencia Española de Protección de Datos (AEPD).</dd></dl><h3>7.2 Rights Under CCPA/CPRA (California Residents)</h3><p>If you are a California resident, you have the following rights under the California Consumer Privacy Act (CCPA) and California Privacy Rights Act (CPRA):</p><dl><dt><strong>Right to Know</strong></dt><dd>You have the right to request information about the categories and specific pieces of personal information we have collected, the sources of collection, the business or commercial purposes for collection, and the categories of third parties with whom we share your information.</dd><dt><strong>Right to Delete</strong></dt><dd>You have the right to request that we delete your personal information, subject to certain exceptions provided by law.</dd><dt><strong>Right to Correct</strong></dt><dd>You have the right to request that we correct inaccurate personal information we maintain about you.</dd><dt><strong>Right to Opt-Out of Sale/Sharing</strong></dt><dd>You have the right to opt-out of the sale or sharing of your personal information for cross-context behavioral advertising. Note: Flectar does not sell personal information as defined by the CCPA/CPRA.</dd><dt><strong>Right to Limit Use of Sensitive Personal Information</strong></dt><dd>You have the right to limit our use and disclosure of sensitive personal information to purposes necessary to provide the services you request.</dd><dt><strong>Right to Non-Discrimination</strong></dt><dd>You have the right not to receive discriminatory treatment for exercising your privacy rights.</dd></dl><h3>7.3 Exercising Your Rights</h3><p>To exercise any of these rights, please contact us using the information provided in the Contact section below. We will verify your identity before processing your request to protect your privacy and security.</p><p>We will respond to your request within the timeframe required by applicable law: within one month for GDPR requests (extendable by two months for complex requests), and within 45 days for CCPA requests (extendable by an additional 45 days if necessary).</p><p>You may also designate an authorized agent to make requests on your behalf. We may require verification of the agent&#39;s authorization before processing the request.</p></section><!-- Section 8: Data Security --><section><h2>8. Data Security</h2><p>We take the security of your personal information seriously and implement appropriate technical and organizational measures to protect it against unauthorized access, alteration, disclosure, or destruction.</p><h3>8.1 Security Measures</h3><p>Our security measures include, but are not limited to:</p><ul><li>Encryption of data in transit using TLS 1.3 and secure HTTPS connections</li><li>Encryption of sensitive data at rest using AES-256 encryption</li><li>Secure access controls with role-based permissions and multi-factor authentication</li><li>Regular security assessments, vulnerability scans, and penetration testing</li><li>Continuous monitoring and logging of system access and activities</li><li>Employee security awareness training and background checks</li><li>Incident response procedures and breach notification protocols</li><li>Regular backups and disaster recovery planning</li><li>Physical security controls at our facilities and data centers</li></ul><h3>8.2 Data Breach Response</h3><p>In the event of a data breach that affects your personal information, we will notify you and the relevant supervisory authorities as required by applicable law. For GDPR purposes, we will notify the supervisory authority within 72 hours of becoming aware of a breach that is likely to result in a risk to your rights and freedoms.</p><p>However, no method of transmission over the Internet or electronic storage is 100% secure. While we strive to use commercially acceptable means to protect your personal information, we cannot guarantee its absolute security.</p></section><!-- Section 9: Children's Privacy --><section><h2>9. Children&#39;s Privacy</h2><p>Our Services are intended for businesses and individuals who are at least 16 years of age. We do not knowingly collect personal information from children under 16 years of age.</p><p>If you are a parent or guardian and you believe your child has provided us with personal information without your consent, please contact us immediately. If we become aware that we have collected personal information from a child under 16 without verification of parental consent, we will take steps to remove that information from our servers promptly.</p></section><!-- Section 10: Third-Party Links and Services --><section><h2>10. Third-Party Links and Services</h2><p>Our website and services may contain links to third-party websites, plugins, applications, and services that are not operated by us. These links are provided for your convenience and information.</p><p>We have no control over and assume no responsibility for the content, privacy policies, or practices of any third-party sites or services. We encourage you to review the privacy policy of every website you visit before providing any personal information.</p><p>The inclusion of any link does not imply endorsement by Flectar of the linked site or service. Your interactions with third-party services are governed by the privacy policies of those services.</p></section><!-- Section 11: Do Not Track Signals --><section><h2>11. Do Not Track Signals</h2><p>Some web browsers have a &quot;Do Not Track&quot; (DNT) feature that sends a signal to websites requesting that your browsing activity not be tracked. There is currently no universally accepted standard for how websites should respond to DNT signals.</p><p>Our website does not currently respond to DNT signals. However, you can manage your privacy preferences through our cookie consent tool, your browser settings, or the opt-out mechanisms described in our Cookie Policy.</p></section><!-- Section 12: Changes to This Privacy Policy --><section><h2>12. Changes to This Privacy Policy</h2><p>We may update this Privacy Policy from time to time to reflect changes in our practices, technologies, legal requirements, or for other operational reasons. When we make changes, we will update the &quot;Last updated&quot; date at the top of this policy.</p><p>For material changes that significantly affect your privacy rights or how we process your personal information, we will provide additional notice through one or more of the following methods:</p><ul><li>A prominent notice on our website</li><li>An email notification to the address associated with your account</li><li>A notification within our services or client portal</li></ul><p>We encourage you to review this Privacy Policy periodically to stay informed about how we are protecting your information. Your continued use of our Services after any changes to this Privacy Policy constitutes your acceptance of such changes.</p></section><!-- Section 13: Contact Us --><section><h2>13. Contact Us</h2><p>If you have any questions, concerns, or requests regarding this Privacy Policy or our privacy practices, or if you wish to exercise any of your privacy rights, please contact us at:</p><address><p><strong>Flectar</strong></p><p>Attn: Data Protection Officer</p><p>Email: <a href="mailto:privacy@flectar.com">privacy@flectar.com</a></p><p>Phone: <a href="tel:+34614057979">(+34) 614 05 79 79</a></p><p>Málaga, Spain</p></address><p>For general inquiries, you may also contact us at hello@flectar.com.</p><p>We will acknowledge receipt of your request and respond within the timeframe required by applicable law. We are committed to working with you to resolve any privacy concerns you may have.</p></section>
+</div>
+
+<script>
+(function () {
+  var langs = (navigator.languages && navigator.languages.length)
+    ? navigator.languages : [navigator.language || 'en'];
+  var zh = langs.some(function (lang) { return /^zh/i.test(lang); });
+  function show(which) {
+    document.documentElement.lang = which === 'zh' ? 'zh-CN' : 'en';
+    var blocks = document.querySelectorAll('[data-lang]');
+    for (var i = 0; i < blocks.length; i++) {
+      blocks[i].hidden = blocks[i].getAttribute('data-lang') !== which;
+    }
+  }
+  show(zh ? 'zh' : 'en');
+  var links = document.querySelectorAll('.lang-switch a');
+  for (var j = 0; j < links.length; j++) {
+    links[j].addEventListener('click', function (event) {
+      event.preventDefault();
+      show(this.getAttribute('data-set'));
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -29,6 +29,7 @@ static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static NOTIFY: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
+static OPEN_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -86,6 +87,13 @@ pub(super) unsafe extern "C" fn set_bridge(
             argv[0],
             b"requestPasteboard\0",
             &REQUEST_PASTEBOARD,
+            call_zero_arg,
+        );
+        install_property(
+            env,
+            argv[0],
+            b"openPrivacyPolicy\0",
+            &OPEN_PRIVACY,
             call_zero_arg,
         );
         undefined(env)
@@ -147,6 +155,13 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
 
 /// Open `url` in the system browser. Callable from any thread.
 pub(super) fn open_url(url: &str) -> Result<(), String> {
+    // The privacy policy ships as a local page until the website edition
+    // covers the application-specific disclosures; keep the URL in the shared
+    // UI so other hosts open the published policy.
+    const PRIVACY_URL: &str = "https://flectar.com/legal/privacy/";
+    if url == PRIVACY_URL {
+        return call_closure(&OPEN_PRIVACY, "openPrivacyPolicy", ());
+    }
     let url = CString::new(url).map_err(|_| "authorization address is malformed".to_owned())?;
     call_closure(&OPEN_URL, "openUrl", url)
 }

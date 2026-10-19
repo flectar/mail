@@ -59,6 +59,8 @@ export component OnboardingView inherits Rectangle {
     callback start-oauth(string);
     callback cancel-oauth();
     callback import-accounts();
+    callback import-account-backup();
+    callback open-link(string);
 
     private property <bool> account-form-valid: root.account-email != ""
         && root.account-password != ""
@@ -217,6 +219,14 @@ export component OnboardingView inherits Rectangle {
                     has-icon: true;
                     enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
                     clicked => { root.import-accounts(); }
+                }
+                Button {
+                    height: 40px;
+                    text: @tr("Privacy policy");
+                    icon: @image-url("../icons/lucide/outline/lock.svg");
+                    has-icon: true;
+                    enabled: !root.account-setup-in-progress && !root.oauth-in-progress && !root.oauth-settings-saving;
+                    clicked => { root.open-link("https://flectar.com/legal/privacy/"); }
                 }
                 if root.oauth-in-progress && root.oauth-authorization-url != "" : OAuthBrowserHelp {
                     launch-failed: root.oauth-browser-error;
