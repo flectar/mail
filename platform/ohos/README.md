@@ -100,6 +100,10 @@ for a different name, pass `BUNDLE=<that name>` for local debug builds.
 version downgrade") because the shared bundle name carries the DevEco
 project's version code.
 
+The ArkTS entry page (`shell/entry/src/main/ets/pages/Index.ets`) is generated
+from `shell/page-templates/Index.<APP>.ets` by the build script and is not
+tracked; an IDE build that bypasses the script needs that copy first.
+
 ## CI
 
 The platform is tier 3: it is built by a manually dispatched workflow
@@ -166,6 +170,48 @@ handled (and asserted) in the script, do not "simplify" them away:
   path. Import/export goes through the system document picker via the host
   `DocumentProvider`, and credentials live in the system Asset Store, never
   in plain files.
+
+## Lint
+
+The ArkTS sources are checked with `oxk` from
+[ohos-rs/oxc-ark](https://github.com/ohos-rs/oxc-ark), the ArkTS tooling built
+on oxc/oxlint (`cargo install oxk --git
+https://github.com/ohos-rs/oxc-ark.git` with the `scripts/env.sh` environment).
+The rule selection and the project API level live in
+`shell/.oxlintrc.jsonc`:
+
+```sh
+cd platform/ohos/shell
+oxk lint entry/src/main/ets --config .oxlintrc.jsonc --threads 1
+```
+
+## Verified on device
+
+HarmonyOS 7.0.0.111 (API 26), 2-in-1 (HUAWEI MateBook Pro):
+
+- IMAP IDLE sync, SMTP sending, OAuth sign-in through the system browser and
+  the loopback broker.
+- CJK glyphs in mail bodies (Blitz/Parley) and the compose editor.
+- Compose attachments, account-backup export, database-snapshot export and
+  certificate import through the system pickers.
+- External links, system notifications, wheel/touchpad scrolling, and Asset
+  Store credentials including recovery from a stale row after reinstalling.
+- Fresh install signed with the AGC release and debug profiles under the AGC
+  bundle.
+
+## Known limitations
+
+- Clipboard paste needs the ACL permission `ohos.permission.READ_PASTEBOARD`
+  (application pending). A hap that declares it installs only with a signing
+  profile whose `acls.allowed-acls` lists it.
+- Backup and snapshot import, PDF preview and multi-account setups are not yet
+  exercised on device.
+- The clipboard path reads plain text only: no rich text, images or
+  drag-and-drop.
+- The soft keyboard is summoned explicitly (Alt+Shift on 2-in-1) because the
+  system suppresses it for native surfaces with a physical keyboard.
+- The Settings privacy-policy row is not restored, and the email renderer runs
+  on the CPU (upstream enables the GPU path only on desktop).
 
 ## Tests
 
