@@ -22,7 +22,8 @@ interface FlectarBridge {
   hideIme: () => void;
   notify: (title: string, body: string) => void;
   requestPasteboard: () => void;
-  openPrivacyPolicy: () => void;
+  openPrivacyPolicy: (lang: string) => void;
+  withdrawPrivacyConsent: () => void;
 }
 
 // The exports of the native XComponent module (`onLoad` hands them over).
@@ -44,6 +45,7 @@ struct Index {
   @State private privacyChecked: boolean = false;
   @State private privacyAccepted: boolean = false;
   private privacyController: webview.WebviewController = new webview.WebviewController();
+  private privacyLanguage: string = 'system';
 
   aboutToAppear(): void {
     this.probeResources();
@@ -139,6 +141,9 @@ struct Index {
       Web({ src: $rawfile('privacy.html'), controller: this.privacyController })
         .width('100%')
         .layoutWeight(1)
+        .onPageEnd((): void => {
+          this.applyPrivacyLanguage();
+        })
     }
     .width('100%')
     .height('100%')
@@ -235,8 +240,11 @@ struct Index {
       requestPasteboard: (): void => {
         this.requestPasteboardPermission();
       },
-      openPrivacyPolicy: (): void => {
-        this.openPrivacyPolicy();
+      openPrivacyPolicy: (lang: string): void => {
+        this.openPrivacyPolicy(lang);
+      },
+      withdrawPrivacyConsent: (): void => {
+        this.withdrawPrivacyConsent();
       },
     });
   }
@@ -491,9 +499,53 @@ struct Index {
     });
   }
 
-  // Shows the bundled privacy policy (About and onboarding rows).
-  private openPrivacyPolicy(): void {
+  // Shows the bundled privacy policy (About and onboarding rows). The page
+  // starts from the configured language and falls back to the system one.
+  private openPrivacyPolicy(language: string): void {
+    this.privacyLanguage = language;
     this.showPrivacyPolicy = true;
+    // The page applies the language once it is loaded (onPageEnd); calling
+    // runJavaScript before the Web component is bound crashes ArkWeb.
+  }
+
+  // Withdrawing clears the stored consent and stops the application, so no
+  // further account or mail processing happens; the next start asks again.
+  private withdrawPrivacyConsent(): void {
+    const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    this.clearPrivacyConsent(context);
+  }
+
+  private async clearPrivacyConsent(context: common.UIAbilityContext): Promise<void> {
+    try {
+      const store = await preferences.getPreferences(context, PRIVACY_STORE);
+      await store.put(PRIVACY_KEY, false);
+      await store.flush();
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'privacy consent could not be cleared: %{public}s',
+        (error as BusinessError).message);
+    }
+    try {
+      this.getUIContext().getPromptAction().showToast({
+        message: 'Privacy consent withdrawn. The app will close.',
+        duration: 2000,
+      });
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'withdraw toast failed');
+    }
+    setTimeout((): void => {
+      context.terminateSelf().catch((error: BusinessError): void => {
+        hilog.error(0x0000, LOG_TAG, 'could not stop after withdrawing consent: %{public}s',
+          error.message);
+      });
+    }, 1500);
+  }
+
+  private applyPrivacyLanguage(): void {
+    const language = JSON.stringify(this.privacyLanguage);
+    this.privacyController.runJavaScript(`window.setPolicyLanguage(${language})`)
+      .catch((error: BusinessError): void => {
+        hilog.error(0x0000, LOG_TAG, 'privacy language failed: %{public}s', error.message);
+      });
   }
 
   private showPasteboardNotice(): void {

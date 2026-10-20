@@ -30,6 +30,7 @@ static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static NOTIFY: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 static OPEN_PRIVACY: AtomicUsize = AtomicUsize::new(0);
+static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -94,6 +95,13 @@ pub(super) unsafe extern "C" fn set_bridge(
             argv[0],
             b"openPrivacyPolicy\0",
             &OPEN_PRIVACY,
+            call_privacy,
+        );
+        install_property(
+            env,
+            argv[0],
+            b"withdrawPrivacyConsent\0",
+            &WITHDRAW_PRIVACY,
             call_zero_arg,
         );
         undefined(env)
@@ -157,10 +165,20 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
 pub(super) fn open_url(url: &str) -> Result<(), String> {
     // The privacy policy ships as a local page until the website edition
     // covers the application-specific disclosures; keep the URL in the shared
-    // UI so other hosts open the published policy.
-    const PRIVACY_URL: &str = "https://flectar.com/legal/privacy/";
-    if url == PRIVACY_URL {
-        return call_closure(&OPEN_PRIVACY, "openPrivacyPolicy", ());
+    // UI so other hosts open the published policy. The shared UI appends the
+    // configured language as `?lang=`.
+    const PRIVACY_PREFIX: &str = "https://flectar.com/legal/privacy/";
+    if url.starts_with(PRIVACY_PREFIX) {
+        if url.contains("consent=withdraw") {
+            return call_closure(&WITHDRAW_PRIVACY, "withdrawPrivacyConsent", ());
+        }
+        let language = url
+            .split_once("?lang=")
+            .map(|(_, rest)| rest.split('&').next().unwrap_or(""))
+            .filter(|value| !value.is_empty())
+            .unwrap_or("system")
+            .to_owned();
+        return call_closure(&OPEN_PRIVACY, "openPrivacyPolicy", language);
     }
     let url = CString::new(url).map_err(|_| "authorization address is malformed".to_owned())?;
     call_closure(&OPEN_URL, "openUrl", url)
@@ -491,6 +509,26 @@ unsafe extern "C" fn call_zero_arg(
     let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
     // SAFETY: NAPI call on the JS thread.
     unsafe { call_with_args(env, js_callback, &[], "notice") };
+}
+
+/// JS-thread half of [`open_privacy_policy`] (one language argument).
+unsafe extern "C" fn call_privacy(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `String` boxed by `call_closure`; this callback
+    // owns it.
+    let language = unsafe { Box::from_raw(data.cast::<String>()) };
+    // SAFETY: NAPI calls on the JS thread with live handles; the string bytes
+    // outlive the call.
+    unsafe {
+        let Some(arg) = string_value(env, language.as_bytes()) else {
+            return;
+        };
+        call_with_args(env, js_callback, &[arg], "openPrivacyPolicy");
+    }
 }
 
 /// JS-thread half of [`notify`].

@@ -2178,6 +2178,7 @@ export component AppWindow inherits Window {
         cancel-oauth => { root.cancel_oauth(); }
         import-accounts => { root.import_accounts(); }
         open-link(url) => { root.open_email_link(url); }
+        language-mode: root.language_mode;
         import-account-backup => {
             root.import_account_backup();
             if (root.connected_accounts.length > 0) {

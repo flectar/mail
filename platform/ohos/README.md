@@ -161,13 +161,15 @@ handled (and asserted) in the script, do not "simplify" them away:
   in-app notifications setting is on. A refusal is final at the system level;
   the user can re-enable notifications in the system settings.
 - **Privacy**: the first launch shows a consent screen before the native module
-  (and therefore any account or mail processing) starts. The policy ships in
-  `shell/entry/src/main/resources/rawfile/privacy.html` (Simplified Chinese,
-  an English application supplement, and the official Flectar text) and is
-  reachable from the onboarding screen and Settings -> About. The host opens
-  this bundled page when the shared UI asks for
-  `https://flectar.com/legal/privacy/`; drop that interception once the
-  website covers the application-specific disclosures.
+  (and therefore any account or mail processing) starts; Settings -> About can
+  withdraw the consent, which clears the stored choice and stops the app. The
+  policy ships in `shell/entry/src/main/resources/rawfile/privacy.html` with
+  Simplified Chinese, English, Spanish, Turkish and Russian sections selected
+  by the configured language (the selector mirrors Settings -> General);
+  English also carries the official Flectar text. It is reachable from the
+  onboarding screen and Settings -> About. The host opens this bundled page
+  when the shared UI asks for `https://flectar.com/legal/privacy/`; drop that
+  interception once the website covers the application-specific disclosures.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on

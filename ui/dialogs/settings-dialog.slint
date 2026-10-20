@@ -2297,7 +2297,17 @@ export component SettingsDialog inherits Rectangle {
                                         body-text: root.body-text;
                                         muted-text: root.faint-text;
                                         hover-background: root.accent-soft;
-                                        clicked => { root.open-link("https://flectar.com/legal/privacy/"); }
+                                        clicked => { root.open-link("https://flectar.com/legal/privacy/?lang=" + root.language_mode); }
+                                    }
+                                    SettingsLinkRow {
+                                        text: @tr("Withdraw privacy consent");
+                                        description: @tr("Closes the app and asks for consent again on the next start");
+                                        icon: @image-url("../icons/lucide/outline/undo.svg");
+                                        accent: root.accent;
+                                        body-text: root.body-text;
+                                        muted-text: root.faint-text;
+                                        hover-background: root.accent-soft;
+                                        clicked => { root.open-link("https://flectar.com/legal/privacy/?consent=withdraw&lang=" + root.language_mode); }
                                     }
                                     SettingsLinkRow {
                                         text: @tr("Flectar");
