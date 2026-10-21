@@ -191,6 +191,10 @@ export global I18n {
         if (key == "Could not save theme palette: {}") { return @tr("Could not save theme palette: {}", argument); }
         if (key == "Custom theme updated for this session.") { return @tr("Custom theme updated for this session."); }
         if (key == "Custom theme saved.") { return @tr("Custom theme saved."); }
+        if (key == "Download location saved.") { return @tr("Download location saved."); }
+        if (key == "Download location is saved once an account is set up.") { return @tr("Download location is saved once an account is set up."); }
+        if (key == "Could not save the download location: {}") { return @tr("Could not save the download location: {}", argument); }
+        if (key == "Choose download location") { return @tr("Choose download location"); }
         if (key == "Could not save custom theme: {}") { return @tr("Could not save custom theme: {}", argument); }
         if (key == "Language updated for this session.") { return @tr("Language updated for this session."); }
         if (key == "Language preference saved.") { return @tr("Language preference saved."); }
@@ -545,6 +549,8 @@ export component AppWindow inherits Window {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_group_mail_by_date(bool);
+    callback choose_download_directory();
+    callback clear_download_directory();
     callback save_mail_profile(string, string, color) -> string;
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
@@ -924,6 +930,11 @@ export component AppWindow inherits Window {
     in-out property <string> google_client_id: "";
     in-out property <string> google_client_secret: "";
     in-out property <string> ms_client_id: "";
+    // Where desktop save dialogs open. Empty follows the platform default.
+    in-out property <string> download_directory: "";
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting.
+    in-out property <bool> download_directory_available: false;
     in-out property <bool> custom_oauth_open: false;
     in property <bool> custom_oauth_configured: false;
     in property <bool> google_oauth_available: false;
@@ -1745,6 +1756,10 @@ export component AppWindow inherits Window {
             custom_oauth_open <=> root.custom_oauth_open;
             save_theme(mode) => { root.save_theme(mode); }
             save_theme_preset(preset) => { root.save_theme_preset(preset); }
+            download_directory <=> root.download_directory;
+            download_directory_available <=> root.download_directory_available;
+            choose_download_directory => { root.choose_download_directory(); }
+            clear_download_directory => { root.clear_download_directory(); }
             save_custom_theme(
                 light-primary,
                 light-page,

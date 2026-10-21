@@ -46,12 +46,15 @@ pub struct DocumentDialog {
     pub title: String,
     /// Filter name and the extensions it offers.
     pub filter: Option<(String, &'static [&'static str])>,
+    /// Directory the picker opens in. `None` follows the platform default.
+    pub directory: Option<PathBuf>,
 }
 impl DocumentDialog {
     pub fn titled(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             filter: None,
+            directory: None,
         }
     }
 }
@@ -124,12 +127,52 @@ pub(crate) fn safe_name(name: &str) -> String {
     }
 }
 
+/// Builds the dialog for a download, starting in the directory the user
+/// configured in Settings.
+pub(crate) fn download_dialog(title: impl Into<String>, setting: &str) -> DocumentDialog {
+    DocumentDialog {
+        title: title.into(),
+        filter: None,
+        directory: resolve_download_directory(setting),
+    }
+}
+
+/// Builds the download dialog from the stored settings. Every download goes
+/// through here, so a new download site picks up the configured location
+/// without repeating the lookup. An unreadable settings row falls back to the
+/// platform default rather than blocking the download.
+pub(crate) async fn download_dialog_for(core: &flectar_mail_core::Core) -> DocumentDialog {
+    let setting = core
+        .get_settings()
+        .await
+        .map(|settings| settings.download_directory)
+        .unwrap_or_default();
+    download_dialog("Download file", &setting)
+}
+
+/// Resolves the configured download directory for desktop save dialogs. An
+/// empty setting, a path that no longer exists, or a path that is not a
+/// directory all fall back to the platform default, so a download never fails
+/// because a saved location went away, such as an unmounted network share.
+pub(crate) fn resolve_download_directory(setting: &str) -> Option<PathBuf> {
+    let trimmed = setting.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    path.is_dir().then_some(path)
+}
+
 #[cfg(desktop)]
 struct DesktopDocuments;
 #[cfg(desktop)]
 impl DocumentDialog {
     fn file_dialog(&self) -> rfd::AsyncFileDialog {
         let dialog = rfd::AsyncFileDialog::new().set_title(&self.title);
+        let dialog = match &self.directory {
+            Some(directory) => dialog.set_directory(directory),
+            None => dialog,
+        };
         match &self.filter {
             Some((name, extensions)) => dialog.add_filter(name, extensions),
             None => dialog,
@@ -194,6 +237,49 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn download_dialog_starts_in_the_configured_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let dialog = download_dialog("Download file", &dir.path().to_string_lossy());
+        assert_eq!(dialog.title, "Download file");
+        assert_eq!(dialog.directory, Some(dir.path().to_owned()));
+    }
+
+    #[test]
+    fn download_dialog_without_a_configured_directory_uses_the_platform_default() {
+        assert_eq!(download_dialog("Download file", "").directory, None);
+    }
+
+    #[test]
+    fn configured_directory_is_used_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_download_directory(&dir.path().to_string_lossy()),
+            Some(dir.path().to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_setting_uses_the_platform_default() {
+        assert_eq!(resolve_download_directory(""), None);
+        assert_eq!(resolve_download_directory("   "), None);
+    }
+
+    #[test]
+    fn missing_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        assert_eq!(resolve_download_directory(&missing.to_string_lossy()), None);
+    }
+
+    #[test]
+    fn file_path_instead_of_a_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lieferschein.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        assert_eq!(resolve_download_directory(&file.to_string_lossy()), None);
+    }
 
     fn imported(path: PathBuf, drops: Arc<AtomicUsize>) -> ImportedDocument {
         ImportedDocument::temporary(path, move |path| {

@@ -714,6 +714,8 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_google_client_id(settings.google_client_id.clone().into());
     app.set_google_client_secret(settings.google_client_secret.clone().into());
     app.set_ms_client_id(settings.ms_client_id.clone().into());
+    app.set_download_directory(settings.download_directory.clone().into());
+    app.set_download_directory_available(cfg!(desktop));
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
     app.set_notification_scope(settings.notification_scope.clone().into());

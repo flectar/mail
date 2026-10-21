@@ -1392,6 +1392,13 @@ pub struct Settings {
     /// Mark unread conversations as read when the user opens them.
     #[serde(default = "default_true")]
     pub mark_read_on_open: bool,
+    /// Directory desktop save dialogs open in. An empty value follows the
+    /// platform default. The path is deliberately not validated when stored:
+    /// a saved location can be unavailable later, such as an unmounted network
+    /// share, so downloads fall back to the platform default at save time
+    /// rather than failing.
+    #[serde(default)]
+    pub download_directory: String,
     #[serde(default = "default_ai_base_url")]
     pub ai_base_url: String,
     /// Per-tier model ids, all sharing `ai_base_url` and the stored API key.
@@ -1673,6 +1680,7 @@ impl Default for Settings {
             undo_send_seconds: 10,
             load_remote_images: false,
             mark_read_on_open: true,
+            download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
             ai_model_cheap: default_ai_model(),

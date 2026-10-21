@@ -379,7 +379,8 @@ pub(crate) fn register(
                             Entry::Remote(n) => n.name,
                         })
                         .unwrap_or_else(|_| "download".into());
-                    result = documents.export(path, safe_name(&name)).await.map(|saved| {
+                    let dialog = crate::documents::download_dialog_for(&core).await;
+                    result = documents.export_with(path, safe_name(&name), dialog).await.map(|saved| {
                         ServiceOutput::Status(
                             if saved {
                                 "File downloaded."

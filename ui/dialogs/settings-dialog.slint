@@ -547,6 +547,11 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> google_client_id: "";
     in-out property <string> google_client_secret: "";
     in-out property <string> ms_client_id: "";
+    // Where desktop save dialogs open. Empty follows the platform default.
+    in-out property <string> download_directory: "";
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting.
+    in-out property <bool> download_directory_available: false;
     in-out property <bool> custom_oauth_open: false;
     in-out property <bool> imap_form_open: false;
     private property <bool> imap_editing: false;
@@ -579,6 +584,8 @@ export component SettingsDialog inherits Rectangle {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_group_mail_by_date(bool);
+    callback choose_download_directory();
+    callback clear_download_directory();
     callback save_mail_profile(string, string, color) -> string;
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
@@ -683,7 +690,7 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login")
+            ? @tr("general theme appearance palette language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures")
             : section == "Contacts"
@@ -1347,6 +1354,52 @@ export component SettingsDialog inherits Rectangle {
                                             color: root.faint-text;
                                             font-size: TypeScale.caption;
                                             overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.download_directory_available : Rectangle {
+                                height: max(root.compact ? 168px : 132px, self.preferred-height);
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding: 16px;
+                                    spacing: 6px;
+                                    Text {
+                                        height: max(20px, self.preferred-height);
+                                        text: @tr("Download location");
+                                        color: root.heading;
+                                        font-size: TypeScale.subtitle;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        height: max(17px, self.preferred-height);
+                                        text: root.download_directory == ""
+                                            ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
+                                            : root.download_directory;
+                                        color: root.faint-text;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalBox {
+                                        height: max(32px, self.preferred-height);
+                                        padding: 0px;
+                                        spacing: 8px;
+                                        alignment: start;
+                                        Button {
+                                            width: max(132px, self.content-width);
+                                            text: @tr("Choose folder…");
+                                            clicked => { root.choose_download_directory(); }
+                                        }
+                                        Button {
+                                            width: max(96px, self.content-width);
+                                            text: @tr("Reset");
+                                            enabled: root.download_directory != "";
+                                            clicked => { root.clear_download_directory(); }
                                         }
                                     }
                                 }

@@ -655,6 +655,7 @@ fn backup_dialog(app: &AppWindow, title: UiMessage) -> documents::DocumentDialog
             translated(app, &UiMessage::plain("Flectar Mail backup")).to_string(),
             &["json"],
         )),
+        directory: None,
     }
 }
 

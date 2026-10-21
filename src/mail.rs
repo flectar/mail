@@ -845,6 +845,19 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Stores the directory desktop save dialogs open in. The path is not
+    /// checked here: a location can be unavailable later, such as an unmounted
+    /// network share, and downloads fall back to the platform default instead
+    /// of failing.
+    pub async fn set_download_directory(&self, directory: &str) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.download_directory = directory.trim().to_owned();
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_message_appearance(&self, preference: &str) -> Result<(), String> {
         let preference = flectar_mail_core::models::MessageAppearance::parse(preference)
             .ok_or("Unknown message appearance")?;

@@ -57,6 +57,7 @@ mod tests {
         assert_eq!(d.custom_theme.light_primary, "#0969DA");
         assert!(d.mail_profiles.is_empty());
         assert!(!d.show_account_badges);
+        assert!(d.download_directory.is_empty());
 
         let mut s = d.clone();
         s.theme = "carbon".into();
@@ -69,6 +70,7 @@ mod tests {
         s.workspace_layout = "minimal".into();
         s.contact_suggest_all_accounts = true;
         s.theme_preset = "teal".into();
+        s.download_directory = "/srv/downloads".into();
         s.custom_theme.light_primary = "#006B7A".into();
         s.signature_list.push(crate::models::Signature {
             id: "a".into(),
@@ -116,6 +118,7 @@ mod tests {
         assert!(back.contact_suggest_all_accounts);
         assert_eq!(back.workspace_layout, "minimal");
         assert_eq!(back.theme_preset, "teal");
+        assert_eq!(back.download_directory, "/srv/downloads");
         assert_eq!(back.custom_theme.light_primary, "#006B7A");
         assert_eq!(back.signature_list.len(), 1);
         assert_eq!(back.signature_list[0].html, "<b>Dean</b>");
@@ -162,6 +165,7 @@ mod tests {
         assert!(s.ai_automation_rules.is_empty());
         assert!(s.mail_profiles.is_empty());
         assert!(!s.show_account_badges);
+        assert!(s.download_directory.is_empty());
         assert!(!s.ai_model_instant.is_empty());
         assert!(!s.ai_model_cheap.is_empty());
         assert!(!s.ai_model_intelligent.is_empty());

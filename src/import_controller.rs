@@ -408,6 +408,9 @@ pub(super) fn register_import_callbacks(
                 translated(&app, &UiMessage::plain("Account settings")).to_string(),
                 &["k9s", "zip", "js", "json"],
             )),
+            // Imports read files the user picks; the download location does
+            // not apply here.
+            directory: None,
         };
         let inspect = Rc::clone(&file_inspect);
         let session = Rc::clone(&file_session);

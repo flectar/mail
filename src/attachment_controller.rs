@@ -506,12 +506,14 @@ pub(crate) fn register(
                         .await
                         .map_err(|e| e.to_string())?;
                     if download {
+                        let dialog = crate::documents::download_dialog_for(&core).await;
                         documents
-                            .export(
+                            .export_with(
                                 path.into(),
                                 crate::documents::safe_name(
                                     selected.filename.as_deref().unwrap_or("attachment"),
                                 ),
+                                dialog,
                             )
                             .await?;
                         return Ok(None);

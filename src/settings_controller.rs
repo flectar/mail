@@ -19,6 +19,33 @@ fn apply_account_presentation_settings(
     refresh_rows_only(app, state, runtime);
 }
 
+/// Persists the download location and only then reflects it in the UI, so a
+/// failed write never leaves Settings showing a directory that was not saved.
+#[cfg(desktop)]
+fn save_download_directory(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    directory: String,
+) {
+    let Some(core) = state.borrow().core.clone() else {
+        app.set_sync_status(UiMessage::plain(
+            "Download location is saved once an account is set up.",
+        ));
+        return;
+    };
+    match runtime.block_on(core.set_download_directory(&directory)) {
+        Ok(()) => {
+            app.set_download_directory(directory.into());
+            app.set_sync_status(UiMessage::plain("Download location saved."));
+        }
+        Err(error) => app.set_sync_status(UiMessage::detail(
+            "Could not save the download location: {}",
+            error,
+        )),
+    }
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -181,6 +208,39 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting entirely.
+    #[cfg(desktop)]
+    {
+        let state_for_download = Rc::clone(state);
+        let runtime_for_download = Rc::clone(runtime);
+        let app_weak_for_download = app_weak.clone();
+        app.on_choose_download_directory(move || {
+            let Some(app) = app_weak_for_download.upgrade() else {
+                return;
+            };
+            let title =
+                translated(&app, &UiMessage::plain("Choose download location")).to_string();
+            let Some(directory) = rfd::FileDialog::new().set_title(title).pick_folder() else {
+                return;
+            };
+            save_download_directory(
+                &app,
+                &state_for_download,
+                &runtime_for_download,
+                directory.to_string_lossy().into_owned(),
+            );
+        });
+        let state_for_clear = Rc::clone(state);
+        let runtime_for_clear = Rc::clone(runtime);
+        let app_weak_for_clear = app_weak.clone();
+        app.on_clear_download_directory(move || {
+            let Some(app) = app_weak_for_clear.upgrade() else {
+                return;
+            };
+            save_download_directory(&app, &state_for_clear, &runtime_for_clear, String::new());
+        });
+    }
     let state_for_theme_preset = Rc::clone(state);
     let runtime_for_theme_preset = Rc::clone(runtime);
     app.on_save_theme_preset(move |preset| {
