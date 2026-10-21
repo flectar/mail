@@ -299,13 +299,14 @@ unsafe extern "C" fn on_axis_event(
             "scroll #{seen}: action={action} raw=({horizontal:.2}, {vertical:.2}) at ({x:.0}, {y:.0})"
         ));
     }
-    // Positive platform values scroll forward, toward the start of the
-    // content, which is also Slint's positive delta.
+    // OHOS reports positive axis values toward the end of the content (wheel
+    // down / touchpad swipe up with natural scrolling), the opposite of
+    // Slint's positive delta (toward the start), so invert both axes.
     send(BackendEvent::Scroll {
         x,
         y,
-        delta_x: horizontal * LOGICAL_PX_PER_WHEEL_DEGREE,
-        delta_y: vertical * LOGICAL_PX_PER_WHEEL_DEGREE,
+        delta_x: -horizontal * LOGICAL_PX_PER_WHEEL_DEGREE,
+        delta_y: -vertical * LOGICAL_PX_PER_WHEEL_DEGREE,
     });
 }
 

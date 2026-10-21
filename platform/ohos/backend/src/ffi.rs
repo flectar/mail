@@ -406,8 +406,8 @@ unsafe extern "C" {
     /// Axis (mouse wheel / touchpad) accessors for the event handed to the UI
     /// input callback. Wheel values are in degrees (a notch reports 15
     /// degrees times the user's scroll-step setting); touchpad values are in
-    /// pixels. Positive values scroll forward (toward the start of the
-    /// content).
+    /// pixels. Positive values scroll toward the end of the content (the
+    /// opposite of Slint's positive delta).
     pub fn OH_ArkUI_AxisEvent_GetAxisAction(event: *const ArkUI_UIInputEvent) -> i32;
     pub fn OH_ArkUI_AxisEvent_GetVerticalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
     pub fn OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
