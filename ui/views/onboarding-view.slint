@@ -60,7 +60,6 @@ export component OnboardingView inherits Rectangle {
     callback start-oauth(string);
     callback cancel-oauth();
     callback import-accounts();
-    callback import-account-backup();
     callback open-link(string);
 
     private property <bool> account-form-valid: root.account-email != ""
