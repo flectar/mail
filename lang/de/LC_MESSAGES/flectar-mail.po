@@ -2,11 +2,10 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
-"POT-Creation-Date: 2026-10-16 12:17+0000\n"
+"POT-Creation-Date: 2026-10-23 00:42+0000\n"
 "PO-Revision-Date: 2026-09-24 11:59+0000\n"
 "Last-Translator: Christoph Seibel <christoph_seibel@t-online.de>\n"
-"Language-Team: German <https://translate.flectar.com/projects/flectar-mail/"
-"mail/de/>\n"
+"Language-Team: German <https://translate.flectar.com/projects/flectar-mail/mail/de/>\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -678,7 +677,7 @@ msgid "Flectar Mail backup"
 msgstr ""
 
 #: ui/app.slint:296 ui/dialogs/import-dialog.slint:211
-#: ui/views/onboarding-view.slint:215
+#: ui/views/onboarding-view.slint:217
 msgid "Import accounts"
 msgstr ""
 
@@ -756,9 +755,7 @@ msgstr ""
 
 #: ui/app.slint:323
 msgid "Enter a name, email address, or phone number, then save."
-msgstr ""
-"Geben Sie einen Namen, eine E-Mail-Adresse oder eine Telefonnummer ein und "
-"speichern Sie den Kontakt."
+msgstr "Geben Sie einen Namen, eine E-Mail-Adresse oder eine Telefonnummer ein und speichern Sie den Kontakt."
 
 #: ui/app.slint:324
 msgid "Could not save: contact storage is unavailable."
@@ -890,9 +887,7 @@ msgid "Message load failed: {}"
 msgstr ""
 
 #: ui/app.slint:364
-msgid ""
-"Your local mailbox could not be opened. No account operation was started. "
-"Retry, or copy the diagnostics for support."
+msgid "Your local mailbox could not be opened. No account operation was started. Retry, or copy the diagnostics for support."
 msgstr ""
 
 #: ui/app.slint:365
@@ -929,8 +924,7 @@ msgstr "Einstellungen für gesendete Kopien aktualisiert."
 
 #: ui/app.slint:379
 msgid "Could not update Sent copy settings: {}"
-msgstr ""
-"Einstellungen für gesendete Kopien konnten nicht aktualisiert werden: {}"
+msgstr "Einstellungen für gesendete Kopien konnten nicht aktualisiert werden: {}"
 
 #: ui/app.slint:380
 msgid "Mail history requires local mail data."
@@ -1001,8 +995,7 @@ msgid "Message action completed."
 msgstr ""
 
 #: ui/app.slint:401
-msgid ""
-"Permanent deletion queued. Mail will disappear after the server confirms."
+msgid "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr ""
 
 #: ui/app.slint:402
@@ -1142,9 +1135,7 @@ msgid "Added {} attachments."
 msgstr ""
 
 #: ui/app.slint:440
-msgid ""
-"Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
-"total limit)."
+msgid "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit)."
 msgstr ""
 
 #: ui/app.slint:441
@@ -1260,9 +1251,7 @@ msgid "Could not load account preferences: {}"
 msgstr ""
 
 #: ui/app.slint:469
-msgid ""
-"Your edited signature was preserved. Choose No signature to keep it as "
-"message text before inserting another."
+msgid "Your edited signature was preserved. Choose No signature to keep it as message text before inserting another."
 msgstr ""
 
 #: ui/app.slint:470
@@ -1278,13 +1267,11 @@ msgid "Testing IMAP and SMTP connections…"
 msgstr ""
 
 #: ui/app.slint:477
-msgid ""
-"Another browser authorization is already in progress; finish it or choose "
-"Cancel."
+msgid "Another browser authorization is already in progress; finish it or choose Cancel."
 msgstr ""
 
 #: ui/app.slint:478 ui/dialogs/settings-dialog.slint:1646
-#: ui/dialogs/settings-dialog.slint:1689 ui/views/onboarding-view.slint:153
+#: ui/dialogs/settings-dialog.slint:1689 ui/views/onboarding-view.slint:155
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 
@@ -1371,8 +1358,7 @@ msgid "Delete permanently?"
 msgstr ""
 
 #: ui/app.slint:2035
-msgid ""
-"Permanently delete all messages in Trash across every connected account?"
+msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
 #: ui/app.slint:2036
@@ -1399,27 +1385,27 @@ msgstr ""
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2211
+#: ui/app.slint:2213
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2217
+#: ui/app.slint:2219
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2230
+#: ui/app.slint:2232
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2233
+#: ui/app.slint:2235
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2238
+#: ui/app.slint:2240
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2246 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2248 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -1476,9 +1462,7 @@ msgid "Sender identities, signatures & OpenPGP"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:123
-msgid ""
-"Choose an account to manage its sender identity, signature, and message "
-"protection."
+msgid "Choose an account to manage its sender identity, signature, and message protection."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:134
@@ -1515,9 +1499,7 @@ msgid "Remove"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:161
-msgid ""
-"Gmail decides which addresses you can send from. Add an address in Gmail "
-"settings under Accounts › Send mail as, then refresh sender identities."
+msgid "Gmail decides which addresses you can send from. Add an address in Gmail settings under Accounts › Send mail as, then refresh sender identities."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:164
@@ -1529,20 +1511,15 @@ msgid "Add a sender address"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:168
-msgid ""
-"Your server lets you send from any address at the domains shown as "
-"wildcards. Add the addresses you want to choose from."
+msgid "Your server lets you send from any address at the domains shown as wildcards. Add the addresses you want to choose from."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:169
-msgid ""
-"Add an alias or another address your mail server lets you send from. The "
-"server decides when you send; Flectar shows whether it accepted the last "
-"message."
+msgid "Add an alias or another address your mail server lets you send from. The server decides when you send; Flectar shows whether it accepted the last message."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:171
-#: ui/dialogs/settings-dialog.slint:2639 ui/views/onboarding-view.slint:257
+#: ui/dialogs/settings-dialog.slint:2659 ui/views/onboarding-view.slint:267
 msgid "Email address"
 msgstr ""
 
@@ -1576,7 +1553,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
-#: ui/dialogs/settings-dialog.slint:1969 ui/dialogs/settings-dialog.slint:2710
+#: ui/dialogs/settings-dialog.slint:1969 ui/dialogs/settings-dialog.slint:2730
 #: ui/views/contacts-view.slint:604 ui/views/files-view.slint:620
 msgid "Cancel"
 msgstr ""
@@ -1609,9 +1586,7 @@ msgid ""
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:191
-msgid ""
-"Plain text works in every email client. You can format the inserted "
-"signature in the composer."
+msgid "Plain text works in every email client. You can format the inserted signature in the composer."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:193
@@ -1644,21 +1619,15 @@ msgid "Save signature defaults"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:212
-msgid ""
-"OpenPGP protects message bodies and attachments. Digital signatures let "
-"recipients check who signed a message."
+msgid "OpenPGP protects message bodies and attachments. Digital signatures let recipients check who signed a message."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:213
-msgid ""
-"Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
-"in GnuPG's unlock dialog."
+msgid "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered in GnuPG's unlock dialog."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:213
-msgid ""
-"OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
-"without a supported encryption engine."
+msgid "OpenPGP is unavailable on this mobile build. Protected accounts cannot send without a supported encryption engine."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:214
@@ -1666,9 +1635,7 @@ msgid "Create a new key"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:215
-msgid ""
-"New keys expire in two years. GnuPG asks you to protect the private key with "
-"a passphrase."
+msgid "New keys expire in two years. GnuPG asks you to protect the private key with a passphrase."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:216
@@ -1700,10 +1667,7 @@ msgid "Verified recipient keys"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:228
-msgid ""
-"Compare fingerprints with recipients through a separate trusted channel, "
-"then enter one email=fingerprint per line. Importing a key alone does not "
-"verify it."
+msgid "Compare fingerprints with recipients through a separate trusted channel, then enter one email=fingerprint per line. Importing a key alone does not verify it."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:229
@@ -1731,16 +1695,11 @@ msgid "Open message file (.eml)"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:244
-msgid ""
-"Manage expiry, revocation and private-key backups in GnuPG. Only public keys "
-"are exported here."
+msgid "Manage expiry, revocation and private-key backups in GnuPG. Only public keys are exported here."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:245
-msgid ""
-"Subjects and addresses remain visible. Protected drafts stay on this device. "
-"Existing server drafts are not retroactively protected. S/MIME certificates "
-"are not supported."
+msgid "Subjects and addresses remain visible. Protected drafts stay on this device. Existing server drafts are not retroactively protected. S/MIME certificates are not supported."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:248
@@ -1752,9 +1711,7 @@ msgid "OpenPGP message"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:263
-msgid ""
-"Decrypted content is shown as text, without remote content. It is not added "
-"to search or saved to the mail database."
+msgid "Decrypted content is shown as text, without remote content. It is not added to search or saved to the mail database."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:264
@@ -1762,7 +1719,7 @@ msgid "Export decrypted message"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2615 ui/views/files-view.slint:455
+#: ui/dialogs/settings-dialog.slint:2635 ui/views/files-view.slint:455
 #: ui/views/files-view.slint:656 ui/window-chrome.slint:201
 msgid "Close"
 msgstr ""
@@ -1901,8 +1858,7 @@ msgid "Show {}"
 msgstr ""
 
 #: ui/components/calendar.slint:351
-msgid ""
-"No provider calendars yet. Connect Google Calendar or Outlook in Settings."
+msgid "No provider calendars yet. Connect Google Calendar or Outlook in Settings."
 msgstr ""
 
 #: ui/components/calendar.slint:443
@@ -2309,9 +2265,7 @@ msgid "SMTP encryption"
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:94
-msgid ""
-"Without encryption, anyone on the network can read your password and mail. "
-"Use this only with a server on a network you trust."
+msgid "Without encryption, anyone on the network can read your password and mail. Use this only with a server on a network you trust."
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:99
@@ -2323,10 +2277,7 @@ msgid "Custom server certificate…"
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:108
-msgid ""
-"For Proton Bridge, export its certificate from Bridge settings and import it "
-"here. Only trust certificates from your server administrator. Server names "
-"and expiry dates are still checked."
+msgid "For Proton Bridge, export its certificate from Bridge settings and import it here. Only trust certificates from your server administrator. Server names and expiry dates are still checked."
 msgstr ""
 
 #: ui/components/mail-security-fields.slint:111
@@ -2354,14 +2305,11 @@ msgid "Having trouble with browser sign-in?"
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:73
-msgid ""
-"Flectar could not reach the system browser from this app environment. Open "
-"the link again or copy it into a browser on this device."
+msgid "Flectar could not reach the system browser from this app environment. Open the link again or copy it into a browser on this device."
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:73
-msgid ""
-"Open the sign-in page again or copy its link into a browser on this device."
+msgid "Open the sign-in page again or copy its link into a browser on this device."
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:80
@@ -2373,9 +2321,7 @@ msgid "Copy sign-in link"
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:84
-msgid ""
-"If the final browser page says localhost can’t be reached, copy its full "
-"address and paste it below."
+msgid "If the final browser page says localhost can’t be reached, copy its full address and paste it below."
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:89
@@ -2415,9 +2361,7 @@ msgid "Choose profile"
 msgstr ""
 
 #: ui/components/profile-controls.slint:391
-msgid ""
-"Profiles group accounts, color them in the mail list and can focus the mail "
-"view on them."
+msgid "Profiles group accounts, color them in the mail list and can focus the mail view on them."
 msgstr ""
 
 #: ui/components/profile-controls.slint:400
@@ -2731,12 +2675,8 @@ msgid "Checked text contrast meets 4.5:1 · minimum {}:1"
 msgstr "Geprüfter Textkontrast erreicht 4.5:1 · Minimum {}:1"
 
 #: ui/components/theme-editor.slint:756
-msgid ""
-"Low contrast · 4.5:1 is recommended for text. You can still save this "
-"palette."
-msgstr ""
-"Geringer Kontrast · Für Text wird 4.5:1 empfohlen. Sie können diese Palette "
-"trotzdem speichern."
+msgid "Low contrast · 4.5:1 is recommended for text. You can still save this palette."
+msgstr "Geringer Kontrast · Für Text wird 4.5:1 empfohlen. Sie können diese Palette trotzdem speichern."
 
 #: ui/components/theme-editor.slint:769
 msgid "{} · {}:1"
@@ -2769,7 +2709,7 @@ msgid "Files"
 msgstr ""
 
 #: ui/components/workspace-navigation.slint:139
-#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:2344
+#: ui/dialogs/settings-dialog.slint:1341 ui/dialogs/settings-dialog.slint:2364
 #: ui/views/contacts-view.slint:249
 msgid "Contacts"
 msgstr ""
@@ -2991,8 +2931,7 @@ msgid "Delete folder?"
 msgstr ""
 
 #: ui/dialogs/folder-dialog.slint:73
-msgid ""
-"Delete “{}” and all nested labels from “{}”? Messages will not be deleted."
+msgid "Delete “{}” and all nested labels from “{}”? Messages will not be deleted."
 msgstr ""
 
 #: ui/dialogs/folder-dialog.slint:74
@@ -3056,62 +2995,43 @@ msgid "The outgoing server {} uses a protocol Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:82
-msgid ""
-"The incoming server {} is not encrypted, so your password and mail cross the "
-"network unprotected."
+msgid "The incoming server {} is not encrypted, so your password and mail cross the network unprotected."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:83
-msgid ""
-"The outgoing server {} is not encrypted, so your password and mail cross the "
-"network unprotected."
+msgid "The outgoing server {} is not encrypted, so your password and mail cross the network unprotected."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:84
-msgid ""
-"{} keeps your password off its unencrypted connection, but Flectar Mail "
-"would send it in the clear. Turn on SSL/TLS or STARTTLS for this server "
-"first."
+msgid "{} keeps your password off its unencrypted connection, but Flectar Mail would send it in the clear. Turn on SSL/TLS or STARTTLS for this server first."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:86
-msgid ""
-"The incoming server connects without signing in, which Flectar Mail does not "
-"support."
+msgid "The incoming server connects without signing in, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:87
-msgid ""
-"The incoming server signs in with a client certificate, which Flectar Mail "
-"does not support."
+msgid "The incoming server signs in with a client certificate, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:88
-msgid ""
-"The incoming server signs in with {}, which Flectar Mail does not support."
+msgid "The incoming server signs in with {}, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:89
-msgid ""
-"The outgoing server sends mail without signing in, which Flectar Mail does "
-"not support."
+msgid "The outgoing server sends mail without signing in, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:90
-msgid ""
-"The outgoing server signs in with a client certificate, which Flectar Mail "
-"does not support."
+msgid "The outgoing server signs in with a client certificate, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:91
-msgid ""
-"The outgoing server signs in with {}, which Flectar Mail does not support."
+msgid "The outgoing server signs in with {}, which Flectar Mail does not support."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:92
-msgid ""
-"The outgoing server signs in as {}. Flectar Mail uses one sign-in for both "
-"servers."
+msgid "The outgoing server signs in as {}. Flectar Mail uses one sign-in for both servers."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:93
@@ -3127,9 +3047,7 @@ msgid "This address appears earlier in the file."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:96
-msgid ""
-"Your password will be sent over the encrypted connection instead of with "
-"CRAM-MD5."
+msgid "Your password will be sent over the encrypted connection instead of with CRAM-MD5."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:97
@@ -3141,14 +3059,11 @@ msgid "You will sign in with Google instead of a password."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:99
-msgid ""
-"The account signs in as {}, which is not an email address. Add it with its "
-"own address instead."
+msgid "The account signs in as {}, which is not an email address. Add it with its own address instead."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:100
-msgid ""
-"Flectar Mail cannot use browser sign-in for {}. Sign in with an app password."
+msgid "Flectar Mail cannot use browser sign-in for {}. Sign in with an app password."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:101
@@ -3157,18 +3072,13 @@ msgstr ""
 
 #: ui/dialogs/import-dialog.slint:102
 msgid "One other address is managed by Gmail and appears after you sign in."
-msgid_plural ""
-"{n} other addresses are managed by Gmail and appear after you sign in."
+msgid_plural "{n} other addresses are managed by Gmail and appear after you sign in."
 msgstr[0] ""
 msgstr[1] ""
 
 #: ui/dialogs/import-dialog.slint:103
-msgid ""
-"One sending address was not imported because it is invalid or uses another "
-"outgoing server."
-msgid_plural ""
-"{n} sending addresses were not imported because they are invalid or use "
-"another outgoing server."
+msgid "One sending address was not imported because it is invalid or uses another outgoing server."
+msgid_plural "{n} sending addresses were not imported because they are invalid or use another outgoing server."
 msgstr[0] ""
 msgstr[1] ""
 
@@ -3189,9 +3099,7 @@ msgid "The settings file is too large."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:112
-msgid ""
-"This file is not a supported settings export. Choose a .k9s file, a "
-"Thunderbird profile export or prefs.js, or a Flectar Mail backup."
+msgid "This file is not a supported settings export. Choose a .k9s file, a Thunderbird profile export or prefs.js, or a Flectar Mail backup."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:113
@@ -3207,21 +3115,15 @@ msgid "The settings contain no mail accounts."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:116
-msgid ""
-"This folder contains several Thunderbird profiles. Choose the profile folder "
-"inside it that you want to import."
+msgid "This folder contains several Thunderbird profiles. Choose the profile folder inside it that you want to import."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:117
-msgid ""
-"This folder is not a Thunderbird profile. Choose the folder that contains "
-"prefs.js."
+msgid "This folder is not a Thunderbird profile. Choose the folder that contains prefs.js."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:118
-msgid ""
-"This Thunderbird profile is on a network location. Choose the profile folder "
-"itself to import it."
+msgid "This Thunderbird profile is on a network location. Choose the profile folder itself to import it."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:119
@@ -3271,10 +3173,7 @@ msgid "Import complete"
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:290
-msgid ""
-"Bring your account settings from Thunderbird, Thunderbird for Android, K-9 "
-"Mail, or a Flectar Mail backup. Passwords are never imported: you sign in to "
-"each account afterward."
+msgid "Bring your account settings from Thunderbird, Thunderbird for Android, K-9 Mail, or a Flectar Mail backup. Passwords are never imported: you sign in to each account afterward."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:296
@@ -3290,16 +3189,11 @@ msgid "{} (default profile)"
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:373
-msgid ""
-"Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip), profile folders and prefs.js, and Flectar Mail "
-"backups (.json)."
+msgid "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip), profile folders and prefs.js, and Flectar Mail backups (.json)."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:374
-msgid ""
-"Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip) and prefs.js, and Flectar Mail backups (.json)."
+msgid "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip) and prefs.js, and Flectar Mail backups (.json)."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:386
@@ -3311,9 +3205,7 @@ msgid "Importing accounts…"
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:414
-msgid ""
-"From Thunderbird for Android or K-9 Mail. Existing accounts are never "
-"changed."
+msgid "From Thunderbird for Android or K-9 Mail. Existing accounts are never changed."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:415
@@ -3364,21 +3256,19 @@ msgstr ""
 
 #: ui/dialogs/import-dialog.slint:498
 msgid "One account was already in Flectar Mail and was left unchanged."
-msgid_plural ""
-"{n} accounts were already in Flectar Mail and were left unchanged."
+msgid_plural "{n} accounts were already in Flectar Mail and were left unchanged."
 msgstr[0] ""
 msgstr[1] ""
 
 #: ui/dialogs/import-dialog.slint:504
-msgid ""
-"The theme, language, and other preferences from the backup were applied."
+msgid "The theme, language, and other preferences from the backup were applied."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:516
 msgid "{} could not be imported: {}"
 msgstr ""
 
-#: ui/dialogs/oauth-setup-dialog.slint:28 ui/views/onboarding-view.slint:199
+#: ui/dialogs/oauth-setup-dialog.slint:28 ui/views/onboarding-view.slint:201
 msgid "Sign-in settings"
 msgstr ""
 
@@ -3463,15 +3353,11 @@ msgid "Create a Desktop app client in Google Cloud and enable the Gmail API."
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:110
-msgid ""
-"Use a public desktop app registration in Microsoft Entra. No client secret "
-"is needed."
+msgid "Use a public desktop app registration in Microsoft Entra. No client secret is needed."
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:114
-msgid ""
-"Leave the client ID blank to use default keys, if available. Keys are shared "
-"with Settings."
+msgid "Leave the client ID blank to use default keys, if available. Keys are shared with Settings."
 msgstr ""
 
 #: ui/dialogs/oauth-setup-dialog.slint:128
@@ -3488,15 +3374,11 @@ msgid "About email rendering"
 msgstr ""
 
 #: ui/dialogs/rendering-info-dialog.slint:124
-msgid ""
-"Flectar Mail uses a completely new email renderer built in Rust. It is still "
-"in its early stages, so some emails may not render correctly."
+msgid "Flectar Mail uses a completely new email renderer built in Rust. It is still in its early stages, so some emails may not render correctly."
 msgstr ""
 
 #: ui/dialogs/rendering-info-dialog.slint:142
-msgid ""
-"Want to help us fix this email? Copy its HTML source and include it in a "
-"GitHub issue. Remove private or sensitive information before submitting it."
+msgid "Want to help us fix this email? Copy its HTML source and include it in a GitHub issue. Remove private or sensitive information before submitting it."
 msgstr ""
 
 #: ui/dialogs/rendering-info-dialog.slint:166
@@ -3664,22 +3546,15 @@ msgid "Russian"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:660
-msgid ""
-"general theme appearance palette language workspace layout window frameless "
-"title bar renderer privacy remote images sync group messages date inbox tray "
-"background startup sign in login"
+msgid "general theme appearance palette language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:662
-msgid ""
-"accounts profiles personal work colors providers gmail outlook imap jmap "
-"caldav carddav mail history oauth security signatures"
+msgid "accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:664
-msgid ""
-"contacts people suggestions autocomplete recipients senders address book "
-"privacy clear"
+msgid "contacts people suggestions autocomplete recipients senders address book privacy clear"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:666
@@ -3691,60 +3566,56 @@ msgid "shortcuts keyboard compose search archive spam trash"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:670
-msgid ""
-"storage data usage mail attachments files databases backup snapshot import "
-"export delete"
+msgid "storage data usage mail attachments files databases backup snapshot import export delete"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:672
-msgid ""
-"services flectar base account sign in subscription paid sync devices "
-"business email custom domain mailbox"
+msgid "services flectar base account sign in subscription paid sync devices business email custom domain mailbox"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:673
 msgid "about version credits contributors license flectar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:906 ui/dialogs/settings-dialog.slint:2409
+#: ui/dialogs/settings-dialog.slint:906 ui/dialogs/settings-dialog.slint:2429
 msgid "SETTINGS"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:909 ui/dialogs/settings-dialog.slint:2411
+#: ui/dialogs/settings-dialog.slint:909 ui/dialogs/settings-dialog.slint:2431
 msgid "No settings found"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:910 ui/dialogs/settings-dialog.slint:940
-#: ui/dialogs/settings-dialog.slint:2412
+#: ui/dialogs/settings-dialog.slint:2432
 msgid "General"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:911 ui/dialogs/settings-dialog.slint:1491
-#: ui/dialogs/settings-dialog.slint:2413 ui/dialogs/settings-dialog.slint:2838
+#: ui/dialogs/settings-dialog.slint:2433 ui/dialogs/settings-dialog.slint:2858
 msgid "Accounts"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:913 ui/dialogs/settings-dialog.slint:2060
-#: ui/dialogs/settings-dialog.slint:2415
+#: ui/dialogs/settings-dialog.slint:2435
 msgid "Notifications"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:914 ui/dialogs/settings-dialog.slint:2346
+#: ui/dialogs/settings-dialog.slint:914 ui/dialogs/settings-dialog.slint:2366
 msgid "Shortcuts"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:915 ui/dialogs/settings-dialog.slint:1988
-#: ui/dialogs/settings-dialog.slint:2417
+#: ui/dialogs/settings-dialog.slint:2437
 msgid "Storage"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:916 ui/dialogs/settings-dialog.slint:2136
-#: ui/dialogs/settings-dialog.slint:2418
+#: ui/dialogs/settings-dialog.slint:2438
 msgid "Services"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:917 ui/dialogs/settings-dialog.slint:2223
-#: ui/dialogs/settings-dialog.slint:2419
+#: ui/dialogs/settings-dialog.slint:2439
 msgid "About"
 msgstr ""
 
@@ -3957,9 +3828,7 @@ msgid "Active: CPU — Low Memory"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1344
-msgid ""
-"Keep your address book clean while still making frequent recipients easy to "
-"find."
+msgid "Keep your address book clean while still making frequent recipients easy to find."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1366
@@ -3967,9 +3836,7 @@ msgid "Remember people I email"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1367
-msgid ""
-"While enabled, remember To, Cc, and Bcc recipients from new sends and synced "
-"Sent mail."
+msgid "While enabled, remember To, Cc, and Bcc recipients from new sends and synced Sent mail."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1382
@@ -3977,9 +3844,7 @@ msgid "Remember incoming senders"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1383
-msgid ""
-"Remember human senders from new mail. Automated, spam, trash, and existing "
-"mail are excluded."
+msgid "Remember human senders from new mail. Automated, spam, trash, and existing mail are excluded."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1398
@@ -3987,9 +3852,7 @@ msgid "Use suggestions from all accounts"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1399
-msgid ""
-"Include people emailed from any connected account. Turn off to keep learned "
-"recipients account-specific."
+msgid "Include people emailed from any connected account. Turn off to keep learned recipients account-specific."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1414
@@ -3997,9 +3860,7 @@ msgid "Use suggestions when composing"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1415
-msgid ""
-"Include learned people in recipient autocomplete. Saved and CardDAV contacts "
-"are always available."
+msgid "Include learned people in recipient autocomplete. Saved and CardDAV contacts are always available."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1436
@@ -4007,9 +3868,7 @@ msgid "Suggested people"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1439
-msgid ""
-"People you email remain available as local suggestions and never sync to "
-"CardDAV. Clear them any time to restart learning."
+msgid "People you email remain available as local suggestions and never sync to CardDAV. Clear them any time to restart learning."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1457
@@ -4021,15 +3880,11 @@ msgid "Clear suggested people"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1492
-msgid ""
-"Manage connected mailboxes and add providers. Drag an account to change its "
-"order everywhere."
+msgid "Manage connected mailboxes and add providers. Drag an account to change its order everywhere."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1519
-msgid ""
-"Group accounts as Personal or Work and identify them by color in the mail "
-"list."
+msgid "Group accounts as Personal or Work and identify them by color in the mail list."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1528 ui/dialogs/settings-dialog.slint:1558
@@ -4041,16 +3896,14 @@ msgid "Show account color at the left edge of each message"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1572
-msgid ""
-"No profiles yet. Accounts keep their individual or generated colors until "
-"you create one."
+msgid "No profiles yet. Accounts keep their individual or generated colors until you create one."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1617 ui/dialogs/settings-dialog.slint:2734
+#: ui/dialogs/settings-dialog.slint:1617 ui/dialogs/settings-dialog.slint:2754
 msgid "Edit profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1627 ui/dialogs/settings-dialog.slint:2952
+#: ui/dialogs/settings-dialog.slint:1627 ui/dialogs/settings-dialog.slint:2972
 msgid "Delete profile"
 msgstr ""
 
@@ -4111,7 +3964,7 @@ msgid "Retry calendar"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1812 ui/dialogs/settings-dialog.slint:1940
-#: ui/dialogs/settings-dialog.slint:2481
+#: ui/dialogs/settings-dialog.slint:2501
 msgid "Set up CalDAV"
 msgstr ""
 
@@ -4136,9 +3989,7 @@ msgid "Mail history"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1863
-msgid ""
-"Download the full mailbox. Large accounts can take considerable time and "
-"storage."
+msgid "Download the full mailbox. Large accounts can take considerable time and storage."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1864
@@ -4150,11 +4001,8 @@ msgid "Sent copies"
 msgstr "Gesendete Kopien"
 
 #: ui/dialogs/settings-dialog.slint:1879
-msgid ""
-"Choose who saves sent mail. Use Flectar if your server does not save a copy."
-msgstr ""
-"Wähle, wer gesendete E-Mails speichert. Verwende Flectar, wenn dein Server "
-"keine Kopie speichert."
+msgid "Choose who saves sent mail. Use Flectar if your server does not save a copy."
+msgstr "Wähle, wer gesendete E-Mails speichert. Verwende Flectar, wenn dein Server keine Kopie speichert."
 
 #: ui/dialogs/settings-dialog.slint:1880
 msgid "Provider default"
@@ -4180,7 +4028,7 @@ msgstr ""
 msgid "Uses a generated account color"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1940 ui/dialogs/settings-dialog.slint:2432
+#: ui/dialogs/settings-dialog.slint:1940 ui/dialogs/settings-dialog.slint:2452
 msgid "CalDAV settings"
 msgstr ""
 
@@ -4225,8 +4073,7 @@ msgid "Save Outlook"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1958
-msgid ""
-"Outlook public desktop clients use PKCE and do not need a client secret."
+msgid "Outlook public desktop clients use PKCE and do not need a client secret."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1964
@@ -4241,12 +4088,12 @@ msgstr ""
 msgid "https://contacts.example.com/"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1968 ui/dialogs/settings-dialog.slint:2516
-#: ui/dialogs/settings-dialog.slint:2640
+#: ui/dialogs/settings-dialog.slint:1968 ui/dialogs/settings-dialog.slint:2536
+#: ui/dialogs/settings-dialog.slint:2660
 msgid "Username"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1968 ui/dialogs/settings-dialog.slint:2525
+#: ui/dialogs/settings-dialog.slint:1968 ui/dialogs/settings-dialog.slint:2545
 msgid "App password"
 msgstr ""
 
@@ -4254,13 +4101,12 @@ msgstr ""
 msgid "Disconnect"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1969 ui/dialogs/settings-dialog.slint:2545
+#: ui/dialogs/settings-dialog.slint:1969 ui/dialogs/settings-dialog.slint:2565
 msgid "Connect"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1991
-msgid ""
-"See what Flectar Mail stores locally and manage the data on this device."
+msgid "See what Flectar Mail stores locally and manage the data on this device."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2017
@@ -4268,15 +4114,11 @@ msgid "Database snapshot"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2017
-msgid ""
-"Export verified copies of the mail and calendar databases with their schema "
-"versions."
+msgid "Export verified copies of the mail and calendar databases with their schema versions."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2019
-msgid ""
-"The snapshot contains private local mail and settings, but not passwords or "
-"OAuth tokens. Store it securely."
+msgid "The snapshot contains private local mail and settings, but not passwords or OAuth tokens. Store it securely."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2020
@@ -4288,19 +4130,13 @@ msgid "Transfer account setup"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2027
-msgid ""
-"Import accounts from Thunderbird, K-9 Mail, or a backup, or export one "
-"connected account and your preferences."
-msgid_plural ""
-"Import accounts from Thunderbird, K-9 Mail, or a backup, or export {n} "
-"connected accounts and your preferences."
+msgid "Import accounts from Thunderbird, K-9 Mail, or a backup, or export one connected account and your preferences."
+msgid_plural "Import accounts from Thunderbird, K-9 Mail, or a backup, or export {n} connected accounts and your preferences."
 msgstr[0] ""
 msgstr[1] ""
 
 #: ui/dialogs/settings-dialog.slint:2029
-msgid ""
-"Passwords and OAuth tokens stay in the system keyring. A restored device "
-"asks you to sign in securely."
+msgid "Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2036
@@ -4316,16 +4152,14 @@ msgid "Delete all local data"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2044
-msgid ""
-"Remove accounts, downloaded mail, calendars, contacts, preferences, and "
-"credentials from this device."
+msgid "Remove accounts, downloaded mail, calendars, contacts, preferences, and credentials from this device."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2046
 msgid "This does not delete anything from Gmail, Outlook, or your IMAP server."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2047 ui/dialogs/settings-dialog.slint:2914
+#: ui/dialogs/settings-dialog.slint:2047 ui/dialogs/settings-dialog.slint:2934
 msgid "Delete everything"
 msgstr ""
 
@@ -4391,9 +4225,7 @@ msgid "#"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2137
-msgid ""
-"Optional paid services from Flectar. Flectar Mail stays free and works "
-"without them."
+msgid "Optional paid services from Flectar. Flectar Mail stays free and works without them."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2142
@@ -4405,9 +4237,7 @@ msgid "Not signed in"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2144
-msgid ""
-"A Flectar account is only needed for these optional services. Learn more at "
-"flectar.com/mail."
+msgid "A Flectar account is only needed for these optional services. Learn more at flectar.com/mail."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2149
@@ -4423,9 +4253,7 @@ msgid "Your setup on every device"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2163
-msgid ""
-"Sign in on a new phone or computer and your accounts, calendars, contacts, "
-"and preferences are ready without setting them up again."
+msgid "Sign in on a new phone or computer and your accounts, calendars, contacts, and preferences are ready without setting them up again."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2165
@@ -4445,9 +4273,7 @@ msgid "Account credentials, encrypted on this device before upload"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2170
-msgid ""
-"Your messages stay with your mail provider. Sync only carries your Flectar "
-"Mail setup."
+msgid "Your messages stay with your mail provider. Sync only carries your Flectar Mail setup."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2185
@@ -4479,16 +4305,14 @@ msgid "Billed per mailbox."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2205
-msgid ""
-"These services are in development. Plans and availability will be announced "
-"on flectar.com/mail."
+msgid "These services are in development. Plans and availability will be announced on flectar.com/mail."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2224
 msgid "Flectar Mail, its makers, and its community."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2240 ui/views/onboarding-view.slint:113
+#: ui/dialogs/settings-dialog.slint:2240 ui/views/onboarding-view.slint:115
 msgid "Flectar Mail logo"
 msgstr ""
 
@@ -4508,272 +4332,276 @@ msgstr ""
 msgid "Built by Flectar with help from the open-source community."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2293
-msgid "Flectar"
+#: ui/dialogs/settings-dialog.slint:2293 ui/views/onboarding-view.slint:225
+msgid "Privacy policy"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2294
-msgid "Company website"
+msgid "How Flectar Mail handles your data"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2303
+msgid "Withdraw privacy consent"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2304
-msgid "Open-source contributors"
+msgid "Closes the app and asks for consent again on the next start"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2305
-msgid "Meet the people who have contributed on GitHub"
+#: ui/dialogs/settings-dialog.slint:2313
+msgid "Flectar"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2318
-msgid "License"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2318
-msgid "AGPL-3.0-only."
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2318
-msgid ""
-"Flectar Mail is released under the GNU Affero General Public License v3.0 "
-"only."
+#: ui/dialogs/settings-dialog.slint:2314
+msgid "Company website"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2324
+msgid "Open-source contributors"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2325
+msgid "Meet the people who have contributed on GitHub"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2338
+msgid "License"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2338
+msgid "AGPL-3.0-only."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2338
+msgid "Flectar Mail is released under the GNU Affero General Public License v3.0 only."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2344
 msgid "Third-party components retain their own licenses and notices."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2351
+#: ui/dialogs/settings-dialog.slint:2371
 msgid "Settings sections"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2362
+#: ui/dialogs/settings-dialog.slint:2382
 msgid "Close settings"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2384
+#: ui/dialogs/settings-dialog.slint:2404
 msgid "Close settings sections"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2482
+#: ui/dialogs/settings-dialog.slint:2502
 msgid "Discover new calendars."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2482
-msgid ""
-"Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV "
-"servers."
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2507
-msgid "Server address"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2509
-msgid "https://calendar.example.com/"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2518 ui/dialogs/settings-dialog.slint:2633
-msgid "Usually your email address"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2525
-msgid "New app password · Optional"
+#: ui/dialogs/settings-dialog.slint:2502
+msgid "Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2527
+msgid "Server address"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2529
+msgid "https://calendar.example.com/"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2538 ui/dialogs/settings-dialog.slint:2653
+msgid "Usually your email address"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2545
+msgid "New app password · Optional"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2547
 msgid "Leave blank to keep the current password"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2527 ui/dialogs/settings-dialog.slint:2642
+#: ui/dialogs/settings-dialog.slint:2547 ui/dialogs/settings-dialog.slint:2662
 msgid "Stored securely in your system keyring"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2545 ui/dialogs/settings-dialog.slint:2713
+#: ui/dialogs/settings-dialog.slint:2565 ui/dialogs/settings-dialog.slint:2733
 msgid "Connecting…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2563
+#: ui/dialogs/settings-dialog.slint:2583
 msgid "Edit mail account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2563 ui/dialogs/settings-dialog.slint:2611
+#: ui/dialogs/settings-dialog.slint:2583 ui/dialogs/settings-dialog.slint:2631
 msgid "Connect a mail account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2611
+#: ui/dialogs/settings-dialog.slint:2631
 msgid "Edit {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2612
+#: ui/dialogs/settings-dialog.slint:2632
 msgid "Uses JMAP for mail sync and sending, with automatic discovery."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2612
+#: ui/dialogs/settings-dialog.slint:2632
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2632 ui/dialogs/settings-dialog.slint:2639
+#: ui/dialogs/settings-dialog.slint:2652 ui/dialogs/settings-dialog.slint:2659
 msgid "name@example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2642 ui/views/onboarding-view.slint:275
+#: ui/dialogs/settings-dialog.slint:2662 ui/views/onboarding-view.slint:285
 msgid "Password, app password, or API token"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2642 ui/views/onboarding-view.slint:275
+#: ui/dialogs/settings-dialog.slint:2662 ui/views/onboarding-view.slint:285
 msgid "Password or app password"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2647 ui/views/onboarding-view.slint:289
+#: ui/dialogs/settings-dialog.slint:2667 ui/views/onboarding-view.slint:299
 msgid "IMAP + SMTP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2648 ui/views/onboarding-view.slint:297
+#: ui/dialogs/settings-dialog.slint:2668 ui/views/onboarding-view.slint:307
 msgid "JMAP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2652
+#: ui/dialogs/settings-dialog.slint:2672
 msgid "Server address · Optional"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2654
+#: ui/dialogs/settings-dialog.slint:2674
 msgid "Discovered from your email domain"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2662 ui/views/onboarding-view.slint:322
+#: ui/dialogs/settings-dialog.slint:2682 ui/views/onboarding-view.slint:332
 msgid "IMAP server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2662
+#: ui/dialogs/settings-dialog.slint:2682
 msgid "imap.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2663 ui/dialogs/settings-dialog.slint:2670
-#: ui/views/onboarding-view.slint:355
+#: ui/dialogs/settings-dialog.slint:2683 ui/dialogs/settings-dialog.slint:2690
+#: ui/views/onboarding-view.slint:365
 msgid "Port"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2663 ui/views/onboarding-view.slint:335
+#: ui/dialogs/settings-dialog.slint:2683 ui/views/onboarding-view.slint:345
 msgid "993"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2669 ui/views/onboarding-view.slint:346
+#: ui/dialogs/settings-dialog.slint:2689 ui/views/onboarding-view.slint:356
 msgid "SMTP server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2669
+#: ui/dialogs/settings-dialog.slint:2689
 msgid "smtp.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2670 ui/views/onboarding-view.slint:359
+#: ui/dialogs/settings-dialog.slint:2690 ui/views/onboarding-view.slint:369
 msgid "465"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2673 ui/views/onboarding-view.slint:364
-msgid ""
-"Proton Bridge: use the local servers, ports and password shown in Bridge, "
-"and match its encryption settings."
+#: ui/dialogs/settings-dialog.slint:2693 ui/views/onboarding-view.slint:374
+msgid "Proton Bridge: use the local servers, ports and password shown in Bridge, and match its encryption settings."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2713
+#: ui/dialogs/settings-dialog.slint:2733
 msgid "Save account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2713 ui/views/onboarding-view.slint:395
+#: ui/dialogs/settings-dialog.slint:2733 ui/views/onboarding-view.slint:405
 msgid "Connect account"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2734 ui/dialogs/settings-dialog.slint:2790
+#: ui/dialogs/settings-dialog.slint:2754 ui/dialogs/settings-dialog.slint:2810
 msgid "Create profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2791
-msgid ""
-"Its color marks its accounts' mail, and choosing it shows only their mail."
+#: ui/dialogs/settings-dialog.slint:2811
+msgid "Its color marks its accounts' mail, and choosing it shows only their mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2796
+#: ui/dialogs/settings-dialog.slint:2816
 msgid "Profile name"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2798
+#: ui/dialogs/settings-dialog.slint:2818
 msgid "Personal or Work"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2804 ui/views/mail-reading-pane.slint:1971
+#: ui/dialogs/settings-dialog.slint:2824 ui/views/mail-reading-pane.slint:1971
 msgid "Color"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2813
+#: ui/dialogs/settings-dialog.slint:2833
 msgid "Profile color {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2855
+#: ui/dialogs/settings-dialog.slint:2875
 msgid "Save profile"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2863
+#: ui/dialogs/settings-dialog.slint:2883
 msgid "Could not save this profile. Check the name and try again."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2881
+#: ui/dialogs/settings-dialog.slint:2901
 msgid "Choose a profile for {}"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2911
+#: ui/dialogs/settings-dialog.slint:2931
 msgid "Delete all local data?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2912
-msgid ""
-"This removes every account, downloaded message, calendar, contact, "
-"preference, and credential stored by Flectar Mail on this device."
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2913
-msgid ""
-"Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2915
-msgid "Keep my data"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2929
-msgid "Remove account?"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2931
-msgid "Remove this account and its downloaded mail from this device."
-msgstr ""
-
 #: ui/dialogs/settings-dialog.slint:2932
-msgid "Messages on the mail server will not be deleted."
+msgid "This removes every account, downloaded message, calendar, contact, preference, and credential stored by Flectar Mail on this device."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2933
-msgid "Remove account"
+msgid "Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2934
-msgid "Keep account"
+#: ui/dialogs/settings-dialog.slint:2935
+msgid "Keep my data"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2948
-msgid "Delete profile?"
-msgstr ""
-
-#: ui/dialogs/settings-dialog.slint:2950
-msgid ""
-"Accounts assigned to this profile will return to their individual or "
-"generated account colors."
+#: ui/dialogs/settings-dialog.slint:2949
+msgid "Remove account?"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2951
-msgid "Accounts and provider data are not changed."
+msgid "Remove this account and its downloaded mail from this device."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2952
+msgid "Messages on the mail server will not be deleted."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2953
+msgid "Remove account"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2954
+msgid "Keep account"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2968
+msgid "Delete profile?"
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2970
+msgid "Accounts assigned to this profile will return to their individual or generated account colors."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2971
+msgid "Accounts and provider data are not changed."
+msgstr ""
+
+#: ui/dialogs/settings-dialog.slint:2973
 msgid "Keep profile"
 msgstr ""
 
@@ -4791,8 +4619,7 @@ msgid "New contact"
 msgstr ""
 
 #: ui/views/contacts-view.slint:196 ui/views/contacts-view.slint:274
-msgid ""
-"Suggested people stay local and separate until you save them as contacts."
+msgid "Suggested people stay local and separate until you save them as contacts."
 msgstr ""
 
 #: ui/views/contacts-view.slint:221 ui/views/files-view.slint:108
@@ -4852,9 +4679,7 @@ msgid "No contacts match this search."
 msgstr ""
 
 #: ui/views/contacts-view.slint:479
-msgid ""
-"No suggested people yet. People you email can appear here for faster "
-"addressing."
+msgid "No suggested people yet. People you email can appear here for faster addressing."
 msgstr ""
 
 #: ui/views/contacts-view.slint:480
@@ -4926,23 +4751,16 @@ msgid "Address book unavailable; changes are kept on this device"
 msgstr "Adressbuch nicht verfügbar; Änderungen bleiben auf diesem Gerät"
 
 #: ui/views/contacts-view.slint:712
-msgid ""
-"Address book removed before these changes synced; they are kept on this "
-"device"
-msgstr ""
-"Das Adressbuch wurde entfernt, bevor diese Änderungen synchronisiert wurden; "
-"sie bleiben auf diesem Gerät"
+msgid "Address book removed before these changes synced; they are kept on this device"
+msgstr "Das Adressbuch wurde entfernt, bevor diese Änderungen synchronisiert wurden; sie bleiben auf diesem Gerät"
 
 #: ui/views/contacts-view.slint:713
 msgid "Could not sync: {}"
 msgstr "Synchronisierung fehlgeschlagen: {}"
 
 #: ui/views/contacts-view.slint:720
-msgid ""
-"This contact changed on the server. Choose which complete version to keep."
-msgstr ""
-"Dieser Kontakt wurde auf dem Server geändert. Wählen Sie, welche "
-"vollständige Version Sie behalten möchten."
+msgid "This contact changed on the server. Choose which complete version to keep."
+msgstr "Dieser Kontakt wurde auf dem Server geändert. Wählen Sie, welche vollständige Version Sie behalten möchten."
 
 #: ui/views/contacts-view.slint:723
 msgid "Keep my version"
@@ -5285,15 +5103,11 @@ msgid "Delete…"
 msgstr ""
 
 #: ui/views/files-view.slint:563
-msgid ""
-"This permanently deletes “{}” and all of its contents from storage. This "
-"cannot be undone."
+msgid "This permanently deletes “{}” and all of its contents from storage. This cannot be undone."
 msgstr ""
 
 #: ui/views/files-view.slint:568
-msgid ""
-"Destination folder path (for example /Documents). Leave empty for the "
-"current folder, or the root of another storage space."
+msgid "Destination folder path (for example /Documents). Leave empty for the current folder, or the root of another storage space."
 msgstr ""
 
 #: ui/views/files-view.slint:569
@@ -5433,9 +5247,7 @@ msgid "Transfers and operations"
 msgstr ""
 
 #: ui/views/files-view.slint:686
-msgid ""
-"Interrupted changes need review before retrying. Refresh storage and inspect "
-"the destination first."
+msgid "Interrupted changes need review before retrying. Refresh storage and inspect the destination first."
 msgstr ""
 
 #: ui/views/files-view.slint:693
@@ -5598,7 +5410,7 @@ msgstr ""
 msgid "Delete permanently…"
 msgstr ""
 
-#: ui/views/mail-list-pane.slint:1063 ui/views/onboarding-view.slint:131
+#: ui/views/mail-list-pane.slint:1063 ui/views/onboarding-view.slint:133
 msgid "Opening your mailbox…"
 msgstr ""
 
@@ -5873,55 +5685,55 @@ msgstr ""
 msgid "Close folders"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:143
+#: ui/views/onboarding-view.slint:145
 msgid "Connect an account to get started."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:150
+#: ui/views/onboarding-view.slint:152
 msgid "Continue with Gmail"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:162
+#: ui/views/onboarding-view.slint:164
 msgid "Continue with Outlook"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:174
+#: ui/views/onboarding-view.slint:176
 msgid "Connect another provider"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:189
+#: ui/views/onboarding-view.slint:191
 msgid "Add your own app keys to enable Gmail and Outlook."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:190
+#: ui/views/onboarding-view.slint:192
 msgid "Add your own app keys to enable Gmail."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:191
+#: ui/views/onboarding-view.slint:193
 msgid "Add your own app key to enable Outlook."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:207
+#: ui/views/onboarding-view.slint:209
 msgid "Moving from Thunderbird, K-9 Mail, or another device?"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:247
+#: ui/views/onboarding-view.slint:257
 msgid "Connect using JMAP for mail sync and sending."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:247
+#: ui/views/onboarding-view.slint:257
 msgid "Connect using IMAP and SMTP. POP3 is not supported."
 msgstr ""
 
-#: ui/views/onboarding-view.slint:266 ui/views/onboarding-view.slint:269
+#: ui/views/onboarding-view.slint:276 ui/views/onboarding-view.slint:279
 msgid "Username (defaults to email)"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:306
+#: ui/views/onboarding-view.slint:316
 msgid "Server address (optional)"
 msgstr ""
 
-#: ui/views/onboarding-view.slint:310
+#: ui/views/onboarding-view.slint:320
 msgid "Leave blank to discover /.well-known/jmap from your email domain."
 msgstr ""
 
