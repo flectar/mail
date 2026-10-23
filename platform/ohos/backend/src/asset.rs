@@ -1,0 +1,215 @@
+//! OpenHarmony Asset Store FFI (secret storage).
+//!
+//! `libasset_ndk.z.so` — see `asset/asset_api.h` and `asset/asset_type.h` in
+//! the OHOS NDK. Only the non-persistent attributes are used (no
+//! `ASSET_TAG_IS_PERSISTENT`), which requires no per-app permission.
+
+use core::ptr::null_mut;
+
+// Tag type bases (`Asset_TagType`).
+const ASSET_TYPE_NUMBER: u32 = 0x2 << 28;
+const ASSET_TYPE_BYTES: u32 = 0x3 << 28;
+
+// Attribute tags (`Asset_Tag`).
+const TAG_SECRET: u32 = ASSET_TYPE_BYTES | 0x01;
+const TAG_ALIAS: u32 = ASSET_TYPE_BYTES | 0x02;
+const TAG_ACCESSIBILITY: u32 = ASSET_TYPE_NUMBER | 0x03;
+const TAG_AUTH_TYPE: u32 = ASSET_TYPE_NUMBER | 0x05;
+const TAG_SYNC_TYPE: u32 = ASSET_TYPE_NUMBER | 0x10;
+const TAG_RETURN_TYPE: u32 = ASSET_TYPE_NUMBER | 0x40;
+const TAG_CONFLICT_RESOLUTION: u32 = ASSET_TYPE_NUMBER | 0x44;
+
+const ACCESSIBILITY_DEVICE_FIRST_UNLOCKED: u32 = 1;
+const AUTH_TYPE_NONE: u32 = 0;
+const SYNC_TYPE_NEVER: u32 = 0;
+const RETURN_ALL: u32 = 0;
+const CONFLICT_OVERWRITE: u32 = 0;
+
+const ASSET_SUCCESS: i32 = 0;
+const ASSET_NOT_FOUND: i32 = 24000002;
+const ASSET_CRYPTO_ERROR: i32 = 24000009;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AssetBlob {
+    size: u32,
+    data: *mut u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+union AssetValue {
+    boolean: bool,
+    u32_value: u32,
+    blob: AssetBlob,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct AssetAttr {
+    tag: u32,
+    value: AssetValue,
+}
+
+#[repr(C)]
+struct AssetResult {
+    count: u32,
+    attrs: *mut AssetAttr,
+}
+
+#[repr(C)]
+struct AssetResultSet {
+    count: u32,
+    results: *mut AssetResult,
+}
+
+#[link(name = "asset_ndk.z", kind = "dylib")]
+unsafe extern "C" {
+    fn OH_Asset_Add(attributes: *const AssetAttr, attrCnt: u32) -> i32;
+    fn OH_Asset_Remove(query: *const AssetAttr, queryCnt: u32) -> i32;
+    fn OH_Asset_Query(
+        query: *const AssetAttr,
+        queryCnt: u32,
+        resultSet: *mut AssetResultSet,
+    ) -> i32;
+    fn OH_Asset_ParseAttr(result: *const AssetResult, tag: u32) -> *mut AssetAttr;
+    fn OH_Asset_FreeBlob(blob: *mut AssetBlob);
+    fn OH_Asset_FreeResultSet(resultSet: *mut AssetResultSet);
+}
+
+fn bytes_attr(tag: u32, bytes: &[u8]) -> AssetAttr {
+    AssetAttr {
+        tag,
+        value: AssetValue {
+            blob: AssetBlob {
+                size: bytes.len() as u32,
+                data: bytes.as_ptr() as *mut u8,
+            },
+        },
+    }
+}
+
+fn number_attr(tag: u32, value: u32) -> AssetAttr {
+    AssetAttr {
+        tag,
+        value: AssetValue { u32_value: value },
+    }
+}
+
+/// Adds `secret` under `alias`, overwriting an existing entry.
+fn add(alias: &str, secret: &str) -> Result<(), i32> {
+    let alias_bytes = alias.as_bytes();
+    let secret_bytes = secret.as_bytes();
+    let attrs = [
+        bytes_attr(TAG_ALIAS, alias_bytes),
+        bytes_attr(TAG_SECRET, secret_bytes),
+        number_attr(TAG_ACCESSIBILITY, ACCESSIBILITY_DEVICE_FIRST_UNLOCKED),
+        number_attr(TAG_AUTH_TYPE, AUTH_TYPE_NONE),
+        number_attr(TAG_SYNC_TYPE, SYNC_TYPE_NEVER),
+        number_attr(TAG_CONFLICT_RESOLUTION, CONFLICT_OVERWRITE),
+    ];
+    // SAFETY: the attrs array borrows `alias_bytes`/`secret_bytes` for the
+    // duration of this synchronous call; the service copies them.
+    let rc = unsafe { OH_Asset_Add(attrs.as_ptr(), attrs.len() as u32) };
+    if rc == ASSET_SUCCESS { Ok(()) } else { Err(rc) }
+}
+
+/// Stores (or overwrites) `secret` under `alias`.
+pub fn put(alias: &str, secret: &str) -> Result<(), String> {
+    let failed = match add(alias, secret) {
+        Ok(()) => return Ok(()),
+        Err(rc) => rc,
+    };
+    // Reinstalling under a different signing identity leaves rows the asset
+    // service can no longer decrypt: overwriting one fails with
+    // `ASSET_CRYPTO_ERROR`, while queries report it as missing. Deleting by
+    // alias does not need the old secret, so drop the stale row and add a
+    // fresh one.
+    if failed != ASSET_CRYPTO_ERROR {
+        return Err(format!("asset add failed: {failed}"));
+    }
+    let alias_bytes = alias.as_bytes();
+    let query = [bytes_attr(TAG_ALIAS, alias_bytes)];
+    // SAFETY: the query borrows `alias_bytes` for this synchronous call.
+    let rc = unsafe { OH_Asset_Remove(query.as_ptr(), query.len() as u32) };
+    if rc != ASSET_SUCCESS && rc != ASSET_NOT_FOUND {
+        return Err(format!("asset remove failed: {rc}"));
+    }
+    crate::log::info(&format!(
+        "asset: dropped stale entry {alias} (crypto error {failed}) and retried"
+    ));
+    add(alias, secret).map_err(|rc| format!("asset add failed: {rc}"))
+}
+
+/// Loads the secret stored under `alias`. `Ok(None)` when absent.
+pub fn get(alias: &str) -> Result<Option<String>, String> {
+    let alias_bytes = alias.as_bytes();
+    let query = [
+        bytes_attr(TAG_ALIAS, alias_bytes),
+        number_attr(TAG_RETURN_TYPE, RETURN_ALL),
+    ];
+    let mut result_set = AssetResultSet {
+        count: 0,
+        results: null_mut(),
+    };
+    // SAFETY: synchronous call; the query borrows `alias_bytes`; the service
+    // fills `result_set` (freed below).
+    let rc = unsafe { OH_Asset_Query(query.as_ptr(), query.len() as u32, &mut result_set) };
+    if rc == ASSET_NOT_FOUND {
+        return Ok(None);
+    }
+    if rc != ASSET_SUCCESS {
+        return Err(format!("asset query failed: {rc}"));
+    }
+    if result_set.count == 0 || result_set.results.is_null() {
+        // SAFETY: nothing was allocated for an empty result.
+        unsafe { OH_Asset_FreeResultSet(&mut result_set) };
+        return Ok(None);
+    }
+
+    let mut value = None;
+    // SAFETY: the service returned at least one result; `ParseAttr` returns a
+    // pointer into that result and the blob is copied before being freed.
+    unsafe {
+        let attr = OH_Asset_ParseAttr(result_set.results, TAG_SECRET);
+        if !attr.is_null() {
+            let blob: &AssetBlob = &(*attr).value.blob;
+            if !blob.data.is_null() && blob.size > 0 {
+                let bytes = core::slice::from_raw_parts(blob.data, blob.size as usize);
+                value = Some(String::from_utf8_lossy(bytes).into_owned());
+            }
+            OH_Asset_FreeBlob(&mut (*attr).value.blob as *mut AssetBlob);
+        }
+        OH_Asset_FreeResultSet(&mut result_set);
+    }
+    Ok(value)
+}
+
+/// Removes the secret stored under `alias`. Missing entries succeed
+/// (idempotent delete).
+pub fn remove(alias: &str) -> Result<(), String> {
+    let alias_bytes = alias.as_bytes();
+    let query = [bytes_attr(TAG_ALIAS, alias_bytes)];
+    // SAFETY: synchronous call; the query borrows `alias_bytes`.
+    let rc = unsafe { OH_Asset_Remove(query.as_ptr(), query.len() as u32) };
+    if rc == ASSET_SUCCESS || rc == ASSET_NOT_FOUND {
+        Ok(())
+    } else {
+        Err(format!("asset remove failed: {rc}"))
+    }
+}
+
+/// One `put`/`get`/`remove` cycle; returns `Ok` when the service works.
+pub fn self_test() -> Result<(), String> {
+    const ALIAS: &str = "flectar:asset-self-test";
+    let probe = "flectar-asset-probe-v1";
+    put(ALIAS, probe)?;
+    let loaded = get(ALIAS)?;
+    let remove_result = remove(ALIAS);
+    match (loaded.as_deref(), remove_result) {
+        (Some(value), Ok(())) if value == probe => Ok(()),
+        (Some(_), Ok(())) => Err("asset self-test returned different data".into()),
+        (_, Err(error)) => Err(error),
+        (None, Ok(())) => Err("asset self-test read back nothing".into()),
+    }
+}

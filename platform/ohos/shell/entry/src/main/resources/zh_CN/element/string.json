@@ -1,0 +1,8 @@
+{
+  "string": [
+    {
+      "name": "pasteboard_permission_reason",
+      "value": "用于将剪贴板中的文本粘贴到邮件正文、主题和收件人输入框。"
+    }
+  ]
+}

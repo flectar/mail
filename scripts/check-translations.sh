@@ -29,7 +29,9 @@ diff -u \
   <(sed '/^"POT-Creation-Date:/d' "$work_dir/flectar-mail.pot")
 
 for language in de es fr ru tr zh_Hans; do
-  msgmerge --quiet --no-fuzzy-matching \
+  # --no-wrap keeps the header (and long messages) byte-identical across
+  # gettext versions, so the check does not depend on the runner's gettext.
+  msgmerge --quiet --no-fuzzy-matching --no-wrap \
     --output-file "$work_dir/flectar-mail-$language.po" \
     "lang/$language/LC_MESSAGES/flectar-mail.po" "$work_dir/flectar-mail.pot"
   diff -u \

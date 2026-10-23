@@ -93,6 +93,18 @@ pub(crate) fn run_request<T: Send + 'static>(
     request: DocumentFuture<T>,
     on_ready: impl FnOnce(Result<T, String>) + 'static,
 ) {
+    #[cfg(mobile)]
+    {
+        // A sandboxed host runs the picker in a system window that covers the
+        // application and delivers the result from its own thread. Keeping
+        // the presentation thread idle for the duration is what OpenHarmony
+        // needs: running the request on the runtime leaves the composer
+        // unresponsive once the picker returns (verified on device).
+        let result = runtime.block_on(request);
+        on_ready(result);
+    }
+    #[cfg(desktop)]
+    {
     let request = runtime.spawn(request);
     let abort = request.abort_handle();
     let on_ready = std::rc::Rc::new(std::cell::Cell::new(Some(on_ready)));
@@ -108,6 +120,7 @@ pub(crate) fn run_request<T: Send + 'static>(
         if let Some(on_ready) = on_ready.take() {
             on_ready(Err(error.to_string()));
         }
+    }
     }
 }
 /// Desktop file dialogs. Mobile hosts inject their own provider through

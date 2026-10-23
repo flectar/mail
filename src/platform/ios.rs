@@ -24,6 +24,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
     })?;
     Ok(crate::PlatformContext {
         external_urls: crate::ExternalUrlOpener::default(),
+        notification_publisher: crate::NotificationPublisher::default(),
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),
@@ -66,4 +67,9 @@ pub(crate) fn install_preview_lifecycle() {
     // SAFETY: PdfPreview.m registers NotificationCenter observers that call
     // flectar_suspend_pdf_preview; registration has no other preconditions.
     unsafe { install_pdf_lifecycle_observers() }
+}
+
+/// iOS reaches system fonts through the fontique system backend.
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    None
 }

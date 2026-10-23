@@ -638,6 +638,7 @@ pub(crate) fn spawn_core_event_listener(
     core: CoreMailSource,
     pending: Arc<Mutex<PendingCoreUpdates>>,
     wake: UiWake,
+    publisher: crate::notifications::NotificationPublisher,
 ) {
     let mut events = core.subscribe_events();
     runtime.spawn(async move {
@@ -651,6 +652,13 @@ pub(crate) fn spawn_core_event_listener(
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .record_threads(thread_ids);
                     true
+                }
+                Ok(CoreEvent::MailNew { thread_ids, .. }) => {
+                    // The same batch also produces `MailUpdated`, which drives
+                    // the list refresh; this event only feeds the system
+                    // notification.
+                    crate::notifications::notify_new_mail(&core, &thread_ids, &publisher).await;
+                    false
                 }
                 Ok(CoreEvent::AccountState {
                     account_id,

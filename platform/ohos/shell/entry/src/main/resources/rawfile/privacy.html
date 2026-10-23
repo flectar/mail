@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flectar Mail — 隐私政策 / Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  [hidden] { display: none !important; }
+  body { margin: 0 auto; max-width: 760px; padding: 24px 20px 64px;
+         font-family: system-ui, -apple-system, "HarmonyOS Sans", "Noto Sans", sans-serif;
+         line-height: 1.65; color: #1c1c1e; background: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e5e5e7; background: #111113; }
+    a { color: #7aa7ff; }
+    code { background: #26262a; }
+    .lang-switch select { background: #1c1c1f; color: #e5e5e7; border-color: #3a3a40; }
+  }
+  h1 { font-size: 1.7rem; margin: 0 0 4px; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 0.6rem; }
+  h3 { font-size: 1.05rem; margin: 1.4rem 0 0.4rem; }
+  p, li { font-size: 0.95rem; }
+  ul { padding-left: 1.3rem; }
+  li { margin: 0.25rem 0; }
+  header p, .meta { color: #6b6b70; margin-top: 0; }
+  code { font-family: ui-monospace, monospace; background: #f2f2f5;
+          padding: 1px 4px; border-radius: 4px; font-size: 0.85em; }
+  a { color: #0a59f7; }
+  hr { border: 0; border-top: 1px solid #e2e2e6; margin: 2.5rem 0; }
+  .lang-switch { text-align: right; font-size: 0.85rem; margin-bottom: 4px; color: #6b6b70; }
+  .lang-switch select { margin-left: 6px; padding: 2px 6px; border-radius: 6px;
+    border: 1px solid #d0d0d6; background: #ffffff; color: #1c1c1e; font: inherit; }
+</style>
+</head>
+<body>
+<div class="lang-switch">
+  <label for="policy-language" id="policy-language-label">语言 / Language</label>
+  <select id="policy-language">
+    <option value="system">System language</option>
+    <option value="en">English</option>
+    <option value="es">Español</option>
+    <option value="tr">Türkçe</option>
+    <option value="zh_Hans">简体中文</option>
+    <option value="ru">Русский</option>
+  </select>
+</div>
+
+<div data-lang="zh_Hans">
+  <h1>隐私政策</h1>
+  
+  
+  <p class="meta">更新日期：2026 年 10 月 20 日　生效日期：2026 年 10 月 20 日</p>
+  <p>本政策适用于 Flectar Mail 应用（以下简称“本应用”）。本政策的各语言版本适用于对应市场；如不同语言版本之间存在不一致，以您所在市场适用的语言版本为准。本应用为本地优先的邮件客户端，邮件内容在您的设备上处理，不上传至 Flectar 服务器。</p>
+
+  <h3>一、个人信息处理者</h3>
+  <p>名称：Flectar（西班牙）。联系方式：<a href="mailto:privacy@flectar.com">privacy@flectar.com</a>；电话 (+34) 614 05 79 79；地址：Málaga, Spain。</p>
+  <p>Flectar 仅对您与我们的支持通信等有限处理承担处理者责任；邮件、附件、联系人与日历由本应用在设备本地处理，Flectar 不接收、不存储该等内容。您选择的邮件服务商（以及您使用 Google/Microsoft 登录时的相应服务商）对其处理的数据独立承担处理者责任，适用其各自的隐私政策。</p>
+
+  <h3>二、我们如何收集和使用个人信息</h3>
+  <ul>
+    <li><strong>邮件账户与登录：</strong>您的邮箱地址、用户名、密码或 OAuth 刷新令牌。密码与令牌仅保存在设备系统安全凭据存储（HarmonyOS 为系统 Asset Store），不会写入明文文件、不会包含在导出内容中，也不会发送给 Flectar。</li>
+    <li><strong>邮件收发与同步：</strong>邮件内容、附件、联系人与日历数据由本应用在设备本地处理与保存。使用 Google/Microsoft 登录时，登录过程由对应服务商完成，适用其隐私政策。</li>
+    <li><strong>通知：</strong>新邮件提醒由本应用在本地生成，不使用推送服务。</li>
+    <li><strong>剪贴板：</strong>仅在您主动粘贴时读取系统剪贴板中的纯文本，且仅用于插入当前输入框；不存储、不记录日志、不上传，不在后台读取或监听剪贴板变化。</li>
+    <li><strong>导入与导出：</strong>仅在您主动操作时，通过系统文件选择器读取或保存文件；备份与数据库快照包含本地邮件与设置，但不包含密码或 OAuth 令牌。</li>
+  </ul>
+  <p>我们不会收集与上述功能无关的信息：不收集您的通讯录、精确位置、设备标识符（IMEI/OAID 等）、应用列表或生物识别信息，也不进行广告推送、个性化推荐或自动化决策。</p>
+
+  <h3>三、系统权限清单</h3>
+  <ul>
+    <li><code>ohos.permission.INTERNET</code>（网络访问）：用于邮件同步、发送邮件与账户登录；拒绝后无法收发邮件。</li>
+    <li><code>ohos.permission.READ_PASTEBOARD</code>（读取剪贴板）：仅在您主动粘贴时读取纯文本，用于插入输入框；拒绝后仅无法粘贴，其他功能不受影响。</li>
+    <li>通知权限（可选）：用于新邮件提醒；拒绝后不影响收发邮件。</li>
+  </ul>
+  <p>本应用不申请相机、麦克风、位置、通讯录、日历、电话或存储权限；文件通过系统文件选择器获取。</p>
+
+  <h3>四、第三方 SDK 清单</h3>
+  <p>本应用未集成任何第三方 SDK（包括统计分析、广告、崩溃上报类 SDK），不会通过 SDK 向第三方提供个人信息。</p>
+
+  <h3>五、对外提供与共享</h3>
+  <p>我们不会向 Flectar 服务器上传您的邮件内容，也不会将您的个人信息出售或提供给广告商。为实现功能，本应用会直接连接：</p>
+  <ul>
+    <li>您配置的邮件服务商（IMAP/SMTP），用于收发邮件；</li>
+    <li>Google/Microsoft 的 OAuth 服务，用于登录（由您主动发起）。</li>
+  </ul>
+  <p>上述服务商对数据的处理适用其各自的隐私政策。</p>
+
+  <h3>六、存储地点与保存期限</h3>
+  <p>邮件、附件、草稿、联系人与日历数据保存在您的设备本地，保存期限由您控制：在您删除账户、清除本地数据或卸载应用时删除。Flectar 服务器不保存您的邮件内容。您与我们的支持通信在问题解决后最多保存 3 年，法律另有要求的除外。</p>
+
+  <h3>七、数据出境</h3>
+  <p>Flectar 不接收您的邮件内容；本应用由您的设备直接连接您选择的邮件服务商。如该服务商位于中国境外，数据传输发生于您与该服务商之间，适用其隐私政策。您与 Flectar 的支持通信在西班牙（欧盟）处理；如涉及跨境传输，我们将依据适用法律采取充分性认定、标准合同条款等保障措施。</p>
+
+  <h3>八、您的权利</h3>
+  <ul>
+    <li><strong>查阅与复制：</strong>在应用内查看邮件；通过“设置 → 存储”导出备份或数据库快照。</li>
+    <li><strong>更正与删除：</strong>在应用内编辑或删除邮件、联系人与日历数据；通过“设置 → 存储 → 删除全部本地数据”清除全部本地数据；卸载应用将删除应用数据。</li>
+    <li><strong>撤回同意：</strong>在系统“设置 → 隐私 → 权限管理”中关闭剪贴板或通知权限；在应用设置中关闭通知。</li>
+    <li><strong>注销：</strong>本应用不要求注册 Flectar 账户；您可以移除已添加的邮箱账户并删除全部本地数据，即完成注销与数据删除。</li>
+  </ul>
+  <p>我们将在收到请求后 <strong>15 个工作日</strong>内完成核查与处理。</p>
+
+  <h3>九、未成年人保护</h3>
+  <p>本应用不面向不满十四周岁的未成年人。若您为不满十四周岁的未成年人，请在监护人陪同下阅读本政策，并在取得监护人同意后使用本应用。若我们发现在未取得监护人同意的情况下收集了儿童个人信息，将尽快删除。</p>
+
+  <h3>十、安全措施</h3>
+  <p>账户凭据保存在系统安全凭据存储；应用数据位于系统应用沙箱；网络传输使用 TLS。我们采取合理措施保护数据安全，但无法保证绝对安全。</p>
+
+  <h3>十一、投诉与举报</h3>
+  <p>如您对本政策或个人信息处理有投诉、建议或疑问，请发送邮件至 <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>。我们将在 <strong>15 个工作日</strong>内受理并处理。您也可以向履行个人信息保护职责的监管部门投诉、举报。</p>
+
+  <h3>十二、政策更新</h3>
+  <p>本政策更新时，我们会修改本页面的更新日期；涉及处理目的、方式、种类等重大变更时，我们会通过应用内提示等适当方式通知您并重新取得同意（如适用）。</p>
+
+  <h3>十三、联系我们</h3>
+  <p>Flectar，Attn: Data Protection Officer，<a href="mailto:privacy@flectar.com">privacy@flectar.com</a>，Málaga, Spain。</p>
+  <p class="meta">Flectar 网站与商务通信适用另行发布的 Flectar 隐私政策：<a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a>。</p>
+
+</div>
+<div data-lang="en" hidden>
+<h1>Privacy Policy</h1>
+<p class="meta">Last updated: 20 October 2026 · Effective: 20 October 2026</p>
+<p>This policy applies to the Flectar Mail application (the “app”). This English version applies to users outside the markets covered by the Simplified Chinese, Spanish, Turkish and Russian versions; where a market-specific version exists, that version prevails for users in that market. Flectar Mail is a local-first mail client: mail content is processed on your device and is not uploaded to Flectar servers.</p>
+<h3>1. Data controller</h3>
+<p>Flectar (Spain). Contact: <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; phone (+34) 614 05 79 79; address: Málaga, Spain.</p>
+<p>Flectar is the controller for the limited processing described in this policy (for example, support correspondence you send us). The app processes mail, attachments, contacts and calendars locally on your device; Flectar does not receive or store that content. Your mail provider (and Google or Microsoft when you sign in with them) is an independent controller of the data it processes under its own privacy policy.</p>
+<h3>2. Data we process</h3>
+<ul>
+<li><strong>Account and sign-in:</strong> email address, username, password or OAuth refresh token. Credentials are stored only in the system secure store (on HarmonyOS, the Asset Store); they are never written to plain files, included in exports, or sent to Flectar.</li>
+<li><strong>Mail and sync:</strong> messages, attachments, contacts and calendars are processed and stored locally. When you sign in with Google or Microsoft, the provider performs the authentication under its own policy.</li>
+<li><strong>Notifications:</strong> new-mail notifications are generated locally; no push service is used.</li>
+<li><strong>Clipboard:</strong> only when you paste, the app reads plain text from the clipboard to insert it into the active field; the text is not stored, logged or transmitted, is not read in the background, and clipboard changes are not monitored.</li>
+<li><strong>Import and export:</strong> only at your request, through the system file picker; backups contain local mail and settings but no passwords or OAuth tokens.</li>
+</ul>
+<p>We do not collect data unrelated to these features: no system contacts, precise location, device identifiers (IMEI/OAID), app list or biometric data; no advertising, personalised recommendations or automated decisions.</p>
+<p><strong>Legal bases (UK GDPR).</strong> We process data on the basis of the contract (Article 6(1)(b) UK GDPR) to provide the mail service, legitimate interests (Article 6(1)(f)) for security and abuse prevention, and consent (Article 6(1)(a)) for notifications and clipboard access, which you may withdraw at any time.</p>
+<h3>3. System permissions</h3>
+<ul>
+<li><strong>ohos.permission.INTERNET:</strong> sync, sending and sign-in.</li>
+<li><strong>ohos.permission.READ_PASTEBOARD:</strong> clipboard reading only when you paste; without it only pasting is unavailable.</li>
+<li><strong>Notifications (optional):</strong> new-mail alerts.</li>
+</ul>
+<p>We do not request camera, microphone, location, contacts, calendar, phone or storage permissions; files are chosen through the system picker.</p>
+<h3>4. Third-party SDKs</h3>
+<p>The app contains no third-party SDKs (analytics, advertising or crash reporting) and does not share data through SDKs.</p>
+<h3>5. Sharing</h3>
+<p>We do not upload mail content to Flectar servers, sell it or provide it to advertisers. To work, the app connects directly to the mail provider you configure (IMAP/SMTP) and, when you sign in with Google or Microsoft, to their OAuth services. Those providers process data under their own privacy policies.</p>
+<h3>6. Retention and location</h3>
+<p>Mail, attachments, drafts, contacts and calendars remain on your device until you delete them, clear local data or uninstall the app. Flectar does not store mail content on its servers. Support correspondence is retained for up to 3 years after the request is resolved, unless a longer period is required by law.</p>
+<h3>7. International transfers</h3>
+<p>Flectar does not receive mail content; the app connects directly to the provider you choose. If the provider is outside your country, the transfer occurs between you and that provider under its policy. If you contact us, support correspondence is processed in Spain (EU); where required, we rely on adequacy regulations or Standard Contractual Clauses.</p>
+<h3>8. Your rights</h3>
+<ul>
+<li><strong>Access and copy:</strong> view mail in the app; export backups or snapshots from Settings → Storage.</li>
+<li><strong>Rectification and erasure:</strong> edit or delete messages, contacts and calendars; “Delete all local data” in Settings → Storage; uninstall the app.</li>
+<li><strong>Restriction, objection and portability:</strong> request restriction of processing, object to it, or receive your data in a structured format.</li>
+<li><strong>Withdraw consent:</strong> disable permissions in the system settings and notifications in the app.</li>
+<li><strong>Account closure:</strong> the app does not require a Flectar account; removing mail accounts and local data is equivalent to closing an account.</li>
+</ul>
+<p>To exercise these rights, contact <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>. We respond within one month (extendable by two months for complex requests) and within 15 working days for other enquiries. UK users may complain to the Information Commissioner’s Office (<a href="https://ico.org.uk">ico.org.uk</a>). California residents: we do not sell or share personal information as defined by the CCPA/CPRA; you may request access, deletion, correction, and limitation of the use of sensitive personal information, and we will not discriminate against you for exercising these rights. Requests are answered within 45 days; you may also contact the California Privacy Protection Agency or the Attorney General.</p>
+<h3>9. Children</h3>
+<p>The app is not directed to children below the digital age of consent in their country (16 in much of the EEA, 14 in Spain and China, 13 in the UK and US, 18 in Türkiye and Russia). Younger users may use it only with the consent of a parent or guardian. If we learn that we hold children’s data without consent, we will delete it.</p>
+<h3>10. Security</h3>
+<p>Credentials are stored in the system secure store, app data in the application sandbox, and network connections use TLS. We take reasonable measures but cannot guarantee absolute security.</p>
+<h3>11. Complaints</h3>
+<p>For privacy questions or complaints, write to <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; we respond within 15 working days. You may also complain to the Information Commissioner’s Office (UK), the California Privacy Protection Agency or the Attorney General (California), or your local data-protection authority.</p>
+<h3>12. Changes</h3>
+<p>We update the date on this page when the policy changes; material changes are notified in the app and, where required, consent is requested again.</p>
+<h3>13. Contact</h3>
+<p>Flectar, Attn: Data Protection Officer, <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>, Málaga, Spain.</p>
+<p class="meta">The Flectar website and business communications are covered by the separate Flectar Privacy Policy published at <a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a>.</p>
+</div>
+<div data-lang="es" hidden>
+<h1>Política de privacidad</h1>
+<p class="meta">Última actualización: 20 de octubre de 2026 · Entrada en vigor: 20 de octubre de 2026</p>
+<p>Esta política se aplica a Flectar Mail (la «aplicación»). Para los usuarios en España y la Unión Europea se aplica esta versión en español; en caso de discrepancia entre versiones lingüísticas, prevalece la versión aplicable a su mercado. La aplicación es un cliente de correo que procesa los datos en el dispositivo y no sube el contenido del correo a los servidores de Flectar.</p>
+<h3>1. Responsable del tratamiento</h3>
+<p>Flectar (España). Contacto: <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; teléfono (+34) 614 05 79 79; dirección: Málaga, España.</p>
+<p>Flectar es responsable del tratamiento limitado descrito en esta política (por ejemplo, la correspondencia de soporte que nos envíe). La aplicación procesa el correo, los adjuntos, los contactos y los calendarios localmente en su dispositivo; Flectar no recibe ni almacena ese contenido. Su proveedor de correo (y Google o Microsoft cuando inicia sesión con ellos) es responsable independiente de los datos que trata conforme a su propia política.</p>
+<h3>2. Datos que tratamos</h3>
+<ul>
+<li><strong>Cuenta y acceso:</strong> dirección de correo, nombre de usuario, contraseña o token de actualización OAuth. Las credenciales se guardan únicamente en el almacén seguro del sistema (en HarmonyOS, el Asset Store) y nunca se escriben en archivos de texto, se incluyen en exportaciones ni se envían a Flectar.</li>
+<li><strong>Correo y sincronización:</strong> mensajes, adjuntos, contactos y calendarios se procesan y almacenan localmente. Al iniciar sesión con Google o Microsoft, el proceso lo realiza el proveedor correspondiente bajo su propia política.</li>
+<li><strong>Notificaciones:</strong> se generan localmente; no se utiliza ningún servicio de notificaciones push.</li>
+<li><strong>Portapapeles:</strong> solo cuando el usuario pega, la aplicación lee texto plano del portapapeles para insertarlo en el campo activo; no se almacena, registra ni transmite, y no se lee en segundo plano ni se vigilan los cambios.</li>
+<li><strong>Importación y exportación:</strong> solo a petición del usuario, mediante el selector de archivos del sistema; las copias de seguridad contienen correo y ajustes locales, pero no contraseñas ni tokens OAuth.</li>
+</ul>
+<p>No recopilamos datos ajenos a estas funciones: no accedemos a contactos del sistema, ubicación precisa, identificadores del dispositivo (IMEI/OAID), lista de aplicaciones ni datos biométricos, y no realizamos publicidad, recomendaciones personalizadas ni decisiones automatizadas.</p>
+<h3>Base jurídica del tratamiento (RGPD)</h3>
+<p>Tratamos los datos sobre la base del <strong>contrato</strong> (art. 6.1.b RGPD) para prestar el servicio de correo; de <strong>intereses legítimos</strong> (art. 6.1.f) para la seguridad y la prevención de abusos; y del <strong>consentimiento</strong> (art. 6.1.a) para las notificaciones y el acceso al portapapeles, que puede retirar en cualquier momento.</p>
+<h3>3. Permisos del sistema</h3>
+<ul>
+<li><code>ohos.permission.INTERNET</code>: sincronización, envío e inicio de sesión.</li>
+<li><code>ohos.permission.READ_PASTEBOARD</code>: lectura del portapapeles solo al pegar; sin este permiso únicamente no funciona el pegado.</li>
+<li>Notificaciones (opcional): avisos de correo nuevo.</li>
+</ul>
+<p>No solicitamos cámara, micrófono, ubicación, contactos, calendario, teléfono ni almacenamiento; los archivos se eligen con el selector del sistema.</p>
+<h3>4. SDK de terceros</h3>
+<p>La aplicación no integra ningún SDK de terceros (análisis, publicidad o informes de fallos) y no comparte datos mediante SDK.</p>
+<h3>5. Comunicación de datos</h3>
+<p>No subimos el contenido del correo a servidores de Flectar ni lo vendemos o cedemos a anunciantes. Para funcionar, la aplicación se conecta directamente al proveedor de correo configurado (IMAP/SMTP) y, si el usuario inicia sesión con Google o Microsoft, a sus servicios OAuth.</p>
+<h3>6. Conservación y ubicación</h3>
+<p>El correo, los adjuntos, los borradores, los contactos y los calendarios permanecen en el dispositivo y se conservan hasta que el usuario los elimina, borra los datos locales o desinstala la aplicación. Flectar no almacena el contenido del correo en sus servidores. La correspondencia de soporte se conserva hasta 3 años después de resolverse la solicitud, salvo que la ley exija un plazo mayor.</p>
+<h3>7. Transferencias internacionales</h3>
+<p>Flectar no recibe el contenido del correo; la aplicación se conecta directamente con el proveedor elegido por el usuario. Si el proveedor está fuera de su país, la transferencia se produce entre el usuario y dicho proveedor conforme a su política. Si nos contacta, la correspondencia de soporte se procesa en España (UE); cuando sea necesario, aplicamos decisiones de adecuación o cláusulas contractuales tipo.</p>
+<h3>8. Derechos del usuario</h3>
+<ul>
+<li>Acceso y copia: consultar el correo en la aplicación; exportar copias o instantáneas desde Ajustes → Almacenamiento.</li>
+<li>Rectificación y supresión: editar o eliminar mensajes, contactos y calendarios; «Eliminar todos los datos locales» en Ajustes → Almacenamiento; desinstalar la aplicación.</li>
+<li>Limitación, oposición y portabilidad: solicitar la limitación del tratamiento, oponerse a él o recibir sus datos en un formato estructurado.</li>
+<li>Retirada del consentimiento: desactivar permisos en los ajustes del sistema y las notificaciones en la aplicación.</li>
+<li>Cancelación: la aplicación no requiere una cuenta de Flectar; eliminar las cuentas de correo y los datos locales equivale a la cancelación.</li>
+</ul>
+<p>Responderemos en el plazo máximo de un mes, prorrogable dos meses más en casos complejos.</p>
+<h3>9. Menores</h3>
+<p>La aplicación no está dirigida a menores de 14 años; si un menor de esa edad desea usarla, deberá hacerlo con el consentimiento de su tutor. Si detectamos datos de menores sin consentimiento, los eliminaremos.</p>
+<h3>10. Seguridad</h3>
+<p>Las credenciales se guardan en el almacén seguro del sistema, los datos en el espacio privado de la aplicación y las comunicaciones usan TLS. Aplicamos medidas razonables, sin poder garantizar seguridad absoluta.</p>
+<h3>11. Reclamaciones</h3>
+<p>Para consultas o reclamaciones sobre privacidad, escriba a <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; responderemos en 15 días hábiles. También puede presentar una reclamación ante la Agencia Española de Protección de Datos (<a href="https://www.aepd.es">www.aepd.es</a>) o la autoridad de protección de datos competente.</p>
+<h3>12. Cambios</h3>
+<p>Actualizaremos la fecha de esta página cuando cambie la política; los cambios importantes se notificarán en la aplicación y, si procede, se solicitará de nuevo el consentimiento.</p>
+<h3>13. Contacto</h3>
+<p>Flectar, Attn: Data Protection Officer, <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>, Málaga, España.</p>
+<p class="meta">El sitio web de Flectar y las comunicaciones comerciales se rigen por la Política de privacidad de Flectar publicada en <a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a>.</p>
+</div>
+<div data-lang="tr" hidden>
+<h1>Gizlilik Politikası</h1>
+<p class="meta">Son güncelleme: 20 Ekim 2026 · Yürürlük tarihi: 20 Ekim 2026</p>
+<p>Bu politika Flectar Mail uygulaması için geçerlidir. Bu sürüm Türkiye'deki kullanıcılar için geçerlidir; dil sürümleri arasında farklılık olması hâlinde kullanıcının bulunduğu pazara uygulanan sürüm esas alınır. Uygulama, verileri cihazda işleyen ve e-posta içeriğini Flectar sunucularına yüklemeyen bir e-posta istemcisidir.</p>
+<h3>1. Veri sorumlusu</h3>
+<p>Flectar (İspanya). İletişim: <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; telefon (+34) 614 05 79 79; adres: Málaga, İspanya.</p>
+<p>Flectar, bu politikada açıklanan sınırlı işleme (örneğin bize gönderdiğiniz destek yazışmaları) için veri sorumlusudur. Uygulama posta, ekler, kişiler ve takvimleri cihazınızda yerel olarak işler; Flectar bu içeriği almaz veya saklamaz. Posta sağlayıcınız (ve Google veya Microsoft ile oturum açtığınızda ilgili sağlayıcılar) işledikleri veriler bakımından kendi politikalarına tabi bağımsız veri sorumlularıdır.</p>
+<h3>2. İşlediğimiz veriler</h3>
+<ul>
+<li><strong>Hesap ve oturum açma:</strong> e-posta adresi, kullanıcı adı, parola veya OAuth yenileme belirteci. Kimlik bilgileri yalnızca sistemin güvenli kimlik deposunda (HarmonyOS'ta Asset Store) saklanır; düz metin dosyalara yazılmaz, dışa aktarmalara eklenmez ve Flectar'a gönderilmez.</li>
+<li><strong>Posta ve eşitleme:</strong> iletiler, ekler, kişiler ve takvimler yerel olarak işlenir ve saklanır. Google/Microsoft ile oturum açıldığında kimlik doğrulama ilgili sağlayıcı tarafından kendi politikasına göre yapılır.</li>
+<li><strong>Bildirimler:</strong> yeni posta bildirimleri yerel olarak oluşturulur; anlık bildirim (push) hizmeti kullanılmaz.</li>
+<li><strong>Pano:</strong> yalnızca kullanıcı yapıştırdığında panodaki düz metin okunur ve etkin alana eklenir; saklanmaz, günlüğe yazılmaz, iletilmez; arka planda okunmaz ve değişiklikler izlenmez.</li>
+<li><strong>İçe ve dışa aktarma:</strong> yalnızca kullanıcı istediğinde sistem dosya seçicisiyle yapılır; yedekler yerel posta ve ayarları içerir, parola veya OAuth belirteci içermez.</li>
+</ul>
+<p>Bu işlevlerle ilgisiz verileri toplamayız: sistem kişileri, hassas konum, cihaz tanımlayıcıları (IMEI/OAID), uygulama listesi veya biyometrik veriler; reklam, kişiselleştirilmiş öneri veya otomatik karar verme yapmayız.</p>
+<h3>Hukuki dayanaklar (KVKK m. 5/6)</h3>
+<p>Verileri; e-posta hizmetini sunmak için <strong>sözleşmenin kurulması veya ifası</strong> (m. 5/2-c), güvenlik ve kötüye kullanımın önlenmesi için <strong>meşru menfaat</strong> (m. 5/2-f) ve bildirimler ile pano erişimi için <strong>açık rıza</strong> (m. 5/1) hukuki sebeplerine dayanarak işleriz. Açık rızanızı dilediğiniz zaman geri çekebilirsiniz.</p>
+<h3>3. Sistem izinleri</h3>
+<ul>
+<li><code>ohos.permission.INTERNET</code>: eşitleme, gönderme, oturum açma.</li>
+<li><code>ohos.permission.READ_PASTEBOARD</code>: yalnızca yapıştırma sırasında pano okuma; izin verilmezse yalnızca yapıştırma çalışmaz.</li>
+<li>Bildirimler (isteğe bağlı): yeni posta uyarıları.</li>
+</ul>
+<p>Kamera, mikrofon, konum, kişiler, takvim, telefon veya depolama izni istemeyiz; dosyalar sistem seçicisiyle seçilir.</p>
+<h3>4. Üçüncü taraf SDK'lar</h3>
+<p>Uygulama hiçbir üçüncü taraf SDK (analiz, reklam, çökme raporlama) içermez ve SDK aracılığıyla veri paylaşmaz.</p>
+<h3>5. Verilerin aktarımı</h3>
+<p>Posta içeriğini Flectar sunucularına yüklemeyiz, reklamverenlere satmayız veya devretmeyiz. Uygulama doğrudan yapılandırılmış posta sağlayıcısına (IMAP/SMTP) ve Google/Microsoft ile oturum açıldığında ilgili OAuth hizmetlerine bağlanır.</p>
+<h3>6. Saklama ve konum</h3>
+<p>Posta, ekler, taslaklar, kişiler ve takvimler cihazda kalır; kullanıcı silene, yerel verileri temizleyene veya uygulamayı kaldırana kadar saklanır. Flectar posta içeriğini sunucularında saklamaz. Destek yazışmaları, talebin sonuçlanmasından itibaren en fazla 3 yıl saklanır; kanun daha uzun bir süre öngörmedikçe.</p>
+<h3>7. Yurt dışına aktarım</h3>
+<p>Flectar posta içeriğini almaz; uygulama kullanıcının seçtiği sağlayıcıya doğrudan bağlanır. Sağlayıcı yurt dışındaysa aktarım kullanıcı ile sağlayıcı arasında ve sağlayıcının politikasına göre gerçekleşir. Bizimle iletişime geçmeniz hâlinde destek yazışmaları İspanya'da (AB) işlenir; gerektiğinde yeterlilik kararlarına veya standart sözleşme hükümlerine dayanırız.</p>
+<h3>8. Kullanıcı hakları</h3>
+<ul>
+<li>Erişim ve kopya: uygulamada postayı görüntüleme; Ayarlar → Depolama üzerinden yedek veya anlık görüntü dışa aktarma.</li>
+<li>Düzeltme ve silme: iletileri, kişileri ve takvimleri düzenleme veya silme; Ayarlar → Depolama → «Tüm yerel verileri sil»; uygulamayı kaldırma.</li>
+<li>Onayı geri çekme: sistem ayarlarından izinleri, uygulamadan bildirimleri kapatma.</li>
+<li>Hesap kapatma: uygulama Flectar hesabı gerektirmez; posta hesaplarını kaldırmak ve yerel verileri silmek hesap kapatma ile eşdeğerdir.</li>
+</ul>
+<p>KVKK m. 11 kapsamındaki haklarınız (verilerin işlenip işlenmediğini öğrenme, bilgi talep etme, düzeltme, silme veya yok etme, aktarılan üçüncü kişileri öğrenme, yalnızca otomatik analize itiraz ve zararın giderilmesi) için <a href="mailto:privacy@flectar.com">privacy@flectar.com</a> adresine başvurabilirsiniz. Talepleri en geç <strong>30 gün</strong> içinde yanıtlarız.</p>
+<h3>9. Çocuklar</h3>
+<p>Uygulama 18 yaşından küçük çocuklara yönelik değildir; 18 yaşın altındaki kullanıcılar yalnızca veli veya yasal temsilci onayıyla kullanabilir. Onaysız çocuk verisi tespit edilirse sileriz.</p>
+<h3>10. Güvenlik</h3>
+<p>Kimlik bilgileri sistemin güvenli deposunda, veriler uygulamanın özel alanında saklanır; iletişim TLS ile şifrelenir. Makul önlemler alırız ancak mutlak güvenlik garanti edilemez.</p>
+<h3>11. Şikâyetler</h3>
+<p>Gizlilikle ilgili soru ve şikâyetler için <a href="mailto:privacy@flectar.com">privacy@flectar.com</a> adresine yazın; 15 iş günü içinde yanıtlarız. Kişisel Verileri Koruma Kurulu'na (<a href="https://www.kvkk.gov.tr">www.kvkk.gov.tr</a>) da şikâyette bulunabilirsiniz.</p>
+<h3>12. Değişiklikler</h3>
+<p>Politika değiştiğinde bu sayfadaki tarihi güncelleriz; önemli değişiklikleri uygulama içinde bildirir ve gerekirse yeniden onay isteriz.</p>
+<h3>13. İletişim</h3>
+<p>Flectar, Attn: Data Protection Officer, <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>, Málaga, İspanya.</p>
+<p class="meta">Flectar'ın web sitesi ve ticari iletişimi, <a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a> adresinde yayımlanan ayrı Flectar Gizlilik Politikasına tabidir.</p>
+</div>
+<div data-lang="ru" hidden>
+<h1>Политика конфиденциальности</h1>
+<p class="meta">Последнее обновление: 20 октября 2026 г. · Дата вступления в силу: 20 октября 2026 г.</p>
+<p>Настоящая политика применяется к приложению Flectar Mail. Настоящая версия применяется к пользователям в Российской Федерации; в случае расхождений между языковыми версиями применяется версия, действующая для рынка пользователя. Приложение обрабатывает данные на устройстве и не загружает содержимое почты на серверы Flectar.</p>
+<h3>1. Оператор персональных данных</h3>
+<p>Flectar (Испания). Контакт: <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; телефон (+34) 614 05 79 79; адрес: Малага, Испания.</p>
+<p>Flectar является оператором в отношении ограниченной обработки, описанной в настоящей политике (например, переписки со службой поддержки). Приложение обрабатывает почту, вложения, контакты и календари локально на устройстве; Flectar не получает и не хранит это содержимое. Ваш почтовый провайдер (а также Google или Microsoft при входе через них) является самостоятельным оператором обрабатываемых им данных и действует по своей политике.</p>
+<h3>2. Какие данные мы обрабатываем</h3>
+<ul>
+<li><strong>Учётная запись и вход:</strong> адрес электронной почты, имя пользователя, пароль или токен обновления OAuth. Учётные данные хранятся только в защищённом хранилище системы (в HarmonyOS — Asset Store); они не записываются в текстовые файлы, не включаются в экспорт и не передаются в Flectar.</li>
+<li><strong>Почта и синхронизация:</strong> сообщения, вложения, контакты и календари обрабатываются и хранятся локально. При входе через Google или Microsoft аутентификацию выполняет соответствующий провайдер по своей политике.</li>
+<li><strong>Уведомления:</strong> уведомления о новой почте создаются локально; служба push-уведомлений не используется.</li>
+<li><strong>Буфер обмена:</strong> только при вставке приложение читает открытый текст из буфера обмена и вставляет его в активное поле; текст не сохраняется, не журналируется и не передаётся, не читается в фоновом режиме, изменения не отслеживаются.</li>
+<li><strong>Импорт и экспорт:</strong> только по запросу пользователя через системный выбор файлов; резервные копии содержат локальную почту и настройки, но не пароли и не токены OAuth.</li>
+</ul>
+<p>Мы не собираем данные, не связанные с этими функциями: контакты системы, точное местоположение, идентификаторы устройства (IMEI/OAID), список приложений и биометрические данные; не используем рекламу, персонализированные рекомендации и автоматизированные решения.</p>
+<h3>Правовые основания (152-ФЗ)</h3>
+<p>Мы обрабатываем данные на основании <strong>договора</strong> (п. 5 ч. 1 ст. 6) для оказания почтового сервиса, <strong>законных интересов</strong> (п. 7 ч. 1 ст. 6) для безопасности и предотвращения злоупотреблений и <strong>согласия</strong> (п. 1 ч. 1 ст. 6) для уведомлений и доступа к буферу обмена; согласие можно отозвать в любое время.</p>
+<h3>3. Системные разрешения</h3>
+<ul>
+<li><code>ohos.permission.INTERNET</code>: синхронизация, отправка, вход.</li>
+<li><code>ohos.permission.READ_PASTEBOARD</code>: чтение буфера обмена только при вставке; без разрешения недоступна только вставка.</li>
+<li>Уведомления (необязательно): оповещения о новой почте.</li>
+</ul>
+<p>Мы не запрашиваем камеру, микрофон, местоположение, контакты, календарь, телефон или доступ к хранилищу; файлы выбираются через системный выбор.</p>
+<h3>4. Сторонние SDK</h3>
+<p>Приложение не содержит сторонних SDK (аналитика, реклама, отчёты о сбоях) и не передаёт данные через SDK.</p>
+<h3>5. Передача данных</h3>
+<p>Мы не загружаем содержимое почты на серверы Flectar, не продаём и не передаём его рекламодателям. Для работы приложение напрямую подключается к настроенному почтовому провайдеру (IMAP/SMTP) и, при входе через Google/Microsoft, к их службам OAuth.</p>
+<h3>6. Хранение и местоположение</h3>
+<p>Почта, вложения, черновики, контакты и календари остаются на устройстве до удаления пользователем, очистки локальных данных или удаления приложения. Flectar не хранит содержимое почты на своих серверах. Переписка со службой поддержки хранится не более 3 лет после решения вопроса, если закон не требует более длительного срока.</p>
+<h3>7. Трансграничная передача</h3>
+<p>Flectar не получает содержимое почты; приложение подключается напрямую к провайдеру, выбранному пользователем. Если провайдер находится за рубежом, передача происходит между пользователем и провайдером в соответствии с его политикой. При обращении к нам переписка со службой поддержки обрабатывается в Испании (ЕС); при необходимости мы опираемся на решения об адекватности или стандартные договорные условия.</p>
+<h3>8. Права пользователя</h3>
+<ul>
+<li>Доступ и копирование: просмотр почты в приложении; экспорт резервной копии или снимка через «Настройки → Хранилище».</li>
+<li>Исправление и удаление: редактирование или удаление сообщений, контактов и календарей; «Удалить все локальные данные» в «Настройки → Хранилище»; удаление приложения.</li>
+<li>Отзыв согласия: отключение разрешений в настройках системы и уведомлений в приложении.</li>
+<li>Удаление учётной записи: приложение не требует учётной записи Flectar; удаление почтовых учётных записей и локальных данных равнозначно удалению учётной записи.</li>
+</ul>
+<p>Права, предусмотренные ст. 14 152-ФЗ (доступ, уточнение, удаление, ограничение обработки, возражение против обработки), можно реализовать, написав на <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>. Мы отвечаем в течение <strong>10 рабочих дней</strong>.</p>
+<h3>9. Дети</h3>
+<p>Приложение не предназначено для детей младше 18 лет; лица младше 18 лет могут использовать его только с согласия законного представителя. При обнаружении данных детей без согласия мы удалим их.</p>
+<h3>10. Безопасность</h3>
+<p>Учётные данные хранятся в защищённом хранилище системы, данные — в частной области приложения, соединения защищены TLS. Мы принимаем разумные меры, но не можем гарантировать абсолютную безопасность.</p>
+<h3>11. Жалобы</h3>
+<p>По вопросам конфиденциальности пишите на <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>; мы ответим в течение 15 рабочих дней. Вы также можете обратиться в Роскомнадзор (<a href="https://rkn.gov.ru">rkn.gov.ru</a>).</p>
+<h3>12. Изменения</h3>
+<p>При изменении политики мы обновляем дату на этой странице; о существенных изменениях сообщаем в приложении и при необходимости запрашиваем согласие повторно.</p>
+<h3>13. Контакты</h3>
+<p>Flectar, Attn: Data Protection Officer, <a href="mailto:privacy@flectar.com">privacy@flectar.com</a>, Малага, Испания.</p>
+<p class="meta">Сайт Flectar и деловые коммуникации регулируются отдельной Политикой конфиденциальности Flectar, опубликованной по адресу <a href="https://flectar.com/legal/privacy/">https://flectar.com/legal/privacy/</a>.</p>
+</div>
+
+<script>
+(function () {
+  var select = document.getElementById('policy-language');
+  var label = document.getElementById('policy-language-label');
+  var systemOption = select.querySelector('option[value="system"]');
+  var LABELS = {
+    title: { zh_Hans: '语言', en: 'Language', es: 'Idioma', tr: 'Dil', ru: 'Язык' },
+    system: { zh_Hans: '跟随系统', en: 'System language', es: 'Idioma del sistema',
+               tr: 'Sistem dili', ru: 'Системный язык' }
+  };
+  function systemLanguage() {
+    var langs = (navigator.languages && navigator.languages.length)
+      ? navigator.languages : [navigator.language || 'en'];
+    for (var i = 0; i < langs.length; i++) {
+      var code = String(langs[i]).toLowerCase();
+      if (code.indexOf('zh') === 0) { return 'zh_Hans'; }
+      if (code.indexOf('es') === 0) { return 'es'; }
+      if (code.indexOf('tr') === 0) { return 'tr'; }
+      if (code.indexOf('ru') === 0) { return 'ru'; }
+      if (code.indexOf('en') === 0) { return 'en'; }
+    }
+    return 'en';
+  }
+  function normalize(mode) {
+    var code = (mode || '').toLowerCase();
+    if (code === 'zh_hans' || code === 'zh-cn' || code === 'zh') { return 'zh_Hans'; }
+    if (code === 'en' || code === 'es' || code === 'tr' || code === 'ru') { return code; }
+    return null;
+  }
+  function show(which) {
+    document.documentElement.lang = which === 'zh_Hans' ? 'zh-CN' : which;
+    var blocks = document.querySelectorAll('[data-lang]');
+    for (var i = 0; i < blocks.length; i++) {
+      blocks[i].hidden = blocks[i].getAttribute('data-lang') !== which;
+    }
+    label.textContent = LABELS.title[which] || 'Language';
+    systemOption.textContent = LABELS.system[which] || 'System language';
+  }
+  // The application passes the configured language (system, en, es, tr,
+  // zh_Hans, ru); "system" follows the device language.
+  window.setPolicyLanguage = function (mode) {
+    var normalized = normalize(mode);
+    var selected = normalized || 'system';
+    show(normalized || systemLanguage());
+    select.value = selected;
+  };
+  select.addEventListener('change', function () {
+    show(select.value === 'system' ? systemLanguage() : select.value);
+  });
+  window.setPolicyLanguage('system');
+})();
+</script>
+</body>
+</html>

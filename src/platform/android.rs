@@ -46,3 +46,8 @@ pub(crate) fn lower_current_thread_priority() {
 
 /// Lifecycle callbacks arrive through FlectarActivity's JNI bridge.
 pub(crate) fn install_preview_lifecycle() {}
+
+/// Android and iOS reach system fonts through the fontique system backend.
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    None
+}

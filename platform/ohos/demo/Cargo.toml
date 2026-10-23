@@ -1,0 +1,24 @@
+[package]
+name = "slint-ohos-demo"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "AGPL-3.0-only"
+description = "Minimal Slint-on-OHOS demo loaded as a NAPI/XComponent module"
+publish = false
+
+[lib]
+name = "slint_ohos_demo"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+slint.workspace = true
+slint-ohos-backend = { path = "../backend" }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+# cargo-machete's metadata mode does not see build-script usage.
+[package.metadata.cargo-machete]
+ignored = ["slint-build"]

@@ -1617,6 +1617,44 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
         .collection
         .register_fonts(Blob::new(Arc::new(blitz_dom::BULLET_FONT) as _), None);
 
+    // Platforms without Fontconfig hand their system font directory over
+    // through the platform layer; the system collection above cannot find a
+    // font there. Extend the Han fallback with those faces so CJK mail
+    // content renders instead of missing glyphs (the Slint UI collection is
+    // filled the same way by the host, see platform/ohos).
+    if let Some(directory) = crate::platform::email_font_dir() {
+        font_ctx.collection.load_fonts_from_paths([directory]);
+        let names: Vec<String> = font_ctx
+            .collection
+            .family_names()
+            .map(|name| name.to_string())
+            .collect();
+        let mut han_families = Vec::new();
+        for fragment in ["FZHeiT", "HYQiHei", "Source Han", "Noto Sans CJK"] {
+            for name in &names {
+                if name.contains(fragment)
+                    && let Some(id) = font_ctx.collection.family_id(name)
+                    && !han_families.contains(&id)
+                {
+                    han_families.push(id);
+                }
+            }
+            if !han_families.is_empty() {
+                break;
+            }
+        }
+        if !han_families.is_empty() {
+            let key = FallbackKey::new(Script::from_bytes(*b"Hani"), None);
+            let mut fallbacks: Vec<_> = font_ctx.collection.fallback_families(key).collect();
+            for family in han_families {
+                if !fallbacks.contains(&family) {
+                    fallbacks.push(family);
+                }
+            }
+            font_ctx.collection.set_fallbacks(key, fallbacks.into_iter());
+        }
+    }
+
     // Keep the host's preferred sans-serif families, then use the font that is
     // already bundled for the composer as the guaranteed final fallback.
     let bundled_sans = font_ctx
