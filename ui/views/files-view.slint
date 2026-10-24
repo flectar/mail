@@ -1,4 +1,4 @@
-import { DocumentPreview } from "../components/document-preview.slint";
+import { DocumentPreview, TextPreview } from "../components/document-preview.slint";
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { HorizontalBox, VerticalBox, ListView, ScrollView, ComboBox, CheckBox } from "std-widgets.slint";
@@ -179,6 +179,9 @@ export component FilesView inherits Rectangle {
     );
     private property <bool> list-visible: !root.single-surface || !FilesUi.preview-open;
     private property <bool> detail-visible: !root.single-surface || FilesUi.preview-open;
+    // Details and previews share the detail pane; this decides which one the
+    // details toggle in its title row switches to.
+    private property <bool> showing-details: false;
     private property <string> search-text: FilesUi.query;
     private property <bool> search-pending: false;
     changed active => { if !root.active { root.search-pending = false; FilesUi.command("release-preview", "", ""); FilesUi.preview-open = false; } }
@@ -194,6 +197,10 @@ export component FilesView inherits Rectangle {
             if action == "account" || action == "account-id" || action == "space" || action == "up" || action == "attachment-source" { root.search-text = ""; }
             FilesUi.command(action, value, scope);
         }
+    }
+    function show(action: string, index: string) {
+        root.showing-details = action == "details";
+        FilesUi.command(action, index, "");
     }
     pagination := InfiniteScrollController {
         active: root.active && root.list-visible && !root.setup && !root.search-pending;
@@ -402,15 +409,15 @@ export component FilesView inherits Rectangle {
                         row-focus := FocusScope {
                             enabled: !FilesUi.busy;
                             key-pressed(event) => {
-                                if event.text == Key.Return { FilesUi.selected = index; FilesUi.command(row.directory ? "enter" : "preview", "" + index, ""); return accept; }
+                                if event.text == Key.Return { FilesUi.selected = index; if row.directory { FilesUi.command("enter", "" + index, ""); } else { root.show("preview", "" + index); } return accept; }
                                 if event.text == " " { FilesUi.selected = index; return accept; }
                                 return reject;
                             }
                         hit := TouchArea {
                             enabled: !FilesUi.busy; mouse-cursor: pointer; accessible-role: button; accessible-label: row.name + ", " + row.detail; accessible-checked: FilesUi.selected == index;
-                            clicked => { row-focus.focus(); FilesUi.selected = index; FilesUi.command(row.directory ? "details" : "preview", "" + index, ""); }
-                            double-clicked => { FilesUi.selected = index; FilesUi.command(row.directory ? "enter" : "preview", "" + index, ""); }
-                            accessible-action-default => { row-focus.focus(); FilesUi.selected = index; FilesUi.command(row.directory ? "details" : "preview", "" + index, ""); }
+                            clicked => { row-focus.focus(); FilesUi.selected = index; root.show(row.directory ? "details" : "preview", "" + index); }
+                            double-clicked => { FilesUi.selected = index; if row.directory { FilesUi.command("enter", "" + index, ""); } else { root.show("preview", "" + index); } }
+                            accessible-action-default => { row-focus.focus(); FilesUi.selected = index; root.show(row.directory ? "details" : "preview", "" + index); }
                         }
                         }
                     }
@@ -454,28 +461,21 @@ export component FilesView inherits Rectangle {
                     leading-icon: @image-url("../icons/lucide/outline/arrow-left.svg");
                     leading-tooltip: @tr("Back to files");
                     leading-clicked => { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); }
+                    if !FilesUi.activity-open && root.selected-row.directory : Button { width: self.content-width; text: @tr("Open folder"); enabled: !FilesUi.busy && root.selected-row.readable; clicked => { FilesUi.command("enter", "", ""); } }
+                    if !FilesUi.activity-open && !root.selected-row.directory : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/download.svg"); tooltip-text: @tr("Download"); interactive: !FilesUi.busy && root.selected-row.readable; clicked => { FilesUi.command("download", "", ""); } }
+                    if !FilesUi.activity-open && FilesUi.attachments && !root.selected-row.directory : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/info.svg"); tooltip-text: root.showing-details ? @tr("Preview") : @tr("Details"); active: root.showing-details; interactive: !FilesUi.busy; clicked => { root.show(root.showing-details ? "preview" : "details", ""); } }
+                    if !FilesUi.activity-open && !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg"); tooltip-text: @tr("Manage"); interactive: !FilesUi.busy; clicked => { FilesUi.dialog = "manage"; } }
                     if !root.single-surface : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/x.svg"); tooltip-text: @tr("Close"); clicked => { FilesUi.preview-open = false; if FilesUi.busy { FilesUi.command("cancel", "", ""); } FilesUi.command("release-preview", "", ""); } }
                 }
-                if FilesUi.preview-open && !FilesUi.activity-open : VerticalBox {
-                    padding: 0px; spacing: 8px;
-                    Text { text: root.selected-row.detail; wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
-                    HorizontalBox {
-                        padding: 0px; spacing: 8px;
-                        Button { text: root.selected-row.directory ? @tr("Open folder") : @tr("Download"); enabled: !FilesUi.busy && root.selected-row.readable; clicked => { FilesUi.command(root.selected-row.directory ? "enter" : "download", "", ""); } }
-                        if !FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/kebab-horizontal.svg"); tooltip-text: @tr("Manage"); interactive: !FilesUi.busy; clicked => { FilesUi.dialog = "manage"; } }
-                        if !root.selected-row.directory : Button { text: @tr("Preview"); enabled: !FilesUi.busy; clicked => { FilesUi.command("preview", "", ""); } }
-                        if FilesUi.attachments : ToolbarIconButton { icon-color: AppTheme.secondary; icon: @image-url("../icons/lucide/outline/info.svg"); tooltip-text: @tr("Details"); interactive: !FilesUi.busy; clicked => { FilesUi.command("details", "", ""); } }
-                        Rectangle { horizontal-stretch: 1; }
-                    }
-                }
+                if FilesUi.preview-open && !FilesUi.activity-open : Text { vertical-stretch: 0; text: root.selected-row.detail; wrap: word-wrap; color: AppTheme.secondary; font-size: TypeScale.caption; }
                 if !FilesUi.preview-open : DetailEmptyState {
                     vertical-stretch: 1;
                     icon: @image-url("../icons/lucide/outline/files.svg");
                     title: @tr("Select a file to preview");
                     description: FilesUi.pdf-supported ? @tr("PDFs, images and text appear here. Other formats can be downloaded.") : @tr("Images and text appear here. Other formats can be downloaded.");
                 }
-                if FilesUi.preview-open && FilesUi.busy : Text { text: FilesUi.transfer-status != "" ? FilesUi.transfer-status : @tr("Loading preview…"); color: AppTheme.secondary; wrap: word-wrap; }
-                if FilesUi.preview-open && FilesUi.activity-open : Button { text: @tr("Clear displayed activity"); enabled: !FilesUi.busy; clicked => { FilesUi.command("clear-notifications", "", ""); } }
+                if FilesUi.preview-open && FilesUi.busy : Text { vertical-stretch: 0; text: FilesUi.transfer-status != "" ? FilesUi.transfer-status : @tr("Loading preview…"); color: AppTheme.secondary; wrap: word-wrap; }
+                if FilesUi.preview-open && FilesUi.activity-open : Button { vertical-stretch: 0; text: @tr("Clear displayed activity"); enabled: !FilesUi.busy; clicked => { FilesUi.command("clear-notifications", "", ""); } }
                 if FilesUi.preview-open && FilesUi.preview-is-image : DocumentPreview {
                     compact: root.compact; busy: FilesUi.busy; source: FilesUi.preview-image;
                     page: FilesUi.pdf-page; pages: FilesUi.pdf-pages;
@@ -483,8 +483,8 @@ export component FilesView inherits Rectangle {
                     document-revision: FilesUi.selected;
                     render-page(page, zoom) => { FilesUi.command("pdf-page", "" + page, "200"); }
                 }
-                if FilesUi.preview-open && !FilesUi.preview-is-image : ScrollView { vertical-stretch: 1; content-width: self.visible-width; Text { x: 0px; y: 0px; width: parent.width; height: self.preferred-height; text: FilesUi.preview-text; wrap: word-wrap; color: AppTheme.body; font-size: TypeScale.body; } }
-                if FilesUi.preview-open && FilesUi.status != "" : Text { text: FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
+                if FilesUi.preview-open && !FilesUi.preview-is-image : TextPreview { compact: root.compact; text: FilesUi.preview-text; }
+                if root.single-surface && FilesUi.preview-open && FilesUi.status != "" : Text { vertical-stretch: 0; text: FilesUi.status; color: AppTheme.secondary; wrap: word-wrap; font-size: TypeScale.caption; }
             }
         }
     }

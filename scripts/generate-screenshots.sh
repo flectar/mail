@@ -24,6 +24,21 @@ command -v jq >/dev/null 2>&1 || {
 
 slint-viewer --check "$ui"
 
+# The PDF preview is an SVG fixture, not a rendered PDF. Derive its dark
+# paper, ink, rules, and accent colors. Real PDF previews retain the
+# document's original colors.
+pdf_preview_light="$repo_dir/resources/screenshots/demo-pdf-preview.svg"
+pdf_preview_dark="$temporary_dir/demo-pdf-preview-dark.svg"
+sed \
+  -e 's/#FFFFFF/#202328/g' \
+  -e 's/#20262D/#ECEFF3/g' \
+  -e 's/#475361/#C0C7D0/g' \
+  -e 's/#626E7B/#A5AFBB/g' \
+  -e 's/#C8D0D9/#46515E/g' \
+  -e 's/#17365D/#A7C7F0/g' \
+  -e 's/#EEF2F6/#2C343E/g' \
+  "$pdf_preview_light" > "$pdf_preview_dark"
+
 favicon_dir="$temporary_dir/favicons"
 mapfile -t sender_addresses < <(
   jq -r '[.selected_address, (.emails[].address), (.thread_messages[]? | select(.outgoing | not) | .address)] | unique[]' "$fixture"
@@ -48,6 +63,8 @@ prepare_data() {
   local data_file="$temporary_dir/$output_name.json"
   local email_file="$email_dir/demo-email-$theme_preset-$theme.json"
   local email="null"
+  local pdf_preview="$pdf_preview_light"
+  [[ "$theme" != "dark" ]] || pdf_preview="$pdf_preview_dark"
   # Desktop screenshots show the integrated macOS frame; the traffic lights
   # are painted after rendering because AppKit draws them natively.
   [[ "$output_name" != desktop-* ]] || window_frame="macos"
@@ -63,6 +80,7 @@ prepare_data() {
     --arg tab_strip "$tab_strip" \
     --arg window_frame "$window_frame" \
     --arg favicon_dir "$favicon_dir" \
+    --arg pdf_preview "$pdf_preview" \
     --argjson show_threads "$show_threads" \
     --argjson show_account_markers "$show_account_markers" \
     --argjson email "$email" \

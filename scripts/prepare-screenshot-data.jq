@@ -5,6 +5,7 @@ def favicon_path(address):
 | .workspace_layout = $workspace_layout
 | .screenshot_theme_preset = $theme_preset
 | .active_view = $active_view
+| .FilesUi["preview-image"] = $pdf_preview
 # The app always has at least one tab; show the same strip as the frameless
 # screenshots: the current view, a background conversation and the calendar.
 # The tabs showcase adds more conversations and every other workspace.

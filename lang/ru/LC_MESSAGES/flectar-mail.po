@@ -2127,7 +2127,7 @@ msgid "Export decrypted message"
 msgstr "Экспортировать расшифрованное сообщение"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2786 ui/views/files-view.slint:457
+#: ui/dialogs/settings-dialog.slint:2786 ui/views/files-view.slint:468
 #: ui/views/files-view.slint:658 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "Закрыть"
@@ -2594,15 +2594,15 @@ msgstr "Очистить выделение"
 msgid "Select"
 msgstr "Выбрать"
 
-#: ui/components/document-preview.slint:43
+#: ui/components/document-preview.slint:17
 msgid "Previous page"
 msgstr "Предыдущая страница"
 
-#: ui/components/document-preview.slint:44
+#: ui/components/document-preview.slint:18
 msgid "Page {} of {}"
 msgstr "Страница {} из {}"
 
-#: ui/components/document-preview.slint:45
+#: ui/components/document-preview.slint:19
 msgid "Next page"
 msgstr "Следующая страница"
 
@@ -3054,7 +3054,7 @@ msgid "{} label, {} account"
 msgstr "Меток: {}, учётных записей: {}"
 
 #: ui/components/sidebar.slint:623 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:345
 msgid "New folder"
 msgstr "Новая папка"
 
@@ -3224,7 +3224,7 @@ msgstr "Сохранить палитру"
 msgid "Mail"
 msgstr "Почта"
 
-#: ui/components/workspace-navigation.slint:128 ui/views/files-view.slint:383
+#: ui/components/workspace-navigation.slint:128 ui/views/files-view.slint:390
 msgid "Files"
 msgstr "Файлы"
 
@@ -3286,11 +3286,11 @@ msgstr "Увеличить"
 msgid "Fit to width"
 msgstr "По ширине"
 
-#: ui/dialogs/attachment-preview-dialog.slint:40 ui/views/files-view.slint:464
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
 msgid "Download"
 msgstr "Скачать"
 
-#: ui/dialogs/attachment-preview-dialog.slint:54 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
 msgid "Loading preview…"
 msgstr "Загрузка предпросмотра…"
 
@@ -3768,7 +3768,7 @@ msgstr "Не удалось импортировать учётные запис
 msgid "Could not read the settings"
 msgstr "Не удалось прочитать настройки"
 
-#: ui/dialogs/import-dialog.slint:168 ui/views/files-view.slint:324
+#: ui/dialogs/import-dialog.slint:168 ui/views/files-view.slint:331
 msgid "Back"
 msgstr "Назад"
 
@@ -4093,7 +4093,7 @@ msgstr "Локальное хранилище"
 msgid "Calculating…"
 msgstr "Вычисление…"
 
-#: ui/dialogs/settings-dialog.slint:203 ui/views/files-view.slint:299
+#: ui/dialogs/settings-dialog.slint:203 ui/views/files-view.slint:306
 msgid "Refresh"
 msgstr "Обновить"
 
@@ -4785,7 +4785,7 @@ msgstr "Повторить подключение календаря"
 msgid "Set up CalDAV"
 msgstr "Настроить CalDAV"
 
-#: ui/dialogs/settings-dialog.slint:1918 ui/views/files-view.slint:465
+#: ui/dialogs/settings-dialog.slint:1918 ui/views/files-view.slint:467
 msgid "Manage"
 msgstr "Управлять"
 
@@ -5933,7 +5933,7 @@ msgstr "Серверное хранилище"
 msgid "STORAGE SPACE"
 msgstr "ПРОСТРАНСТВО ХРАНИЛИЩА"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:452
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
 msgid "Sharing activity"
 msgstr "Действия с общим доступом"
 
@@ -5941,59 +5941,59 @@ msgstr "Действия с общим доступом"
 msgid "Transfers"
 msgstr "Передачи"
 
-#: ui/views/files-view.slint:294 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
 msgid "File sources"
 msgstr "Источники файлов"
 
-#: ui/views/files-view.slint:297
+#: ui/views/files-view.slint:304
 msgid "Search files"
 msgstr "Поиск файлов"
 
-#: ui/views/files-view.slint:300 ui/views/files-view.slint:307
+#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
 msgid "Filter and sort files"
 msgstr "Фильтрация и сортировка файлов"
 
-#: ui/views/files-view.slint:303
+#: ui/views/files-view.slint:310
 msgid "Synchronized mail"
 msgstr "Синхронизированная почта"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "All mail on server (JMAP)"
 msgstr "Вся почта на сервере (JMAP)"
 
-#: ui/views/files-view.slint:305
+#: ui/views/files-view.slint:312
 msgid "Index cached text"
 msgstr "Индексировать кешированный текст"
 
-#: ui/views/files-view.slint:331
+#: ui/views/files-view.slint:338
 msgid "Upload"
 msgstr "Загрузить на сервер"
 
-#: ui/views/files-view.slint:369
+#: ui/views/files-view.slint:376
 msgid "No files to show"
 msgstr "Нет файлов для отображения"
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Attachments from synchronized messages will appear here."
 msgstr "Здесь появятся вложения из синхронизированных писем."
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Upload a file or create a folder to get started."
 msgstr "Загрузите файл или создайте папку, чтобы начать работу."
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Select an account and connect its storage."
 msgstr "Выберите учётную запись и подключите её хранилище."
 
-#: ui/views/files-view.slint:429
+#: ui/views/files-view.slint:436
 msgid "Load more"
 msgstr "Загрузить ещё"
 
-#: ui/views/files-view.slint:438
+#: ui/views/files-view.slint:445
 msgid "File list width"
 msgstr "Ширина списка файлов"
 
-#: ui/views/files-view.slint:455
+#: ui/views/files-view.slint:462
 msgid "Back to files"
 msgstr "Вернуться к файлам"
 
@@ -6005,7 +6005,7 @@ msgstr "Открыть папку"
 msgid "Preview"
 msgstr "Предпросмотр"
 
-#: ui/views/files-view.slint:467
+#: ui/views/files-view.slint:466
 msgid "Details"
 msgstr "Сведения"
 

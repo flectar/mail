@@ -2150,7 +2150,7 @@ msgid "Export decrypted message"
 msgstr "Exportar mensaje descifrado"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2786 ui/views/files-view.slint:457
+#: ui/dialogs/settings-dialog.slint:2786 ui/views/files-view.slint:468
 #: ui/views/files-view.slint:658 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "Cerrar"
@@ -2618,15 +2618,15 @@ msgstr "Limpiar selección"
 msgid "Select"
 msgstr "Seleccionar"
 
-#: ui/components/document-preview.slint:43
+#: ui/components/document-preview.slint:17
 msgid "Previous page"
 msgstr "Página anterior"
 
-#: ui/components/document-preview.slint:44
+#: ui/components/document-preview.slint:18
 msgid "Page {} of {}"
 msgstr "Página {} de {}"
 
-#: ui/components/document-preview.slint:45
+#: ui/components/document-preview.slint:19
 msgid "Next page"
 msgstr "Página siguiente"
 
@@ -3079,7 +3079,7 @@ msgid "{} label, {} account"
 msgstr "Etiqueta {}, cuenta {}"
 
 #: ui/components/sidebar.slint:623 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:345
 msgid "New folder"
 msgstr "Nueva carpeta"
 
@@ -3249,7 +3249,7 @@ msgstr "Guardar paleta"
 msgid "Mail"
 msgstr "Correo"
 
-#: ui/components/workspace-navigation.slint:128 ui/views/files-view.slint:383
+#: ui/components/workspace-navigation.slint:128 ui/views/files-view.slint:390
 msgid "Files"
 msgstr "Archivos"
 
@@ -3311,11 +3311,11 @@ msgstr "Acercar"
 msgid "Fit to width"
 msgstr "Ajustar al ancho"
 
-#: ui/dialogs/attachment-preview-dialog.slint:40 ui/views/files-view.slint:464
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
 msgid "Download"
 msgstr "Descargar"
 
-#: ui/dialogs/attachment-preview-dialog.slint:54 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
 msgid "Loading preview…"
 msgstr "Cargando vista previa…"
 
@@ -3783,7 +3783,7 @@ msgstr "No se pudieron importar las cuentas"
 msgid "Could not read the settings"
 msgstr "No se pudo leer la configuración"
 
-#: ui/dialogs/import-dialog.slint:168 ui/views/files-view.slint:324
+#: ui/dialogs/import-dialog.slint:168 ui/views/files-view.slint:331
 msgid "Back"
 msgstr "Atrás"
 
@@ -4103,7 +4103,7 @@ msgstr "Almacenamiento local"
 msgid "Calculating…"
 msgstr "Calculando…"
 
-#: ui/dialogs/settings-dialog.slint:203 ui/views/files-view.slint:299
+#: ui/dialogs/settings-dialog.slint:203 ui/views/files-view.slint:306
 msgid "Refresh"
 msgstr "Actualizar"
 
@@ -4805,7 +4805,7 @@ msgstr "Reintentar calendario"
 msgid "Set up CalDAV"
 msgstr "Configurar CalDAV"
 
-#: ui/dialogs/settings-dialog.slint:1918 ui/views/files-view.slint:465
+#: ui/dialogs/settings-dialog.slint:1918 ui/views/files-view.slint:467
 msgid "Manage"
 msgstr "Gestionar"
 
@@ -5954,7 +5954,7 @@ msgstr "Almacenamiento del servidor"
 msgid "STORAGE SPACE"
 msgstr "ESPACIO DE ALMACENAMIENTO"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:452
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
 msgid "Sharing activity"
 msgstr "Actividad de uso compartido"
 
@@ -5962,59 +5962,59 @@ msgstr "Actividad de uso compartido"
 msgid "Transfers"
 msgstr "Transferencias"
 
-#: ui/views/files-view.slint:294 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
 msgid "File sources"
 msgstr "Orígenes de archivos"
 
-#: ui/views/files-view.slint:297
+#: ui/views/files-view.slint:304
 msgid "Search files"
 msgstr "Buscar archivos"
 
-#: ui/views/files-view.slint:300 ui/views/files-view.slint:307
+#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
 msgid "Filter and sort files"
 msgstr "Filtrar y ordenar archivos"
 
-#: ui/views/files-view.slint:303
+#: ui/views/files-view.slint:310
 msgid "Synchronized mail"
 msgstr "Correo sincronizado"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "All mail on server (JMAP)"
 msgstr "Todo el correo del servidor (JMAP)"
 
-#: ui/views/files-view.slint:305
+#: ui/views/files-view.slint:312
 msgid "Index cached text"
 msgstr "Indexar texto en caché"
 
-#: ui/views/files-view.slint:331
+#: ui/views/files-view.slint:338
 msgid "Upload"
 msgstr "Subir"
 
-#: ui/views/files-view.slint:369
+#: ui/views/files-view.slint:376
 msgid "No files to show"
 msgstr "No hay archivos que mostrar"
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Attachments from synchronized messages will appear here."
 msgstr "Aquí aparecerán los adjuntos de los mensajes sincronizados."
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Upload a file or create a folder to get started."
 msgstr "Sube un archivo o crea una carpeta para empezar."
 
-#: ui/views/files-view.slint:370
+#: ui/views/files-view.slint:377
 msgid "Select an account and connect its storage."
 msgstr "Selecciona una cuenta y conecta su almacenamiento."
 
-#: ui/views/files-view.slint:429
+#: ui/views/files-view.slint:436
 msgid "Load more"
 msgstr "Cargar más"
 
-#: ui/views/files-view.slint:438
+#: ui/views/files-view.slint:445
 msgid "File list width"
 msgstr "Ancho de la lista de archivos"
 
-#: ui/views/files-view.slint:455
+#: ui/views/files-view.slint:462
 msgid "Back to files"
 msgstr "Volver a los archivos"
 
@@ -6026,7 +6026,7 @@ msgstr "Abrir carpeta"
 msgid "Preview"
 msgstr "Vista previa"
 
-#: ui/views/files-view.slint:467
+#: ui/views/files-view.slint:466
 msgid "Details"
 msgstr "Detalles"
 
