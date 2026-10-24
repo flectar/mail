@@ -36,35 +36,15 @@ STAGE="$BUILD_DIR/hap-stage"
 BUNDLE="${BUNDLE:-com.flectar.mail}"
 
 # The hap carries the application version: versionName is the root crate
-# version and versionCode is derived from it so store uploads stay monotonic
-# (a prerelease sorts below its release). VERSION_NAME/VERSION_CODE override.
+# version and versionCode follows the Android sequence (alpha < beta < rc <
+# release < the next patch), so store uploads stay monotonic.
+# VERSION_NAME/VERSION_CODE override.
 APP_VERSION="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$REPO_DIR/Cargo.toml" | head -n 1)"
 [ -n "$APP_VERSION" ] || die "cannot read the application version from Cargo.toml"
 VERSION_NAME="${VERSION_NAME:-$APP_VERSION}"
-VERSION_CORE="${APP_VERSION%%-*}"
-VERSION_CORE="${VERSION_CORE%%+*}"
-VERSION_PRE=""
-case "$APP_VERSION" in
-    *-*) VERSION_PRE="${APP_VERSION#*-}"; VERSION_PRE="${VERSION_PRE%%+*}" ;;
-esac
-IFS=. read -r V_MAJOR V_MINOR V_PATCH <<EOF
-$VERSION_CORE
-EOF
-case "$V_MAJOR$V_MINOR$V_PATCH" in
-    *[!0-9]*|"") die "unsupported application version: $APP_VERSION" ;;
-esac
 if [ -z "${VERSION_CODE:-}" ]; then
-    VERSION_CODE=$(( V_MAJOR * 10000000 + V_MINOR * 100000 + V_PATCH * 1000 ))
-    if [ -n "$VERSION_PRE" ]; then
-        VERSION_PRE_NUM="${VERSION_PRE##*.}"
-        case "$VERSION_PRE_NUM" in
-            *[!0-9]*|"") VERSION_PRE_NUM=1 ;;
-        esac
-        [ "$VERSION_PRE_NUM" -ge 1 ] && [ "$VERSION_PRE_NUM" -le 998 ] || VERSION_PRE_NUM=998
-        VERSION_CODE=$((VERSION_CODE + VERSION_PRE_NUM))
-    else
-        VERSION_CODE=$((VERSION_CODE + 999))
-    fi
+    VERSION_CODE=$(python3 "$REPO_DIR/scripts/android-version-code.py" "$APP_VERSION") \
+        || die "unsupported application version: $APP_VERSION"
 fi
 [ "$VERSION_CODE" -gt 0 ] && [ "$VERSION_CODE" -le 2147483647 ] || die "versionCode out of range: $VERSION_CODE"
 log "version: $VERSION_NAME ($VERSION_CODE)"

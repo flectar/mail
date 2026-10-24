@@ -77,11 +77,11 @@ hdc shell "aa start -a EntryAbility -b com.flectar.mail"
 ```
 
 The bundle name defaults to `com.flectar.mail`. The hap version follows the
-workspace `Cargo.toml`: `versionName` is the crate version and `versionCode` is
-`major*10^7 + minor*10^5 + patch*10^3` plus the prerelease number, or plus 999
-for a release, so store uploads stay monotonic (`0.1.0-alpha.7` becomes
-`100007`, `0.1.0` becomes `100999`). `VERSION_NAME` and `VERSION_CODE`
-override either value.
+workspace `Cargo.toml`: `versionName` is the crate version and `versionCode`
+follows the Android sequence from `scripts/android-version-code.py` (alpha <
+beta < rc < release < the next patch), so store uploads stay monotonic
+(`0.1.0-alpha.7` becomes `1000007`, `0.1.0` becomes `1009999`).
+`VERSION_NAME` and `VERSION_CODE` override either value.
 
 Release builds are signed with the AGC material through `hap-sign-tool`:
 
