@@ -1651,7 +1651,9 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
                     fallbacks.push(family);
                 }
             }
-            font_ctx.collection.set_fallbacks(key, fallbacks.into_iter());
+            font_ctx
+                .collection
+                .set_fallbacks(key, fallbacks.into_iter());
         }
     }
 
