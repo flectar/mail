@@ -1,11 +1,12 @@
 //! Experimental GPU renderer (femtovg on wgpu via EGL) for the XComponent
 //! surface.
 //!
-//! Selected at runtime with `FLECTAR_OHOS_GPU=1`; the software renderer stays
-//! the default. Construction is "suspended" (no surface, no GL context): the
-//! renderer attaches to the `OHNativeWindow` when the surface callback fires,
-//! renders on the Slint thread, and the surface gate keeps the compositor from
-//! pulling the window away while a frame is in flight.
+//! Attempted by default; `FLECTAR_OHOS_SOFTWARE=1` opts out on local runs (the
+//! device build has no environment), and a failed surface attach falls back to
+//! the software renderer. Construction is "suspended" (no surface, no GL
+//! context): the renderer attaches to the `OHNativeWindow` when the surface
+//! callback fires, renders on the Slint thread, and the surface gate keeps the
+//! compositor from pulling the window away while a frame is in flight.
 //!
 //! The raw-window-handle crate documents exactly this scenario (XComponent
 //! `OnSurfaceCreated` hands over an `OHNativeWindow` for

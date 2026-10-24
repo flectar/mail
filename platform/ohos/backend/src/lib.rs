@@ -1,6 +1,6 @@
 //! Minimal Slint platform backend for OpenHarmony.
 //!
-//! Architecture (see `docs/plans/2026-10-11-ohos-m2-minimal-backend.md`):
+//! Architecture:
 //!
 //! - The OHOS main thread hosts the ArkTS XComponent. Its native callbacks
 //!   (surface lifecycle + touch) arrive on the main thread and are converted
@@ -8,11 +8,9 @@
 //! - [`start`] spawns the Slint application thread. It installs
 //!   [`platform::OhosPlatform`] and runs the application closure. All Slint
 //!   state lives on that thread.
-//! - Rendering uses Slint's public software renderer
-//!   (`slint::platform::software_renderer`) and presents through the
-//!   `OHNativeWindow` buffer queue ([`present::Presenter`]).
-//!
-//! Only public Slint APIs are used.
+//! - Rendering uses the femtovg renderer on wgpu (EGL/GLES) once the surface
+//!   attaches ([`gpu`]), and otherwise Slint's software renderer, presenting
+//!   through the `OHNativeWindow` buffer queue ([`present::Presenter`]).
 
 pub mod asset;
 pub mod clipboard;

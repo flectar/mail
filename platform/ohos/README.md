@@ -16,9 +16,10 @@ operating-system name. OpenHarmony is one of the `mobile` platforms:
 
 - `build.rs` defines `mobile = any(target_os = "android", target_os = "ios",
   target_env = "ohos")` and keeps OHOS out of `desktop`/`linux_desktop`.
-- `src/platform/ohos.rs` is the application-side platform module: the share
-  target for data exported from the sandbox, the system monospace family, and
-  the TLS/system-font switches the shared code asks the platform about.
+- `src/platform/ohos.rs` is the application-side platform module: the items
+  of the host contract in [platform/README.md](../README.md) (PDFium location,
+  renderer name, PDF worker priority, preview lifecycle, app icon) plus the
+  system font directory for the email renderer.
 - This tree is the only place that may name OpenHarmony: the host builds a
   [`PlatformContext`](../README.md) (app-private paths, a document provider, a
   credential store and an OAuth redirect broker) and calls
@@ -32,7 +33,7 @@ must use the aliases.
 
 | Path | What it is |
 |------|------------|
-| `backend/` | `slint-ohos-backend`: Slint `Platform`/`WindowAdapter` for a single XComponent window. Software renderer by default, experimental femtovg/wgpu GPU path, input translation, IME hooks, clipboard, system fonts. |
+| `backend/` | `slint-ohos-backend`: Slint `Platform`/`WindowAdapter` for a single XComponent window. femtovg/wgpu renderer (EGL/GLES) with the software renderer as fallback, input translation, IME hooks, clipboard, system fonts. |
 | `mail/` | `flectar-mail-ohos` cdylib: NAPI module that builds the `PlatformContext` (app-private paths, `DocumentProvider` over the ArkTS pickers, Asset Store credential store, loopback OAuth broker), starts the application, and exposes the ArkTS bridge (file pickers, clipboard, IME text, external links). |
 | `demo/` | `slint-ohos-demo`: minimal cdylib used as a smoke target for backend changes. |
 | `shell/` | DevEco shell project (ArkTS). `page-templates/Index.mail.ets` is the real app page and `page-templates/Index.demo.ets` the demo page; `build-hap.sh` copies the selected template to `shell/entry/src/main/ets/pages/Index.ets`. |
@@ -145,7 +146,12 @@ handled (and asserted) in the script, do not "simplify" them away:
   runs can opt out with `FLECTAR_OHOS_SOFTWARE=1`; the device build has no
   environment, so the fallback is the safety net. The wgpu GL-backend
   subtleties (why `Backends::GL` must be requested explicitly) are documented
-  in the porting notes.
+  in `backend/src/gpu.rs`.
+- **System pickers**: the document picker opens in a window over the
+  XComponent without hiding it, and frames presented into the covered surface
+  leave the window unresponsive once the picker closes. Each pending picker
+  request therefore holds presentation (`backend/src/hold.rs`): the Slint
+  thread waits, without drawing, until the page reports the result.
 - **Soft keyboard**: the page attaches the OHOS input-method controller when
   Slint requests the input method. On 2in1 devices with a physical keyboard
   the system suppresses the soft keyboard (system applications included)
