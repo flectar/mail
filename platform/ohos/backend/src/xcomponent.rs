@@ -28,11 +28,6 @@ static VISIBLE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 static TOUCH_LOGGED: AtomicU32 = AtomicU32::new(0);
 const TOUCH_LOG_LIMIT: u32 = 40;
 
-/// Key diagnostics: log the first few events (codes and phases only, never the
-/// translated text, so that secrets typed into the app stay out of hilog).
-static KEY_LOGGED: AtomicU32 = AtomicU32::new(0);
-const KEY_LOG_LIMIT: u32 = 12;
-
 /// Wheel diagnostics: log the first few scroll events with the raw platform
 /// value, so the unit and sign can be checked against a device.
 static SCROLL_LOGGED: AtomicU32 = AtomicU32::new(0);
@@ -349,12 +344,6 @@ unsafe extern "C" fn on_key_event(component: *mut ffi::OH_NativeXComponent, _win
     let Some(text) = translate_key(code) else {
         return;
     };
-    let seen = KEY_LOGGED.fetch_add(1, Ordering::Relaxed);
-    if seen < KEY_LOG_LIMIT {
-        crate::log::info(&format!(
-            "key #{seen}: code={code} down={down} repeat={repeat}"
-        ));
-    }
     send(BackendEvent::Key { text, down, repeat });
 }
 
