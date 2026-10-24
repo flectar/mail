@@ -215,11 +215,9 @@ impl OhosWindow {
                 position,
                 button: PointerEventButton::Left,
             },
-            // A cancelled touch behaves as a release at the last known point.
-            TouchPhase::Cancel => WindowEvent::PointerReleased {
-                position,
-                button: PointerEventButton::Left,
-            },
+            // The system took the gesture over: end it without activating
+            // whatever it started on.
+            TouchPhase::Cancel => WindowEvent::PointerExited,
         };
         let _ = self.window.dispatch_event_with_result(event);
     }
