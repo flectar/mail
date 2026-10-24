@@ -4,14 +4,12 @@ use super::*;
 
 pub(super) fn register(
     app: &AppWindow,
-    _runtime: &Rc<tokio::runtime::Runtime>,
-    _documents: &std::sync::Arc<dyn crate::documents::DocumentProvider>,
+    runtime: &Rc<tokio::runtime::Runtime>,
+    documents: &std::sync::Arc<dyn documents::DocumentProvider>,
 ) {
     let weak = app.as_weak();
-    #[cfg(any(desktop, mobile))]
-    let runtime = Rc::clone(_runtime);
-    #[cfg(mobile)]
-    let documents = std::sync::Arc::clone(_documents);
+    let runtime = Rc::clone(runtime);
+    let provider = std::sync::Arc::clone(documents);
     app.on_import_mail_certificate(move || {
         let Some(app) = weak.upgrade() else {
             return;
@@ -19,50 +17,27 @@ pub(super) fn register(
         if app.get_account_setup_in_progress() {
             return;
         }
-        #[cfg(desktop)]
-        {
-            let weak = app.as_weak();
-            runtime.spawn(async move {
-                let Some(file) = rfd::AsyncFileDialog::new()
-                    .set_title("Import server certificate")
-                    .add_filter("PEM certificate", &["pem", "crt", "cer"])
-                    .pick_file()
-                    .await
-                else {
-                    return;
-                };
-                let result = read_certificate(file.path()).await;
-                let _ = weak.upgrade_in_event_loop(move |app| {
-                    if app.get_account_setup_in_progress() {
-                        return;
-                    }
-                    match result {
-                        Ok(pem) => {
-                            app.set_trusted_certificate_pem(pem.into());
-                            app.set_sync_status(UiMessage::plain(
-                                "Certificate imported. Connect to verify the server.",
-                            ));
-                        }
-                        Err(error) => app.set_sync_status(UiMessage::detail(
-                            "Certificate import failed: {}",
-                            error,
-                        )),
-                    }
-                });
-            });
-        }
-        #[cfg(mobile)]
-        {
-            // The host picker runs in its own window while this thread waits;
-            // read the staged copy while the ImportedDocument guard owns it.
-            let outcome = runtime.block_on(async {
-                let Some(document) = documents.import().await? else {
-                    return Ok::<Option<String>, String>(None);
-                };
-                let pem = read_certificate(document.path()).await?;
-                Ok(Some(pem))
-            });
-            match outcome {
+        let import = provider.import_with(documents::DocumentDialog {
+            title: "Import server certificate".into(),
+            filter: Some(("PEM certificate".into(), &["pem", "crt", "cer"])),
+        });
+        let request: documents::DocumentFuture<Option<String>> = Box::pin(async move {
+            // Read before the document is dropped: a host's staged copy lives
+            // only as long as the ImportedDocument.
+            let Some(document) = import.await? else {
+                return Ok(None);
+            };
+            read_certificate(document.path()).await.map(Some)
+        });
+        let weak = app.as_weak();
+        documents::run_request(&runtime, request, move |result| {
+            let Some(app) = weak.upgrade() else {
+                return;
+            };
+            if app.get_account_setup_in_progress() {
+                return;
+            }
+            match result {
                 Ok(Some(pem)) => {
                     app.set_trusted_certificate_pem(pem.into());
                     app.set_sync_status(UiMessage::plain(
@@ -70,16 +45,14 @@ pub(super) fn register(
                     ));
                 }
                 Ok(None) => {}
-                Err(error) => app.set_sync_status(UiMessage::detail(
-                    "Certificate import failed: {}",
-                    error,
-                )),
+                Err(error) => {
+                    app.set_sync_status(UiMessage::detail("Certificate import failed: {}", error))
+                }
             }
-        }
+        });
     });
 }
 
-#[cfg(any(desktop, mobile))]
 async fn read_certificate(path: &std::path::Path) -> Result<String, String> {
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(path)
