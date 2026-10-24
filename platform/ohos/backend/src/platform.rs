@@ -234,14 +234,21 @@ impl Platform for OhosPlatform {
         self.start_time.elapsed()
     }
 
-    /// OHOS has a single system clipboard; the selection clipboard maps onto it
-    /// as well because the platform only exposes one.
-    fn set_clipboard_text(&self, text: &str, _clipboard: slint::platform::Clipboard) {
-        crate::clipboard::write_text(text);
+    /// OpenHarmony has one system clipboard and no selection clipboard. Slint
+    /// copies every selection to the latter, password fields included, so it
+    /// must not reach the system clipboard.
+    fn set_clipboard_text(&self, text: &str, clipboard: slint::platform::Clipboard) {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            crate::clipboard::write_text(text);
+        }
     }
 
-    fn clipboard_text(&self, _clipboard: slint::platform::Clipboard) -> Option<String> {
-        crate::clipboard::read_text()
+    fn clipboard_text(&self, clipboard: slint::platform::Clipboard) -> Option<String> {
+        if clipboard == slint::platform::Clipboard::DefaultClipboard {
+            crate::clipboard::read_text()
+        } else {
+            None
+        }
     }
 }
 
