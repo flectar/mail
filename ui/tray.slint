@@ -5,10 +5,11 @@
 export component FlectarTray inherits SystemTrayIcon {
     in-out property <bool> enabled: false;
     visible: root.enabled;
-    // Trays draw at 16-44 px. The tray backends keep several decoded copies
-    // and Linux sends the pixels over D-Bus, so the full app icon would cost
-    // megabytes for the whole time the app sits in the tray.
-    icon: @image-url("../resources/app-icon/flectar-mail-tray.png");
+    // Rust sets the chosen icon's tray image from AppIcon.tray-image, which
+    // explains the small size; this compilation unit cannot share globals
+    // with app.slint.
+    in property <image> image: @image-url("../resources/app-icon/flectar-mail-tray.png");
+    icon: root.image;
     title: @tr("Flectar Mail");
     tooltip: @tr("Flectar Mail");
 

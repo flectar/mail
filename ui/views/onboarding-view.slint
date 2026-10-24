@@ -1,4 +1,5 @@
 import { FormField } from "../components/settings-components.slint";
+import { AppIcon } from "../app-icon.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
@@ -115,7 +116,7 @@ export component OnboardingView inherits Rectangle {
                 Image {
                     width: root.account-form-open ? 40px : 62px;
                     height: root.account-form-open ? 40px : 62px;
-                    source: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
+                    source: AppIcon.logo(AppIcon.variant);
                     image-fit: contain;
                     accessible-label: @tr("Flectar Mail logo");
                 }

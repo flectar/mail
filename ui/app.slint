@@ -6,6 +6,8 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
+export { AppIcon, AppIconVariant } from "app-icon.slint";
+import { AppIcon } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
@@ -200,6 +202,9 @@ export global I18n {
         if (key == "Sidebar icon style updated for this session.") { return @tr("Sidebar icon style updated for this session."); }
         if (key == "Sidebar icon preference saved.") { return @tr("Sidebar icon preference saved."); }
         if (key == "Could not save sidebar icon preference: {}") { return @tr("Could not save sidebar icon preference: {}", argument); }
+        if (key == "App icon updated for this session.") { return @tr("App icon updated for this session."); }
+        if (key == "App icon saved.") { return @tr("App icon saved."); }
+        if (key == "Could not save app icon: {}") { return @tr("Could not save app icon: {}", argument); }
         if (key == "Avatar preference updated for this session.") { return @tr("Avatar preference updated for this session."); }
         if (key == "Avatar preference saved.") { return @tr("Avatar preference saved."); }
         if (key == "Could not save avatar preference: {}") { return @tr("Could not save avatar preference: {}", argument); }
@@ -509,9 +514,7 @@ export global I18n {
 
 export component AppWindow inherits Window {
     title: @tr("Flectar Mail");
-    // Window managers show this at 256 px at most, and the decoded pixels stay
-    // resident for the life of the process, including while in the tray.
-    icon: @image-url("../resources/app-icon/flectar-mail-window.png");
+    icon: AppIcon.window-image(AppIcon.variant);
     // Windows keeps its native frame and macOS its traffic lights in the
     // integrated frame; only Linux removes the window manager's decorations.
     no-frame: WindowChrome.integrated && WindowChrome.platform == "linux";

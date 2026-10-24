@@ -302,6 +302,29 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_app_icon = Rc::clone(state);
+    let runtime_for_app_icon = Rc::clone(runtime);
+    app.global::<AppIcon>().on_choose(move |variant| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let previous = crate::app_icon::choice(app.global::<AppIcon>().get_variant());
+        let icon = crate::app_icon::choice(variant);
+        crate::app_icon::apply(&app, icon);
+        let Some(core) = state_for_app_icon.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("App icon updated for this session."));
+            return;
+        };
+        match runtime_for_app_icon.block_on(core.set_app_icon(icon)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("App icon saved.")),
+            Err(error) => {
+                crate::app_icon::apply(&app, previous);
+                app.set_sync_status(UiMessage::detail("Could not save app icon: {}", error));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sidebar_icons = Rc::clone(state);
     let runtime_for_sidebar_icons = Rc::clone(runtime);
     app.on_save_sidebar_icon_style(move |monochrome| {

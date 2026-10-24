@@ -128,6 +128,9 @@ fn android_main(app: slint::android::AndroidApp) {
     let credential_store = credentials::AndroidCredentialStore::new(&app, &internal)
         .expect("failed to initialize Android Keystore credential storage");
     pdf::configure(&app).expect("failed to configure bundled PDF preview");
+    if let Err(error) = launcher_icon::install(&app) {
+        tracing::warn!(%error, "launcher icon choice unavailable");
+    }
     let documents =
         documents::AndroidDocuments::new(&app).expect("failed to initialize document access");
     let platform = flectar_mail::PlatformContext::app_private(
@@ -150,5 +153,7 @@ mod tls;
 #[cfg(target_os = "android")]
 mod documents;
 
+#[cfg(target_os = "android")]
+mod launcher_icon;
 #[cfg(target_os = "android")]
 mod pdf;

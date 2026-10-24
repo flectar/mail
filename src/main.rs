@@ -1,5 +1,6 @@
 mod account_controller;
 mod account_mail_preferences;
+mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
 mod attachment_controller;
@@ -1581,6 +1582,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();

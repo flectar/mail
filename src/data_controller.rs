@@ -401,6 +401,13 @@ pub(super) fn restore_account_backup(
             {
                 settings.monochrome_sidebar_icons = enabled;
             }
+            if let Some(icon) = preferences
+                .get("appIcon")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::AppIcon::parse)
+            {
+                settings.app_icon = icon;
+            }
             if let Some(enabled) = preferences
                 .get("showAvatars")
                 .and_then(|value| value.as_bool())
@@ -596,6 +603,7 @@ pub(super) fn restore_account_backup(
         .into(),
     );
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
+    crate::app_icon::apply(app, settings.app_icon);
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
@@ -1204,6 +1212,7 @@ pub(super) fn register_data_management_callbacks(
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
+                    "appIcon": settings.app_icon,
                     "language": settings.language,
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
@@ -1485,6 +1494,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_theme_mode("system".into());
                     app.global::<MessageColors>().set_preference("system".into());
                     app.set_monochrome_sidebar_icons(false);
+                    crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());

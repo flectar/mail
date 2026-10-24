@@ -1,6 +1,8 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
+import { AppIcon } from "../app-icon.slint";
+import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
@@ -674,7 +676,7 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
@@ -1047,6 +1049,8 @@ export component SettingsDialog inherits Rectangle {
                                     );
                                 }
                             }
+
+                            if AppIcon.available : AppIconPicker { compact: root.compact; }
 
                             Rectangle {
                                 height: max((root.compact ? 346px : 264px)
@@ -2334,7 +2338,7 @@ export component SettingsDialog inherits Rectangle {
                                     y: 24px;
                                     width: 62px;
                                     height: 62px;
-                                    source: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
+                                    source: AppIcon.logo(AppIcon.variant);
                                     image-fit: contain;
                                     accessible-label: @tr("Flectar Mail logo");
                                 }

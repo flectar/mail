@@ -1,0 +1,59 @@
+// The application icon chosen in Settings. The window icon and in-app logos
+// bind to it here; Rust applies it to the tray, the Dock and the Linux
+// launcher. resources/app-icon/generate.py produces the variant assets.
+
+export enum AppIconVariant { orange, graphite, light, blue, green, purple }
+
+export struct AppIconOption {
+    variant: AppIconVariant,
+    name: string,
+}
+
+export global AppIcon {
+    // Rust enables the choice where the platform shows the selected icon.
+    in property <bool> available: false;
+    // "windows" | "macos" | "linux" | "android" | "ios".
+    in property <string> platform;
+    in property <AppIconVariant> variant: AppIconVariant.orange;
+    out property <[AppIconOption]> options: [
+        { variant: AppIconVariant.orange, name: @tr("Orange") },
+        { variant: AppIconVariant.graphite, name: @tr("Graphite") },
+        { variant: AppIconVariant.light, name: @tr("Light") },
+        { variant: AppIconVariant.blue, name: @tr("Blue") },
+        { variant: AppIconVariant.green, name: @tr("Green") },
+        { variant: AppIconVariant.purple, name: @tr("Purple") },
+    ];
+    callback choose(AppIconVariant);
+
+    public pure function logo(variant: AppIconVariant) -> image {
+        return variant == AppIconVariant.graphite ? @image-url("../resources/app-icon/variants/graphite.svg")
+            : variant == AppIconVariant.light ? @image-url("../resources/app-icon/variants/light.svg")
+            : variant == AppIconVariant.blue ? @image-url("../resources/app-icon/variants/blue.svg")
+            : variant == AppIconVariant.green ? @image-url("../resources/app-icon/variants/green.svg")
+            : variant == AppIconVariant.purple ? @image-url("../resources/app-icon/variants/purple.svg")
+            : @image-url("../resources/app-icon/flectar-mail-masked.svg");
+    }
+
+    // Window managers show this at 256 px at most, and the decoded pixels stay
+    // resident for the life of the process, including while in the tray.
+    public pure function window-image(variant: AppIconVariant) -> image {
+        return variant == AppIconVariant.graphite ? @image-url("../resources/app-icon/variants/graphite-window.png")
+            : variant == AppIconVariant.light ? @image-url("../resources/app-icon/variants/light-window.png")
+            : variant == AppIconVariant.blue ? @image-url("../resources/app-icon/variants/blue-window.png")
+            : variant == AppIconVariant.green ? @image-url("../resources/app-icon/variants/green-window.png")
+            : variant == AppIconVariant.purple ? @image-url("../resources/app-icon/variants/purple-window.png")
+            : @image-url("../resources/app-icon/flectar-mail-window.png");
+    }
+
+    // Trays draw at 16-44 px. The tray backends keep several decoded copies
+    // and Linux sends the pixels over D-Bus, so the full app icon would cost
+    // megabytes for the whole time the app sits in the tray.
+    public pure function tray-image(variant: AppIconVariant) -> image {
+        return variant == AppIconVariant.graphite ? @image-url("../resources/app-icon/variants/graphite-tray.png")
+            : variant == AppIconVariant.light ? @image-url("../resources/app-icon/variants/light-tray.png")
+            : variant == AppIconVariant.blue ? @image-url("../resources/app-icon/variants/blue-tray.png")
+            : variant == AppIconVariant.green ? @image-url("../resources/app-icon/variants/green-tray.png")
+            : variant == AppIconVariant.purple ? @image-url("../resources/app-icon/variants/purple-tray.png")
+            : @image-url("../resources/app-icon/flectar-mail-tray.png");
+    }
+}

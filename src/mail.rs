@@ -1022,6 +1022,18 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_app_icon(
+        &self,
+        icon: flectar_mail_core::models::AppIcon,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.app_icon = icon;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_monochrome_sidebar_icons(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.monochrome_sidebar_icons = enabled;

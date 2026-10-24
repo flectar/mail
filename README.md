@@ -113,7 +113,9 @@ Tauri or Wails.
 Choose the workspace that fits the way you handle email. Keep the detailed
 three-pane layout, switch to a streamlined minimal view, choose a light or dark
 theme, select a built-in color palette or create a custom one, and show or hide
-sender avatars.
+sender avatars. You can also give the app icon a different color: on the
+taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
+and iOS home screens.
 
 Message appearance can follow the app theme or stay light or dark independently.
 It uses your selected color palette for HTML, plain text, and Reader mode.
@@ -431,6 +433,8 @@ Flathub package and therefore does not receive automatic Flathub updates. Its
 close-to-tray option is disabled until the tray backend can use a sandbox-safe
 D-Bus name. Starting automatically at sign-in goes through the desktop's
 Background portal and opens the window, because there is no tray to start into.
+The app icon stays orange there, because the sandbox cannot change the launcher
+icon on the host.
 
 Install the downloaded Linux package with either
 `sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` or

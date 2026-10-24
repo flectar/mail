@@ -52,6 +52,7 @@ pub(super) fn create_and_register_window_lifecycle(
 
     if let Some(tray) = tray.as_ref() {
         tray.set_enabled(app.get_close_to_tray());
+        crate::app_icon::attach_tray(app, tray);
 
         let app_for_tray = app.as_weak();
         tray.on_show_window(move || {

@@ -85,6 +85,8 @@ provides these crate-internal items, which shared code calls without a `cfg`:
 | `pdfium_library()` | Path of the bundled PDFium library. |
 | `lower_current_thread_priority()` | Run the PDF worker thread at background priority. |
 | `install_preview_lifecycle()` | Register for background/memory-pressure notifications, which must call `flectar_mail::suspend_file_preview()`. |
+| `NAME` | The platform's name, which Settings uses to describe where the app icon appears. |
+| `show_app_icon(icon)` | Show the app icon chosen in Settings on the home screen. Android forwards it to the bridge its host registers with `configure_launcher_icon`; iOS switches to the alternate icon sets declared in `platform/ios/project.yml`. |
 
 Hosts that launch through `src/desktop.rs` (desktop and iOS) also provide
 `platform::launch_context()`.

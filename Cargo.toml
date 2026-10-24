@@ -162,11 +162,12 @@ wayland-protocols = { version = "0.32", default-features = false, features = ["c
 slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
 
 # The integrated title bar adjusts the native window, which winit cannot
-# change after creation. These AppKit bindings are already in the build.
+# change after creation, and the chosen app icon replaces the Dock icon.
+# These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSError", "NSGeometry", "NSString", "NSUserDefaults"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSData", "NSError", "NSGeometry", "NSString", "NSUserDefaults"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 

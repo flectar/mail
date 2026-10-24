@@ -41,6 +41,7 @@ mod tests {
         assert!(d.mark_read_on_open);
         assert!(!d.load_remote_images);
         assert!(!d.monochrome_sidebar_icons);
+        assert_eq!(d.app_icon, crate::models::AppIcon::Orange);
         assert!(d.show_avatars);
         assert!(d.group_mail_by_date);
         assert!(d.collect_outgoing_contacts);
@@ -65,6 +66,7 @@ mod tests {
         s.calendar_week_start = "sunday".into();
         s.notifications_enabled = false;
         s.monochrome_sidebar_icons = true;
+        s.app_icon = crate::models::AppIcon::Graphite;
         s.show_avatars = false;
         s.group_mail_by_date = false;
         s.workspace_layout = "minimal".into();
@@ -113,6 +115,7 @@ mod tests {
         assert_eq!(back.calendar_week_start, "sunday");
         assert!(!back.notifications_enabled);
         assert!(back.monochrome_sidebar_icons);
+        assert_eq!(back.app_icon, crate::models::AppIcon::Graphite);
         assert!(!back.show_avatars);
         assert!(!back.group_mail_by_date);
         assert!(back.contact_suggest_all_accounts);
@@ -148,6 +151,7 @@ mod tests {
         assert!(s.load_remote_images);
         assert!(s.mark_read_on_open);
         assert!(!s.monochrome_sidebar_icons);
+        assert_eq!(s.app_icon, crate::models::AppIcon::Orange);
         assert!(s.show_avatars);
         assert!(s.group_mail_by_date);
         assert!(s.collect_outgoing_contacts);

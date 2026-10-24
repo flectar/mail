@@ -11,7 +11,9 @@ pub mod snapshot;
 
 use crate::{
     error::{CoreError, Result},
-    models::{StartupPresentation, normalized_window_frame, normalized_workspace_list_pane_width},
+    models::{
+        AppIcon, StartupPresentation, normalized_window_frame, normalized_workspace_list_pane_width,
+    },
 };
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -216,6 +218,11 @@ pub(crate) fn startup_presentation(path: &Path) -> StartupPresentation {
         close_to_tray: value
             .get("closeToTray")
             .and_then(serde_json::Value::as_bool)
+            .unwrap_or_default(),
+        app_icon: value
+            .get("appIcon")
+            .and_then(serde_json::Value::as_str)
+            .and_then(AppIcon::parse)
             .unwrap_or_default(),
     }
 }
@@ -775,7 +782,7 @@ mod connection_profile_tests {
 #[cfg(test)]
 mod startup_preference_tests {
     use super::startup_presentation;
-    use crate::models::MIN_WORKSPACE_LIST_PANE_WIDTH;
+    use crate::models::{AppIcon, MIN_WORKSPACE_LIST_PANE_WIDTH};
     use rusqlite::Connection;
 
     #[test]
@@ -867,6 +874,30 @@ mod startup_preference_tests {
             conn.execute("UPDATE app_settings SET value = ?1", [value])
                 .unwrap();
             assert!(!startup_presentation(&path).close_to_tray, "{value}");
+        }
+    }
+
+    #[test]
+    fn startup_app_icon_falls_back_to_the_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mail.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"appIcon\": \"graphite\"}');",
+        )
+        .unwrap();
+        assert_eq!(startup_presentation(&path).app_icon, AppIcon::Graphite);
+
+        for value in ["{}", "{\"appIcon\": \"future\"}", "{\"appIcon\": 2}"] {
+            conn.execute("UPDATE app_settings SET value = ?1", [value])
+                .unwrap();
+            assert_eq!(
+                startup_presentation(&path).app_icon,
+                AppIcon::Orange,
+                "{value}"
+            );
         }
     }
 }
