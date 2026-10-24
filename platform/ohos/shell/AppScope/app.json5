@@ -2,11 +2,11 @@
   app: {
     // Bundle name; build-hap.sh can override it with BUNDLE=...
     bundleName: 'com.flectar.mail',
-    vendor: 'example',
+    vendor: 'Flectar',
     // build-hap.sh rewrites these from the workspace Cargo.toml (versionName
     // is the crate version, versionCode is derived from it). The values here
     // only apply to an IDE build that bypasses the script.
-    versionCode: 100007,
+    versionCode: 1000007,
     versionName: '0.1.0-alpha.7',
     icon: '$media:app_icon',
     label: '$string:app_name',

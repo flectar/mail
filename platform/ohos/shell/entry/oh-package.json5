@@ -4,6 +4,6 @@
   description: 'entry module',
   main: '',
   author: '',
-  license: 'MIT',
+  license: 'AGPL-3.0-only',
   dependencies: {},
 }

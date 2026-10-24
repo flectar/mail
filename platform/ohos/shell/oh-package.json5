@@ -1,8 +1,8 @@
 {
   modelVersion: '6.0.2',
-  name: 'slint_ohos_demo',
+  name: 'flectar_mail',
   version: '1.0.0',
-  description: 'Slint OHOS M2 demo shell',
+  description: 'Flectar Mail for OpenHarmony',
   main: '',
   author: '',
   license: 'AGPL-3.0-only',
