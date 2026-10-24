@@ -6,6 +6,8 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
+export { AppIcon, AppIconVariant } from "app-icon.slint";
+import { AppIcon } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
@@ -22,6 +24,7 @@ export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "
 export { MailListNavigation, MailNavigationTarget } from "models.slint";
 export { ThreadMessageRow, StorageUsageRow } from "models.slint";
 export { CalendarAgendaNavigation } from "components/calendar-agenda.slint";
+export { KeyboardKeys, KeyChord } from "components/kbd.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail, WindowTopBar } from "components/workspace-navigation.slint";
 export { TabsUi, TabRow } from "components/workspace-navigation.slint";
@@ -43,15 +46,22 @@ import { FilesView, FilesUi } from "views/files-view.slint";
 import { ContactsView } from "views/contacts-view.slint";
 import { OnboardingView } from "views/onboarding-view.slint";
 
-// Rust view-models call this global for the small amount of date/status text
+// Rust view-models call this global for the date vocabulary and status text
 // that must be materialized before it enters a Slint model. Keeping the
 // translations here makes those strings part of the same bundled catalog as
 // the declarative UI.
 export global I18n {
-    pure callback month-name(int, bool) -> string;
-    pure callback weekday-short(int) -> string;
-    pure callback weekday-name(int) -> string;
-    pure callback agenda-date-label(int, int, int) -> string;
+    // Date vocabulary and patterns for src/date_format.rs. Patterns use CLDR
+    // date field symbols: y year, M month (MMM abbreviated, MMMM full),
+    // LLLL standalone month, d day, E weekday (EEEE full), a AM/PM, h and H
+    // 12- and 24-hour hours, m minutes. Text in single quotes is literal.
+    pure callback date-month(int, string) -> string;
+    pure callback date-weekday(int, bool) -> string;
+    pure callback date-day-period(bool) -> string;
+    pure callback date-yesterday() -> string;
+    pure callback date-pattern(string) -> string;
+    pure callback date-range(string, string) -> string;
+    pure callback date-at-time(string, string) -> string;
     pure callback calendar-all-day() -> string;
     pure callback untitled-event() -> string;
     pure callback no-contact-history() -> string;
@@ -59,7 +69,7 @@ export global I18n {
     pure callback new-contact-entry() -> string;
     pure callback no-connected-account() -> string;
     pure callback interaction-count(int) -> string;
-    pure callback last-contacted(int, int, int) -> string;
+    pure callback last-contacted(string) -> string;
     pure callback loading-local-data() -> string;
     pure callback local-data-ready() -> string;
     pure callback local-data-unavailable(string) -> string;
@@ -78,44 +88,84 @@ export global I18n {
     pure callback ui-message-compose(string, string, string, string) -> string;
     pure callback ui-message-oauth(string, string, string, string) -> string;
 
-    month-name(month, short) => {
-        if (month == 1) { return short ? @tr("Jan") : @tr("January"); }
-        if (month == 2) { return short ? @tr("Feb") : @tr("February"); }
-        if (month == 3) { return short ? @tr("Mar") : @tr("March"); }
-        if (month == 4) { return short ? @tr("Apr") : @tr("April"); }
-        if (month == 5) { return @tr("May"); }
-        if (month == 6) { return short ? @tr("Jun") : @tr("June"); }
-        if (month == 7) { return short ? @tr("Jul") : @tr("July"); }
-        if (month == 8) { return short ? @tr("Aug") : @tr("August"); }
-        if (month == 9) { return short ? @tr("Sep") : @tr("September"); }
-        if (month == 10) { return short ? @tr("Oct") : @tr("October"); }
-        if (month == 11) { return short ? @tr("Nov") : @tr("November"); }
-        if (month == 12) { return short ? @tr("Dec") : @tr("December"); }
+    date-month(month, form) => {
+        if (form == "abbreviated") {
+            if (month == 1) { return @tr("abbreviated month in a date" => "Jan"); }
+            if (month == 2) { return @tr("abbreviated month in a date" => "Feb"); }
+            if (month == 3) { return @tr("abbreviated month in a date" => "Mar"); }
+            if (month == 4) { return @tr("abbreviated month in a date" => "Apr"); }
+            if (month == 5) { return @tr("abbreviated month in a date" => "May"); }
+            if (month == 6) { return @tr("abbreviated month in a date" => "Jun"); }
+            if (month == 7) { return @tr("abbreviated month in a date" => "Jul"); }
+            if (month == 8) { return @tr("abbreviated month in a date" => "Aug"); }
+            if (month == 9) { return @tr("abbreviated month in a date" => "Sep"); }
+            if (month == 10) { return @tr("abbreviated month in a date" => "Oct"); }
+            if (month == 11) { return @tr("abbreviated month in a date" => "Nov"); }
+            if (month == 12) { return @tr("abbreviated month in a date" => "Dec"); }
+        }
+        if (form == "wide") {
+            if (month == 1) { return @tr("month in a date" => "January"); }
+            if (month == 2) { return @tr("month in a date" => "February"); }
+            if (month == 3) { return @tr("month in a date" => "March"); }
+            if (month == 4) { return @tr("month in a date" => "April"); }
+            if (month == 5) { return @tr("month in a date" => "May"); }
+            if (month == 6) { return @tr("month in a date" => "June"); }
+            if (month == 7) { return @tr("month in a date" => "July"); }
+            if (month == 8) { return @tr("month in a date" => "August"); }
+            if (month == 9) { return @tr("month in a date" => "September"); }
+            if (month == 10) { return @tr("month in a date" => "October"); }
+            if (month == 11) { return @tr("month in a date" => "November"); }
+            if (month == 12) { return @tr("month in a date" => "December"); }
+        }
+        if (month == 1) { return @tr("month on its own" => "January"); }
+        if (month == 2) { return @tr("month on its own" => "February"); }
+        if (month == 3) { return @tr("month on its own" => "March"); }
+        if (month == 4) { return @tr("month on its own" => "April"); }
+        if (month == 5) { return @tr("month on its own" => "May"); }
+        if (month == 6) { return @tr("month on its own" => "June"); }
+        if (month == 7) { return @tr("month on its own" => "July"); }
+        if (month == 8) { return @tr("month on its own" => "August"); }
+        if (month == 9) { return @tr("month on its own" => "September"); }
+        if (month == 10) { return @tr("month on its own" => "October"); }
+        if (month == 11) { return @tr("month on its own" => "November"); }
+        if (month == 12) { return @tr("month on its own" => "December"); }
         return "";
     }
 
-    weekday-short(day) => {
-        if (day == 0) { return @tr("Mon"); }
-        if (day == 1) { return @tr("Tue"); }
-        if (day == 2) { return @tr("Wed"); }
-        if (day == 3) { return @tr("Thu"); }
-        if (day == 4) { return @tr("Fri"); }
-        if (day == 5) { return @tr("Sat"); }
-        return @tr("Sun");
+    date-weekday(day, abbreviated) => {
+        if (day == 0) { return abbreviated ? @tr("Mon") : @tr("Monday"); }
+        if (day == 1) { return abbreviated ? @tr("Tue") : @tr("Tuesday"); }
+        if (day == 2) { return abbreviated ? @tr("Wed") : @tr("Wednesday"); }
+        if (day == 3) { return abbreviated ? @tr("Thu") : @tr("Thursday"); }
+        if (day == 4) { return abbreviated ? @tr("Fri") : @tr("Friday"); }
+        if (day == 5) { return abbreviated ? @tr("Sat") : @tr("Saturday"); }
+        return abbreviated ? @tr("Sun") : @tr("Sunday");
     }
 
-    weekday-name(day) => {
-        if (day == 0) { return @tr("Monday"); }
-        if (day == 1) { return @tr("Tuesday"); }
-        if (day == 2) { return @tr("Wednesday"); }
-        if (day == 3) { return @tr("Thursday"); }
-        if (day == 4) { return @tr("Friday"); }
-        if (day == 5) { return @tr("Saturday"); }
-        return @tr("Sunday");
+    date-day-period(pm) => {
+        return pm ? @tr("time of day" => "PM") : @tr("time of day" => "AM");
     }
-    agenda-date-label(weekday, day, month) => {
-        return @tr("{} · {} {}", root.weekday-name(weekday), day, root.month-name(month, false));
+
+    date-yesterday() => { return @tr("Yesterday"); }
+
+    date-pattern(key) => {
+        if (key == "short-day-month") { return @tr("date pattern (CLDR): day and month of recent mail in lists" => "MMM d"); }
+        if (key == "short-date") { return @tr("date pattern (CLDR): date of older mail in lists, keep it short" => "MMM d, y"); }
+        if (key == "date") { return @tr("date pattern (CLDR): a date on its own" => "MMM d, y"); }
+        if (key == "weekday-date") { return @tr("date pattern (CLDR): a date with its weekday" => "EEE, MMM d, y"); }
+        if (key == "weekday-day-month") { return @tr("date pattern (CLDR): day heading in the agenda" => "EEEE, MMMM d"); }
+        if (key == "month-year") { return @tr("date pattern (CLDR): month heading, LLLL is the month name on its own" => "LLLL y"); }
+        if (key == "same-month-start") { return @tr("date pattern (CLDR): first date of a range within one month" => "MMMM d"); }
+        if (key == "same-month-end") { return @tr("date pattern (CLDR): last date of a range within one month" => "d, y"); }
+        if (key == "same-year-start") { return @tr("date pattern (CLDR): first date of a range within one year" => "MMM d"); }
+        if (key == "same-year-end") { return @tr("date pattern (CLDR): last date of a range within one year" => "MMM d, y"); }
+        if (key == "time-24") { return @tr("time pattern (CLDR): 24-hour clock" => "HH:mm"); }
+        if (key == "time-12") { return @tr("time pattern (CLDR): 12-hour clock, a is AM or PM" => "h:mm a"); }
+        return @tr("time pattern (CLDR): whole hour on a 12-hour clock" => "h a");
     }
+
+    date-range(start, end) => { return @tr("date range" => "{0} – {1}", start, end); }
+    date-at-time(date, time) => { return @tr("date and time" => "{0} at {1}", date, time); }
 
     calendar-all-day() => { return @tr("All day"); }
     untitled-event() => { return @tr("(untitled event)"); }
@@ -126,9 +176,7 @@ export global I18n {
     interaction-count(count) => {
         return @tr("{n} interaction" | "{n} interactions" % count);
     }
-    last-contacted(month, day, year) => {
-        return @tr("Last contacted {} {}, {}", root.month-name(month, true), day, year);
-    }
+    last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
     local-data-ready() => { return @tr("Local data ready."); }
     local-data-unavailable(error) => { return @tr("Local data is unavailable: {}", error); }
@@ -197,9 +245,15 @@ export global I18n {
         if (key == "Language updated for this session.") { return @tr("Language updated for this session."); }
         if (key == "Language preference saved.") { return @tr("Language preference saved."); }
         if (key == "Could not save language: {}") { return @tr("Could not save language: {}", argument); }
+        if (key == "Time format updated for this session.") { return @tr("Time format updated for this session."); }
+        if (key == "Time format preference saved.") { return @tr("Time format preference saved."); }
+        if (key == "Could not save time format: {}") { return @tr("Could not save time format: {}", argument); }
         if (key == "Sidebar icon style updated for this session.") { return @tr("Sidebar icon style updated for this session."); }
         if (key == "Sidebar icon preference saved.") { return @tr("Sidebar icon preference saved."); }
         if (key == "Could not save sidebar icon preference: {}") { return @tr("Could not save sidebar icon preference: {}", argument); }
+        if (key == "App icon updated for this session.") { return @tr("App icon updated for this session."); }
+        if (key == "App icon saved.") { return @tr("App icon saved."); }
+        if (key == "Could not save app icon: {}") { return @tr("Could not save app icon: {}", argument); }
         if (key == "Avatar preference updated for this session.") { return @tr("Avatar preference updated for this session."); }
         if (key == "Avatar preference saved.") { return @tr("Avatar preference saved."); }
         if (key == "Could not save avatar preference: {}") { return @tr("Could not save avatar preference: {}", argument); }
@@ -256,6 +310,11 @@ export global I18n {
 
     ui-message-account(key, argument, second-argument, third-argument) => {
         if (key == "Database snapshot exported to {}.") { return @tr("Database snapshot exported to {}.", argument); }
+        if (key == "Choose where to export the mail") { return @tr("Choose where to export the mail"); }
+        if (key == "Exporting mail…") { return @tr("Exporting mail…"); }
+        if (key == "Mail exported to {}.") { return @tr("Mail exported to {}.", argument); }
+        if (key == "Mail exported to {}. Some messages could not be found on this device or the mail server.") { return @tr("Mail exported to {}. Some messages could not be found on this device or the mail server.", argument); }
+        if (key == "Could not export mail: {}") { return @tr("Could not export mail: {}", argument); }
         if (key == "Could not export database snapshot: {}") { return @tr("Could not export database snapshot: {}", argument); }
         if (key == "Account order saved.") { return @tr("Account order saved."); }
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
@@ -347,7 +406,7 @@ export global I18n {
         if (key == "Could not delete event: {}") { return @tr("Could not delete event: {}", argument); }
         if (key == "Event deleted, but refresh failed: {}") { return @tr("Event deleted, but refresh failed: {}", argument); }
         if (key == "Event deleted.") { return @tr("Event deleted."); }
-        if (key == "Use YYYY-MM-DD and a 24-hour time such as 09:30.") { return @tr("Use YYYY-MM-DD and a 24-hour time such as 09:30."); }
+        if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
         if (key == "That local time does not exist in the current time zone.") { return @tr("That local time does not exist in the current time zone."); }
@@ -377,6 +436,10 @@ export global I18n {
         if (key == "Updating Sent copy settings…") { return @tr("Updating Sent copy settings…"); }
         if (key == "Sent copy settings updated.") { return @tr("Sent copy settings updated."); }
         if (key == "Could not update Sent copy settings: {}") { return @tr("Could not update Sent copy settings: {}", argument); }
+        if (key == "Server mail settings require local mail data.") { return @tr("Server mail settings require local mail data."); }
+        if (key == "Updating server mail settings…") { return @tr("Updating server mail settings…"); }
+        if (key == "Server mail settings updated.") { return @tr("Server mail settings updated."); }
+        if (key == "Could not update server mail settings: {}") { return @tr("Could not update server mail settings: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -433,6 +496,14 @@ export global I18n {
     }
 
     ui-message-compose(key, argument, second-argument, third-argument) => {
+        // Reply and forward quotation headers, written into the draft.
+        if (key == "On {}, {} wrote:") { return @tr("On {}, {} wrote:", argument, second-argument); }
+        if (key == "{} wrote:") { return @tr("{} wrote:", argument); }
+        if (key == "Forwarded message") { return @tr("Forwarded message"); }
+        if (key == "From: {}") { return @tr("forwarded message header" => "From: {}", argument); }
+        if (key == "Date: {}") { return @tr("forwarded message header" => "Date: {}", argument); }
+        if (key == "Subject: {}") { return @tr("forwarded message header" => "Subject: {}", argument); }
+        if (key == "To: {}") { return @tr("forwarded message header" => "To: {}", argument); }
         if (key == "Attach files to this email") { return @tr("Attach files to this email"); }
         if (key == "Could not add attachments: {}") { return @tr("Could not add attachments: {}", argument); }
         if (key == "Added 1 attachment.") { return @tr("Added 1 attachment."); }
@@ -461,6 +532,7 @@ export global I18n {
         if (key == "Email template inserted, but its usage could not be saved: {}") { return @tr("Email template inserted, but its usage could not be saved: {}", argument); }
         if (key == "Choose a supported account type and connection security.") { return @tr("Choose a supported account type and connection security."); }
         if (key == "IMAP port must be between 1 and 65535.") { return @tr("IMAP port must be between 1 and 65535."); }
+        if (key == "POP3 port must be between 1 and 65535.") { return @tr("POP3 port must be between 1 and 65535."); }
         if (key == "SMTP port must be between 1 and 65535.") { return @tr("SMTP port must be between 1 and 65535."); }
         if (key == "Local mail data is unavailable. Retry startup.") { return @tr("Local mail data is unavailable. Retry startup."); }
         if (key == "Discovering JMAP and checking capabilities…") { return @tr("Discovering JMAP and checking capabilities…"); }
@@ -470,6 +542,7 @@ export global I18n {
         if (key == "Certificate import failed: {}") { return @tr("Certificate import failed: {}", argument); }
         if (key == "Paste the PEM certificate into the certificate field.") { return @tr("Paste the PEM certificate into the certificate field."); }
         if (key == "Testing IMAP and SMTP connections…") { return @tr("Testing IMAP and SMTP connections…"); }
+        if (key == "Testing POP3 and SMTP connections…") { return @tr("Testing POP3 and SMTP connections…"); }
         return "";
     }
 
@@ -498,9 +571,7 @@ export global I18n {
 
 export component AppWindow inherits Window {
     title: @tr("Flectar Mail");
-    // Window managers show this at 256 px at most, and the decoded pixels stay
-    // resident for the life of the process, including while in the tray.
-    icon: @image-url("../resources/app-icon/flectar-mail-window.png");
+    icon: AppIcon.window-image(AppIcon.variant);
     // Windows keeps its native frame and macOS its traffic lights in the
     // integrated frame; only Linux removes the window manager's decorations.
     no-frame: WindowChrome.integrated && WindowChrome.platform == "linux";
@@ -563,6 +634,7 @@ export component AppWindow inherits Window {
     callback save_workspace_layout(string);
     callback save_workspace_list_pane_width(length);
     callback save_language(string);
+    callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
@@ -603,6 +675,7 @@ export component AppWindow inherits Window {
     callback reorder_account(string, int, bool);
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
+    callback save_account_keep_on_server(int, string);
     callback connect_account_calendar(int);
     callback set_account_calendar_enabled(int, bool);
     callback connect_caldav(int, string, string, string);
@@ -612,6 +685,7 @@ export component AppWindow inherits Window {
     callback export_account_backup();
     callback import_accounts();
     callback export_database_snapshot();
+    callback export_device_mail(int);
     callback delete_all_data();
     callback load_storage_usage();
     callback cancel_storage_usage();
@@ -684,6 +758,9 @@ export component AppWindow inherits Window {
     in property <int> selected_mail_label_count: 0;
     in property <bool> selected_account_uses_labels: false;
     in property <[AccountRow]> connected_accounts: [];
+    in property <bool> has_device_mail: false;
+    in property <bool> mail_export_running: false;
+    in property <LocalizedMessage> mail-export-message;
     in property <[MailProfileRow]> mail_profiles: [];
     in property <[ProfileMemberRow]> profile_members: [];
     // The profile the mail view shows; an empty id means every account.
@@ -753,6 +830,8 @@ export component AppWindow inherits Window {
     in property <string> calendar_period_title: "";
     in property <string> calendar_week_label: "";
     in property <string> calendar_selected_date: "";
+    in property <string> calendar_selected_date_label: "";
+    in property <[string]> calendar_hour_labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
     in property <bool> calendar_selected_date_has_events: false;
     in-out property <bool> calendar_sidebar_collapsed: false;
     in-out property <string> calendar_view_mode: "week";
@@ -769,7 +848,7 @@ export component AppWindow inherits Window {
     in-out property <bool> mail_sidebar_collapsed: false;
     in-out property <bool> contacts_sidebar_collapsed: false;
     in property <string> unified_count: "";
-    in property <string> search_query: "";
+    in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
@@ -821,8 +900,21 @@ export component AppWindow inherits Window {
     changed settings_open => {
         root.product-changed(root.active_view);
         // Hiding Settings destroys the dialog before its own change handlers
-        // run, so an unsaved palette is discarded here.
-        if root.settings_open { root.settings-shown(); } else { ThemeDraft.revert(); }
+        // run, so an unsaved palette and open forms are discarded here. The
+        // dialog's private state starts over when it is created again.
+        if root.settings_open {
+            root.settings-shown();
+        } else {
+            ThemeDraft.revert();
+            root.account_form_open = false;
+            root.account_password = "";
+            root.caldav_account_id = -1;
+            root.caldav_password = "";
+            root.caldav_manage_existing = false;
+            root.carddav_account_id = -1;
+            root.carddav_password = "";
+            root.carddav_manage_existing = false;
+        }
         TabsUi.navigated();
     }
     // Settings appeared, whichever way it was opened.
@@ -866,6 +958,9 @@ export component AppWindow inherits Window {
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
     in-out property <string> language_mode: "system";
+    // "automatic" follows the regional clock; "12h" and "24h" fix it.
+    in-out property <string> time_format: "automatic";
+    in property <string> time_format_sample: "13:30";
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
@@ -1248,7 +1343,7 @@ export component AppWindow inherits Window {
         accessible-label: I18n.loading-local-data();
 
         VerticalLayout {
-            width: 240px.min(parent.width - 32px);
+            width: max(240px, self.preferred-width).min(parent.width - 32px);
             height: 92px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1357,7 +1452,7 @@ export component AppWindow inherits Window {
             selected_scope_title: root.selected_scope_title;
             trash_view: root.trash_view;
             unified_count: root.unified_count;
-            search_query: root.search_query;
+            search_query <=> root.search_query;
             search_filter: root.search_filter;
             selected_sender: root.selected_sender;
             selected_address: root.selected_address;
@@ -1505,6 +1600,8 @@ export component AppWindow inherits Window {
             period-title: root.calendar_period_title;
             week-label: root.calendar_week_label;
             selected-date: root.calendar_selected_date;
+            selected-date-label: root.calendar_selected_date_label;
+            hour-labels: root.calendar_hour_labels;
             selected-date-has-events: root.calendar_selected_date_has_events;
             view-mode: root.calendar_view_mode;
             background-color: root.page-bg;
@@ -1557,7 +1654,7 @@ export component AppWindow inherits Window {
             contacts: root.contacts;
             sidebar-rows: root.contact_sidebar_rows;
             toggle-section(key, open) => { root.toggle-contact-section(key, open); }
-            query: root.contact_search_query;
+            query <=> root.contact_search_query;
             filter: root.contact_scope == "Favorites" ? "favorites"
                 : root.contact_scope == "Suggestions" ? "suggestions" : "all";
             selected-scope: root.contact_scope;
@@ -1703,6 +1800,7 @@ export component AppWindow inherits Window {
             calendar_event_title <=> root.calendar_event_title;
             calendar_event_date <=> root.calendar_event_date;
             calendar_event_time <=> root.calendar_event_time;
+            time-placeholder: root.time_format_sample;
             calendar_event_duration <=> root.calendar_event_duration;
             calendar_event_color <=> root.calendar_event_color;
             calendar-save-event(title, date, time, duration, color) => {
@@ -1723,6 +1821,9 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             connected_accounts: root.connected_accounts;
+            has_device_mail: root.has_device_mail;
+            mail_export_running: root.mail_export_running;
+            mail_export_status: I18n.ui-message(root.mail-export-message.key, root.mail-export-message.argument, root.mail-export-message.second_argument, root.mail-export-message.third_argument);
             mail_profiles: root.mail_profiles;
             profile_members: root.profile_members;
             new-profile-requested <=> root.new_profile_requested;
@@ -1768,6 +1869,8 @@ export component AppWindow inherits Window {
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
+            time_format <=> root.time_format;
+            time_format_sample: root.time_format_sample;
             monochrome_sidebar_icons <=> root.monochrome_sidebar_icons;
             notifications_enabled <=> root.notifications_enabled;
             notification_sound_enabled <=> root.notification_sound_enabled;
@@ -1862,6 +1965,7 @@ export component AppWindow inherits Window {
             }
             save_workspace_layout(mode) => { root.save_workspace_layout(mode); }
             save_language(language) => { root.save_language(language); }
+            save_time_format(format) => { root.save_time_format(format); }
             save_sidebar_icon_style(monochrome) => { root.save_sidebar_icon_style(monochrome); }
             save_notification_settings(enabled, sound-enabled, scope) => {
                 root.save_notification_settings(enabled, sound-enabled, scope);
@@ -1895,6 +1999,7 @@ export component AppWindow inherits Window {
             reorder_account(source, target, after) => { root.reorder_account(source, target, after); }
             save_account_mail_history(account-id, value) => { root.save_account_mail_history(account-id, value); }
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
+            save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
             set_account_calendar_enabled(account-id, enabled) => { root.set_account_calendar_enabled(account-id, enabled); }
             connect_caldav(account-id, url, username, password) => { root.connect_caldav(account-id, url, username, password); }
@@ -1904,6 +2009,7 @@ export component AppWindow inherits Window {
             export_account_backup => { root.export_account_backup(); }
             import_accounts => { root.import_accounts(); }
             export_database_snapshot => { root.export_database_snapshot(); }
+            export_device_mail(account-id) => { root.export_device_mail(account-id); }
             delete_all_data => { root.delete_all_data(); }
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }

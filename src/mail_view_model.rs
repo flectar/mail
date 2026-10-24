@@ -4,7 +4,7 @@
 mod removal_tests;
 
 use super::*;
-use chrono::Datelike;
+use chrono::{Datelike, Timelike};
 
 pub(super) fn refresh_from_source(
     app: &AppWindow,
@@ -670,6 +670,7 @@ fn make_thread_rows(
     selected_index: usize,
     favicon_icons: &HashMap<String, FaviconImages>,
 ) -> Vec<ThreadMessageRow> {
+    let now = Local::now();
     messages
         .iter()
         .enumerate()
@@ -687,7 +688,7 @@ fn make_thread_rows(
                     .unwrap_or_default(),
                 has_favicon: favicon.is_some(),
                 preview: display_preview(&message.preview).into(),
-                time: message.time.clone().into(),
+                time: message_time(message.date_ms, &now).into(),
                 to: message.to.clone().into(),
                 unread: message.unread,
                 outgoing: message.is_outgoing,
@@ -979,7 +980,7 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                 has_favicon: favicon.is_some(),
                 subject: email.subject.clone().into(),
                 preview: display_preview(&email.preview).into(),
-                time: mail_list_display_time(email.date_ms, &email.time, &now).into(),
+                time: mail_list_time(email.date_ms, &now).into(),
                 unread: email.unread,
                 starred: email.starred,
                 has_attachments: email.has_attachments,
@@ -996,24 +997,34 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
         .collect()
 }
 
-fn mail_list_display_time(
-    date_ms: i64,
-    fallback: &str,
-    now: &chrono::DateTime<Local>,
-) -> String {
+/// The time or date beside a mail list row. Yesterday's mail shows its time
+/// too, since the list's date sections name the day.
+fn mail_list_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
+    message_time_label(date_ms, now, false)
+}
+
+/// The time or date in a conversation's message headers.
+pub(super) fn message_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
+    message_time_label(date_ms, now, true)
+}
+
+fn message_time_label(date_ms: i64, now: &chrono::DateTime<Local>, name_yesterday: bool) -> String {
     let Some(date) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(date_ms)
         .filter(|_| date_ms > 0)
         .map(|date| date.with_timezone(&Local))
     else {
-        return fallback.to_owned();
+        return String::new();
     };
-    let days = now.date_naive().signed_duration_since(date.date_naive()).num_days();
-    if (0..=1).contains(&days) {
-        date.format("%H:%M").to_string()
-    } else if date.year() == now.year() {
-        date.format("%b %-d").to_string()
-    } else {
-        date.format("%b %-d, %Y").to_string()
+    let formats = date_format::current();
+    let days = now
+        .date_naive()
+        .signed_duration_since(date.date_naive())
+        .num_days();
+    match days {
+        1 if name_yesterday => formats.yesterday().to_owned(),
+        0 | 1 => formats.time(date.hour(), date.minute()),
+        _ if date.year() == now.year() => formats.date(DateStyle::ShortDayMonth, date.date_naive()),
+        _ => formats.date(DateStyle::Short, date.date_naive()),
     }
 }
 
@@ -1227,6 +1238,33 @@ pub(super) fn refresh_rows_only(
         );
     }
     schedule_favicon_fetches(app, state, runtime, &visible_domains);
+}
+
+/// Rebuilds the mail text the date formats produce, after the language or the
+/// time format changed.
+pub(super) fn refresh_message_dates(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+) {
+    refresh_rows_only(app, state, runtime);
+    let date_ms = {
+        let state = state.borrow();
+        state.selected_id.and_then(|id| {
+            (state.conversation_owner_id == Some(id))
+                .then(|| {
+                    state
+                        .conversation_messages
+                        .get(state.conversation_selected_index)
+                })
+                .flatten()
+                .or_else(|| state.messages.iter().find(|message| message.id == id))
+                .map(|message| message.date_ms)
+        })
+    };
+    if let Some(date_ms) = date_ms {
+        app.set_selected_time(message_time(date_ms, &Local::now()).into());
+    }
 }
 
 pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
@@ -1563,7 +1601,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_rows_show_clock_time_for_recent_mail_and_dates_for_older_mail() {
+    fn message_times_show_the_clock_for_recent_mail_and_dates_for_older_mail() {
         let at_noon = |year, month, day| {
             let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
                 .unwrap()
@@ -1572,16 +1610,19 @@ mod tests {
             Local.from_local_datetime(&naive).single().unwrap()
         };
         let now = at_noon(2026, 1, 5);
-        assert_eq!(mail_list_display_time(now.timestamp_millis(), "Today", &now), "12:00");
-        assert_eq!(
-            mail_list_display_time(at_noon(2026, 1, 4).timestamp_millis(), "Yesterday", &now),
-            "12:00"
-        );
-        assert_eq!(
-            mail_list_display_time(at_noon(2025, 12, 20).timestamp_millis(), "Dec 20", &now),
-            "Dec 20, 2025"
-        );
-        assert_eq!(mail_list_display_time(0, "Cached", &now), "Cached");
+        let today = now.timestamp_millis();
+        let yesterday = at_noon(2026, 1, 4).timestamp_millis();
+        let this_year = at_noon(2026, 1, 2).timestamp_millis();
+        let last_year = at_noon(2025, 12, 20).timestamp_millis();
+
+        assert_eq!(mail_list_time(today, &now), "12:00");
+        assert_eq!(mail_list_time(yesterday, &now), "12:00");
+        assert_eq!(mail_list_time(this_year, &now), "Jan 2");
+        assert_eq!(mail_list_time(last_year, &now), "Dec 20, 2025");
+        assert_eq!(mail_list_time(0, &now), "");
+        assert_eq!(message_time(today, &now), "12:00");
+        assert_eq!(message_time(yesterday, &now), "Yesterday");
+        assert_eq!(message_time(last_year, &now), "Dec 20, 2025");
     }
 
     #[test]
@@ -1718,7 +1759,6 @@ mod tests {
             initials: String::new(),
             subject: String::new(),
             preview: String::new(),
-            time: String::new(),
             date_ms: 0,
             to: String::new(),
             label: String::new(),

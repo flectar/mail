@@ -996,10 +996,11 @@ fn smtp_config(port: u16, mode: ConnectionSecurity, certificate: &str) -> Accoun
 }
 /// A relay that takes the message and then never answers must not hold the
 /// submission worker forever.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn smtp_send_gives_up_on_a_stalled_relay() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    let (stalled_tx, stalled) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
@@ -1018,19 +1019,34 @@ async fn smtp_send_gives_up_on_a_stalled_relay() {
         assert_eq!(line(&mut stream).await, "DATA\r\n");
         stream.write_all(b"354 Continue\r\n").await.unwrap();
         while line(&mut stream).await != ".\r\n" {}
+        stalled_tx.send(()).unwrap();
         std::future::pending::<()>().await;
     });
     let config = smtp_config(port, ConnectionSecurity::Tls, CERT);
-    let error = smtp::send_raw(
-        &config,
-        &smtp::SmtpAuth::Password("bridge-password".into()),
-        "user@example.com",
-        &["friend@example.com".into()],
-        b"Subject: Hello\r\n\r\nBody\r\n",
-    )
-    .await
-    .unwrap_err();
-    assert!(error.to_string().contains("timed out"), "{error}");
+    let send = tokio::spawn(async move {
+        smtp::send_raw(
+            &config,
+            &smtp::SmtpAuth::Password("bridge-password".into()),
+            "user@example.com",
+            &["friend@example.com".into()],
+            b"Subject: Hello\r\n\r\nBody\r\n",
+        )
+        .await
+    });
+    // The exchange runs in real time. Time that advances on its own while the
+    // handshake still waits on the network would fire unrelated deadlines, so
+    // the clock only jumps past the idle deadline once the relay has stalled.
+    tokio::time::timeout(std::time::Duration::from_secs(10), stalled)
+        .await
+        .expect("the relay never received the message")
+        .unwrap();
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    let error = send.await.unwrap().unwrap_err();
+    assert!(
+        error.to_string().contains("connection timed out after 60s"),
+        "{error}"
+    );
     server.abort();
 }
 

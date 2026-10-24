@@ -303,7 +303,9 @@ export component WorkspaceTitleRow inherits Rectangle {
 // The optional leading action keeps each workspace's sidebar toggle on the
 // same line, while feature-specific actions are injected before refresh.
 export component WorkspaceSearchToolbar inherits Rectangle {
-    in property <string> text;
+    // Bind with `<=>` so the field follows queries set elsewhere, such as a
+    // reset when switching account or folder.
+    in-out property <string> text;
     in property <string> placeholder-text;
     in property <bool> show-leading: false;
     in property <image> leading-icon;
@@ -331,6 +333,11 @@ export component WorkspaceSearchToolbar inherits Rectangle {
         if search-edit.text != root.text {
             search-edit.text = root.text;
         }
+    }
+
+    public function focus-search() {
+        search-edit.focus();
+        search-edit.select-all();
     }
 
     clearance := WindowControlsClearance { width: parent.width; height: parent.height; }
@@ -361,7 +368,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
-                text: root.text;
+                text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
                 leading-icon: @image-url("../icons/lucide/outline/search.svg");

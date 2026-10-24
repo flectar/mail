@@ -23,6 +23,8 @@ pub enum CoreError {
     ImapParse(String),
     #[error("jmap error: {0}")]
     Jmap(String),
+    #[error("pop3 error: {0}")]
+    Pop3(String),
     #[error("send status uncertain: {0}")]
     SendUncertain(String),
     #[error("smtp error: {0}")]
@@ -64,6 +66,7 @@ impl CoreError {
             CoreError::Network(_) | CoreError::ResponseTooLarge { .. } => "network",
             CoreError::Imap(_) | CoreError::ImapParse(_) => "imap",
             CoreError::Jmap(_) => "jmap",
+            CoreError::Pop3(_) => "pop3",
             CoreError::SendUncertain(_) => "send_uncertain",
             CoreError::Smtp(_) => "smtp",
             CoreError::Tls(_) => "tls",

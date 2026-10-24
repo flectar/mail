@@ -1,5 +1,6 @@
 //! Files owns one serialized async session. UI callbacks only capture input and
 //! schedule work; protocol, database, dialogs and disk I/O never block Slint.
+use crate::date_format::{self, DateFormats, DateStyle};
 use crate::document_preview::{Preview, preview};
 use crate::documents::safe_name;
 use crate::{AppWindow, FileRow, FilesUi, InboxState, OperationRow};
@@ -9,7 +10,9 @@ use flectar_mail_core::files::{
         Entry, FilesService as Directory, Output as ServiceOutput, Preview as ServicePreview,
     },
 };
-use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
+use slint::{
+    ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel,
+};
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 use tokio::sync::Mutex;
 
@@ -50,6 +53,23 @@ pub(crate) fn register(
         }));
         crate::platform::install_preview_lifecycle();
     }
+    let weak = app.as_weak();
+    date_format::on_change(move || {
+        let Some(app) = weak.upgrade() else {
+            return;
+        };
+        let rows = app.global::<FilesUi>().get_rows();
+        let formats = date_format::current();
+        for index in 0..rows.row_count() {
+            if let Some(mut row) = rows.row_data(index) {
+                let date = file_date(&formats, &row.iso_date);
+                if row.date != date {
+                    row.date = date;
+                    rows.set_row_data(index, row);
+                }
+            }
+        }
+    });
     let view_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let directory = Arc::new(Mutex::new((
         (0usize, 0u64),
@@ -563,6 +583,27 @@ struct Snapshot {
     query: String,
     quota: String,
 }
+
+/// The local day of a file's date. Snapshots are built off the UI thread,
+/// which formats it with the current language in `Snapshot::apply`.
+fn iso_day(date: chrono::DateTime<chrono::Local>) -> String {
+    date.format("%Y-%m-%d").to_string()
+}
+
+/// JMAP stores RFC 3339 times and WebDAV reports RFC 2822 ones.
+fn modified_day(modified: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(modified)
+        .or_else(|_| chrono::DateTime::parse_from_rfc2822(modified))
+        .ok()
+        .map(|date| iso_day(date.with_timezone(&chrono::Local)))
+}
+
+fn file_date(formats: &DateFormats, iso_date: &str) -> SharedString {
+    chrono::NaiveDate::parse_from_str(iso_date, "%Y-%m-%d")
+        .map(|date| formats.date(DateStyle::Medium, date).into())
+        .unwrap_or_default()
+}
+
 impl Snapshot {
     fn new(dir: &Directory) -> Self {
         let rows = dir
@@ -581,8 +622,8 @@ impl Snapshot {
                     name: a.filename.clone().into(),
                     detail: format!("{} · {}", a.sender, a.subject).into(),
                     size: size(a.size).into(),
-                    date: chrono::DateTime::from_timestamp_millis(a.date)
-                        .map(|d| d.format("%b %d, %Y").to_string())
+                    iso_date: chrono::DateTime::from_timestamp_millis(a.date)
+                        .map(|date| iso_day(date.with_timezone(&chrono::Local)))
                         .unwrap_or_default()
                         .into(),
                     attachment: true,
@@ -604,13 +645,11 @@ impl Snapshot {
                         n.media_type.clone().unwrap_or_default().into()
                     },
                     size: n.size.map(size).unwrap_or_default().into(),
-                    date: n
+                    iso_date: n
                         .modified
                         .as_deref()
-                        .unwrap_or("")
-                        .chars()
-                        .take(10)
-                        .collect::<String>()
+                        .and_then(modified_day)
+                        .unwrap_or_default()
                         .into(),
                     directory: n.is_directory(),
                     readable: n.my_rights.may_read,
@@ -683,7 +722,11 @@ impl Snapshot {
             quota: dir.quota.clone(),
         }
     }
-    fn apply(self, ui: &FilesUi) {
+    fn apply(mut self, ui: &FilesUi) {
+        let formats = date_format::current();
+        for row in &mut self.rows {
+            row.date = file_date(&formats, &row.iso_date);
+        }
         // Reuse Mail's reconciliation so appending pages retains the viewport
         // and existing row delegates instead of rebuilding the entire list.
         let retained = ui.get_rows();
@@ -720,5 +763,26 @@ impl Snapshot {
         ui.set_path(self.path.into());
         ui.set_query(self.query.into());
         ui.set_quota(self.quota.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::date_format::HourCycle;
+
+    #[test]
+    fn file_dates_read_jmap_and_webdav_times() {
+        let noon = chrono::DateTime::parse_from_rfc3339("2026-10-22T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Local);
+        let day = iso_day(noon);
+        assert_eq!(modified_day("2026-10-22T12:00:00Z"), Some(day.clone()));
+        assert_eq!(modified_day("Thu, 22 Oct 2026 12:00:00 GMT"), Some(day));
+        assert_eq!(modified_day("yesterday"), None);
+
+        let formats = DateFormats::english(HourCycle::TwentyFour);
+        assert_eq!(file_date(&formats, "2026-10-22"), "Oct 22, 2026");
+        assert_eq!(file_date(&formats, ""), "");
     }
 }

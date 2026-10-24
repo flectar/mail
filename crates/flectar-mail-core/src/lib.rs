@@ -22,6 +22,7 @@ mod http_body;
 pub mod imap;
 pub mod jmap;
 pub mod mail_security;
+mod mbox;
 pub mod migration;
 pub mod mime;
 pub mod models;
@@ -212,12 +213,21 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
             account_kind,
             (Provider::Generic, AuthKind::Password) | (Provider::Microsoft, AuthKind::Oauth2)
         ),
-        MailProtocol::Jmap => account_kind == (Provider::Generic, AuthKind::Password),
+        MailProtocol::Jmap | MailProtocol::Pop3 => {
+            account_kind == (Provider::Generic, AuthKind::Password)
+        }
     };
     if !supported {
         return Err(CoreError::Other(format!(
             "unsupported sign-in type for {email}"
         )));
+    }
+    if config.mail_protocol != MailProtocol::Pop3
+        && config.settings.keep_on_server != KeepOnServer::Always
+    {
+        return Err(CoreError::Other(
+            "only POP3 accounts remove downloaded mail from their server".into(),
+        ));
     }
     let connection = &config.settings.connection;
     if config.auth_kind == AuthKind::Oauth2
@@ -231,7 +241,7 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
         // Provider presets own the server settings of OAuth accounts.
         MailProtocol::Gmail => true,
         MailProtocol::Imap if config.provider == Provider::Microsoft => true,
-        MailProtocol::Imap => {
+        MailProtocol::Imap | MailProtocol::Pop3 => {
             !config.username.trim().is_empty()
                 && !config.incoming_host.trim().is_empty()
                 && !config.smtp_host.trim().is_empty()
@@ -251,14 +261,65 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
 
 /// Separator between the levels of a stored folder path. JMAP paths are
 /// composed by Flectar from mailbox names; IMAP servers and Gmail labels
-/// report their own.
+/// report their own, and POP3 folders exist only on this device.
 fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder) -> String {
     match protocol {
         MailProtocol::Jmap => " / ".to_owned(),
         MailProtocol::Gmail | MailProtocol::Imap => {
             folder.delimiter.clone().unwrap_or_else(|| "/".into())
         }
+        MailProtocol::Pop3 => repo::pop3::FOLDER_DELIMITER.to_owned(),
     }
+}
+
+/// The configuration a password account would have, for checks before it
+/// exists.
+fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
+    AccountConfig {
+        id: 0,
+        email: args.email.clone(),
+        display_name: None,
+        avatar_url: None,
+        provider: Provider::Generic,
+        auth_kind: AuthKind::Password,
+        mail_protocol: args.mail_protocol,
+        username: args.username.clone(),
+        jmap_url: String::new(),
+        jmap_account_id: None,
+        incoming_host: args.incoming_host.clone(),
+        incoming_port: args.incoming_port,
+        smtp_host: args.smtp_host.clone(),
+        smtp_port: args.smtp_port,
+        settings: AccountSettings::new(args.connection.clone()),
+    }
+}
+
+async fn check_smtp(args: &AddPasswordAccountArgs) -> Result<()> {
+    smtp::test_connection(
+        &password_account_config(args),
+        &smtp::SmtpAuth::Password(args.password.clone()),
+    )
+    .await
+}
+
+/// The setup check signed in, so the first sync respects the server's
+/// minimum time between sign-ins.
+fn record_pop3_probe(
+    conn: &rusqlite::Connection,
+    account_id: i64,
+    probe: sync::pop3::Probe,
+) -> Result<()> {
+    repo::pop3::record_sign_in(
+        conn,
+        account_id,
+        probe.signed_in_at,
+        probe.login_delay,
+        probe.expire,
+    )
+}
+
+fn folder_exists() -> CoreError {
+    CoreError::Other("a folder with this name already exists".into())
 }
 
 /// Gmail mail is only reachable through Google sign-in.
@@ -555,6 +616,13 @@ impl Core {
         let removed_staged_files = core.cleanup_orphaned_draft_files().await?;
         if removed_staged_files > 0 {
             tracing::info!(removed_staged_files, "removed orphaned draft staging files");
+        }
+        let removed_mail_files = core.remove_interrupted_mail_files().await?;
+        if removed_mail_files > 0 {
+            tracing::info!(
+                removed_mail_files,
+                "removed files of interrupted mail writes"
+            );
         }
 
         // Make saved OAuth app registrations available before any actor
@@ -984,6 +1052,9 @@ impl Core {
                     MailProtocol::Imap => {
                         repo::folders::reopen_backfill_for_account(&transaction, account_id)?;
                     }
+                    // The next sync weighs skipped server messages against
+                    // the new boundary.
+                    MailProtocol::Pop3 => {}
                 }
                 transaction.commit()?;
                 Ok(Some(config.settings))
@@ -1011,7 +1082,49 @@ impl Core {
                 let tx = conn.transaction()?;
                 let mut config = repo::accounts::get_config(&tx, account_id)?
                     .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {}
+                    MailProtocol::Pop3 => {
+                        return Err(CoreError::Other(
+                            "POP3 accounts keep sent mail on this device".into(),
+                        ));
+                    }
+                }
                 config.settings.sent_copy_policy = policy;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// Choose how long a POP3 account leaves downloaded mail on its server.
+    /// The account's next sync applies the choice.
+    pub async fn set_account_keep_on_server(
+        &self,
+        account_id: i64,
+        keep: KeepOnServer,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Pop3 => {}
+                    MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {
+                        return Err(CoreError::Other(
+                            "only POP3 accounts remove downloaded mail from their server".into(),
+                        ));
+                    }
+                }
+                config.settings.keep_on_server = keep;
                 repo::accounts::set_settings(&tx, account_id, &config.settings)?;
                 tx.commit()?;
                 Ok(config.settings)
@@ -1042,6 +1155,11 @@ impl Core {
                 .check_imap_smtp(&args)
                 .await
                 .map_err(|error| error.to_string()),
+            MailProtocol::Pop3 => self
+                .check_pop3_smtp(&args)
+                .await
+                .map(drop)
+                .map_err(|error| error.to_string()),
             MailProtocol::Gmail => Err(gmail_needs_google_sign_in().to_string()),
         };
         match result {
@@ -1071,24 +1189,15 @@ impl Core {
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
         mailbox_result?;
-        let config = AccountConfig {
-            id: 0,
-            email: args.email.clone(),
-            display_name: None,
-            avatar_url: None,
-            provider: Provider::Generic,
-            auth_kind: AuthKind::Password,
-            mail_protocol: MailProtocol::Imap,
-            username: args.username.clone(),
-            jmap_url: String::new(),
-            jmap_account_id: None,
-            incoming_host: args.incoming_host.clone(),
-            incoming_port: args.incoming_port,
-            smtp_host: args.smtp_host.clone(),
-            smtp_port: args.smtp_port,
-            settings: AccountSettings::new(args.connection.clone()),
-        };
-        smtp::test_connection(&config, &smtp::SmtpAuth::Password(args.password.clone())).await
+        check_smtp(args).await
+    }
+
+    /// Returns what the POP3 server announced, which the first sync has to
+    /// respect.
+    async fn check_pop3_smtp(&self, args: &AddPasswordAccountArgs) -> Result<sync::pop3::Probe> {
+        let probe = sync::pop3::probe(&password_account_config(args), &args.password).await?;
+        check_smtp(args).await?;
+        Ok(probe)
     }
 
     pub async fn add_account_password(&self, args: AddPasswordAccountArgs) -> Result<Account> {
@@ -1125,15 +1234,16 @@ impl Core {
             return Err(CoreError::Auth("an account field is too long".into()));
         }
         match args.mail_protocol {
-            MailProtocol::Imap => {
+            MailProtocol::Imap | MailProtocol::Pop3 => {
                 if args.incoming_host.is_empty()
                     || args.smtp_host.is_empty()
                     || args.incoming_port == 0
                     || args.smtp_port == 0
                 {
-                    return Err(CoreError::Auth(
-                        "IMAP and SMTP server hosts and ports are required".into(),
-                    ));
+                    return Err(CoreError::Auth(format!(
+                        "{} and SMTP server hosts and ports are required",
+                        args.mail_protocol.as_str().to_ascii_uppercase()
+                    )));
                 }
             }
             MailProtocol::Jmap => {
@@ -1146,9 +1256,28 @@ impl Core {
         credentials::check_available_async(self.credentials.clone()).await?;
         self.recover_incomplete_account_credentials().await?;
 
+        let existing = self
+            .db
+            .read({
+                let email = args.email.clone();
+                move |conn| repo::accounts::find_by_email(conn, &email)
+            })
+            .await?;
+        // POP3 mail exists only on this device, so it can't move to or from
+        // a protocol that keeps mail on the server.
+        if let Some(existing) = &existing
+            && (existing.mail_protocol == MailProtocol::Pop3)
+                != (args.mail_protocol == MailProtocol::Pop3)
+        {
+            return Err(CoreError::Auth(
+                "an account can't switch between POP3 and IMAP or JMAP".into(),
+            ));
+        }
+
         // Verify credentials before storing anything. For JMAP, also pin the
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
+        let mut pop3_probe = None;
         let jmap_account_id = match args.mail_protocol {
             MailProtocol::Jmap => Some(
                 crate::jmap::client::connect_with(
@@ -1165,16 +1294,12 @@ impl Core {
                 self.check_imap_smtp(&args).await?;
                 None
             }
+            MailProtocol::Pop3 => {
+                pop3_probe = Some(self.check_pop3_smtp(&args).await?);
+                None
+            }
             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
         };
-
-        let existing = self
-            .db
-            .read({
-                let email = args.email.clone();
-                move |conn| repo::accounts::find_by_email(conn, &email)
-            })
-            .await?;
         let is_new_account = existing.is_none();
 
         let id = if let Some(existing) = existing {
@@ -1224,6 +1349,9 @@ impl Core {
                         .settings;
                     settings.connection = a.connection.clone();
                     repo::accounts::set_settings(&transaction, id, &settings)?;
+                    if let Some(probe) = pop3_probe {
+                        record_pop3_probe(&transaction, id, probe)?;
+                    }
                     transaction.commit()?;
                     Ok(())
                 })
@@ -1266,6 +1394,9 @@ impl Core {
                         &AccountSettings::new(a.connection.clone()),
                         repo::accounts::CREDENTIAL_SETUP_STATE,
                     )?;
+                    if let Some(probe) = pop3_probe {
+                        record_pop3_probe(&transaction, id, probe)?;
+                    }
                     transaction.commit()?;
                     Ok(id)
                 })
@@ -1917,6 +2048,54 @@ impl Core {
         Ok(())
     }
 
+    /// Remove what interrupted mail writes left behind: temporary files, and
+    /// POP3 originals nothing refers to because their download stopped
+    /// before it was committed. That session never sent QUIT, so the server
+    /// still has those messages. Runs before any account worker writes.
+    async fn remove_interrupted_mail_files(&self) -> Result<usize> {
+        let mut accounts = match tokio::fs::read_dir(self.paths.mail_root()).await {
+            Ok(accounts) => accounts,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
+        let stored: HashSet<std::ffi::OsString> = self
+            .db
+            .read(|conn| {
+                let mut statement =
+                    conn.prepare("SELECT raw_path FROM messages WHERE raw_path LIKE '%' || ?1")?;
+                let paths = statement
+                    .query_map([sync::pop3::ORIGINAL_SUFFIX], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(paths
+                    .iter()
+                    .filter_map(|path| std::path::Path::new(path).file_name())
+                    .map(std::ffi::OsStr::to_owned)
+                    .collect())
+            })
+            .await?;
+        let mut removed = 0;
+        while let Some(account) = accounts.next_entry().await? {
+            if !account.file_type().await?.is_dir() {
+                continue;
+            }
+            removed += crate::file_io::remove_partial_writes(account.path()).await?;
+            let mut files = tokio::fs::read_dir(account.path()).await?;
+            while let Some(file) = files.next_entry().await? {
+                let name = file.file_name();
+                if name
+                    .to_str()
+                    .is_some_and(|name| name.ends_with(sync::pop3::ORIGINAL_SUFFIX))
+                    && !stored.contains(&name)
+                    && file.file_type().await?.is_file()
+                {
+                    tokio::fs::remove_file(file.path()).await?;
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
+    }
+
     async fn cleanup_orphaned_draft_files(&self) -> Result<usize> {
         let (stale_paths, referenced_paths) = self
             .db
@@ -2078,23 +2257,7 @@ impl Core {
         &self,
         destination: std::path::PathBuf,
     ) -> Result<DatabaseSnapshotManifest> {
-        let parent = destination.parent().ok_or_else(|| {
-            CoreError::Other("database snapshot destination has no parent directory".into())
-        })?;
-        let canonical_parent = tokio::fs::canonicalize(parent).await.map_err(|error| {
-            CoreError::Other(format!(
-                "resolving snapshot destination {}: {error}",
-                parent.display()
-            ))
-        })?;
-        let data_dir = tokio::fs::canonicalize(&self.paths.data_dir).await?;
-        let cache_dir = tokio::fs::canonicalize(&self.paths.cache_dir).await?;
-        if canonical_parent.starts_with(&data_dir) || canonical_parent.starts_with(&cache_dir) {
-            return Err(CoreError::Other(
-                "database snapshots must be exported outside the application data and cache directories"
-                    .into(),
-            ));
-        }
+        self.check_export_destination(&destination).await?;
         let _files_guard = self.file_work_lock.lock().await;
         db::snapshot::create(
             &self.db,
@@ -2104,6 +2267,201 @@ impl Core {
             &destination,
         )
         .await
+    }
+
+    /// Exports go outside the app's own directories, where nothing the app
+    /// cleans up can take them away, and never replace an earlier export.
+    async fn check_export_destination(&self, destination: &std::path::Path) -> Result<()> {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| CoreError::Other("the destination has no parent directory".into()))?;
+        let canonical_parent = tokio::fs::canonicalize(parent).await.map_err(|error| {
+            CoreError::Other(format!(
+                "resolving the destination {}: {error}",
+                parent.display()
+            ))
+        })?;
+        let data_dir = tokio::fs::canonicalize(&self.paths.data_dir).await?;
+        let cache_dir = tokio::fs::canonicalize(&self.paths.cache_dir).await?;
+        if canonical_parent.starts_with(&data_dir) || canonical_parent.starts_with(&cache_dir) {
+            return Err(CoreError::Other(
+                "exports must go outside the application data and cache directories".into(),
+            ));
+        }
+        if tokio::fs::try_exists(destination).await? {
+            return Err(CoreError::Other(format!(
+                "{} already exists",
+                destination.display()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Write a POP3 account's mail to a new directory as one mbox file per
+    /// folder, so mail that exists only on this device can be kept before it
+    /// is removed. The directory must not exist yet.
+    pub async fn export_account_mail(
+        &self,
+        account_id: i64,
+        destination: std::path::PathBuf,
+    ) -> Result<MailExport> {
+        let config = self.folder_account_config(account_id).await?;
+        match config.mail_protocol {
+            MailProtocol::Pop3 => {}
+            MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {
+                return Err(CoreError::Other(
+                    "only POP3 accounts keep their mail on this device alone".into(),
+                ));
+            }
+        }
+        self.check_export_destination(&destination).await?;
+        let staging = crate::file_io::staging_directory(&destination)?;
+        tokio::fs::create_dir(&staging).await?;
+        let result = async {
+            crate::file_io::restrict_permissions(&staging, &[])?;
+            let export = self.write_mail_export(account_id, &staging).await?;
+            crate::file_io::publish_directory(&staging, &destination)?;
+            Ok(export)
+        }
+        .await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+        }
+        result
+    }
+
+    async fn write_mail_export(
+        &self,
+        account_id: i64,
+        directory: &std::path::Path,
+    ) -> Result<MailExport> {
+        use tokio::io::AsyncWriteExt;
+        let folders = self
+            .db
+            .read(move |conn| repo::folders::list(conn, Some(account_id)))
+            .await?;
+        let mut names = HashSet::new();
+        let mut export = MailExport::default();
+        for folder in folders {
+            let folder_id = folder.id;
+            let messages = self
+                .db
+                .read(move |conn| repo::messages::in_folder_for_export(conn, folder_id))
+                .await?;
+            if messages.is_empty() {
+                continue;
+            }
+            let path = directory.join(mbox::file_name(&folder.path, &mut names));
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .await?;
+            for message in messages {
+                let original = match &message.raw_path {
+                    Some(raw_path) => self
+                        .read_original(
+                            account_id,
+                            message.id,
+                            raw_path,
+                            MAX_CACHED_MESSAGE_BYTES,
+                            "exported message",
+                        )
+                        .await
+                        .inspect_err(|error| {
+                            tracing::warn!(message_id = message.id, %error, "message left out of a mail export");
+                        })
+                        .ok(),
+                    None if message.is_draft => Some(self.draft_message(message.id).await?),
+                    None => None,
+                };
+                let Some(original) = original else {
+                    export.missing += 1;
+                    continue;
+                };
+                file.write_all(mbox::separator(&message.from, message.date).as_bytes())
+                    .await?;
+                file.write_all(&mbox::entry(&original)).await?;
+                export.messages += 1;
+            }
+            // The account may be removed right after its export.
+            file.sync_all().await?;
+            crate::file_io::restrict_permissions(directory, &[&path])?;
+            export.folders += 1;
+        }
+        Ok(export)
+    }
+
+    /// A draft as a message file. Drafts have no original until they are
+    /// sent.
+    async fn draft_message(&self, draft_id: i64) -> Result<Vec<u8>> {
+        let (detail, bcc, staged) = self
+            .db
+            .read(move |conn| {
+                let detail = repo::messages::detail(conn, draft_id)?;
+                let bcc: String = conn.query_row(
+                    "SELECT bcc_json FROM messages WHERE id = ?1",
+                    [draft_id],
+                    |row| row.get(0),
+                )?;
+                let mut statement = conn.prepare(
+                    "SELECT file_path, filename FROM draft_attachments WHERE draft_id = ?1",
+                )?;
+                let staged = statement
+                    .query_map([draft_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((detail, serde_json::from_str::<Vec<Address>>(&bcc)?, staged))
+            })
+            .await?;
+        // Like sending, only ever read files from the app's own staging area.
+        let staging_root = tokio::fs::canonicalize(self.paths.draft_attachments_dir())
+            .await
+            .ok();
+        let mut attachments = Vec::new();
+        let mut budget = MAX_DRAFT_ATTACHMENT_BYTES;
+        for (path, filename) in staged {
+            let path = tokio::fs::canonicalize(&path).await?;
+            if !staging_root
+                .as_ref()
+                .is_some_and(|root| path.starts_with(root))
+            {
+                return Err(CoreError::Other(format!(
+                    "attachment {filename}: refusing to read a file outside the staging area"
+                )));
+            }
+            let bytes = crate::file_io::read(&path, budget, "draft attachment").await?;
+            budget -= bytes.len();
+            attachments.push(crate::mime::OutgoingAttachment {
+                mime_type: crate::queue::mime_guess_from_name(&filename),
+                filename,
+                bytes,
+            });
+        }
+        let domain = detail
+            .from
+            .email
+            .split('@')
+            .nth(1)
+            .unwrap_or("localhost")
+            .to_owned();
+        let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
+            from: detail.from.clone(),
+            reply_to: None,
+            to: &detail.to,
+            cc: &detail.cc,
+            bcc: &bcc,
+            subject: &detail.subject,
+            body_text: detail.text_body.as_deref().unwrap_or(""),
+            body_html: detail.html_body.as_deref(),
+            in_reply_to: None,
+            references: &[],
+            message_id: None,
+            message_id_domain: &domain,
+            attachments,
+        })?;
+        Ok(raw)
     }
 
     pub async fn sync_now(&self, account_id: Option<i64>) -> Result<()> {
@@ -3008,6 +3366,32 @@ impl Core {
                     })
                     .await?;
             }
+            MailProtocol::Pop3 => {
+                let delimiter = repo::pop3::FOLDER_DELIMITER;
+                if name.contains(delimiter) {
+                    return Err(CoreError::Other(format!(
+                        "folder names cannot contain the hierarchy separator {delimiter:?}"
+                    )));
+                }
+                let parent_local_id = parent.as_ref().map(|folder| folder.id);
+                let path = parent
+                    .as_ref()
+                    .map(|parent| format!("{}{delimiter}{name}", parent.path))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        if repo::folders::path_exists(&tx, account_id, &path)? {
+                            return Err(folder_exists());
+                        }
+                        let folder_id =
+                            repo::folders::upsert(&tx, account_id, &path, Some(delimiter), None)?;
+                        repo::folders::set_parent(&tx, folder_id, parent_local_id)?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await?;
+            }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(())
@@ -3086,6 +3470,26 @@ impl Core {
                     })
                     .await?;
             }
+            MailProtocol::Pop3 => {
+                let new_name = parent_prefix
+                    .map(|parent| format!("{parent}{delimiter}{name}"))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        if new_name != old_name
+                            && repo::folders::path_exists(&tx, account_id, &new_name)?
+                        {
+                            return Err(folder_exists());
+                        }
+                        repo::folders::rename_tree(
+                            &tx, account_id, &old_name, &new_name, &delimiter,
+                        )?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await?;
+            }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(())
@@ -3142,11 +3546,7 @@ impl Core {
                         .await
                         .map_err(jmap::client::map_error)?;
                 }
-                let root_name = folder.path;
-                self.db
-                    .write(move |conn| {
-                        repo::folders::delete_tree(conn, account_id, &root_name, &delimiter)
-                    })
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
                     .await?;
             }
             MailProtocol::Imap => {
@@ -3155,11 +3555,12 @@ impl Core {
                     imap::delete_folder(&mut session, &candidate.path).await?;
                 }
                 imap::logout(session).await;
-                let root_name = folder.path;
-                self.db
-                    .write(move |conn| {
-                        repo::folders::delete_tree(conn, account_id, &root_name, &delimiter)
-                    })
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
+                    .await?;
+            }
+            // The folders and their mail exist only here.
+            MailProtocol::Pop3 => {
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
                     .await?;
             }
         }
@@ -3712,7 +4113,7 @@ impl Core {
                 // recipient lists must never cause a plaintext server upload.
                 let uploads_drafts = match mail_protocol {
                     MailProtocol::Gmail | MailProtocol::Jmap => true,
-                    MailProtocol::Imap => false,
+                    MailProtocol::Imap | MailProtocol::Pop3 => false,
                 };
                 let sync_remote_account = if !security.enabled() && uploads_drafts {
                     tx.execute(
@@ -3990,7 +4391,7 @@ impl Core {
                         )?;
                         nudge_account = Some(row.0);
                     }
-                    MailProtocol::Imap => {
+                    MailProtocol::Imap | MailProtocol::Pop3 => {
                         // Purely local drafts have no remote copy to preserve.
                         staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
                         repo::messages::delete(conn, draft_id)?;
@@ -4097,6 +4498,47 @@ impl Core {
         })
     }
 
+    /// Read a downloaded message's original file. A POP3 account keeps the
+    /// only copy of its mail here, so when the file has gone missing it is
+    /// downloaded again while the server still has the message.
+    pub(crate) async fn read_original(
+        &self,
+        account_id: i64,
+        message_id: i64,
+        path: &str,
+        max_bytes: usize,
+        context: &'static str,
+    ) -> Result<Vec<u8>> {
+        let error = match crate::file_io::read(path, max_bytes, context).await {
+            Ok(raw) => return Ok(raw),
+            Err(error) => error,
+        };
+        let protocol = self
+            .db
+            .read(move |conn| {
+                repo::accounts::get_config(conn, account_id)?
+                    .map(|config| config.mail_protocol)
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
+            })
+            .await?;
+        let missing = !tokio::fs::try_exists(path).await.unwrap_or(true);
+        match protocol {
+            MailProtocol::Pop3 if missing => {}
+            MailProtocol::Pop3 | MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {
+                return Err(error);
+            }
+        }
+        let handle = self
+            .handles
+            .read()
+            .await
+            .get(&account_id)
+            .cloned()
+            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+        let restored = handle.restore_message(message_id).await?;
+        crate::file_io::read(restored, max_bytes, context).await
+    }
+
     /// Return a stable cached attachment path. Legacy messages extract from
     /// their raw MIME; selectively-cached messages download only the requested
     /// IMAP section through the priority reader.
@@ -4169,7 +4611,14 @@ impl Core {
             part_id.as_deref(),
         ) {
             (Some(raw_path), Some(part_id)) => {
-                match crate::file_io::read(raw_path, MAX_CACHED_MESSAGE_BYTES, "cached message")
+                match self
+                    .read_original(
+                        row.account_id,
+                        message_id,
+                        raw_path,
+                        MAX_CACHED_MESSAGE_BYTES,
+                        "cached message",
+                    )
                     .await
                 {
                     Ok(raw) => match crate::mime::extract_attachment(&raw, part_id) {
@@ -7374,6 +7823,16 @@ impl Core {
             .await
     }
 
+    pub async fn set_time_format(&self, format: TimeFormat) -> Result<()> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                settings.time_format = format;
+                repo::settings::set(conn, &settings)
+            })
+            .await
+    }
+
     /// Persist one or both OAuth registrations in a single settings write.
     /// Read on the writer thread so unrelated preferences aren't overwritten
     /// by a stale settings snapshot while this operation waits for the DB.
@@ -8551,11 +9010,16 @@ fn revert_action(
                         // Remote never changed; restore the original mapping.
                         repo::messages::set_uid_and_folder(&tx, mid, src, src_uid)?;
                     } else {
-                        // Remote moved; move it back.
+                        // Remote moved; move it back. The message's UID there
+                        // is known once that mailbox has synced, and the move
+                        // looks it up otherwise.
+                        let current_uid = repo::messages::get_row(&tx, mid)?
+                            .filter(|row| row.folder_id == cur_folder)
+                            .and_then(|row| row.uid);
                         repo::messages::set_uid_and_folder(&tx, mid, src, None)?;
                         let payload = serde_json::json!({
                             "srcFolderId": cur_folder,
-                            "srcUid": serde_json::Value::Null,
+                            "srcUid": current_uid,
                             "targetFolderId": src,
                         });
                         repo::actions::enqueue(
@@ -9219,6 +9683,29 @@ mod account_backup_import_tests {
         validate_portable_account(&microsoft).unwrap();
         microsoft.settings.connection.smtp_security = ConnectionSecurity::None;
         assert!(validate_portable_account(&microsoft).is_err());
+    }
+
+    #[test]
+    fn pop3_accounts_import_only_with_password_sign_in() {
+        let mut pop3 = portable_imap("pop3@example.com");
+        pop3.mail_protocol = MailProtocol::Pop3;
+        pop3.incoming_port = 995;
+        validate_portable_account(&pop3).unwrap();
+
+        let mut oauth = pop3.clone();
+        oauth.provider = Provider::Microsoft;
+        oauth.auth_kind = AuthKind::Oauth2;
+        assert!(validate_portable_account(&oauth).is_err());
+
+        // Only POP3 accounts remove mail from their server.
+        pop3.settings.keep_on_server = KeepOnServer::UntilDownloaded;
+        validate_portable_account(&pop3).unwrap();
+        let mut imap = portable_imap("imap@example.com");
+        imap.settings.keep_on_server = KeepOnServer::UntilDownloaded;
+        assert!(validate_portable_account(&imap).is_err());
+
+        pop3.incoming_host.clear();
+        assert!(validate_portable_account(&pop3).is_err());
     }
 
     #[tokio::test]

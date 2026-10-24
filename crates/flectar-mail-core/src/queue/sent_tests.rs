@@ -326,3 +326,19 @@ async fn sent_copy_policy_setting_preserves_other_account_settings() {
     assert_eq!(settings.sent_copy_policy, SentCopyPolicy::Client);
     assert_eq!(settings.mail_history, MailHistory::OneYear);
 }
+
+#[tokio::test]
+async fn only_pop3_accounts_remove_mail_from_their_server() {
+    let (_temp, core, _, _) = local_outgoing().await;
+    let refused = core
+        .set_account_keep_on_server(1, KeepOnServer::UntilDeleted)
+        .await
+        .unwrap_err();
+    assert!(refused.to_string().contains("POP3"), "{refused}");
+    let settings = core
+        .db
+        .read(|c| Ok(repo::accounts::get_config(c, 1)?.unwrap().settings))
+        .await
+        .unwrap();
+    assert_eq!(settings.keep_on_server, KeepOnServer::Always);
+}

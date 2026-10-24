@@ -108,7 +108,22 @@ for library in libxkbcommon-x11.so.0 libxkbcommon.so.0; do
   fi
 done
 
-# Preserve the allocator tuning and stable process name from our launcher.
+# AppRun leaves LD_LIBRARY_PATH to the host, so the executable and bundled
+# libraries must find usr/lib through the RUNPATH linuxdeploy sets.
+require_runpath() {
+  local dynamic
+  dynamic="$(readelf -d "$1")"
+  if [[ "$dynamic" != *"Library runpath: [$2]"* ]]; then
+    printf '%s does not have RUNPATH %s.\n' "$1" "$2" >&2
+    exit 1
+  fi
+}
+require_runpath "$app_dir/usr/bin/flectar-mail" '$ORIGIN/../lib'
+for library in "$app_dir"/usr/lib/*.so*; do
+  require_runpath "$library" '$ORIGIN'
+done
+
+# Preserve the renderer default and stable process name from our launcher.
 cp "$project_dir/resources/AppRun" "$app_dir/AppRun"
 chmod +x "$app_dir/AppRun"
 

@@ -38,7 +38,7 @@ export component ContactsView inherits Rectangle {
     in property <bool> dark-mode: false;
     in property <[ContactRow]> contacts: [];
     in property <[ContactSidebarRow]> sidebar-rows: [];
-    in property <string> query: "";
+    in-out property <string> query: "";
     in-out property <string> filter: "all";
     in property <string> selected-scope: "All contacts";
     in property <string> status: "";
@@ -324,7 +324,7 @@ export component ContactsView inherits Rectangle {
                             : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                         leading-tooltip: root.sidebar-collapsed ? @tr("Show contact groups") : @tr("Hide contact groups");
                         leading-accessible-id: "contacts-sidebar-button";
-                        text: root.query;
+                        text <=> root.query;
                         placeholder-text: @tr("Search contacts");
                         filters: [
                             { title: @tr("All contacts"), value: "all" },

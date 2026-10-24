@@ -91,7 +91,8 @@ impl Core {
                 let connected = crate::jmap::client::connect(&account, &secret).await?;
                 jmap_sender_identities(&account, &connected).await?
             }
-            MailProtocol::Imap => vec![primary_identity(&account)],
+            // SMTP servers publish no identity list.
+            MailProtocol::Imap | MailProtocol::Pop3 => vec![primary_identity(&account)],
         };
         self.db
             .write(move |conn| {
@@ -388,7 +389,7 @@ pub(crate) fn manual_identity_policy_for(protocol: MailProtocol) -> ManualIdenti
     match protocol {
         MailProtocol::Gmail => ManualIdentityPolicy::Never,
         MailProtocol::Jmap => ManualIdentityPolicy::WithinWildcard,
-        MailProtocol::Imap => ManualIdentityPolicy::Any,
+        MailProtocol::Imap | MailProtocol::Pop3 => ManualIdentityPolicy::Any,
     }
 }
 
@@ -398,8 +399,8 @@ pub(crate) async fn jmap_sender_identities(
 ) -> Result<Vec<SenderIdentity>> {
     let mut request = connected.request();
     request.get_identity().account_id(&connected.account_id);
-    let identities = request
-        .send_get_identity()
+    let identities = connected
+        .send_single::<jmap_client::core::response::IdentityGetResponse>(request)
         .await
         .map_err(crate::jmap::client::map_error)?
         .take_list();

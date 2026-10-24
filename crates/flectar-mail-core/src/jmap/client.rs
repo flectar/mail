@@ -1,23 +1,31 @@
 use crate::error::{CoreError, Result};
 use crate::models::AccountConfig;
 use jmap_client::URI;
+use jmap_client::blob::upload::UploadResponse;
 use jmap_client::client::{Client, Credentials};
 use jmap_client::core::changes::ChangesResponse;
 use jmap_client::core::query::{Filter, QueryResponse};
 use jmap_client::core::request::Request;
-use jmap_client::core::response::{EmailSetResponse, MailboxSetResponse};
-use jmap_client::core::session::{Capabilities, Session};
+use jmap_client::core::response::{
+    EmailSetResponse, MailboxSetResponse, Response, SingleMethodResponse,
+};
+use jmap_client::core::session::{Capabilities, Session, URLPart};
 use jmap_client::core::set::SetObject;
 use jmap_client::email::Email;
 use jmap_client::mailbox::{Mailbox, Role};
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 use url::Url;
 
 pub const CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 pub const MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 pub const SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
 const MAX_DISCOVERY_REDIRECTS: usize = 5;
+/// Bound for any one JMAP request, upload or download.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AuthenticationScheme {
@@ -33,7 +41,15 @@ static AUTHENTICATION_SCHEMES: OnceLock<Mutex<HashMap<String, AuthenticationSche
 /// pins the selected account id instead of relying on map iteration order.
 pub struct ConnectedClient {
     pub client: Client,
-    pub download_http: reqwest::Client,
+    /// Carries every request, upload and download of this session over one
+    /// pooled connection. jmap-client builds a new HTTP client, and so a new
+    /// DNS lookup and TLS handshake, for each request it sends.
+    http: reqwest::Client,
+    /// Deadline of each request; tests shorten it.
+    pub timeout: Duration,
+    /// A response reported another Session state, so the Session has to be
+    /// fetched again before relying on it.
+    session_changed: AtomicBool,
     pub account_id: String,
     pub base_url: String,
     pub supports_submission: bool,
@@ -69,7 +85,7 @@ impl ConnectedClient {
     ) -> jmap_client::Result<ChangesResponse<Email>> {
         let mut request = self.request();
         request.changes_email(since_state).max_changes(max_changes);
-        request.send_single().await
+        self.send_single(request).await
     }
 
     pub async fn email_query(
@@ -78,7 +94,7 @@ impl ConnectedClient {
     ) -> jmap_client::Result<QueryResponse> {
         let mut request = self.request();
         request.query_email().filter(filter);
-        request.send_single::<QueryResponse>().await
+        self.send_single::<QueryResponse>(request).await
     }
 
     pub async fn email_submission_query(
@@ -87,7 +103,7 @@ impl ConnectedClient {
     ) -> jmap_client::Result<QueryResponse> {
         let mut request = self.request();
         request.query_email_submission().filter(filter);
-        request.send_single::<QueryResponse>().await
+        self.send_single::<QueryResponse>(request).await
     }
 
     pub async fn email_set_keyword(
@@ -98,7 +114,9 @@ impl ConnectedClient {
     ) -> jmap_client::Result<Option<Email>> {
         let mut request = self.request();
         request.set_email().update(id).keyword(keyword, set);
-        request.send_single::<EmailSetResponse>().await?.updated(id)
+        self.send_single::<EmailSetResponse>(request)
+            .await?
+            .updated(id)
     }
 
     pub async fn email_set_mailboxes<T, U>(
@@ -112,14 +130,15 @@ impl ConnectedClient {
     {
         let mut request = self.request();
         request.set_email().update(id).mailbox_ids(mailbox_ids);
-        request.send_single::<EmailSetResponse>().await?.updated(id)
+        self.send_single::<EmailSetResponse>(request)
+            .await?
+            .updated(id)
     }
 
     pub async fn email_destroy(&self, id: &str) -> jmap_client::Result<()> {
         let mut request = self.request();
         request.set_email().destroy([id]);
-        request
-            .send_single::<EmailSetResponse>()
+        self.send_single::<EmailSetResponse>(request)
             .await?
             .destroyed(id)
     }
@@ -139,8 +158,7 @@ impl ConnectedClient {
             .parent_id(parent_id)
             .create_id()
             .ok_or_else(|| jmap_client::Error::Internal("mailbox create id".into()))?;
-        request
-            .send_single::<MailboxSetResponse>()
+        self.send_single::<MailboxSetResponse>(request)
             .await?
             .created(&id)
     }
@@ -152,8 +170,7 @@ impl ConnectedClient {
     ) -> jmap_client::Result<Option<Mailbox>> {
         let mut request = self.request();
         request.set_mailbox().update(id).name(name);
-        request
-            .send_single::<MailboxSetResponse>()
+        self.send_single::<MailboxSetResponse>(request)
             .await?
             .updated(id)
     }
@@ -165,10 +182,74 @@ impl ConnectedClient {
             .destroy([id])
             .arguments()
             .on_destroy_remove_emails(delete_emails);
-        request
-            .send_single::<MailboxSetResponse>()
+        self.send_single::<MailboxSetResponse>(request)
             .await?
             .destroyed(id)
+    }
+
+    /// Sends a request of one method call and returns its response.
+    pub async fn send_single<T: DeserializeOwned>(
+        &self,
+        request: Request<'_>,
+    ) -> jmap_client::Result<T> {
+        let api_url = self.client.session().api_url().to_owned();
+        let response = self
+            .http
+            .post(api_url)
+            .timeout(self.timeout)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(serde_json::to_string(&request)?)
+            .send()
+            .await?;
+        let body = Client::handle_error(response).await?.bytes().await?;
+        let response: Response<SingleMethodResponse<T>> = serde_json::from_slice(&body)?;
+        if response.session_state() != self.client.session().state() {
+            self.session_changed.store(true, Ordering::Relaxed);
+        }
+        match response
+            .unwrap_method_responses()
+            .pop()
+            .ok_or_else(|| jmap_client::Error::Internal("Server returned no results".into()))?
+        {
+            SingleMethodResponse::Ok((_, response, _)) => Ok(response),
+            SingleMethodResponse::Error((_, error, _)) => Err(error.into()),
+        }
+    }
+
+    /// Uploads a blob into the selected account.
+    pub async fn upload(
+        &self,
+        blob: Vec<u8>,
+        content_type: &str,
+    ) -> jmap_client::Result<UploadResponse> {
+        let mut url = String::new();
+        for part in self.client.upload_url() {
+            match part {
+                URLPart::Value(value) => url.push_str(value),
+                URLPart::Parameter(_) => url.push_str(&self.account_id),
+            }
+        }
+        let response = self
+            .http
+            .post(url)
+            .timeout(self.timeout)
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(blob)
+            .send()
+            .await?;
+        let body = Client::handle_error(response).await?.bytes().await?;
+        Ok(serde_json::from_slice(&body)?)
+    }
+
+    /// Starts a download over the session's connection.
+    pub fn get(&self, url: impl reqwest::IntoUrl) -> reqwest::RequestBuilder {
+        self.http.get(url).timeout(self.timeout)
+    }
+
+    /// The server reported another Session state than this one: capabilities,
+    /// accounts or endpoints may have changed.
+    pub fn session_changed(&self) -> bool {
+        self.session_changed.load(Ordering::Relaxed)
     }
 }
 
@@ -364,19 +445,31 @@ pub async fn connect_with(
         .unwrap_or(false);
     drop(session);
     client.set_default_account_id(account_id.clone());
-    let mut download_headers = client.headers().clone();
-    download_headers.remove(reqwest::header::CONTENT_TYPE);
-    let download_http = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .default_headers(download_headers)
+    let mut headers = client.headers().clone();
+    // Each request names its own content type.
+    headers.remove(reqwest::header::CONTENT_TYPE);
+    // Like jmap-client, follow a few redirects, and only on the session host.
+    let redirect_host = host.clone();
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() > 5 {
+                attempt.error("too many redirects")
+            } else if attempt.url().host_str() == Some(redirect_host.as_str()) {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .default_headers(headers)
         .build()
-        .map_err(|error| CoreError::Network(format!("JMAP download client failed: {error}")))?;
+        .map_err(|error| CoreError::Network(format!("JMAP client failed: {error}")))?;
 
     Ok(ConnectedClient {
         client,
-        download_http,
+        http,
+        timeout: REQUEST_TIMEOUT,
+        session_changed: AtomicBool::new(false),
         account_id,
         base_url,
         supports_submission: true,
@@ -436,11 +529,12 @@ async fn resolve_session_url(mut current: Url, allow_local_http: bool) -> Result
         .build()
         .map_err(|error| CoreError::Network(format!("JMAP discovery client failed: {error}")))?;
     for redirect_count in 0..=MAX_DISCOVERY_REDIRECTS {
-        let response = http
-            .get(current.clone())
-            .send()
-            .await
-            .map_err(|error| CoreError::Network(format!("JMAP discovery failed: {error}")))?;
+        let response = http.get(current.clone()).send().await.map_err(|error| {
+            CoreError::Network(format!(
+                "JMAP discovery failed: {}",
+                transport_failure(&error)
+            ))
+        })?;
         if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
             return Ok(current);
         }
@@ -499,7 +593,7 @@ async fn connect_authenticated(
     };
     Client::new()
         .credentials(credentials)
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(REQUEST_TIMEOUT)
         // Public cross-host redirects are resolved before authentication.
         // The library may follow same-host redirects from this well-known URL.
         .follow_redirects([host])
@@ -515,6 +609,12 @@ fn is_authentication_rejection(error: &jmap_client::Error) -> bool {
         }
         _ => false,
     }
+}
+
+/// The server didn't answer within the request timeout. Asking for fewer
+/// objects may still work.
+pub fn is_timeout(error: &jmap_client::Error) -> bool {
+    matches!(error, jmap_client::Error::Transport(source) if source.is_timeout())
 }
 
 fn is_unauthorized(error: &jmap_client::Error) -> bool {
@@ -592,9 +692,39 @@ pub fn map_error(error: jmap_client::Error) -> CoreError {
             CoreError::Auth("JMAP rejected the password, app password, or API token".into())
         }
         jmap_client::Error::Transport(source) if source.is_timeout() || source.is_connect() => {
-            CoreError::Network(format!("JMAP connection failed: {source}"))
+            CoreError::Network(format!(
+                "JMAP request failed: {}",
+                transport_failure(source)
+            ))
         }
+        jmap_client::Error::Transport(source) => CoreError::Jmap(transport_failure(source)),
         _ => CoreError::Jmap(error.to_string()),
+    }
+}
+
+/// What went wrong in an HTTP exchange, in place of reqwest's generic "error
+/// sending request": no answer in time, or the innermost cause, such as a
+/// refused connection, a failed DNS lookup or an untrusted certificate.
+pub(crate) fn transport_failure(error: &reqwest::Error) -> String {
+    let url = error
+        .url()
+        .map(|url| format!(" ({url})"))
+        .unwrap_or_default();
+    if error.is_timeout() {
+        return format!("the server did not answer in time{url}");
+    }
+    let mut cause: &(dyn std::error::Error + 'static) = error;
+    let mut nested = false;
+    while let Some(source) = cause.source() {
+        cause = source;
+        nested = true;
+    }
+    if error.is_connect() {
+        format!("could not connect{url}: {cause}")
+    } else if nested {
+        format!("{error}: {cause}")
+    } else {
+        error.to_string()
     }
 }
 
@@ -1040,6 +1170,48 @@ pub(crate) mod tests {
                 .unwrap()
                 .to_ascii_lowercase()
                 .contains("authorization:")
+        );
+    }
+
+    #[tokio::test]
+    async fn transport_failures_say_what_went_wrong() {
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(200))
+            .build()
+            .unwrap();
+
+        // A server that takes the connection but never answers.
+        let silent = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let silent_url = format!("http://{}/jmap/", silent.local_addr().unwrap());
+        let held = tokio::spawn(async move {
+            let _connection = silent.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let error = http.post(&silent_url).send().await.unwrap_err();
+        assert_eq!(
+            transport_failure(&error),
+            format!("the server did not answer in time ({silent_url})")
+        );
+        assert!(matches!(
+            map_error(jmap_client::Error::Transport(error)),
+            CoreError::Network(message)
+                if message == format!("JMAP request failed: the server did not answer in time ({silent_url})")
+        ));
+        held.abort();
+
+        // Nothing listens on a port that was just released.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let closed_url = format!("http://{}/jmap/", closed.local_addr().unwrap());
+        drop(closed);
+        let error = http.post(&closed_url).send().await.unwrap_err();
+        let failure = transport_failure(&error);
+        assert!(
+            failure.starts_with(&format!("could not connect ({closed_url}): ")),
+            "{failure}"
+        );
+        assert!(
+            failure.to_ascii_lowercase().contains("refused"),
+            "{failure}"
         );
     }
 

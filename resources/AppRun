@@ -79,18 +79,10 @@ if [[ "${1:-}" == "--integrate" ]]; then
   exit 0
 fi
 
-# The mail shell has a small number of worker threads. One glibc allocation
-# arena is enough and prevents per-thread arenas from retaining render/sync
-# scratch memory after a burst of work. Respect an explicit user override.
-export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-1}"
-export MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-65536}"
+# The executable finds the bundled libraries in usr/lib through its RUNPATH.
+# Do not export LD_LIBRARY_PATH: the browser and every other program the app
+# launches would inherit it and load those libraries instead of the host's.
 
-# Preserve the host search path for external programs such as the browser.
-export FLECTAR_MAIL_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH-}"
-export FLECTAR_MAIL_BUNDLED=1
-
-# linuxdeploy places any non-system ELF dependencies here.
-export LD_LIBRARY_PATH="$app_dir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 # The Linux binary supports Slint's Wayland and X11 winit integrations. Slint
 # paints every application control while the window system owns window chrome.
 export SLINT_BACKEND="${SLINT_BACKEND:-winit-software}"

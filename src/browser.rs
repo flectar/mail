@@ -6,9 +6,9 @@ type OpenUrl = dyn Fn(&str) -> Result<(), String> + Send + Sync;
 
 /// The URL service carried by [`crate::PlatformContext`].
 ///
-/// The default uses the system browser, preserving Linux's portal and AppImage
-/// library-path handling for authorization. Hosts without desktop launchers
-/// supply a callback with [`Self::new`]. Clones share that callback's state.
+/// The default uses the system browser, preferring Linux's desktop portal for
+/// authorization. Hosts without desktop launchers supply a callback with
+/// [`Self::new`]. Clones share that callback's state.
 #[derive(Clone, Default)]
 pub struct ExternalUrlOpener {
     handler: Option<Arc<OpenUrl>>,
@@ -51,33 +51,13 @@ impl ExternalUrlOpener {
 use std::process::{Command, Stdio};
 
 #[cfg(linux_desktop)]
-fn host_command(program: &str) -> Command {
+fn quiet_command(program: &str) -> Command {
     let mut command = Command::new(program);
-    restore_library_path(
-        &mut command,
-        std::env::var_os("FLECTAR_MAIL_BUNDLED").is_some(),
-        std::env::var_os("FLECTAR_MAIL_HOST_LD_LIBRARY_PATH"),
-    );
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     command
-}
-
-#[cfg(linux_desktop)]
-fn restore_library_path(command: &mut Command, bundled: bool, path: Option<std::ffi::OsString>) {
-    if !bundled {
-        return;
-    }
-    match path.filter(|p| !p.is_empty()) {
-        Some(path) => {
-            command.env("LD_LIBRARY_PATH", path);
-        }
-        None => {
-            command.env_remove("LD_LIBRARY_PATH");
-        }
-    }
 }
 
 #[cfg(linux_desktop)]
@@ -132,12 +112,12 @@ fn open_system_authorization(address: &url::Url) -> Result<(), String> {
         if open_with_desktop_portal(address).is_ok() {
             return Ok(());
         }
-        let mut xdg = host_command("xdg-open");
+        let mut xdg = quiet_command("xdg-open");
         xdg.arg(url);
         if launch(xdg).is_ok() {
             return Ok(());
         }
-        let mut gio = host_command("gio");
+        let mut gio = quiet_command("gio");
         gio.args(["open", url]);
         launch(gio).map_err(|_| "Could not open the default browser".into())
     }
@@ -264,16 +244,6 @@ mod tests {
         let mut command = Command::new("sh");
         command.args(["-c", "exit 0"]);
         assert!(launch(command).is_ok());
-    }
-    #[test]
-    fn restores_host_libraries_only_for_bundled_builds() {
-        let mut command = Command::new("xdg-open");
-        restore_library_path(&mut command, false, None);
-        assert_eq!(command.get_envs().count(), 0);
-        restore_library_path(&mut command, true, Some("/host/lib".into()));
-        assert_eq!(command.get_envs().next().unwrap().1.unwrap(), "/host/lib");
-        restore_library_path(&mut command, true, Some("".into()));
-        assert_eq!(command.get_envs().next().unwrap().1, None);
     }
     #[test]
     fn foreground_browser_does_not_hold_up_authorization() {

@@ -15,6 +15,8 @@ import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 
 export struct FileRow {
     identity: string, name: string, detail: string, size: string, date: string, directory: bool,
+    // The local day `date` shows, kept to format it again for a new language.
+    iso-date: string,
     attachment: bool, readable: bool, writable: bool, renameable: bool,
     deletable: bool, shareable: bool, locked: bool, owns-lock: bool,
     created: string, modified: string, accessed: string, executable: bool, subscribed: bool,
@@ -291,7 +293,7 @@ export component FilesView inherits Rectangle {
                         leading-icon: root.compact || root.sidebar-collapsed ? @image-url("../icons/lucide/outline/sidebar-expand.svg") : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                         leading-tooltip: @tr("File sources");
                         leading-accessible-id: "files-sidebar-button";
-                        text: root.search-text;
+                        text <=> root.search-text;
                         placeholder-text: @tr("Search files");
                         refresh-enabled: !FilesUi.busy;
                         refresh-tooltip: @tr("Refresh"); refresh-accessible-id: "files-refresh-button";
@@ -305,8 +307,8 @@ export component FilesView inherits Rectangle {
                         private property <[WorkspaceSearchFilter]> storage-filters: [{title: @tr("Filter and sort files"), value: "filter"}];
                         filters: FilesUi.attachments ? self.attachment-filters : self.storage-filters;
                         leading-clicked => { if root.compact { root.navigation-open = true; } else { root.sidebar-collapsed = !root.sidebar-collapsed; } }
-                        edited(value) => { root.search-text = value; root.search-pending = true; search-delay.restart(); }
-                        submitted(value) => { root.search-text = value; root.search-pending = false; if !FilesUi.busy { FilesUi.command("search", value, ""); } else { root.search-pending = true; } }
+                        edited(value) => { root.search-pending = true; search-delay.restart(); }
+                        submitted(value) => { root.search-pending = false; if !FilesUi.busy { FilesUi.command("search", value, ""); } else { root.search-pending = true; } }
                         refresh => { if !root.search-pending { FilesUi.command("refresh", "", ""); } }
                         filter-selected(value) => {
                             if !FilesUi.busy {

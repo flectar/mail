@@ -19,8 +19,14 @@ export component ConfirmationDialog inherits Rectangle {
     in property <color> body-color;
     in property <color> muted-color;
     in property <color> danger-color: #d04a43;
+    // An optional step before deciding, such as saving a copy of what will be
+    // deleted. It leaves the dialog open and reports in `action-status`.
+    in property <string> action-label;
+    in property <string> action-status;
+    in property <bool> action-enabled: true;
     callback confirmed;
     callback cancelled;
+    callback action();
     private property <bool> confirm-selected: false;
 
     visible: root.open;
@@ -108,6 +114,8 @@ export component ConfirmationDialog inherits Rectangle {
                 if root.subject != "" : Text { text: root.subject; color: root.body-color; font-size: TypeScale.secondary; font-weight: 600; wrap: char-wrap; }
                 Text { min-height: 42px; text: root.description; color: root.body-color; font-size: TypeScale.secondary; wrap: word-wrap; vertical-alignment: center; }
                 Text { min-height: 26px; text: root.detail; color: root.muted-color; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                if root.action-label != "" : Button { height: 34px; text: root.action-label; enabled: root.action-enabled; clicked => { root.action(); } }
+                if root.action-label != "" && root.action-status != "" : Text { text: root.action-status; color: root.body-color; font-size: TypeScale.caption; wrap: word-wrap; }
                 Rectangle { vertical-stretch: 1; }
 
                 GridLayout {

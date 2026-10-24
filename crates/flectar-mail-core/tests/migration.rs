@@ -7,7 +7,9 @@ use flectar_mail_core::migration::{
     self, AccountPlan, FindingCode, ImportInventory, OtherEntryKind, PlanStatus, ServerProtocol,
     SignIn, Source, SourceError, SourceKind,
 };
-use flectar_mail_core::models::{ConnectionSecurity, Provider, SenderIdentitySource};
+use flectar_mail_core::models::{
+    ConnectionSecurity, KeepOnServer, MailProtocol, Provider, SenderIdentitySource,
+};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -119,11 +121,25 @@ fn k9_export_maps_supported_accounts_and_explains_the_rest() {
     assert_eq!(gmail.provider, Provider::Gmail);
     assert_eq!(gmail.incoming_host, "imap.gmail.com");
 
+    // A POP3 account keeps downloading, and mail deleted here leaves the
+    // server as mail deleted in K-9 did.
     let pop = &plans[2];
-    assert_eq!(pop.status, PlanStatus::Unsupported);
+    assert_eq!(pop.status, PlanStatus::Ready);
     assert_eq!(pop.email, "old@example.net");
-    assert_eq!(codes(pop), [FindingCode::Pop3Unsupported]);
-    assert!(pop.draft.is_none());
+    assert_eq!(
+        codes(pop),
+        [
+            FindingCode::UnencryptedOutgoing,
+            FindingCode::RemovesServerMail
+        ]
+    );
+    let pop = &pop.draft.as_ref().unwrap().config;
+    assert_eq!(pop.mail_protocol, MailProtocol::Pop3);
+    assert_eq!(
+        (pop.incoming_host.as_str(), pop.incoming_port),
+        ("pop.example.net", 995)
+    );
+    assert_eq!(pop.settings.keep_on_server, KeepOnServer::UntilDeleted);
 }
 
 #[test]
@@ -343,10 +359,14 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
             .collect::<Vec<_>>(),
         [
             ("jane@example.com", SignIn::Password),
-            ("jane.doe@gmail.com", SignIn::Google)
+            ("jane.doe@gmail.com", SignIn::Google),
+            ("old@example.net", SignIn::Password)
         ]
     );
     assert!(report.already_present.is_empty() && report.failed.is_empty());
+    // An imported POP3 account starts with its folders on this device.
+    let pop3 = report.imported[2].account_id;
+    assert_eq!(core.list_folders(Some(pop3)).await.unwrap().len(), 6);
 
     let listed = core.list_accounts().await.unwrap();
     assert!(
@@ -377,7 +397,7 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
     // Repeating the import changes nothing and says so.
     let again = core.import_accounts(drafts).await.unwrap();
     assert!(again.imported.is_empty());
-    assert_eq!(again.already_present.len(), 2);
+    assert_eq!(again.already_present.len(), 3);
     let plans = migration::plan(
         &inventory,
         &listed
@@ -493,6 +513,104 @@ user_pref(\"mail.smtpservers\", \"smtp1\");
         plans[0].draft.as_ref().unwrap().signatures[0].html,
         "<div>Café</div>"
     );
+}
+
+#[test]
+fn thunderbird_pop3_accounts_keep_their_rules_for_mail_on_the_server() {
+    let profile = tempfile::tempdir().unwrap();
+    let mut prefs = String::from(
+        "user_pref(\"mail.accountmanager.accounts\", \"account1,account2,account3,account4,account5\");
+user_pref(\"mail.server.default.leave_on_server\", true);
+user_pref(\"mail.smtpserver.smtp1.hostname\", \"smtp.example.org\");
+user_pref(\"mail.smtpserver.smtp1.try_ssl\", 3);
+user_pref(\"mail.smtpserver.smtp1.username\", \"me\");
+user_pref(\"mail.smtpservers\", \"smtp1\");
+",
+    );
+    // Thunderbird's account wizard, the profile's default, a day count no
+    // choice matches, removal right after download, and Gmail over POP3.
+    let servers = [
+        (
+            "wizard@example.org",
+            "pop.example.org",
+            "me",
+            &[
+                "delete_by_age_from_server\", true",
+                "num_days_to_leave_on_server\", 14",
+                "delete_mail_left_on_server\", true",
+            ][..],
+        ),
+        ("default@example.org", "pop.example.org", "me", &[][..]),
+        (
+            "ten@example.org",
+            "pop.example.org",
+            "me",
+            &[
+                "delete_by_age_from_server\", true",
+                "num_days_to_leave_on_server\", 10",
+            ][..],
+        ),
+        (
+            "once@example.org",
+            "pop.example.org",
+            "me",
+            &["leave_on_server\", false"][..],
+        ),
+        ("me@gmail.com", "pop.gmail.com", "me@gmail.com", &[][..]),
+    ];
+    for (index, (email, host, user, extra)) in servers.iter().enumerate() {
+        let n = index + 1;
+        prefs.push_str(&format!(
+            "user_pref(\"mail.account.account{n}.identities\", \"id{n}\");
+user_pref(\"mail.account.account{n}.server\", \"server{n}\");
+user_pref(\"mail.identity.id{n}.useremail\", \"{email}\");
+user_pref(\"mail.server.server{n}.hostname\", \"{host}\");
+user_pref(\"mail.server.server{n}.socketType\", 3);
+user_pref(\"mail.server.server{n}.type\", \"pop3\");
+user_pref(\"mail.server.server{n}.userName\", \"{user}\");
+"
+        ));
+        for setting in *extra {
+            prefs.push_str(&format!("user_pref(\"mail.server.server{n}.{setting});\n"));
+        }
+    }
+    std::fs::write(profile.path().join("prefs.js"), prefs).unwrap();
+
+    let plans = migration::plan(&accounts(migration::open(profile.path()).unwrap()), &[]);
+    let imported = |index: usize| {
+        let plan = &plans[index];
+        assert_eq!(plan.status, PlanStatus::Ready, "{:?}", plan.findings);
+        let config = plan.draft.as_ref().unwrap().config.clone();
+        (codes(plan), config)
+    };
+    let removes = FindingCode::RemovesServerMail;
+    let (findings, wizard) = imported(0);
+    assert_eq!(findings, [removes]);
+    assert_eq!(plans[0].findings[0].detail, "fourteenDays");
+    assert_eq!(wizard.mail_protocol, MailProtocol::Pop3);
+    assert_eq!(wizard.incoming_port, 995);
+    assert_eq!(wizard.settings.keep_on_server, KeepOnServer::FourteenDays);
+    let (findings, default) = imported(1);
+    assert!(findings.is_empty());
+    assert_eq!(default.settings.keep_on_server, KeepOnServer::Always);
+    let (findings, ten) = imported(2);
+    assert_eq!(findings, [removes, FindingCode::ServerMailRuleApproximated]);
+    assert_eq!(ten.settings.keep_on_server, KeepOnServer::FourteenDays);
+    let (findings, once) = imported(3);
+    assert_eq!(findings, [removes]);
+    assert_eq!(once.settings.keep_on_server, KeepOnServer::UntilDownloaded);
+    let (findings, gmail) = imported(4);
+    assert_eq!(
+        findings,
+        [
+            FindingCode::ProviderSyncReplacesPop3,
+            FindingCode::GoogleSignInReplacesPassword,
+            FindingCode::OutgoingServerReplaced
+        ]
+    );
+    assert_eq!(plans[4].findings[0].detail, "Gmail");
+    assert_eq!(gmail.provider, Provider::Gmail);
+    assert_eq!(gmail.settings.keep_on_server, KeepOnServer::Always);
 }
 
 #[test]

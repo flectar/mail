@@ -25,6 +25,7 @@ fn account(id: i64) -> Account {
         sync_state: "idle".into(),
         sync_error: None,
         can_create_top_level_mailbox: true,
+        server_keeps_mail_days: None,
     }
 }
 fn config(account: &Account) -> AccountConfig {

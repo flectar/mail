@@ -76,8 +76,15 @@ fn save(path: &Path, mode: RendererMode) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+/// Set on the CPU process that replaces one whose GPU startup failed.
+const GPU_FALLBACK: &str = "FLECTAR_GPU_FALLBACK";
+
+pub(crate) fn gpu_startup_failed() -> bool {
+    std::env::var_os(GPU_FALLBACK).is_some()
+}
+
 pub(crate) fn requested(preferred: RendererMode) -> RendererMode {
-    if std::env::var_os("FLECTAR_GPU_FALLBACK").is_some() {
+    if gpu_startup_failed() {
         return RendererMode::Cpu;
     }
     match std::env::var("FLECTAR_RENDERER") {
@@ -95,11 +102,13 @@ pub(crate) fn register(
     preferred: RendererMode,
     gpu: bool,
     supported: bool,
+    gpu_failed: bool,
 ) {
     let settings = app.global::<RendererSettings>();
     settings.set_preferred(preferred.key().into());
     settings.set_active(if gpu { "gpu" } else { "cpu" }.into());
     settings.set_gpu_supported(supported);
+    settings.set_gpu_failed(gpu_failed);
     settings.set_available(!cfg!(mobile));
     let weak = app.as_weak();
     settings.on_choose(move |value| {
@@ -207,7 +216,7 @@ pub(crate) fn restart_cpu(error: &dyn std::error::Error) -> Result<(), Box<dyn s
                 .skip(1)
                 .filter(|argument| argument != crate::autostart::BACKGROUND_ARGUMENT),
         )
-        .env("FLECTAR_GPU_FALLBACK", "1");
+        .env(GPU_FALLBACK, "1");
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

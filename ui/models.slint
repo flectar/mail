@@ -128,8 +128,6 @@ export struct MailListEntry {
     is_header: bool,
     group_key: string,
     group_kind: string,
-    group_month: int,
-    group_year: int,
     group_count: int,
     expanded: bool,
     show_row: bool,
@@ -222,6 +220,10 @@ export struct AccountRow {
     smtp_port: string,
     mail_history: string,
     sent_copy_policy: string,
+    keep_on_server: string,
+    // Days a POP3 server keeps downloaded mail on its own; -1 when it
+    // keeps it or hasn't said.
+    server_keeps_mail_days: int,
     calendar_connected: bool,
     calendar_enabled: bool,
     calendar_status: string,
@@ -272,6 +274,7 @@ export struct EmailTemplateRow {
 export struct CalendarDay {
     day: string,
     iso_date: string,
+    date_label: string,
     outside_month: bool,
     is_today: bool,
     is_selected: bool,
@@ -282,6 +285,7 @@ export struct CalendarWeekDay {
     weekday: string,
     day: string,
     iso_date: string,
+    date_label: string,
     is_today: bool,
 }
 
@@ -291,6 +295,7 @@ export struct CalendarEventRow {
     title: string,
     detail: string,
     iso_date: string,
+    date_label: string,
     day_index: int,
     month_index: int,
     start_minutes: int,

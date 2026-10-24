@@ -9,10 +9,18 @@
 //! FLECTAR_MAIL_TLS_INSECURE=1.
 //!
 //! Gated: runs only when FLECTAR_MAIL_TEST_POP3=1. The mailbox is seeded over
-//! IMAP, so reruns start from the same three messages.
+//! IMAP, so reruns start from the same three messages. The account part also
+//! submits through the container's port 10587, as dovecot_e2e.rs does.
 
-use flectar_mail_core::models::ConnectionSecurity;
-use flectar_mail_core::{imap, pop3};
+use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
+use flectar_mail_core::config::Paths;
+use flectar_mail_core::models::{
+    AddPasswordAccountArgs, ConnectionSecurity, KeepOnServer, MailConnectionSettings, MailProtocol,
+    View,
+};
+use flectar_mail_core::{Core, imap, pop3};
+use std::sync::Arc;
+use std::time::Duration;
 
 fn gated() -> bool {
     std::env::var("FLECTAR_MAIL_TEST_POP3")
@@ -66,7 +74,7 @@ async fn connect(port: u16, security: ConnectionSecurity) -> pop3::Session {
         .unwrap_or_else(|error| panic!("connect on {port} with {security:?}: {error}"))
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn pop3_against_dovecot() {
     if !gated() {
         eprintln!("skipped: set FLECTAR_MAIL_TEST_POP3=1 with Dovecot running");
@@ -132,4 +140,86 @@ async fn pop3_against_dovecot() {
         ids[1..].iter().map(|(_, id)| id).collect::<Vec<_>>()
     );
     session.quit().await.unwrap();
+
+    account_against_dovecot().await;
+}
+
+/// A POP3 account downloads the mailbox and leaves it on the server.
+async fn account_against_dovecot() {
+    seed(&["one", "two", "three"]).await;
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let account = core
+        .add_account_password(AddPasswordAccountArgs {
+            email: "testuser@example.com".into(),
+            display_name: Some("Test User".into()),
+            username: "testuser".into(),
+            password: "pass".into(),
+            mail_protocol: MailProtocol::Pop3,
+            jmap_url: String::new(),
+            incoming_host: "127.0.0.1".into(),
+            incoming_port: 10995,
+            smtp_host: "127.0.0.1".into(),
+            smtp_port: 10587,
+            connection: MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Starttls,
+            ),
+        })
+        .await
+        .expect("add POP3 account");
+    let subjects = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let page = core
+                .list_threads(View::Inbox, None, Some(account.id), None, None, (None, 50))
+                .await
+                .unwrap();
+            if page.threads.len() == 3 {
+                let mut subjects: Vec<_> = page
+                    .threads
+                    .into_iter()
+                    .map(|thread| thread.subject)
+                    .collect();
+                subjects.sort();
+                return subjects;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    })
+    .await
+    .expect("POP3 account download");
+    assert_eq!(subjects, ["one", "three", "two"]);
+
+    let mut session = connect(10995, ConnectionSecurity::Tls).await;
+    assert_eq!(session.unique_ids().await.unwrap().len(), 3);
+    session.quit().await.unwrap();
+
+    // Choosing to keep mail only until it's downloaded empties the server,
+    // and the mail stays here.
+    core.set_account_keep_on_server(account.id, KeepOnServer::UntilDownloaded)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let mut session = connect(10995, ConnectionSecurity::Tls).await;
+            let left = session.unique_ids().await.unwrap().len();
+            session.quit().await.unwrap();
+            if left == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+    })
+    .await
+    .expect("mail removed from the server");
+    let page = core
+        .list_threads(View::Inbox, None, Some(account.id), None, None, (None, 50))
+        .await
+        .unwrap();
+    assert_eq!(page.threads.len(), 3);
 }

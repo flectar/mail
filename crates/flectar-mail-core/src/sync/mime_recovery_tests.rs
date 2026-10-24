@@ -238,7 +238,7 @@ async fn fixture(behavior: Behavior) -> (Fixture, Option<Session>) {
         .await
         .unwrap();
     let headers = imap::fetch_headers(&mut session, "1:3").await.unwrap();
-    store_headers(&ctx, &config, &folder, headers, None)
+    store_headers(&ctx, &config, &folder, headers, None, NewHeaders::Insert)
         .await
         .unwrap();
     let folder_id = folder.id;

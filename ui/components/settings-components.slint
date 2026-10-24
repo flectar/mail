@@ -2,6 +2,7 @@ import { ComboBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { LineEdit, Switch } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { SidebarStyle } from "sidebar-row.slint";
+import { KbdShortcut, KeyboardKeys } from "kbd.slint";
 
 // Settings navigation is intentionally separate from MailSidebar: the latter
 // owns mailbox models, compose actions, and tree expansion state.
@@ -295,41 +296,76 @@ export component SettingsLinkRow inherits Rectangle {
     }
 }
 
-export component ShortcutRow inherits Rectangle {
+// A card of shortcut rows under a small heading.
+export component ShortcutSection inherits Rectangle {
     in property <string> title;
-    in property <string> shortcut;
-    in property <color> title-color;
-    in property <color> shortcut-color;
-    in property <color> key-background;
-    in property <color> key-border;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
 
-    height: 40px;
-    Text {
-        x: 0px;
-        width: parent.width - 52px;
-        height: parent.height;
-        text: root.title;
-        color: root.title-color;
-        font-size: TypeScale.body;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    Rectangle {
-        x: parent.width - self.width;
-        y: (parent.height - self.height) / 2;
-        width: max(32px, key-label.preferred-width + 16px);
-        height: 26px;
-        border-radius: 5px;
-        border-width: 1px;
-        border-color: root.key-border;
-        background: root.key-background;
-        key-label := Text {
-            text: root.shortcut;
-            color: root.shortcut-color;
+    background: root.surface;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.card-border-color;
+    VerticalBox {
+        padding-top: 12px;
+        padding-right: 18px;
+        padding-bottom: 12px;
+        padding-left: 18px;
+        spacing: 0px;
+        Text {
+            height: max(20px, self.preferred-height);
+            text: root.title;
+            color: root.heading;
             font-size: TypeScale.caption;
             font-weight: 700;
-            horizontal-alignment: center;
             vertical-alignment: center;
+        }
+        @children
+    }
+}
+
+// One shortcut with its keys; a second binding is shown as an alternative.
+export component ShortcutRow inherits Rectangle {
+    in property <string> title;
+    in property <[keys]> keys;
+    in property <string> separator: @tr("or");
+    in property <color> title-color;
+    in property <color> separator-color;
+
+    height: max(40px, keys-row.preferred-height + 12px);
+    accessible-role: text;
+    accessible-label: @tr("{}, {}", root.title, root.keys.length > 1
+        ? KeyboardKeys.text(root.keys[0]) + " " + root.separator + " " + KeyboardKeys.text(root.keys[1])
+        : KeyboardKeys.text(root.keys[0]));
+
+    HorizontalLayout {
+        spacing: 16px;
+        Text {
+            horizontal-stretch: 1;
+            text: root.title;
+            color: root.title-color;
+            font-size: TypeScale.body;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+        keys-row := HorizontalLayout {
+            spacing: 6px;
+            alignment: end;
+            cross-axis-alignment: center;
+            for binding[index] in root.keys : HorizontalLayout {
+                spacing: 6px;
+                cross-axis-alignment: center;
+                if index > 0 : Text {
+                    text: root.separator;
+                    color: root.separator-color;
+                    font-size: TypeScale.caption;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                }
+                KbdShortcut { keys: binding; }
+            }
         }
     }
 }
@@ -337,6 +373,8 @@ export component ShortcutRow inherits Rectangle {
 export component FormField inherits VerticalBox {
     in property <bool> enabled: true;
     in property <string> label;
+    // Bind with `<=>`: typing replaces a one-way binding, after which the
+    // field would keep showing its old text when the form is reset or filled.
     in-out property <string> value;
     in property <string> placeholder;
     in property <InputType> input-type: InputType.text;
@@ -357,12 +395,9 @@ export component FormField inherits VerticalBox {
     field := LineEdit {
         enabled: root.enabled;
         height: 36px;
-        text: root.value;
+        text <=> root.value;
         placeholder-text: root.placeholder;
         input-type: root.input-type;
-        edited(value) => {
-            root.value = value;
-            root.edited(value);
-        }
+        edited(value) => { root.edited(value); }
     }
 }

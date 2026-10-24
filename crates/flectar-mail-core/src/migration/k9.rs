@@ -8,7 +8,7 @@
 use super::SourceError;
 use super::model::{
     AccountCandidate, IdentityCandidate, ImportInventory, ServerCandidate, ServerProtocol,
-    SignatureCandidate, SourceAuth, SourceKind, SourceSecurity,
+    SignatureCandidate, SourceAuth, SourceKind, SourceRetention, SourceSecurity,
 };
 use quick_xml::Reader;
 use quick_xml::events::Event;
@@ -220,19 +220,32 @@ fn account(element: &Element, version: u32) -> AccountCandidate {
                 .collect()
         })
         .unwrap_or_default();
+    let incoming = element
+        .child("incoming-server")
+        .map(|server| server_candidate(server, version));
+    // POP3 accounts keep mail on the server, or remove it once it is
+    // deleted in the app. An absent policy is the default, NEVER.
+    let retention = incoming
+        .as_ref()
+        .filter(|server| server.protocol == ServerProtocol::Pop3)
+        .map(|_| SourceRetention {
+            keep: true,
+            remove_after_days: None,
+            remove_deleted: settings.and_then(|settings| settings.value("deletePolicy"))
+                == Some("DELETE"),
+        });
     AccountCandidate {
         source_id: element.attribute("uuid").unwrap_or_default().to_owned(),
         label: element.child_text("name").map(str::to_owned),
         identities,
-        incoming: element
-            .child("incoming-server")
-            .map(|server| server_candidate(server, version)),
+        incoming,
         outgoing: element
             .child("outgoing-server")
             .map(|server| server_candidate(server, version)),
         color: settings
             .and_then(|settings| settings.value("chipColor"))
             .and_then(color),
+        retention,
     }
 }
 

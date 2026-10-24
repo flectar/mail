@@ -516,6 +516,26 @@ async fn pipelined_headers_survive_a_refused_message() {
 }
 
 #[tokio::test]
+async fn an_oversized_header_section_is_skipped_and_the_session_continues() {
+    let mut steps = signed_in(&["USER", "TOP"]);
+    let large = format!("X-Large: {}\r\n\r\n", "y".repeat(2000));
+    steps.extend([
+        reply("TOP 1 0", format!("+OK\r\n{large}.\r\n")),
+        reply("TOP 2 0", "+OK\r\nSubject: two\r\n\r\n.\r\n"),
+        reply("QUIT", "+OK\r\n"),
+    ]);
+    let (port, received, task) = server(false, steps).await;
+    let mut session = connect(port).await;
+    assert_eq!(
+        session.headers(&[1, 2], 1024).await.unwrap(),
+        [None, Some(b"Subject: two\r\n\r\n".to_vec())]
+    );
+    session.quit().await.unwrap();
+    task.await.unwrap();
+    assert_eq!(received.lock().unwrap().last().unwrap(), "QUIT");
+}
+
+#[tokio::test]
 async fn deletions_are_committed_by_quit() {
     let mut steps = signed_in(&["USER"]);
     steps.extend([

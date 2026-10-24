@@ -14,6 +14,7 @@ pub mod gmail;
 pub mod labels;
 pub mod messages;
 pub mod notifications;
+pub mod pop3;
 pub mod search;
 pub mod sender_identities;
 pub mod settings;

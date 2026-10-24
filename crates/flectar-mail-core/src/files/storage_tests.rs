@@ -148,8 +148,9 @@ async fn metadata_snapshot_contains_all_three_stores() {
         .create_database_snapshot(out.path().join("snapshot"))
         .await
         .unwrap();
-    assert_eq!(manifest.version, 2);
+    assert_eq!(manifest.version, 3);
     assert!(manifest.files.is_some());
+    assert!(!manifest.device_mail_payloads);
     for name in ["mail.sqlite3", "calendar.sqlite3", "files.sqlite3"] {
         assert!(out.path().join("snapshot").join(name).exists());
     }

@@ -15,6 +15,7 @@ import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { MessageColors } from "../message-colors.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
+import { Shortcuts } from "../shortcuts.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -318,7 +319,9 @@ component ThreadMessageHeader inherits Rectangle {
     }
 }
 
-export component MailReadingPane inherits Rectangle {
+// A focus scope only so message shortcuts work from anywhere in the reader.
+export component MailReadingPane inherits FocusScope {
+    enabled: false;
     in property <bool> compact: false;
     in property <bool> full-width: false;
     private property <bool> attachment-menu-mode: root.height < 500px;
@@ -447,9 +450,9 @@ export component MailReadingPane inherits Rectangle {
         email-surface.height - root.thread-header-height - root.renderer-controls-height
     );
     private property <length> rendered-email-height: root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px);
-    // Slint's software renderer (CPU mode, Android) panics when it paints a
-    // rectangle past ±32767 physical pixels (#35). Surfaces that grow with the
-    // message paint only the visible scroll content, with a margin for cut edges.
+    // Slint's software renderer (CPU mode) panics when it paints a rectangle
+    // past ±32767 physical pixels (#35). Surfaces that grow with the message
+    // paint only the visible scroll content, with a margin for cut edges.
     // Remove this clamping once a Slint release fixes slint-ui/slint#14250.
     private property <length> paint-margin: 32px;
     private property <length> paint-left: -email-scroll.content-x - root.paint-margin;
@@ -539,6 +542,25 @@ export component MailReadingPane inherits Rectangle {
         else if root.text_mode { plain-text-editor.focus(); }
         else if EmailReader.reader-mode { reader-focus.focus(); }
         else { email-focus.focus(); }
+    }
+
+    // Message shortcuts act on the open conversation, as its toolbar does,
+    // but not behind a dialog the reader shows.
+    private property <bool> message-keys: root.has_selected && !root.rendering_info_open && !root.label-editor-open;
+    KeyBinding {
+        keys: Shortcuts.archive;
+        enabled: root.message-keys && !root.selected_is_draft;
+        activated => { root.message_action("archive"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.spam;
+        enabled: root.message-keys && !root.selected_is_draft;
+        activated => { root.message_action("spam"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.trash;
+        enabled: root.message-keys;
+        activated => { root.message_action(root.trash_view ? "delete_permanently" : "trash"); }
     }
 
     private property <bool> viewport-pending: false;
@@ -648,7 +670,7 @@ export component MailReadingPane inherits Rectangle {
 
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
-                background: root.surface-raised;
+                Rectangle { background: root.surface-raised; }
 
                 VerticalBox {
                     visible: root.has_selected;
@@ -1305,10 +1327,13 @@ export component MailReadingPane inherits Rectangle {
                                         accessible-role: none;
                                     }
 
+                                    // Like the card, the banner keeps its place
+                                    // while a wide message scrolls sideways, so
+                                    // its button stays in view.
                                     if root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : Rectangle {
-                                        x: 12px;
+                                        x: -email-scroll.content-x + 12px;
                                         y: 12px;
-                                        width: parent.width - 24px;
+                                        width: root.email-viewport-width - 24px;
                                         height: 36px;
                                         background: root.control-bg;
                                         border-radius: 6px;
@@ -1434,12 +1459,16 @@ export component MailReadingPane inherits Rectangle {
                                             }
                                         }
 
+                                        KeyBinding {
+                                            keys: Shortcuts.find;
+                                            activated => { EmailReader.find-open = true; EmailReader.reader-mode = false; find-input.focus(); }
+                                        }
+                                        KeyBinding { keys: Shortcuts.zoom-in; activated => { EmailReader.command("zoom-in"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-in-alternate; activated => { EmailReader.command("zoom-in"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-out; activated => { EmailReader.command("zoom-out"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-reset; activated => { EmailReader.command("zoom-reset"); } }
+                                        KeyBinding { keys: Shortcuts.caret-browsing; activated => { EmailReader.caret-mode = !EmailReader.caret-mode; } }
                                         key-pressed(event) => {
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "f" { EmailReader.find-open = true; EmailReader.reader-mode = false; find-input.focus(); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && (event.text == "+" || event.text == "=") { EmailReader.command("zoom-in"); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "-" { EmailReader.command("zoom-out"); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "0" { EmailReader.command("zoom-reset"); return accept; }
-                                            if event.text == Key.F7 { EmailReader.caret-mode = !EmailReader.caret-mode; return accept; }
                                             if event.text == Key.Escape { EmailReader.command("clear-selection"); return accept; }
                                             if !event.modifiers.shift && !EmailReader.caret-mode {
                                                 if event.text == Key.LeftArrow { email-scroll.content-x = min(0px,email-scroll.content-x + 40px); return accept; }

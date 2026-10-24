@@ -4,7 +4,9 @@
     Flectar Mail
   </h1>
   <p>
-    <strong>English</strong> · <a href="README.zh_Hans.md">简体中文</a>
+    <strong>English</strong> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.de.md">Deutsch</a> ·
+    <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.pt_BR.md">Português (Brasil)</a> · <a href="docs/readme/README.ru.md">Русский</a> ·
+    <a href="docs/readme/README.hi.md">हिन्दी</a> · <a href="docs/readme/README.ar.md">العربية</a> · <a href="docs/readme/README.zh_Hans.md">简体中文</a>
   </p>
   <div align="center">
     <h3>Email, made fast again</h3>
@@ -48,7 +50,7 @@ fraction of the memory of a typical web-based mail client.
 - **Offline by design.** Your mailbox and calendar are stored locally, so your
   synced data remains useful without a connection.
 - **Works with your accounts.** Connect Gmail, Outlook and Microsoft 365, or
-  standards-based IMAP/SMTP, JMAP, CalDAV, and CardDAV services.
+  standards-based IMAP, POP3, SMTP, JMAP, CalDAV, and CardDAV services.
 - **Privacy-conscious defaults.** Remote images are blocked until you allow
   them, helping prevent tracking pixels from reporting when you read a message.
 - **Security by architecture.** Email content is never opened in a WebView.
@@ -113,7 +115,9 @@ Tauri or Wails.
 Choose the workspace that fits the way you handle email. Keep the detailed
 three-pane layout, switch to a streamlined minimal view, choose a light or dark
 theme, select a built-in color palette or create a custom one, and show or hide
-sender avatars.
+sender avatars. You can also give the app icon a different color: on the
+taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
+and iOS home screens.
 
 Message appearance can follow the app theme or stay light or dark independently.
 It uses your selected color palette for HTML, plain text, and Reader mode.
@@ -358,12 +362,21 @@ snapshots or transfer connected-account setup and preferences through a backup.
 Passwords and OAuth tokens stay in the system keyring, so a restored device asks
 you to sign in again.
 
+POP3 accounts download mail to this device and leave it on the server unless
+you choose otherwise: each account can remove mail from the server after 7, 14,
+or 30 days, once you delete it here, or as soon as it's downloaded, but never
+before it's stored on this device. Their folders exist only on this device, so
+snapshots include that mail, and removing a POP3 account or deleting all data
+offers to export it first as mbox files, one per folder, which other mail apps
+can import.
+
 The same import also brings accounts over from Thunderbird (a profile folder,
 its Tools › Export archive, or `prefs.js`) and from Thunderbird for Android or
 K-9 Mail (`.k9s` settings exports). You review each account before anything is
-added: settings Flectar Mail can't reproduce, such as POP3 servers, are
-explained instead of changed silently. Existing accounts are never
-modified, and passwords are never imported.
+added: settings Flectar Mail can't reproduce, such as an Exchange server, are
+explained instead of changed silently, and POP3 accounts keep their rule for
+removing mail from the server. Existing accounts are never modified, and
+passwords are never imported.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-storage-dark.png">
@@ -394,11 +407,11 @@ Flectar Mail is currently in development and is not yet stable.
 >
 > Google and Microsoft OAuth verification is still in progress. Earlier GitHub
 > prereleases are intended for testers using their own OAuth registrations or
-> IMAP/JMAP accounts.
+> IMAP, POP3, or JMAP accounts.
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 **Sign-in settings** cog on the welcome screen to save your own Google or
-Microsoft app registration, or connect an IMAP/JMAP account. Custom keys are
+Microsoft app registration, or connect an IMAP, POP3, or JMAP account. Custom keys are
 shared with Settings and take precedence over bundled keys; clearing a custom
 client ID restores the defaults when available. Each provider enables separately
 once its configuration is saved.
@@ -422,6 +435,8 @@ Flathub package and therefore does not receive automatic Flathub updates. Its
 close-to-tray option is disabled until the tray backend can use a sandbox-safe
 D-Bus name. Starting automatically at sign-in goes through the desktop's
 Background portal and opens the window, because there is no tray to start into.
+The app icon stays orange there, because the sandbox cannot change the launcher
+icon on the host.
 
 Install the downloaded Linux package with either
 `sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` or
@@ -497,6 +512,20 @@ Getting started is easy:
 3. Translate strings directly through Weblate, no programming or GitHub experience required.
 
 Translations are synchronized with our GitHub repository and submitted as pull requests for review. Contributors can also receive GitHub attribution for their work.
+
+README translations are maintained in this repository. See
+[Contributing translations](CONTRIBUTING.md#translations) to add or update one.
+
+## ♿ Accessibility
+
+Flectar Mail includes keyboard navigation, light and dark themes, and flexible
+layouts. Accessibility work is ongoing. See [ACCESSIBILITY.md](ACCESSIBILITY.md)
+for current features, testing limitations, and how to report a barrier.
+
+## 🔒 Security
+
+To report a vulnerability privately, follow [SECURITY.md](SECURITY.md).
+Please keep vulnerability details out of public issues.
 
 ## 🌐 Open source, for everyone
 

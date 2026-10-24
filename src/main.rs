@@ -1,5 +1,6 @@
 mod account_controller;
 mod account_mail_preferences;
+mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
 mod attachment_controller;
@@ -12,12 +13,14 @@ mod compose_controller;
 mod compose_editor;
 mod contacts;
 mod data_controller;
+mod date_format;
 mod document_preview;
 pub mod documents;
 mod email_document;
 pub mod favicon;
 mod files_controller;
 mod import_controller;
+mod keyboard_keys;
 mod latest_load;
 mod mail;
 #[cfg(test)]
@@ -85,6 +88,7 @@ use contacts::{
     ContactDirectoryState, apply_contact_directory, apply_contact_rows, clear_contact_form,
 };
 use data_controller::register_data_management_callbacks;
+use date_format::DateStyle;
 use favicon::{
     FaviconImage, FaviconImages, FaviconLoader, ProfileAvatarImages, ProfileAvatarLoader,
     physical_pixel_side,
@@ -1057,6 +1061,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         eprintln!("could not select {selected} translation: {error}");
     }
     app.set_language_mode(language_mode.into());
+    date_format::reload(app);
 }
 
 impl InboxState {
@@ -1467,7 +1472,7 @@ pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::
     #[cfg(desktop)]
     if let Err(error) = &result
         && error.is::<renderer_preferences::GpuStartupError>()
-        && std::env::var_os("FLECTAR_GPU_FALLBACK").is_none()
+        && !renderer_preferences::gpu_startup_failed()
     {
         return renderer_preferences::restart_cpu(error.as_ref());
     }
@@ -1583,10 +1588,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app = renderer_preferences::initialize_step(use_wgpu, AppWindow::new)?;
     app.global::<MailListNavigation>()
         .on_target(mail_navigation::target);
+    app.global::<KeyboardKeys>().on_chord(keyboard_keys::chord);
     if let Some(width) = startup_presentation.workspace_list_pane_width {
         app.set_workspace_list_pane_width(width as f32);
     }
     window_chrome::register(&app, &runtime);
+    app_icon::apply(&app, startup_presentation.app_icon);
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.on_settings_search_matches(|haystack, query| {
         let query = query.to_string().trim().to_lowercase();
@@ -1598,6 +1605,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         preferred_renderer,
         use_wgpu,
         renderer_preferences::GPU_SUPPORTED,
+        renderer_preferences::gpu_startup_failed(),
     );
     app.global::<ZoomApi>()
         .on_resolve(|action, current, minimum, maximum| {
@@ -2645,6 +2653,24 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let calendar_editing_event_id = Rc::new(Cell::new(None::<i64>));
 
     let app_weak = app.as_weak();
+    let state_for_dates = Rc::clone(&state);
+    let runtime_for_dates = Rc::clone(&runtime);
+    let calendar_for_dates = Rc::clone(&calendar_state);
+    let contacts_for_dates = Rc::clone(&contact_state);
+    date_format::on_change(move || {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        refresh_message_dates(&app, &state_for_dates, &runtime_for_dates);
+        apply_calendar(
+            &app,
+            &calendar_for_dates.borrow(),
+            Local::now().date_naive(),
+        );
+        apply_contact_rows(&app, &contacts_for_dates);
+    });
+
+    let app_weak = app.as_weak();
     let calendar_for_navigation = Rc::clone(&calendar_state);
     let inbox_for_calendar_navigation = Rc::clone(&state);
     let runtime_for_navigation = Rc::clone(&runtime);
@@ -2840,7 +2866,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_calendar_event_editing(false);
         app.set_calendar_event_title("".into());
         app.set_calendar_event_date(calendar.selected_date.format("%Y-%m-%d").to_string().into());
-        app.set_calendar_event_time("09:00".into());
+        app.set_calendar_event_time(date_format::current().time(9, 0).into());
         app.set_calendar_event_duration("60".into());
         app.set_calendar_event_color(0);
         app.set_calendar_editor_open(true);
@@ -2869,14 +2895,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_calendar_event_editing(true);
         app.set_calendar_event_title(event.title.into());
         app.set_calendar_event_date(event.date.format("%Y-%m-%d").to_string().into());
-        app.set_calendar_event_time(
-            format!(
-                "{:02}:{:02}",
-                event.start_minutes / 60,
-                event.start_minutes % 60
-            )
-            .into(),
-        );
+        let start = event.start_minutes.clamp(0, 24 * 60 - 1) as u32;
+        app.set_calendar_event_time(date_format::current().time(start / 60, start % 60).into());
         app.set_calendar_event_duration(event.duration_minutes.to_string().into());
         app.set_calendar_event_color(event.color_index);
         app.set_calendar_editor_open(true);
@@ -2944,12 +2964,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        let parsed = NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").and_then(|date| {
-            NaiveTime::parse_from_str(time.trim(), "%H:%M").map(|time| (date, time))
-        });
-        let Ok((date, time)) = parsed else {
-            app.set_sync_status(UiMessage::plain(
-                "Use YYYY-MM-DD and a 24-hour time such as 09:30.",
+        let formats = date_format::current();
+        let parsed = NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").ok().zip(
+            formats
+                .parse_time(&time)
+                .and_then(|(hour, minute)| NaiveTime::from_hms_opt(hour, minute, 0)),
+        );
+        let Some((date, time)) = parsed else {
+            app.set_sync_status(UiMessage::detail(
+                "Use YYYY-MM-DD for the date and a time such as {}.",
+                formats.time(9, 30),
             ));
             return;
         };
@@ -4605,7 +4629,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_account_protocol("imap".into());
                 app.set_jmap_url("".into());
                 app.set_incoming_host("".into());
+                app.set_incoming_port("993".into());
                 app.set_smtp_host("".into());
+                app.set_smtp_port("465".into());
             }
             if let Some(removal) = update.account_removal.as_mut().filter(|removal| removal.removed) {
                 let current_page = {
@@ -4903,6 +4929,48 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             };
             // Reload on both success and failure so the selector always shows
             // the authoritative persisted value.
+            let accounts = core.load_account_snapshot().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts,
+                    calendar_connections: None,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_keep_on_server = Rc::clone(&state);
+    let runtime_for_keep_on_server = Rc::clone(&runtime);
+    let ui_task_tx_for_keep_on_server = ui_task_tx.clone();
+    app.on_save_account_keep_on_server(move |account_id, value| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_keep_on_server.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Server mail settings require local mail data.",
+            ));
+            return;
+        };
+        let account_id = i64::from(account_id);
+        let value = value.to_string();
+        app.set_sync_status(UiMessage::plain("Updating server mail settings…"));
+        let updates = ui_task_tx_for_keep_on_server.clone();
+        runtime_for_keep_on_server.spawn(async move {
+            let message = match core.set_account_keep_on_server(account_id, &value).await {
+                Ok(()) => UiMessage::plain("Server mail settings updated."),
+                Err(error) => UiMessage::detail("Could not update server mail settings: {}", error),
+            };
+            // Reload either way so the selector shows the saved choice.
             let accounts = core.load_account_snapshot().await.ok();
             let _ = updates
                 .send(UiTaskUpdate {
@@ -6088,6 +6156,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             &source,
             action.as_str(),
             app.get_selected_plain_text().as_str(),
+            |message| translated(&app, &message).into(),
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -6753,6 +6822,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         let Some(app) = suggestion_app.upgrade() else {
             return;
         };
+        // Only server settings that the form shows are suggested.
+        let (protocol, standard_incoming_port) =
+            match MailProtocol::parse(app.get_account_protocol().as_str()) {
+                Some(MailProtocol::Imap) => (MailProtocol::Imap, "993"),
+                Some(MailProtocol::Pop3) => (MailProtocol::Pop3, "995"),
+                Some(MailProtocol::Gmail | MailProtocol::Jmap) | None => return,
+            };
         let transport_matches_last_suggestion = last_suggested_transport
             .borrow()
             .as_ref()
@@ -6770,7 +6846,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             });
         let transport_is_pristine = app.get_incoming_host().trim().is_empty()
             && app.get_smtp_host().trim().is_empty()
-            && app.get_incoming_port().as_str() == "993"
+            && app.get_incoming_port().as_str() == standard_incoming_port
             && app.get_smtp_port().as_str() == "465"
             && app.get_incoming_security().as_str() == "tls"
             && app.get_smtp_security().as_str() == "tls"
@@ -6781,12 +6857,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         let suggestion = {
             let state = suggestion_state.borrow();
-            reusable_mail_transport(&state.account_configs, email.as_str()).cloned()
+            reusable_mail_transport(&state.account_configs, email.as_str(), protocol).cloned()
         };
         let Some(config) = suggestion else {
             if transport_matches_last_suggestion {
                 app.set_incoming_host("".into());
-                app.set_incoming_port("993".into());
+                app.set_incoming_port(standard_incoming_port.into());
                 app.set_smtp_host("".into());
                 app.set_smtp_port("465".into());
                 app.set_incoming_security("tls".into());
@@ -6850,11 +6926,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     465,
                     UiMessage::plain("Discovering JMAP and checking capabilities…"),
                 ),
-                MailProtocol::Imap => {
+                MailProtocol::Imap | MailProtocol::Pop3 => {
                     let Some(incoming_port) = port(&incoming_port) else {
-                        app.set_sync_status(UiMessage::plain(
-                            "IMAP port must be between 1 and 65535.",
-                        ));
+                        app.set_sync_status(match mail_protocol {
+                            MailProtocol::Pop3 => {
+                                UiMessage::plain("POP3 port must be between 1 and 65535.")
+                            }
+                            _ => UiMessage::plain("IMAP port must be between 1 and 65535."),
+                        });
                         return;
                     };
                     let Some(smtp_port) = port(&smtp_port) else {
@@ -6866,7 +6945,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     (
                         incoming_port,
                         smtp_port,
-                        UiMessage::plain("Testing IMAP and SMTP connections…"),
+                        match mail_protocol {
+                            MailProtocol::Pop3 => {
+                                UiMessage::plain("Testing POP3 and SMTP connections…")
+                            }
+                            _ => UiMessage::plain("Testing IMAP and SMTP connections…"),
+                        },
                     )
                 }
                 MailProtocol::Gmail => {

@@ -6,6 +6,7 @@ import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint"
 import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
+import { Shortcuts } from "../shortcuts.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -47,7 +48,7 @@ export component MailView inherits FocusScope {
     in property <string> selected_scope_title: "Unified Inbox";
     in property <bool> trash_view: false;
     in property <string> unified_count: "";
-    in property <string> search_query: "";
+    in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
@@ -90,6 +91,7 @@ export component MailView inherits FocusScope {
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> focus-list-after-settings: false;
+    private property <bool> focus-search-after-page-change: false;
     out property <bool> list-focus-visible: root.single-pane
         ? compact-list-pane.keyboard-focus-visible : desktop-list-pane.keyboard-focus-visible;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
@@ -189,6 +191,48 @@ export component MailView inherits FocusScope {
         }
     }
 
+    function focus-search() {
+        root.folders-open = false;
+        if root.single-pane && root.compact-page != "list" {
+            // The list page takes focus once it is shown; send it to the field.
+            root.focus-search-after-page-change = true;
+            root.compact-page = "list";
+            root.close_preview();
+        } else if root.single-pane {
+            compact-list-pane.focus-search();
+        } else {
+            desktop-list-pane.focus-search();
+        }
+    }
+
+    function switch-pane() {
+        if root.single-pane && root.compact-page == "message" {
+            root.compact-page = "list";
+            root.close_preview();
+        } else if !root.single-pane && desktop-list-pane.keyboard-focused {
+            root.focus-reader();
+        } else {
+            root.focus-list(true);
+        }
+    }
+
+    KeyBinding {
+        keys: Shortcuts.compose;
+        activated => { root.open_compose(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.search;
+        activated => { root.focus-search(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.search-alternate;
+        activated => { root.focus-search(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.switch-pane;
+        activated => { root.switch-pane(); }
+    }
+
     init => {
         // A new mail view starts at the top; an earlier view's offset is stale.
         TabsUi.list-offset = root.list-scroll-offset;
@@ -196,22 +240,17 @@ export component MailView inherits FocusScope {
         else { root.focus-list(false); }
     }
     changed compact-page => {
-        if root.compact-page == "list" { root.focus-list(false); }
-        else { root.focus-reader(); }
+        if root.compact-page == "list" && root.focus-search-after-page-change {
+            root.focus-search-after-page-change = false;
+            compact-list-pane.focus-search();
+        } else if root.compact-page == "list" {
+            root.focus-list(false);
+        } else {
+            root.focus-reader();
+        }
     }
     capture-key-pressed(event) => {
         if event.modifiers.control || event.modifiers.meta || event.modifiers.alt { return reject; }
-        if event.text == Key.F6 {
-            if root.single-pane && root.compact-page == "message" {
-                root.compact-page = "list";
-                root.close_preview();
-            } else if !root.single-pane && desktop-list-pane.keyboard-focused {
-                root.focus-reader();
-            } else {
-                root.focus-list(true);
-            }
-            return accept;
-        }
         if event.text == Key.Escape && root.single-pane && root.compact-page == "message"
             && !EmailReader.find-open && !root.has_selection && !EmailReader.caret-mode {
             root.compact-page = "list";
@@ -302,7 +341,7 @@ export component MailView inherits FocusScope {
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 trash_view: root.trash_view;
-                search_query: root.search_query;
+                search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
                 can_load_more: root.can_load_more;
@@ -523,7 +562,7 @@ export component MailView inherits FocusScope {
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 trash_view: root.trash_view;
-                search_query: root.search_query;
+                search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
                 can_load_more: root.can_load_more;

@@ -26,16 +26,18 @@ fn same_mail_transport(left: &AccountConfig, right: &AccountConfig) -> bool {
         && left.settings.connection == right.settings.connection
 }
 
-/// Reuse transport details only when every manual IMAP account for the domain
-/// agrees. Ambiguous configurations deliberately leave the new form untouched.
+/// Reuse transport details only when every manual account of the form's
+/// protocol for the domain agrees. Ambiguous configurations deliberately leave
+/// the new form untouched.
 pub(super) fn reusable_mail_transport<'a>(
     configs: &'a [AccountConfig],
     address: &str,
+    protocol: MailProtocol,
 ) -> Option<&'a AccountConfig> {
     let domain = mail_domain(address)?;
     let mut matches = configs.iter().filter(|config| {
         config.provider == Provider::Generic
-            && config.mail_protocol == MailProtocol::Imap
+            && config.mail_protocol == protocol
             && mail_domain(&config.email)
                 .is_some_and(|candidate| candidate.eq_ignore_ascii_case(domain))
     });
@@ -261,6 +263,11 @@ pub(super) fn apply_connected_accounts(
                 smtp_port: config.smtp_port.to_string().into(),
                 mail_history: config.settings.mail_history.as_str().into(),
                 sent_copy_policy: config.settings.sent_copy_policy.as_str().into(),
+                keep_on_server: config.settings.keep_on_server.as_str().into(),
+                server_keeps_mail_days: account
+                    .server_keeps_mail_days
+                    .and_then(|days| i32::try_from(days).ok())
+                    .unwrap_or(-1),
                 calendar_connected: calendar.is_some(),
                 calendar_enabled: calendar.is_some_and(|connection| connection.enabled),
                 calendar_status: calendar
@@ -296,6 +303,11 @@ pub(super) fn apply_connected_accounts(
         })
         .collect::<Vec<_>>();
     apply_connected_account_rows(app, rows);
+    app.set_has_device_mail(
+        accounts
+            .iter()
+            .any(|account| account.mail_protocol == MailProtocol::Pop3),
+    );
     let known_accounts = accounts
         .iter()
         .map(|account| account.id)
@@ -645,7 +657,8 @@ mod mail_transport_suggestion_tests {
             "imap.example.com",
             "smtp.example.com",
         )];
-        let suggestion = reusable_mail_transport(&configs, "second@example.COM").unwrap();
+        let suggestion =
+            reusable_mail_transport(&configs, "second@example.COM", MailProtocol::Imap).unwrap();
         assert_eq!(suggestion.incoming_host, "imap.example.com");
         assert_eq!(suggestion.smtp_host, "smtp.example.com");
     }
@@ -666,7 +679,29 @@ mod mail_transport_suggestion_tests {
                 "smtp.example.com",
             ),
         ];
-        assert!(reusable_mail_transport(&configs, "new@example.com").is_none());
-        assert!(reusable_mail_transport(&configs, "new@").is_none());
+        assert!(reusable_mail_transport(&configs, "new@example.com", MailProtocol::Imap).is_none());
+        assert!(reusable_mail_transport(&configs, "new@", MailProtocol::Imap).is_none());
+    }
+
+    #[test]
+    fn only_accounts_of_the_form_protocol_are_reused() {
+        let mut pop3 = config(2, "pop@example.com", "pop.example.com", "smtp.example.com");
+        pop3.mail_protocol = MailProtocol::Pop3;
+        let configs = vec![
+            config(
+                1,
+                "imap@example.com",
+                "imap.example.com",
+                "smtp.example.com",
+            ),
+            pop3,
+        ];
+        let host = |protocol| {
+            reusable_mail_transport(&configs, "new@example.com", protocol)
+                .map(|config| config.incoming_host.as_str())
+        };
+        assert_eq!(host(MailProtocol::Pop3), Some("pop.example.com"));
+        assert_eq!(host(MailProtocol::Imap), Some("imap.example.com"));
+        assert_eq!(host(MailProtocol::Jmap), None);
     }
 }

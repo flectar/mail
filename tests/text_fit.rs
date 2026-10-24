@@ -13,7 +13,7 @@
 // FLECTAR_TEXT_FIT_SNAPSHOTS to a directory to save a render of each state.
 
 use flectar_mail::{
-    AccountImport, AccountRow, AppTheme, AppWindow, CalendarAgendaRow, CalendarDay,
+    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow, CalendarDay,
     CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ContactAccountRow, ContactRow,
     ContactSidebarRow, ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow,
     ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage,
@@ -333,6 +333,9 @@ fn work_profile() -> MailProfileRow {
 
 fn apply_fixture(app: &AppWindow) {
     app.global::<MotionSettings>().set_enabled(false);
+    // Linux shows the app icon card with its longest description and note.
+    app.global::<AppIcon>().set_available(true);
+    app.global::<AppIcon>().set_platform("linux".into());
     app.set_startup_ready(true);
     app.set_startup_hydrated(true);
     app.set_connected_accounts(model(accounts()));
@@ -448,6 +451,7 @@ fn apply_fixture(app: &AppWindow) {
                 day: (19 + index).to_string().into(),
                 iso_date: format!("2026-10-{}", 19 + index).into(),
                 is_today: index == 0,
+                ..Default::default()
             })
             .collect(),
     ));
@@ -462,6 +466,7 @@ fn apply_fixture(app: &AppWindow) {
                     is_today: index == 21,
                     is_selected: index == 21,
                     has_events: index % 5 == 0,
+                    ..Default::default()
                 }
             })
             .collect(),
@@ -744,12 +749,18 @@ fn load_catalog(language: &str) -> BTreeMap<String, String> {
     };
     let mut catalog = BTreeMap::new();
     let (mut id, mut text, mut field) = (String::new(), String::new(), "");
+    // Slint skips fuzzy entries, so the app shows their source text.
+    let (mut fuzzy, mut next_fuzzy) = (false, false);
     for line in std::fs::read_to_string(path).unwrap().lines() {
         if let Some(rest) = line.strip_prefix("msgid ") {
-            if !id.is_empty() && !text.is_empty() {
+            if !id.is_empty() && !text.is_empty() && !fuzzy {
                 catalog.insert(std::mem::take(&mut id), std::mem::take(&mut text));
             }
             (id, text, field) = (unquote(rest), String::new(), "id");
+            fuzzy = std::mem::take(&mut next_fuzzy);
+        } else if let Some(flags) = line.strip_prefix("#,") {
+            next_fuzzy = flags.split(',').any(|flag| flag.trim() == "fuzzy");
+            field = "";
         } else if let Some(rest) = line.strip_prefix("msgstr ") {
             (text, field) = (unquote(rest), "text");
         } else if line.starts_with('"') {
@@ -762,7 +773,7 @@ fn load_catalog(language: &str) -> BTreeMap<String, String> {
             field = "";
         }
     }
-    if !id.is_empty() && !text.is_empty() {
+    if !id.is_empty() && !text.is_empty() && !fuzzy {
         catalog.insert(id, text);
     }
     catalog

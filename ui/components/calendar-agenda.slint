@@ -254,7 +254,7 @@ export component CalendarAgenda inherits Rectangle {
                     enabled: row.kind == "event";
                     visible: row.kind == "event";
                     accessible-role: button;
-                    accessible-label: @tr("View details for {}", row.event.title) + " · " + row.iso-date + " · " + row.time-label + " · " + row.event.calendar;
+                    accessible-label: @tr("View details for {}", row.event.title) + " · " + row.event.date-label + " · " + row.time-label + " · " + row.event.calendar;
                     accessible-action-default => { if row.kind == "event" { root.event-clicked(row.event); } }
                     mouse-cursor: row.kind == "event" ? MouseCursor.pointer : MouseCursor.default;
                     clicked => { agenda-keyboard.focus(); agenda-keyboard.pointer-activated(); root.keyboard-key = row.key; root.event-clicked(row.event); }

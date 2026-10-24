@@ -3,6 +3,7 @@
 use crate::{
     AppWindow, CalendarAgendaFilterRow, CalendarAgendaRow, CalendarDay, CalendarEventRow,
     CalendarSourceRow, CalendarWeekDay, I18n,
+    date_format::{self, DateFormats, DateStyle},
 };
 use chrono::{
     Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
@@ -323,50 +324,12 @@ pub(crate) fn shift_month(date: NaiveDate, delta: i32) -> NaiveDate {
     NaiveDate::from_ymd_opt(year, month, 1).unwrap_or(date)
 }
 
-fn month_name(app: &AppWindow, date: NaiveDate, short: bool) -> String {
-    app.global::<I18n>()
-        .invoke_month_name(date.month() as i32, short)
-        .into()
-}
-
-fn calendar_period_title(app: &AppWindow, state: &LocalCalendarState) -> String {
+fn calendar_period_title(formats: &DateFormats, state: &LocalCalendarState) -> String {
     if matches!(state.view_mode.as_str(), "month" | "agenda") {
-        return format!(
-            "{} {}",
-            month_name(app, state.visible_month, false),
-            state.visible_month.year()
-        );
+        return formats.date(DateStyle::MonthYear, state.visible_month);
     }
     let start = start_of_week(state.selected_date);
-    let end = start + ChronoDuration::days(6);
-    if start.year() == end.year() && start.month() == end.month() {
-        format!(
-            "{} {} – {}, {}",
-            month_name(app, start, false),
-            start.day(),
-            end.day(),
-            start.year()
-        )
-    } else if start.year() == end.year() {
-        format!(
-            "{} {} – {} {}, {}",
-            month_name(app, start, true),
-            start.day(),
-            month_name(app, end, true),
-            end.day(),
-            start.year()
-        )
-    } else {
-        format!(
-            "{} {}, {} – {} {}, {}",
-            month_name(app, start, true),
-            start.day(),
-            start.year(),
-            month_name(app, end, true),
-            end.day(),
-            end.year()
-        )
-    }
+    formats.date_range(start, start + ChronoDuration::days(6))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -432,8 +395,10 @@ fn agenda_occurrences(state: &LocalCalendarState) -> BTreeMap<NaiveDate, Vec<Age
     days
 }
 
-fn minute_label(minutes: i32) -> String {
-    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+/// A time of day from minutes after midnight, up to 1440 for the day's end.
+fn minute_label(formats: &DateFormats, minutes: i32) -> String {
+    let minutes = minutes.clamp(0, 24 * 60) as u32;
+    formats.time(minutes / 60, minutes % 60)
 }
 
 pub(crate) fn apply_agenda(
@@ -455,6 +420,7 @@ pub(crate) fn apply_agenda(
         days.entry(today).or_default();
     }
     let now_minutes = time.hour() as i32 * 60 + time.minute() as i32;
+    let formats = date_format::current();
     let mut rows = Vec::new();
     let mut anchor = 0;
     let mut height = 0;
@@ -470,11 +436,7 @@ pub(crate) fn apply_agenda(
             key: format!("day:{date}").into(),
             kind: "day".into(),
             iso_date: iso_date.clone().into(),
-            date_label: app.global::<I18n>().invoke_agenda_date_label(
-                date.weekday().num_days_from_monday() as i32,
-                date.day() as i32,
-                date.month() as i32,
-            ),
+            date_label: formats.date(DateStyle::WeekdayDayMonth, date).into(),
             is_today: date == today,
             count: occurrences.len() as i32,
             ..Default::default()
@@ -485,7 +447,7 @@ pub(crate) fn apply_agenda(
             key: format!("now:{date}").into(),
             kind: "now".into(),
             iso_date: iso_date.clone().into(),
-            time_label: minute_label(now_minutes).into(),
+            time_label: minute_label(&formats, now_minutes).into(),
             ..Default::default()
         };
         for occurrence in occurrences {
@@ -502,16 +464,16 @@ pub(crate) fn apply_agenda(
                 time_label: if event.all_day {
                     app.global::<I18n>().invoke_calendar_all_day()
                 } else {
-                    minute_label(occurrence.start_minutes).into()
+                    minute_label(&formats, occurrence.start_minutes).into()
                 },
                 end_label: if event.all_day {
                     "".into()
                 } else {
-                    minute_label(occurrence.end_minutes).into()
+                    minute_label(&formats, occurrence.end_minutes).into()
                 },
                 event: event_rows
                     .entry(occurrence.event_index)
-                    .or_insert_with(|| event_row(app, state, event))
+                    .or_insert_with(|| event_row(app, state, &formats, event))
                     .clone(),
                 ..Default::default()
             });
@@ -618,6 +580,7 @@ pub(crate) fn agenda_row_index(rows: ModelRc<CalendarAgendaRow>, key: SharedStri
 fn event_row(
     app: &AppWindow,
     state: &LocalCalendarState,
+    formats: &DateFormats,
     event: &LocalCalendarEvent,
 ) -> CalendarEventRow {
     let week_start = start_of_week(state.selected_date);
@@ -629,9 +592,6 @@ fn event_row(
         .accounts
         .iter()
         .find(|account| account.id == event.account_id);
-    let start_time =
-        NaiveTime::from_num_seconds_from_midnight_opt((event.start_minutes.max(0) * 60) as u32, 0)
-            .unwrap_or_default();
     CalendarEventRow {
         id: event.id,
         editable: event.is_local,
@@ -644,28 +604,26 @@ fn event_row(
             let last_day = (event.end - ChronoDuration::nanoseconds(1)).date();
             if last_day > event.date {
                 format!(
-                    "{} · {} – {}",
+                    "{} · {}",
                     app.global::<I18n>().invoke_calendar_all_day(),
-                    event.date,
-                    last_day
+                    formats.date_range(event.date, last_day)
                 )
                 .into()
             } else {
                 app.global::<I18n>().invoke_calendar_all_day()
             }
         } else {
-            format!(
-                "{} – {}",
-                start_time.format("%H:%M"),
-                if event.end.date() == event.date {
-                    event.end.format("%H:%M").to_string()
-                } else {
-                    event.end.format("%Y-%m-%d %H:%M").to_string()
-                }
-            )
-            .into()
+            let end = if event.end.date() == event.date {
+                formats.time(event.end.hour(), event.end.minute())
+            } else {
+                formats.date_time(DateStyle::Medium, event.end)
+            };
+            formats
+                .range(&minute_label(formats, event.start_minutes), &end)
+                .into()
         },
         iso_date: event.date.format("%Y-%m-%d").to_string().into(),
+        date_label: formats.date(DateStyle::WeekdayMedium, event.date).into(),
         day_index: (event.date - week_start).num_days() as i32,
         month_index: (event.date - grid_start).num_days() as i32,
         start_minutes: event.start_minutes,
@@ -705,6 +663,7 @@ fn event_row(
 }
 
 pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today: NaiveDate) {
+    let formats = date_format::current();
     let selected_date_has_events = state
         .events
         .iter()
@@ -717,6 +676,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
             CalendarDay {
                 day: date.day().to_string().into(),
                 iso_date: date.format("%Y-%m-%d").to_string().into(),
+                date_label: formats.date(DateStyle::WeekdayMedium, date).into(),
                 outside_month: date.month() != state.visible_month.month(),
                 is_today: date == today,
                 is_selected: date == state.selected_date,
@@ -730,13 +690,13 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         .map(|offset| {
             let date = week_start + ChronoDuration::days(offset);
             CalendarWeekDay {
-                weekday: app
-                    .global::<I18n>()
-                    .invoke_weekday_short(date.weekday().num_days_from_monday() as i32)
+                weekday: formats
+                    .weekday(date.weekday().num_days_from_monday(), true)
                     .to_uppercase()
                     .into(),
                 day: date.day().to_string().into(),
                 iso_date: date.format("%Y-%m-%d").to_string().into(),
+                date_label: formats.date(DateStyle::WeekdayMedium, date).into(),
                 is_today: date == today,
             }
         })
@@ -785,7 +745,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
                 last_synced: source
                     .last_synced_at
                     .and_then(|millis| Local.timestamp_millis_opt(millis).single())
-                    .map(|value| value.format("%Y-%m-%d %H:%M").to_string())
+                    .map(|value| formats.date_time(DateStyle::Medium, value.naive_local()))
                     .unwrap_or_default()
                     .into(),
             }
@@ -796,7 +756,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         .events
         .iter()
         .filter(|event| event.date >= range_start && event.date <= range_end)
-        .map(|event| event_row(app, state, event))
+        .map(|event| event_row(app, state, &formats, event))
         .collect::<Vec<_>>();
 
     apply_agenda(app, state, today, Local::now().time());
@@ -807,18 +767,37 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
         .reconcile_by(source_rows, |row| row.id, PartialEq::eq);
     app.set_calendar_events(ModelRc::new(VecModel::from(events)));
     app.set_calendar_month_title(
-        format!(
-            "{} {}",
-            month_name(app, state.visible_month, false),
-            state.visible_month.year()
-        )
-        .into(),
+        formats
+            .date(DateStyle::MonthYear, state.visible_month)
+            .into(),
     );
-    app.set_calendar_period_title(calendar_period_title(app, state).into());
+    app.set_calendar_period_title(calendar_period_title(&formats, state).into());
     app.set_calendar_week_label(format!("W{:02}", state.selected_date.iso_week().week()).into());
     app.set_calendar_selected_date(state.selected_date.format("%Y-%m-%d").to_string().into());
+    app.set_calendar_selected_date_label(
+        formats
+            .date(DateStyle::WeekdayMedium, state.selected_date)
+            .into(),
+    );
+    apply_hour_labels(app, &formats);
     app.set_calendar_selected_date_has_events(selected_date_has_events);
     app.set_calendar_view_mode(state.view_mode.clone().into());
+}
+
+/// The week view's hour ruler. The model is replaced only when the labels
+/// change, since a new model recreates every ruler row.
+fn apply_hour_labels(app: &AppWindow, formats: &DateFormats) {
+    use slint::Model;
+    let labels = (8..=18)
+        .map(|hour| SharedString::from(formats.hour(hour)))
+        .collect::<Vec<_>>();
+    if !app
+        .get_calendar_hour_labels()
+        .iter()
+        .eq(labels.iter().cloned())
+    {
+        app.set_calendar_hour_labels(ModelRc::new(VecModel::from(labels)));
+    }
 }
 
 #[cfg(test)]

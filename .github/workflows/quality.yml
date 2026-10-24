@@ -79,6 +79,7 @@ jobs:
           PY
           python3 scripts/test-benchmark-startup.py
           python3 ui/icons/lucide/generate.py --check
+          python3 resources/app-icon/generate.py --check
       - name: Keep operating-system names in the platform layer
         run: python3 scripts/check-platform-gates.py
       - name: Verify the Blitz patch queue
@@ -89,6 +90,8 @@ jobs:
         run: |
           python3 scripts/verify-parley.py
           cargo test --manifest-path crates/parley/Cargo.toml --lib --locked --target-dir target/parley-tests
+      - name: Verify the Slint winit clipboard backport
+        run: python3 scripts/verify-slint-winit.py
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin

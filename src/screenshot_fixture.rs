@@ -215,8 +215,6 @@ fixture_row!(MailListEntry {
     is_header,
     group_key,
     group_kind,
-    group_month,
-    group_year,
     group_count,
     expanded,
     show_row,

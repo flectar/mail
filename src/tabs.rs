@@ -2207,6 +2207,7 @@ mod tests {
             sync_state: "idle".into(),
             sync_error: None,
             can_create_top_level_mailbox: true,
+            server_keeps_mail_days: None,
         }
     }
 
@@ -2357,5 +2358,71 @@ mod tests {
             shortcut(&Key::Named(NamedKey::Tab), ModifiersState::empty()),
             None
         );
+    }
+
+    #[cfg(desktop)]
+    mod listed {
+        slint::slint! {
+            export { Shortcuts } from "../ui/shortcuts.slint";
+            export component ShortcutList inherits Window {}
+        }
+    }
+
+    // Settings lists the tab keys from ui/shortcuts.slint, but `shortcut`
+    // handles them; the two must agree.
+    #[cfg(desktop)]
+    #[test]
+    fn listed_tab_shortcuts_are_the_handled_ones() {
+        use listed::{ShortcutList, Shortcuts};
+        use slint::ComponentHandle;
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        use slint::platform::{Platform, WindowAdapter};
+        use slint::winit_030::winit::keyboard::{Key, ModifiersState, NamedKey};
+
+        struct Headless(std::rc::Rc<MinimalSoftwareWindow>);
+        impl Platform for Headless {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<std::rc::Rc<dyn WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        slint::platform::set_platform(Box::new(Headless(MinimalSoftwareWindow::new(
+            RepaintBufferType::NewBuffer,
+        ))))
+        .unwrap();
+
+        // Slint calls Command `Control` and Control `Meta` on macOS.
+        let (control, meta) = if cfg!(target_os = "macos") {
+            (ModifiersState::SUPER, ModifiersState::CONTROL)
+        } else {
+            (ModifiersState::CONTROL, ModifiersState::SUPER)
+        };
+        let handled = |keys: slint::Keys| {
+            let mut modifiers = ModifiersState::empty();
+            let mut key = None;
+            for part in keys.to_parts() {
+                match part {
+                    "Control" => modifiers |= control,
+                    "Meta" => modifiers |= meta,
+                    "Shift" => modifiers |= ModifiersState::SHIFT,
+                    "Alt" => modifiers |= ModifiersState::ALT,
+                    "Shift?" | "Alt?" => {}
+                    "\t" => key = Some(Key::Named(NamedKey::Tab)),
+                    text => key = Some(Key::Character(text.into())),
+                }
+            }
+            shortcut(&key.unwrap(), modifiers)
+        };
+        let list = ShortcutList::new().unwrap();
+        let listed = list.global::<Shortcuts>();
+        assert_eq!(handled(listed.get_new_tab()), Some(Command::New));
+        assert_eq!(handled(listed.get_close_tab()), Some(Command::Close));
+        assert_eq!(handled(listed.get_reopen_tab()), Some(Command::Reopen));
+        assert_eq!(handled(listed.get_next_tab()), Some(Command::Next));
+        assert_eq!(handled(listed.get_previous_tab()), Some(Command::Previous));
+        assert_eq!(handled(listed.get_first_tab()), Some(Command::Select(0)));
+        assert_eq!(handled(listed.get_eighth_tab()), Some(Command::Select(7)));
+        assert_eq!(handled(listed.get_last_tab()), Some(Command::Last));
     }
 }

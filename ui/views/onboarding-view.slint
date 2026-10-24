@@ -1,5 +1,6 @@
 import { FormField } from "../components/settings-components.slint";
-import { MailSecurityFields } from "../components/mail-security-fields.slint";
+import { AppIcon } from "../app-icon.slint";
+import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
@@ -87,6 +88,13 @@ export component OnboardingView inherits Rectangle {
         root.account-form-open = true;
     }
 
+    function choose-protocol(protocol: string) {
+        if MailPorts.is-standard-incoming(root.incoming-port) {
+            root.incoming-port = MailPorts.incoming(protocol, root.incoming-security);
+        }
+        root.account-protocol = protocol;
+    }
+
     background: root.page-bg;
 
     setup-scroll := ScrollView {
@@ -110,7 +118,7 @@ export component OnboardingView inherits Rectangle {
                 Image {
                     width: root.account-form-open ? 40px : 62px;
                     height: root.account-form-open ? 40px : 62px;
-                    source: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
+                    source: AppIcon.logo(AppIcon.variant);
                     image-fit: contain;
                     accessible-label: @tr("Flectar Mail logo");
                 }
@@ -254,7 +262,9 @@ export component OnboardingView inherits Rectangle {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: root.account-protocol == "jmap" ? @tr("Connect using JMAP for mail sync and sending.") : @tr("Connect using IMAP and SMTP. POP3 is not supported.");
+                    text: root.account-protocol == "jmap" ? @tr("Connect using JMAP for mail sync and sending.")
+                        : root.account-protocol == "pop3" ? @tr("Connect using POP3 and SMTP. Mail is downloaded to this device and kept here.")
+                        : @tr("Connect using IMAP and SMTP.");
                     wrap: word-wrap; height: self.preferred-height;
                     color: root.muted-text;
                     font-size: TypeScale.secondary;
@@ -266,28 +276,26 @@ export component OnboardingView inherits Rectangle {
                     height: 60px;
                     label: @tr("Email address");
                     label-color: root.muted-text;
-                    value: root.account-email;
+                    value <=> root.account-email;
                     placeholder: @tr("Email address");
-                    edited(value) => { root.account-email = value; root.suggest-account-settings(value); }
+                    edited(value) => { root.suggest-account-settings(value); }
                 }
                 FormField {
                     enabled: !root.account-setup-in-progress;
                     height: 60px;
                     label: @tr("Username (defaults to email)");
                     label-color: root.muted-text;
-                    value: root.account-username;
+                    value <=> root.account-username;
                     placeholder: @tr("Username (defaults to email)");
-                    edited(value) => { root.account-username = value; }
                 }
                 FormField {
                     enabled: !root.account-setup-in-progress;
                     height: 60px;
                     label: root.account-protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password");
                     label-color: root.muted-text;
-                    value: root.account-password;
+                    value <=> root.account-password;
                     input-type: password;
                     placeholder: root.account-protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password");
-                    edited(value) => { root.account-password = value; }
                 }
                 HorizontalBox {
                     height: 42px;
@@ -296,10 +304,18 @@ export component OnboardingView inherits Rectangle {
                     Button {
                         horizontal-stretch: 1;
                         height: 42px;
-                        text: @tr("IMAP + SMTP");
+                        text: @tr("IMAP");
                         enabled: !root.account-setup-in-progress;
                         primary: root.account-protocol == "imap";
-                        clicked => { root.account-protocol = "imap"; }
+                        clicked => { root.choose-protocol("imap"); }
+                    }
+                    Button {
+                        horizontal-stretch: 1;
+                        height: 42px;
+                        text: @tr("POP3");
+                        enabled: !root.account-setup-in-progress;
+                        primary: root.account-protocol == "pop3";
+                        clicked => { root.choose-protocol("pop3"); }
                     }
                     Button {
                         horizontal-stretch: 1;
@@ -307,14 +323,13 @@ export component OnboardingView inherits Rectangle {
                         text: @tr("JMAP");
                         enabled: !root.account-setup-in-progress;
                         primary: root.account-protocol == "jmap";
-                        clicked => { root.account-protocol = "jmap"; }
+                        clicked => { root.choose-protocol("jmap"); }
                     }
                 }
                 if root.account-protocol == "jmap" : LineEdit {
                     height: 42px;
-                    text: root.jmap-url;
+                    text <=> root.jmap-url;
                     placeholder-text: @tr("Server address (optional)");
-                    edited(value) => { root.jmap-url = value; }
                 }
                 if root.account-protocol == "jmap" : Text {
                     text: @tr("Leave blank to discover /.well-known/jmap from your email domain.");
@@ -322,31 +337,29 @@ export component OnboardingView inherits Rectangle {
                     font-size: TypeScale.caption;
                     wrap: word-wrap; height: self.preferred-height;
                 }
-                if root.account-protocol == "imap" : HorizontalBox {
+                if root.account-protocol != "jmap" : HorizontalBox {
                     height: 60px;
                     padding: 0px;
                     spacing: 8px;
                     FormField {
                         enabled: !root.account-setup-in-progress;
                         horizontal-stretch: 1;
-                        label: @tr("IMAP server");
+                        label: root.account-protocol == "pop3" ? @tr("POP3 server") : @tr("IMAP server");
                         label-color: root.muted-text;
-                        value: root.incoming-host;
-                        placeholder: @tr("IMAP server");
-                        edited(value) => { root.incoming-host = value; }
+                        value <=> root.incoming-host;
+                        placeholder: root.account-protocol == "pop3" ? @tr("POP3 server") : @tr("IMAP server");
                     }
                     FormField {
                         enabled: !root.account-setup-in-progress;
                         width: max(82px, self.preferred-width);
                         label: @tr("Port");
                         label-color: root.muted-text;
-                        value: root.incoming-port;
+                        value <=> root.incoming-port;
                         input-type: number;
-                        placeholder: @tr("993");
-                        edited(value) => { root.incoming-port = value; }
+                        placeholder: MailPorts.incoming(root.account-protocol, root.incoming-security);
                     }
                 }
-                if root.account-protocol == "imap" : HorizontalBox {
+                if root.account-protocol != "jmap" : HorizontalBox {
                     height: 60px;
                     padding: 0px;
                     spacing: 8px;
@@ -355,26 +368,25 @@ export component OnboardingView inherits Rectangle {
                         horizontal-stretch: 1;
                         label: @tr("SMTP server");
                         label-color: root.muted-text;
-                        value: root.smtp-host;
+                        value <=> root.smtp-host;
                         placeholder: @tr("SMTP server");
-                        edited(value) => { root.smtp-host = value; }
                     }
                     FormField {
                         enabled: !root.account-setup-in-progress;
                         width: max(82px, self.preferred-width);
                         label: @tr("Port");
                         label-color: root.muted-text;
-                        value: root.smtp-port;
+                        value <=> root.smtp-port;
                         input-type: number;
-                        placeholder: @tr("465");
-                        edited(value) => { root.smtp-port = value; }
+                        placeholder: MailPorts.smtp(root.smtp-security);
                     }
                 }
                 if root.account-protocol == "imap" : Text {
                     text: @tr("Proton Bridge: use the local servers, ports and password shown in Bridge, and match its encryption settings.");
                     color: root.muted-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
                 }
-                if root.account-protocol == "imap" : MailSecurityFields {
+                if root.account-protocol != "jmap" : MailSecurityFields {
+                    incoming-protocol: root.account-protocol;
                     incoming-security <=> root.incoming-security;
                     smtp-security <=> root.smtp-security;
                     incoming-port <=> root.incoming-port;

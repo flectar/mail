@@ -1,6 +1,5 @@
 use crate::favicon::domain_from_address;
 use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
-use chrono::{DateTime, Datelike, Local, Utc};
 use flectar_mail_core::{
     Core,
     config::Paths,
@@ -31,7 +30,6 @@ pub struct EmailFixture {
     pub initials: String,
     pub subject: String,
     pub preview: String,
-    pub time: String,
     #[serde(default)]
     pub to: String,
     #[serde(rename = "label_summary")]
@@ -59,8 +57,8 @@ pub struct MailMessage {
     pub initials: String,
     pub subject: String,
     pub preview: String,
-    pub time: String,
-    /// Milliseconds since the Unix epoch, used for local-date list sections.
+    /// Milliseconds since the Unix epoch. Views format it when they project
+    /// the message, so the text follows the current language.
     pub date_ms: i64,
     pub to: String,
     pub label: String,
@@ -97,8 +95,7 @@ impl MailMessage {
             initials: email.initials.to_owned(),
             subject: email.subject.to_owned(),
             preview: email.preview.to_owned(),
-            time: email.time.to_owned(),
-            date_ms: (Local::now() - chrono::Duration::days(i64::from(email.id - 1)))
+            date_ms: (chrono::Local::now() - chrono::Duration::days(i64::from(email.id - 1)))
                 .timestamp_millis(),
             to: email.to.to_owned(),
             label: email.label.to_owned(),
@@ -855,6 +852,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn export_account_mail(
+        &self,
+        account_id: i64,
+        destination: std::path::PathBuf,
+    ) -> Result<flectar_mail_core::models::MailExport, String> {
+        self.core
+            .export_account_mail(account_id, destination)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn load_settings(&self) -> Result<Settings, String> {
         self.core
             .get_settings()
@@ -898,6 +906,19 @@ impl CoreMailSource {
             .ok_or_else(|| format!("unsupported mail history window: {value}"))?;
         self.core
             .set_account_mail_history(account_id, mail_history)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_account_keep_on_server(
+        &self,
+        account_id: i64,
+        value: &str,
+    ) -> Result<(), String> {
+        let keep = flectar_mail_core::models::KeepOnServer::from_storage(value)
+            .ok_or_else(|| format!("unsupported choice for mail on the server: {value}"))?;
+        self.core
+            .set_account_keep_on_server(account_id, keep)
             .await
             .map_err(|error| error.to_string())
     }
@@ -998,6 +1019,18 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn set_app_icon(
+        &self,
+        icon: flectar_mail_core::models::AppIcon,
+    ) -> Result<(), String> {
+        let mut settings = self.load_settings().await?;
+        settings.app_icon = icon;
+        self.core
+            .set_settings(settings)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn set_monochrome_sidebar_icons(&self, enabled: bool) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.monochrome_sidebar_icons = enabled;
@@ -1019,6 +1052,16 @@ impl CoreMailSource {
     pub async fn set_group_mail_by_date(&self, enabled: bool) -> Result<(), String> {
         self.core
             .set_group_mail_by_date(enabled)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    pub async fn set_time_format(
+        &self,
+        format: flectar_mail_core::models::TimeFormat,
+    ) -> Result<(), String> {
+        self.core
+            .set_time_format(format)
             .await
             .map_err(|error| error.to_string())
     }
@@ -2242,7 +2285,6 @@ fn summary_to_message(
         initials,
         subject: display_thread_subject(&thread.subject),
         preview: thread.snippet,
-        time: relative_time(thread.last_message_at),
         date_ms: thread.last_message_at,
         to: String::new(),
         label: if thread.unread_count > 0 {
@@ -2331,7 +2373,6 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         initials,
         subject: message.subject.clone(),
         preview: message.snippet.clone(),
-        time: relative_time(message.date),
         date_ms: message.date,
         to: message
             .to
@@ -2463,29 +2504,6 @@ fn initials(name: &str) -> String {
     letters
 }
 
-fn relative_time(timestamp_ms: i64) -> String {
-    relative_time_at(timestamp_ms, Local::now())
-}
-
-fn relative_time_at(timestamp_ms: i64, now: DateTime<Local>) -> String {
-    let Some(date) = DateTime::<Utc>::from_timestamp_millis(timestamp_ms)
-        .map(|timestamp| timestamp.with_timezone(&Local))
-    else {
-        return "Unknown date".to_owned();
-    };
-    let days = now
-        .date_naive()
-        .signed_duration_since(date.date_naive())
-        .num_days()
-        .max(0);
-    match days {
-        0 => "Today".to_owned(),
-        1 => "Yesterday".to_owned(),
-        _ if date.year() == now.year() => date.format("%b %-d").to_string(),
-        _ => date.format("%b %-d, %Y").to_string(),
-    }
-}
-
 fn text_to_html(text: &str) -> String {
     const PREFIX: &str = "<html><body style=\"font-family:Arial,sans-serif;padding:32px;line-height:1.6;color:#303348\"><pre style=\"margin:0;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere\">";
     const SUFFIX: &str = "</pre></body></html>";
@@ -2602,11 +2620,10 @@ pub fn fixtures() -> Vec<EmailFixture> {
 mod tests {
     use super::{
         ComposeMessage, compose_args, display_thread_subject, mailbox_entries, markdown_to_html,
-        markdown_to_plain_text, readable_message_html, relative_time_at, resolve_scope,
-        summary_to_message, validated_startup_scope,
+        markdown_to_plain_text, readable_message_html, resolve_scope, summary_to_message,
+        validated_startup_scope,
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
-    use chrono::{Local, TimeZone};
     use flectar_mail_core::models::{
         Account, Address, AuthKind, FolderInfo, Label, MailProtocol, Provider, ThreadSummary, View,
     };
@@ -2623,6 +2640,7 @@ mod tests {
             sync_state: "idle".into(),
             sync_error: None,
             can_create_top_level_mailbox: true,
+            server_keeps_mail_days: None,
         }
     }
 
@@ -2750,30 +2768,6 @@ mod tests {
         assert!(html.contains("white-space:pre-wrap"));
         assert!(html.contains("&gt; Earlier reply\n&gt;&gt; Older reply"));
         assert_eq!(prepared.plain_text, text);
-    }
-
-    #[test]
-    fn old_mail_uses_a_calendar_date_instead_of_elapsed_days() {
-        let now = Local.with_ymd_and_hms(2026, 8, 23, 12, 0, 0).unwrap();
-        let old = Local.with_ymd_and_hms(2021, 6, 15, 9, 0, 0).unwrap();
-
-        assert_eq!(
-            relative_time_at(old.timestamp_millis(), now),
-            "Jun 15, 2021"
-        );
-    }
-
-    #[test]
-    fn recent_mail_keeps_friendly_labels() {
-        let now = Local.with_ymd_and_hms(2026, 8, 23, 12, 0, 0).unwrap();
-        let today = Local.with_ymd_and_hms(2026, 8, 23, 8, 0, 0).unwrap();
-        let yesterday = Local.with_ymd_and_hms(2026, 8, 22, 23, 0, 0).unwrap();
-
-        assert_eq!(relative_time_at(today.timestamp_millis(), now), "Today");
-        assert_eq!(
-            relative_time_at(yesterday.timestamp_millis(), now),
-            "Yesterday"
-        );
     }
 
     #[test]

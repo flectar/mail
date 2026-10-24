@@ -11,6 +11,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Base64;
+import android.util.Log;
 
 import com.google.android.gms.auth.api.identity.AuthorizationRequest;
 import com.google.android.gms.auth.api.identity.AuthorizationResult;
@@ -36,15 +37,30 @@ public final class FlectarActivity extends NativeActivity {
 
     @Override
     protected void onStop() {
+        applyLauncherIcon();
         nativeSuspendPdfPreview();
         super.onStop();
     }
 
-    @Override
-    public void onTrimMemory(int level) {
-        super.onTrimMemory(level);
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            nativeSuspendPdfPreview();
+    private volatile String pendingLauncherIcon;
+
+    /**
+     * Called from Rust with the icon chosen in Settings. Switching launcher
+     * entries can close a visible app on some launchers, so the switch waits
+     * until the app leaves the foreground.
+     */
+    public void setLauncherIcon(String icon) {
+        if (LauncherIcons.exists(icon)) pendingLauncherIcon = icon;
+    }
+
+    private void applyLauncherIcon() {
+        String chosen = pendingLauncherIcon;
+        pendingLauncherIcon = null;
+        if (chosen == null) return;
+        try {
+            LauncherIcons.choose(this, chosen);
+        } catch (RuntimeException error) {
+            Log.e("flectar-mail", "could not change the launcher icon", error);
         }
     }
 

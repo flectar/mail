@@ -1,0 +1,8 @@
+{
+  "version": "1.18.1",
+  "revision": "372cf0ee5577c3dfec309a45e7b778ba4e81b734",
+  "sha256": "dae4fcf1b19e9cb109984d2af87d2b9485388c619265bff71dd523133888bee2",
+  "adaptation": "https://github.com/slint-ui/slint/pull/14248",
+  "adaptation_revision": "cb91c1927cd8c17649ba445d28d3a0c2a0041238",
+  "smithay_clipboard": "0.7.2"
+}

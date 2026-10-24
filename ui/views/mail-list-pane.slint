@@ -11,6 +11,7 @@ import { ScrollFade } from "../components/scroll-fade.slint";
 import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
+import { Shortcuts } from "../shortcuts.slint";
 
 component MailListLabelChip inherits Rectangle {
     in property <string> name;
@@ -160,7 +161,9 @@ component MailGroupHeader inherits Rectangle {
     }
 }
 
-export component MailListPane inherits Rectangle {
+// A focus scope only so message shortcuts work from anywhere in the pane.
+export component MailListPane inherits FocusScope {
+    enabled: false;
     in property <bool> compact: false;
     // Single-surface navigation is also used by the desktop Minimal layout;
     // keep it separate from compact sizing so desktop controls stay dense.
@@ -175,7 +178,7 @@ export component MailListPane inherits Rectangle {
     in property <string> selected_scope: "Unified Inbox";
     in property <string> scope_title: selected_scope;
     in property <bool> trash_view: false;
-    in property <string> search_query: "";
+    in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <bool> sync_in_progress: false;
     in property <bool> can_load_more: false;
@@ -274,6 +277,41 @@ export component MailListPane inherits Rectangle {
         root.move-cursor("current", 1, false);
     }
 
+    public function focus-search() { search-toolbar.focus-search(); }
+
+    // Shortcuts act on the checked rows, else the row under the focused
+    // cursor, else the open conversation; never on a row nothing points at.
+    function act-on-messages(action: string) {
+        if root.selection-mode {
+            root.bulk_message_action(action);
+            return;
+        }
+        let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
+        if target.id < 0 { return; }
+        let at-cursor = list-keyboard.has-focus && target.id == root.keyboard-email-id;
+        if !at-cursor && !root.list_entries[target.entry_index].email.selected { return; }
+        let last = MailListNavigation.target(root.list_entries, target.id, "next", 1).id == target.id;
+        root.message_action_for_email(target.id, action);
+        // Move on as Rust does for the open conversation, so the next press
+        // acts on the next row. Permanent deletion waits for confirmation.
+        if at-cursor && action != "delete_permanently" {
+            root.move-cursor(last ? "previous" : "next", 1, true);
+        }
+    }
+
+    KeyBinding {
+        keys: Shortcuts.archive;
+        activated => { root.act-on-messages("archive"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.spam;
+        activated => { root.act-on-messages("spam"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.trash;
+        activated => { root.act-on-messages(root.trash_view ? "delete_permanently" : "trash"); }
+    }
+
     function pointer-focus(id: int) {
         root.keyboard-email-id = id;
         let target = MailListNavigation.target(root.list_entries, id, "current", 1);
@@ -369,38 +407,19 @@ export component MailListPane inherits Rectangle {
     changed search_query => { root.reset-pagination(); }
     changed search_filter => { root.reset-pagination(); }
 
-    pure function month-name(month: int) -> string {
-        if month == 1 { return @tr("January"); }
-        if month == 2 { return @tr("February"); }
-        if month == 3 { return @tr("March"); }
-        if month == 4 { return @tr("April"); }
-        if month == 5 { return @tr("May"); }
-        if month == 6 { return @tr("June"); }
-        if month == 7 { return @tr("July"); }
-        if month == 8 { return @tr("August"); }
-        if month == 9 { return @tr("September"); }
-        if month == 10 { return @tr("October"); }
-        if month == 11 { return @tr("November"); }
-        if month == 12 { return @tr("December"); }
-        return @tr("Earlier");
-    }
-
-    pure function group-title(kind: string, month: int, year: int) -> string {
+    pure function group-title(kind: string) -> string {
         if kind == "today" { return @tr("Today"); }
         if kind == "yesterday" { return @tr("Yesterday"); }
         if kind == "this-week" { return @tr("This week"); }
         if kind == "last-week" { return @tr("Last week"); }
         if kind == "this-month" { return @tr("This month"); }
         if kind == "last-month" { return @tr("Last month"); }
-        if kind == "month" {
-            return year == 0 ? root.month-name(month) : @tr("{} {}", root.month-name(month), year);
-        }
         return @tr("Earlier");
     }
 
                 width: LayoutMetrics.list-pane-width;
                 vertical-stretch: 1;
-                background: root.surface;
+                Rectangle { background: root.surface; }
 
                 VerticalBox {
                     x: 0px;
@@ -419,7 +438,7 @@ export component MailListPane inherits Rectangle {
                         // Tooltips extend below the toolbar; keep them above the
                         // list body, which is declared later in this layout.
                         z: 1;
-                        WorkspaceSearchToolbar {
+                        search-toolbar := WorkspaceSearchToolbar {
                             x: root.compact ? LayoutMetrics.compact-inset : LayoutMetrics.content-inset;
                             y: (parent.height - self.height) / 2;
                             width: parent.width - 2 * self.x;
@@ -429,7 +448,7 @@ export component MailListPane inherits Rectangle {
                                 : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                             leading-tooltip: root.mail_sidebar_collapsed ? @tr("Show folders") : @tr("Hide folders");
                             leading-accessible-id: "mail-folders-button";
-                            text: root.search_query;
+                            text <=> root.search_query;
                             placeholder-text: @tr("Search mail");
                             filters: [
                                 { title: @tr("All mail"), value: "All mail" },
@@ -562,27 +581,41 @@ export component MailListPane inherits Rectangle {
                             changed has-focus => {
                                 if self.has-focus { root.move-cursor("current", 1, false); }
                             }
+                            // Only the list itself navigates; focused row controls keep their keys.
+                            KeyBinding {
+                                keys: Shortcuts.next-message;
+                                enabled: list-keyboard.has-focus;
+                                activated => { root.move-cursor("next", 1, true); }
+                            }
+                            KeyBinding {
+                                keys: Shortcuts.previous-message;
+                                enabled: list-keyboard.has-focus;
+                                activated => { root.move-cursor("previous", 1, true); }
+                            }
+                            KeyBinding {
+                                keys: Shortcuts.open-message;
+                                enabled: list-keyboard.has-focus;
+                                activated => {
+                                    root.move-cursor("current", 1, false);
+                                    if root.keyboard-email-id >= 0 { root.open_email(root.keyboard-email-id); }
+                                }
+                            }
+                            KeyBinding {
+                                keys: Shortcuts.select-message;
+                                enabled: list-keyboard.has-focus;
+                                activated => {
+                                    root.move-cursor("current", 1, false);
+                                    let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
+                                    if target.id >= 0 { root.set_email_checked(target.id, !target.checked); }
+                                }
+                            }
                             key-pressed(event) => {
-                                // Child controls keep their own activation and navigation.
                                 if !self.has-focus || event.modifiers.control || event.modifiers.meta || event.modifiers.alt || event.modifiers.shift { return reject; }
                                 let page = max(1, floor(mail-list-scroll.visible-height / root.message-row-height));
-                                if event.text == Key.DownArrow { root.move-cursor("next", 1, true); return accept; }
-                                if event.text == Key.UpArrow { root.move-cursor("previous", 1, true); return accept; }
                                 if event.text == Key.Home { root.move-cursor("first", 1, true); return accept; }
                                 if event.text == Key.End { root.move-cursor("last", 1, true); return accept; }
                                 if event.text == Key.PageDown { root.move-cursor("next", page, true); return accept; }
                                 if event.text == Key.PageUp { root.move-cursor("previous", page, true); return accept; }
-                                if event.text == Key.Return {
-                                    root.move-cursor("current", 1, false);
-                                    if root.keyboard-email-id >= 0 { root.open_email(root.keyboard-email-id); }
-                                    return accept;
-                                }
-                                if event.text == Key.Space {
-                                    root.move-cursor("current", 1, false);
-                                    let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
-                                    if target.id >= 0 { root.set_email_checked(target.id, !target.checked); }
-                                    return accept;
-                                }
                                 reject
                             }
 
@@ -1011,7 +1044,7 @@ export component MailListPane inherits Rectangle {
                                 if entry.is_header : MailGroupHeader {
                                     width: parent.width;
                                     height: parent.height;
-                                    title: root.group-title(entry.group_kind, entry.group_month, entry.group_year);
+                                    title: root.group-title(entry.group_kind);
                                     group-key: entry.group_key;
                                     message-count: entry.group_count;
                                     expanded: entry.expanded;

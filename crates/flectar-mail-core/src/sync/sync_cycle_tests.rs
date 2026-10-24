@@ -1,5 +1,6 @@
 //! End-to-end fixtures for scheduling and IMAP compatibility in one sync cycle.
 use super::*;
+use crate::db::repo::messages::NewMessage;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::sync::Mutex;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -437,6 +438,7 @@ async fn deleted_headers_are_skipped_without_stalling_progress_or_notifying() {
         &folder,
         vec![deletion_header(42, true)],
         Some(1),
+        NewHeaders::Insert,
     )
     .await
     .unwrap();
@@ -467,6 +469,7 @@ async fn deleted_headers_are_skipped_without_stalling_progress_or_notifying() {
         &folder,
         vec![deletion_header(43, false), deletion_header(44, true)],
         Some(1),
+        NewHeaders::Insert,
     )
     .await
     .unwrap();
@@ -502,6 +505,7 @@ async fn deleted_headers_are_skipped_without_stalling_progress_or_notifying() {
         &trash,
         vec![deletion_header(45, false)],
         None,
+        NewHeaders::Insert,
     )
     .await
     .unwrap();
@@ -597,6 +601,7 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
             deletion_header(1_000_042, false),
         ],
         None,
+        NewHeaders::Insert,
     )
     .await
     .unwrap();
@@ -742,4 +747,270 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
         .unwrap();
     imap::logout(session).await;
     server.await.unwrap();
+}
+
+/// A message of the account that waits to be matched with its copy on the
+/// server, as a server change or a recreated mailbox leaves it.
+fn seed_waiting(
+    conn: &rusqlite::Connection,
+    folder_id: i64,
+    message_id: &str,
+    received: i64,
+) -> i64 {
+    conn.execute(
+        "INSERT INTO threads (account_id, subject_norm) VALUES (1, ?1)",
+        [message_id],
+    )
+    .unwrap();
+    let thread_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO messages (account_id, thread_id, folder_id, message_id, subject, date,
+                               internal_date, relink_pending)
+         VALUES (1, ?1, ?2, ?3, ?3, ?4, ?4, 1)",
+        rusqlite::params![thread_id, folder_id, message_id, received],
+    )
+    .unwrap();
+    conn.last_insert_rowid()
+}
+
+async fn still_there(ctx: &SyncCtx, id: i64) -> bool {
+    ctx.db
+        .read(move |conn| Ok(repo::messages::get_row(conn, id)?.is_some()))
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn waiting_mail_stays_until_each_folder_was_searched() {
+    // Nothing listens here.
+    let (_dir, ctx, config, inbox) = deleted_mail_context(1).await;
+    let inbox_id = inbox.id;
+    let (archive_id, waiting) = ctx
+        .db
+        .write(move |conn| {
+            let archive =
+                repo::folders::upsert(conn, 1, "Archive", Some("/"), Some(roles::ARCHIVE))?;
+            repo::folders::set_backfill(conn, archive, Some(1), false)?;
+            Ok((
+                archive,
+                seed_waiting(conn, inbox_id, "old@example.test", 1_000),
+            ))
+        })
+        .await
+        .unwrap();
+    let mut session = None;
+
+    // Right after a switch from JMAP, the server's folders aren't known yet.
+    ctx.db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE folders SET jmap_id = 'inbox' WHERE id = ?1",
+                [inbox_id],
+            )?;
+            repo::folders::set_backfill(conn, archive_id, Some(1), true)
+        })
+        .await
+        .unwrap();
+    settle_unlinked_mail(&ctx, &config, &mut session)
+        .await
+        .unwrap();
+    assert!(still_there(&ctx, waiting).await);
+
+    // A folder still without its history.
+    ctx.db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE folders SET jmap_id = NULL WHERE id = ?1",
+                [inbox_id],
+            )?;
+            repo::folders::set_backfill(conn, archive_id, Some(1), false)
+        })
+        .await
+        .unwrap();
+    settle_unlinked_mail(&ctx, &config, &mut session)
+        .await
+        .unwrap();
+    assert!(still_there(&ctx, waiting).await);
+
+    // A server that can't be searched removes nothing.
+    ctx.db
+        .write(move |conn| repo::folders::set_backfill(conn, archive_id, Some(1), true))
+        .await
+        .unwrap();
+    assert!(
+        settle_unlinked_mail(&ctx, &config, &mut session)
+            .await
+            .is_err()
+    );
+    assert!(still_there(&ctx, waiting).await);
+    assert!(session.is_none());
+}
+
+#[tokio::test]
+async fn waiting_mail_is_matched_with_the_server_or_removed() {
+    let day = 24 * 60 * 60 * 1000;
+    let matched_at = now_ms() - 730 * day;
+    let since = chrono::DateTime::from_timestamp_millis(matched_at - day)
+        .unwrap()
+        .date_naive()
+        .format("%-d-%b-%Y")
+        .to_string();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let command_log = commands.clone();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tls_acceptor().accept(tcp).await.unwrap());
+        stream.write_all(b"* OK fixture ready\r\n").await.unwrap();
+        let mut selected = String::new();
+        loop {
+            let command = read_line(&mut stream).await;
+            command_log.lock().unwrap().push(command.clone());
+            let fields: Vec<_> = command.split_whitespace().collect();
+            let tag = fields[0];
+            let response = match fields[1] {
+                "LOGIN" => format!("{tag} OK logged in\r\n"),
+                "CAPABILITY" => format!("* CAPABILITY IMAP4rev1\r\n{tag} OK capability\r\n"),
+                "SELECT" => {
+                    selected = fields[2].trim_matches('"').to_owned();
+                    format!("* 2 EXISTS\r\n* OK [UIDVALIDITY 9] valid\r\n{tag} OK selected\r\n")
+                }
+                "UID" if fields[2] == "SEARCH" => {
+                    assert_eq!(fields[3..].join(" "), format!("SINCE {since} UNDELETED"));
+                    // Inbox: mail no local message stands for, the copy of
+                    // one that lost its UID, and mail that arrived after the
+                    // live sync's last scan.
+                    let hits = if selected == "INBOX" { "3 5 60" } else { "7" };
+                    format!("* SEARCH {hits}\r\n{tag} OK searched\r\n")
+                }
+                "UID" if fields[2] == "FETCH" => {
+                    let found: &[(u32, &str)] = if selected == "INBOX" {
+                        assert_eq!(fields[3], "3,5,60");
+                        &[
+                            (3, "unrelated@example.test"),
+                            (5, "recent@example.test"),
+                            (60, "fresh@example.test"),
+                        ]
+                    } else {
+                        assert_eq!(fields[3], "7");
+                        &[(7, "old@example.test")]
+                    };
+                    let mut response = String::new();
+                    for (index, (uid, message_id)) in found.iter().enumerate() {
+                        let header = format!(
+                            "Message-ID: <{message_id}>\r\nFrom: sender@example.test\r\nSubject: {message_id}\r\n\r\n"
+                        );
+                        response.push_str(&format!(
+                            "* {} FETCH (UID {uid} FLAGS () BODY[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT)] {{{}}}\r\n{header})\r\n",
+                            index + 1,
+                            header.len()
+                        ));
+                    }
+                    response.push_str(&format!("{tag} OK fetched\r\n"));
+                    response
+                }
+                "LOGOUT" => {
+                    stream
+                        .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    break;
+                }
+                other => panic!("unexpected command {other}: {command}"),
+            };
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let (dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let gone_file = dir.path().join("gone.eml");
+    tokio::fs::write(&gone_file, b"Subject: gone\r\n\r\n")
+        .await
+        .unwrap();
+    let gone_path = gone_file.to_str().unwrap().to_owned();
+    let inbox_id = inbox.id;
+    let (archive_id, matched, recent, gone, busy) = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_last_seen_uid(conn, inbox_id, 50)?;
+            let archive =
+                repo::folders::upsert(conn, 1, "Archive", Some("/"), Some(roles::ARCHIVE))?;
+            repo::folders::set_backfill(conn, archive, Some(1), true)?;
+            let matched = seed_waiting(conn, inbox_id, "old@example.test", matched_at);
+            // Within the history, as mail flagged by the upgrade is.
+            let recent = seed_waiting(conn, inbox_id, "recent@example.test", now_ms() - 10 * day);
+            let gone = seed_waiting(conn, inbox_id, "gone@example.test", matched_at + day);
+            conn.execute(
+                "UPDATE messages SET raw_path = ?2 WHERE id = ?1",
+                rusqlite::params![gone, gone_path],
+            )?;
+            // Work queued for it keeps it, and leaves it out of the search.
+            let busy = seed_waiting(conn, inbox_id, "busy@example.test", matched_at - 365 * day);
+            repo::actions::enqueue(
+                conn,
+                1,
+                "star",
+                Some(busy),
+                None,
+                &serde_json::json!({}),
+                Some(now_ms() + 60_000),
+            )?;
+            Ok((archive, matched, recent, gone, busy))
+        })
+        .await
+        .unwrap();
+
+    let matched_thread = ctx
+        .db
+        .read(move |conn| Ok(repo::messages::get_row(conn, matched)?.unwrap().thread_id))
+        .await
+        .unwrap()
+        .unwrap();
+    let mut events = ctx.bus.subscribe();
+    let mut session = None;
+    settle_unlinked_mail(&ctx, &config, &mut session)
+        .await
+        .unwrap();
+    if let Some(session) = session.take() {
+        imap::logout(session).await;
+    }
+    server.await.unwrap();
+    let CoreEvent::MailUpdated { thread_ids } = events.try_recv().unwrap() else {
+        panic!("expected a list refresh for the message that moved to Archive");
+    };
+    assert_eq!(thread_ids, [matched_thread]);
+
+    ctx.db
+        .read(move |conn| {
+            let row = repo::messages::get_row(conn, matched)?.unwrap();
+            assert_eq!((row.folder_id, row.uid), (Some(archive_id), Some(7)));
+            let row = repo::messages::get_row(conn, recent)?.unwrap();
+            assert_eq!((row.folder_id, row.uid), (Some(inbox_id), Some(5)));
+            assert!(repo::messages::get_row(conn, gone)?.is_none());
+            assert!(repo::messages::get_row(conn, busy)?.is_some());
+            assert_eq!(repo::messages::oldest_relink_pending(conn, 1)?, None);
+            // The rest of the mailbox stays outside the history, and the
+            // live sync still fetches what arrived since its last scan.
+            for message_id in ["unrelated@example.test", "fresh@example.test"] {
+                assert!(repo::messages::by_message_id(conn, 1, message_id)?.is_none());
+            }
+            assert_eq!(
+                repo::folders::get(conn, inbox_id)?.unwrap().last_seen_uid,
+                50
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(!gone_file.exists());
+    assert_eq!(
+        commands
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|command| command.contains(" SELECT "))
+            .count(),
+        2
+    );
 }

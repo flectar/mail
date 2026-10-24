@@ -11,7 +11,9 @@ pub mod snapshot;
 
 use crate::{
     error::{CoreError, Result},
-    models::{StartupPresentation, normalized_window_frame, normalized_workspace_list_pane_width},
+    models::{
+        AppIcon, StartupPresentation, normalized_window_frame, normalized_workspace_list_pane_width,
+    },
 };
 use rusqlite::config::DbConfig;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -216,6 +218,11 @@ pub(crate) fn startup_presentation(path: &Path) -> StartupPresentation {
         close_to_tray: value
             .get("closeToTray")
             .and_then(serde_json::Value::as_bool)
+            .unwrap_or_default(),
+        app_icon: value
+            .get("appIcon")
+            .and_then(serde_json::Value::as_str)
+            .and_then(AppIcon::parse)
             .unwrap_or_default(),
     }
 }
@@ -489,6 +496,34 @@ impl Db {
         db.call(db.write_tx.as_ref().unwrap(), f).await
     }
 
+    /// Run `f` in one transaction whose commit has reached stable storage when
+    /// this returns. The store normally commits with `synchronous=NORMAL`,
+    /// which a power loss can undo; this is for commits that let a server
+    /// drop its own copy of the data.
+    pub async fn write_durable<T, F>(&self, f: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rusqlite::Transaction) -> Result<T> + Send + 'static,
+    {
+        self.write(move |conn| {
+            // The level can only change outside a transaction.
+            let previous: i64 = conn.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+            conn.pragma_update(None, "synchronous", "FULL")?;
+            let result = conn.transaction().map_err(Into::into).and_then(|tx| {
+                let value = f(&tx)?;
+                tx.commit()?;
+                Ok(value)
+            });
+            // Once the commit stands, failing to restore the usual level only
+            // costs speed; reporting an error would misstate the commit.
+            if let Err(error) = conn.pragma_update(None, "synchronous", previous) {
+                tracing::warn!(%error, "could not restore the database sync level");
+            }
+            result
+        })
+        .await
+    }
+
     /// Run a read-only closure on the reader connection.
     pub async fn read<T, F>(&self, f: F) -> Result<T>
     where
@@ -747,7 +782,7 @@ mod connection_profile_tests {
 #[cfg(test)]
 mod startup_preference_tests {
     use super::startup_presentation;
-    use crate::models::MIN_WORKSPACE_LIST_PANE_WIDTH;
+    use crate::models::{AppIcon, MIN_WORKSPACE_LIST_PANE_WIDTH};
     use rusqlite::Connection;
 
     #[test]
@@ -839,6 +874,30 @@ mod startup_preference_tests {
             conn.execute("UPDATE app_settings SET value = ?1", [value])
                 .unwrap();
             assert!(!startup_presentation(&path).close_to_tray, "{value}");
+        }
+    }
+
+    #[test]
+    fn startup_app_icon_falls_back_to_the_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mail.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"appIcon\": \"graphite\"}');",
+        )
+        .unwrap();
+        assert_eq!(startup_presentation(&path).app_icon, AppIcon::Graphite);
+
+        for value in ["{}", "{\"appIcon\": \"future\"}", "{\"appIcon\": 2}"] {
+            conn.execute("UPDATE app_settings SET value = ?1", [value])
+                .unwrap();
+            assert_eq!(
+                startup_presentation(&path).app_icon,
+                AppIcon::Orange,
+                "{value}"
+            );
         }
     }
 }

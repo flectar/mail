@@ -209,7 +209,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
 
                 mini-day-hit := TouchArea {
                     accessible-role: button;
-                    accessible-label: @tr("Select {}", day.iso-date);
+                    accessible-label: @tr("Select {}", day.date-label);
                     accessible-checked: day.is-selected;
                     accessible-action-default => { root.select-date(day.iso-date); }
                     clicked => { root.select-date(day.iso-date); }
@@ -380,7 +380,10 @@ export component FunctionalCalendarView inherits Rectangle {
     in property <string> period-title;
     in property <string> week-label;
     in property <string> selected-date;
+    in property <string> selected-date-label;
     in property <bool> selected-date-has-events: false;
+    // The week view's ruler labels for 08:00 through 18:00.
+    in property <[string]> hour-labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
     in property <string> view-mode: "week";
     in property <color> background-color;
     in property <color> sidebar-color;
@@ -460,7 +463,7 @@ export component FunctionalCalendarView inherits Rectangle {
         root.detail-title = event.title;
         root.detail-subtitle = event.source == "local" ? @tr("Created in Flectar Mail") : @tr("Synced provider event");
         root.detail-provider = event.provider;
-        root.detail-date-time = event.iso-date + " · " + event.detail;
+        root.detail-date-time = event.date-label + " · " + event.detail;
         root.detail-calendar = event.calendar != "" ? event.calendar : @tr("Default calendar");
         root.detail-account = event.account;
         root.detail-location = event.location;
@@ -492,7 +495,7 @@ export component FunctionalCalendarView inherits Rectangle {
     local-label-width := Text { visible: false; text: @tr("LOCAL"); font-size: TypeScale.caption; }
     all-day-label-width := Text { visible: false; text: @tr("ALL DAY"); font-size: TypeScale.caption; }
     all-day-line := Text { visible: false; text: "Ag"; font-size: TypeScale.caption; font-weight: 700; }
-    hour-label-width := Text { visible: false; text: "00:00"; font-size: TypeScale.caption; }
+    hour-label-width := Text { visible: false; text: root.hour-labels[2]; font-size: TypeScale.caption; }
 
     calendar-sidebar := FunctionalCalendarSidebar {
         active: root.active && !root.compact;
@@ -616,7 +619,7 @@ export component FunctionalCalendarView inherits Rectangle {
                     height: parent.height;
                     background: day.is-today ? root.accent-background : transparent;
                     Text { text: day.weekday + "\n" + day.day; color: day.is-today ? root.accent-color : root.secondary-color; font-size: TypeScale.caption; font-weight: day.is-today ? 700 : 600; horizontal-alignment: center; vertical-alignment: center; }
-                    TouchArea { accessible-role: button; accessible-label: @tr("Select {}", day.iso-date); accessible-action-default => { root.select-date(day.iso-date); } clicked => { root.select-date(day.iso-date); } mouse-cursor: pointer; }
+                    TouchArea { accessible-role: button; accessible-label: @tr("Select {}", day.date-label); accessible-action-default => { root.select-date(day.iso-date); } clicked => { root.select-date(day.iso-date); } mouse-cursor: pointer; }
                 }
             }
             Rectangle { y: 47px; width: parent.width; height: 1px; background: root.ui-border-color; }
@@ -649,7 +652,7 @@ export component FunctionalCalendarView inherits Rectangle {
                 width: parent.width;
                 height: parent.height - self.y;
                 clip: true;
-                for hour[index] in ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"] : Rectangle {
+                for hour[index] in root.hour-labels : Rectangle {
                     y: index * root.hour-height;
                     width: parent.width;
                     height: 1px;
@@ -705,7 +708,7 @@ export component FunctionalCalendarView inherits Rectangle {
                 background: day.is-selected ? root.accent-background : root.surface-color;
                 Text { x: 9px; y: 6px; width: 28px; height: 24px; text: day.day; color: day.is-today ? root.accent-color : day.outside-month ? root.muted-color : root.body-color; font-size: TypeScale.secondary; font-weight: day.is-today ? 700 : 500; }
                 Rectangle { visible: day.is-today; x: 7px; y: 5px; width: 25px; height: 25px; border-radius: 13px; border-width: 1px; border-color: root.accent-color; background: transparent; }
-                TouchArea { accessible-role: button; accessible-label: @tr("Select {}", day.iso-date); accessible-checked: day.is-selected; accessible-action-default => { root.select-date(day.iso-date); } clicked => { root.select-date(day.iso-date); } mouse-cursor: pointer; }
+                TouchArea { accessible-role: button; accessible-label: @tr("Select {}", day.date-label); accessible-checked: day.is-selected; accessible-action-default => { root.select-date(day.iso-date); } clicked => { root.select-date(day.iso-date); } mouse-cursor: pointer; }
             }
             for event in root.events : Rectangle {
                 x: mod(event.month-index, 7) * parent.width / 7 + 7px;
@@ -817,7 +820,7 @@ export component FunctionalCalendarView inherits Rectangle {
                     day-hit := TouchArea {
                         mouse-cursor: pointer;
                         accessible-role: button;
-                        accessible-label: @tr("Select {}", day.iso-date);
+                        accessible-label: @tr("Select {}", day.date-label);
                         accessible-checked: day.is-selected;
                         accessible-action-default => { root.select-date(day.iso-date); }
                         accessible-id: "calendar-day-" + day.iso-date;
@@ -828,7 +831,7 @@ export component FunctionalCalendarView inherits Rectangle {
         }
 
         Rectangle { x: 14px; y: 270px; width: parent.width - 28px; height: 1px; background: root.subtle-border-color; }
-        Text { x: 16px; y: 278px; width: parent.width - 32px; height: 28px; text: @tr("Agenda · {}", root.selected-date); color: root.secondary-color; font-size: TypeScale.secondary; font-weight: 700; vertical-alignment: center; }
+        Text { x: 16px; y: 278px; width: parent.width - 32px; height: 28px; text: @tr("Agenda · {}", root.selected-date-label); color: root.secondary-color; font-size: TypeScale.secondary; font-weight: 700; vertical-alignment: center; }
 
         agenda-scroll := ScrollView {
             x: 8px;

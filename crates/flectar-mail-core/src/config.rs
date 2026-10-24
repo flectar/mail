@@ -84,9 +84,14 @@ impl Paths {
         [self.cache_dir.join("warm-start-mailbox-v2.json")]
     }
 
+    /// Directory holding every account's [`Self::mail_dir`].
+    pub fn mail_root(&self) -> PathBuf {
+        self.data_dir.join("mail")
+    }
+
     /// Directory for raw .eml files of one account.
     pub fn mail_dir(&self, account_id: i64) -> PathBuf {
-        self.data_dir.join("mail").join(account_id.to_string())
+        self.mail_root().join(account_id.to_string())
     }
 
     /// Directory for extracted attachment files.
@@ -129,10 +134,6 @@ impl Paths {
             std::fs::set_permissions(&self.cache_dir, std::fs::Permissions::from_mode(0o700))?;
         }
         Ok(())
-    }
-
-    fn mail_root(&self) -> PathBuf {
-        self.data_dir.join("mail")
     }
 }
 

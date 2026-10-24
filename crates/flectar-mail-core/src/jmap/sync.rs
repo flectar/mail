@@ -10,20 +10,33 @@ use crate::models::{AccountConfig, Address, MailProtocol, SenderDeliveryStatus, 
 use crate::sync::engine::{
     PriorityFetchCmd, SyncCmd, SyncCtx, configured_sync_interval, set_state, set_state_error,
 };
-use futures::StreamExt;
+use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
-use jmap_client::core::response::{EmailGetResponse, MailboxGetResponse};
+use jmap_client::core::query::QueryResponse;
+use jmap_client::core::response::{
+    EmailGetResponse, EmailSetResponse, EmailSubmissionSetResponse, IdentityGetResponse,
+    MailboxGetResponse,
+};
 use jmap_client::core::set::{SetErrorType, SetObject};
-use jmap_client::email::{Email, Header, HeaderValue, Property as EmailProperty};
-use jmap_client::mailbox::{Property as MailboxProperty, Role};
+use jmap_client::email::import::EmailImportResponse;
+use jmap_client::email::{BodyProperty, Email, Header, HeaderValue, Property as EmailProperty};
+use jmap_client::event_source::PushNotification;
+use jmap_client::mailbox::{Mailbox, Property as MailboxProperty, Role};
 use rusqlite::{OptionalExtension, params};
 use std::collections::{HashMap, HashSet};
-use tokio::sync::{mpsc, watch};
+use std::future::Future;
+use std::pin::Pin;
+use tokio::sync::{mpsc, oneshot, watch};
 
 const PAGE: usize = 500;
 const MAX_QUERY_RESTARTS: usize = 3;
 const MAX_CHANGE_PAGES: usize = 10_000;
 const MAX_JMAP_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
+/// Stalwart reads a message in full to list its attachments, so one listing
+/// request covers at most this many message bytes, or a single larger
+/// message. A request the server doesn't answer in time lowers it.
+const ATTACHMENT_LISTING_BYTES: i64 = 32 * 1024 * 1024;
+const ATTACHMENT_LISTING_EMAILS: usize = 50;
 
 pub(crate) fn spawn(
     ctx: SyncCtx,
@@ -68,6 +81,10 @@ async fn actor(
     let mut waiters = Vec::new();
     let mut retry = 1u64;
     let mut identities_synced_at: Option<std::time::Instant> = None;
+    let mut listing_bytes = ATTACHMENT_LISTING_BYTES;
+    // Kept from one sync to the next, with its connection. A failed sync or a
+    // changed Session makes the next one connect again.
+    let mut session: Option<ConnectedClient> = None;
     loop {
         while let Ok(cmd) = rx.try_recv() {
             match cmd {
@@ -81,9 +98,16 @@ async fn actor(
         if settings.has_changed().unwrap_or(false) {
             config.settings = settings.borrow_and_update().clone();
         }
+        let reused = session.take();
         let outcome = async {
-            let connected = connect(&ctx, &config).await?;
-            persist_session(&ctx, config.id, &connected).await?;
+            let connected = match reused {
+                Some(connected) if !connected.session_changed() => connected,
+                _ => {
+                    let connected = connect(&ctx, &config).await?;
+                    persist_session(&ctx, config.id, &connected).await?;
+                    connected
+                }
+            };
             if identities_synced_at.is_none_or(|at| at.elapsed() >= IDENTITY_REFRESH_INTERVAL) {
                 // Identities change rarely and only gate the From picker, so
                 // a failure here must not block mail synchronization.
@@ -131,7 +155,10 @@ async fn actor(
         } else {
             std::time::Duration::from_secs(retry)
         };
-        if let Some(connected) = connected {
+        let deadline = tokio::time::sleep(delay);
+        tokio::pin!(deadline);
+        let mut push = None;
+        if let Some(connected) = &connected {
             // RFC 8620 EventSource gives Stalwart an immediate new-mail path;
             // the selected periodic interval remains the correctness backstop.
             match connected
@@ -148,34 +175,98 @@ async fn actor(
                 )
                 .await
             {
-                Ok(mut stream) => {
-                    tokio::select! {
-                        command = rx.recv() => match command {
-                            None | Some(SyncCmd::Shutdown) => return,
-                            Some(SyncCmd::SyncNow { complete: Some(done) }) => waiters.push(done),
-                            _ => {}
-                        },
-                        _ = settings.changed() => {},
-                        _ = tokio::time::sleep(delay) => {},
-                        notification = stream.next() => {
-                            if let Some(Err(error)) = notification {
-                                tracing::debug!(account_id=config.id, error=%error, "JMAP push stream ended; polling fallback will continue");
-                            }
-                        },
-                    }
-                    continue;
-                }
+                Ok(stream) => push = Some(stream),
                 Err(error) => {
                     tracing::debug!(account_id=config.id, error=%error, "JMAP push unavailable; using polling")
                 }
             }
         }
-        match tokio::time::timeout(delay, rx.recv()).await {
-            Ok(None) | Ok(Some(SyncCmd::Shutdown)) => return,
-            Ok(Some(SyncCmd::SyncNow {
-                complete: Some(done),
-            })) => waiters.push(done),
-            _ => {}
+        let mut listing = connected.is_some();
+        loop {
+            let wake = next_wake(
+                &mut rx,
+                &mut settings,
+                &mut waiters,
+                push.as_mut(),
+                deadline.as_mut(),
+                config.id,
+            );
+            let wake = match (&connected, listing) {
+                // Attachment listing fills idle time one request at a time and
+                // gives way as soon as anything else needs the actor.
+                (Some(connected), true) => match wake.now_or_never() {
+                    Some(wake) => wake,
+                    None => {
+                        listing = match list_attachments(
+                            &ctx,
+                            &config,
+                            connected,
+                            &mut listing_bytes,
+                        )
+                        .await
+                        {
+                            Ok(listed) => listed,
+                            Err(error) => {
+                                tracing::warn!(account_id = config.id, %error, "JMAP attachment listing failed; retrying after the next sync");
+                                false
+                            }
+                        };
+                        continue;
+                    }
+                },
+                _ => wake.await,
+            };
+            match wake {
+                Wake::Shutdown => return,
+                Wake::Sync => break,
+            }
+        }
+        // The push stream borrows the session it was opened on.
+        drop(push);
+        session = connected;
+    }
+}
+
+enum Wake {
+    Shutdown,
+    Sync,
+}
+
+/// Waits for the next reason to sync: a command, a settings change, the
+/// sync interval, or a push notification.
+async fn next_wake<S>(
+    rx: &mut mpsc::Receiver<SyncCmd>,
+    settings: &mut watch::Receiver<crate::models::AccountSettings>,
+    waiters: &mut Vec<oneshot::Sender<std::result::Result<(), String>>>,
+    push: Option<&mut S>,
+    deadline: Pin<&mut tokio::time::Sleep>,
+    account_id: i64,
+) -> Wake
+where
+    S: Stream<Item = jmap_client::Result<PushNotification>> + Unpin,
+{
+    let notification = async {
+        match push {
+            Some(stream) => stream.next().await,
+            None => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        command = rx.recv() => match command {
+            None | Some(SyncCmd::Shutdown) => Wake::Shutdown,
+            Some(SyncCmd::SyncNow { complete: Some(done) }) => {
+                waiters.push(done);
+                Wake::Sync
+            }
+            Some(_) => Wake::Sync,
+        },
+        _ = settings.changed() => Wake::Sync,
+        _ = deadline => Wake::Sync,
+        notification = notification => {
+            if let Some(Err(error)) = notification {
+                tracing::debug!(account_id, error=%error, "JMAP push stream ended; polling fallback will continue");
+            }
+            Wake::Sync
         }
     }
 }
@@ -219,22 +310,7 @@ fn role(value: Role) -> Option<&'static str> {
 }
 
 async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) -> Result<()> {
-    let mut request = c.request();
-    // Counters (totalEmails, unreadThreads, ...) are computed locally; asking
-    // for them makes the server count every mailbox of a large account.
-    request.get_mailbox().account_id(&c.account_id).properties([
-        MailboxProperty::Id,
-        MailboxProperty::Name,
-        MailboxProperty::ParentId,
-        MailboxProperty::Role,
-        MailboxProperty::MyRights,
-    ]);
-    let mut response: MailboxGetResponse = request
-        .send_get_mailbox()
-        .await
-        .map_err(client::map_error)?;
-    let state = response.take_state();
-    let mailboxes = response.take_list();
+    let (state, mailboxes) = fetch_mailboxes(c).await?;
     let hierarchy = mailboxes
         .iter()
         .map(|mailbox| {
@@ -344,6 +420,69 @@ async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) 
         .await
 }
 
+/// Every mailbox of the account and the Mailbox state they share.
+///
+/// Asked for without ids, Stalwart returns no more mailboxes than its get
+/// limit and says nothing of the rest. An answer that fills the limit is
+/// checked against Mailbox/query and fetched again in pages.
+async fn fetch_mailboxes(c: &ConnectedClient) -> Result<(String, Vec<Mailbox>)> {
+    let limit = max_objects_in_get(c);
+    let (state, mailboxes) = get_mailboxes(c, None).await?;
+    if mailboxes.len() < limit {
+        return Ok((state, mailboxes));
+    }
+    'restart: for _ in 0..MAX_QUERY_RESTARTS {
+        let ids = query_all("Mailbox/query", |position| async move {
+            let mut request = c.request();
+            request
+                .query_mailbox()
+                .account_id(&c.account_id)
+                .position(position)
+                .limit(PAGE)
+                .calculate_total(true);
+            c.send_single::<QueryResponse>(request).await
+        })
+        .await?;
+        let mut state: Option<String> = None;
+        let mut mailboxes = Vec::with_capacity(ids.len());
+        for page in ids.chunks(limit) {
+            let (page_state, list) = get_mailboxes(c, Some(page)).await?;
+            if state.get_or_insert_with(|| page_state.clone()) != &page_state {
+                continue 'restart;
+            }
+            mailboxes.extend(list);
+        }
+        if let Some(state) = state {
+            return Ok((state, mailboxes));
+        }
+    }
+    Err(CoreError::Jmap(
+        "mailboxes changed repeatedly while listing them; retrying later".into(),
+    ))
+}
+
+async fn get_mailboxes(
+    c: &ConnectedClient,
+    ids: Option<&[String]>,
+) -> Result<(String, Vec<Mailbox>)> {
+    let mut request = c.request();
+    // Counters (totalEmails, unreadThreads, ...) are computed locally; asking
+    // for them makes the server count every mailbox of a large account.
+    let get = request.get_mailbox().account_id(&c.account_id).properties([
+        MailboxProperty::Id,
+        MailboxProperty::Name,
+        MailboxProperty::ParentId,
+        MailboxProperty::Role,
+        MailboxProperty::MyRights,
+    ]);
+    if let Some(ids) = ids {
+        get.ids(ids.iter().cloned());
+    }
+    let mut response: MailboxGetResponse =
+        c.send_single(request).await.map_err(client::map_error)?;
+    Ok((response.take_state(), response.take_list()))
+}
+
 fn mailbox_path(id: &str, hierarchy: &HashMap<String, (String, Option<String>)>) -> Result<String> {
     let mut parts = Vec::new();
     let mut current = Some(id);
@@ -368,6 +507,88 @@ fn mailbox_path(id: &str, hierarchy: &HashMap<String, (String, Option<String>)>)
     }
 }
 
+/// The Emails a full sync goes through: the account's mail history, reaching
+/// back to the oldest message an earlier server or protocol of the account
+/// left here, so it can be matched with its copy on this server.
+async fn full_sync_ids(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+) -> Result<Vec<String>> {
+    let Some(cutoff) = config.settings.mail_history.cutoff_ms_at(now_ms()) else {
+        return query_ids(c, None).await;
+    };
+    let account_id = config.id;
+    let oldest_leftover = ctx
+        .db
+        .read(move |conn| {
+            Ok(repo::messages::jmap_leftovers(conn, account_id)?
+                .into_iter()
+                .map(|leftover| leftover.received_at)
+                .min())
+        })
+        .await?;
+    // A day's margin covers servers recording slightly different times.
+    let received_after = oldest_leftover.map_or(cutoff, |oldest| {
+        cutoff.min(oldest.saturating_sub(24 * 60 * 60 * 1000))
+    });
+    query_ids(c, Some(received_after)).await
+}
+
+/// The Email state an unfinished full sync started from.
+async fn unfinished_full_sync(ctx: &SyncCtx, id: i64) -> Result<Option<String>> {
+    ctx.db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT full_sync_state FROM jmap_sync_state WHERE account_id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .flatten())
+        })
+        .await
+}
+
+/// Starts a full sync from the server's current Email state. Recording the
+/// state first lets an interrupted run resume: checkpointing that older state
+/// at the end is safe because Email/changes then repeats whatever changed
+/// meanwhile.
+async fn begin_full_sync(ctx: &SyncCtx, id: i64, c: &ConnectedClient) -> Result<String> {
+    let state = current_email_state(c).await?;
+    let started = state.clone();
+    ctx.db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "INSERT INTO jmap_sync_state(account_id,full_sync_state) VALUES(?1,?2)
+                 ON CONFLICT(account_id) DO UPDATE SET full_sync_state=excluded.full_sync_state",
+                params![id, started],
+            )?;
+            tx.execute(
+                "DELETE FROM jmap_full_sync_stored WHERE account_id=?1",
+                params![id],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await?;
+    Ok(state)
+}
+
+async fn full_sync_stored(ctx: &SyncCtx, id: i64) -> Result<HashSet<String>> {
+    ctx.db
+        .read(move |conn| {
+            let mut stmt =
+                conn.prepare("SELECT email_id FROM jmap_full_sync_stored WHERE account_id=?1")?;
+            Ok(stmt
+                .query_map(params![id], |r| r.get(0))?
+                .collect::<rusqlite::Result<HashSet<String>>>()?)
+        })
+        .await
+}
+
 async fn saved_email_state(ctx: &SyncCtx, id: i64) -> Result<Option<String>> {
     ctx.db
         .read(move |conn| {
@@ -383,39 +604,46 @@ async fn saved_email_state(ctx: &SyncCtx, id: i64) -> Result<Option<String>> {
         .await
 }
 
-async fn query_ids(config: &AccountConfig, c: &ConnectedClient) -> Result<Vec<String>> {
-    let cutoff = config
-        .settings
-        .mail_history
-        .cutoff_ms_at(now_ms())
-        .map(|v| v / 1000);
+/// Every Email received after `received_after` (ms), newest first.
+async fn query_ids(c: &ConnectedClient, received_after: Option<i64>) -> Result<Vec<String>> {
+    let cutoff = received_after.map(|v| v / 1000);
+    query_all("Email/query", |position| async move {
+        let mut request = c.request();
+        let query = request
+            .query_email()
+            .account_id(&c.account_id)
+            .position(position)
+            .limit(PAGE)
+            .calculate_total(true)
+            .sort([jmap_client::email::query::Comparator::received_at().descending()]);
+        if let Some(cutoff) = cutoff {
+            query.filter(jmap_client::email::query::Filter::after(cutoff));
+        }
+        c.send_single::<QueryResponse>(request).await
+    })
+    .await
+}
+
+/// Pages through a query until it has every id, starting over whenever the
+/// results change underneath it.
+async fn query_all<F, Fut>(name: &str, mut page: F) -> Result<Vec<String>>
+where
+    F: FnMut(i32) -> Fut,
+    Fut: Future<Output = jmap_client::Result<QueryResponse>>,
+{
     'restart: for _ in 0..MAX_QUERY_RESTARTS {
         let mut ids = Vec::new();
         let mut query_state: Option<String> = None;
         let mut expected_total: Option<usize> = None;
         loop {
             let position = i32::try_from(ids.len())
-                .map_err(|_| CoreError::Jmap("Email/query result set is too large".into()))?;
-            let mut request = c.request();
-            let query = request
-                .query_email()
-                .account_id(&c.account_id)
-                .position(position)
-                .limit(PAGE)
-                .calculate_total(true)
-                .sort([jmap_client::email::query::Comparator::received_at().descending()]);
-            if let Some(cutoff) = cutoff {
-                query.filter(jmap_client::email::query::Filter::after(cutoff));
-            }
-            let mut response = request
-                .send_query_email()
-                .await
-                .map_err(client::map_error)?;
+                .map_err(|_| CoreError::Jmap(format!("{name} result set is too large")))?;
+            let mut response = page(position).await.map_err(client::map_error)?;
             let response_state = response.query_state().to_owned();
             let total = response
                 .total()
-                .ok_or_else(|| CoreError::Jmap("Email/query omitted its requested total".into()))?;
-            if response.position() != ids.len() as i32
+                .ok_or_else(|| CoreError::Jmap(format!("{name} omitted its requested total")))?;
+            if response.position() != position
                 || query_state
                     .as_ref()
                     .is_some_and(|state| state != &response_state)
@@ -442,9 +670,9 @@ async fn query_ids(config: &AccountConfig, c: &ConnectedClient) -> Result<Vec<St
             }
         }
     }
-    Err(CoreError::Jmap(
-        "mailbox changed repeatedly while paging Email/query; retrying later".into(),
-    ))
+    Err(CoreError::Jmap(format!(
+        "{name} results changed repeatedly while paging; retrying later"
+    )))
 }
 
 async fn changes(
@@ -494,8 +722,7 @@ async fn current_email_state(c: &ConnectedClient) -> Result<String> {
         .account_id(&c.account_id)
         .ids(Vec::<String>::new())
         .properties([EmailProperty::Id]);
-    let mut response: EmailGetResponse =
-        request.send_get_email().await.map_err(client::map_error)?;
+    let mut response: EmailGetResponse = c.send_single(request).await.map_err(client::map_error)?;
     Ok(response.take_state())
 }
 
@@ -517,8 +744,8 @@ fn header_properties() -> Vec<EmailProperty> {
         EmailProperty::Bcc,
         EmailProperty::Subject,
         EmailProperty::SentAt,
+        // Not `attachments`: see `list_attachments`.
         EmailProperty::HasAttachment,
-        EmailProperty::Attachments,
         EmailProperty::Preview,
         EmailProperty::Header(Header::as_text("Auto-Submitted", false)),
         EmailProperty::Header(Header::as_text("List-Id", false)),
@@ -546,37 +773,66 @@ fn automated_email(email: &Email) -> bool {
 }
 
 async fn sync_emails(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient) -> Result<()> {
-    let previous = saved_email_state(ctx, config.id).await?;
-    let (ids, mut destroyed, checkpoint_state, full) = match previous {
-        Some(state) => match changes(c, state).await {
-            Ok((ids, destroyed, state)) => (ids, destroyed, state, false),
-            Err(CoreError::Jmap(value)) if value == "cannotCalculateChanges" => {
-                let state = current_email_state(c).await?;
-                (query_ids(config, c).await?, Vec::new(), state, true)
-            }
-            Err(error) => return Err(error),
-        },
-        None => {
-            let state = current_email_state(c).await?;
-            (query_ids(config, c).await?, Vec::new(), state, true)
-        }
+    let account_id = config.id;
+    let (ids, mut destroyed, checkpoint_state, full) =
+        match unfinished_full_sync(ctx, account_id).await? {
+            Some(state) => (
+                full_sync_ids(ctx, config, c).await?,
+                Vec::new(),
+                state,
+                true,
+            ),
+            None => match saved_email_state(ctx, account_id).await? {
+                Some(state) => match changes(c, state).await {
+                    Ok((ids, destroyed, state)) => (ids, destroyed, state, false),
+                    Err(CoreError::Jmap(value)) if value == "cannotCalculateChanges" => {
+                        let state = begin_full_sync(ctx, account_id, c).await?;
+                        (
+                            full_sync_ids(ctx, config, c).await?,
+                            Vec::new(),
+                            state,
+                            true,
+                        )
+                    }
+                    Err(error) => return Err(error),
+                },
+                None => {
+                    let state = begin_full_sync(ctx, account_id, c).await?;
+                    (
+                        full_sync_ids(ctx, config, c).await?,
+                        Vec::new(),
+                        state,
+                        true,
+                    )
+                }
+            },
+        };
+    // A full sync downloads the account's mail history. Older mail it lists
+    // only replaces what an earlier server left here.
+    let insert_after = if full {
+        config.settings.mail_history.cutoff_ms_at(now_ms())
+    } else {
+        None
     };
-    let max = c
-        .client
-        .session()
-        .core_capabilities()
-        .map(|v| v.max_objects_in_get().clamp(1, 1000))
-        .unwrap_or(256);
+    // A full sync that stopped midway skips what it already stored.
+    let stored = if full {
+        full_sync_stored(ctx, account_id).await?
+    } else {
+        HashSet::new()
+    };
+    let (skipped, ids): (Vec<_>, Vec<_>) = ids.into_iter().partition(|id| stored.contains(id));
     // Each Email/get page is committed on its own while the next one is in
     // flight: a first sync fills the mailbox newest first instead of showing
     // nothing until the whole history is downloaded. The email state is only
-    // checkpointed once every page is stored, so an interrupted run restarts.
-    let mut remote_ids = HashSet::with_capacity(ids.len());
-    let mut chunks = ids.chunks(max);
-    let mut fetched = match chunks.next() {
-        Some(chunk) => Some(fetch_headers(c, chunk).await?),
-        None => None,
+    // checkpointed once every page is stored.
+    let mut remote_ids = skipped.into_iter().collect::<HashSet<_>>();
+    remote_ids.reserve(ids.len());
+    let mut pages = HeaderPages {
+        ids: &ids,
+        position: 0,
+        size: max_objects_in_get(c),
     };
+    let mut fetched = pages.next(c).await?;
     while let Some((emails, not_found)) = fetched.take() {
         destroyed.extend(not_found);
         remote_ids.extend(
@@ -584,33 +840,63 @@ async fn sync_emails(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient)
                 .iter()
                 .filter_map(|email| email.id().map(str::to_owned)),
         );
-        let persist = persist_emails(ctx, config, emails);
-        fetched = match chunks.next() {
-            Some(chunk) => {
-                let (next, persisted) = tokio::join!(fetch_headers(c, chunk), persist);
-                persisted?;
-                Some(next?)
-            }
-            None => {
-                persist.await?;
-                None
-            }
-        };
+        let (next, persisted) = tokio::join!(
+            pages.next(c),
+            persist_emails(ctx, config, emails, full, insert_after)
+        );
+        persisted?;
+        fetched = next?;
     }
     destroyed.sort();
     destroyed.dedup();
     finish_email_sync(ctx, config, remote_ids, destroyed, checkpoint_state, full).await
 }
 
-async fn fetch_headers(c: &ConnectedClient, ids: &[String]) -> Result<(Vec<Email>, Vec<String>)> {
+/// The header pages of one sync run, newest first.
+struct HeaderPages<'a> {
+    ids: &'a [String],
+    position: usize,
+    size: usize,
+}
+
+impl HeaderPages<'_> {
+    /// The next page of headers and the ids the server no longer has. A page
+    /// the server doesn't answer in time is asked for again in halves, and
+    /// later pages keep the smaller size, so a slow server still makes
+    /// progress.
+    async fn next(&mut self, c: &ConnectedClient) -> Result<Option<(Vec<Email>, Vec<String>)>> {
+        while self.position < self.ids.len() {
+            let end = self.ids.len().min(self.position + self.size);
+            match fetch_headers(c, &self.ids[self.position..end]).await {
+                Ok(page) => {
+                    self.position = end;
+                    return Ok(Some(page));
+                }
+                Err(error) if client::is_timeout(&error) && end - self.position > 1 => {
+                    self.size = (end - self.position) / 2;
+                    tracing::debug!(
+                        size = self.size,
+                        "JMAP header page timed out; asking for fewer"
+                    );
+                }
+                Err(error) => return Err(client::map_error(error)),
+            }
+        }
+        Ok(None)
+    }
+}
+
+async fn fetch_headers(
+    c: &ConnectedClient,
+    ids: &[String],
+) -> jmap_client::Result<(Vec<Email>, Vec<String>)> {
     let mut request = c.request();
     request
         .get_email()
         .account_id(&c.account_id)
         .ids(ids.iter().cloned())
         .properties(header_properties());
-    let mut response: EmailGetResponse =
-        request.send_get_email().await.map_err(client::map_error)?;
+    let mut response: EmailGetResponse = c.send_single(request).await?;
     Ok((response.take_list(), response.take_not_found()))
 }
 
@@ -641,7 +927,16 @@ fn first(values: Option<&[String]>) -> Option<String> {
     values.and_then(|values| values.first()).cloned()
 }
 
-async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email>) -> Result<()> {
+/// Stores a page of headers. A full sync also records each message as
+/// stored, so an interrupted run need not fetch it again. An Email received
+/// before `insert_after` only updates a message already here.
+async fn persist_emails(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    emails: Vec<Email>,
+    full_sync: bool,
+    insert_after: Option<i64>,
+) -> Result<()> {
     let account_id = config.id;
     let (thread_ids, stale_paths) = ctx
         .db
@@ -659,6 +954,12 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                     .id()
                     .map(str::to_owned)
                     .ok_or_else(|| CoreError::Jmap("Email/get returned an object without id".into()))?;
+                if full_sync {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO jmap_full_sync_stored(account_id,email_id) VALUES(?1,?2)",
+                        params![account_id, remote_id],
+                    )?;
+                }
                 let mut folders = Vec::new();
                 for mailbox_id in email.mailbox_ids() {
                     let folder = repo::folders::by_jmap_id(&tx, account_id, mailbox_id)?
@@ -702,6 +1003,9 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                         None => None,
                     },
                 };
+                if existing.is_none() && insert_after.is_some_and(|after| date < after) {
+                    continue;
+                }
                 let remote_thread = email
                     .thread_id()
                     .ok_or_else(|| {
@@ -744,6 +1048,9 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                 let to = addresses(email.to());
                 let cc = addresses(email.cc());
                 let bcc = addresses(email.bcc());
+                // Servers may keep the body's line breaks in `preview`, which
+                // the single-line mail list would stack over the row above.
+                let snippet = crate::mime::make_snippet(email.preview().unwrap_or_default());
                 let blob_id = Some(
                     email
                         .blob_id()
@@ -807,11 +1114,21 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                     (pending_keywords, pending_mailboxes) =
                         repo::actions::jmap_reconciliation_guards(&tx, existing.id)?;
                     let old_thread_id = existing.thread_id;
-                    if existing.jmap_blob_id != blob_id && let Some(path) = existing.raw_path {
-                        stale_paths.push(path);
+                    if existing.jmap_blob_id != blob_id {
+                        // These rows describe the previous content; the
+                        // attachment listing describes the new blob.
+                        tx.execute(
+                            "DELETE FROM attachments WHERE message_id=?1",
+                            params![existing.id],
+                        )?;
+                        if let Some(path) = existing.raw_path {
+                            stale_paths.push(path);
+                        }
                     }
+                    // JMAP messages carry no IMAP UID; an adopted one drops
+                    // the UID its earlier copy had in another folder.
                     tx.execute(
-                        "UPDATE messages SET thread_id=?2, folder_id=CASE WHEN ?21 THEN folder_id ELSE ?3 END,
+                        "UPDATE messages SET uid=NULL, thread_id=?2, folder_id=CASE WHEN ?21 THEN folder_id ELSE ?3 END,
                            message_id=?4, subject=?5, from_name=?6, from_addr=?7, to_json=?8,
                            cc_json=?9, bcc_json=?10, date=?11, internal_date=?11,
                            is_read=CASE WHEN ?22 THEN is_read ELSE ?12 END,
@@ -840,7 +1157,7 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                             is_automated as i64,
                             email.has_attachment() as i64,
                             size,
-                            email.preview().unwrap_or_default(),
+                            snippet,
                             blob_id,
                             pending_mailboxes as i64,
                             pending_keywords as i64,
@@ -887,7 +1204,7 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                         is_automated,
                         has_attachments: email.has_attachment(),
                         size: Some(size),
-                        snippet: email.preview().unwrap_or_default().to_owned(),
+                        snippet,
                         references,
                         list_unsubscribe: None,
                         list_unsubscribe_post: None,
@@ -902,11 +1219,6 @@ async fn persist_emails(ctx: &SyncCtx, config: &AccountConfig, emails: Vec<Email
                         blob_id.as_deref(),
                     )?;
                 }
-                // Populate Files without downloading the message or changing $seen.
-                // Preserve MIME-derived rows once a raw body is cached; their part
-                // identifiers belong to the MIME parser, not the JMAP server.
-                let body_cached: bool=tx.query_row("SELECT body_state='cached' FROM messages WHERE id=?1",[local_id],|r|r.get(0))?;
-                if !body_cached { persist_attachment_parts(&tx, local_id, email.attachments().unwrap_or_default())?; }
                 if !pending_mailboxes {
                     repo::gmail::set_message_folders(&tx, local_id, &folder_ids)?;
                 }
@@ -990,6 +1302,27 @@ async fn finish_email_sync(
                         repo::messages::delete(&tx, id)?;
                     }
                 }
+                // Mail an earlier server or protocol of the account left here
+                // had this full sync to be matched with its copy on this
+                // server. What wasn't matched is not on the account's server.
+                for leftover in repo::messages::jmap_leftovers(&tx, account_id)? {
+                    tx.execute(
+                        "UPDATE pending_actions SET state='cancelled', finished_at=?2,
+                           last_error='the message is not on the account''s server'
+                         WHERE message_id=?1 AND state IN ('pending','inflight')",
+                        params![leftover.id, now_ms()],
+                    )?;
+                    changed_threads.extend(leftover.thread_id);
+                    stale_paths.extend(leftover.raw_path);
+                    repo::messages::delete(&tx, leftover.id)?;
+                }
+                // Everything an earlier server or protocol left has now been
+                // matched with its copy here or removed.
+                tx.execute(
+                    "UPDATE messages SET relink_pending=0 WHERE account_id=?1 AND relink_pending=1",
+                    params![account_id],
+                )?;
+                changed_threads.extend(repo::folders::drop_jmap_leftovers(&tx, account_id)?);
             }
             for thread_id in &changed_threads {
                 repo::threads::recompute(&tx, *thread_id)?;
@@ -998,8 +1331,13 @@ async fn finish_email_sync(
                 "INSERT INTO jmap_sync_state(account_id,email_state,last_full_sync)
                  VALUES(?1,?2,CASE WHEN ?3 THEN ?4 ELSE NULL END)
                  ON CONFLICT(account_id) DO UPDATE SET email_state=excluded.email_state,
-                   last_full_sync=CASE WHEN ?3 THEN ?4 ELSE jmap_sync_state.last_full_sync END",
+                   last_full_sync=CASE WHEN ?3 THEN ?4 ELSE jmap_sync_state.last_full_sync END,
+                   full_sync_state=NULL",
                 params![account_id, state, full as i64, now_ms()],
+            )?;
+            tx.execute(
+                "DELETE FROM jmap_full_sync_stored WHERE account_id=?1",
+                params![account_id],
             )?;
             tx.commit()?;
             Ok((changed_threads.into_iter().collect::<Vec<_>>(), stale_paths))
@@ -1016,6 +1354,168 @@ async fn publish_changes(ctx: &SyncCtx, thread_ids: Vec<i64>, stale_paths: Vec<S
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
+}
+
+/// Lists the attachments of the newest messages still waiting for it, as many
+/// as one request covers, so Files can show them without downloading the
+/// messages or changing $seen. Returns whether a request was made; the next
+/// call finds out whether more messages wait.
+///
+/// Header sync leaves `attachments` out because Stalwart can only answer it by
+/// reading each message in full. Here the reads are bounded per request by
+/// `budget`, which halves whenever the server doesn't answer in time, and
+/// never hold back mail sync.
+async fn list_attachments(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    budget: &mut i64,
+) -> Result<bool> {
+    let account_id = config.id;
+    let limit = max_objects_in_get(c).min(ATTACHMENT_LISTING_EMAILS);
+    let queue = ctx
+        .db
+        .read(move |conn| {
+            repo::messages::jmap_attachment_listing_queue(conn, account_id, limit as i64)
+        })
+        .await?;
+    let mut count = queue.len();
+    loop {
+        let mut bytes = 0_i64;
+        let mut batch = Vec::new();
+        for message in queue.iter().take(count) {
+            let size = message.size.max(0);
+            if !batch.is_empty() && bytes.saturating_add(size) > *budget {
+                break;
+            }
+            bytes = bytes.saturating_add(size);
+            batch.push(message.clone());
+        }
+        if batch.is_empty() {
+            return Ok(false);
+        }
+        match request_attachments(c, &batch).await {
+            Ok(listed) => {
+                store_attachments(ctx, batch, listed).await?;
+                return Ok(true);
+            }
+            Err(error) if client::is_timeout(&error) && batch.len() > 1 => {
+                // Halving the count too guarantees progress when sizes are
+                // unknown.
+                count = batch.len() / 2;
+                *budget = (bytes / 2).max(1);
+                tracing::debug!(
+                    account_id,
+                    budget = *budget,
+                    "JMAP attachment listing timed out; asking for fewer"
+                );
+            }
+            Err(error) if client::is_timeout(&error) => {
+                // The server can't read this one message in time. Rather than
+                // retrying it forever, Files leaves it out until the message
+                // is opened, which lists its attachments from the download.
+                tracing::warn!(
+                    account_id,
+                    size = bytes,
+                    "JMAP attachment listing of one message timed out; skipping it"
+                );
+                store_attachments(ctx, batch, Vec::new()).await?;
+                return Ok(true);
+            }
+            Err(error) => return Err(client::map_error(error)),
+        }
+    }
+}
+
+async fn request_attachments(
+    c: &ConnectedClient,
+    batch: &[repo::messages::JmapAttachmentListing],
+) -> jmap_client::Result<Vec<Email>> {
+    let mut request = c.request();
+    request
+        .get_email()
+        .account_id(&c.account_id)
+        .ids(batch.iter().map(|message| message.remote_id.clone()))
+        .properties([
+            EmailProperty::Id,
+            EmailProperty::BlobId,
+            EmailProperty::Attachments,
+        ])
+        .arguments()
+        .body_properties([
+            BodyProperty::PartId,
+            BodyProperty::BlobId,
+            BodyProperty::Size,
+            BodyProperty::Name,
+            BodyProperty::Type,
+            BodyProperty::Disposition,
+            BodyProperty::Cid,
+        ]);
+    let mut response: EmailGetResponse = c.send_single(request).await?;
+    Ok(response.take_list())
+}
+
+/// Stores what the server listed for `batch` and marks every message in it as
+/// listed for its blob. Messages the server didn't list as they are here are
+/// left to header sync, which queues them again if their blob changes.
+async fn store_attachments(
+    ctx: &SyncCtx,
+    batch: Vec<repo::messages::JmapAttachmentListing>,
+    listed: Vec<Email>,
+) -> Result<()> {
+    let thread_ids = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let mut changed_threads = HashSet::new();
+            for message in &batch {
+                let current = tx
+                    .query_row(
+                        "SELECT thread_id, body_state FROM messages
+                         WHERE id=?1 AND jmap_id=?2 AND jmap_blob_id=?3",
+                        params![message.message_id, message.remote_id, message.blob_id],
+                        |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, String>(1)?)),
+                    )
+                    .optional()?;
+                // A message that changed meanwhile comes back through the
+                // queue with its new blob.
+                let Some((thread_id, body_state)) = current else {
+                    continue;
+                };
+                // Missing here or holding another blob on the server: header
+                // sync reconciles the message, which queues it again if needed.
+                // MIME-derived rows of a cached body stay authoritative.
+                if let Some(email) = listed.iter().find(|email| {
+                    email.id() == Some(message.remote_id.as_str())
+                        && email.blob_id() == Some(message.blob_id.as_str())
+                }) && body_state != "cached"
+                {
+                    persist_attachment_parts(
+                        &tx,
+                        message.message_id,
+                        email.attachments().unwrap_or_default(),
+                    )?;
+                    changed_threads.extend(thread_id);
+                }
+                tx.execute(
+                    "UPDATE messages SET jmap_attachments_blob_id=?2 WHERE id=?1",
+                    params![message.message_id, message.blob_id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(changed_threads.into_iter().collect::<Vec<_>>())
+        })
+        .await?;
+    publish_changes(ctx, thread_ids, Vec::new()).await;
+    Ok(())
+}
+
+fn max_objects_in_get(c: &ConnectedClient) -> usize {
+    c.client
+        .session()
+        .core_capabilities()
+        .map(|v| v.max_objects_in_get().clamp(1, 1000))
+        .unwrap_or(256)
 }
 
 fn persist_attachment_parts(
@@ -1211,7 +1711,8 @@ async fn execute_action(
                     .set_email()
                     .account_id(&c.account_id)
                     .destroy(batch.iter().cloned());
-                let mut response = request.send_set_email().await.map_err(client::map_error)?;
+                let mut response: EmailSetResponse =
+                    c.send_single(request).await.map_err(client::map_error)?;
                 for id in batch {
                     match response.destroyed(id) {
                         Ok(()) => {}
@@ -1312,57 +1813,19 @@ async fn execute_action(
 }
 
 async fn query_mailbox_ids(c: &ConnectedClient, mailbox_id: &str) -> Result<Vec<String>> {
-    'restart: for _ in 0..MAX_QUERY_RESTARTS {
-        let mut ids = Vec::new();
-        let mut state: Option<String> = None;
-        let mut total: Option<usize> = None;
-        loop {
-            let position = i32::try_from(ids.len())
-                .map_err(|_| CoreError::Jmap("Trash contains too many messages".into()))?;
-            let mut request = c.request();
-            request
-                .query_email()
-                .account_id(&c.account_id)
-                .position(position)
-                .limit(PAGE)
-                .calculate_total(true)
-                .sort([jmap_client::email::query::Comparator::received_at().descending()])
-                .filter(jmap_client::email::query::Filter::in_mailbox(mailbox_id));
-            let mut response = request
-                .send_query_email()
-                .await
-                .map_err(client::map_error)?;
-            let page_state = response.query_state().to_owned();
-            let page_total = response
-                .total()
-                .ok_or_else(|| CoreError::Jmap("Trash query omitted its total".into()))?;
-            if response.position() != position
-                || state.as_ref().is_some_and(|s| s != &page_state)
-                || total.is_some_and(|n| n != page_total)
-            {
-                continue 'restart;
-            }
-            state.get_or_insert(page_state);
-            total.get_or_insert(page_total);
-            let page = response.take_ids();
-            if page.is_empty() && ids.len() < page_total {
-                continue 'restart;
-            }
-            ids.extend(page);
-            if ids.len() == page_total {
-                if ids.iter().collect::<HashSet<_>>().len() != ids.len() {
-                    continue 'restart;
-                }
-                return Ok(ids);
-            }
-            if ids.len() > page_total {
-                continue 'restart;
-            }
-        }
-    }
-    Err(CoreError::Jmap(
-        "Trash changed repeatedly while loading it; retrying later".into(),
-    ))
+    query_all("Trash query", |position| async move {
+        let mut request = c.request();
+        request
+            .query_email()
+            .account_id(&c.account_id)
+            .position(position)
+            .limit(PAGE)
+            .calculate_total(true)
+            .sort([jmap_client::email::query::Comparator::received_at().descending()])
+            .filter(jmap_client::email::query::Filter::in_mailbox(mailbox_id));
+        c.send_single::<QueryResponse>(request).await
+    })
+    .await
 }
 
 async fn apply_message_mutation<T>(
@@ -1693,8 +2156,7 @@ async fn save_draft_action(
     }
 
     let mut uploaded = c
-        .client
-        .upload(Some(&c.account_id), raw, Some("message/rfc822"))
+        .upload(raw, "message/rfc822")
         .await
         .map_err(client::map_error)?;
     let blob_id = uploaded.take_blob_id();
@@ -1716,8 +2178,8 @@ async fn save_draft_action(
         .keywords(["$draft", "$seen"])
         .received_at(now_ms() / 1000);
     let create_id = import.create_id();
-    let imported = request
-        .send_import_email()
+    let imported = c
+        .send_single::<EmailImportResponse>(request)
         .await
         .map_err(client::map_error)?
         .created(&create_id)
@@ -1830,8 +2292,8 @@ async fn send_action(
             .await?;
         let mut identity_request = c.request();
         identity_request.get_identity().account_id(&c.account_id);
-        let identities = identity_request
-            .send_get_identity()
+        let identities = c
+            .send_single::<IdentityGetResponse>(identity_request)
             .await
             .map_err(client::map_error)?
             .take_list();
@@ -1858,8 +2320,8 @@ async fn send_action(
             .to_owned();
         let (request, create_id) =
             submission_request(c, &remote_email, identity_id, sent_mailbox.clone());
-        let mut response = request
-            .send_set_email_submission()
+        let mut response = c
+            .send_single::<EmailSubmissionSetResponse>(request)
             .await
             .map_err(map_submission_error)?;
         let created = response.created(&create_id);
@@ -2032,7 +2494,7 @@ async fn ensure_submitted_email_state(
         .mailbox_ids([sent_mailbox])
         .keyword("$draft", false)
         .keyword("$seen", true);
-    let mut response = request.send_set_email().await.map_err(client::map_error)?;
+    let mut response: EmailSetResponse = c.send_single(request).await.map_err(client::map_error)?;
     match response.updated(remote_email) {
         Ok(_) => Ok(()),
         Err(jmap_client::Error::Set(error)) if error.type_ == SetErrorType::NotFound => Ok(()),
@@ -2109,10 +2571,12 @@ async fn mark_submission_accepted(
 }
 
 async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<PriorityFetchCmd>) {
+    let mut session = None;
     while let Some(command) = rx.recv().await {
         match command {
             PriorityFetchCmd::Body(message_id) => {
-                if let Err(error) = fetch_body(&ctx, &config, message_id).await {
+                if let Err(error) = fetch_body(&ctx, &config, &mut session, message_id).await {
+                    session = None;
                     tracing::warn!(account_id=config.id, message_id, error=%error, "JMAP body fetch failed");
                     let _ = ctx
                         .db
@@ -2124,16 +2588,40 @@ async fn body_actor(ctx: SyncCtx, config: AccountConfig, mut rx: mpsc::Receiver<
                 attachment_id,
                 complete,
             } => {
-                let result = fetch_attachment(&ctx, &config, attachment_id)
+                let result = fetch_attachment(&ctx, &config, &mut session, attachment_id)
                     .await
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| {
+                        session = None;
+                        error.to_string()
+                    });
                 let _ = complete.send(result);
             }
         }
     }
 }
 
-async fn fetch_body(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> Result<()> {
+/// The body worker's session: connected when first needed, and again after a
+/// failure or once the server reports a changed Session.
+async fn body_session<'a>(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &'a mut Option<ConnectedClient>,
+) -> Result<&'a ConnectedClient> {
+    if session
+        .as_ref()
+        .is_none_or(ConnectedClient::session_changed)
+    {
+        *session = Some(connect(ctx, config).await?);
+    }
+    Ok(session.as_ref().expect("the session was connected above"))
+}
+
+async fn fetch_body(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<ConnectedClient>,
+    message_id: i64,
+) -> Result<()> {
     let row = ctx
         .db
         .read(move |conn| repo::messages::get_row(conn, message_id))
@@ -2156,14 +2644,10 @@ async fn fetch_body(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> R
             MAX_JMAP_MESSAGE_BYTES / (1024 * 1024)
         )));
     }
-    let connected = connect(ctx, config).await?;
-    let raw = download_message_bounded(&connected, &expected_blob).await?;
+    let connected = body_session(ctx, config, session).await?;
+    let raw = download_message_bounded(connected, &expected_blob).await?;
     let parsed = crate::mime::parse_message(&raw)?;
-    let calendar_events = parsed
-        .calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect::<Vec<_>>();
+    let calendar_events = crate::sync::ingest::calendar_events(&parsed);
     let dir = ctx.paths.mail_dir(config.id);
     tokio::fs::create_dir_all(&dir).await?;
     let path = dir.join(format!("{message_id}.jmap.eml"));
@@ -2183,38 +2667,7 @@ async fn fetch_body(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> R
             if !valid {
                 return Ok((false, None));
             }
-            repo::messages::store_body(
-                &tx,
-                message_id,
-                parsed.text.as_deref(),
-                parsed.html.as_deref(),
-                Some(&path_string),
-                parsed
-                    .attachments
-                    .iter()
-                    .any(|attachment| !attachment.is_inline),
-                Some(&parsed.snippet),
-            )?;
-            repo::messages::set_sender_verification(
-                &tx,
-                message_id,
-                parsed.headers.sender_verification,
-            )?;
-            let attachments = parsed
-                .attachments
-                .iter()
-                .map(|attachment| repo::messages::NewAttachment {
-                    message_id,
-                    part_id: Some(&attachment.part_id),
-                    filename: attachment.filename.as_deref(),
-                    mime_type: attachment.mime_type.as_deref(),
-                    size: Some(attachment.size),
-                    content_id: attachment.content_id.as_deref(),
-                    is_inline: attachment.is_inline,
-                })
-                .collect::<Vec<_>>();
-            repo::messages::replace_attachments(&tx, message_id, &attachments)?;
-            repo::search::index_message(&tx, message_id)?;
+            crate::sync::ingest::store_body(&tx, message_id, &path_string, &parsed)?;
             let thread_id = current.and_then(|row| row.thread_id);
             if let Some(thread_id) = thread_id {
                 repo::threads::recompute(&tx, thread_id)?;
@@ -2227,20 +2680,7 @@ async fn fetch_body(ctx: &SyncCtx, config: &AccountConfig, message_id: i64) -> R
         let _ = tokio::fs::remove_file(path).await;
         return Ok(());
     }
-    if !calendar_events.is_empty() {
-        let account_id = config.id;
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for event in &calendar_events {
-                    repo::calendar::upsert(&tx, account_id, message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
+    crate::sync::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
     if let Some(thread_id) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![thread_id],
@@ -2266,10 +2706,12 @@ async fn download_message_bounded(c: &ConnectedClient, blob_id: &str) -> Result<
             URLPart::Parameter(URLParameter::Type) => url.push_str("message/rfc822"),
         }
     }
-    let response =
-        c.download_http.get(url).send().await.map_err(|error| {
-            CoreError::Network(format!("JMAP message download failed: {error}"))
-        })?;
+    let response = c.get(url).send().await.map_err(|error| {
+        CoreError::Network(format!(
+            "JMAP message download failed: {}",
+            client::transport_failure(&error)
+        ))
+    })?;
     let status = response.status();
     if matches!(status.as_u16(), 401 | 403) {
         return Err(CoreError::Auth(
@@ -2297,7 +2739,10 @@ async fn download_message_bounded(c: &ConnectedClient, blob_id: &str) -> Result<
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| {
-            CoreError::Network(format!("JMAP message download failed: {error}"))
+            CoreError::Network(format!(
+                "JMAP message download failed: {}",
+                client::transport_failure(&error)
+            ))
         })?;
         if bytes.len().saturating_add(chunk.len()) > MAX_JMAP_MESSAGE_BYTES {
             return Err(CoreError::Jmap(format!(
@@ -2313,6 +2758,7 @@ async fn download_message_bounded(c: &ConnectedClient, blob_id: &str) -> Result<
 async fn fetch_attachment(
     ctx: &SyncCtx,
     config: &AccountConfig,
+    session: &mut Option<ConnectedClient>,
     attachment_id: i64,
 ) -> Result<Vec<u8>> {
     let (message_id, part_id, raw_path, blob_id) = ctx
@@ -2335,8 +2781,8 @@ async fn fetch_attachment(
         })
         .await?;
     if let Some(blob) = blob_id {
-        let connected = connect(ctx, config).await?;
-        return download_message_bounded(&connected, &blob).await;
+        let connected = body_session(ctx, config, session).await?;
+        return download_message_bounded(connected, &blob).await;
     }
     let part_id = part_id.ok_or_else(|| CoreError::NotFound("attachment MIME part".into()))?;
     let cached = match raw_path {
@@ -2348,7 +2794,7 @@ async fn fetch_attachment(
     let raw = match cached {
         Some(raw) => raw,
         None => {
-            fetch_body(ctx, config, message_id).await?;
+            fetch_body(ctx, config, session, message_id).await?;
             let path = ctx
                 .db
                 .read(move |conn| {
@@ -2435,7 +2881,7 @@ mod tests {
 mod attachment_metadata_tests {
     use super::*;
     #[test]
-    fn header_attachment_metadata_preserves_identity_and_invalidates_changed_blobs() {
+    fn attachment_listing_preserves_identity_and_invalidates_changed_blobs() {
         let db = crate::db::testutil::conn();
         crate::db::testutil::seed_account(&db);
         db.execute("INSERT INTO messages(id,account_id,folder_id,subject,from_addr,date) VALUES(99,1,1,'File metadata','sender@test.dev',0)",[]).unwrap();

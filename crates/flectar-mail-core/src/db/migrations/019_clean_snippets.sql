@@ -1,0 +1,4 @@
+-- Server-provided previews were stored as received: JMAP previews kept their
+-- line breaks, which the single-line mail list drew over the sender and
+-- subject, and Gmail snippets stayed HTML-escaped. The conversion after this
+-- step rewrites stored snippets the way new ones are made.

@@ -9,7 +9,11 @@ authors.
 Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
-the upstream source is <https://github.com/slint-ui/slint>.
+the upstream source is <https://github.com/slint-ui/slint>. The locally patched
+`i-slint-backend-winit` 1.18.1 crate retains its upstream license texts in
+[`crates/i-slint-backend-winit/LICENSES`](crates/i-slint-backend-winit/LICENSES).
+Its Wayland clipboard backport, source checksum, and removal condition are
+documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
 
 ## Blitz
 

@@ -75,7 +75,6 @@ global ImportText {
     public pure function finding(code: string, detail: string, count: int) -> string {
         if code == "missing-email" { return @tr("No valid email address was found."); }
         if code == "missing-incoming-server" { return @tr("No incoming mail server is configured."); }
-        if code == "pop3-unsupported" { return @tr("POP3 accounts are not supported. Add the account with IMAP instead."); }
         if code == "incoming-protocol-unsupported" { return @tr("The incoming server {} uses a protocol Flectar Mail does not support.", detail); }
         if code == "missing-outgoing-server" { return @tr("No outgoing mail server is configured."); }
         if code == "outgoing-protocol-unsupported" { return @tr("The outgoing server {} uses a protocol Flectar Mail does not support.", detail); }
@@ -99,6 +98,11 @@ global ImportText {
         if code == "oauth-login-unsupported" { return @tr("The account signs in as {}, which is not an email address. Add it with its own address instead.", detail); }
         if code == "oauth-replaced-by-password" { return @tr("Flectar Mail cannot use browser sign-in for {}. Sign in with an app password.", detail); }
         if code == "outgoing-server-replaced" { return @tr("The provider's standard outgoing server replaces {}.", detail); }
+        if code == "provider-sync-replaces-pop3" { return @tr("This account syncs with {} instead of downloading mail with POP3.", detail); }
+        if code == "removes-server-mail" && detail == "untilDownloaded" { return @tr("Mail is removed from the server once it's on this device."); }
+        if code == "removes-server-mail" && detail == "untilDeleted" { return @tr("Mail you delete here is removed from the server too."); }
+        if code == "removes-server-mail" { return @tr("Mail is removed from the server {} days after it's downloaded, or once deleted here.", detail == "sevenDays" ? 7 : detail == "fourteenDays" ? 14 : 30); }
+        if code == "server-mail-rule-approximated" { return @tr("No choice here matches how long the account kept mail on the server, so the closest one is used."); }
         if code == "aliases-managed-by-provider" { return @tr("One other address is managed by Gmail and appears after you sign in." | "{n} other addresses are managed by Gmail and appear after you sign in." % count); }
         if code == "aliases-skipped" { return @tr("One sending address was not imported because it is invalid or uses another outgoing server." | "{n} sending addresses were not imported because they are invalid or use another outgoing server." % count); }
         if code == "signature-file-not-imported" { return @tr("A signature stored in a file outside the profile was not imported."); }

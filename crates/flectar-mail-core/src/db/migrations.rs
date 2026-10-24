@@ -32,6 +32,11 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/013_contact_entries.sql")),
     Migration::Plain(include_str!("migrations/014_folder_paths.sql")),
     Migration::TableRebuild(include_str!("migrations/015_account_protocols.sql")),
+    Migration::Plain(include_str!("migrations/016_pop3.sql")),
+    Migration::Plain(include_str!("migrations/017_jmap_attachment_listing.sql")),
+    Migration::Plain(include_str!("migrations/018_jmap_full_sync_progress.sql")),
+    Migration::Plain(include_str!("migrations/019_clean_snippets.sql")),
+    Migration::Plain(include_str!("migrations/020_server_relink.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -40,8 +45,56 @@ pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 fn convert(conn: &Connection, version: i64) -> Result<()> {
     match version {
         13 => super::repo::contact_entries::migrate(conn),
+        19 => clean_snippets(conn),
         _ => Ok(()),
     }
+}
+
+/// Rewrites stored snippets the way new ones are made. SQLite calls back into
+/// the snippet builders, so rows stream through without being loaded at once
+/// and only the ones that change are written.
+///
+/// A Gmail snippet holding `&` may still be HTML-escaped. Every path that
+/// stores a body-derived snippet also stores the body, so a message with a
+/// body takes its snippet from it again, and one without can only hold
+/// Gmail's snippet, which is safe to decode.
+fn clean_snippets(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("make_snippet", 1, flags, |ctx| {
+        Ok(crate::mime::make_snippet(&ctx.get::<String>(0)?))
+    })?;
+    conn.create_scalar_function("make_html_snippet", 1, flags, |ctx| {
+        Ok(crate::mime::make_html_snippet(&ctx.get::<String>(0)?))
+    })?;
+    conn.create_scalar_function("make_body_snippet", 2, flags, |ctx| {
+        Ok(crate::mime::make_body_snippet(
+            ctx.get::<Option<String>>(0)?.as_deref(),
+            ctx.get::<Option<String>>(1)?.as_deref(),
+        ))
+    })?;
+    let converted = conn.execute_batch(
+        "UPDATE messages SET snippet = COALESCE(
+           NULLIF((SELECT make_body_snippet(b.text_body, b.html_body)
+                   FROM message_bodies b WHERE b.message_id = messages.id), ''),
+           make_html_snippet(snippet))
+         WHERE snippet LIKE '%&%'
+           AND account_id IN (SELECT id FROM accounts WHERE mail_protocol = 'gmail');
+         UPDATE threads SET snippet = COALESCE(
+           (SELECT snippet FROM messages WHERE thread_id = threads.id ORDER BY date DESC LIMIT 1), '')
+         WHERE snippet LIKE '%&%'
+           AND account_id IN (SELECT id FROM accounts WHERE mail_protocol = 'gmail');
+         UPDATE messages SET snippet = make_snippet(snippet) WHERE snippet <> make_snippet(snippet);
+         UPDATE threads SET snippet = make_snippet(snippet) WHERE snippet <> make_snippet(snippet);",
+    );
+    for (name, arguments) in [
+        ("make_snippet", 1),
+        ("make_html_snippet", 1),
+        ("make_body_snippet", 2),
+    ] {
+        conn.remove_function(name, arguments)?;
+    }
+    Ok(converted?)
 }
 
 pub fn run(conn: &mut Connection) -> Result<()> {
@@ -234,6 +287,7 @@ mod tests {
             "folders",
             "gmail_labels",
             "gmail_sync_state",
+            "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
             "message_bodies",
@@ -245,6 +299,8 @@ mod tests {
             "messages_fts",
             "notification_outbox",
             "pending_actions",
+            "pop3_sync_state",
+            "pop3_uidls",
             "route_cache",
             "sender_identities",
             "snippets",
@@ -336,6 +392,207 @@ mod tests {
             )
             .unwrap();
         assert_eq!(indexed, 0);
+    }
+
+    #[test]
+    fn jmap_attachment_listing_upgrade_keeps_what_header_sync_listed() {
+        let mut conn = staged(16);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET jmap_id = 'email-1', jmap_blob_id = 'blob-1', has_attachments = 1
+             WHERE id = 1;
+             INSERT INTO messages (id, account_id, thread_id, folder_id, subject, date, has_attachments)
+             VALUES (2, 1, 1, 1, 'Not on a JMAP server', 2, 1);",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let markers = conn
+            .prepare("SELECT id, jmap_attachments_blob_id FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<(i64, Option<String>)>>>()
+            .unwrap();
+        assert_eq!(markers, [(1, Some("blob-1".to_owned())), (2, None)]);
+        let queued = |conn: &Connection| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM messages INDEXED BY idx_messages_jmap_attachments_pending
+                 WHERE has_attachments = 1 AND body_state <> 'cached'
+                   AND jmap_blob_id IS NOT NULL AND jmap_attachments_blob_id IS NOT jmap_blob_id",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(queued(&conn), 0);
+        conn.execute(
+            "UPDATE messages SET jmap_blob_id = 'blob-2' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        assert_eq!(queued(&conn), 1);
+        conn.execute("UPDATE messages SET body_state = 'cached' WHERE id = 1", [])
+            .unwrap();
+        assert_eq!(queued(&conn), 0);
+    }
+
+    #[test]
+    fn snippet_upgrade_puts_stored_previews_on_one_line() {
+        let mut conn = staged(18);
+        seed_mail_graph(&conn);
+        conn.execute(
+            "UPDATE messages SET snippet = '\nDear Partner,\r\n\n  As reported' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE threads SET snippet = 'View this post\non the web' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let snippets: (String, String) = conn
+            .query_row(
+                "SELECT m.snippet, t.snippet FROM messages m JOIN threads t ON t.id = m.thread_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            snippets,
+            (
+                "Dear Partner, As reported".into(),
+                "View this post on the web".into()
+            )
+        );
+    }
+
+    #[test]
+    fn snippet_upgrade_decodes_only_escaped_gmail_snippets() {
+        let mut conn = staged(18);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET snippet = 'Fish &amp; chips' WHERE id = 1;
+             INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (2, 'me@gmail.test', 'gmail', 'oauth2', 'gmail', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO folders (id, account_id, path, role) VALUES (3, 2, 'INBOX', 'inbox');
+             INSERT INTO threads (id, account_id, snippet)
+             VALUES (2, 2, 'Tom & Jerry <tj@example.com>'), (3, 2, 'It&#39;s here');
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
+               date, snippet
+             ) VALUES
+               (2, 2, 2, 3, 'Hydrated', 'a@test.dev', '[]', '[]', 1,
+                'Tom & Jerry <tj@example.com>'),
+               (3, 2, 3, 3, 'Headers only', 'a@test.dev', '[]', '[]', 1, 'It&#39;s here');
+             INSERT INTO message_bodies (message_id, text_body)
+             VALUES (2, 'Tom & Jerry <tj@example.com>');",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let snippets = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT snippet FROM {table} ORDER BY id"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(
+            snippets("messages"),
+            [
+                "Fish &amp; chips",
+                "Tom & Jerry <tj@example.com>",
+                "It's here"
+            ]
+        );
+        assert_eq!(
+            snippets("threads"),
+            ["", "Tom & Jerry <tj@example.com>", "It's here"]
+        );
+    }
+
+    #[test]
+    fn jmap_full_sync_progress_upgrade_keeps_sync_states() {
+        let mut conn = staged(17);
+        seed_mail_graph(&conn);
+        conn.execute(
+            "INSERT INTO jmap_sync_state(account_id,mailbox_state,email_state)
+             VALUES(1,'mailboxes','emails')",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let states: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT mailbox_state,email_state,full_sync_state FROM jmap_sync_state",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(states, ("mailboxes".into(), "emails".into(), None));
+        conn.execute(
+            "INSERT INTO jmap_full_sync_stored(account_id,email_id) VALUES(1,'email-a')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM accounts WHERE id=1", []).unwrap();
+        let progress: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jmap_full_sync_stored", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(progress, 0);
+    }
+
+    #[test]
+    fn relink_upgrade_flags_mail_an_earlier_switch_left() {
+        let mut conn = staged(19);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (2, 'jmap@test.dev', 'generic', 'password', 'jmap', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO messages (id, account_id, thread_id, folder_id, uid, jmap_id,
+                                   subject, date, is_outgoing)
+             VALUES (2, 1, 1, 1, NULL, NULL, 'Left by a switch from JMAP', 1, 0),
+                    (3, 1, 1, 1, NULL, NULL, 'Sent from this device', 1, 1),
+                    (4, 1, 1, 1, NULL, NULL, 'Draft', 1, 0),
+                    (5, 2, NULL, NULL, 9, NULL, 'Left by a switch to JMAP', 1, 0),
+                    (6, 2, NULL, NULL, NULL, 'email-6', 'On the JMAP server', 1, 0),
+                    (7, 2, NULL, NULL, NULL, NULL, 'Sent from this device', 1, 1);
+             INSERT INTO drafts_meta (message_id) VALUES (4);",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let waiting = conn
+            .prepare(
+                "SELECT id FROM messages INDEXED BY idx_messages_relink_pending
+                 WHERE account_id IN (1, 2) AND relink_pending = 1",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(waiting, [2, 5]);
+        let missing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM folders WHERE missing_on_server = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(missing, 0);
+        assert!(
+            conn.execute("UPDATE folders SET missing_on_server = 2 WHERE id = 2", [])
+                .is_err()
+        );
     }
 
     #[test]
@@ -1040,7 +1297,10 @@ mod tests {
         assert!(dependents.iter().any(|(table, _)| table == "messages"));
         assert!(dependents.iter().all(|(table, _)| table != "accounts"));
 
-        run(&mut conn).unwrap();
+        // Through the rebuild only: later migrations add tables of their own.
+        for (index, migration) in MIGRATIONS.iter().enumerate().take(15).skip(13) {
+            apply(&mut conn, migration, (index + 1) as i64).unwrap();
+        }
 
         assert_eq!(account_dependents(&conn), dependents);
         let accounts = conn

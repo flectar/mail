@@ -124,7 +124,7 @@ export component TextEdit inherits Rectangle {
         editor := TextInput {
             width: editor-scroll.visible-width;
             height: max(editor-scroll.visible-height, self.preferred-height);
-            text: root.text;
+            text <=> root.text;
             color: root.text-color;
             selection-background-color: AppTheme.accent;
             selection-foreground-color: white;
@@ -134,10 +134,7 @@ export component TextEdit inherits Rectangle {
             enabled: root.enabled;
             read-only: root.read-only;
             page-height: editor-scroll.visible-height;
-            edited => {
-                root.text = self.text;
-                root.edited(self.text);
-            }
+            edited => { root.edited(self.text); }
             cursor-position-changed(cursor) => {
                 let line = self.font-metrics.ascent - self.font-metrics.descent;
                 if cursor.y + editor-scroll.content-y < 0px {

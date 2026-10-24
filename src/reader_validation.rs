@@ -647,6 +647,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         crate::renderer_preferences::RendererMode::Cpu,
         false,
         true,
+        false,
     );
     let renderer_settings = app.global::<RendererSettings>();
     renderer_settings.invoke_choose("gpu".into());
@@ -674,10 +675,23 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         crate::renderer_preferences::RendererMode::Cpu,
         false,
         true,
+        false,
     );
     renderer_settings.invoke_choose("gpu".into());
     assert_eq!(renderer_settings.get_preferred(), "cpu");
     assert!(!renderer_settings.get_error().is_empty());
+    // After a failed GPU startup the app restarts in CPU mode and says so.
+    crate::renderer_preferences::register(
+        &app,
+        preference_path.clone(),
+        crate::renderer_preferences::RendererMode::Gpu,
+        false,
+        true,
+        true,
+    );
+    assert!(renderer_settings.get_gpu_failed());
+    assert_eq!(renderer_settings.get_preferred(), "gpu");
+    assert_eq!(renderer_settings.get_active(), "cpu");
     app.set_settings_open(false);
     app.set_active_view("contacts".into());
     app.set_contacts(ModelRc::default());
@@ -755,43 +769,123 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.hide().unwrap();
 }
 
-/// Slint's software renderer (CPU mode, Android) panics when it paints a
-/// rectangle reaching past ±32767 physical pixels (#35). Reader surfaces sized
-/// by a long message must keep painting within the visible window.
+/// The desktop mail view at scale 2, drawn by Slint's software renderer like
+/// CPU mode. That renderer panics when it paints a rectangle reaching past
+/// ±32767 physical pixels (#35), so reader surfaces sized by a long message
+/// must keep painting within the visible window.
+struct SoftwareReader {
+    window: Rc<MinimalSoftwareWindow>,
+    app: AppWindow,
+    runtime: tokio::runtime::Runtime,
+    state: Rc<RefCell<InboxState>>,
+    renderer: Rc<RefCell<GpuEmailRenderer>>,
+    pixels: RefCell<Vec<Rgb8Pixel>>,
+    _cache: tempfile::TempDir,
+}
+
+impl SoftwareReader {
+    const SIZE: (u32, u32) = (2560, 1800);
+
+    fn new(messages: Vec<MailMessage>) -> Self {
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window.clone(), Rc::default()))).unwrap();
+        let app = AppWindow::new().unwrap();
+        app.window()
+            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
+        app.set_startup_ready(true);
+        app.set_startup_hydrated(true);
+        app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
+            id: 1,
+            ..Default::default()
+        }])));
+        app.set_active_view("mail".into());
+        let (width, height) = Self::SIZE;
+        app.window()
+            .set_size(slint::PhysicalSize::new(width, height));
+        app.show().unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let (favicons, _) = bounded_ui_channel();
+        let (avatars, _) = bounded_ui_channel();
+        let mut state = InboxState::empty(
+            None,
+            UiSender::new(favicons, UiWake::new(app.as_weak(), |_| {})),
+            None,
+            UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
+            false,
+            false,
+            WarmStartCacheWriter::spawn(&runtime, cache.path().join("warm.json")),
+        );
+        state.messages = messages;
+        state.mailboxes = fixture_mailboxes(&state.messages);
+        app.set_emails(state.email_rows.clone().into());
+        app.set_thread_messages(state.conversation_rows.clone().into());
+        let renderer = state.email_renderer.clone();
+        register_renderer_input_callbacks(
+            &app,
+            &renderer,
+            false,
+            ExternalUrlOpener::new(|_| Err("test host unavailable".into())),
+        );
+        Self {
+            window,
+            app,
+            runtime,
+            state: Rc::new(RefCell::new(state)),
+            renderer,
+            pixels: RefCell::new(vec![Rgb8Pixel::default(); (width * height) as usize]),
+            _cache: cache,
+        }
+    }
+
+    /// Project the selected conversation, then draw it.
+    fn render(&self) {
+        render_current(&self.app, &self.state, &self.runtime).unwrap();
+        self.paint();
+    }
+
+    /// Render any missing email tiles, then draw a frame.
+    fn paint(&self) {
+        slint::platform::update_timers_and_animations();
+        let (width, height) = email_viewport_size(&self.app);
+        if let Some(frame) = self
+            .renderer
+            .borrow_mut()
+            .render_cpu_if_needed(width, height, self.app.window().scale_factor())
+            .unwrap()
+        {
+            apply_cpu_frame(&self.app, frame);
+        }
+        self.app.window().request_redraw();
+        self.window.draw_if_needed(|r| {
+            r.render(&mut self.pixels.borrow_mut(), Self::SIZE.0 as usize);
+        });
+    }
+
+    /// Height of the open message's rendered body in physical pixels.
+    fn body_height(&self) -> f32 {
+        self.app.get_email_viewport_width()
+            * self.app.global::<EmailReader>().get_width_ratio()
+            * self.app.get_email_content_aspect()
+            * self.app.window().scale_factor()
+    }
+
+    /// Page through the message and back, drawing each stop.
+    fn scroll_through(&self) {
+        for command in ["page-down", "end", "page-up", "home"] {
+            self.app
+                .global::<EmailReader>()
+                .invoke_command(command.into());
+            self.paint();
+        }
+    }
+}
+
 #[test]
 fn tall_messages_paint_with_the_software_renderer() {
-    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
-    slint::platform::set_platform(Box::new(Headless(window.clone(), Rc::default()))).unwrap();
-    let app = AppWindow::new().unwrap();
-    app.window()
-        .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
-    app.set_startup_ready(true);
-    app.set_startup_hydrated(true);
-    app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
-        id: 1,
-        ..Default::default()
-    }])));
-    app.set_active_view("mail".into());
-    let (width, height) = (2560, 1800);
-    app.window()
-        .set_size(slint::PhysicalSize::new(width, height));
-    app.show().unwrap();
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let (favicons, _) = bounded_ui_channel();
-    let (avatars, _) = bounded_ui_channel();
-    let mut state = InboxState::empty(
-        None,
-        UiSender::new(favicons, UiWake::new(app.as_weak(), |_| {})),
-        None,
-        UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
-        false,
-        false,
-        WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
-    );
     let mut message = mail::fixture_messages().remove(0);
     message.folder = "Inbox".into();
     // The loading skeleton covers the whole body until it arrives.
@@ -804,40 +898,11 @@ fn tall_messages_paint_with_the_software_renderer() {
          <p style='height:2000px'>End of message</p></a></body>"
             .into(),
     );
-    state.messages = vec![message];
-    state.mailboxes = fixture_mailboxes(&state.messages);
-    app.set_emails(state.email_rows.clone().into());
-    let renderer = state.email_renderer.clone();
-    register_renderer_input_callbacks(
-        &app,
-        &renderer,
-        false,
-        ExternalUrlOpener::new(|_| Err("test host unavailable".into())),
-    );
-    let state = Rc::new(RefCell::new(state));
-    let mut pixels = vec![Rgb8Pixel::default(); (width * height) as usize];
-    let mut paint = || {
-        slint::platform::update_timers_and_animations();
-        let (w, h) = email_viewport_size(&app);
-        if let Some(frame) = renderer
-            .borrow_mut()
-            .render_cpu_if_needed(w, h, app.window().scale_factor())
-            .unwrap()
-        {
-            apply_cpu_frame(&app, frame);
-        }
-        app.window().request_redraw();
-        window.draw_if_needed(|r| {
-            r.render(&mut pixels, width as usize);
-        });
-    };
-    render_current(&app, &state, &runtime).unwrap();
-    paint();
+    let view = SoftwareReader::new(vec![message]);
+    let app = &view.app;
+    view.render();
     let reader = app.global::<EmailReader>();
-    let physical_height = app.get_email_viewport_width()
-        * reader.get_width_ratio()
-        * app.get_email_content_aspect()
-        * app.window().scale_factor();
+    let physical_height = view.body_height();
     assert!(
         physical_height > f32::from(i16::MAX),
         "the message must exceed the software renderer's range, got {physical_height}"
@@ -847,11 +912,8 @@ fn tall_messages_paint_with_the_software_renderer() {
     assert!(reader.get_images().row_count() > 0);
     // The skeleton fades out over the loaded body.
     reader.set_body_pending(false);
-    paint();
-    for command in ["page-down", "end", "page-up", "home"] {
-        reader.invoke_command(command.into());
-        paint();
-    }
+    view.paint();
+    view.scroll_through();
     // Keyboard focus outlines a link as tall as the message.
     app.window()
         .dispatch_event(slint::platform::WindowEvent::PointerPressed {
@@ -872,9 +934,147 @@ fn tall_messages_paint_with_the_software_renderer() {
         });
     }
     assert_eq!(reader.get_destination(), "https://example.com/");
-    paint();
+    view.paint();
     reader.invoke_command("end".into());
-    paint();
+    view.paint();
     assert!(!app.get_text_mode());
     app.hide().unwrap();
+}
+
+/// Replies quote the conversation before them, so the newest message of a
+/// long thread holds every earlier one, nested as Zoho Mail does (#117).
+#[test]
+fn long_quoted_conversations_paint_with_the_software_renderer() {
+    let mut thread = mail::fixture_messages().remove(0);
+    thread.folder = "Inbox".into();
+    thread.thread_id = Some(1);
+    thread.message_count = 46;
+    let mut quoted = String::new();
+    let conversation = (0..46)
+        .map(|index| {
+            let quote = if quoted.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "<div style='border-top:1px solid #ccc;margin:10px 0'></div>\
+                     <div class='zmail_extra'>\
+                     <div>---- On Thu, 23 Oct 2026 Annie &lt;annie@example.com&gt; wrote ----</div>\
+                     <blockquote style='border-left:1px solid #ccc;padding-left:6px;margin:0 0 0 5px'>\
+                     <div>{quoted}</div></blockquote></div>"
+                )
+            };
+            quoted = format!(
+                "<div style='font-family:Verdana,sans-serif;font-size:10pt'>\
+                 <p>Hi all,</p>\
+                 <p>Reply {index}: thanks for the update. The schedule matches our records now. \
+                 Please confirm the delivery window so we can book the loading dock.</p>\
+                 <p>We moved the pickup to Thursday morning because the carrier could not make \
+                 Wednesday. If that does not work for your team, tell us which day does and we \
+                 will rebook it.</p>\
+                 <p>Regards,<br>Annie Example<br>Operations Lead<br>Example Logistics<br>\
+                 +49 30 1234567<br>Example Street 1, 10115 Berlin</p>\
+                 <p style='color:#777'>This message and its attachments are confidential and \
+                 meant only for the people it is addressed to. If you received it by mistake, \
+                 please tell the sender and delete it. Do not copy, forward or disclose it.</p>\
+                 {quote}</div>"
+            );
+            MailMessage {
+                id: 100 + index,
+                html: Some(quoted.clone()),
+                ..thread.clone()
+            }
+        })
+        .collect();
+    let view = SoftwareReader::new(vec![thread.clone()]);
+    // Selecting the thread loads its conversation, which opens at the newest
+    // message.
+    view.render();
+    {
+        let mut state = view.state.borrow_mut();
+        state.conversation_owner_id = Some(thread.id);
+        state.conversation_messages = conversation;
+        state.conversation_selected_index = 45;
+    }
+    view.render();
+    assert_eq!(view.app.get_thread_messages().row_count(), 46);
+    let physical_height = view.body_height();
+    assert!(
+        physical_height > f32::from(i16::MAX),
+        "the newest reply must exceed the software renderer's range, got {physical_height}"
+    );
+    view.scroll_through();
+    // An earlier reply is tall as well, and the newer headers follow it.
+    select_thread_message(&view.app, &view.state, &view.runtime, 40).unwrap();
+    view.paint();
+    assert!(view.body_height() > f32::from(i16::MAX));
+    view.scroll_through();
+    assert!(!view.app.get_text_mode());
+    view.app.hide().unwrap();
+}
+
+/// Newsletters often leave image heights to the images, so the message grows
+/// past the renderer's range only once they load after the first paint (#120).
+#[test]
+fn messages_growing_as_images_load_paint_with_the_software_renderer() {
+    use base64::Engine;
+    // The column scales each small image to about 600×3000px. Tiny sources
+    // decode at once, leaving the image queue all documents share to other
+    // tests.
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(4, 20, image::Rgba([32, 96, 192, 255]))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let image = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+    );
+    let products: String = (0..10)
+        .map(|index| {
+            format!(
+                "<tr><td style='padding-bottom:24px'><a href='https://example.com/product/{index}'>\
+                 <img src='{image}#{index}' width='600' alt='Product {index}' \
+                 style='display:block;width:100%;height:auto'></a>\
+                 <p>Product {index}</p></td></tr>"
+            )
+        })
+        .collect();
+    let mut message = mail::fixture_messages().remove(0);
+    message.folder = "Inbox".into();
+    message.html = Some(format!(
+        "<body style='margin:0'><table width='600' align='center'>{products}</table></body>"
+    ));
+    let view = SoftwareReader::new(vec![message]);
+    view.renderer
+        .borrow_mut()
+        .configure_resources(view.runtime.handle().clone(), false)
+        .unwrap();
+    view.render();
+    assert!(
+        view.body_height() < f32::from(i16::MAX),
+        "the message must start within the renderer's range"
+    );
+    // Each completed image relays out the message, as CPU mode does when Blitz
+    // reports finished resources.
+    for _ in 0..3_000 {
+        if view.body_height() > f32::from(i16::MAX)
+            && view.app.global::<EmailReader>().get_images().row_count() == 0
+        {
+            break;
+        }
+        view.runtime
+            .block_on(async { tokio::time::sleep(Duration::from_millis(10)).await });
+        if view.renderer.borrow_mut().poll_resources() {
+            view.paint();
+            sync_reader_metadata(&view.app, &view.renderer);
+            view.paint();
+        }
+    }
+    let physical_height = view.body_height();
+    assert!(
+        physical_height > f32::from(i16::MAX),
+        "loaded images must grow the message past the renderer's range, got {physical_height}"
+    );
+    view.scroll_through();
+    assert!(!view.app.get_text_mode());
+    view.app.hide().unwrap();
 }

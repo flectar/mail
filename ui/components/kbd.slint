@@ -1,0 +1,98 @@
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+
+// A `keys` value taken apart, so caps can follow each platform's order and
+// names. Slint reports Command as `control` and Control as `meta` on Apple
+// platforms, matching what `@keys(Control + …)` binds there.
+export struct KeyChord {
+    control: bool,
+    alt: bool,
+    shift: bool,
+    meta: bool,
+    key: string,
+}
+
+export global KeyboardKeys {
+    // Slint cannot take a `keys` value apart, so Rust does.
+    pure callback chord(keys) -> KeyChord;
+    out property <bool> apple: Platform.os == OperatingSystemType.macos || Platform.os == OperatingSystemType.ios;
+    out property <bool> windows: Platform.os == OperatingSystemType.windows;
+
+    // The name printed on a key or modifier; Apple keyboards print symbols.
+    public pure function label(key: string) -> string {
+        if key == "Control" { return apple ? "⌘" : @tr("Keyboard key" => "Ctrl"); }
+        if key == "Meta" { return apple ? "⌃" : windows ? "Win" : @tr("Keyboard key" => "Super"); }
+        if key == "Alt" { return apple ? "⌥" : @tr("Keyboard key" => "Alt"); }
+        if key == "Shift" { return apple ? "⇧" : @tr("Keyboard key" => "Shift"); }
+        if key == Key.Delete { return apple ? "⌦" : @tr("Keyboard key" => "Delete"); }
+        if key == Key.Backspace { return apple ? "⌫" : @tr("Keyboard key" => "Backspace"); }
+        if key == Key.Tab { return apple ? "⇥" : @tr("Keyboard key" => "Tab"); }
+        if key == Key.Return { return apple ? "↩" : @tr("Keyboard key" => "Enter"); }
+        if key == Key.Space { return @tr("Keyboard key" => "Space"); }
+        if key == Key.UpArrow { return "↑"; }
+        if key == Key.DownArrow { return "↓"; }
+        if key == Key.LeftArrow { return "←"; }
+        if key == Key.RightArrow { return "→"; }
+        if key == Key.F6 { return "F6"; }
+        if key == Key.F7 { return "F7"; }
+        if key == "-" { return "−"; }
+        return key.to-uppercase();
+    }
+
+    // The binding as one line, as screen readers and tooltips need it.
+    public pure function text(keys: keys) -> string {
+        let chord = chord(keys);
+        let joiner = apple ? "" : "+";
+        return (chord.meta ? label("Meta") + joiner : "")
+            + (!apple && chord.control ? label("Control") + joiner : "")
+            + (chord.alt ? label("Alt") + joiner : "")
+            + (chord.shift ? label("Shift") + joiner : "")
+            + (apple && chord.control ? label("Control") : "")
+            + label(chord.key);
+    }
+}
+
+// One key cap, after shadcn/ui's Kbd.
+export component Kbd inherits Rectangle {
+    in property <string> text;
+
+    width: max(self.height, label.preferred-width + 10px);
+    height: max(20px, label.preferred-height + 4px);
+    border-radius: 4px;
+    background: AppTheme.control-bg;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    accessible-role: none;
+
+    label := Text {
+        text: root.text;
+        color: AppTheme.secondary;
+        font-size: TypeScale.caption;
+        font-weight: 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
+// Keys pressed together, after shadcn/ui's KbdGroup.
+export component KbdGroup inherits HorizontalLayout {
+    spacing: 4px;
+    alignment: start;
+    cross-axis-alignment: center;
+    @children
+}
+
+// The caps for a key binding, in the platform's modifier order. Apple
+// platforms put Command last: ⌃⌥⇧⌘.
+export component KbdShortcut inherits KbdGroup {
+    in property <keys> keys;
+    private property <KeyChord> chord: KeyboardKeys.chord(root.keys);
+
+    if root.chord.meta : Kbd { text: KeyboardKeys.label("Meta"); }
+    if !KeyboardKeys.apple && root.chord.control : Kbd { text: KeyboardKeys.label("Control"); }
+    if root.chord.alt : Kbd { text: KeyboardKeys.label("Alt"); }
+    if root.chord.shift : Kbd { text: KeyboardKeys.label("Shift"); }
+    if KeyboardKeys.apple && root.chord.control : Kbd { text: KeyboardKeys.label("Control"); }
+    Kbd { text: KeyboardKeys.label(root.chord.key); }
+}

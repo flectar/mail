@@ -374,7 +374,8 @@ impl Session {
 
     /// The header section of each message, with requests pipelined when the
     /// server allows it. `None` marks a message the server refused, for
-    /// example because another client deleted it.
+    /// example because another client deleted it, or whose header section is
+    /// larger than `limit`.
     pub async fn headers(
         &mut self,
         messages: &[u32],
@@ -392,7 +393,7 @@ impl Session {
             }
             for _ in chunk {
                 sections.push(match self.read_status().await? {
-                    Status::Ok(_) => Some(self.read_data(limit).await?),
+                    Status::Ok(_) => self.read_data_or_skip(limit).await?,
                     Status::Err(..) => None,
                 });
             }
@@ -551,6 +552,32 @@ impl Session {
                 return Err(Error::TooLarge(limit));
             }
             data.extend_from_slice(line);
+        }
+    }
+
+    /// [`Self::read_data`] for responses that may be skipped: data larger
+    /// than `limit` is read to its end and dropped, so the session stays
+    /// usable. Only a response beyond [`MAX_LISTING`] ends it.
+    async fn read_data_or_skip(&mut self, limit: usize) -> Result<Option<Vec<u8>>> {
+        let mut data = Some(Vec::new());
+        let mut total = 0usize;
+        loop {
+            let line = match self.read_raw_line(MAX_LISTING - total).await {
+                Err(Error::TooLarge(_)) => return Err(Error::TooLarge(MAX_LISTING)),
+                line => line?,
+            };
+            if line_content(&line) == b"." {
+                return Ok(data);
+            }
+            total += line.len();
+            let line = line.strip_prefix(b".").unwrap_or(&line);
+            if let Some(kept) = &mut data {
+                if kept.len() + line.len() > limit {
+                    data = None;
+                } else {
+                    kept.extend_from_slice(line);
+                }
+            }
         }
     }
 

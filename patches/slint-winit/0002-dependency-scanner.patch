@@ -1,0 +1,14 @@
+diff --git a/crates/i-slint-backend-winit/Cargo.toml b/crates/i-slint-backend-winit/Cargo.toml
+--- a/crates/i-slint-backend-winit/Cargo.toml
++++ b/crates/i-slint-backend-winit/Cargo.toml
+@@ -35,6 +35,10 @@ features = [
+ ]
+ rustdoc-args = ["--generate-link-to-definition"]
+ 
++# Declared upstream but not imported by this release.
++[package.metadata.cargo-machete]
++ignored = ["imgref", "lyon_path", "pin-weak", "rgb", "scopeguard"]
++
+ [features]
+ accessibility = [
+     "dep:accesskit",

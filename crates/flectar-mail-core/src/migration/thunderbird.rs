@@ -9,7 +9,8 @@
 
 use super::model::{
     AccountCandidate, IdentityCandidate, ImportInventory, OtherEntry, OtherEntryKind,
-    ServerCandidate, ServerProtocol, SignatureCandidate, SourceAuth, SourceKind, SourceSecurity,
+    ServerCandidate, ServerProtocol, SignatureCandidate, SourceAuth, SourceKind, SourceRetention,
+    SourceSecurity,
 };
 use super::prefs::Prefs;
 use super::{MAX_SOURCE_BYTES, SourceError};
@@ -349,6 +350,8 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
         };
         let account_smtp = identities.first().map(|id| smtp_key(id));
         let incoming = incoming_server(prefs, server, kind);
+        let retention =
+            (incoming.protocol == ServerProtocol::Pop3).then(|| pop3_retention(prefs, server));
         let account = AccountCandidate {
             source_id: key.clone(),
             color: root_folder_color(&colors, prefs, server, incoming.protocol),
@@ -365,6 +368,7 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
             outgoing: account_smtp
                 .filter(|key| !key.is_empty())
                 .and_then(|key| outgoing_server(prefs, &key)),
+            retention,
         };
         size = spend(size, text_size(&account))?;
         accounts.push(account);
@@ -446,6 +450,33 @@ fn incoming_server(prefs: &Prefs, server: &str, kind: &str) -> ServerCandidate {
         security,
         auth: auth_method(prefs.int(&pref("authMethod")).unwrap_or(3)),
         username: username.to_owned(),
+    }
+}
+
+/// What Thunderbird does with mail a POP3 server delivers. A server falls
+/// back to `mail.server.default` as Thunderbird resolves its settings.
+fn pop3_retention(prefs: &Prefs, server: &str) -> SourceRetention {
+    let setting = |name: &str| {
+        [
+            format!("mail.server.{server}.{name}"),
+            format!("mail.server.default.{name}"),
+        ]
+    };
+    let flag = |name: &str| {
+        setting(name)
+            .iter()
+            .find_map(|pref| prefs.bool(pref))
+            .unwrap_or(false)
+    };
+    let days = setting("num_days_to_leave_on_server")
+        .iter()
+        .find_map(|pref| prefs.int(pref))
+        .unwrap_or(7);
+    SourceRetention {
+        keep: flag("leave_on_server"),
+        remove_after_days: flag("delete_by_age_from_server")
+            .then(|| u32::try_from(days.max(0)).unwrap_or(u32::MAX)),
+        remove_deleted: flag("delete_mail_left_on_server"),
     }
 }
 

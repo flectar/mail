@@ -9,7 +9,7 @@ use super::*;
 use chrono::Utc;
 use flectar_mail_core::accounts::backup as account_backup;
 use flectar_mail_core::models::{
-    MIN_WORKSPACE_LIST_PANE_WIDTH, PortableAccountConfig, Settings,
+    MIN_WORKSPACE_LIST_PANE_WIDTH, MailExport, PortableAccountConfig, Settings,
     normalized_workspace_list_pane_width,
 };
 use serde::{Deserialize, Serialize};
@@ -401,6 +401,13 @@ pub(super) fn restore_account_backup(
             {
                 settings.monochrome_sidebar_icons = enabled;
             }
+            if let Some(icon) = preferences
+                .get("appIcon")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::AppIcon::parse)
+            {
+                settings.app_icon = icon;
+            }
             if let Some(enabled) = preferences
                 .get("showAvatars")
                 .and_then(|value| value.as_bool())
@@ -439,6 +446,13 @@ pub(super) fn restore_account_backup(
                 && language.len() <= 32
             {
                 settings.language = language.to_owned();
+            }
+            if let Some(format) = preferences
+                .get("timeFormat")
+                .and_then(|value| value.as_str())
+                .and_then(flectar_mail_core::models::TimeFormat::parse)
+            {
+                settings.time_format = format;
             }
             if let Some(week_start) = preferences
                 .get("calendarWeekStart")
@@ -581,6 +595,7 @@ pub(super) fn restore_account_backup(
     })();
 
     let (restore, settings, accounts, configs) = result?;
+    app.set_time_format(settings.time_format.as_str().into());
     apply_language(app, &settings.language);
     state.borrow_mut().account_presentation = AccountPresentationSettings::from_settings(&settings);
     // Imported profiles can change which accounts the mail view shows.
@@ -596,6 +611,7 @@ pub(super) fn restore_account_backup(
         .into(),
     );
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
+    crate::app_icon::apply(app, settings.app_icon);
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
@@ -672,21 +688,22 @@ fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
         })
 }
 
-/// Mobile hosts export single files from their app-private storage, so the
-/// verified snapshot is staged beside the data directory (Core refuses
-/// destinations inside the data and cache roots) and archived as one zip.
+/// Mobile hosts export single files from their app-private storage, so
+/// snapshots and mail exports are staged beside the data directory (Core
+/// refuses destinations inside the data and cache roots) and archived as one
+/// zip.
 #[cfg(mobile)]
-fn snapshot_staging_root(paths: &Paths) -> Result<PathBuf, String> {
+fn export_staging_root(paths: &Paths) -> Result<PathBuf, String> {
     Ok(paths
         .data_dir
         .parent()
-        .ok_or("the data directory has no parent for snapshot staging")?
+        .ok_or("the data directory has no parent for export staging")?
         .join("snapshot-staging"))
 }
 
-/// A zipped snapshot waiting in staging for the export picker.
+/// A zipped export waiting in staging for the export picker.
 #[cfg(mobile)]
-struct StagedSnapshot {
+struct StagedExport {
     root: PathBuf,
     archive: PathBuf,
     name: String,
@@ -695,7 +712,7 @@ struct StagedSnapshot {
 }
 
 #[cfg(mobile)]
-impl StagedSnapshot {
+impl StagedExport {
     async fn remove(self) {
         let _ = tokio::fs::remove_dir_all(&self.root).await;
     }
@@ -706,9 +723,9 @@ async fn stage_database_snapshot(
     core: CoreMailSource,
     paths: Paths,
     staging: Arc<tokio::sync::Mutex<()>>,
-) -> Result<StagedSnapshot, String> {
+) -> Result<StagedExport, String> {
     let staging = staging.lock_owned().await;
-    let root = snapshot_staging_root(&paths)?;
+    let root = export_staging_root(&paths)?;
     // The root only ever holds this export, so clearing it also removes what
     // an interrupted export left behind.
     let _ = tokio::fs::remove_dir_all(&root).await;
@@ -728,7 +745,7 @@ async fn stage_database_snapshot(
         let archive = root.join(&name);
         let archive_for_zip = archive.clone();
         tokio::task::spawn_blocking(move || {
-            archive_snapshot_directory(
+            archive_directory(
                 &directory,
                 &archive_for_zip,
                 flectar_mail_core::files::MAX_TRANSFER as u64,
@@ -740,7 +757,7 @@ async fn stage_database_snapshot(
     }
     .await;
     match staged {
-        Ok((archive, name)) => Ok(StagedSnapshot {
+        Ok((archive, name)) => Ok(StagedExport {
             root,
             archive,
             name,
@@ -753,12 +770,13 @@ async fn stage_database_snapshot(
     }
 }
 
-/// Archives a snapshot directory without compression: the stores are dense
-/// SQLite files plus already-compressed attachments. Symlinks are skipped so
-/// nothing outside the snapshot enters the archive. Hosts transfer at most
-/// `limit` bytes, so a larger snapshot fails before the archive is written.
+/// Archives an export directory without compression: snapshots hold dense
+/// SQLite files plus already-compressed attachments, and mail travels as is.
+/// Symlinks are skipped so nothing outside the export enters the archive.
+/// Hosts transfer at most `limit` bytes, so a larger export fails before the
+/// archive is written.
 #[cfg(any(mobile, test))]
-fn archive_snapshot_directory(
+fn archive_directory(
     directory: &std::path::Path,
     archive: &std::path::Path,
     limit: u64,
@@ -795,7 +813,7 @@ fn archive_snapshot_directory(
     }
     let too_large = |size| {
         format!(
-            "the snapshot is {}, more than the {} this device can export",
+            "the export is {}, more than the {} this device can export",
             format_storage_size(size),
             format_storage_size(limit)
         )
@@ -833,6 +851,230 @@ fn archive_snapshot_directory(
         return Err(too_large(size));
     }
     Ok(())
+}
+
+/// A folder name for an exported account that every platform accepts.
+fn export_folder_name(email: &str) -> String {
+    email
+        .chars()
+        .map(|character| match character {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            character if character.is_control() => '_',
+            character => character,
+        })
+        .collect()
+}
+
+/// Export POP3 accounts as mbox files: one account directly into
+/// `destination`, several into one folder each, named by address.
+async fn export_device_mail(
+    core: CoreMailSource,
+    destination: PathBuf,
+    accounts: Vec<(i64, String)>,
+) -> Result<MailExport, String> {
+    if let [(account_id, _)] = accounts.as_slice() {
+        return core.export_account_mail(*account_id, destination).await;
+    }
+    tokio::fs::create_dir(&destination)
+        .await
+        .map_err(|error| format!("creating {}: {error}", destination.display()))?;
+    let mut total = MailExport::default();
+    for (account_id, email) in accounts {
+        let exported = core
+            .export_account_mail(account_id, destination.join(export_folder_name(&email)))
+            .await?;
+        total.folders += exported.folders;
+        total.messages += exported.messages;
+        total.missing += exported.missing;
+    }
+    Ok(total)
+}
+
+#[cfg(mobile)]
+async fn stage_mail_export(
+    core: CoreMailSource,
+    paths: Paths,
+    staging: Arc<tokio::sync::Mutex<()>>,
+    name: String,
+    accounts: Vec<(i64, String)>,
+) -> Result<(StagedExport, MailExport), String> {
+    let staging = staging.lock_owned().await;
+    let root = export_staging_root(&paths)?;
+    let _ = tokio::fs::remove_dir_all(&root).await;
+    let staged = async {
+        tokio::fs::create_dir_all(&root)
+            .await
+            .map_err(|error| format!("creating {}: {error}", root.display()))?;
+        let directory = root.join(&name);
+        let exported = export_device_mail(core, directory.clone(), accounts).await?;
+        let name = format!("{name}.zip");
+        let archive = root.join(&name);
+        let archive_for_zip = archive.clone();
+        tokio::task::spawn_blocking(move || {
+            archive_directory(
+                &directory,
+                &archive_for_zip,
+                flectar_mail_core::files::MAX_TRANSFER as u64,
+            )
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        Ok((archive, name, exported))
+    }
+    .await;
+    match staged {
+        Ok((archive, name, exported)) => Ok((
+            StagedExport {
+                root,
+                archive,
+                name,
+                _staging: staging,
+            },
+            exported,
+        )),
+        Err(error) => {
+            let _ = tokio::fs::remove_dir_all(&root).await;
+            Err(error)
+        }
+    }
+}
+
+fn mail_export_message(exported: &MailExport, location: &str) -> UiMessage {
+    if exported.missing == 0 {
+        UiMessage::detail("Mail exported to {}.", location)
+    } else {
+        UiMessage::detail(
+            "Mail exported to {}. Some messages could not be found on this device or the mail server.",
+            location,
+        )
+    }
+}
+
+/// Mail of POP3 accounts exists only on this device, so it can be exported as
+/// mbox files before its account, or all local data, is removed.
+fn register_mail_export(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &Rc<tokio::runtime::Runtime>,
+    // Mobile hosts stage the export and hand it to the platform's picker.
+    #[cfg_attr(desktop, allow(unused_variables))] documents: &std::sync::Arc<
+        dyn documents::DocumentProvider,
+    >,
+    #[cfg_attr(desktop, allow(unused_variables))] paths: &Paths,
+    #[cfg_attr(desktop, allow(unused_variables))] staging: &Arc<tokio::sync::Mutex<()>>,
+) {
+    let app_weak = app.as_weak();
+    let state = Rc::clone(state);
+    let runtime = Rc::clone(runtime);
+    #[cfg(mobile)]
+    let documents = documents.clone();
+    #[cfg(mobile)]
+    let paths = paths.clone();
+    #[cfg(mobile)]
+    let staging = Arc::clone(staging);
+    let running = Rc::new(Cell::new(false));
+    app.on_export_device_mail(move |account_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if running.get() {
+            return;
+        }
+        let (core, accounts) = {
+            let state = state.borrow();
+            let accounts = state
+                .account_configs
+                .iter()
+                .filter(|config| {
+                    config.mail_protocol == MailProtocol::Pop3
+                        && (account_id < 0 || config.id == i64::from(account_id))
+                })
+                .map(|config| (config.id, config.email.clone()))
+                .collect::<Vec<_>>();
+            (state.core.clone(), accounts)
+        };
+        let Some(core) = core else {
+            app.set_mail_export_status(UiMessage::plain(
+                "Local data storage is unavailable. Retry startup.",
+            ));
+            return;
+        };
+        let name = match accounts.as_slice() {
+            [] => return,
+            [(_, email)] => format!(
+                "flectar-mail-{}-{}",
+                export_folder_name(email),
+                Local::now().format("%Y-%m-%d-%H%M%S")
+            ),
+            _ => format!("flectar-mail-{}", Local::now().format("%Y-%m-%d-%H%M%S")),
+        };
+        #[cfg(desktop)]
+        let Some(destination) = rfd::FileDialog::new()
+            .set_title(
+                translated(&app, &UiMessage::plain("Choose where to export the mail")).to_string(),
+            )
+            .pick_folder()
+            .map(|folder| folder.join(&name))
+        else {
+            return;
+        };
+        running.set(true);
+        app.set_mail_export_running(true);
+        app.set_mail_export_status(UiMessage::plain("Exporting mail…"));
+        #[cfg(desktop)]
+        let task = runtime.spawn(export_device_mail(core, destination.clone(), accounts));
+        #[cfg(mobile)]
+        let task = runtime.spawn(stage_mail_export(
+            core,
+            paths.clone(),
+            Arc::clone(&staging),
+            name,
+            accounts,
+        ));
+        let app_weak = app.as_weak();
+        let finished = Rc::clone(&running);
+        #[cfg(mobile)]
+        let documents = documents.clone();
+        #[cfg(mobile)]
+        let runtime = Rc::clone(&runtime);
+        let finish = move |message: UiMessage| {
+            finished.set(false);
+            if let Some(app) = app_weak.upgrade() {
+                app.set_mail_export_running(false);
+                app.set_mail_export_status(message);
+            }
+        };
+        let spawned = slint::spawn_local(async move {
+            let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
+            #[cfg(desktop)]
+            finish(match result {
+                Ok(exported) => mail_export_message(&exported, &destination.display().to_string()),
+                Err(error) => UiMessage::detail("Could not export mail: {}", error),
+            });
+            #[cfg(mobile)]
+            match result {
+                Ok((staged, exported)) => {
+                    let request = documents.export(staged.archive.clone(), staged.name.clone());
+                    let cleanup = runtime.handle().clone();
+                    documents::run_request(&runtime, request, move |saved| {
+                        let name = staged.name.clone();
+                        cleanup.spawn(staged.remove());
+                        finish(match saved {
+                            Ok(true) => mail_export_message(&exported, &name),
+                            Ok(false) => UiMessage::EMPTY,
+                            Err(error) => UiMessage::detail("Could not export mail: {}", error),
+                        });
+                    });
+                }
+                Err(error) => finish(UiMessage::detail("Could not export mail: {}", error)),
+            }
+        });
+        if let Err(error) = spawned {
+            running.set(false);
+            app.set_mail_export_running(false);
+            app.set_mail_export_status(UiMessage::detail("Could not export mail: {}", error));
+        }
+    });
 }
 
 /// Clears the in-progress flag when the snapshot task ends, even by panic.
@@ -978,7 +1220,9 @@ pub(super) fn register_data_management_callbacks(
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
+                    "appIcon": settings.app_icon,
                     "language": settings.language,
+                    "timeFormat": settings.time_format,
                     "calendarWeekStart": settings.calendar_week_start,
                     "loadRemoteImages": settings.load_remote_images,
                     "markReadOnOpen": settings.mark_read_on_open,
@@ -1049,6 +1293,20 @@ pub(super) fn register_data_management_callbacks(
         });
     });
 
+    // Snapshots and mail exports take turns in one staging root on mobile.
+    let export_staging = Arc::new(tokio::sync::Mutex::new(()));
+    // A killed export leaves a full copy in staging; reclaim it now instead of
+    // at the next export.
+    #[cfg(mobile)]
+    if let Ok(root) = export_staging_root(paths) {
+        let staging = Arc::clone(&export_staging);
+        runtime.spawn(async move {
+            let _staging = staging.lock().await;
+            let _ = tokio::fs::remove_dir_all(root).await;
+        });
+    }
+    register_mail_export(app, state, runtime, documents, paths, &export_staging);
+
     let app_weak = app.as_weak();
     let state_for_database_snapshot = Rc::clone(state);
     let runtime_for_database_snapshot = Rc::clone(runtime);
@@ -1059,17 +1317,7 @@ pub(super) fn register_data_management_callbacks(
     #[cfg(mobile)]
     let paths_for_database_snapshot = paths.clone();
     #[cfg(mobile)]
-    let snapshot_staging = Arc::new(tokio::sync::Mutex::new(()));
-    // A killed export leaves a full copy of the stores in staging; reclaim it
-    // now instead of at the next export.
-    #[cfg(mobile)]
-    if let Ok(root) = snapshot_staging_root(paths) {
-        let staging = Arc::clone(&snapshot_staging);
-        runtime.spawn(async move {
-            let _staging = staging.lock().await;
-            let _ = tokio::fs::remove_dir_all(root).await;
-        });
-    }
+    let snapshot_staging = Arc::clone(&export_staging);
     let database_snapshot_running = Arc::new(AtomicBool::new(false));
     app.on_export_database_snapshot(move || {
         let Some(app) = app_weak.upgrade() else {
@@ -1255,6 +1503,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_theme_mode("system".into());
                     app.global::<MessageColors>().set_preference("system".into());
                     app.set_monochrome_sidebar_icons(false);
+                    crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
@@ -1545,7 +1794,7 @@ mod tests {
         std::os::unix::fs::symlink(&outside, snapshot.join("link")).unwrap();
         let archive = staging.path().join("snapshot.zip");
 
-        archive_snapshot_directory(&snapshot, &archive, u64::MAX).unwrap();
+        archive_directory(&snapshot, &archive, u64::MAX).unwrap();
 
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
         let mut names = zip
@@ -1571,12 +1820,12 @@ mod tests {
         std::fs::write(snapshot.join("mail.sqlite3"), [0; 64]).unwrap();
         let archive = staging.path().join("snapshot.zip");
 
-        let error = archive_snapshot_directory(&snapshot, &archive, 63).unwrap_err();
+        let error = archive_directory(&snapshot, &archive, 63).unwrap_err();
 
         assert!(error.contains("64 B"), "{error}");
         assert!(!archive.exists());
         // Headers alone push an archive of a store at the limit past it.
-        assert!(archive_snapshot_directory(&snapshot, &archive, 64).is_err());
-        archive_snapshot_directory(&snapshot, &archive, 4096).unwrap();
+        assert!(archive_directory(&snapshot, &archive, 64).is_err());
+        archive_directory(&snapshot, &archive, 4096).unwrap();
     }
 }

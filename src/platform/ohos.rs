@@ -2,9 +2,13 @@
 //! XComponent Slint backend live in that host tree; this module only holds
 //! what the shared application needs at runtime.
 
+use flectar_mail_core::models::AppIcon;
 use std::{path::PathBuf, sync::OnceLock};
 
 static PDFIUM_LIBRARY: OnceLock<PathBuf> = OnceLock::new();
+
+/// Names this platform to the settings that describe it.
+pub(crate) const NAME: &str = "ohos";
 
 /// Supply the application's native library directory (the hap's `libs/<abi>`,
 /// which the host derives from its own loaded module path). Never a
@@ -49,6 +53,10 @@ pub(crate) fn lower_current_thread_priority() {
 
 /// Preview lifecycle is owned by the ArkTS shell.
 pub(crate) fn install_preview_lifecycle() {}
+
+/// Switching the home screen icon is a system API on OpenHarmony
+/// (`bundleManager.enableDynamicIcon`), so the choice applies inside the app.
+pub(crate) fn show_app_icon(_icon: AppIcon) {}
 
 /// Directory the email (Blitz/Parley) renderer loads fonts from. OpenHarmony
 /// ships no Fontconfig, so the fontique system backend is disabled and the

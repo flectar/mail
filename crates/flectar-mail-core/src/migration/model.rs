@@ -48,6 +48,21 @@ pub struct AccountCandidate {
     pub outgoing: Option<ServerCandidate>,
     /// Account marker color as `#RRGGBB`.
     pub color: Option<String>,
+    /// What the source does with mail it downloads with POP3. `None` for
+    /// other incoming protocols.
+    pub retention: Option<SourceRetention>,
+}
+
+/// How long the source leaves mail it downloads on a POP3 server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceRetention {
+    /// Downloaded mail stays on the server. Otherwise it is removed as soon
+    /// as it is downloaded.
+    pub keep: bool,
+    /// While kept, mail is removed this many days after it was downloaded.
+    pub remove_after_days: Option<u32>,
+    /// While kept, mail is removed once it is deleted in the source.
+    pub remove_deleted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

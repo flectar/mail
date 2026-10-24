@@ -30,8 +30,9 @@
 /ui/.*.slint
 /settings-accounts-*.png
 
-# Candle is tested through the application workspace lockfile.
+# Candle and Slint's winit backend resolve through the application lockfiles.
 /crates/candle-core/Cargo.lock
+/crates/i-slint-backend-winit/Cargo.lock
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/

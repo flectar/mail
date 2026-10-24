@@ -3,12 +3,31 @@ import { Button } from "button.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
+// Standard server ports. A port follows the chosen protocol or security only
+// while it still holds a standard port, so a custom port is never overwritten.
+export global MailPorts {
+    public pure function incoming(protocol: string, security: string) -> string {
+        if protocol == "pop3" {
+            return security == "tls" ? "995" : "110";
+        }
+        return security == "tls" ? "993" : "143";
+    }
+
+    public pure function smtp(security: string) -> string {
+        return security == "tls" ? "465" : "587";
+    }
+
+    public pure function is-standard-incoming(port: string) -> bool {
+        return port == "993" || port == "143" || port == "995" || port == "110";
+    }
+}
+
 // The same account-scoped transport settings are used during setup and edits.
 export component MailSecurityFields inherits VerticalBox {
+    // "imap" or "pop3".
+    in property <string> incoming-protocol: "imap";
     in-out property <string> incoming-security: "tls";
     in-out property <string> smtp-security: "tls";
-    // A port follows the selected security only while it still holds the
-    // previous mode's standard port, so a custom port is never overwritten.
     in-out property <string> incoming-port: "993";
     in-out property <string> smtp-port: "465";
     in-out property <string> certificate-pem;
@@ -20,14 +39,6 @@ export component MailSecurityFields inherits VerticalBox {
     padding: 0px;
     vertical-stretch: 0;
 
-    pure function standard-incoming-port(security: string) -> string {
-        return security == "tls" ? "993" : "143";
-    }
-
-    pure function standard-smtp-port(security: string) -> string {
-        return security == "tls" ? "465" : "587";
-    }
-
     pure function security-index(security: string) -> int {
         return security == "starttls" ? 1 : security == "none" ? 2 : 0;
     }
@@ -37,17 +48,26 @@ export component MailSecurityFields inherits VerticalBox {
     }
 
     function choose-incoming-security(security: string) {
-        if (root.incoming-port == root.standard-incoming-port(root.incoming-security)) {
-            root.incoming-port = root.standard-incoming-port(security);
+        if (root.incoming-port == MailPorts.incoming(root.incoming-protocol, root.incoming-security)) {
+            root.incoming-port = MailPorts.incoming(root.incoming-protocol, security);
         }
         root.incoming-security = security;
     }
 
     function choose-smtp-security(security: string) {
-        if (root.smtp-port == root.standard-smtp-port(root.smtp-security)) {
-            root.smtp-port = root.standard-smtp-port(security);
+        if (root.smtp-port == MailPorts.smtp(root.smtp-security)) {
+            root.smtp-port = MailPorts.smtp(security);
         }
         root.smtp-security = security;
+    }
+
+    // Choosing an item replaces a selector's binding. These keep both showing
+    // values set later, such as a reset form or a suggested server.
+    changed incoming-security => {
+        incoming-encryption.current-index = root.security-index(root.incoming-security);
+    }
+    changed smtp-security => {
+        smtp-encryption.current-index = root.security-index(root.smtp-security);
     }
 
     Text { text: @tr("Connection security"); color: AppTheme.heading; font-size: TypeScale.secondary; font-weight: 600; }
@@ -63,8 +83,8 @@ export component MailSecurityFields inherits VerticalBox {
             horizontal-stretch: 1;
             padding: 0px;
             spacing: 4px;
-            Text { text: @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            ComboBox {
+            Text { text: root.incoming-protocol == "pop3" ? @tr("POP3 encryption") : @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+            incoming-encryption := ComboBox {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;
@@ -80,7 +100,7 @@ export component MailSecurityFields inherits VerticalBox {
             padding: 0px;
             spacing: 4px;
             Text { text: @tr("SMTP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            ComboBox {
+            smtp-encryption := ComboBox {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;

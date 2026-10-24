@@ -1390,11 +1390,13 @@ fn parse_resource(value: &Value) -> Result<ParsedResource> {
         headers,
         internal_date,
         size: value.get("sizeEstimate").and_then(Value::as_i64),
-        snippet: value
-            .get("snippet")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+        // Gmail returns the snippet HTML-escaped.
+        snippet: crate::mime::make_html_snippet(
+            value
+                .get("snippet")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
         has_attachments: payload_has_file_attachments(payload)?,
     })
 }
@@ -4012,7 +4014,7 @@ mod tests {
             "internalDate": "1700000000000",
             "sizeEstimate": 42,
             "labelIds": ["INBOX", "UNREAD", "Label_1"],
-            "snippet": "hello",
+            "snippet": "Alice&#39;s\n  report &amp; notes",
             "payload": {
                 "headers": [
                     { "name": "From", "value": "Alice <alice@example.com>" },
@@ -4035,6 +4037,7 @@ mod tests {
         assert_eq!(parsed.headers.from.unwrap().email, "alice@example.com");
         assert!(parsed.labels.contains(&"UNREAD".into()));
         assert!(parsed.has_attachments);
+        assert_eq!(parsed.snippet, "Alice's report & notes");
     }
 
     #[test]

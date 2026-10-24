@@ -70,7 +70,7 @@ enum TitleBarAction {
 
 /// Platform name shared with the window controls; empty where the platform
 /// always owns the window frame.
-const PLATFORM: &str = if cfg!(target_os = "windows") {
+pub(crate) const PLATFORM: &str = if cfg!(target_os = "windows") {
     "windows"
 } else if cfg!(target_os = "macos") {
     "macos"

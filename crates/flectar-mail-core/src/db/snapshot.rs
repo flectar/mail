@@ -5,14 +5,18 @@
 
 use super::Db;
 use crate::error::{CoreError, Result};
+use crate::file_io;
 use rusqlite::{Connection, MAIN_DB, OpenFlags};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 const SNAPSHOT_FORMAT: &str = "flectar-mail-database-snapshot";
-const SNAPSHOT_VERSION: u32 = 2;
+const SNAPSHOT_VERSION: u32 = 3;
 const MAIL_FILE: &str = "mail.sqlite3";
+/// Originals of mail that exists only on this device, as
+/// `mail/<account id>/<file>`.
+const DEVICE_MAIL_DIR: &str = "mail";
 const CALENDAR_FILE: &str = "calendar.sqlite3";
 const FILES_FILE: &str = "files.sqlite3";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -48,6 +52,62 @@ pub struct DatabaseSnapshotManifest {
     pub files: Option<DatabaseSnapshotStore>,
     #[serde(default)]
     pub file_transfer_payloads: bool,
+    /// The snapshot holds the originals of mail that exists only on this
+    /// device (POP3 accounts) in [`DEVICE_MAIL_DIR`].
+    #[serde(default)]
+    pub device_mail_payloads: bool,
+}
+
+/// Copy the originals of mail that exists only on this device into the
+/// snapshot, as the snapshot's own mail database references them. A file
+/// removed since the snapshot was taken belonged to a message deleted since,
+/// and is left out. Returns whether there were any.
+async fn copy_device_mail(snapshot_db: &Path, staging: &Path) -> Result<bool> {
+    let db = snapshot_db.to_owned();
+    let originals = tokio::task::spawn_blocking(move || -> Result<Vec<(i64, String)>> {
+        let conn = Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let mut statement = conn.prepare(
+            "SELECT m.account_id, m.raw_path
+             FROM messages m JOIN accounts a ON a.id = m.account_id
+             WHERE a.mail_protocol = 'pop3' AND m.raw_path IS NOT NULL",
+        )?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+    .await
+    .map_err(|error| CoreError::Other(error.to_string()))??;
+    if originals.is_empty() {
+        return Ok(false);
+    }
+    let root = staging.join(DEVICE_MAIL_DIR);
+    for (account_id, original) in originals {
+        let source = Path::new(&original);
+        let Some(name) = source.file_name() else {
+            continue;
+        };
+        let directory = root.join(account_id.to_string());
+        if !tokio::fs::try_exists(&directory).await? {
+            tokio::fs::create_dir_all(&directory).await?;
+            file_io::restrict_permissions(&root, &[])?;
+            file_io::restrict_permissions(&directory, &[])?;
+        }
+        let target = directory.join(name);
+        match crate::file_io::copy(
+            source,
+            &target,
+            crate::MAX_CACHED_MESSAGE_BYTES,
+            "snapshot mail",
+        )
+        .await
+        {
+            Ok(_) => file_io::restrict_permissions(&directory, &[&target])?,
+            Err(_) if !tokio::fs::try_exists(source).await? => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(true)
 }
 
 fn snapshot_store(
@@ -105,60 +165,6 @@ fn verify_store(path: &Path, expected: &DatabaseSnapshotStore, store: &str) -> R
     Ok(())
 }
 
-fn staging_path(destination: &Path) -> Result<PathBuf> {
-    let parent = destination.parent().ok_or_else(|| {
-        CoreError::Other("database snapshot destination has no parent directory".into())
-    })?;
-    let name = destination.file_name().ok_or_else(|| {
-        CoreError::Other("database snapshot destination has no directory name".into())
-    })?;
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|error| CoreError::Other(format!("system clock before Unix epoch: {error}")))?
-        .as_nanos();
-    Ok(parent.join(format!(
-        ".{}.partial-{}-{nonce}",
-        name.to_string_lossy(),
-        std::process::id()
-    )))
-}
-
-#[cfg(unix)]
-fn restrict_permissions(directory: &Path, files: &[&Path]) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
-    for file in files {
-        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn restrict_permissions(_directory: &Path, _files: &[&Path]) -> Result<()> {
-    Ok(())
-}
-
-fn publish_snapshot(staging: &Path, destination: &Path) -> Result<()> {
-    #[cfg(rename_noreplace)]
-    {
-        rustix::fs::renameat_with(
-            rustix::fs::CWD,
-            staging,
-            rustix::fs::CWD,
-            destination,
-            rustix::fs::RenameFlags::NOREPLACE,
-        )
-        .map_err(std::io::Error::from)?;
-    }
-    #[cfg(not(rename_noreplace))]
-    {
-        // Windows directory rename fails if the destination already exists.
-        std::fs::rename(staging, destination)?;
-    }
-    Ok(())
-}
-
 /// Create a new snapshot directory atomically. The destination must not
 /// already exist, which prevents an export from overwriting an older backup.
 pub async fn create(
@@ -178,12 +184,12 @@ pub async fn create(
         CoreError::Other("database snapshot destination has no parent directory".into())
     })?;
     tokio::fs::create_dir_all(parent).await?;
-    let staging = staging_path(destination)?;
+    let staging = file_io::staging_directory(destination)?;
     tokio::fs::create_dir(&staging).await?;
     // Restrict access before SQLite creates any files. Applying permissions
     // only after the backup would briefly expose private mail under a common
     // 022 umask.
-    restrict_permissions(&staging, &[])?;
+    file_io::restrict_permissions(&staging, &[])?;
 
     let mail_path = staging.join(MAIL_FILE);
     let calendar_path = staging.join(CALENDAR_FILE);
@@ -267,6 +273,7 @@ pub async fn create(
             calendar,
             files: Some(files),
             file_transfer_payloads: payload_root.is_some(),
+            device_mail_payloads: copy_device_mail(&mail_path, &staging).await?,
         };
         if let Some(source) = payload_root
             && tokio::fs::try_exists(&source).await?
@@ -283,7 +290,7 @@ pub async fn create(
                     ));
                 }
                 tokio::fs::create_dir_all(&target).await?;
-                restrict_permissions(&target, &[])?;
+                file_io::restrict_permissions(&target, &[])?;
                 let mut entries = tokio::fs::read_dir(source).await?;
                 while let Some(entry) = entries.next_entry().await? {
                     let kind = entry.file_type().await?;
@@ -302,11 +309,11 @@ pub async fn create(
         }
         let manifest_path = staging.join(MANIFEST_FILE);
         tokio::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?).await?;
-        restrict_permissions(
+        file_io::restrict_permissions(
             &staging,
             &[&mail_path, &calendar_path, &files_path, &manifest_path],
         )?;
-        publish_snapshot(&staging, destination)?;
+        file_io::publish_directory(&staging, destination)?;
         Ok(manifest)
     }
     .await;
@@ -394,5 +401,60 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(error.contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn snapshots_carry_the_originals_of_mail_kept_only_on_this_device() {
+        let source = tempfile::tempdir().unwrap();
+        let output = tempfile::tempdir().unwrap();
+        let mail = Db::open(&source.path().join("mail.db")).unwrap();
+        let calendar = Db::open_calendar(&source.path().join("calendar.db")).unwrap();
+        let files = Db::open_files(&source.path().join("files.db")).unwrap();
+        let kept = source.path().join("kept.pop3.eml");
+        let deleted = source.path().join("deleted.pop3.eml");
+        let server_copy = source.path().join("cache.eml");
+        std::fs::write(&kept, b"Subject: kept\r\n\r\nbody\r\n").unwrap();
+        std::fs::write(&server_copy, b"Subject: cached\r\n\r\n").unwrap();
+        let paths =
+            [kept.clone(), deleted, server_copy].map(|path| path.to_string_lossy().into_owned());
+        mail.write(move |conn| {
+            for (id, protocol) in [(1, "pop3"), (2, "imap")] {
+                conn.execute(
+                    "INSERT INTO accounts (
+                       id, email, provider, auth_kind, username, incoming_host, incoming_port,
+                       smtp_host, smtp_port, created_at, mail_protocol, settings_json
+                     ) VALUES (?1, ?1 || '@example.test', 'generic', 'password', 'me', 'h', 995,
+                               'h', 465, 0, ?2, '{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+                    rusqlite::params![id, protocol],
+                )?;
+                conn.execute(
+                    "INSERT INTO folders (id, account_id, path, role) VALUES (?1, ?1, 'Inbox', 'inbox')",
+                    [id],
+                )?;
+            }
+            for (account, path) in [(1, &paths[0]), (1, &paths[1]), (2, &paths[2])] {
+                conn.execute(
+                    "INSERT INTO messages (account_id, folder_id, date, raw_path)
+                     VALUES (?1, ?1, 0, ?2)",
+                    rusqlite::params![account, path],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        let destination = output.path().join("snapshot");
+        let manifest = create(&mail, &calendar, &files, None, &destination)
+            .await
+            .unwrap();
+        assert!(manifest.device_mail_payloads);
+        let copied = destination.join(DEVICE_MAIL_DIR).join("1");
+        assert_eq!(
+            std::fs::read(copied.join("kept.pop3.eml")).unwrap(),
+            std::fs::read(&kept).unwrap()
+        );
+        assert_eq!(std::fs::read_dir(&copied).unwrap().count(), 1);
+        assert!(!destination.join(DEVICE_MAIL_DIR).join("2").exists());
     }
 }

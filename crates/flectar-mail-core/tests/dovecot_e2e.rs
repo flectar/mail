@@ -437,6 +437,26 @@ async fn full_sync_triage_and_search() {
     })
     .await;
 
+    // Undoing that archive after it reached the server moves the message
+    // back to the server's INBOX.
+    assert!(core.undo_last().await.unwrap());
+    wait_for("remote undo replay", Duration::from_secs(90), || async {
+        let creds = flectar_mail_core::imap::ImapCredentials::Password {
+            user: "testuser".into(),
+            password: "pass".into(),
+        };
+        let mut s = flectar_mail_core::imap::connect("127.0.0.1", 10993, creds)
+            .await
+            .ok()?;
+        let sel = flectar_mail_core::imap::select(&mut s, "INBOX")
+            .await
+            .ok()?;
+        let n = sel.exists;
+        flectar_mail_core::imap::logout(s).await;
+        (n == 8).then_some(())
+    })
+    .await;
+
     // 11. IMAP IDLE push: with the actor waiting in IDLE, a message appended to
     // INBOX should surface in seconds - far faster than the 60s poll cycle.
     // Wait until the actor is quiescent (state "idle" => in the IDLE wait), then

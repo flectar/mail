@@ -2,9 +2,10 @@
 
 use crate::{
     AppWindow, ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, I18n,
+    date_format::{self, DateStyle},
     paged_visible_count,
 };
-use chrono::{Datelike, Local, TimeZone};
+use chrono::{Local, TimeZone};
 use flectar_mail_core::models::{
     ContactRecord, ContactRecordCursor, ContactRecordPage, ContactSync,
 };
@@ -150,8 +151,9 @@ fn contact_last_interacted(app: &AppWindow, value: Option<i64>) -> String {
         .timestamp_millis_opt(value)
         .single()
         .map(|time| {
+            let date = date_format::current().date(DateStyle::Medium, time.date_naive());
             app.global::<I18n>()
-                .invoke_last_contacted(time.month() as i32, time.day() as i32, time.year())
+                .invoke_last_contacted(date.into())
                 .into()
         })
         .unwrap_or_else(|| {
