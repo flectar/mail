@@ -79,6 +79,7 @@ jobs:
           PY
           python3 scripts/test-benchmark-startup.py
           python3 ui/icons/lucide/generate.py --check
+          python3 resources/app-icon/generate.py --check
       - name: Keep operating-system names in the platform layer
         run: python3 scripts/check-platform-gates.py
       - name: Verify the Blitz patch queue
