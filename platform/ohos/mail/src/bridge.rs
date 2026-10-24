@@ -19,6 +19,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use slint_ohos_backend::ffi::{self, napi_env, napi_value};
+use slint_ohos_backend::hold::PresentationHold;
 use tokio::sync::oneshot;
 
 /// Thread-safe handles to the ArkTS closures; `0` until installed.
@@ -35,15 +36,21 @@ static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
 
-type PendingSender = oneshot::Sender<Result<String, String>>;
+/// One open picker: where its result goes, and the hold that keeps the Slint
+/// thread from presenting while the picker covers the window.
+struct Pending {
+    sender: oneshot::Sender<Result<String, String>>,
+    _hold: PresentationHold,
+}
 
-fn pending() -> &'static Mutex<HashMap<i64, PendingSender>> {
-    static PENDING: OnceLock<Mutex<HashMap<i64, PendingSender>>> = OnceLock::new();
+fn pending() -> &'static Mutex<HashMap<i64, Pending>> {
+    static PENDING: OnceLock<Mutex<HashMap<i64, Pending>>> = OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Removes the request entry when the awaiting future goes away (cancellation,
-/// timeout); a late page-side result is then dropped.
+/// Removes the request entry, and with it the presentation hold, when the
+/// awaiting future goes away (cancellation, timeout); a late page-side result
+/// is then dropped.
 struct PendingGuard(i64);
 
 impl Drop for PendingGuard {
@@ -142,9 +149,9 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
         } else {
             String::new()
         };
-        let sender = pending().lock().ok().and_then(|mut map| map.remove(&id));
-        match sender {
-            Some(sender) => {
+        let request = pending().lock().ok().and_then(|mut map| map.remove(&id));
+        match request {
+            Some(Pending { sender, .. }) => {
                 // Empty path + empty error means "the user cancelled".
                 let outcome = if !path.is_empty() || error.is_empty() {
                     Ok(path)
@@ -184,14 +191,25 @@ pub(super) fn open_url(url: &str) -> Result<(), String> {
     call_closure(&OPEN_URL, "openUrl", url)
 }
 
-/// Run the system file picker for one document. `Ok(None)` = user cancelled.
-pub(super) async fn pick_open() -> Result<Option<String>, String> {
+/// Registers a picker request. Its entry holds presentation until the page
+/// reports the result or the request is dropped, whichever thread awaits it.
+fn register_picker() -> Result<(i64, oneshot::Receiver<Result<String, String>>), String> {
     let id = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
     let (sender, receiver) = oneshot::channel();
+    let request = Pending {
+        sender,
+        _hold: PresentationHold::acquire(),
+    };
     pending()
         .lock()
         .map_err(|_| "the picker registry is poisoned".to_owned())?
-        .insert(id, sender);
+        .insert(id, request);
+    Ok((id, receiver))
+}
+
+/// Run the system file picker for one document. `Ok(None)` = user cancelled.
+pub(super) async fn pick_open() -> Result<Option<String>, String> {
+    let (id, receiver) = register_picker()?;
     let guard = PendingGuard(id);
     call_closure(&PICK_OPEN, "pickOpen", id)?;
     let path = await_result(receiver).await?;
@@ -205,12 +223,7 @@ pub(super) async fn pick_save(
     source_path: String,
     suggested_name: String,
 ) -> Result<Option<String>, String> {
-    let id = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
-    let (sender, receiver) = oneshot::channel();
-    pending()
-        .lock()
-        .map_err(|_| "the picker registry is poisoned".to_owned())?
-        .insert(id, sender);
+    let (id, receiver) = register_picker()?;
     let guard = PendingGuard(id);
     let request = SaveRequest {
         id,

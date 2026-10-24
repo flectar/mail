@@ -21,6 +21,7 @@ pub mod event;
 pub mod ffi;
 pub mod fonts;
 pub mod gpu;
+pub mod hold;
 pub mod ime;
 pub mod log;
 pub mod perf;
