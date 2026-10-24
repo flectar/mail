@@ -29,6 +29,11 @@ const ASSET_SUCCESS: i32 = 0;
 const ASSET_NOT_FOUND: i32 = 24000002;
 const ASSET_CRYPTO_ERROR: i32 = 24000009;
 
+/// The service rejects empty secrets, but callers store an empty string to
+/// clear one (a disconnected calendar, a server without a password). It is
+/// kept as a single NUL, which no secret contains.
+const EMPTY_SECRET: &str = "\0";
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct AssetBlob {
@@ -116,6 +121,11 @@ fn add(alias: &str, secret: &str) -> Result<(), i32> {
 
 /// Stores (or overwrites) `secret` under `alias`.
 pub fn put(alias: &str, secret: &str) -> Result<(), String> {
+    let secret = if secret.is_empty() {
+        EMPTY_SECRET
+    } else {
+        secret
+    };
     let failed = match add(alias, secret) {
         Ok(()) => return Ok(()),
         Err(rc) => rc,
@@ -182,7 +192,13 @@ pub fn get(alias: &str) -> Result<Option<String>, String> {
         }
         OH_Asset_FreeResultSet(&mut result_set);
     }
-    Ok(value)
+    Ok(value.map(|secret| {
+        if secret == EMPTY_SECRET {
+            String::new()
+        } else {
+            secret
+        }
+    }))
 }
 
 /// Removes the secret stored under `alias`. Missing entries succeed
