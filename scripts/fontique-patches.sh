@@ -62,10 +62,8 @@ while IFS= read -r patch || [[ -n "$patch" ]]; do
     git -C "$work_root/patched" apply "$PATCH_DIR/$patch"
 done < "$SERIES_FILE"
 
-differences=$(diff -qr "$work_root/patched/crates/$CRATE" "$REPO_ROOT/crates/$CRATE" \
-    | grep -vE '(^|/)\.cargo-ok$|: \.cargo-ok$' || true)
-if [[ -n "$differences" ]]; then
-    printf 'Checked-in %s differs from the documented patch result:\n%s\n' "$CRATE" "$differences" >&2
+if ! diff -qr "$work_root/patched/crates/$CRATE" "$REPO_ROOT/crates/$CRATE"; then
+    printf 'Checked-in %s differs from the documented patch result.\n' "$CRATE" >&2
     exit 1
 fi
 
