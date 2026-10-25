@@ -28,6 +28,7 @@ pub mod present;
 pub mod window;
 pub mod xcomponent;
 
+use crate::event::BackendEvent;
 use core::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -83,4 +84,9 @@ pub fn start(
 pub unsafe fn register_xcomponent(component: *mut c_void) -> i32 {
     // SAFETY: the caller guarantees this is the live XComponent pointer.
     unsafe { xcomponent::register(component.cast()) }
+}
+
+/// Report the system light/dark preference from the ArkTS shell.
+pub fn set_color_scheme(dark: bool) {
+    xcomponent::send(BackendEvent::ColorScheme(dark));
 }

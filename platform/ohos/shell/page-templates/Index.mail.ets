@@ -1,10 +1,14 @@
-import { abilityAccessCtrl, common, PermissionRequestResult, Permissions, Want } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
+// Keep picker imports bounded: a mail attachment is copied into the app
+// cache, so a mis-picked multi-GB file must not fill the sandbox.
+const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
 // request/response: the page reports the outcome through `submitBridgeResult`.
@@ -21,21 +25,47 @@ interface FlectarBridge {
 // The exports of the native XComponent module (`onLoad` hands them over).
 interface FlectarNativeModule {
   setBridge?: (bridge: FlectarBridge) => void;
-  submitBridgeResult?: (requestId: number, path: string, error: string) => void;
+  submitBridgeResult?: (requestId: number, path: string, error: string) => boolean;
   imeCommit?: (text: string) => void;
   imeDelete?: (count: number) => void;
   imeFunction?: (key: number) => void;
+  setColorScheme?: (dark: boolean) => void;
+  suspendPreview?: () => void;
 }
 
 @Entry
 @Component
 struct Index {
   private nativeModule: FlectarNativeModule | undefined = undefined;
+  @StorageLink('flectarColorMode') @Watch('onColorModeChanged') colorMode: number =
+    ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
   private imeAttached: boolean = false;
+  private imeAttachPending: boolean = false;
   private imePassword: boolean | undefined = undefined;
+  private lastImeCursor: string = '';
+  private appliedColorMode: number = -2;
   private pasteboardPermissionRequested: boolean = false;
   aboutToAppear(): void {
     this.probeResources();
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      AppStorage.setOrCreate('flectarColorMode', context.config.colorMode ?? -1);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not read the system color mode: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  onColorModeChanged(): void {
+    this.applySystemColorScheme(this.colorMode);
+  }
+
+  onPageShow(): void {
+    this.applySystemColorScheme(this.colorMode);
+  }
+
+  onPageHide(): void {
+    this.nativeModule?.suspendPreview?.();
   }
 
   // The IME controller is process-scoped; its listeners capture this page, so
@@ -52,7 +82,9 @@ struct Index {
         (error as BusinessError).message);
     }
     this.imeAttached = false;
+    this.imeAttachPending = false;
     this.imePassword = undefined;
+    this.lastImeCursor = '';
   }
 
   build(): void {
@@ -129,10 +161,11 @@ struct Index {
         this.requestPasteboardPermission();
       },
     });
+    this.applySystemColorScheme(this.colorMode);
   }
 
-  private reportBridgeResult(requestId: number, path: string, error: string): void {
-    this.nativeModule?.submitBridgeResult?.(requestId, path, error);
+  private reportBridgeResult(requestId: number, path: string, error: string): boolean {
+    return this.nativeModule?.submitBridgeResult?.(requestId, path, error) ?? false;
   }
 
   private openUrl(url: string): void {
@@ -172,9 +205,16 @@ struct Index {
         this.reportBridgeResult(requestId, '', '');
         return;
       }
-      const staged = this.stageCopy(context, uris[0]);
+      const staged = await this.stageCopy(context, uris[0]);
       hilog.info(0x0000, LOG_TAG, 'picker imported a document (%{public}d picked)', uris.length);
-      this.reportBridgeResult(requestId, staged, '');
+      if (!this.reportBridgeResult(requestId, staged, '')) {
+        // The native request timed out or was cancelled while the picker was
+        // open; do not leave the staged copy behind.
+        fileIo.unlink(staged).catch((error: BusinessError): void => {
+          hilog.error(0x0000, LOG_TAG, 'could not remove the orphaned import: %{public}s',
+            error.message);
+        });
+      }
     } catch (error) {
       const failure = error as BusinessError;
       hilog.error(0x0000, LOG_TAG, 'document picker failed: %{public}d %{public}s',
@@ -223,6 +263,9 @@ struct Index {
   // time, so a type change detaches and attaches again.
   private showIme(password: boolean): void {
     try {
+      if (this.imeAttachPending) {
+        return;
+      }
       const controller = inputMethod.getController();
       if (this.imeAttached && this.imePassword === password) {
         controller.showTextInput(inputMethod.RequestKeyboardReason.TOUCH)
@@ -240,11 +283,15 @@ struct Index {
         return;
       }
       if (this.imeAttached) {
+        this.imeAttachPending = true;
         controller.detach().then((): void => {
           this.imeAttached = false;
+          this.imeAttachPending = false;
           this.imePassword = undefined;
+          this.lastImeCursor = '';
           this.showIme(password);
         }).catch((error: BusinessError): void => {
+          this.imeAttachPending = false;
           hilog.error(0x0000, LOG_TAG, 'IME detach failed: %{public}d %{public}s',
             error.code, error.message);
         });
@@ -263,9 +310,12 @@ struct Index {
       // The touch reason asks the IME service to raise the soft keyboard even
       // when a physical keyboard is attached (a 2in1 policy would otherwise
       // suppress it).
+      this.imeAttachPending = true;
       controller.attach(true, config, inputMethod.RequestKeyboardReason.TOUCH).then((): void => {
         this.imeAttached = true;
+        this.imeAttachPending = false;
         this.imePassword = password;
+        this.lastImeCursor = '';
         // (Re-)register exactly one set of handlers: a stale registration from
         // an earlier attach (or a duplicate one) would double-insert text.
         controller.off('insertText');
@@ -282,6 +332,7 @@ struct Index {
         });
         hilog.info(0x0000, LOG_TAG, 'IME attached');
       }).catch((error: BusinessError): void => {
+        this.imeAttachPending = false;
         hilog.error(0x0000, LOG_TAG, 'IME attach failed: %{public}d %{public}s',
           error.code, error.message);
       });
@@ -297,6 +348,11 @@ struct Index {
     if (!this.imeAttached) {
       return;
     }
+    const key = `${left},${top},${width},${height}`;
+    if (key === this.lastImeCursor) {
+      return;
+    }
+    this.lastImeCursor = key;
     try {
       const ui = this.getUIContext();
       inputMethod.getController().updateCursor({
@@ -327,6 +383,25 @@ struct Index {
       });
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'IME hide failed: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  private applySystemColorScheme(mode: number): void {
+    try {
+      let colorMode = mode;
+      if (colorMode < 0) {
+        const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+        colorMode = context.config.colorMode ?? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET;
+      }
+      if (this.nativeModule === undefined || colorMode === this.appliedColorMode) {
+        return;
+      }
+      this.appliedColorMode = colorMode;
+      this.nativeModule.setColorScheme?.(
+        colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not apply the system color mode: %{public}s',
         (error as BusinessError).message);
     }
   }
@@ -376,7 +451,7 @@ struct Index {
    * @throws { BusinessError } when the picked file cannot be opened or copied;
    * the caller reports it through the bridge result.
    */
-  private stageCopy(context: common.UIAbilityContext, uri: string): string {
+  private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<string> {
     const directory = `${context.cacheDir}/imports`;
     try {
       fileIo.mkdirSync(directory, true);
@@ -387,27 +462,33 @@ struct Index {
       const failure = error as BusinessError;
       hilog.info(0x0000, LOG_TAG, 'stage: mkdir reported %{public}d; continuing', failure.code);
     }
-    const segments = uri.split('/');
-    const raw = segments.pop() ?? 'document';
-    // The picker chooses the file name; keep it to a conservative character
-    // set and length so it cannot escape the cache directory.
-    const cleaned = raw.replace(/[^A-Za-z0-9._-]/g, '_').substring(0, 96);
-    const name = cleaned.length > 0 ? cleaned : 'document';
-    const destination = `${directory}/${Date.now()}-${name}`;
     const source = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {
+      const size = fileIo.statSync(source.fd).size;
+      if (size > MAX_IMPORT_BYTES) {
+        throw new Error(`the selected file is too large (${size} bytes; limit ${MAX_IMPORT_BYTES})`);
+      }
+      // Never reuse the picked file name (or a predictable timestamp) in the
+      // cache: it can leak the user's document name and collide with another
+      // staged import. Keep only a short extension for content detection.
+      const raw = uri.split('/').pop() ?? '';
+      const dot = raw.lastIndexOf('.');
+      const extension = dot > 0
+        ? raw.substring(dot).replace(/[^A-Za-z0-9.]/g, '').substring(0, 12)
+        : '';
+      const destination = `${directory}/import-${util.generateRandomUUID(true)}${extension}`;
       const target = fileIo.openSync(
         destination,
         fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC,
       );
       try {
-        fileIo.copyFileSync(source.fd, target.fd);
+        await fileIo.copyFile(source.fd, target.fd);
       } finally {
         fileIo.closeSync(target);
       }
+      return destination;
     } finally {
       fileIo.closeSync(source);
     }
-    return destination;
   }
 }

@@ -111,6 +111,7 @@ unsafe extern "C" {
     pub fn napi_get_undefined(env: napi_env, result: *mut napi_value) -> napi_status;
     pub fn napi_create_int64(env: napi_env, value: i64, result: *mut napi_value) -> napi_status;
     pub fn napi_get_boolean(env: napi_env, value: bool, result: *mut napi_value) -> napi_status;
+    pub fn napi_get_value_bool(env: napi_env, value: napi_value, result: *mut bool) -> napi_status;
     pub fn napi_create_double(env: napi_env, value: f64, result: *mut napi_value) -> napi_status;
     pub fn napi_get_value_int64(env: napi_env, value: napi_value, result: *mut i64) -> napi_status;
     /// With `buf == NULL` and `bufsize == 0` the required length (excluding the
@@ -396,6 +397,15 @@ unsafe extern "C" {
         component: *mut OH_NativeXComponent,
         callback: unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void),
     ) -> i32;
+    pub fn OH_NativeXComponent_RegisterMouseEventCallback(
+        component: *mut OH_NativeXComponent,
+        callback: *mut OH_NativeXComponent_MouseEvent_Callback,
+    ) -> i32;
+    pub fn OH_NativeXComponent_GetMouseEvent(
+        component: *mut OH_NativeXComponent,
+        window: *mut c_void,
+        mouse_event: *mut OH_NativeXComponent_MouseEvent,
+    ) -> i32;
     pub fn OH_NativeXComponent_RegisterUIInputEventCallback(
         component: *mut OH_NativeXComponent,
         callback: unsafe extern "C" fn(
@@ -599,4 +609,34 @@ mod tests {
         // 6 * i32 + u64 (8-aligned) + ptr + i32 (+4 pad) + u64 + 2 * u32 = 64.
         assert_eq!(size_of::<BufferHandle>(), 64);
     }
+}
+
+/// Mouse action mapped from `OH_NativeXComponent_MouseEventAction`.
+pub const OH_NATIVEXCOMPONENT_MOUSE_PRESS: i32 = 1;
+pub const OH_NATIVEXCOMPONENT_MOUSE_RELEASE: i32 = 2;
+pub const OH_NATIVEXCOMPONENT_MOUSE_MOVE: i32 = 3;
+pub const OH_NATIVEXCOMPONENT_MOUSE_CANCEL: i32 = 4;
+
+/// Mouse button values from `OH_NativeXComponent_MouseEventButton`.
+pub const OH_NATIVEXCOMPONENT_LEFT_BUTTON: i32 = 0x01;
+pub const OH_NATIVEXCOMPONENT_RIGHT_BUTTON: i32 = 0x02;
+pub const OH_NATIVEXCOMPONENT_MIDDLE_BUTTON: i32 = 0x04;
+
+#[repr(C)]
+pub struct OH_NativeXComponent_MouseEvent {
+    pub x: f32,
+    pub y: f32,
+    pub screenX: f32,
+    pub screenY: f32,
+    pub timestamp: i64,
+    pub action: i32,
+    pub button: i32,
+}
+
+#[repr(C)]
+pub struct OH_NativeXComponent_MouseEvent_Callback {
+    pub DispatchMouseEvent:
+        Option<unsafe extern "C" fn(component: *mut OH_NativeXComponent, window: *mut c_void)>,
+    pub DispatchHoverEvent:
+        Option<unsafe extern "C" fn(component: *mut OH_NativeXComponent, isHover: bool)>,
 }

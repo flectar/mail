@@ -169,6 +169,29 @@ impl OhosPlatform {
                     w.dispatch_scroll(x, y, delta_x, delta_y);
                 }
             }
+            BackendEvent::ColorScheme(dark) => {
+                if let Some(w) = self.window.borrow().as_ref() {
+                    let scheme = if dark {
+                        i_slint_core::items::ColorScheme::Dark
+                    } else {
+                        i_slint_core::items::ColorScheme::Light
+                    };
+                    i_slint_core::window::WindowInner::from_pub(w.window())
+                        .context()
+                        .set_color_scheme(scheme);
+                    w.request_redraw();
+                }
+            }
+            BackendEvent::Mouse {
+                x,
+                y,
+                action,
+                button,
+            } => {
+                if let Some(w) = self.window.borrow().as_ref() {
+                    w.dispatch_mouse(x, y, action, button);
+                }
+            }
             BackendEvent::Key { text, down, repeat } => {
                 if let Some(w) = self.window.borrow().as_ref() {
                     w.dispatch_key(text, down, repeat);

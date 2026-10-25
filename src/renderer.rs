@@ -1658,6 +1658,33 @@ fn create_email_font_ctx_with_system_fonts(system_fonts: bool) -> parley::FontCo
                 .collection
                 .set_fallbacks(key, fallbacks.into_iter());
         }
+
+        // The same empty-Fontconfig problem affects every non-Latin script in
+        // mail content, not only Han. Give fontique the system families for
+        // the other scripts as well; the platform directory is the only source
+        // of these faces on OHOS.
+        const FALLBACK_SCRIPTS: [&[u8; 4]; 25] = [
+            b"Arab", b"Hebr", b"Thai", b"Laoo", b"Khmr", b"Mymr", b"Tibt", b"Deva",
+            b"Beng", b"Guru", b"Gujr", b"Orya", b"Taml", b"Telu", b"Knda", b"Mlym",
+            b"Sinh", b"Ethi", b"Armn", b"Geor", b"Cyrl", b"Grek", b"Hang", b"Hira",
+            b"Kana",
+        ];
+        let all_families: Vec<_> = names
+            .iter()
+            .filter_map(|name| font_ctx.collection.family_id(name))
+            .collect();
+        for script in FALLBACK_SCRIPTS {
+            let key = FallbackKey::new(Script::from_bytes(*script), None);
+            let mut fallbacks: Vec<_> = font_ctx.collection.fallback_families(key).collect();
+            for family in &all_families {
+                if !fallbacks.contains(family) {
+                    fallbacks.push(*family);
+                }
+            }
+            font_ctx
+                .collection
+                .set_fallbacks(key, fallbacks.into_iter());
+        }
     }
 
     // Keep the host's preferred sans-serif families, then use the font that is

@@ -66,6 +66,38 @@ pub fn register_system_fonts() -> usize {
         }
     }
 
+    // Fontconfig is unavailable on OHOS, so fontique starts with an empty
+    // fallback table. Every script that is not Latin must be given the system
+    // families explicitly; otherwise only Han text would fall back and Arabic,
+    // Hebrew, Thai, Indic, Cyrillic, Greek, Armenian, Georgian, Hangul and
+    // Japanese would render as tofu.
+    const FALLBACK_SCRIPTS: [&[u8; 4]; 25] = [
+        b"Arab", b"Hebr", b"Thai", b"Laoo", b"Khmr", b"Mymr", b"Tibt", b"Deva", b"Beng", b"Guru",
+        b"Gujr", b"Orya", b"Taml", b"Telu", b"Knda", b"Mlym", b"Sinh", b"Ethi", b"Armn", b"Geor",
+        b"Cyrl", b"Grek", b"Hang", b"Hira", b"Kana",
+    ];
+    let all_names: Vec<String> = collection
+        .family_names()
+        .map(|name| name.to_string())
+        .collect();
+    let all_families: Vec<_> = all_names
+        .iter()
+        .filter_map(|name| collection.family_id(name))
+        .collect();
+    if !all_families.is_empty() {
+        for script in FALLBACK_SCRIPTS {
+            collection.append_fallbacks(
+                FallbackKey::new(Script::from_bytes(*script), None),
+                all_families.iter().copied(),
+            );
+        }
+        crate::log::info(&format!(
+            "fonts: {} families registered for {} non-Latin script fallbacks",
+            all_families.len(),
+            FALLBACK_SCRIPTS.len()
+        ));
+    }
+
     if han_families.is_empty() {
         return 0;
     }

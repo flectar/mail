@@ -188,6 +188,14 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
                 &b"imeFunction\0"[..],
                 bridge::ime_function as ffi::napi_callback,
             ),
+            (
+                &b"setColorScheme\0"[..],
+                bridge::set_color_scheme as ffi::napi_callback,
+            ),
+            (
+                &b"suspendPreview\0"[..],
+                bridge::suspend_preview as ffi::napi_callback,
+            ),
         ] {
             let mut function: napi_value = core::ptr::null_mut();
             let rc = ffi::napi_create_function(

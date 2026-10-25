@@ -37,6 +37,35 @@ pub enum TouchPhase {
     Cancel,
 }
 
+/// Mouse action mapped from the XComponent mouse callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseAction {
+    Press,
+    Release,
+    Move,
+    Cancel,
+}
+
+/// Mouse button mapped to Slint's pointer button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Other,
+}
+
+impl From<MouseButton> for slint::platform::PointerEventButton {
+    fn from(button: MouseButton) -> Self {
+        match button {
+            MouseButton::Left => Self::Left,
+            MouseButton::Right => Self::Right,
+            MouseButton::Middle => Self::Middle,
+            MouseButton::Other => Self::Other,
+        }
+    }
+}
+
 /// Event delivered from the OHOS main thread (or a Slint proxy) to the Slint
 /// application thread.
 pub enum BackendEvent {
@@ -65,6 +94,15 @@ pub enum BackendEvent {
         y: f32,
         delta_x: f32,
         delta_y: f32,
+    },
+    /// The system color scheme changed (dark = true).
+    ColorScheme(bool),
+    /// A mouse event in physical surface coordinates.
+    Mouse {
+        x: f32,
+        y: f32,
+        action: MouseAction,
+        button: MouseButton,
     },
     /// A keyboard event translated to Slint's key-text representation.
     Key {
@@ -110,6 +148,16 @@ impl core::fmt::Debug for BackendEvent {
             }
             // The translated text is deliberately omitted: it may contain
             // characters typed into password fields.
+            BackendEvent::ColorScheme(dark) => write!(f, "ColorScheme({dark})"),
+            BackendEvent::Mouse {
+                x,
+                y,
+                action,
+                button,
+            } => write!(
+                f,
+                "Mouse {{ x: {x}, y: {y}, action: {action:?}, button: {button:?} }}"
+            ),
             BackendEvent::Key { down, repeat, .. } => {
                 write!(f, "Key {{ down: {down}, repeat: {repeat} }}")
             }

@@ -126,7 +126,7 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
         );
         if rc != ffi::NAPI_OK || argc < 1 {
             slint_ohos_backend::ohos_error!("mail: submitBridgeResult: bad arguments (rc={rc})");
-            return undefined(env);
+            return boolean(env, false);
         }
         let id = read_int64(env, argv[0]).unwrap_or(0);
         let path = if argc > 1 {
@@ -140,7 +140,7 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
             String::new()
         };
         let request = pending().lock().ok().and_then(|mut map| map.remove(&id));
-        match request {
+        let accepted = match request {
             Some(Pending { sender, .. }) => {
                 // Empty path + empty error means "the user cancelled".
                 let outcome = if !path.is_empty() || error.is_empty() {
@@ -148,14 +148,28 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
                 } else {
                     Err(error)
                 };
-                let _ = sender.send(outcome);
+                sender.send(outcome).is_ok()
             }
-            None => slint_ohos_backend::ohos_info!(
-                "mail: bridge result for an unknown request id (dropped)"
-            ),
-        }
-        undefined(env)
+            None => {
+                slint_ohos_backend::ohos_info!(
+                    "mail: bridge result for an unknown request id (dropped)"
+                );
+                false
+            }
+        };
+        // The page deletes a staged import when the request timed out or was
+        // cancelled before the result arrived; otherwise it would leak a copy
+        // in the cache directory.
+        boolean(env, accepted)
     }
+}
+
+/// Create a JS boolean return value for a NAPI callback.
+unsafe fn boolean(env: napi_env, value: bool) -> napi_value {
+    let mut result: napi_value = core::ptr::null_mut();
+    // SAFETY: NAPI call on the JS thread.
+    unsafe { ffi::napi_get_boolean(env, value, &mut result) };
+    result
 }
 
 /// Open `url` in the system browser. Callable from any thread.
@@ -318,6 +332,44 @@ pub(super) unsafe extern "C" fn ime_delete(
         slint_ohos_backend::ime::delete_left(count);
         undefined(env)
     }
+}
+
+/// `setColorScheme(dark)`: report the system light/dark preference.
+pub(super) unsafe extern "C" fn set_color_scheme(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live NAPI env/info; argv holds one boolean.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        if ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        ) == ffi::NAPI_OK
+            && argc >= 1
+        {
+            let mut dark = false;
+            if ffi::napi_get_value_bool(env, argv[0], &mut dark) == ffi::NAPI_OK {
+                slint_ohos_backend::set_color_scheme(dark);
+            }
+        }
+        undefined(env)
+    }
+}
+
+/// `suspendPreview()`: the app is leaving the foreground; release any preview
+/// resource the core keeps alive.
+pub(super) unsafe extern "C" fn suspend_preview(
+    env: napi_env,
+    _info: ffi::napi_callback_info,
+) -> napi_value {
+    flectar_mail::suspend_file_preview();
+    undefined(env)
 }
 
 /// `imeFunction(key)`: the action key of the soft keyboard was pressed.

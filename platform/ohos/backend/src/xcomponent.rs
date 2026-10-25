@@ -12,7 +12,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use crate::event::{BackendEvent, SendPtr, TouchPhase};
+use crate::event::{BackendEvent, MouseAction, MouseButton, SendPtr, TouchPhase};
 use crate::ffi;
 use crate::present::SurfaceGate;
 
@@ -121,6 +121,18 @@ pub unsafe fn register(component: *mut ffi::OH_NativeXComponent) -> i32 {
     let rc_key =
         unsafe { ffi::OH_NativeXComponent_RegisterKeyEventCallback(component, on_key_event) };
     crate::log::info(&format!("register XComponent key callback: rc={rc_key}"));
+    // Right-click and hover reach the native component only through this
+    // callback; without it Slint's ContextMenuArea never sees a right button.
+    let mouse_callbacks: &'static mut ffi::OH_NativeXComponent_MouseEvent_Callback =
+        Box::leak(Box::new(ffi::OH_NativeXComponent_MouseEvent_Callback {
+            DispatchMouseEvent: Some(dispatch_mouse_event),
+            DispatchHoverEvent: None,
+        }));
+    let rc_mouse =
+        unsafe { ffi::OH_NativeXComponent_RegisterMouseEventCallback(component, mouse_callbacks) };
+    crate::log::info(&format!(
+        "register XComponent mouse callback: rc={rc_mouse}"
+    ));
     // SAFETY: same live component; the callbacks have the required C signature.
     let rc_show =
         unsafe { ffi::OH_NativeXComponent_RegisterSurfaceShowCallback(component, on_surface_show) };
@@ -183,7 +195,18 @@ unsafe extern "C" fn on_surface_hide(
     if let Some(visible) = VISIBLE.get() {
         visible.store(false, Ordering::Relaxed);
     }
+    reset_modifiers();
     send(BackendEvent::SurfaceHidden);
+}
+
+/// Forget modifier and auto-repeat state when the window loses focus. A key-up
+/// delivered to another window would otherwise leave Shift/CapsLock stuck.
+fn reset_modifiers() {
+    KEY_SHIFT.store(false, Ordering::Relaxed);
+    KEY_CAPS_LOCK.store(false, Ordering::Relaxed);
+    if let Ok(mut keys) = keys_down().lock() {
+        keys.clear();
+    }
 }
 
 fn surface_event(component: *mut ffi::OH_NativeXComponent, window: *mut c_void) {
@@ -217,6 +240,7 @@ unsafe extern "C" fn on_surface_destroyed(
     let Some(gate) = GATE.get().cloned() else {
         return;
     };
+    reset_modifiers();
     let live = gate.begin_destroy();
     send(BackendEvent::SurfaceDestroyed);
     if live {
@@ -258,6 +282,39 @@ unsafe extern "C" fn dispatch_touch_event(
         x: touch.x,
         y: touch.y,
         phase,
+    });
+}
+
+unsafe extern "C" fn dispatch_mouse_event(
+    component: *mut ffi::OH_NativeXComponent,
+    window: *mut c_void,
+) {
+    if let Some(visible) = VISIBLE.get() {
+        visible.store(true, Ordering::Relaxed);
+    }
+    let mut mouse: ffi::OH_NativeXComponent_MouseEvent = unsafe { core::mem::zeroed() };
+    let rc = unsafe { ffi::OH_NativeXComponent_GetMouseEvent(component, window, &mut mouse) };
+    if rc != 0 {
+        return;
+    }
+    let action = match mouse.action {
+        ffi::OH_NATIVEXCOMPONENT_MOUSE_PRESS => MouseAction::Press,
+        ffi::OH_NATIVEXCOMPONENT_MOUSE_RELEASE => MouseAction::Release,
+        ffi::OH_NATIVEXCOMPONENT_MOUSE_MOVE => MouseAction::Move,
+        ffi::OH_NATIVEXCOMPONENT_MOUSE_CANCEL => MouseAction::Cancel,
+        _ => return,
+    };
+    let button = match mouse.button {
+        ffi::OH_NATIVEXCOMPONENT_LEFT_BUTTON => MouseButton::Left,
+        ffi::OH_NATIVEXCOMPONENT_RIGHT_BUTTON => MouseButton::Right,
+        ffi::OH_NATIVEXCOMPONENT_MIDDLE_BUTTON => MouseButton::Middle,
+        _ => MouseButton::Other,
+    };
+    send(BackendEvent::Mouse {
+        x: mouse.x,
+        y: mouse.y,
+        action,
+        button,
     });
 }
 

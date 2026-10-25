@@ -18,7 +18,7 @@ use slint::{LogicalPosition, PhysicalSize, Window, WindowSize};
 // internal `WindowAdapterInternal` hook).
 use i_slint_core::renderer::RendererSealed;
 
-use crate::event::{BackendEvent, TouchPhase};
+use crate::event::{BackendEvent, MouseAction, MouseButton, TouchPhase};
 use crate::gpu::GpuRenderer;
 use crate::present::PresentOutcome;
 
@@ -243,6 +243,29 @@ impl OhosWindow {
             // The system took the gesture over: end it without activating
             // whatever it started on.
             TouchPhase::Cancel => WindowEvent::PointerExited,
+        };
+        let _ = self.window.dispatch_event_with_result(event);
+    }
+
+    /// Translate one mouse event into Slint pointer events. Right-button
+    /// press/release is what `ContextMenuArea` listens for.
+    pub fn dispatch_mouse(&self, x: f32, y: f32, action: MouseAction, button: MouseButton) {
+        let scale = {
+            let factor = self.window.scale_factor();
+            if factor > 0.0 { factor } else { 1.0 }
+        };
+        let position = LogicalPosition::new(x / scale, y / scale);
+        let event = match action {
+            MouseAction::Press => WindowEvent::PointerPressed {
+                position,
+                button: button.into(),
+            },
+            MouseAction::Release => WindowEvent::PointerReleased {
+                position,
+                button: button.into(),
+            },
+            MouseAction::Move => WindowEvent::PointerMoved { position },
+            MouseAction::Cancel => WindowEvent::PointerExited,
         };
         let _ = self.window.dispatch_event_with_result(event);
     }
