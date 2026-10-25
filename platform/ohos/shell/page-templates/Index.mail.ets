@@ -12,7 +12,8 @@ interface FlectarBridge {
   openUrl: (url: string) => void;
   pickOpen: (requestId: number) => void;
   pickSave: (requestId: number, sourcePath: string, suggestedName: string) => void;
-  showIme: () => void;
+  showIme: (password: boolean) => void;
+  imeUpdateCursor: (left: number, top: number, width: number, height: number) => void;
   hideIme: () => void;
   requestPasteboard: () => void;
 }
@@ -31,6 +32,7 @@ interface FlectarNativeModule {
 struct Index {
   private nativeModule: FlectarNativeModule | undefined = undefined;
   private imeAttached: boolean = false;
+  private imePassword: boolean | undefined = undefined;
   private pasteboardPermissionRequested: boolean = false;
   aboutToAppear(): void {
     this.probeResources();
@@ -44,11 +46,13 @@ struct Index {
       const controller = inputMethod.getController();
       controller.off('insertText');
       controller.off('deleteLeft');
+      controller.off('sendFunctionKey');
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'IME listener cleanup failed: %{public}s',
         (error as BusinessError).message);
     }
     this.imeAttached = false;
+    this.imePassword = undefined;
   }
 
   build(): void {
@@ -112,8 +116,11 @@ struct Index {
       pickSave: (requestId: number, sourcePath: string, suggestedName: string): void => {
         this.pickSave(requestId, sourcePath, suggestedName);
       },
-      showIme: (): void => {
-        this.showIme();
+      showIme: (password: boolean): void => {
+        this.showIme(password);
+      },
+      imeUpdateCursor: (left: number, top: number, width: number, height: number): void => {
+        this.imeUpdateCursor(left, top, width, height);
       },
       hideIme: (): void => {
         this.hideIme();
@@ -211,11 +218,13 @@ struct Index {
 
   // Slint enables the input method when an editable field gains focus. The
   // controller refuses event subscription until it is attached, so attach
-  // first and register the text callbacks once it succeeds.
-  private showIme(): void {
+  // first and register the text callbacks once it succeeds. A password field
+  // changes the keyboard type, which the controller only reads at attach
+  // time, so a type change detaches and attaches again.
+  private showIme(password: boolean): void {
     try {
       const controller = inputMethod.getController();
-      if (this.imeAttached) {
+      if (this.imeAttached && this.imePassword === password) {
         controller.showTextInput(inputMethod.RequestKeyboardReason.TOUCH)
           .catch((error: BusinessError): void => {
             hilog.error(0x0000, LOG_TAG, 'IME show failed: %{public}d %{public}s',
@@ -225,15 +234,30 @@ struct Index {
               // left the foreground. Clear the flag and attach again so the
               // keyboard can come up on the next focus.
               this.imeAttached = false;
-              this.showIme();
+              this.showIme(password);
             }
           });
         return;
       }
+      if (this.imeAttached) {
+        controller.detach().then((): void => {
+          this.imeAttached = false;
+          this.imePassword = undefined;
+          this.showIme(password);
+        }).catch((error: BusinessError): void => {
+          hilog.error(0x0000, LOG_TAG, 'IME detach failed: %{public}d %{public}s',
+            error.code, error.message);
+        });
+        return;
+      }
       const config: inputMethod.TextConfig = {
         inputAttribute: {
-          textInputType: inputMethod.TextInputType.TEXT,
-          enterKeyType: inputMethod.EnterKeyType.NEWLINE,
+          textInputType: password
+            ? inputMethod.TextInputType.VISIBLE_PASSWORD
+            : inputMethod.TextInputType.TEXT,
+          enterKeyType: password
+            ? inputMethod.EnterKeyType.DONE
+            : inputMethod.EnterKeyType.NEWLINE,
         },
       };
       // The touch reason asks the IME service to raise the soft keyboard even
@@ -241,15 +265,20 @@ struct Index {
       // suppress it).
       controller.attach(true, config, inputMethod.RequestKeyboardReason.TOUCH).then((): void => {
         this.imeAttached = true;
+        this.imePassword = password;
         // (Re-)register exactly one set of handlers: a stale registration from
         // an earlier attach (or a duplicate one) would double-insert text.
         controller.off('insertText');
         controller.off('deleteLeft');
+        controller.off('sendFunctionKey');
         controller.on('insertText', (text: string): void => {
           this.nativeModule?.imeCommit?.(text);
         });
         controller.on('deleteLeft', (length: number): void => {
           this.nativeModule?.imeDelete?.(length);
+        });
+        controller.on('sendFunctionKey', (functionKey: inputMethod.FunctionKey): void => {
+          this.nativeModule?.imeFunction?.(functionKey.enterKeyType);
         });
         hilog.info(0x0000, LOG_TAG, 'IME attached');
       }).catch((error: BusinessError): void => {
@@ -258,6 +287,28 @@ struct Index {
       });
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'IME setup failed: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  // Slint reports the caret rectangle while the field is focused. The system
+  // IME uses it to place the candidate window.
+  private imeUpdateCursor(left: number, top: number, width: number, height: number): void {
+    if (!this.imeAttached) {
+      return;
+    }
+    try {
+      const ui = this.getUIContext();
+      inputMethod.getController().updateCursor({
+        left: ui.vp2px(left),
+        top: ui.vp2px(top),
+        width: ui.vp2px(width),
+        height: ui.vp2px(height),
+      }).catch((error: BusinessError): void => {
+        hilog.error(0x0000, LOG_TAG, 'IME cursor update failed: %{public}d', error.code);
+      });
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'IME cursor update failed: %{public}s',
         (error as BusinessError).message);
     }
   }

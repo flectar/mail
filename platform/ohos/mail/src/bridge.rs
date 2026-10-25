@@ -28,9 +28,8 @@ static PICK_OPEN: AtomicUsize = AtomicUsize::new(0);
 static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
+static IME_UPDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
-static OPEN_PRIVACY: AtomicUsize = AtomicUsize::new(0);
-static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -86,27 +85,20 @@ pub(super) unsafe extern "C" fn set_bridge(
         install_property(env, argv[0], b"openUrl\0", &OPEN_URL, call_open_url);
         install_property(env, argv[0], b"pickOpen\0", &PICK_OPEN, call_pick_open);
         install_property(env, argv[0], b"pickSave\0", &PICK_SAVE, call_pick_save);
-        install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_zero_arg);
+        install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_bool_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
+        install_property(
+            env,
+            argv[0],
+            b"imeUpdateCursor\0",
+            &IME_UPDATE_CURSOR,
+            call_cursor_update,
+        );
         install_property(
             env,
             argv[0],
             b"requestPasteboard\0",
             &REQUEST_PASTEBOARD,
-            call_zero_arg,
-        );
-        install_property(
-            env,
-            argv[0],
-            b"openPrivacyPolicy\0",
-            &OPEN_PRIVACY,
-            call_privacy,
-        );
-        install_property(
-            env,
-            argv[0],
-            b"withdrawPrivacyConsent\0",
-            &WITHDRAW_PRIVACY,
             call_zero_arg,
         );
         undefined(env)
@@ -168,23 +160,6 @@ pub(super) unsafe extern "C" fn submit_bridge_result(
 
 /// Open `url` in the system browser. Callable from any thread.
 pub(super) fn open_url(url: &str) -> Result<(), String> {
-    // The privacy policy ships as a local page until the website edition
-    // covers the application-specific disclosures; keep the URL in the shared
-    // UI so other hosts open the published policy. The shared UI appends the
-    // configured language as `?lang=`.
-    const PRIVACY_PREFIX: &str = "https://flectar.com/legal/privacy/";
-    if url.starts_with(PRIVACY_PREFIX) {
-        if url.contains("consent=withdraw") {
-            return call_closure(&WITHDRAW_PRIVACY, "withdrawPrivacyConsent", ());
-        }
-        let language = url
-            .split_once("?lang=")
-            .map(|(_, rest)| rest.split('&').next().unwrap_or(""))
-            .filter(|value| !value.is_empty())
-            .unwrap_or("system")
-            .to_owned();
-        return call_closure(&OPEN_PRIVACY, "openPrivacyPolicy", language);
-    }
     let url = CString::new(url).map_err(|_| "authorization address is malformed".to_owned())?;
     call_closure(&OPEN_URL, "openUrl", url)
 }
@@ -234,6 +209,14 @@ pub(super) async fn pick_save(
     Ok((!path.is_empty()).then_some(path))
 }
 
+/// Arguments of one `imeUpdateCursor` call.
+struct CursorUpdate {
+    left: f32,
+    top: f32,
+    width: f32,
+    height: f32,
+}
+
 /// Arguments of one `pickSave` call, boxed into the thread-safe-function data.
 struct SaveRequest {
     id: i64,
@@ -252,13 +235,27 @@ async fn await_result(
 }
 
 /// Raise the system keyboard through the ArkTS hook. Callable from any thread.
-pub(super) fn show_ime() {
-    let _ = call_closure(&SHOW_IME, "showIme", ());
+pub(super) fn show_ime(password: bool) {
+    let _ = call_closure(&SHOW_IME, "showIme", password);
 }
 
 /// Lower the system keyboard through the ArkTS hook.
 pub(super) fn hide_ime() {
     let _ = call_closure(&HIDE_IME, "hideIme", ());
+}
+
+/// Forward the caret rectangle to the ArkTS input-method controller.
+pub(super) fn update_cursor(left: f32, top: f32, width: f32, height: f32) {
+    let _ = call_closure(
+        &IME_UPDATE_CURSOR,
+        "imeUpdateCursor",
+        CursorUpdate {
+            left,
+            top,
+            width,
+            height,
+        },
+    );
 }
 
 /// Ask the page to request the pasteboard permission (called from the
@@ -341,10 +338,10 @@ pub(super) unsafe extern "C" fn ime_function(
             core::ptr::null_mut(),
         );
         if rc == ffi::NAPI_OK && argc >= 1 {
-            // FunctionKey.ENTER is 1 in the OHOS input-method enums.
-            if read_int64(env, argv[0]).unwrap_or(0) == 1 {
-                slint_ohos_backend::ime::function_key_enter();
-            }
+            // `sendFunctionKey` fires only for the keyboard's action key. The
+            // reported EnterKeyType varies by keyboard and field, so any of
+            // them means "activate": send Return.
+            slint_ohos_backend::ime::function_key_enter();
         }
         undefined(env)
     }
@@ -493,7 +490,54 @@ unsafe extern "C" fn call_pick_save(
     }
 }
 
-/// JS-thread half of [`show_ime`] and [`hide_ime`] (zero arguments).
+/// JS-thread half of [`show_ime`] (one boolean: password field).
+unsafe extern "C" fn call_bool_arg(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `bool` payload boxed by `call_closure`; this
+    // callback owns it.
+    let password = unsafe { Box::from_raw(data.cast::<bool>()) };
+    let mut value: napi_value = core::ptr::null_mut();
+    // SAFETY: NAPI call on the JS thread with a live boolean payload.
+    let rc = unsafe { ffi::napi_get_boolean(env, *password, &mut value) };
+    if rc == ffi::NAPI_OK {
+        // SAFETY: NAPI call on the JS thread with live handles.
+        unsafe { call_with_args(env, js_callback, &[value], "showIme") };
+    }
+}
+
+/// JS-thread half of [`update_cursor`] (four doubles).
+unsafe extern "C" fn call_cursor_update(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `CursorUpdate` payload boxed by `call_closure`;
+    // this callback owns it.
+    let update = unsafe { Box::from_raw(data.cast::<CursorUpdate>()) };
+    let mut args: [napi_value; 4] = [core::ptr::null_mut(); 4];
+    let values = [
+        update.left as f64,
+        update.top as f64,
+        update.width as f64,
+        update.height as f64,
+    ];
+    for (index, value) in values.into_iter().enumerate() {
+        // SAFETY: NAPI call on the JS thread; `args` outlives the call.
+        let rc = unsafe { ffi::napi_create_double(env, value, &mut args[index]) };
+        if rc != ffi::NAPI_OK {
+            return;
+        }
+    }
+    // SAFETY: NAPI call on the JS thread with live handles.
+    unsafe { call_with_args(env, js_callback, &args, "imeUpdateCursor") };
+}
+
+/// JS-thread half of [`hide_ime`] and [`request_pasteboard`] (zero arguments).
 unsafe extern "C" fn call_zero_arg(
     env: napi_env,
     js_callback: napi_value,
@@ -505,26 +549,6 @@ unsafe extern "C" fn call_zero_arg(
     let _payload = unsafe { Box::from_raw(data.cast::<()>()) };
     // SAFETY: NAPI call on the JS thread.
     unsafe { call_with_args(env, js_callback, &[], "notice") };
-}
-
-/// JS-thread half of [`open_privacy_policy`] (one language argument).
-unsafe extern "C" fn call_privacy(
-    env: napi_env,
-    js_callback: napi_value,
-    _context: *mut c_void,
-    data: *mut c_void,
-) {
-    // SAFETY: `data` is the `String` boxed by `call_closure`; this callback
-    // owns it.
-    let language = unsafe { Box::from_raw(data.cast::<String>()) };
-    // SAFETY: NAPI calls on the JS thread with live handles; the string bytes
-    // outlive the call.
-    unsafe {
-        let Some(arg) = string_value(env, language.as_bytes()) else {
-            return;
-        };
-        call_with_args(env, js_callback, &[arg], "openPrivacyPolicy");
-    }
 }
 
 unsafe fn string_value(env: napi_env, bytes: &[u8]) -> Option<napi_value> {

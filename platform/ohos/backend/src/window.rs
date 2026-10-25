@@ -330,11 +330,20 @@ impl i_slint_core::window::WindowAdapterInternal for OhosWindow {
     /// Editable fields ask for the platform input method here; the IME module
     /// forwards enable/disable to the ArkTS hooks.
     fn input_method_request(&self, request: i_slint_core::window::InputMethodRequest) {
+        use i_slint_core::items::InputType;
         match request {
-            i_slint_core::window::InputMethodRequest::Enable(_) => crate::ime::request(true),
-            i_slint_core::window::InputMethodRequest::Disable => crate::ime::request(false),
-            // Cursor/selection updates: the system keyboard tracks its own
-            // caret through the controller, nothing to forward yet.
+            i_slint_core::window::InputMethodRequest::Enable(properties) => {
+                crate::ime::request(true, matches!(properties.input_type, InputType::Password))
+            }
+            i_slint_core::window::InputMethodRequest::Update(properties) => {
+                crate::ime::update_cursor(
+                    properties.cursor_rect_origin.x,
+                    properties.cursor_rect_origin.y,
+                    properties.cursor_rect_size.width,
+                    properties.cursor_rect_size.height,
+                )
+            }
+            i_slint_core::window::InputMethodRequest::Disable => crate::ime::request(false, false),
             _ => {}
         }
     }

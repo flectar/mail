@@ -110,6 +110,8 @@ unsafe extern "C" {
     ) -> napi_status;
     pub fn napi_get_undefined(env: napi_env, result: *mut napi_value) -> napi_status;
     pub fn napi_create_int64(env: napi_env, value: i64, result: *mut napi_value) -> napi_status;
+    pub fn napi_get_boolean(env: napi_env, value: bool, result: *mut napi_value) -> napi_status;
+    pub fn napi_create_double(env: napi_env, value: f64, result: *mut napi_value) -> napi_status;
     pub fn napi_get_value_int64(env: napi_env, value: napi_value, result: *mut i64) -> napi_status;
     /// With `buf == NULL` and `bufsize == 0` the required length (excluding the
     /// NUL terminator) is written to `result`.
