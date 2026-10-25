@@ -52,6 +52,7 @@ host-provided service:
 | `credentials` | System keychain (`SystemCredentialStore`) | Implements `CredentialStore` with the platform keystore |
 | `oauth_redirects` | Loopback redirect broker | Implements `OAuthRedirectBroker` (app links, custom schemes) |
 | `external_urls` | System URL launcher | `ExternalUrlOpener::new` with the host's native URL bridge |
+| `notification_publisher` | Disabled by default | `NotificationPublisher::new` with a callback that formats and raises the host notification; it receives raw sender, subject and thread ids so the host translates the text and chooses the notification slot |
 
 Mobile hosts use `PlatformContext::app_private(data_root, cache_dir, documents,
 credentials, oauth_redirects)`, which keeps durable data below
