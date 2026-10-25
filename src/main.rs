@@ -6833,7 +6833,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.oauth_redirects.clone(),
         platform.external_urls.clone(),
     );
-    mail_setup::register(&app, &runtime, &platform.documents);
+    mail_setup::register(&app, &runtime);
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);
