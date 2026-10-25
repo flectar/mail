@@ -542,6 +542,7 @@ export global I18n {
         if (key == "Could not load account preferences: {}") { return @tr("Could not load account preferences: {}", argument); }
         if (key == "Your edited signature was preserved. Choose No signature to keep it as message text before inserting another.") { return @tr("Your edited signature was preserved. Choose No signature to keep it as message text before inserting another."); }
         if (key == "Certificate import failed: {}") { return @tr("Certificate import failed: {}", argument); }
+        if (key == "Paste the PEM certificate into the certificate field.") { return @tr("Paste the PEM certificate into the certificate field."); }
         if (key == "Testing IMAP and SMTP connections…") { return @tr("Testing IMAP and SMTP connections…"); }
         if (key == "Testing POP3 and SMTP connections…") { return @tr("Testing POP3 and SMTP connections…"); }
         return "";
@@ -2289,8 +2290,6 @@ export component AppWindow inherits Window {
         }
         cancel-oauth => { root.cancel_oauth(); }
         import-accounts => { root.import_accounts(); }
-        open-link(url) => { root.open_email_link(url); }
-        language-mode: root.language_mode;
     }
 
     // Keep the progressively painted shell inert until its callbacks have a

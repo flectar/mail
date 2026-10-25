@@ -161,21 +161,9 @@ handled (and asserted) in the script, do not "simplify" them away:
   in `backend/src/xcomponent.rs`, and wheel/touchpad axis events reach the
   same module through the XComponent UI input callback (Slint's flickables
   then scroll without any application-side change).
-- **Notifications**: the ability requests notification permission once the
-  page has loaded (asking earlier is rejected by the system), and new mail
-  from the sync engine is published through `@kit.NotificationKit` when the
-  in-app notifications setting is on. A refusal is final at the system level;
-  the user can re-enable notifications in the system settings.
-- **Privacy**: the first launch shows a consent screen before the native module
-  (and therefore any account or mail processing) starts; Settings -> About can
-  withdraw the consent, which clears the stored choice and stops the app. The
-  policy ships in `shell/entry/src/main/resources/rawfile/privacy.html` with
-  Simplified Chinese, English, Spanish, Turkish and Russian sections selected
-  by the configured language (the selector mirrors Settings -> General);
-  English also carries the official Flectar text. It is reachable from the
-  onboarding screen and Settings -> About. The host opens this bundled page
-  when the shared UI asks for `https://flectar.com/legal/privacy/`; drop that
-  interception once the website covers the application-specific disclosures.
+- **Privacy**: Flectar publishes the app-specific policy at
+  `https://flectar.com/mail/privacy/`; the in-app link and consent flow are
+  tracked separately from this port.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
@@ -210,7 +198,7 @@ HarmonyOS 7.0.0.111 (API 26), 2-in-1 (HUAWEI MateBook Pro):
 - CJK glyphs in mail bodies (Blitz/Parley) and the compose editor.
 - Compose attachments, account-backup export, database-snapshot export and
   certificate import through the system pickers.
-- External links, system notifications, wheel/touchpad scrolling, Asset Store
+- External links, wheel/touchpad scrolling, Asset Store
   credentials including recovery from a stale row after reinstalling, and PDF
   attachment preview through the bundled PDFium.
 - Fresh install signed with the AGC release and debug profiles under the AGC

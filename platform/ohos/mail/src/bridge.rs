@@ -28,7 +28,6 @@ static PICK_OPEN: AtomicUsize = AtomicUsize::new(0);
 static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
-static NOTIFY: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 static OPEN_PRIVACY: AtomicUsize = AtomicUsize::new(0);
 static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
@@ -89,7 +88,6 @@ pub(super) unsafe extern "C" fn set_bridge(
         install_property(env, argv[0], b"pickSave\0", &PICK_SAVE, call_pick_save);
         install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_zero_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
-        install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
         install_property(
             env,
             argv[0],
@@ -267,21 +265,6 @@ pub(super) fn hide_ime() {
 /// clipboard fallback on a denied read).
 pub(super) fn request_pasteboard() {
     let _ = call_closure(&REQUEST_PASTEBOARD, "requestPasteboard", ());
-}
-
-/// Publish a system notification through the ArkTS hook.
-pub(super) fn notify(title: &str, body: &str) {
-    let request = NotifyRequest {
-        title: title.to_owned(),
-        body: body.to_owned(),
-    };
-    let _ = call_closure(&NOTIFY, "notify", request);
-}
-
-/// Arguments of one `notify` call.
-struct NotifyRequest {
-    title: String,
-    body: String,
 }
 
 /// `imeCommit(text)`: committed text from the soft keyboard.
@@ -541,29 +524,6 @@ unsafe extern "C" fn call_privacy(
             return;
         };
         call_with_args(env, js_callback, &[arg], "openPrivacyPolicy");
-    }
-}
-
-/// JS-thread half of [`notify`].
-unsafe extern "C" fn call_notify(
-    env: napi_env,
-    js_callback: napi_value,
-    _context: *mut c_void,
-    data: *mut c_void,
-) {
-    // SAFETY: `data` is the `NotifyRequest` boxed in `notify`; this callback
-    // owns it.
-    let request = unsafe { Box::from_raw(data.cast::<NotifyRequest>()) };
-    // SAFETY: NAPI calls are made on the JS thread with live handles, and the
-    // argument strings outlive the call.
-    unsafe {
-        let (Some(title), Some(body)) = (
-            string_value(env, request.title.as_bytes()),
-            string_value(env, request.body.as_bytes()),
-        ) else {
-            return;
-        };
-        call_with_args(env, js_callback, &[title, body], "notify");
     }
 }
 

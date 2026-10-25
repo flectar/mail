@@ -2445,26 +2445,6 @@ export component SettingsDialog inherits Rectangle {
                                     padding-bottom: 0px;
                                     spacing: 0px;
                                     SettingsLinkRow {
-                                        text: @tr("Privacy policy");
-                                        description: @tr("How Flectar Mail handles your data");
-                                        icon: @image-url("../icons/lucide/outline/lock.svg");
-                                        accent: root.accent;
-                                        body-text: root.body-text;
-                                        muted-text: root.faint-text;
-                                        hover-background: root.accent-soft;
-                                        clicked => { root.open-link("https://flectar.com/legal/privacy/?lang=" + root.language_mode); }
-                                    }
-                                    SettingsLinkRow {
-                                        text: @tr("Withdraw privacy consent");
-                                        description: @tr("Closes the app and asks for consent again on the next start");
-                                        icon: @image-url("../icons/lucide/outline/undo.svg");
-                                        accent: root.accent;
-                                        body-text: root.body-text;
-                                        muted-text: root.faint-text;
-                                        hover-background: root.accent-soft;
-                                        clicked => { root.open-link("https://flectar.com/legal/privacy/?consent=withdraw&lang=" + root.language_mode); }
-                                    }
-                                    SettingsLinkRow {
                                         text: @tr("Flectar");
                                         description: @tr("Company website");
                                         icon: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
