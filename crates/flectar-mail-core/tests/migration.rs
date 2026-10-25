@@ -409,6 +409,35 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
 }
 
 #[tokio::test]
+async fn another_gmail_spelling_imports_as_the_same_account() {
+    let (_directory, core) = core().await;
+    let inventory = accounts(migration::open(&fixture("k9-settings.k9s")).unwrap());
+    let gmail = migration::plan(&inventory, &[])
+        .into_iter()
+        .filter_map(|plan| plan.draft)
+        .find(|draft| draft.config.email == "jane.doe@gmail.com")
+        .unwrap();
+    let mut respelled = gmail.clone();
+    respelled.config.email = "JaneDoe@googlemail.com".into();
+    respelled.config.username = respelled.config.email.clone();
+
+    let report = core
+        .import_accounts(vec![gmail, respelled.clone()])
+        .await
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(
+        report.failed[0].error,
+        "the address appears twice in this import"
+    );
+
+    let again = core.import_accounts(vec![respelled]).await.unwrap();
+    assert!(again.imported.is_empty());
+    assert_eq!(again.already_present, ["JaneDoe@googlemail.com"]);
+}
+
+#[tokio::test]
 async fn one_invalid_draft_does_not_block_or_corrupt_the_others() {
     let (_directory, core) = core().await;
     let profile = thunderbird_profile();

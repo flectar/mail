@@ -29,7 +29,7 @@ impl DevelopmentFileCredentialStore {
 }
 
 fn entry(account_id: i64, slot: &Slot) -> Result<keyring::Entry> {
-    let user = format!("{account_id}:{}", slot.as_str());
+    let user = format!("{account_id}:{}", slot.key());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
 }
 
@@ -53,7 +53,7 @@ const GENERATION_CHUNK_MARKER: &str = "\u{0}flectar-mail-chunks:v2:";
 const MAX_CHUNKS: usize = 512;
 
 fn chunk_entry(account_id: i64, slot: &Slot, index: usize) -> Result<keyring::Entry> {
-    let user = format!("{account_id}:{}:c{index}", slot.as_str());
+    let user = format!("{account_id}:{}:c{index}", slot.key());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
 }
 
@@ -64,7 +64,7 @@ fn generation_chunk_entry(
     generation: u8,
     index: usize,
 ) -> Result<keyring::Entry> {
-    let user = format!("{account_id}:{}:g{generation}:c{index}", slot.as_str());
+    let user = format!("{account_id}:{}:g{generation}:c{index}", slot.key());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
 }
 
@@ -207,7 +207,7 @@ fn file_save(
 
 #[cfg(any(test, debug_assertions))]
 fn slot_key(account_id: i64, slot: &Slot) -> String {
-    format!("{account_id}:{}", slot.as_str())
+    format!("{account_id}:{}", slot.key())
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -280,7 +280,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
                 delete_generation_chunks_from(account_id, &slot, 1, 0),
             ] {
                 if let Err(error) = cleanup {
-                    tracing::warn!(slot = slot.as_str(), %error, "could not remove stale credential chunks");
+                    tracing::warn!(slot = %slot.key(), %error, "could not remove stale credential chunks");
                 }
             }
         }
@@ -319,7 +319,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
             delete_generation_chunks_from(account_id, &slot, target_generation ^ 1, 0),
         ] {
             if let Err(error) = cleanup {
-                tracing::warn!(slot = slot.as_str(), %error, "could not remove stale credential chunks");
+                tracing::warn!(slot = %slot.key(), %error, "could not remove stale credential chunks");
             }
         }
         // Other platforms compile a fallback after this block.
@@ -420,6 +420,8 @@ fn system_delete_all(account_id: i64) -> Result<()> {
         map.retain(|k, _| !k.starts_with(&format!("{account_id}:")));
         return file_save(&path, &map);
     }
+    // The keyring cannot list entries: connection passwords are deleted with
+    // their connections.
     for slot in [
         Slot::Password,
         Slot::RefreshToken,
@@ -428,7 +430,7 @@ fn system_delete_all(account_id: i64) -> Result<()> {
         Slot::OAuthClientSecret,
         Slot::OAuthBundle,
         Slot::AiApiKey,
-        Slot::CaldavPassword,
+        Slot::AccountCaldavPassword,
         Slot::CarddavPassword,
     ] {
         system_delete(account_id, slot)?;

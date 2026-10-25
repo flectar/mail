@@ -59,6 +59,9 @@ const EMAIL_USER_AGENT_STYLE: &str = r#"
   a:any-link { color: #0969da; cursor: pointer; }
   html, body { overflow-wrap: break-word; word-break: normal; }
   table { max-width: 100%; }
+  /* Senders often put plain text in <pre>, one paragraph per line. Wrap it
+     like the plain text view does; authored white-space still wins. */
+  pre, listing, xmp, plaintext { white-space: pre-wrap; }
   /* Beta.3 follows natural replaced-element sizing. Keep large images fitted
      by default; authored max-width rules still override this reader default. */
   img { max-width: 100%; }

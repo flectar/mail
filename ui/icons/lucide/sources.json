@@ -304,13 +304,41 @@
       "path": "sources/file.svg",
       "sha256": "02a09f1fc37c6d183319a030c70a444e1e7e5079e0f56e43e6e68a597fadbfe4"
     },
+    "file-archive": {
+      "path": "sources/file-archive.svg",
+      "sha256": "1fab2f77fa3e76ccc6ad4946f22edc077c205c7ca9cb890d6e9b23e4ea8f89fb"
+    },
+    "file-code": {
+      "path": "sources/file-code.svg",
+      "sha256": "364283b5a9787049e53ec6f52c893c428e486c0c2bae05d3a1128cd62213340b"
+    },
+    "file-image": {
+      "path": "sources/file-image.svg",
+      "sha256": "c571922b935bee77d6dba637ebeeb7bfc56699328b2d321637fa91bf5bb62980"
+    },
+    "file-music": {
+      "path": "sources/file-music.svg",
+      "sha256": "b5d1d8dde0b8b1387dc1f5549fc200a298331b2ed63c66ae414e89bb4173d5b4"
+    },
     "file-pen-line": {
       "path": "sources/file-pen-line.svg",
       "sha256": "5f83ca3589ee4b6c6ee2246312c1c072f669d191e9b63a52919a6cece48a9c0d"
     },
+    "file-play": {
+      "path": "sources/file-play.svg",
+      "sha256": "f4038fb089839485a1f1061bec80203fd3b6eb43b9cd0cb38cbd2f5506a9284e"
+    },
     "file-plus-2": {
       "path": "sources/file-plus-2.svg",
       "sha256": "6d197e35fd8100d90fd8b3d3ce98f1150f64f5f815eb794167344514f75a86ef"
+    },
+    "file-spreadsheet": {
+      "path": "sources/file-spreadsheet.svg",
+      "sha256": "123d66a08ecdee41bf8d105a3dca8a3c03413aa7876a6c360da5609cbfa62695"
+    },
+    "file-text": {
+      "path": "sources/file-text.svg",
+      "sha256": "829ab7c924368e95a4aae152f89da49dde06ec209f4d598810c92c6908f87be8"
     },
     "files": {
       "path": "sources/files.svg",
@@ -355,6 +383,10 @@
     "italic": {
       "path": "sources/italic.svg",
       "sha256": "25daf3c57cb5b993152059e8b333428a0c1386dbfd4b9b788c5b40108583985f"
+    },
+    "key-round": {
+      "path": "sources/key-round.svg",
+      "sha256": "aa5d5e11cc8c692832ec03c72172f3f1bd48a259450fef2aff0a2db2733468d3"
     },
     "keyboard": {
       "path": "sources/keyboard.svg",

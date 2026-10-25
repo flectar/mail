@@ -9,7 +9,7 @@ use super::model::{
     AccountCandidate, IdentityCandidate, ImportInventory, ServerCandidate, ServerProtocol,
     SignatureCandidate, SourceAuth, SourceRetention, SourceSecurity,
 };
-use crate::accounts::providers;
+use crate::accounts::{mailbox_key, providers};
 use crate::models::{
     AccountSettings, AuthKind, ConnectionSecurity, KeepOnServer, MailConnectionSettings,
     MailProtocol, PortableAccountConfig, Provider,
@@ -251,11 +251,12 @@ impl FindingCode {
 }
 
 /// Plans every account in `inventory`. `existing_emails` are the addresses
-/// Flectar already has; matching accounts are reported, never changed.
+/// Flectar already has; accounts for the same mailbox, in any spelling, are
+/// reported, never changed.
 pub fn plan(inventory: &ImportInventory, existing_emails: &[String]) -> Vec<AccountPlan> {
     let existing = existing_emails
         .iter()
-        .map(|email| email.trim().to_ascii_lowercase())
+        .map(|email| mailbox_key(email))
         .collect::<HashSet<_>>();
     let mut seen = HashSet::new();
     inventory
@@ -289,12 +290,12 @@ fn plan_account(
     // (an old Exchange setup) never hides a later account for the same
     // mailbox.
     let blocked = blocking_count(&findings) > 0;
-    if !blocked && !email.is_empty() && !seen.insert(email.to_ascii_lowercase()) {
+    if !blocked && !email.is_empty() && !seen.insert(mailbox_key(&email)) {
         findings.push(Finding::new(FindingCode::DuplicateInSource, email.clone()));
     }
 
     let blocked = blocking_count(&findings) > 0;
-    let already_added = !email.is_empty() && existing.contains(&email.to_ascii_lowercase());
+    let already_added = !email.is_empty() && existing.contains(&mailbox_key(&email));
     let sign_in = mapping.as_ref().map_or(SignIn::Password, |mapping| {
         SignIn::for_provider(mapping.provider)
     });
@@ -702,16 +703,21 @@ fn draft(
         });
 
     // Every other source identity becomes a sender identity. The account
-    // address itself is the provider-owned primary identity.
+    // address itself is the provider-owned primary identity, in any spelling
+    // Gmail gives the same mailbox.
+    let identity_key = |email: &str| match mapping.provider {
+        Provider::Gmail => mailbox_key(email),
+        Provider::Microsoft | Provider::Generic => email.to_ascii_lowercase(),
+    };
     let mut aliases = Vec::new();
     let mut skipped = 0usize;
-    let mut seen = HashSet::from([mapping.email.to_ascii_lowercase()]);
+    let mut seen = HashSet::from([identity_key(&mapping.email)]);
     for identity in &candidate.identities {
         let Some(email) = sender_address(&identity.email) else {
             skipped += 1;
             continue;
         };
-        if !seen.insert(email.to_ascii_lowercase()) {
+        if !seen.insert(identity_key(&email)) {
             continue;
         }
         // Flectar sends every identity through the account's one outgoing
@@ -1145,6 +1151,47 @@ mod tests {
         assert_eq!(codes(&plans[1]), [FindingCode::DuplicateInSource]);
         assert_eq!(plans[2].status, PlanStatus::AlreadyAdded);
         assert!(plans[2].draft.is_none());
+    }
+
+    #[test]
+    fn gmail_spellings_of_one_mailbox_are_one_account() {
+        let google = |login: &str| {
+            let mut account = candidate(login);
+            let incoming = account.incoming.as_mut().unwrap();
+            incoming.host = "imap.gmail.com".into();
+            incoming.auth = SourceAuth::OAuth2;
+            incoming.username = login.into();
+            account.outgoing.as_mut().unwrap().host = "smtp.gmail.com".into();
+            account
+        };
+        let plans = plan_all(
+            vec![
+                google("johndoe@gmail.com"),
+                google("John.Doe@googlemail.com"),
+                google("jane.doe@gmail.com"),
+                google("jane.doe@workspace.example"),
+                google("janedoe@workspace.example"),
+            ],
+            &["JaneDoe@gmail.com".into()],
+        );
+        assert_eq!(
+            plans.iter().map(|plan| plan.status).collect::<Vec<_>>(),
+            [
+                PlanStatus::Ready,
+                PlanStatus::Unsupported,
+                PlanStatus::AlreadyAdded,
+                // Workspace addresses keep their dots.
+                PlanStatus::Ready,
+                PlanStatus::Ready,
+            ]
+        );
+        assert_eq!(codes(&plans[1]), [FindingCode::DuplicateInSource]);
+
+        // The source's identity in Google's spelling is the account's own
+        // address, not a send-as address that Gmail manages.
+        let mut account = google("johndoe@gmail.com");
+        account.identities[0].email = "John.Doe@gmail.com".into();
+        assert_eq!(codes(&plan_one(account)), []);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 //! Persists reviewed account drafts.
 
 use super::plan::{AccountDraft, SignIn};
+use crate::accounts::mailbox_key;
 use crate::db::repo;
 use crate::error::{CoreError, Result};
 use crate::models::{Settings, Signature, SignatureDefaults};
@@ -61,7 +62,7 @@ impl Core {
         for draft in drafts {
             let checked_draft = check(draft).and_then(|draft| {
                 let email = draft.draft.config.email.trim();
-                if batch.insert(email.to_ascii_lowercase()) {
+                if batch.insert(mailbox_key(email)) {
                     Ok(draft)
                 } else {
                     Err((
@@ -85,7 +86,7 @@ impl Core {
                 let mut settings = repo::settings::get(&transaction)?;
                 for account in checked {
                     let email = account.draft.config.email.trim().to_owned();
-                    if repo::accounts::find_by_email(&transaction, &email)?.is_some() {
+                    if repo::accounts::find_by_mailbox(&transaction, &email)?.is_some() {
                         report.already_present.push(email);
                         continue;
                     }

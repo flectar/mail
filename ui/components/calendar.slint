@@ -348,7 +348,7 @@ export component FunctionalCalendarSidebar inherits CollapsibleWorkspaceSidebar 
                 x: 14px;
                 width: parent.width - 28px;
                 height: parent.height;
-                text: @tr("No provider calendars yet. Connect Google Calendar or Outlook in Settings.");
+                text: @tr("No calendars yet. Connect Google Calendar, Outlook or any CalDAV server in Settings.");
                 color: root.muted-color;
                 font-size: TypeScale.secondary;
                 wrap: word-wrap;
@@ -745,6 +745,8 @@ export component FunctionalCalendarView inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.month-title;
+            // Line the month up with the view switcher below.
+            leading-inset: 16px;
             background-color: root.surface-color;
             IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-left.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous month"); accessible-id: "calendar-previous-month"; clicked => { root.navigate(root.view-mode == "agenda" ? "period" : "month", -1); } }
             IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-right.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next month"); accessible-id: "calendar-next-month"; clicked => { root.navigate(root.view-mode == "agenda" ? "period" : "month", 1); } }

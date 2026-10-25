@@ -70,6 +70,11 @@ pub(crate) struct WarmStartMessage {
     #[serde(default)]
     pub(crate) labels: Vec<i64>,
     pub(crate) sender_verification: String,
+    #[serde(default)]
+    pub(crate) account_uses_labels: bool,
+    // Verification codes come from message bodies, which stay out of this
+    // file, and file chips act on attachment ids that a stored body can
+    // replace; the list shows both once the mail store answers.
 }
 
 impl From<&mail::MailMessage> for WarmStartMessage {
@@ -95,6 +100,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             has_replied: message.has_replied,
             labels: message.labels.clone(),
             sender_verification: message.sender_verification.clone(),
+            account_uses_labels: message.account_uses_labels,
         }
     }
 }
@@ -128,6 +134,10 @@ impl From<WarmStartMessage> for mail::MailMessage {
             attachments: Vec::new(),
             body_pending: true,
             sender_verification: message.sender_verification,
+            verification_code: None,
+            account_uses_labels: message.account_uses_labels,
+            first_attachment: None,
+            attachment_total: 0,
         }
     }
 }
@@ -1141,6 +1151,16 @@ mod warm_start_tests {
             attachments: Vec::new(),
             body_pending: false,
             sender_verification: "domain".into(),
+            verification_code: Some("48291375".into()),
+            account_uses_labels: true,
+            first_attachment: Some(flectar_mail_core::models::AttachmentMeta {
+                id: 3,
+                filename: Some("cached-file-name.pdf".into()),
+                mime_type: Some("application/pdf".into()),
+                size: Some(42),
+                is_inline: false,
+            }),
+            attachment_total: 1,
         }
     }
 
@@ -1192,6 +1212,8 @@ mod warm_start_tests {
         let json = String::from_utf8(bytes).unwrap();
         assert!(!json.contains("body must not enter"));
         assert!(!json.contains("secret-recipient"));
+        assert!(!json.contains("48291375"));
+        assert!(!json.contains("cached-file-name"));
 
         let restored = load_warm_start_snapshot(&path).await.unwrap();
         assert_eq!(restored.scope, PERSON_INBOX);
@@ -1202,6 +1224,8 @@ mod warm_start_tests {
         assert!(restored_message.has_replied);
         assert!(restored_message.html.is_none());
         assert!(restored_message.body_pending);
+        assert!(restored_message.verification_code.is_none());
+        assert!(restored_message.account_uses_labels);
     }
 
     #[tokio::test]

@@ -1763,6 +1763,7 @@ mod interaction_tests {
             .map(|id| calendar::LocalCalendarSource {
                 id,
                 account_id: 1,
+                provider: "generic",
                 name: format!("Calendar {id}"),
                 color: String::new(),
                 read_only: false,

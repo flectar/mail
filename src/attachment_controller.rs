@@ -2,7 +2,8 @@
 //! share bounded decoders/PDF workers; opening Mail never changes Files state.
 use crate::document_preview::{Preview, image_thumbnail, preview};
 use crate::{
-    AppWindow, EmailReader, InboxState, MailAttachment, MailAttachments, mail::MailMessage,
+    AppWindow, EmailReader, InboxState, ListAttachment, MailAttachment, MailAttachments,
+    mail::MailMessage,
 };
 use slint::{ComponentHandle, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::{
@@ -129,38 +130,207 @@ fn attachment_rows(
         .iter()
         .filter(|a| visible_attachment(a))
         .map(|a| {
-            let name = a
-                .filename
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .unwrap_or("attachment");
-            let media = a
-                .mime_type
-                .as_deref()
-                .unwrap_or("")
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            let previewable = media == "application/pdf"
-                || media.starts_with("image/")
-                || media.starts_with("text/")
-                || matches!(media.as_str(), "application/json" | "application/xml")
-                || name
-                    .as_bytes()
-                    .get(name.len().saturating_sub(4)..)
-                    .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"));
+            let name = file_name(a);
+            let media = media_type(a);
             MailAttachment {
                 id: a.id.to_string().into(),
                 name: name.into(),
+                previewable: previewable(name, &media),
+                kind: file_kind(name, &media).into(),
                 detail: media.into(),
-                previewable,
                 thumbnail: Default::default(),
                 has_thumbnail: false,
             }
         })
         .collect::<Vec<_>>()
+}
+
+/// A message-list row's file chip.
+pub(crate) fn list_attachment(
+    attachment: &flectar_mail_core::models::AttachmentMeta,
+) -> ListAttachment {
+    let name = file_name(attachment);
+    let media = media_type(attachment);
+    let (stem, extension) = split_extension(name);
+    ListAttachment {
+        id: attachment.id.to_string().into(),
+        stem: stem.into(),
+        extension: extension.into(),
+        kind: file_kind(name, &media).into(),
+        previewable: previewable(name, &media),
+    }
+}
+
+fn file_name(attachment: &flectar_mail_core::models::AttachmentMeta) -> &str {
+    attachment
+        .filename
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("attachment")
+}
+
+fn media_type(attachment: &flectar_mail_core::models::AttachmentMeta) -> String {
+    attachment
+        .mime_type
+        .as_deref()
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn previewable(name: &str, media: &str) -> bool {
+    media == "application/pdf"
+        || media.starts_with("image/")
+        || media.starts_with("text/")
+        || matches!(media, "application/json" | "application/xml")
+        || name
+            .as_bytes()
+            .get(name.len().saturating_sub(4)..)
+            .is_some_and(|suffix| suffix.eq_ignore_ascii_case(b".pdf"))
+}
+
+/// A name and its extension, such as "Report" and ".pdf". Only a short
+/// final suffix counts, so "version 1.2 final" has none.
+fn split_extension(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(dot)
+            if dot > 0
+                && (2..=6).contains(&(name.len() - dot))
+                && name[dot + 1..].chars().all(|c| c.is_ascii_alphanumeric()) =>
+        {
+            name.split_at(dot)
+        }
+        _ => (name, ""),
+    }
+}
+
+/// What a file is, by its type and otherwise its name: pdf, document,
+/// spreadsheet, presentation, image, video, audio, archive, code, calendar
+/// or file. It picks the file's icon.
+fn file_kind(name: &str, media: &str) -> &'static str {
+    let extension = split_extension(name)
+        .1
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    let is = |types: &[&str], extensions: &[&str], families: &[&str]| {
+        types.contains(&media)
+            || families.iter().any(|family| media.starts_with(family))
+            || extensions.contains(&extension.as_str())
+    };
+    if is(&["application/pdf"], &["pdf"], &[]) {
+        "pdf"
+    } else if is(
+        &[],
+        &[
+            "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp", "tif", "tiff", "svg",
+            "avif",
+        ],
+        &["image/"],
+    ) {
+        "image"
+    } else if is(
+        &[],
+        &[
+            "mp4", "mov", "m4v", "avi", "mkv", "webm", "wmv", "mpg", "mpeg", "3gp",
+        ],
+        &["video/"],
+    ) {
+        "video"
+    } else if is(
+        &[],
+        &[
+            "mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "opus", "wma", "aif", "aiff", "amr",
+        ],
+        &["audio/"],
+    ) {
+        "audio"
+    } else if is(
+        &["text/calendar", "application/ics"],
+        &["ics", "ical", "vcs"],
+        &[],
+    ) {
+        "calendar"
+    } else if is(
+        &[
+            "text/csv",
+            "text/tab-separated-values",
+            "application/vnd.ms-excel",
+            "application/vnd.oasis.opendocument.spreadsheet",
+            "application/vnd.apple.numbers",
+        ],
+        &[
+            "xls", "xlsx", "xlsm", "xlsb", "ods", "csv", "tsv", "numbers",
+        ],
+        &["application/vnd.openxmlformats-officedocument.spreadsheetml"],
+    ) {
+        "spreadsheet"
+    } else if is(
+        &[
+            "application/vnd.ms-powerpoint",
+            "application/vnd.oasis.opendocument.presentation",
+            "application/vnd.apple.keynote",
+        ],
+        &["ppt", "pptx", "pps", "ppsx", "odp", "key"],
+        &["application/vnd.openxmlformats-officedocument.presentationml"],
+    ) {
+        "presentation"
+    } else if is(
+        &[
+            "application/msword",
+            "application/rtf",
+            "text/rtf",
+            "text/plain",
+            "text/markdown",
+            "application/vnd.oasis.opendocument.text",
+            "application/vnd.apple.pages",
+            "application/epub+zip",
+        ],
+        &["doc", "docx", "odt", "rtf", "txt", "md", "pages", "epub"],
+        &["application/vnd.openxmlformats-officedocument.wordprocessingml"],
+    ) {
+        "document"
+    } else if is(
+        &[
+            "application/zip",
+            "application/x-zip-compressed",
+            "application/vnd.rar",
+            "application/x-rar-compressed",
+            "application/x-7z-compressed",
+            "application/x-tar",
+            "application/gzip",
+            "application/x-gzip",
+            "application/x-bzip2",
+            "application/x-xz",
+            "application/zstd",
+        ],
+        &["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "zst"],
+        &[],
+    ) {
+        "archive"
+    } else if is(
+        &[
+            "application/json",
+            "application/xml",
+            "text/xml",
+            "text/html",
+            "text/css",
+            "text/javascript",
+            "application/javascript",
+            "application/x-sh",
+        ],
+        &[
+            "json", "xml", "html", "htm", "css", "js", "ts", "py", "rs", "go", "java", "c", "cpp",
+            "h", "sh", "yml", "yaml", "toml", "sql",
+        ],
+        &[],
+    ) {
+        "code"
+    } else {
+        "file"
+    }
 }
 
 struct Session {
@@ -412,22 +582,39 @@ pub(crate) fn register(
                 close(&ui, &generation, &session);
                 return;
             }
+            // A message-list chip offers the first file of a conversation
+            // that may not be open, so its file comes from the list rows.
+            let listed = matches!(action.as_str(), "preview-listed" | "download-listed");
             let selected = if action == "page" || action == "download-current" {
                 session.borrow().selected.clone()
             } else {
                 value.parse::<i64>().ok().and_then(|id| {
                     let state = state.borrow();
-                    state
-                        .conversation_messages
-                        .iter()
-                        .chain(state.messages.iter())
-                        .find(|m| m.id == message)
-                        .and_then(|m| m.attachments.iter().find(|a| a.id == id))
-                        .cloned()
+                    if listed {
+                        state
+                            .messages
+                            .iter()
+                            .filter_map(|m| m.first_attachment.as_ref())
+                            .find(|a| a.id == id)
+                            .cloned()
+                    } else {
+                        state
+                            .conversation_messages
+                            .iter()
+                            .chain(state.messages.iter())
+                            .find(|m| m.id == message)
+                            .and_then(|m| m.attachments.iter().find(|a| a.id == id))
+                            .cloned()
+                    }
                 })
             };
             let Some(selected) = selected else {
                 return;
+            };
+            let action = match action.as_str() {
+                "preview-listed" => "preview".into(),
+                "download-listed" => "download".into(),
+                _ => action,
             };
             if action == "thumbnail" {
                 let core_id = Arc::as_ptr(&core) as usize;
@@ -587,6 +774,62 @@ mod tests {
         );
         assert_eq!(ids[0].as_ptr(), rows[1].id.as_ptr());
     }
+
+    #[test]
+    fn file_kinds_follow_the_type_then_the_name() {
+        for (name, media, kind) in [
+            ("Joel-Solano-CV.pdf", "application/octet-stream", "pdf"),
+            ("scan", "application/pdf", "pdf"),
+            ("photo.HEIC", "", "image"),
+            (
+                "budget.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "spreadsheet",
+            ),
+            ("totals.csv", "text/csv", "spreadsheet"),
+            ("deck.key", "", "presentation"),
+            ("letter.docx", "", "document"),
+            ("notes.txt", "text/plain", "document"),
+            ("book.epub", "application/epub+zip", "document"),
+            ("site.zip", "application/zip", "archive"),
+            ("invite.ics", "text/calendar", "calendar"),
+            ("clip.mov", "video/quicktime", "video"),
+            ("memo.m4a", "", "audio"),
+            ("config.json", "application/json", "code"),
+            ("data.bin", "application/octet-stream", "file"),
+        ] {
+            assert_eq!(file_kind(name, media), kind, "{name} ({media})");
+        }
+    }
+
+    #[test]
+    fn list_chips_keep_the_extension_of_a_cut_name() {
+        assert_eq!(
+            split_extension("Joel-Solano-CV.pdf"),
+            ("Joel-Solano-CV", ".pdf")
+        );
+        assert_eq!(split_extension("archive.tar.gz"), ("archive.tar", ".gz"));
+        assert_eq!(split_extension("photo.jpeg"), ("photo", ".jpeg"));
+        assert_eq!(split_extension(".bashrc"), (".bashrc", ""));
+        assert_eq!(split_extension("README"), ("README", ""));
+        assert_eq!(
+            split_extension("version 1.2 final"),
+            ("version 1.2 final", "")
+        );
+        let chip = list_attachment(&flectar_mail_core::models::AttachmentMeta {
+            id: 7,
+            filename: Some("portfolio.zip".into()),
+            mime_type: Some("application/zip".into()),
+            size: Some(9000),
+            is_inline: false,
+        });
+        assert_eq!(chip.id, "7");
+        assert_eq!(chip.stem, "portfolio");
+        assert_eq!(chip.extension, ".zip");
+        assert_eq!(chip.kind, "archive");
+        assert!(!chip.previewable);
+    }
+
     #[test]
     fn attachment_rows_preserve_large_ids_and_offer_safe_previews() {
         use flectar_mail_core::models::AttachmentMeta;
@@ -625,6 +868,9 @@ mod tests {
         assert_eq!(rows[0].id.as_str(), i64::MAX.to_string());
         assert!(rows[0].previewable && rows[1].previewable);
         assert!(!rows[2].previewable);
+        assert_eq!(rows[0].kind, "pdf");
+        assert_eq!(rows[1].kind, "image");
+        assert_eq!(rows[2].kind, "archive");
         assert!(!thumbnail_candidate(&files[0]));
         assert!(thumbnail_candidate(&files[1]));
         assert!(!rows[1].has_thumbnail);

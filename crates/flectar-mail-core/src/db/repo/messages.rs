@@ -289,12 +289,18 @@ pub fn set_jmap_remote(
 }
 
 pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> {
+    // The body may arrive later; until then the subject and preview are
+    // all there is to read, and storing the body reads it again.
+    let verification_code = (!m.is_outgoing && !m.is_draft)
+        .then(|| crate::verification_code::find(&m.subject, &m.snippet))
+        .flatten();
     conn.execute(
         "INSERT INTO messages (account_id, thread_id, folder_id, uid, message_id, gm_msgid, gm_thrid,
             subject, from_name, from_addr, to_json, cc_json, bcc_json, date, internal_date,
             is_read, is_starred, is_draft, is_outgoing, is_automated, has_attachments, size, snippet,
-            list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27)",
+            list_unsubscribe, list_unsubscribe_post, sender_addr, sender_verification,
+            verification_code)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28)",
         params![
             m.account_id,
             thread_id,
@@ -323,6 +329,7 @@ pub fn insert(conn: &Connection, m: &NewMessage, thread_id: i64) -> Result<i64> 
             m.list_unsubscribe_post,
             m.sender_addr,
             m.sender_verification.as_str(),
+            verification_code,
         ],
     )?;
     let id = conn.last_insert_rowid();
@@ -650,17 +657,92 @@ pub fn store_body(
          ON CONFLICT(message_id) DO UPDATE SET text_body = excluded.text_body, html_body = excluded.html_body",
         params![id, text_body, html_body],
     )?;
+    // The full text replaces the preview a code was first looked for in.
+    let received: Option<(String, String)> = conn
+        .query_row(
+            "SELECT subject, snippet FROM messages
+             WHERE id = ?1 AND is_outgoing = 0 AND is_draft = 0",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let verification_code = received.and_then(|(subject, stored_snippet)| {
+        find_verification_code(
+            &subject,
+            text_body,
+            html_body,
+            snippet.unwrap_or(&stored_snippet),
+        )
+    });
     // Full text is now available: queue the message for semantic embedding.
     // Inference happens off the writer thread (see the embed worker), so this
     // only flips a cheap flag.
     conn.execute(
         "UPDATE messages SET body_state = 'cached', raw_path = COALESCE(?2, raw_path),
                 has_attachments = ?3, snippet = COALESCE(?4, snippet),
-                embedding_state = 'pending'
+                verification_code = ?5, embedding_state = 'pending'
          WHERE id = ?1",
-        params![id, raw_path, has_attachments as i64, snippet],
+        params![
+            id,
+            raw_path,
+            has_attachments as i64,
+            snippet,
+            verification_code
+        ],
     )?;
     Ok(())
+}
+
+/// The newest message of each of `thread_ids` when it is received mail from
+/// `since` on, its body is unread, no code was found in its subject and
+/// preview, and reading its body has not failed recently:
+/// (message, account, subject, snippet).
+pub fn pending_code_bodies(
+    conn: &Connection,
+    thread_ids: &[i64],
+    since: i64,
+) -> Result<Vec<(i64, i64, String, String)>> {
+    let mut found: Vec<(i64, i64, String, String)> = Vec::new();
+    // Plain `prepare`: the placeholder count varies per call.
+    for chunk in thread_ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT m.id, m.account_id, m.subject, m.snippet
+             FROM threads t
+             JOIN messages m ON m.id = (
+               SELECT id FROM messages WHERE thread_id = t.id ORDER BY date DESC LIMIT 1)
+             LEFT JOIN sync_failures sf ON sf.stage = 'content' AND sf.message_id = m.id
+             WHERE t.id IN ({placeholders})
+               AND m.body_state = 'none' AND m.verification_code IS NULL
+               AND m.is_outgoing = 0 AND m.is_draft = 0 AND m.date >= ?
+               AND (sf.id IS NULL OR sf.next_retry_at IS NULL OR sf.next_retry_at <= ?)
+             ORDER BY m.date DESC"
+        ))?;
+        let values = chunk
+            .iter()
+            .copied()
+            .chain([since, now_ms()])
+            .collect::<Vec<_>>();
+        found.extend(
+            stmt.query_map(rusqlite::params_from_iter(values), |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+    }
+    Ok(found)
+}
+
+/// The code a received message asks its reader to enter, read from its full
+/// text, or from its preview when the body has none.
+pub(crate) fn find_verification_code(
+    subject: &str,
+    text_body: Option<&str>,
+    html_body: Option<&str>,
+    snippet: &str,
+) -> Option<String> {
+    let text = crate::mime::body_text(text_body, html_body);
+    crate::verification_code::find(subject, text.as_deref().unwrap_or(snippet))
 }
 
 /// Newest non-draft message of a thread that carries a List-Unsubscribe
@@ -1467,6 +1549,173 @@ mod tests {
             )
             .unwrap();
         assert_eq!(claimed, 1);
+    }
+
+    fn received(subject: &str, snippet: &str, is_outgoing: bool) -> NewMessage {
+        NewMessage {
+            account_id: 1,
+            folder_id: 1,
+            uid: None,
+            message_id: None,
+            gm_msgid: None,
+            gm_thrid: None,
+            subject: subject.into(),
+            from: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            date: 1000,
+            internal_date: None,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            is_outgoing,
+            is_automated: true,
+            has_attachments: false,
+            size: None,
+            snippet: snippet.into(),
+            references: Vec::new(),
+            list_unsubscribe: None,
+            list_unsubscribe_post: None,
+            sender_addr: None,
+            sender_verification: SenderVerification::None,
+        }
+    }
+
+    #[test]
+    fn verification_codes_follow_the_text_a_message_shows() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO threads (id, account_id, subject_norm) VALUES (10, 1, 'code')",
+            [],
+        )
+        .unwrap();
+        let code = |id: i64| -> Option<String> {
+            conn.query_row(
+                "SELECT verification_code FROM messages WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        // A preview that shows the code is enough until the body arrives.
+        let previewed = insert(
+            &conn,
+            &received("Your Acme code", "Your verification code is 482913", false),
+            10,
+        )
+        .unwrap();
+        assert_eq!(code(previewed).as_deref(), Some("482913"));
+        // Sent mail never offers a code, even one it quotes.
+        let sent = insert(
+            &conn,
+            &received(
+                "Re: Your Acme code",
+                "Your verification code is 482913",
+                true,
+            ),
+            10,
+        )
+        .unwrap();
+        assert_eq!(code(sent), None);
+        store_body(
+            &conn,
+            sent,
+            Some("Your verification code is 482913"),
+            None,
+            None,
+            false,
+            None,
+        )
+        .unwrap();
+        assert_eq!(code(sent), None);
+
+        // The full text replaces what the preview showed.
+        let cut_off = insert(
+            &conn,
+            &received(
+                "Please verify your device",
+                "To complete the sign in, enter the",
+                false,
+            ),
+            10,
+        )
+        .unwrap();
+        assert_eq!(code(cut_off), None);
+        store_body(
+            &conn,
+            cut_off,
+            None,
+            Some(
+                "<p>To complete the sign in, enter the verification code.</p>\
+                 <p>Verification code: 551203</p>",
+            ),
+            None,
+            false,
+            Some("To complete the sign in, enter the verification code."),
+        )
+        .unwrap();
+        assert_eq!(code(cut_off).as_deref(), Some("551203"));
+        store_body(
+            &conn,
+            previewed,
+            Some("Thanks for joining Acme."),
+            None,
+            None,
+            false,
+            Some("Thanks for joining Acme."),
+        )
+        .unwrap();
+        assert_eq!(code(previewed), None);
+    }
+
+    #[test]
+    fn code_bodies_are_read_early_only_for_recent_received_mail_without_one() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let now = now_ms();
+        let since = now - 24 * 60 * 60 * 1000;
+        let seed = |date: i64, update: &str| {
+            let (thread, message) =
+                testutil::seed_message(&conn, "noreply@acme.test", "Verify your device", true);
+            conn.execute(
+                "UPDATE messages SET date = ?2 WHERE id = ?1",
+                params![message, date],
+            )
+            .unwrap();
+            if !update.is_empty() {
+                conn.execute(
+                    &format!("UPDATE messages SET {update} WHERE id = ?1"),
+                    [message],
+                )
+                .unwrap();
+            }
+            (thread, message)
+        };
+        let (fresh, fresh_message) = seed(now, "");
+        let (old, _) = seed(since - 1, "");
+        let (sent, _) = seed(now, "is_outgoing = 1");
+        let (coded, _) = seed(now, "verification_code = '482913'");
+        let (read, _) = seed(now, "body_state = 'cached'");
+        let threads = [fresh, old, sent, coded, read];
+        let wanted = pending_code_bodies(&conn, &threads, since).unwrap();
+        assert_eq!(
+            wanted
+                .iter()
+                .map(|(message, account, ..)| (*message, *account))
+                .collect::<Vec<_>>(),
+            [(fresh_message, 1)]
+        );
+
+        // A body that failed to download waits for its retry.
+        sync_failures::record_content(&conn, fresh_message, Some(now + 60_000), "omitted").unwrap();
+        assert!(
+            pending_code_bodies(&conn, &threads, since)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

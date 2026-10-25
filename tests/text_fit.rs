@@ -13,13 +13,13 @@
 // FLECTAR_TEXT_FIT_SNAPSHOTS to a directory to save a render of each state.
 
 use flectar_mail::{
-    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow, CalendarDay,
-    CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ContactAccountRow, ContactRow,
-    ContactSidebarRow, ContactSidebarRowKind, ContactSyncState, ContactValueRow, EmailRow,
-    ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow, LocalizedMessage,
-    MailAttachment, MailAttachments, MailLabelRow, MailListEntry, MailProfileRow, MailboxRow,
-    MotionSettings, ProfileMemberRow, SidebarRow, SidebarRowKind, StorageUsageRow,
-    ThreadMessageRow,
+    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow,
+    CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay,
+    ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, ContactSyncState,
+    ContactValueRow, EmailRow, ImportAccountRow, ImportFailureRow, ImportFindingRow,
+    ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments, MailLabelRow,
+    MailListEntry, MailProfileRow, MailboxRow, MotionSettings, ProfileMemberRow, SidebarRow,
+    SidebarRowKind, StorageUsageRow, ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
@@ -85,6 +85,32 @@ fn message(key: &str) -> LocalizedMessage {
     }
 }
 
+fn calendar(
+    id: i32,
+    kind: &str,
+    host: &str,
+    calendar_name: &str,
+    calendar_count: i32,
+    enabled: bool,
+    error: &str,
+) -> CalendarConnectionRow {
+    CalendarConnectionRow {
+        id,
+        kind: kind.into(),
+        base_url: format!("https://{host}/").into(),
+        host: host.into(),
+        username: if kind == "generic" {
+            "alex.morgan@example.com".into()
+        } else {
+            Default::default()
+        },
+        calendar_name: calendar_name.into(),
+        calendar_count,
+        enabled,
+        error: error.into(),
+    }
+}
+
 // Between them, the accounts show every calendar and contacts control an
 // account card can have.
 fn accounts() -> Vec<AccountRow> {
@@ -110,11 +136,20 @@ fn accounts() -> Vec<AccountRow> {
             smtp_host: "smtp.example.com".into(),
             smtp_port: "465".into(),
             mail_history: "sixMonths".into(),
-            calendar_connected: true,
-            calendar_enabled: true,
-            calendar_status: "Connected".into(),
-            caldav_url: "https://dav.example.com/calendars/alex/".into(),
-            caldav_username: "alex.morgan@example.com".into(),
+            calendar_connections: model(vec![
+                calendar(1, "generic", "dav.example.com", "", 3, true, ""),
+                calendar(2, "generic", "www.google.com", "Support Team", 1, true, "needs_reauth"),
+                calendar(3, "generic", "cloud.example.com", "", 2, false, ""),
+                calendar(
+                    4,
+                    "generic",
+                    "holidays.example.com",
+                    "Holidays",
+                    1,
+                    true,
+                    "Holidays: caldav error: calendar-query: HTTP 403",
+                ),
+            ]),
             carddav_connected: true,
             carddav_enabled: true,
             carddav_url: "https://dav.example.com/addressbooks/alex/".into(),
@@ -132,6 +167,9 @@ fn accounts() -> Vec<AccountRow> {
             sync_error: "The server closed the connection before the mailbox was selected.".into(),
             initials: "ST".into(),
             mail_history: "sixMonths".into(),
+            provider_calendar_error:
+                "auth failed: consent was granted for someone@example.com - expected support@example.org"
+                    .into(),
             ..Default::default()
         },
         AccountRow {
@@ -139,7 +177,7 @@ fn accounts() -> Vec<AccountRow> {
             drag_key: "3".into(),
             name: "Sam Rivera".into(),
             email: "sam@example.net".into(),
-            provider: "generic".into(),
+            provider: "microsoft".into(),
             mail_protocol: "imap".into(),
             status: "idle".into(),
             initials: "SR".into(),
@@ -147,6 +185,16 @@ fn accounts() -> Vec<AccountRow> {
             incoming_security: "tls".into(),
             smtp_security: "tls".into(),
             mail_history: "sixMonths".into(),
+            calendar_connections: model(vec![calendar(
+                5,
+                "microsoft",
+                "graph.microsoft.com",
+                "Calendar",
+                2,
+                true,
+                "offline",
+            )]),
+            provider_calendar_connected: true,
             carddav_connected: true,
             carddav_status: "Authentication failed".into(),
             ..Default::default()
@@ -1013,6 +1061,21 @@ fn states() -> Vec<State> {
             app.set_settings_tab("Accounts".into());
             app.set_settings_open(true);
             press(app, "No profile");
+        }),
+        state("settings caldav form", |app| {
+            app.set_settings_tab("Accounts".into());
+            app.set_settings_open(true);
+            app.set_caldav_account_id(1);
+            app.set_caldav_url("https://dav.example.com/".into());
+            app.set_caldav_username("alex.morgan@example.com".into());
+        }),
+        state("settings caldav settings", |app| {
+            app.set_settings_tab("Accounts".into());
+            app.set_settings_open(true);
+            app.set_caldav_account_id(1);
+            app.set_caldav_connection_id(2);
+            app.set_caldav_url("https://dav.example.com/".into());
+            app.set_caldav_username("alex.morgan@example.com".into());
         }),
     ];
     for tab in [

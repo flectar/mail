@@ -94,6 +94,17 @@ export struct SidebarRow {
     reveal_row: bool,
 }
 
+// A file shown on a message-list row.
+export struct ListAttachment {
+    id: string,
+    // The name before its extension, which stays whole when the name is cut.
+    stem: string,
+    extension: string,
+    // The file's type, as for MailAttachment.
+    kind: string,
+    previewable: bool,
+}
+
 export struct EmailRow {
     id: int,
     account_id: int,
@@ -118,6 +129,15 @@ export struct EmailRow {
     message_count: int,
     label_summary: string,
     labels: [MailLabelRow],
+    // Gmail labels are tags; other accounts file labels like folders.
+    account_uses_labels: bool,
+    // The one-time code the message asks its reader to enter, if any, and
+    // the same code spelled out for screen readers.
+    verification_code: string,
+    verification_code_spelled: string,
+    // The conversation's first file, and how many files it holds.
+    attachment: ListAttachment,
+    attachment_total: int,
     selected: bool,
     checked: bool,
 }
@@ -191,6 +211,23 @@ export struct ThreadMessageRow {
     selected: bool,
 }
 
+// A calendar server an account syncs; mirrors
+// flectar_mail_core::models::CalendarConnection.
+export struct CalendarConnectionRow {
+    id: int,
+    // google | generic | microsoft
+    kind: string,
+    base_url: string,
+    host: string,
+    username: string,
+    // The calendar's name when the connection syncs exactly one.
+    calendar_name: string,
+    calendar_count: int,
+    enabled: bool,
+    // "needs_reauth", "offline" or an error message; empty while it syncs.
+    error: string,
+}
+
 export struct AccountRow {
     id: int,
     drag_key: string,
@@ -224,11 +261,12 @@ export struct AccountRow {
     // Days a POP3 server keeps downloaded mail on its own; -1 when it
     // keeps it or hasn't said.
     server_keeps_mail_days: int,
-    calendar_connected: bool,
-    calendar_enabled: bool,
-    calendar_status: string,
-    caldav_url: string,
-    caldav_username: string,
+    // Calendar servers the account syncs: its provider's first, then CalDAV.
+    calendar_connections: [CalendarConnectionRow],
+    // Gmail and Outlook accounts sync their provider's calendar at most once.
+    provider_calendar_connected: bool,
+    // Why connecting the provider's calendar last failed.
+    provider_calendar_error: string,
     carddav_connected: bool,
     carddav_enabled: bool,
     carddav_status: string,
@@ -463,6 +501,9 @@ export struct MailAttachment {
     name: string,
     detail: string,
     previewable: bool,
+    // pdf, document, spreadsheet, presentation, image, video, audio,
+    // archive, code, calendar or file.
+    kind: string,
     thumbnail: image,
     has_thumbnail: bool,
 }

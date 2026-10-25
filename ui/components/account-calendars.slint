@@ -1,0 +1,299 @@
+import { AccountRow, CalendarConnectionRow } from "../models.slint";
+import { Button } from "button.slint";
+import { IconButton, Switch } from "controls.slint";
+import { CopyableDiagnostic } from "copyable-diagnostic.slint";
+import { TypeScale } from "../typography.slint";
+import { AppTheme } from "../design-system.slint";
+
+// Change or remove one connection. Google and Microsoft calendars sign in
+// with the account, so they reconnect through it instead of being edited.
+component ConnectionActions inherits HorizontalLayout {
+    in property <bool> provider;
+    in property <bool> provider-actions-enabled;
+    callback edit();
+    callback reconnect();
+    callback remove();
+
+    spacing: 2px;
+    if root.provider : IconButton {
+        icon: @image-url("../icons/lucide/outline/sync.svg");
+        icon-color: AppTheme.secondary;
+        ghost: true;
+        hover-background: AppTheme.muted-control-bg;
+        interactive: root.provider-actions-enabled;
+        tooltip-text: @tr("Reconnect calendar");
+        clicked => { root.reconnect(); }
+    }
+    if !root.provider : IconButton {
+        icon: @image-url("../icons/lucide/outline/pencil.svg");
+        icon-color: AppTheme.secondary;
+        ghost: true;
+        hover-background: AppTheme.muted-control-bg;
+        tooltip-text: @tr("Edit calendar");
+        clicked => { root.edit(); }
+    }
+    IconButton {
+        icon: @image-url("../icons/lucide/outline/trash.svg");
+        icon-color: AppTheme.destructive;
+        ghost: true;
+        hover-background: AppTheme.destructive.with-alpha(0.12);
+        tooltip-text: @tr("Remove calendar");
+        clicked => { root.remove(); }
+    }
+}
+
+// One calendar server in an account card: what it syncs, whether it syncs
+// now, and why not. Phones give the explanation and the actions rows of
+// their own, so the name keeps its width.
+component CalendarConnectionItem inherits Rectangle {
+    in property <CalendarConnectionRow> connection;
+    in property <bool> compact;
+    in property <bool> provider-actions-enabled;
+    in property <color> title-color;
+    in property <color> description-color;
+    in property <color> line-color;
+    callback edit();
+    callback reconnect();
+    callback remove();
+    callback toggled(bool);
+
+    private property <bool> provider: root.connection.kind != "generic";
+    // A CalDAV server syncing one calendar is known by that calendar.
+    private property <bool> named: !root.provider && root.connection.calendar-count == 1 && root.connection.calendar-name != "";
+    private property <string> title: root.connection.kind == "google" ? @tr("Google Calendar")
+        : root.connection.kind == "microsoft" ? @tr("Outlook calendar")
+        : root.named ? root.connection.calendar-name
+        : root.connection.host;
+    private property <string> count: @tr("One calendar" | "{n} calendars" % root.connection.calendar-count);
+    private property <string> detail: root.provider ? root.count
+        : (root.named ? root.connection.host : root.count)
+            + (root.connection.username != "" ? " · " + root.connection.username : "");
+    private property <string> state: !root.connection.enabled ? @tr("Paused")
+        : root.connection.error == "needs_reauth"
+            ? (root.provider ? @tr("Sign-in required") : @tr("The server did not accept the username or app password."))
+        : root.connection.error == "offline" ? @tr("Offline · retrying automatically")
+        : "";
+    private property <color> state-color: root.connection.enabled && root.connection.error == "needs_reauth" ? AppTheme.destructive : root.description-color;
+    // A server error has no explanation of its own; it is shown as is.
+    private property <bool> diagnostic: root.state == "" && root.connection.error != "";
+    // The icon column and its gap: phone rows below the name line up with it.
+    private property <length> text-inset: 42px;
+
+    height: body.preferred-height;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: root.line-color;
+    background: transparent;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    body := VerticalLayout {
+        padding: 10px;
+        padding-right: 12px;
+        spacing: 2px;
+
+        HorizontalLayout {
+            spacing: 10px;
+            cross-axis-alignment: start;
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 8px;
+                background: root.connection.kind == "google" ? #fce8e6 : root.connection.kind == "microsoft" ? #e6f2ff : AppTheme.accent-soft;
+                Image {
+                    x: 7px;
+                    y: 7px;
+                    width: 18px;
+                    height: 18px;
+                    source: root.connection.kind == "google" ? @image-url("../icons/brand/gmail.svg")
+                        : root.connection.kind == "microsoft" ? @image-url("../icons/brand/outlook.svg")
+                        : @image-url("../icons/lucide/outline/calendar.svg");
+                    colorize: root.provider ? transparent : AppTheme.accent;
+                    image-fit: contain;
+                    accessible-role: none;
+                }
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                min-width: 0px;
+                spacing: 1px;
+                Text {
+                    height: max(19px, self.preferred-height);
+                    text: root.title;
+                    color: root.title-color;
+                    font-size: TypeScale.body;
+                    font-weight: 600;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                Text {
+                    height: max(16px, self.preferred-height);
+                    text: root.detail;
+                    color: root.description-color;
+                    font-size: TypeScale.caption;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                if !root.compact && root.state != "" : Text {
+                    height: self.preferred-height;
+                    text: root.state;
+                    color: root.state-color;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+                if !root.compact && root.diagnostic : CopyableDiagnostic {
+                    text: @tr("Calendar sync error: {}", root.connection.error);
+                    text-color: AppTheme.destructive;
+                    font-size: TypeScale.caption;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 2px;
+                cross-axis-alignment: center;
+                if !root.compact : ConnectionActions {
+                    provider: root.provider;
+                    provider-actions-enabled: root.provider-actions-enabled;
+                    edit => { root.edit(); }
+                    reconnect => { root.reconnect(); }
+                    remove => { root.remove(); }
+                }
+                Rectangle {
+                    width: 46px;
+                    height: 36px;
+                    Switch {
+                        x: parent.width - self.width;
+                        y: 7px;
+                        checked: root.connection.enabled;
+                        control-label: @tr("Sync {}", root.title);
+                        toggled => { root.toggled(self.checked); }
+                    }
+                }
+            }
+        }
+
+        if root.compact && root.state != "" : HorizontalLayout {
+            padding-left: root.text-inset;
+            Text {
+                height: self.preferred-height;
+                text: root.state;
+                color: root.state-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+        if root.compact && root.diagnostic : HorizontalLayout {
+            padding-left: root.text-inset;
+            CopyableDiagnostic {
+                text: @tr("Calendar sync error: {}", root.connection.error);
+                text-color: AppTheme.destructive;
+                font-size: TypeScale.caption;
+            }
+        }
+        if root.compact : HorizontalLayout {
+            alignment: end;
+            ConnectionActions {
+                provider: root.provider;
+                provider-actions-enabled: root.provider-actions-enabled;
+                edit => { root.edit(); }
+                reconnect => { root.reconnect(); }
+                remove => { root.remove(); }
+            }
+        }
+    }
+}
+
+// The calendars an account syncs and the ways to add one: its provider's
+// calendar, or any CalDAV server such as a shared mailbox's calendar.
+// Events created in them use the account's address, which the description
+// says, so a calendar reached with this account's sign-in sends its
+// invitations from it.
+export component AccountCalendars inherits VerticalLayout {
+    in property <AccountRow> account;
+    in property <bool> compact;
+    // OAuth flows run one at a time.
+    in property <bool> provider-actions-enabled;
+    in property <color> title-color;
+    in property <color> description-color;
+    in property <color> line-color;
+    callback connect-provider();
+    callback add-caldav();
+    callback edit(CalendarConnectionRow);
+    callback remove(CalendarConnectionRow);
+    callback set-enabled(int, bool);
+
+    private property <bool> can-connect-provider: (root.account.provider == "gmail" || root.account.provider == "microsoft") && !root.account.provider-calendar-connected;
+    private property <string> provider-label: root.account.provider-calendar-error != "" ? @tr("Retry calendar")
+        : root.account.provider == "gmail" ? @tr("Connect Google Calendar") : @tr("Connect Outlook calendar");
+
+    spacing: 8px;
+
+    HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 1px;
+            Text {
+                height: max(20px, self.preferred-height);
+                text: @tr("Calendars");
+                color: root.title-color;
+                font-size: TypeScale.body;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                height: max(18px, self.preferred-height);
+                text: @tr("Invitations for events you create here are sent from {}.", root.account.email);
+                color: root.description-color;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+        if !root.compact && root.can-connect-provider : Button {
+            width: self.content-width;
+            height: 34px;
+            text: root.provider-label;
+            enabled: root.provider-actions-enabled;
+            clicked => { root.connect-provider(); }
+        }
+        if !root.compact : Button {
+            width: self.content-width;
+            height: 34px;
+            text: @tr("Add CalDAV calendar");
+            clicked => { root.add-caldav(); }
+        }
+    }
+
+    if root.account.provider-calendar-error != "" && root.can-connect-provider : CopyableDiagnostic {
+        text: @tr("Could not connect calendar: {}", root.account.provider-calendar-error);
+        text-color: AppTheme.destructive;
+        font-size: TypeScale.caption;
+    }
+
+    for connection in root.account.calendar-connections : CalendarConnectionItem {
+        connection: connection;
+        compact: root.compact;
+        provider-actions-enabled: root.provider-actions-enabled;
+        title-color: root.title-color;
+        description-color: root.description-color;
+        line-color: root.line-color;
+        edit => { root.edit(connection); }
+        reconnect => { root.connect-provider(); }
+        remove => { root.remove(connection); }
+        toggled(enabled) => { root.set-enabled(connection.id, enabled); }
+    }
+
+    if root.compact && root.can-connect-provider : Button {
+        height: 44px;
+        text: root.provider-label;
+        enabled: root.provider-actions-enabled;
+        clicked => { root.connect-provider(); }
+    }
+    if root.compact : Button {
+        height: 44px;
+        text: @tr("Add CalDAV calendar");
+        clicked => { root.add-caldav(); }
+    }
+}

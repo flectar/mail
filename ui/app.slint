@@ -338,6 +338,8 @@ export global I18n {
         if (key == "Could not update calendar sync: {}") { return @tr("Could not update calendar sync: {}", argument); }
         if (key == "CalDAV connected and initial sync started.") { return @tr("CalDAV connected and initial sync started."); }
         if (key == "Could not connect CalDAV: {}") { return @tr("Could not connect CalDAV: {}", argument); }
+        if (key == "Calendar removed.") { return @tr("Calendar removed."); }
+        if (key == "Could not remove calendar: {}") { return @tr("Could not remove calendar: {}", argument); }
         if (key == "CardDAV connected and initial sync started.") { return @tr("CardDAV connected and initial sync started."); }
         if (key == "Could not connect CardDAV: {}") { return @tr("Could not connect CardDAV: {}", argument); }
         if (key == "CardDAV sync enabled.") { return @tr("CardDAV sync enabled."); }
@@ -676,8 +678,10 @@ export component AppWindow inherits Window {
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
     callback connect_account_calendar(int);
-    callback set_account_calendar_enabled(int, bool);
-    callback connect_caldav(int, string, string, string);
+    // (account, connection or -1 for a new one, url, username, password)
+    callback connect_caldav(int, int, string, string, string);
+    callback set_calendar_connection_enabled(int, bool);
+    callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
@@ -744,6 +748,8 @@ export component AppWindow inherits Window {
     callback drain-contact-load-updates();
     callback drain-compose-send-updates();
     callback refresh-email-resources();
+    // Calendar connections changed state while Settings shows them.
+    callback reload-calendar-connections();
 
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> mail_list_entries: [];
@@ -908,8 +914,8 @@ export component AppWindow inherits Window {
             root.account_form_open = false;
             root.account_password = "";
             root.caldav_account_id = -1;
+            root.caldav_connection_id = -1;
             root.caldav_password = "";
-            root.caldav_manage_existing = false;
             root.carddav_account_id = -1;
             root.carddav_password = "";
             root.carddav_manage_existing = false;
@@ -1023,10 +1029,10 @@ export component AppWindow inherits Window {
     in-out property <string> jmap_url: "";
     in-out property <bool> connect_calendar_on_add: true;
     in-out property <int> caldav_account_id: -1;
+    in-out property <int> caldav_connection_id: -1;
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
-    in-out property <bool> caldav_manage_existing: false;
     in property <bool> caldav_connecting: false;
     in-out property <int> carddav_account_id: -1;
     in-out property <string> carddav_url: "";
@@ -1894,7 +1900,7 @@ export component AppWindow inherits Window {
             caldav_url <=> root.caldav_url;
             caldav_username <=> root.caldav_username;
             caldav_password <=> root.caldav_password;
-            caldav_manage_existing <=> root.caldav_manage_existing;
+            caldav_connection_id <=> root.caldav_connection_id;
             caldav_connecting: root.caldav_connecting;
             carddav_account_id <=> root.carddav_account_id;
             carddav_url <=> root.carddav_url;
@@ -2000,8 +2006,9 @@ export component AppWindow inherits Window {
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
             save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
-            set_account_calendar_enabled(account-id, enabled) => { root.set_account_calendar_enabled(account-id, enabled); }
-            connect_caldav(account-id, url, username, password) => { root.connect_caldav(account-id, url, username, password); }
+            connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
+            set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
+            remove_calendar_connection(connection-id) => { root.remove_calendar_connection(connection-id); }
             connect_carddav(account-id, url, username, password) => { root.connect_carddav(account-id, url, username, password); }
             set_account_carddav_enabled(account-id, enabled) => { root.set_account_carddav_enabled(account-id, enabled); }
             disconnect_carddav(account-id) => { root.disconnect_carddav(account-id); }

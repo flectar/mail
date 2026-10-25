@@ -37,6 +37,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/018_jmap_full_sync_progress.sql")),
     Migration::Plain(include_str!("migrations/019_clean_snippets.sql")),
     Migration::Plain(include_str!("migrations/020_server_relink.sql")),
+    Migration::Plain(include_str!("migrations/021_verification_codes.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -46,8 +47,47 @@ fn convert(conn: &Connection, version: i64) -> Result<()> {
     match version {
         13 => super::repo::contact_entries::migrate(conn),
         19 => clean_snippets(conn),
+        21 => find_verification_codes(conn),
         _ => Ok(()),
     }
+}
+
+/// Finds the codes in received mail stored before codes were looked for,
+/// the way new mail is read. Only mail whose subject or preview mentions a
+/// code or a sign-in is read in full, so the upgrade stays quick.
+fn find_verification_codes(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("may_hold_verification_code", 2, flags, |ctx| {
+        Ok(crate::verification_code::mentioned(
+            &ctx.get::<String>(0)?,
+            &ctx.get::<String>(1)?,
+        ))
+    })?;
+    conn.create_scalar_function("find_verification_code", 4, flags, |ctx| {
+        Ok(super::repo::messages::find_verification_code(
+            &ctx.get::<String>(0)?,
+            ctx.get::<Option<String>>(1)?.as_deref(),
+            ctx.get::<Option<String>>(2)?.as_deref(),
+            &ctx.get::<String>(3)?,
+        ))
+    })?;
+    let found = conn.execute_batch(
+        "UPDATE messages SET verification_code = find_verification_code(
+           subject,
+           (SELECT text_body FROM message_bodies WHERE message_id = messages.id),
+           (SELECT html_body FROM message_bodies WHERE message_id = messages.id),
+           snippet)
+         WHERE is_outgoing = 0 AND is_draft = 0
+           AND may_hold_verification_code(subject, snippet);",
+    );
+    for (name, arguments) in [
+        ("may_hold_verification_code", 2),
+        ("find_verification_code", 4),
+    ] {
+        conn.remove_function(name, arguments)?;
+    }
+    Ok(found?)
 }
 
 /// Rewrites stored snippets the way new ones are made. SQLite calls back into
@@ -137,6 +177,23 @@ fn apply(conn: &mut Connection, migration: &Migration, target: i64) -> Result<()
 }
 
 fn rebuild(conn: &mut Connection, sql: &str, target: i64) -> Result<()> {
+    rebuild_tables(conn, "mail", target, |tx| {
+        tx.execute_batch(sql)?;
+        convert(tx, target)
+    })
+}
+
+/// Applies schema step `target` of the `store` database with foreign-key
+/// enforcement off, as SQLite's procedure for rebuilding a referenced table
+/// requires: dropping the old table then neither cascades into nor is
+/// blocked by the referencing rows. The step only commits when it introduced
+/// no foreign-key violation.
+pub(super) fn rebuild_tables(
+    conn: &mut Connection,
+    store: &str,
+    target: i64,
+    step: impl FnOnce(&Connection) -> Result<()>,
+) -> Result<()> {
     let enforced: bool = conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
     // The setting is ignored inside a transaction, so change it first.
     conn.pragma_update(None, "foreign_keys", false)?;
@@ -145,12 +202,11 @@ fn rebuild(conn: &mut Connection, sql: &str, target: i64) -> Result<()> {
         // Compare instead of requiring zero so a violation left by an older
         // build elsewhere in the profile cannot block this upgrade.
         let before = foreign_key_violations(&tx)?;
-        tx.execute_batch(sql)?;
-        convert(&tx, target)?;
+        step(&tx)?;
         let after = foreign_key_violations(&tx)?;
         if after > before {
             return Err(CoreError::Other(format!(
-                "mail database migration {target} would orphan existing data; the profile has not been changed."
+                "{store} database migration {target} would orphan existing data; the profile has not been changed."
             )));
         }
         tx.pragma_update(None, "user_version", target)?;
@@ -342,7 +398,12 @@ mod tests {
             ["account_id", "starred_count"]
         );
 
-        for forbidden in ["calendar_events", "calendars", "caldav_config"] {
+        for forbidden in [
+            "calendar_events",
+            "calendars",
+            "caldav_config",
+            "calendar_connections",
+        ] {
             assert!(!application_tables(&conn).contains(forbidden));
         }
         let seeded: i64 = conn
@@ -512,6 +573,47 @@ mod tests {
         assert_eq!(
             snippets("threads"),
             ["", "Tom & Jerry <tj@example.com>", "It's here"]
+        );
+    }
+
+    #[test]
+    fn verification_code_upgrade_reads_stored_received_mail() {
+        let mut conn = staged(20);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET subject = 'Your Acme code',
+               snippet = 'Your verification code is 482913' WHERE id = 1;
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
+               date, snippet, body_state, is_outgoing
+             ) VALUES
+               (2, 1, 1, 1, 'Please verify your device', 'a@test.dev', '[]', '[]', 2,
+                'To complete the sign in, enter the', 'cached', 0),
+               (3, 1, 1, 1, 'Re: Your Acme code', 'me@test.dev', '[]', '[]', 3,
+                'Your verification code is 482913', 'none', 1),
+               (4, 1, 1, 1, 'Weekly report', 'a@test.dev', '[]', '[]', 4,
+                'Requests were up 18% in 2026', 'none', 0);
+             INSERT INTO message_bodies (message_id, text_body) VALUES (2,
+               'To complete the sign in, enter the verification code.
+                Verification code: 551203');",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let codes = conn
+            .prepare("SELECT verification_code FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            codes,
+            [
+                Some("482913".to_owned()),
+                Some("551203".to_owned()),
+                None,
+                None
+            ]
         );
     }
 

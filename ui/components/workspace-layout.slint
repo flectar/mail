@@ -250,6 +250,8 @@ export component WorkspaceTitleRow inherits Rectangle {
     in property <string> leading-tooltip: "";
     in property <string> leading-accessible-id: "";
     in property <length> horizontal-inset: 0px;
+    // Where the title starts when there is no leading action.
+    in property <length> leading-inset: root.horizontal-inset;
     in property <length> item-spacing: 6px;
     in property <relative-font-size> title-font-size: TypeScale.title-small;
     in property <int> title-weight: 700;
@@ -264,16 +266,17 @@ export component WorkspaceTitleRow inherits Rectangle {
 
     HorizontalBox {
         padding-top: 0px;
-        padding-left: max(root.horizontal-inset, clearance.leading);
+        padding-left: max(root.leading-inset, clearance.leading);
         padding-right: max(root.horizontal-inset, clearance.trailing);
         padding-bottom: 0px;
         spacing: root.item-spacing;
         cross-axis-alignment: center;
 
-        ToolbarIconButton {
-            visible: root.show-leading;
+        // Created only when shown: a hidden button would still take the
+        // row's spacing and push the title off its content's edge.
+        if root.show-leading : ToolbarIconButton {
             compact: root.height >= LayoutMetrics.touch-target;
-            width: root.show-leading ? (self.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size) : 0px;
+            width: self.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
             icon: root.leading-icon;
             icon-color: AppTheme.secondary;
             ghost: root.leading-ghost;
@@ -348,9 +351,8 @@ export component WorkspaceSearchToolbar inherits Rectangle {
         padding-right: clearance.trailing;
         spacing: 6px;
 
-        ToolbarIconButton {
-            visible: root.show-leading;
-            width: root.show-leading ? LayoutMetrics.desktop-icon-button-size : 0px;
+        if root.show-leading : ToolbarIconButton {
+            width: LayoutMetrics.desktop-icon-button-size;
             icon: root.leading-icon;
             icon-color: AppTheme.secondary;
             ghost: true;
@@ -429,6 +431,7 @@ export component CompactPageHeader inherits Rectangle {
     in property <string> leading-accessible-id: "";
     in property <color> background-color: AppTheme.surface;
     in property <bool> leading-ghost: false;
+    in property <length> leading-inset: LayoutMetrics.compact-inset;
     callback leading-clicked;
 
     height: LayoutMetrics.compact-header-height;
@@ -445,6 +448,7 @@ export component CompactPageHeader inherits Rectangle {
         leading-accessible-id: root.leading-accessible-id;
         leading-ghost: root.leading-ghost;
         horizontal-inset: LayoutMetrics.compact-inset;
+        leading-inset: root.leading-inset;
         leading-clicked => { root.leading-clicked(); }
 
         @children

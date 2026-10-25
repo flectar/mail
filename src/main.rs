@@ -3730,6 +3730,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
+            && app.get_settings_open()
+        {
+            app.invoke_reload_calendar_connections();
+        }
+        if pending.calendar_changed
+            && let Some(app) = mail_update_app.upgrade()
             && app.get_active_view() == "calendar"
             && let Some(core) = mail_update_state.borrow().core.clone()
         {
@@ -4333,6 +4339,28 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let product_body_generation = body_generation.clone();
     let product_body_pending = body_pending.clone();
     let product_body_requests = body_requests.clone();
+    let connections_state = state.clone();
+    let connections_runtime = runtime.clone();
+    let connections_updates = startup_tx.clone();
+    app.on_reload_calendar_connections(move || {
+        let Some(core) = connections_state.borrow().core.clone() else {
+            return;
+        };
+        let updates = connections_updates.clone();
+        connections_runtime.spawn(async move {
+            let (calendar, contacts) = tokio::join!(
+                core.load_calendar_connections(),
+                core.load_carddav_connections()
+            );
+            // A failed read keeps what Settings shows.
+            if let (Ok(calendar), Ok(contacts)) = (calendar, contacts) {
+                let _ = updates
+                    .send(StartupUpdate::Connections { calendar, contacts })
+                    .await;
+            }
+        });
+    });
+
     let previous_product = Rc::new(RefCell::new(String::from("mail")));
     app.on_product_changed(move |view| {
         let Some(app) = product_app.upgrade() else {
@@ -7277,14 +7305,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let state_for_calendar_toggle = Rc::clone(&state);
     let runtime_for_calendar_toggle = Rc::clone(&runtime);
     let updates_for_calendar_toggle = ui_task_tx.clone();
-    app.on_set_account_calendar_enabled(move |account_id, enabled| {
+    app.on_set_calendar_connection_enabled(move |connection_id, enabled| {
         let Some(core) = state_for_calendar_toggle.borrow().core.clone() else {
             return;
         };
         let updates = updates_for_calendar_toggle.clone();
         runtime_for_calendar_toggle.spawn(async move {
             let message = match core
-                .set_account_calendar_enabled(i64::from(account_id), enabled)
+                .set_calendar_connection_enabled(i64::from(connection_id), enabled)
                 .await
             {
                 Ok(_) => {
@@ -7314,11 +7342,45 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
 
+    let state_for_calendar_removal = Rc::clone(&state);
+    let runtime_for_calendar_removal = Rc::clone(&runtime);
+    let updates_for_calendar_removal = ui_task_tx.clone();
+    app.on_remove_calendar_connection(move |connection_id| {
+        let Some(core) = state_for_calendar_removal.borrow().core.clone() else {
+            return;
+        };
+        let updates = updates_for_calendar_removal.clone();
+        runtime_for_calendar_removal.spawn(async move {
+            let message = match core
+                .remove_calendar_connection(i64::from(connection_id))
+                .await
+            {
+                Ok(()) => UiMessage::plain("Calendar removed."),
+                Err(error) => UiMessage::detail("Could not remove calendar: {}", error),
+            };
+            let connections = core.load_calendar_connections().await.ok();
+            let _ = updates
+                .send(UiTaskUpdate {
+                    message,
+                    accounts: None,
+                    calendar_connections: connections,
+                    carddav_connections: None,
+                    calendar_error: None,
+                    account_removal: None,
+                    clear_account_form: false,
+                    finishes_account_setup: false,
+                    finishes_oauth: false,
+                    close_to_tray: None,
+                })
+                .await;
+        });
+    });
+
     let state_for_caldav = Rc::clone(&state);
     let runtime_for_caldav = Rc::clone(&runtime);
     let updates_for_caldav = ui_task_tx.clone();
     let app_for_caldav = app.as_weak();
-    app.on_connect_caldav(move |account_id, url, username, password| {
+    app.on_connect_caldav(move |account_id, connection_id, url, username, password| {
         let Some(app) = app_for_caldav.upgrade() else {
             return;
         };
@@ -7336,6 +7398,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let result = core
                 .connect_caldav(
                     i64::from(account_id),
+                    (connection_id > 0).then_some(i64::from(connection_id)),
                     url.to_string(),
                     username.to_string(),
                     password.to_string(),
@@ -7348,10 +7411,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             };
             let _ = app.upgrade_in_event_loop(move |app| {
                 app.set_caldav_connecting(false);
-                if connected && app.get_caldav_account_id() == account_id {
+                // Close the form only when it still shows this connection.
+                if connected
+                    && app.get_caldav_account_id() == account_id
+                    && app.get_caldav_connection_id() == connection_id
+                {
                     app.set_caldav_account_id(-1);
+                    app.set_caldav_connection_id(-1);
                     app.set_caldav_password("".into());
-                    app.set_caldav_manage_existing(false);
                 }
             });
             let connections = core.load_calendar_connections().await.ok();

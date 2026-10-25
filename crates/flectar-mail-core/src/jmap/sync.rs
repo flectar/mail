@@ -1125,6 +1125,11 @@ async fn persist_emails(
                             stale_paths.push(path);
                         }
                     }
+                    // A changed message is read again from its preview
+                    // until its new body arrives.
+                    let verification_code = (!is_outgoing && !is_draft)
+                        .then(|| crate::verification_code::find(&subject, &snippet))
+                        .flatten();
                     // JMAP messages carry no IMAP UID; an adopted one drops
                     // the UID its earlier copy had in another folder.
                     tx.execute(
@@ -1135,6 +1140,7 @@ async fn persist_emails(
                            is_starred=CASE WHEN ?22 THEN is_starred ELSE ?13 END,
                            is_draft=?14, is_outgoing=?15, is_automated=?16,
                            has_attachments=?17, size=?18, snippet=?19, jmap_blob_id=?20,
+                           verification_code=CASE WHEN jmap_blob_id IS NOT ?20 THEN ?23 ELSE verification_code END,
                            body_state=CASE WHEN jmap_blob_id IS NOT ?20 THEN 'none' ELSE body_state END,
                            raw_path=CASE WHEN jmap_blob_id IS NOT ?20 THEN NULL ELSE raw_path END
                          WHERE id=?1",
@@ -1161,6 +1167,7 @@ async fn persist_emails(
                             blob_id,
                             pending_mailboxes as i64,
                             pending_keywords as i64,
+                            verification_code,
                         ],
                     )?;
                     local_id = existing.id;

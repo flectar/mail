@@ -351,8 +351,13 @@ mod tests {
         calendar
             .write(|conn| {
                 conn.execute(
-                    "INSERT INTO calendars (id, account_id, url, display_name)
-                     VALUES (1, 1, 'local://snapshot', 'Snapshot')",
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (1, 1, 'generic', 'https://dav.example.test/')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, display_name)
+                     VALUES (1, 1, 1, 'local://snapshot', 'Snapshot')",
                     [],
                 )?;
                 Ok(())

@@ -24,13 +24,14 @@ pub mod splits;
 pub mod sync_failures;
 pub mod threads;
 
-use crate::models::{Address, AuthKind, MailProtocol, Provider};
+use crate::models::{Address, AuthKind, CalendarConnectionKind, MailProtocol, Provider};
 use rusqlite::ToSql;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, Type, ValueRef};
 use serde::de::DeserializeOwned;
 
-/// Account enums are stored as their stable names. An unknown name is a
-/// conversion error, never a fallback to another protocol or sign-in method.
+/// Account and calendar enums are stored as their stable names. An unknown
+/// name is a conversion error, never a fallback to another protocol, sign-in
+/// method or calendar service.
 macro_rules! stored_name_column {
     ($type:ty) => {
         impl FromSql for $type {
@@ -53,6 +54,7 @@ macro_rules! stored_name_column {
 stored_name_column!(Provider);
 stored_name_column!(AuthKind);
 stored_name_column!(MailProtocol);
+stored_name_column!(CalendarConnectionKind);
 
 pub(crate) fn parse_json_column<T: DeserializeOwned>(
     json: &str,

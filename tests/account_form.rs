@@ -171,8 +171,8 @@ fn account_form_fields_follow_their_values() {
     app.set_account_form_open(true);
     app.set_account_password("typed".into());
     app.set_caldav_account_id(3);
+    app.set_caldav_connection_id(5);
     app.set_caldav_password("calendar".into());
-    app.set_caldav_manage_existing(true);
     app.set_carddav_account_id(4);
     app.set_carddav_password("contacts".into());
     app.set_carddav_manage_existing(true);
@@ -181,8 +181,8 @@ fn account_form_fields_follow_their_values() {
     assert!(!app.get_account_form_open());
     assert_eq!(app.get_account_password(), "");
     assert_eq!(app.get_caldav_account_id(), -1);
+    assert_eq!(app.get_caldav_connection_id(), -1);
     assert_eq!(app.get_caldav_password(), "");
-    assert!(!app.get_caldav_manage_existing());
     assert_eq!(app.get_carddav_account_id(), -1);
     assert_eq!(app.get_carddav_password(), "");
     assert!(!app.get_carddav_manage_existing());

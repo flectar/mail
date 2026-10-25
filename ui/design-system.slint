@@ -60,6 +60,23 @@ export global MailIconPalette {
     out property <color> drafts: #d946ef;
     out property <color> folders: #22a06b;
     out property <color> other: #64748b;
+    // The key on a message's verification code.
+    out property <color> verification-code: #f5b301;
+}
+
+// A file's type keeps one color wherever the file shows, in both themes.
+export global FileIconPalette {
+    out property <color> pdf: #e5484d;
+    out property <color> document: #2f81f7;
+    out property <color> spreadsheet: #22a06b;
+    out property <color> presentation: #ea580c;
+    out property <color> image: #8b5cf6;
+    out property <color> video: #db2777;
+    out property <color> audio: #0ea5e9;
+    out property <color> archive: #d97706;
+    out property <color> code: #64748b;
+    out property <color> calendar: #2f9cf4;
+    out property <color> other: #80817e;
 }
 
 // Settings destinations use the same preference-controlled color strategy as

@@ -9,7 +9,9 @@ use chrono::{
     Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone,
     Timelike, Utc,
 };
-use flectar_mail_core::models::{Account, Address, Calendar, CalendarEvent};
+use flectar_mail_core::models::{
+    Account, Address, Calendar, CalendarConnectionKind, CalendarEvent,
+};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -53,6 +55,9 @@ pub(crate) struct LocalCalendarAccount {
 pub(crate) struct LocalCalendarSource {
     pub(crate) id: i64,
     pub(crate) account_id: i64,
+    /// The service the calendar syncs with, named like account providers:
+    /// a CalDAV calendar of a Gmail account is "generic", not "gmail".
+    pub(crate) provider: &'static str,
     pub(crate) name: String,
     pub(crate) color: String,
     pub(crate) read_only: bool,
@@ -141,6 +146,11 @@ pub(crate) fn calendar_sources(calendars: Vec<Calendar>) -> Vec<LocalCalendarSou
         .map(|calendar| LocalCalendarSource {
             id: calendar.id,
             account_id: calendar.account_id,
+            provider: match calendar.kind {
+                CalendarConnectionKind::Google => "gmail",
+                CalendarConnectionKind::Microsoft => "microsoft",
+                CalendarConnectionKind::Generic => "generic",
+            },
             name: calendar.display_name.unwrap_or_default(),
             color: calendar.color.unwrap_or_default(),
             read_only: calendar.read_only,
@@ -632,8 +642,9 @@ fn event_row(
             .map(|source| calendar_color_index(&source.color, source.id))
             .unwrap_or(event.color_index),
         all_day: event.all_day,
-        provider: account
-            .map(|account| account.provider.as_str())
+        provider: source
+            .map(|source| source.provider)
+            .or_else(|| account.map(|account| account.provider.as_str()))
             .unwrap_or("local")
             .into(),
         account: account
@@ -733,10 +744,7 @@ pub(crate) fn apply_calendar(app: &AppWindow, state: &LocalCalendarState, today:
                     .map(|account| account.email.as_str())
                     .unwrap_or_default()
                     .into(),
-                provider: account
-                    .map(|account| account.provider.as_str())
-                    .unwrap_or("local")
-                    .into(),
+                provider: source.provider.into(),
                 color: source.color.clone().into(),
                 color_index: calendar_color_index(&source.color, source.id),
                 read_only: source.read_only,
@@ -898,6 +906,7 @@ mod tests {
         state.sources.push(LocalCalendarSource {
             id: 12,
             account_id: 0,
+            provider: "generic",
             name: "Work".into(),
             color: String::new(),
             read_only: true,

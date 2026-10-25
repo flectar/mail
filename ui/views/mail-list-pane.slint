@@ -1,55 +1,188 @@
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { HorizontalBox, ListView, VerticalBox } from "std-widgets.slint";
-import { EmailRow, MailDragApi, MailListEntry, MailListNavigation, MailNavigationTarget } from "../models.slint";
+import { EmailRow, ListAttachment, MailAttachments, MailDragApi, MailListEntry, MailListNavigation, MailNavigationTarget } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { FloatingActionButton, SelectionCheckBox, ToolbarIconButton } from "../components/controls.slint";
+import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
+import { LabelChip } from "../components/label-chip.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics, MotionSettings } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 
-component MailListLabelChip inherits Rectangle {
-    in property <string> name;
-    in property <bool> name-has-emoji: false;
-    in property <color> label-color;
-    in property <color> text-color;
-    in property <bool> compact: false;
+// A chip on a message-list row that acts on what it shows instead of
+// opening the message. Other buttons act on the row, as anywhere else on it.
+component MailListChip inherits Rectangle {
+    // Touch rows give the small chip a finger-sized target.
+    in property <bool> touch: false;
+    in property <color> chip-border-color;
+    in property <color> hover-background;
+    in property <color> pressed-background;
+    in property <color> focus-color;
+    callback activated(/* pointer */ bool);
+    // Positions in the window.
+    callback context-menu-requested(length, length);
+    callback open-in-tab-requested(/* background */ bool);
 
-    min-width: min(root.compact ? 68px : 92px, chip-name.preferred-width + 25px);
-    preferred-width: self.min-width;
-    max-width: self.min-width;
-    height: 20px;
     border-radius: 6px;
-    border-width: 1px;
-    border-color: root.label-color.transparentize(0.55);
-    background: root.label-color.transparentize(0.86);
+    border-width: keyboard.focus-visible ? 2px : 1px;
+    border-color: keyboard.focus-visible ? root.focus-color : root.chip-border-color;
+    background: hit.pressed ? root.pressed-background : hit.has-hover ? root.hover-background : transparent;
+    forward-focus: keyboard;
+    accessible-role: button;
+    accessible-action-default => { root.activated(false); }
+    animate background { duration: 120ms; easing: ease-out; enabled: MotionSettings.enabled; }
+
+    @children
+
+    keyboard := FocusVisibleScope {
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.activated(false);
+                return accept;
+            }
+            reject
+        }
+    }
+    hit := TouchArea {
+        x: root.touch ? -4px : 0px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width + (root.touch ? 8px : 0px);
+        height: root.touch ? max(parent.height, 32px) : parent.height;
+        mouse-cursor: pointer;
+        clicked => { root.activated(true); }
+        pointer-event(event) => {
+            if event.kind != PointerEventKind.down {
+                return;
+            }
+            if event.button == PointerEventButton.right {
+                root.context-menu-requested(
+                    self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            } else if event.button == PointerEventButton.middle {
+                root.open-in-tab-requested(event.modifiers.shift);
+            }
+        }
+    }
+}
+
+// The one-time code a message asks for. Activating the chip copies it.
+component MailListCodeChip inherits MailListChip {
+    in property <string> code;
+    // The code a character at a time, for screen readers.
+    in property <string> spelled-code;
+    in property <bool> copied: false;
+    in property <color> text-color;
+    in property <color> copied-color;
+    out property <length> natural-width: code-text.x + code-text.preferred-width + 6px;
+
+    min-width: root.natural-width;
+    preferred-width: root.natural-width;
+    max-width: root.natural-width;
+    height: max(20px, code-text.preferred-height + 2px);
+    accessible-label: root.copied
+        ? @tr("Copied verification code {}", root.spelled-code)
+        : @tr("Copy verification code {}", root.spelled-code);
 
     Image {
         x: 5px;
-        y: 4px;
+        y: (parent.height - self.height) / 2;
         width: 12px;
         height: 12px;
-        source: @image-url("../icons/lucide/outline/file-directory.svg");
-        colorize: root.label-color;
+        source: root.copied
+            ? @image-url("../icons/lucide/outline/check.svg")
+            : @image-url("../icons/lucide/filled/key.svg");
+        colorize: root.copied ? root.copied-color : MailIconPalette.verification-code;
         image-fit: contain;
         accessible-role: none;
     }
-    chip-name := Text {
+    code-text := Text {
         x: 21px;
-        width: parent.width - 25px;
+        width: self.preferred-width;
         height: parent.height;
-        text: root.name;
+        text: root.code;
         color: root.text-color;
         font-size: TypeScale.caption;
-        font-weight: 600;
-        font-family: root.name-has-emoji ? "Noto Emoji" : "";
-        overflow: elide;
+        font-weight: 650;
+        letter-spacing: 0.5px;
         vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
+// A file the conversation carries. Activating the chip previews the file,
+// or downloads it when it can't be previewed.
+component MailListAttachmentChip inherits MailListChip {
+    in property <ListAttachment> file;
+    // Files besides this one, counted at the chip's end.
+    in property <int> more: 0;
+    in property <color> text-color;
+    in property <color> secondary-color;
+    private property <string> name: root.file.stem + root.file.extension;
+    // The whole name, and the least that still shows its start and type.
+    out property <length> natural-width: name-row.x + stem.preferred-width + extension.preferred-width
+        + (root.more > 0 ? count.preferred-width : 0px) + 6px;
+    out property <length> least-width: name-row.x + min(stem.preferred-width, 2.5rem) + extension.preferred-width
+        + (root.more > 0 ? count.preferred-width : 0px) + 6px;
+
+    min-width: root.least-width;
+    preferred-width: root.natural-width;
+    max-width: root.natural-width;
+    height: max(20px, stem.preferred-height + 2px);
+    accessible-label: (root.file.previewable ? @tr("Preview {}", root.name) : @tr("Download {}", root.name))
+        + (root.more > 0 ? ", " + @tr("{n} more file" | "{n} more files" % root.more) : "");
+
+    FileTypeIcon {
+        x: 5px;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        kind: root.file.kind;
+    }
+    name-row := HorizontalLayout {
+        x: 21px;
+        width: max(0px, parent.width - self.x - 6px);
+        height: parent.height;
+        spacing: 0px;
+
+        // The start of the name gives way; its type stays readable.
+        stem := Text {
+            min-width: 0px;
+            horizontal-stretch: 1;
+            text: root.file.stem;
+            color: root.text-color;
+            font-size: TypeScale.caption;
+            font-weight: 600;
+            overflow: elide;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        extension := Text {
+            horizontal-stretch: 0;
+            text: root.file.extension;
+            color: root.text-color;
+            font-size: TypeScale.caption;
+            font-weight: 600;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+        count := Text {
+            visible: root.more > 0;
+            // A text keeps its natural width even when hidden.
+            min-width: root.more > 0 ? self.preferred-width : 0px;
+            max-width: self.min-width;
+            horizontal-stretch: 0;
+            text: " +" + root.more;
+            color: root.secondary-color;
+            font-size: TypeScale.caption;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
     }
 }
 
@@ -236,11 +369,14 @@ export component MailListPane inherits FocusScope {
     private property <length> message-row-height: root.dense ? 44px
         : 32px + root.sender-line + root.subject-line + root.detail-line;
     private property <length> group-row-height: root.compact ? 44px : 40px;
+    // A label shows only with room for the start of its name, and its gap.
+    private property <length> label-least-width: label-probe.least-width + 4px;
     forward-focus: list-keyboard;
 
     sender-line-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body-large; font-weight: 700; }
     subject-line-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.body; font-weight: 700; }
     detail-line-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.secondary; }
+    label-probe := LabelChip { visible: false; compact: true; name: "Long label name"; }
 
     function reveal-target(target: MailNavigationTarget) {
         if mail-list-scroll.visible-height <= 0px { return; }
@@ -406,6 +542,57 @@ export component MailListPane inherits FocusScope {
     changed selected_scope => { root.reset-pagination(); }
     changed search_query => { root.reset-pagination(); }
     changed search_filter => { root.reset-pagination(); }
+
+    // The row whose verification code was just copied shows a check for a
+    // moment; the state lives here so a sync that replaces rows keeps it.
+    private property <int> copied-code-email-id: -1;
+    private property <string> copied-code-spelled;
+
+    function copy-code(id: int, code: string, spelled: string) {
+        code-clipboard.text = code;
+        code-clipboard.select-all();
+        code-clipboard.copy();
+        root.copied-code-email-id = id;
+        root.copied-code-spelled = spelled;
+        // `restart` alone only re-arms a timer that has run before.
+        copied-code-timer.start();
+        copied-code-timer.restart();
+    }
+
+    copied-code-timer := Timer {
+        interval: 1600ms;
+        running: false;
+        triggered => {
+            self.stop();
+            root.copied-code-email-id = -1;
+        }
+    }
+
+    // A primitive text input is the bridge to the platform clipboard.
+    code-clipboard := TextInput {
+        x: -10000px;
+        y: -10000px;
+        width: 1px;
+        height: 1px;
+        visible: false;
+        enabled: false;
+        read-only: true;
+        accessible-role: none;
+    }
+
+    // Screen readers announce the copy, which leaves the screen unchanged
+    // apart from the chip's icon.
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 1px;
+        height: 1px;
+        accessible-role: text;
+        accessible-live-region: polite;
+        accessible-label: root.copied-code-email-id >= 0
+            ? @tr("Copied verification code {}", root.copied-code-spelled)
+            : "";
+    }
 
     pure function group-title(kind: string) -> string {
         if kind == "today" { return @tr("Today"); }
@@ -644,6 +831,22 @@ export component MailListPane inherits FocusScope {
 
                             for entry in root.list_entries : mail-row := Rectangle {
                                 private property <EmailRow> mail-data: entry.email;
+                                // Chips lead the detail line while it has room for them:
+                                // the code first, then the conversation's first file.
+                                private property <bool> shows-code: mail-data.verification_code != ""
+                                    && detail.width >= code-chip.natural-width + 4px;
+                                private property <bool> shows-attachment: mail-data.attachment_total > 0
+                                    && detail.width >= (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
+                                        + attachment-chip.least-width + 4px;
+                                // Labels follow, one beside a chip, while each keeps room for
+                                // the start of its name; "+N" (26px) counts the rest.
+                                private property <length> label-room: detail.width
+                                    - (mail-row.shows-code ? code-chip.natural-width + 4px : 0px)
+                                    - (mail-row.shows-attachment ? attachment-chip.preferred-width + 4px : 0px);
+                                private property <int> label-limit: !root.dense && !mail-row.shows-code && !mail-row.shows-attachment
+                                    && mail-row.label-room >= 2 * root.label-least-width + (mail-data.labels.length > 2 ? 26px : 0px) ? 2
+                                    : mail-row.label-room >= root.label-least-width + (mail-data.labels.length > 1 ? 26px : 0px) ? 1
+                                    : 0;
                                 private property <bool> reveal-ready: !entry.reveal_row;
                                 private property <bool> touch-pending: false;
                                 private property <bool> long-press-triggered: false;
@@ -674,6 +877,8 @@ export component MailListPane inherits FocusScope {
                                         + (mail-data.account_profile == "" ? "" : ", " + @tr("Profile: {}", mail-data.account_profile))
                                         + (mail-data.message_count > 1 ? ", " + @tr("{} messages", mail-data.message_count) : "")
                                         + (mail-data.label_summary == "" ? "" : ", " + mail-data.label_summary)
+                                        + (mail-data.verification_code == "" ? ""
+                                            : ", " + @tr("Verification code {}", mail-data.verification_code_spelled))
                                         + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
                                         + (mail-data.has_replied ? ", " + @tr("Replied") : "");
                                     accessible-id: "mail-row-" + mail-data.id;
@@ -730,213 +935,6 @@ export component MailListPane inherits FocusScope {
                                     foreground-color: mail-data.selected ? root.accent : root.secondary-text;
                                     avatar-border-width: mail-data.has_favicon ? 1px : 0px;
                                     avatar-border-color: root.border;
-                                }
-
-                                message-content := Rectangle {
-                                    // Dense rows keep everything on one line: the account
-                                    // comes before the indicators, thread count and time,
-                                    // and the subject and preview end before it.
-                                    property <length> dense-account-x: (sender-indicators.width > 0px ? sender-indicators.x
-                                        : mail-data.message_count > 1 ? thread-count.x : sender-time.x) - 54px;
-                                    visible: !entry.is_header;
-                                    x: root.show-avatars ? (root.dense ? 52px : 64px) : 14px;
-                                    y: root.dense ? 0px : 8px;
-                                    // The row already ends before the scrollbar
-                                    // gutter, so only its 12px padding remains.
-                                    width: max(0px, parent.width - self.x - 12px);
-                                    height: root.message-row-height - (root.dense ? 0px : 16px);
-
-                                    sender-time := Text {
-                                        x: parent.width - self.width;
-                                        y: 0px;
-                                        width: min(72px, self.preferred-width);
-                                        height: root.dense ? 44px : root.sender-line;
-                                        text: mail-data.time;
-                                        color: root.muted-text;
-                                        font-size: TypeScale.caption;
-                                        overflow: elide;
-                                        horizontal-alignment: right;
-                                        vertical-alignment: center;
-                                    }
-                                    sender-indicators := HorizontalBox {
-                                        x: mail-data.message_count > 1
-                                            ? thread-count.x - self.width - (self.width > 0px ? 8px : 0px)
-                                            : sender-time.x - self.width - 8px;
-                                        y: 0px;
-                                        width: mail-data.has_attachments && mail-data.has_replied && mail-data.message_count <= 1 ? 32px
-                                            : mail-data.has_attachments || (mail-data.has_replied && mail-data.message_count <= 1) ? 14px : 0px;
-                                        height: root.dense ? 44px : root.sender-line;
-                                        spacing: 4px;
-                                        cross-axis-alignment: center;
-
-                                        if mail-data.has_attachments : Image {
-                                            width: 14px;
-                                            height: 14px;
-                                            source: @image-url("../icons/lucide/outline/paperclip.svg");
-                                            colorize: root.muted-text;
-                                            image-fit: contain;
-                                            accessible-role: none;
-                                        }
-                                        if mail-data.has_replied && mail-data.message_count <= 1 : Image {
-                                            width: 14px;
-                                            height: 14px;
-                                            source: @image-url("../icons/lucide/outline/reply.svg");
-                                            colorize: root.muted-text;
-                                            image-fit: contain;
-                                            accessible-role: none;
-                                        }
-                                    }
-                                    thread-count := Rectangle {
-                                        visible: mail-data.message_count > 1;
-                                        x: sender-time.x - self.width - 8px;
-                                        y: root.dense ? 10px : 2px + (root.sender-line - 22px) / 2;
-                                        width: mail-data.message_count >= 100 ? 48px : mail-data.message_count >= 10 ? 42px : 36px;
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: root.accent-soft;
-                                        accessible-role: text;
-                                        accessible-label: @tr("{} messages in this conversation", mail-data.message_count);
-
-                                        HorizontalBox {
-                                            padding-left: 7px;
-                                            padding-right: 7px;
-                                            spacing: 3px;
-                                            cross-axis-alignment: center;
-                                            Image {
-                                                width: 11px;
-                                                height: 11px;
-                                                source: @image-url("../icons/lucide/outline/reply.svg");
-                                                colorize: root.accent;
-                                                image-fit: contain;
-                                                accessible-role: none;
-                                            }
-                                            Text {
-                                                text: mail-data.message_count;
-                                                color: root.accent;
-                                                font-size: TypeScale.caption;
-                                                font-weight: 700;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                    }
-                                    sender-title := Text {
-                                        x: 0px;
-                                        y: 0px;
-                                        width: root.dense ? min(170px, max(0px, parent.width - 190px))
-                                            : mail-data.message_count > 1
-                                                ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
-                                            : mail-data.has_attachments || mail-data.has_replied
-                                                ? max(0px, sender-indicators.x - 8px)
-                                                : max(0px, sender-time.x - 22px);
-                                        height: root.dense ? 44px : root.sender-line;
-                                        text: mail-data.sender;
-                                        color: root.heading;
-                                        font-size: root.dense ? TypeScale.body : TypeScale.body-large;
-                                        font-weight: mail-data.unread ? 700 : 500;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    Rectangle {
-                                        visible: mail-data.unread;
-                                        x: root.dense
-                                            ? min(sender-title.preferred-width + 6px, sender-title.width - 9px)
-                                            : min(sender-title.preferred-width + 6px, sender-title.width - 9px);
-                                        y: root.dense ? 18px : 8px + (root.sender-line - 22px) / 2;
-                                        width: 7px;
-                                        height: 7px;
-                                        border-radius: 4px;
-                                        background: root.accent;
-                                    }
-                                    subject-label := Text {
-                                        x: root.dense ? min(190px, sender-time.x) : 0px;
-                                        y: root.dense ? 0px : root.sender-line + 5px;
-                                        width: root.dense ? min(260px, max(0px, message-content.dense-account-x - self.x - 2px)) : parent.width;
-                                        height: root.dense ? 44px : root.subject-line;
-                                        text: mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject;
-                                        color: root.body-text;
-                                        font-size: TypeScale.body;
-                                        font-weight: mail-data.unread ? 700 : 500;
-                                        overflow: elide;
-                                        vertical-alignment: center;
-                                    }
-                                    account-label := Text {
-                                        visible: !root.dense;
-                                        x: parent.width - 88px;
-                                        y: root.sender-line + root.subject-line + 10px;
-                                        width: 88px;
-                                        height: root.detail-line;
-                                        text: mail-data.account;
-                                        color: root.muted-text;
-                                        font-size: TypeScale.caption;
-                                        overflow: elide;
-                                        horizontal-alignment: right;
-                                        vertical-alignment: center;
-                                    }
-                                    Rectangle {
-                                        visible: root.dense;
-                                        x: message-content.dense-account-x;
-                                        y: 11px;
-                                        width: 48px;
-                                        height: 22px;
-                                        background: transparent;
-                                        accessible-role: text;
-                                        accessible-label: @tr("Account: {}", mail-data.account);
-
-                                        Rectangle {
-                                            visible: mail-data.show_account_marker;
-                                            x: 0px;
-                                            y: 8px;
-                                            width: 6px;
-                                            height: 6px;
-                                            border-radius: 3px;
-                                            background: mail-data.account_color;
-                                        }
-                                        Text {
-                                            x: mail-data.show_account_marker ? 10px : 0px;
-                                            width: mail-data.show_account_marker ? 38px : 48px;
-                                            height: parent.height;
-                                            text: mail-data.account;
-                                            color: root.muted-text;
-                                            font-size: TypeScale.caption;
-                                            overflow: elide;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    HorizontalBox {
-                                        x: root.dense ? subject-label.x + subject-label.width + 12px : 0px;
-                                        y: root.dense ? 0px : root.sender-line + root.subject-line + 10px;
-                                        width: root.dense ? max(0px, message-content.dense-account-x - self.x - 12px) : max(0px, parent.width - 98px);
-                                        height: root.dense ? 44px : root.detail-line;
-                                        padding: 0px;
-                                        spacing: 4px;
-                                        cross-axis-alignment: center;
-
-                                        for label[index] in mail-data.labels : MailListLabelChip {
-                                            visible: index < (root.dense ? 1 : 2);
-                                            name: label.name;
-                                            name-has-emoji: label.name_has_emoji;
-                                            label-color: label.color;
-                                            text-color: root.heading;
-                                            compact: root.dense;
-                                        }
-                                        if mail-data.labels.length > (root.dense ? 1 : 2) : Text {
-                                            min-width: 22px;
-                                            preferred-width: 22px;
-                                            max-width: 22px;
-                                            text: "+" + (mail-data.labels.length - (root.dense ? 1 : 2));
-                                            color: root.secondary-text;
-                                            font-size: TypeScale.caption;
-                                            vertical-alignment: center;
-                                        }
-                                        Text {
-                                            horizontal-stretch: 1;
-                                            text: mail-data.preview;
-                                            color: root.faint-text;
-                                            font-size: TypeScale.secondary;
-                                            overflow: elide;
-                                            vertical-alignment: center;
-                                        }
-                                    }
                                 }
 
                                 // Desktop selects on pointer-down because a sync can
@@ -1008,6 +1006,305 @@ export component MailListPane inherits FocusScope {
                                                 }
                                                 if (event.kind == PointerEventKind.down && event.button == PointerEventButton.right) {
                                                     row-context.show({ x: row-hit.mouse-x, y: row-hit.mouse-y });
+                                                }
+                                            }
+
+                                            // Inside the row's pointer area, so its chips take
+                                            // their clicks before the row does.
+                                            message-content := Rectangle {
+                                                // Dense rows keep everything on one line: the account
+                                                // comes before the indicators, thread count and time,
+                                                // and the subject and preview end before it.
+                                                property <length> dense-account-x: (sender-indicators.width > 0px ? sender-indicators.x
+                                                    : mail-data.message_count > 1 ? thread-count.x : sender-time.x) - 54px;
+                                                visible: !entry.is_header;
+                                                x: root.show-avatars ? (root.dense ? 52px : 64px) : 14px;
+                                                y: root.dense ? 0px : 8px;
+                                                // The row already ends before the scrollbar
+                                                // gutter, so only its 12px padding remains.
+                                                width: max(0px, parent.width - self.x - 12px);
+                                                height: root.message-row-height - (root.dense ? 0px : 16px);
+
+                                                sender-time := Text {
+                                                    x: parent.width - self.width;
+                                                    y: 0px;
+                                                    width: min(72px, self.preferred-width);
+                                                    height: root.dense ? 44px : root.sender-line;
+                                                    text: mail-data.time;
+                                                    color: root.muted-text;
+                                                    font-size: TypeScale.caption;
+                                                    overflow: elide;
+                                                    horizontal-alignment: right;
+                                                    vertical-alignment: center;
+                                                }
+                                                sender-indicators := HorizontalLayout {
+                                                    x: mail-data.message_count > 1
+                                                        ? thread-count.x - self.width - (self.width > 0px ? 8px : 0px)
+                                                        : sender-time.x - self.width - 8px;
+                                                    y: 0px;
+                                                    width: mail-data.has_attachments && mail-data.has_replied && mail-data.message_count <= 1 ? 32px
+                                                        : mail-data.has_attachments || (mail-data.has_replied && mail-data.message_count <= 1) ? 14px : 0px;
+                                                    height: root.dense ? 44px : root.sender-line;
+                                                    spacing: 4px;
+                                                    cross-axis-alignment: center;
+
+                                                    if mail-data.has_attachments : Image {
+                                                        width: 14px;
+                                                        height: 14px;
+                                                        source: @image-url("../icons/lucide/outline/paperclip.svg");
+                                                        colorize: root.muted-text;
+                                                        image-fit: contain;
+                                                        accessible-role: none;
+                                                    }
+                                                    if mail-data.has_replied && mail-data.message_count <= 1 : Image {
+                                                        width: 14px;
+                                                        height: 14px;
+                                                        source: @image-url("../icons/lucide/outline/reply.svg");
+                                                        colorize: root.muted-text;
+                                                        image-fit: contain;
+                                                        accessible-role: none;
+                                                    }
+                                                }
+                                                thread-count := Rectangle {
+                                                    visible: mail-data.message_count > 1;
+                                                    x: sender-time.x - self.width - 8px;
+                                                    y: root.dense ? 10px : 2px + (root.sender-line - 22px) / 2;
+                                                    width: mail-data.message_count >= 100 ? 48px : mail-data.message_count >= 10 ? 42px : 36px;
+                                                    height: 22px;
+                                                    border-radius: 11px;
+                                                    background: root.accent-soft;
+                                                    accessible-role: text;
+                                                    accessible-label: @tr("{} messages in this conversation", mail-data.message_count);
+
+                                                    HorizontalBox {
+                                                        padding-left: 7px;
+                                                        padding-right: 7px;
+                                                        spacing: 3px;
+                                                        cross-axis-alignment: center;
+                                                        Image {
+                                                            width: 11px;
+                                                            height: 11px;
+                                                            source: @image-url("../icons/lucide/outline/reply.svg");
+                                                            colorize: root.accent;
+                                                            image-fit: contain;
+                                                            accessible-role: none;
+                                                        }
+                                                        Text {
+                                                            text: mail-data.message_count;
+                                                            color: root.accent;
+                                                            font-size: TypeScale.caption;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+                                                sender-title := Text {
+                                                    x: 0px;
+                                                    y: 0px;
+                                                    width: root.dense ? min(170px, max(0px, parent.width - 190px))
+                                                        : mail-data.message_count > 1
+                                                            ? max(0px, (sender-indicators.width > 0px ? sender-indicators.x : thread-count.x) - 8px)
+                                                        : mail-data.has_attachments || mail-data.has_replied
+                                                            ? max(0px, sender-indicators.x - 8px)
+                                                            : max(0px, sender-time.x - 22px);
+                                                    height: root.dense ? 44px : root.sender-line;
+                                                    text: mail-data.sender;
+                                                    color: root.heading;
+                                                    font-size: root.dense ? TypeScale.body : TypeScale.body-large;
+                                                    font-weight: mail-data.unread ? 700 : 500;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
+                                                }
+                                                Rectangle {
+                                                    visible: mail-data.unread;
+                                                    x: root.dense
+                                                        ? min(sender-title.preferred-width + 6px, sender-title.width - 9px)
+                                                        : min(sender-title.preferred-width + 6px, sender-title.width - 9px);
+                                                    y: root.dense ? 18px : 8px + (root.sender-line - 22px) / 2;
+                                                    width: 7px;
+                                                    height: 7px;
+                                                    border-radius: 4px;
+                                                    background: root.accent;
+                                                }
+                                                subject-label := Text {
+                                                    x: root.dense ? min(190px, sender-time.x) : 0px;
+                                                    y: root.dense ? 0px : root.sender-line + 5px;
+                                                    width: root.dense ? min(260px, max(0px, message-content.dense-account-x - self.x - 2px)) : parent.width;
+                                                    height: root.dense ? 44px : root.subject-line;
+                                                    text: mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject;
+                                                    color: root.body-text;
+                                                    font-size: TypeScale.body;
+                                                    font-weight: mail-data.unread ? 700 : 500;
+                                                    overflow: elide;
+                                                    vertical-alignment: center;
+                                                }
+                                                account-label := Text {
+                                                    visible: !root.dense;
+                                                    x: parent.width - 88px;
+                                                    y: root.sender-line + root.subject-line + 10px;
+                                                    width: 88px;
+                                                    height: root.detail-line;
+                                                    text: mail-data.account;
+                                                    color: root.muted-text;
+                                                    font-size: TypeScale.caption;
+                                                    overflow: elide;
+                                                    horizontal-alignment: right;
+                                                    vertical-alignment: center;
+                                                }
+                                                Rectangle {
+                                                    visible: root.dense;
+                                                    x: message-content.dense-account-x;
+                                                    y: 11px;
+                                                    width: 48px;
+                                                    height: 22px;
+                                                    background: transparent;
+                                                    accessible-role: text;
+                                                    accessible-label: @tr("Account: {}", mail-data.account);
+
+                                                    Rectangle {
+                                                        visible: mail-data.show_account_marker;
+                                                        x: 0px;
+                                                        y: 8px;
+                                                        width: 6px;
+                                                        height: 6px;
+                                                        border-radius: 3px;
+                                                        background: mail-data.account_color;
+                                                    }
+                                                    Text {
+                                                        x: mail-data.show_account_marker ? 10px : 0px;
+                                                        width: mail-data.show_account_marker ? 38px : 48px;
+                                                        height: parent.height;
+                                                        text: mail-data.account;
+                                                        color: root.muted-text;
+                                                        font-size: TypeScale.caption;
+                                                        overflow: elide;
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                                // A line too narrow for its chips cuts them off rather
+                                                // than drawing over the account.
+                                                detail := Rectangle {
+                                                    x: root.dense ? subject-label.x + subject-label.width + 12px : 0px;
+                                                    y: root.dense ? 0px : root.sender-line + root.subject-line + 10px;
+                                                    width: root.dense ? max(0px, message-content.dense-account-x - self.x - 12px) : max(0px, parent.width - 98px);
+                                                    height: root.dense ? 44px : root.detail-line;
+                                                    clip: true;
+
+                                                    // Each item carries its own gap, so labels past the
+                                                    // limit take no room.
+                                                    HorizontalLayout {
+                                                        spacing: 0px;
+                                                        cross-axis-alignment: center;
+
+                                                        HorizontalLayout {
+                                                            padding-right: mail-row.shows-code ? 4px : 0px;
+                                                            cross-axis-alignment: center;
+
+                                                            code-chip := MailListCodeChip {
+                                                                visible: mail-row.shows-code;
+                                                                min-width: mail-row.shows-code ? self.natural-width : 0px;
+                                                                preferred-width: self.min-width;
+                                                                max-width: self.min-width;
+                                                                code: mail-data.verification_code;
+                                                                spelled-code: mail-data.verification_code_spelled;
+                                                                copied: root.copied-code-email-id == mail-data.id;
+                                                                touch: root.compact;
+                                                                text-color: root.heading;
+                                                                // A control, so outlined like one.
+                                                                chip-border-color: AppTheme.control-border;
+                                                                hover-background: root.muted-control-bg;
+                                                                pressed-background: root.accent-soft;
+                                                                focus-color: root.accent;
+                                                                copied-color: root.accent;
+                                                                activated(pointer) => {
+                                                                    if pointer { root.pointer-focus(mail-data.id); }
+                                                                    root.copy-code(mail-data.id, mail-data.verification_code, mail-data.verification_code_spelled);
+                                                                }
+                                                                context-menu-requested(x, y) => {
+                                                                    row-context.show({ x: x - row-context.absolute-position.x, y: y - row-context.absolute-position.y });
+                                                                }
+                                                                open-in-tab-requested(background) => {
+                                                                    if TabsUi.enabled { TabsUi.open-conversation(mail-data.id, background); }
+                                                                }
+                                                            }
+                                                        }
+                                                        HorizontalLayout {
+                                                            padding-right: mail-row.shows-attachment ? 4px : 0px;
+                                                            cross-axis-alignment: center;
+
+                                                            attachment-chip := MailListAttachmentChip {
+                                                                visible: mail-row.shows-attachment;
+                                                                preferred-width: mail-row.shows-attachment ? min(self.natural-width, root.dense ? 180px : 150px) : 0px;
+                                                                max-width: self.preferred-width;
+                                                                min-width: mail-row.shows-attachment ? min(self.preferred-width, self.least-width) : 0px;
+                                                                horizontal-stretch: 0;
+                                                                file: mail-data.attachment;
+                                                                more: mail-data.attachment_total - 1;
+                                                                touch: root.compact;
+                                                                text-color: root.heading;
+                                                                secondary-color: root.secondary-text;
+                                                                chip-border-color: AppTheme.control-border;
+                                                                hover-background: root.muted-control-bg;
+                                                                pressed-background: root.accent-soft;
+                                                                focus-color: root.accent;
+                                                                activated(pointer) => {
+                                                                    if pointer { root.pointer-focus(mail-data.id); }
+                                                                    MailAttachments.command(
+                                                                        mail-data.attachment.previewable ? "preview-listed" : "download-listed",
+                                                                        mail-data.attachment.id);
+                                                                }
+                                                                context-menu-requested(x, y) => {
+                                                                    row-context.show({ x: x - row-context.absolute-position.x, y: y - row-context.absolute-position.y });
+                                                                }
+                                                                open-in-tab-requested(background) => {
+                                                                    if TabsUi.enabled { TabsUi.open-conversation(mail-data.id, background); }
+                                                                }
+                                                            }
+                                                        }
+                                                        for label[index] in mail-data.labels : HorizontalLayout {
+                                                            padding-right: index < mail-row.label-limit ? 4px : 0px;
+                                                            cross-axis-alignment: center;
+
+                                                            if index < mail-row.label-limit : LabelChip {
+                                                                compact: true;
+                                                                // The preview gives way first, then the names shorten.
+                                                                preferred-width: min(self.natural-width, root.dense ? 68px : 92px);
+                                                                max-width: self.preferred-width;
+                                                                min-width: min(self.preferred-width, self.least-width);
+                                                                horizontal-stretch: 0;
+                                                                name: label.name;
+                                                                name-has-emoji: label.name_has_emoji;
+                                                                use-label-icon: mail-data.account_uses_labels;
+                                                                label-color: label.color;
+                                                                text-color: root.heading;
+                                                                chip-border-color: root.border-subtle;
+                                                            }
+                                                        }
+                                                        if mail-data.labels.length > mail-row.label-limit : HorizontalLayout {
+                                                            padding-right: 4px;
+
+                                                            Text {
+                                                                width: 22px;
+                                                                text: "+" + (mail-data.labels.length - mail-row.label-limit);
+                                                                color: root.secondary-text;
+                                                                font-size: TypeScale.caption;
+                                                                vertical-alignment: center;
+                                                            }
+                                                        }
+                                                        Text {
+                                                            // A preview cut to a few letters says nothing,
+                                                            // so it gives up all its room first and stays
+                                                            // out of a gap too narrow for a word.
+                                                            min-width: 0px;
+                                                            visible: self.width >= 4 * self.font-size;
+                                                            horizontal-stretch: 1;
+                                                            text: mail-data.preview;
+                                                            color: root.faint-text;
+                                                            font-size: TypeScale.secondary;
+                                                            overflow: elide;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
                                                 }
                                             }
 

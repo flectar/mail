@@ -8,7 +8,9 @@ import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
+import { LabelChip } from "../components/label-chip.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
@@ -23,49 +25,6 @@ component ReaderControl inherits ToolbarIconButton {
     icon-color: AppTheme.body;
     hover-background: AppTheme.control-bg;
     active-background: AppTheme.accent-soft;
-}
-
-component MailLabelChip inherits Rectangle {
-    in property <string> name;
-    in property <bool> name-has-emoji: false;
-    in property <bool> use-label-icon: false;
-    in property <color> label-color;
-    in property <color> text-color;
-    in property <color> chip-border-color;
-
-    min-width: chip-name.preferred-width + 28px;
-    preferred-width: self.min-width;
-    max-width: 180px;
-    height: 24px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: root.chip-border-color;
-    background: root.label-color.transparentize(0.88);
-
-    Image {
-        x: 7px;
-        y: 6px;
-        width: 12px;
-        height: 12px;
-        source: root.use-label-icon
-            ? @image-url("../icons/lucide/filled/tag.svg")
-            : @image-url("../icons/lucide/filled/file-directory.svg");
-        colorize: root.label-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-    chip-name := Text {
-        x: 23px;
-        width: parent.width - 27px;
-        height: parent.height;
-        text: root.name;
-        color: root.text-color;
-        font-size: TypeScale.caption;
-        font-weight: 600;
-        font-family: root.name-has-emoji ? "Noto Emoji" : "";
-        overflow: elide;
-        vertical-alignment: center;
-    }
 }
 
 component LabelColorSwatch inherits Rectangle {
@@ -1107,7 +1066,7 @@ export component MailReadingPane inherits FocusScope {
                             padding: 0px;
                             spacing: 6px;
                             alignment: start;
-                            for label in root.mail_labels : MailLabelChip {
+                            for label in root.mail_labels : LabelChip {
                                 visible: label.applied;
                                 name: label.name;
                                 name-has-emoji: label.name_has_emoji;
@@ -1717,15 +1676,12 @@ export component MailReadingPane inherits FocusScope {
                                                         image-fit: cover;
                                                         accessible-role: none;
                                                     }
-                                                    if !attachment.has_thumbnail : Image {
+                                                    if !attachment.has_thumbnail : FileTypeIcon {
                                                         x: 9px;
                                                         y: 9px;
                                                         width: 18px;
                                                         height: 18px;
-                                                        source: @image-url("../icons/lucide/outline/file.svg");
-                                                        colorize: root.secondary-text;
-                                                        image-fit: contain;
-                                                        accessible-role: none;
+                                                        kind: attachment.kind;
                                                     }
                                                 }
 

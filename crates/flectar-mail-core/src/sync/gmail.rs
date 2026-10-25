@@ -3711,7 +3711,12 @@ async fn run_actor(
             Ok::<_, CoreError>((actions_remaining, backfill_done))
         }
         .await;
-        refresh_labels = false;
+        // Labels and sender identities refresh on the first pass and on each
+        // explicit sync. A pass that could not reach Google leaves that
+        // refresh to its retry, so starting offline does not skip it.
+        if !matches!(result, Err(CoreError::Offline)) {
+            refresh_labels = false;
+        }
 
         let (delay, rerun) = match result {
             Ok((actions_remaining, backfill_done)) => {

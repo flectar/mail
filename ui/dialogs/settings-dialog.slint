@@ -7,7 +7,8 @@ import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
+import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
+import { AccountCalendars } from "../components/account-calendars.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
@@ -501,12 +502,15 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> account_protocol: "imap";
     in-out property <string> jmap_url: "";
     in-out property <bool> connect_calendar_on_add: true;
+    // The CalDAV form adds a connection to this account, or changes the
+    // connection with this id when it is positive.
     in-out property <int> caldav_account_id: -1;
+    in-out property <int> caldav_connection_id: -1;
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
-    in-out property <bool> caldav_manage_existing: false;
     in property <bool> caldav_connecting: false;
+    private property <string> caldav-account-email: "";
     in-out property <int> carddav_account_id: -1;
     in-out property <string> carddav_url: "";
     in-out property <string> carddav_username: "";
@@ -553,6 +557,9 @@ export component SettingsDialog inherits Rectangle {
     private property <bool> delete-profile-confirmation: false;
     private property <string> delete-profile-id: "";
     private property <string> delete-profile-name: "";
+    private property <bool> remove-calendar-confirmation: false;
+    private property <int> remove-calendar-id: -1;
+    private property <string> remove-calendar-name: "";
     private property <bool> account-profile-picker-open: false;
     private property <int> account-profile-picker-id: -1;
     // The picker shows the account's live row, which changes as choices apply.
@@ -602,8 +609,10 @@ export component SettingsDialog inherits Rectangle {
     callback save_account_sent_copy_policy(int, string);
     callback save_account_keep_on_server(int, string);
     callback connect_account_calendar(int);
-    callback set_account_calendar_enabled(int, bool);
-    callback connect_caldav(int, string, string, string);
+    // (account, connection or -1 for a new one, url, username, password)
+    callback connect_caldav(int, int, string, string, string);
+    callback set_calendar_connection_enabled(int, bool);
+    callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
@@ -933,18 +942,37 @@ export component SettingsDialog inherits Rectangle {
         root.account-profile-picker-index = -1;
     }
 
-    function open-caldav-settings(account: AccountRow) {
+    function add-caldav(account: AccountRow) {
         root.caldav_account_id = account.id;
-        root.caldav_url = account.caldav_url;
-        root.caldav_username = account.caldav_username;
+        root.caldav_connection_id = -1;
+        root.caldav-account-email = account.email;
+        root.caldav_url = "";
+        root.caldav_username = account.username != "" ? account.username : account.email;
         root.caldav_password = "";
-        root.caldav_manage_existing = account.calendar_connected;
+    }
+
+    function edit-caldav(account: AccountRow, connection: CalendarConnectionRow) {
+        root.caldav_account_id = account.id;
+        root.caldav_connection_id = connection.id;
+        root.caldav-account-email = account.email;
+        root.caldav_url = connection.base_url;
+        root.caldav_username = connection.username;
+        root.caldav_password = "";
     }
 
     function close-caldav-settings() {
         root.caldav_account_id = -1;
+        root.caldav_connection_id = -1;
         root.caldav_password = "";
-        root.caldav_manage_existing = false;
+    }
+
+    function confirm-calendar-removal(account: AccountRow, connection: CalendarConnectionRow) {
+        root.remove-calendar-id = connection.id;
+        root.remove-calendar-name = connection.kind == "google" ? @tr("Google Calendar")
+            : connection.kind == "microsoft" ? @tr("Outlook calendar")
+            : connection.calendar-count == 1 && connection.calendar-name != "" ? connection.calendar-name
+            : connection.host;
+        root.remove-calendar-confirmation = true;
     }
 
         Rectangle {
@@ -1793,7 +1821,7 @@ export component SettingsDialog inherits Rectangle {
                                     : self.has-server-copies
                                         ? server-copies-note.y + server-copies-note.height + (root.compact ? 10px : 8px)
                                         : history-row.y + history-row.height + (root.compact ? 9px : 1px);
-                                height: profile-row.y + profile-row.height + (root.compact ? (account.provider == "generic" ? 61px : 7px) : 13px);
+                                height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
                                 dropped(event) => {
                                     let source = root.read_account_transfer(event.data);
@@ -1869,38 +1897,8 @@ export component SettingsDialog inherits Rectangle {
                                             sync => { root.sync_account(account.id); }
                                             width: 108px;
                                         }
-                                        // The switch rows share the buttons' 30px band and grow
-                                        // to fit their label or button.
-                                        if !root.compact && account.calendar_connected : HorizontalBox {
-                                            width: max(122px, self.preferred-width);
-                                            height: 30px;
-                                            padding-top: 0px;
-                                            padding-bottom: 0px;
-                                            spacing: 8px;
-                                            cross-axis-alignment: center;
-                                            if account.provider == "generic" : Button {
-                                                width: max(64px, self.content-width);
-                                                text: @tr("CalDAV");
-                                                height: 30px;
-                                                clicked => { root.open-caldav-settings(account); }
-                                            }
-                                            if account.provider != "generic" : Text { text: @tr("Calendar"); color: root.body-text; font-size: TypeScale.caption; vertical-alignment: center; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                            Switch { checked: account.calendar_enabled; toggled => { root.set_account_calendar_enabled(account.id, self.checked); } }
-                                        }
-                                        if !root.compact && !account.calendar_connected && account.provider != "generic" : Button {
-                                            width: max(128px, self.content-width);
-                                            height: 30px;
-                                            text: account.calendar_status == "" ? @tr("Add calendar") : @tr("Retry calendar");
-                                            enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
-                                            clicked => { root.connect_account_calendar(account.id); }
-                                        }
-                                        if !root.compact && !account.calendar_connected && account.provider == "generic" : Button {
-                                            width: max(116px, self.content-width);
-                                            height: 30px;
-                                            text: @tr("Set up CalDAV");
-                                            clicked => { root.open-caldav-settings(account); }
-                                        }
+                                        // The switch row shares the buttons' 30px band and grows
+                                        // to fit its label.
                                         if !root.compact && account.carddav_connected : HorizontalBox {
                                             width: max(122px, self.preferred-width);
                                             height: 30px;
@@ -2062,19 +2060,22 @@ export component SettingsDialog inherits Rectangle {
                                             background: account.profile_color;
                                         }
                                     }
-                                    if root.compact && account.provider == "generic" : HorizontalBox {
-                                        x: 24px;
-                                        y: profile-row.y + profile-row.height + 14px;
-                                        width: parent.width - 48px;
-                                        height: 36px;
-                                        spacing: 10px;
-                                        Button {
-                                            width: max(64px, self.content-width);
-                                            text: account.calendar_connected ? @tr("CalDAV settings") : @tr("Set up CalDAV");
-                                            clicked => { root.open-caldav-settings(account); }
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        if account.calendar_connected : Switch { checked: account.calendar_enabled; toggled => { root.set_account_calendar_enabled(account.id, self.checked); } }
+                                    calendars := AccountCalendars {
+                                        x: root.compact ? 24px : 32px;
+                                        y: profile-row.y + profile-row.height + (root.compact ? 14px : 12px);
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        height: self.preferred-height;
+                                        account: account;
+                                        compact: root.compact;
+                                        provider-actions-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        line-color: root.border-subtle;
+                                        connect-provider => { root.connect_account_calendar(account.id); }
+                                        add-caldav => { root.add-caldav(account); }
+                                        edit(connection) => { root.edit-caldav(account, connection); }
+                                        remove(connection) => { root.confirm-calendar-removal(account, connection); }
+                                        set-enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
                                     }
                                 }
                             }
@@ -2603,7 +2604,7 @@ export component SettingsDialog inherits Rectangle {
             background: #00000088;
             z: 900;
             accessible-role: groupbox;
-            accessible-label: root.caldav_manage_existing ? @tr("CalDAV settings") : @tr("Set up CalDAV");
+            accessible-label: root.caldav_connection_id > 0 ? @tr("CalDAV settings") : @tr("Add CalDAV calendar");
 
             TouchArea { clicked => { root.close-caldav-settings(); } }
 
@@ -2611,7 +2612,7 @@ export component SettingsDialog inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 width: min(520px, parent.width - 24px);
-                height: min(root.compact ? 410px : 354px, parent.height - 24px);
+                height: min(root.compact ? 500px : 430px, parent.height - 24px);
                 background: root.surface;
                 border-radius: 12px;
                 border-width: 1px;
@@ -2652,8 +2653,8 @@ export component SettingsDialog inherits Rectangle {
                             VerticalBox {
                                 padding: 0px;
                                 spacing: 2px;
-                                Text { text: root.caldav_manage_existing ? @tr("CalDAV settings") : @tr("Set up CalDAV"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
-                                Text { text: root.caldav_manage_existing ? @tr("Discover new calendars.") : @tr("Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                Text { text: root.caldav_connection_id > 0 ? @tr("CalDAV settings") : @tr("Add CalDAV calendar"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
+                                Text { text: root.caldav_connection_id > 0 ? @tr("Discover new calendars.") : @tr("Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-caldav-settings(); } }
@@ -2677,15 +2678,22 @@ export component SettingsDialog inherits Rectangle {
 
                                 caldav-url-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
+                                    height: self.preferred-height;
                                     label: @tr("Server address");
                                     value <=> root.caldav_url;
                                     placeholder: @tr("https://calendar.example.com/");
                                     label-color: root.secondary-text;
                                 }
+                                Text {
+                                    height: self.preferred-height;
+                                    text: @tr("To sync one calendar, such as a shared mailbox's, enter that calendar's own address.");
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    wrap: word-wrap;
+                                }
                                 caldav-username-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
+                                    height: self.preferred-height;
                                     label: @tr("Username");
                                     value <=> root.caldav_username;
                                     placeholder: @tr("Usually your email address");
@@ -2693,12 +2701,19 @@ export component SettingsDialog inherits Rectangle {
                                 }
                                 caldav-password-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
-                                    label: root.caldav_manage_existing ? @tr("New app password · Optional") : @tr("App password");
+                                    height: self.preferred-height;
+                                    label: root.caldav_connection_id > 0 ? @tr("New app password · Optional") : @tr("App password");
                                     value <=> root.caldav_password;
-                                    placeholder: root.caldav_manage_existing ? @tr("Leave blank to keep the current password") : @tr("Stored securely in your system keyring");
+                                    placeholder: root.caldav_connection_id > 0 ? @tr("Leave blank to keep the current password") : @tr("Stored securely in your system keyring");
                                     input-type: password;
                                     label-color: root.secondary-text;
+                                }
+                                Text {
+                                    height: self.preferred-height;
+                                    text: @tr("Invitations for events you create here are sent from {}.", root.caldav-account-email);
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    wrap: word-wrap;
                                 }
 
                                 if root.sync_status != "" : Text { text: root.sync_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
@@ -2710,13 +2725,14 @@ export component SettingsDialog inherits Rectangle {
                             height: root.compact ? 44px : 34px;
                             spacing: 8px;
                             Rectangle { horizontal-stretch: 1; }
-                            Button { height: parent.height; text: @tr("Cancel"); clicked => { root.close-caldav-settings(); } }
+                            Button { min-width: self.content-width; height: parent.height; text: @tr("Cancel"); clicked => { root.close-caldav-settings(); } }
                             Button {
+                                min-width: self.content-width;
                                 height: parent.height;
-                                text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_manage_existing ? @tr("Reconnect") : @tr("Connect");
+                                text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_connection_id > 0 ? @tr("Reconnect") : @tr("Connect");
                                 primary: true;
-                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_manage_existing || root.caldav_password != "");
-                                clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_url, root.caldav_username, root.caldav_password); }
+                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "");
+                                clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_connection_id, root.caldav_url, root.caldav_username, root.caldav_password); }
                             }
                         }
                     }
@@ -3149,5 +3165,24 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_mail_profile(root.delete-profile-id); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.remove-calendar-confirmation;
+            title: @tr("Remove calendar?");
+            subject: root.remove-calendar-name;
+            description: @tr("Stop syncing it and remove its events from this device.");
+            detail: @tr("Events on the server will not be deleted.");
+            confirm-label: @tr("Remove calendar");
+            cancel-label: @tr("Keep calendar");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.remove_calendar_connection(root.remove-calendar-id); }
         }
 }

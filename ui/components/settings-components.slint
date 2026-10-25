@@ -384,6 +384,7 @@ export component FormField inherits VerticalBox {
 
     padding: 0px;
     spacing: 5px;
+    // Long translated labels wrap on narrow screens instead of overflowing.
     Text {
         height: max(16px, self.preferred-height);
         text: root.label;
@@ -391,6 +392,7 @@ export component FormField inherits VerticalBox {
         font-size: TypeScale.caption;
         font-weight: 600;
         vertical-alignment: center;
+        wrap: word-wrap;
     }
     field := LineEdit {
         enabled: root.enabled;

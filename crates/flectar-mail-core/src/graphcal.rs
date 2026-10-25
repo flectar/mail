@@ -10,15 +10,15 @@
 //! kept in the calendar's `sync_token` column; a `410 Gone` restarts from a
 //! fresh window.
 
+use crate::caldav::route::PendingPush;
+use crate::caldav::sync::Synced;
 use crate::calendar::{IcsAttendee, IcsEvent};
 use crate::db::Db;
 use crate::db::repo;
-use crate::db::repo::calendar::SyncRow;
 use crate::error::{CoreError, Result};
-use crate::events::{CoreEvent, EventBus, NewEventInfo};
+use crate::events::NewEventInfo;
 use crate::graph;
-use crate::models::{Provider, now_ms};
-use crate::oauth::tokens::TokenProvider;
+use crate::models::now_ms;
 
 /// Delta windows are fixed at first sync: 90 days back, ~13 months ahead.
 /// Events outside the window arrive when the token eventually expires (410)
@@ -28,79 +28,60 @@ const WINDOW_FUTURE_MS: i64 = 400 * 86_400_000;
 const MAX_GRAPH_DELTA_PAGES: usize = 1_000;
 const MAX_NEW_EVENT_NOTIFICATIONS: usize = 1_000;
 
-/// One account's full Graph calendar cycle. Returns true when anything
-/// changed, mirroring `caldav::sync::sync_account`.
-pub async fn sync_account(
+/// One Microsoft connection's cycle, mirroring
+/// `caldav::sync::sync_connection`: its routed local changes first, so the
+/// pull sees (and agrees with) their results, then every enabled calendar.
+pub async fn sync_connection(
     db: &Db,
-    bus: &EventBus,
-    tokens: &TokenProvider,
+    token: &str,
     account_id: i64,
-) -> Result<bool> {
-    let token = tokens
-        .access_token_for_scope(
-            account_id,
-            Provider::Microsoft,
-            crate::oauth::providers::MS_CALENDARS_SCOPE,
-        )
-        .await?;
-
-    // Local changes first, so the pull sees (and agrees with) their results.
-    let pushed = push_dirty(db, &token, account_id).await?;
+    connection_id: i64,
+    pushes: &[PendingPush],
+) -> Result<Synced> {
+    let pushed = push_routed(db, token, pushes).await?;
 
     let calendars = db
-        .read(move |conn| repo::caldav::list_calendars(conn, Some(account_id)))
+        .read(move |conn| repo::caldav::connection_calendars(conn, connection_id))
         .await?;
-    let mut changed_any = pushed;
-    let mut new_events: Vec<NewEventInfo> = Vec::new();
-
+    let mut synced = Synced {
+        changed: pushed,
+        ..Synced::default()
+    };
     for cal in calendars.into_iter().filter(|c| c.enabled) {
-        match sync_calendar(db, &token, account_id, cal.id, &cal.url).await {
+        match sync_calendar(db, token, account_id, cal.id, &cal.url).await {
             Ok((changed, fresh)) => {
-                changed_any |= changed;
-                let remaining = MAX_NEW_EVENT_NOTIFICATIONS.saturating_sub(new_events.len());
-                new_events.extend(fresh.into_iter().take(remaining));
+                synced.changed |= changed;
+                synced.add_new_events(fresh);
             }
-            Err(CoreError::NeedsReauth) => return Err(CoreError::NeedsReauth),
+            Err(error @ (CoreError::NeedsReauth | CoreError::Offline)) => return Err(error),
             Err(e) => {
                 tracing::warn!("graph calendar {} sync failed: {e}", cal.id);
-                let msg = e.to_string();
-                db.write(move |conn| repo::caldav::set_config_error(conn, account_id, Some(&msg)))
-                    .await?;
+                let name = cal.display_name.unwrap_or(cal.url);
+                synced.calendar_error.get_or_insert(format!("{name}: {e}"));
             }
         }
     }
-
-    if changed_any {
-        bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
-    if !new_events.is_empty() {
-        bus.emit(CoreEvent::CalendarEventsAdded {
-            account_id,
-            events: new_events,
-        });
-    }
-    Ok(changed_any)
+    Ok(synced)
 }
 
-/// Push every dirty/tombstoned row via Graph. Updates are unconditional
-/// PATCHes (Graph offers no If-Match on delegated events), so concurrent
-/// remote edits resolve last-writer-wins; the next pull reconciles the row.
-async fn push_dirty(db: &Db, token: &str, account_id: i64) -> Result<bool> {
-    let rows = db
-        .read(move |conn| repo::calendar::dirty_rows(conn, account_id))
-        .await?;
+/// Push the changes routed to this connection via Graph. Updates are
+/// unconditional PATCHes (Graph offers no If-Match on delegated events), so
+/// concurrent remote edits resolve last-writer-wins; the next pull
+/// reconciles the row.
+async fn push_routed(db: &Db, token: &str, pushes: &[PendingPush]) -> Result<bool> {
     let mut any = false;
-    for row in rows {
-        match push_row(db, token, account_id, &row).await {
+    for push in pushes {
+        match push_row(db, token, push).await {
             Ok(()) => any = true,
-            Err(CoreError::NeedsReauth) => return Err(CoreError::NeedsReauth),
-            Err(e) => tracing::warn!("graph push of event {} failed: {e}", row.event.id),
+            Err(error @ (CoreError::NeedsReauth | CoreError::Offline)) => return Err(error),
+            Err(e) => tracing::warn!("graph push of event {} failed: {e}", push.row.event.id),
         }
     }
     Ok(any)
 }
 
-async fn push_row(db: &Db, token: &str, account_id: i64, row: &SyncRow) -> Result<()> {
+async fn push_row(db: &Db, token: &str, push: &PendingPush) -> Result<()> {
+    let row = &push.row;
     let event_id = row.event.id;
     if row.deleted {
         if let Some(href) = &row.caldav_href {
@@ -113,47 +94,24 @@ async fn push_row(db: &Db, token: &str, account_id: i64, row: &SyncRow) -> Resul
 
     let subject = row.event.summary.clone().unwrap_or_default();
     let ev = graph_event(&subject, &row.event);
-    match &row.caldav_href {
+    let calendar_id = push.calendar.id;
+    let id = match &row.caldav_href {
         Some(href) => {
             graph::update_calendar_event(token, href, &ev).await?;
-            let calendar_id = match row.event.calendar_id {
-                Some(id) => id,
-                None => return Err(CoreError::CalDav("synced event without calendar".into())),
-            };
-            let href = href.clone();
-            db.write(move |conn| {
-                repo::calendar::clear_dirty_set_etag(conn, event_id, calendar_id, &href, None, "")
-            })
-            .await?;
+            href.clone()
         }
         None => {
-            // Prefer the event's chosen calendar; fall back to the account's
-            // default when none was chosen or it vanished/was disabled.
-            let mut target = None;
-            if let Some(cal_id) = row.event.calendar_id {
-                target = db
-                    .read(move |conn| repo::caldav::get_calendar(conn, cal_id))
-                    .await?
-                    .filter(|c| c.enabled && !c.read_only);
-            }
-            let default = match target {
-                Some(c) => c,
-                None => db
-                    .read(move |conn| repo::caldav::default_calendar(conn, account_id))
-                    .await?
-                    .ok_or_else(|| CoreError::CalDav("no calendar to write to".into()))?,
-            };
-            let id = graph::create_calendar_event(token, Some(&default.url), &ev).await?;
+            let id = graph::create_calendar_event(token, Some(&push.calendar.url), &ev).await?;
             if id.is_empty() {
                 return Err(CoreError::Other("graph create returned no event id".into()));
             }
-            let calendar_id = default.id;
-            db.write(move |conn| {
-                repo::calendar::clear_dirty_set_etag(conn, event_id, calendar_id, &id, None, "")
-            })
-            .await?;
+            id
         }
-    }
+    };
+    db.write(move |conn| {
+        repo::calendar::clear_dirty_set_etag(conn, event_id, calendar_id, &id, None, "")
+    })
+    .await?;
     Ok(())
 }
 

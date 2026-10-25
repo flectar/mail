@@ -208,8 +208,20 @@ fixture_row!(EmailRow {
     message_count,
     label_summary,
     labels,
+    account_uses_labels,
+    verification_code,
+    verification_code_spelled,
+    attachment,
+    attachment_total,
     selected,
     checked
+});
+fixture_row!(ListAttachment {
+    id,
+    stem,
+    extension,
+    kind,
+    previewable
 });
 fixture_row!(MailListEntry {
     is_header,
@@ -250,16 +262,25 @@ fixture_row!(AccountRow {
     smtp_host,
     smtp_port,
     mail_history,
-    calendar_connected,
-    calendar_enabled,
-    calendar_status,
-    caldav_url,
-    caldav_username,
+    calendar_connections,
+    provider_calendar_connected,
+    provider_calendar_error,
     carddav_connected,
     carddav_enabled,
     carddav_status,
     carddav_url,
     carddav_username
+});
+fixture_row!(CalendarConnectionRow {
+    id,
+    kind,
+    base_url,
+    host,
+    username,
+    calendar_name,
+    calendar_count,
+    enabled,
+    error
 });
 fixture_row!(MailProfileRow {
     id,

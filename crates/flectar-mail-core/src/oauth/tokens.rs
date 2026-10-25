@@ -486,7 +486,7 @@ impl TokenProvider {
             {
                 tracing::warn!(
                     account_id,
-                    slot = slot.as_str(),
+                    slot = %slot.key(),
                     %error,
                     "could not remove migrated OAuth credential"
                 );

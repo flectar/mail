@@ -936,6 +936,10 @@ pub(super) fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
         && a.has_replied == b.has_replied
         && a.message_count == b.message_count
         && a.label_summary == b.label_summary
+        && a.account_uses_labels == b.account_uses_labels
+        && a.verification_code == b.verification_code
+        && a.attachment == b.attachment
+        && a.attachment_total == b.attachment_total
         && a.selected == b.selected
         && a.checked == b.checked
         && (!a.has_favicon || (a.favicon == b.favicon && a.favicon_small == b.favicon_small))
@@ -990,11 +994,31 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                     .max(1),
                 label_summary: label_summary(&email.labels, labels).into(),
                 labels: ModelRc::new(VecModel::from(applied_label_rows(labels, &email.labels))),
+                account_uses_labels: email.account_uses_labels,
+                verification_code: email.verification_code.clone().unwrap_or_default().into(),
+                verification_code_spelled: email
+                    .verification_code
+                    .as_deref()
+                    .map(spelled)
+                    .unwrap_or_default()
+                    .into(),
+                attachment: email
+                    .first_attachment
+                    .as_ref()
+                    .map(crate::attachment_controller::list_attachment)
+                    .unwrap_or_default(),
+                attachment_total: i32::try_from(email.attachment_total).unwrap_or(i32::MAX),
                 selected: Some(email.id) == selected_id,
                 checked: checked_ids.contains(&email.id),
             }
         })
         .collect()
+}
+
+/// One character at a time, so "482913" is read as digits rather than as a
+/// number in the hundreds of thousands.
+fn spelled(code: &str) -> String {
+    code.chars().map(String::from).collect::<Vec<_>>().join(" ")
 }
 
 /// The time or date beside a mail list row. Yesterday's mail shows its time
@@ -1774,6 +1798,10 @@ mod tests {
             attachments: Vec::new(),
             body_pending: true,
             sender_verification: String::new(),
+            verification_code: None,
+            account_uses_labels: false,
+            first_attachment: None,
+            attachment_total: 0,
         }
     }
 
@@ -2057,6 +2085,69 @@ mod tests {
         assert_eq!(successor_selection(&order, 40, &visible(&[10, 20])), Some(20));
         assert_eq!(successor_selection(&order, 20, &visible(&[])), None);
         assert_eq!(successor_selection(&order, 99, &visible(&[10])), None);
+    }
+
+    fn project_row(email: &MailMessage) -> EmailRow {
+        make_rows(
+            std::slice::from_ref(email),
+            None,
+            &HashSet::new(),
+            &HashMap::new(),
+            &[],
+            &AccountPresentationSettings::default(),
+        )
+        .remove(0)
+    }
+
+    #[test]
+    fn mail_rows_know_how_their_account_files_labels() {
+        let mut email = message(1);
+        email.account_uses_labels = true;
+        let row = project_row(&email);
+        assert!(row.account_uses_labels);
+        email.account_uses_labels = false;
+        assert!(!same_email_row(&row, &project_row(&email)));
+    }
+
+    #[test]
+    fn mail_rows_offer_verification_codes() {
+        let mut email = message(1);
+        email.verification_code = Some("482913".into());
+        let row = project_row(&email);
+        assert_eq!(row.verification_code, "482913");
+        assert_eq!(row.verification_code_spelled, "4 8 2 9 1 3");
+
+        // A newer code refreshes the row in place.
+        email.verification_code = Some("551203".into());
+        assert!(!same_email_row(&row, &project_row(&email)));
+        email.verification_code = None;
+        let cleared = project_row(&email);
+        assert_eq!(cleared.verification_code, "");
+        assert_eq!(cleared.verification_code_spelled, "");
+    }
+
+    #[test]
+    fn mail_rows_offer_the_first_file() {
+        let mut email = message(1);
+        email.first_attachment = Some(flectar_mail_core::models::AttachmentMeta {
+            id: 9,
+            filename: Some("Joel-Solano-CV.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            size: Some(2048),
+            is_inline: false,
+        });
+        email.attachment_total = 3;
+        let row = project_row(&email);
+        assert_eq!(row.attachment.id, "9");
+        assert_eq!(row.attachment.stem, "Joel-Solano-CV");
+        assert_eq!(row.attachment.extension, ".pdf");
+        assert_eq!(row.attachment.kind, "pdf");
+        assert!(row.attachment.previewable);
+        assert_eq!(row.attachment_total, 3);
+
+        // Another file refreshes the row in place.
+        email.attachment_total = 4;
+        assert!(!same_email_row(&row, &project_row(&email)));
     }
 
     #[test]

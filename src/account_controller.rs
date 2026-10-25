@@ -197,10 +197,13 @@ pub(super) fn apply_connected_accounts(
 ) {
     let configs: HashMap<i64, &AccountConfig> =
         configs.iter().map(|config| (config.id, config)).collect();
-    let calendar_connections: HashMap<i64, &CalendarConnection> = calendar_connections
-        .iter()
-        .map(|connection| (connection.account_id, connection))
-        .collect();
+    let mut account_calendars: HashMap<i64, Vec<&CalendarConnection>> = HashMap::new();
+    for connection in calendar_connections {
+        account_calendars
+            .entry(connection.account_id)
+            .or_default()
+            .push(connection);
+    }
     let carddav_connections: HashMap<i64, &CardDavConnection> = carddav_connections
         .iter()
         .map(|connection| (connection.account_id, connection))
@@ -216,7 +219,10 @@ pub(super) fn apply_connected_accounts(
                 .unwrap_or(&account.email)
                 .clone();
             let avatar = avatars.get(&account.id);
-            let calendar = calendar_connections.get(&account.id);
+            let calendars = account_calendars
+                .get(&account.id)
+                .map(Vec::as_slice)
+                .unwrap_or_default();
             let carddav = carddav_connections.get(&account.id);
             let profile = presentation.profile(account.id);
             Some(AccountRow {
@@ -268,22 +274,14 @@ pub(super) fn apply_connected_accounts(
                     .server_keeps_mail_days
                     .and_then(|days| i32::try_from(days).ok())
                     .unwrap_or(-1),
-                calendar_connected: calendar.is_some(),
-                calendar_enabled: calendar.is_some_and(|connection| connection.enabled),
-                calendar_status: calendar
-                    .and_then(|connection| connection.last_error.clone())
-                    .or_else(|| calendar_errors.get(&account.id).cloned())
+                calendar_connections: calendar_connection_rows(calendars),
+                provider_calendar_connected: calendars.iter().any(|connection| {
+                    connection.kind != flectar_mail_core::models::CalendarConnectionKind::Generic
+                }),
+                provider_calendar_error: calendar_errors
+                    .get(&account.id)
+                    .cloned()
                     .unwrap_or_default()
-                    .into(),
-                caldav_url: calendar
-                    .filter(|connection| connection.kind == "generic")
-                    .map(|connection| connection.base_url.clone())
-                    .unwrap_or_default()
-                    .into(),
-                caldav_username: calendar
-                    .filter(|connection| connection.kind == "generic")
-                    .map(|connection| connection.username.clone())
-                    .unwrap_or_else(|| config.username.clone())
                     .into(),
                 carddav_connected: carddav.is_some(),
                 carddav_enabled: carddav.is_some_and(|connection| connection.enabled),
@@ -424,6 +422,34 @@ pub(super) fn update_connected_accounts(
     if shows_new_account {
         app.invoke_select_mail_profile("".into());
     }
+}
+
+/// One account's calendar connections as settings shows them.
+fn calendar_connection_rows(connections: &[&CalendarConnection]) -> ModelRc<CalendarConnectionRow> {
+    let rows = connections
+        .iter()
+        .filter_map(|connection| {
+            Some(CalendarConnectionRow {
+                id: i32::try_from(connection.id).ok()?,
+                kind: connection.kind.as_str().into(),
+                base_url: connection.base_url.as_str().into(),
+                host: url::Url::parse(&connection.base_url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_owned))
+                    .unwrap_or_default()
+                    .into(),
+                username: connection.username.as_str().into(),
+                calendar_name: match connection.calendars.as_slice() {
+                    [name] => name.as_str().into(),
+                    _ => Default::default(),
+                },
+                calendar_count: i32::try_from(connection.calendars.len()).unwrap_or(i32::MAX),
+                enabled: connection.enabled,
+                error: connection.last_error.as_deref().unwrap_or_default().into(),
+            })
+        })
+        .collect::<Vec<_>>();
+    ModelRc::new(VecModel::from(rows))
 }
 
 pub(super) fn connected_account_rows(app: &AppWindow) -> Vec<AccountRow> {

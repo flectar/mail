@@ -1492,3 +1492,58 @@ async fn backup_import_preserves_transport_settings_and_rejects_private_keys() {
     assert!(core.import_account_configs(vec![config]).await.is_err());
     assert_eq!(core.list_accounts().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn another_gmail_spelling_does_not_edit_a_password_account() {
+    let temp = tempfile::tempdir().unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("test-credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
+    core.import_account_configs(vec![PortableAccountConfig {
+        email: "johndoe@gmail.com".into(),
+        display_name: None,
+        provider: Provider::Generic,
+        auth_kind: AuthKind::Password,
+        mail_protocol: MailProtocol::Imap,
+        username: "johndoe@gmail.com".into(),
+        jmap_url: String::new(),
+        incoming_host: "imap.gmail.com".into(),
+        incoming_port: 993,
+        smtp_host: "smtp.gmail.com".into(),
+        smtp_port: 465,
+        settings: AccountSettings::new(settings(ConnectionSecurity::Tls)),
+    }])
+    .await
+    .unwrap();
+
+    // Taking the new spelling would look like another user to the update
+    // and reset the account's mail, so the form names the existing account.
+    let error = core
+        .add_account_password(AddPasswordAccountArgs {
+            email: "John.Doe@gmail.com".into(),
+            display_name: None,
+            username: "john.doe@gmail.com".into(),
+            password: "app-password".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            incoming_host: "imap.gmail.com".into(),
+            incoming_port: 993,
+            smtp_host: "smtp.gmail.com".into(),
+            smtp_port: 465,
+            connection: settings(ConnectionSecurity::Tls),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "auth failed: johndoe@gmail.com is already added"
+    );
+    let configs = core.list_account_configs().await.unwrap();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].username, "johndoe@gmail.com");
+}
