@@ -20,6 +20,7 @@ use i_slint_core::renderer::RendererSealed;
 
 use crate::event::{BackendEvent, TouchPhase};
 use crate::gpu::GpuRenderer;
+use crate::present::PresentOutcome;
 
 /// Slint window backed by the XComponent surface.
 pub struct OhosWindow {
@@ -132,6 +133,11 @@ impl OhosWindow {
             Err(error) => {
                 self.gpu_active.set(false);
                 self.gpu_surface.set(None);
+                // The component may have been associated with the GPU
+                // renderer before this attempt; re-associate the software
+                // renderer so text metrics and rendering keep working after
+                // the fallback.
+                self.associate_software();
                 crate::log::error(&format!(
                     "gpu: surface attach failed; using the software renderer: {error}"
                 ));
@@ -159,26 +165,45 @@ impl OhosWindow {
             .set_repaint_buffer_type(RepaintBufferType::ReusedBuffer);
     }
 
+    /// Re-associate the software renderer with this window adapter. Slint
+    /// performs the association once at component creation; a GPU attempt can
+    /// replace it, so a later fallback has to restore it explicitly.
+    fn associate_software(&self) {
+        if let Some(adapter) = self.self_weak.upgrade() {
+            let adapter: Rc<dyn WindowAdapter> = adapter;
+            self.renderer.set_window_adapter(&adapter);
+        }
+    }
+
     /// Render if a redraw was requested since the last call. Software frames
     /// are handed to `present_software` (the buffer-queue presenter); GPU
     /// frames present themselves through the wgpu surface.
+    ///
+    /// Returns whether a frame was attempted and, for the software path, the
+    /// presenter's outcome so the caller can retry a failed flush.
     pub fn draw_if_needed(
         &self,
         size: PhysicalSize,
-        present_software: impl FnOnce(&SoftwareRenderer),
-    ) -> bool {
+        present_software: impl FnOnce(&SoftwareRenderer) -> PresentOutcome,
+    ) -> (bool, Option<PresentOutcome>) {
         if !self.needs_redraw.replace(false) {
-            return false;
+            return (false, None);
         }
         match (&self.gpu, self.gpu_active.get()) {
             (Some(gpu), true) => {
                 if let Err(error) = crate::gpu::render(gpu, size) {
-                    crate::log::error(&format!("gpu: render failed: {error}"));
+                    crate::log::error(&format!(
+                        "gpu: render failed; falling back to software: {error}"
+                    ));
+                    self.gpu_active.set(false);
+                    self.associate_software();
+                    let outcome = present_software(&self.renderer);
+                    return (true, Some(outcome));
                 }
+                (true, None)
             }
-            _ => present_software(&self.renderer),
+            _ => (true, Some(present_software(&self.renderer))),
         }
-        true
     }
 
     /// Dispatch the windowing-system scale factor (called once per surface
@@ -263,16 +288,13 @@ impl WindowAdapter for OhosWindow {
     }
 
     fn renderer(&self) -> &dyn Renderer {
-        // The GPU renderer is handed to Slint as soon as it exists: the window
-        // adapter association (`WindowInner::set_component`) and rendering
-        // notifiers are registered on whatever renderer is active *then*,
-        // which predates the surface. The femtovg renderer answers text
-        // metrics without a canvas and no-ops its render until one is set, and
-        // this backend's draw path still decides between the GPU renderer and
-        // the software presenter (see `draw_if_needed`).
-        match &self.gpu {
-            Some(gpu) => gpu,
-            None => &self.renderer,
+        // Only the renderer that is actually active may be visible to Slint.
+        // Returning the suspended GPU renderer before its surface exists makes
+        // `WindowInner::set_component` associate it, and a later software
+        // fallback then has no adapter association.
+        match (&self.gpu, self.gpu_active.get()) {
+            (Some(gpu), true) => gpu,
+            _ => &self.renderer,
         }
     }
 

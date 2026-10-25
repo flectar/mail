@@ -140,6 +140,7 @@ impl OhosPlatform {
                     // resume (software), or (re)attach the GPU surface.
                     w.invalidate_frame();
                     w.attach_surface(window.0, size);
+                    w.request_redraw();
                 }
                 crate::log::info(&format!(
                     "platform: surface {width}x{height} density {density}"
@@ -181,6 +182,9 @@ impl OhosPlatform {
             BackendEvent::SurfaceShown => {
                 if let Some(w) = self.window.borrow().as_ref() {
                     w.invalidate_frame();
+                    // Invalidate only resets the renderer's partial-repaint
+                    // cache; it does not schedule a frame.
+                    w.request_redraw();
                 }
                 crate::log::info("surface shown; repaint requested");
             }
@@ -193,21 +197,28 @@ impl OhosPlatform {
         if self.gate.is_destroying() {
             return;
         }
+        // Keep `needs_redraw` set while hidden: the retained frame is skipped
+        // by the presenter, and the next SurfaceShown must schedule a fresh
+        // frame instead of finding the request already consumed.
+        if !self.visible.load(Ordering::Relaxed) {
+            return;
+        }
         let Some(size) = surface_size else { return };
         let Some(window) = self.window.borrow().clone() else {
             return;
         };
         let started = Instant::now();
-        let drawn = window.draw_if_needed(size, |renderer| {
-            match presenter.present(renderer, size.width, size.height) {
-                PresentOutcome::Presented | PresentOutcome::Skipped => {}
-                PresentOutcome::Failed(code) => {
-                    crate::log::error(&format!("present failed: {code}"));
-                }
-            }
+        let (drawn, outcome) = window.draw_if_needed(size, |renderer| {
+            presenter.present(renderer, size.width, size.height)
         });
         if drawn {
             self.perf.record(started.elapsed());
+        }
+        if let Some(PresentOutcome::Failed(code)) = outcome {
+            // The frame was dropped; request another so a transient buffer
+            // queue failure does not leave stale pixels on screen.
+            crate::log::error(&format!("present failed: {code}"));
+            window.request_redraw();
         }
     }
 }

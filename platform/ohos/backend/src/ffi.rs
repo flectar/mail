@@ -411,6 +411,9 @@ unsafe extern "C" {
     pub fn OH_ArkUI_AxisEvent_GetAxisAction(event: *const ArkUI_UIInputEvent) -> i32;
     pub fn OH_ArkUI_AxisEvent_GetVerticalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
     pub fn OH_ArkUI_AxisEvent_GetHorizontalAxisValue(event: *const ArkUI_UIInputEvent) -> f64;
+    /// Scroll step in degrees for a mouse wheel (0 for a touchpad, whose
+    /// axis value is already in pixels).
+    pub fn OH_ArkUI_AxisEvent_GetScrollStep(event: *const ArkUI_UIInputEvent) -> i32;
     /// Position of a directional input event (touch, mouse or axis) relative
     /// to the component, in physical pixels.
     pub fn OH_ArkUI_PointerEvent_GetX(event: *const ArkUI_UIInputEvent) -> f32;
@@ -557,6 +560,22 @@ unsafe extern "C" {
 
 /// `mmap` failure return value.
 pub const MAP_FAILED: *mut c_void = usize::MAX as *mut c_void;
+
+/// `struct pollfd` from `<poll.h>`; used to wait for the buffer acquire fence.
+#[repr(C)]
+pub struct PollFd {
+    pub fd: c_int,
+    pub events: i16,
+    pub revents: i16,
+}
+
+/// There is data (or the fence signalled) to read.
+pub const POLLIN: i16 = 0x001;
+
+unsafe extern "C" {
+    pub fn poll(fds: *mut PollFd, nfds: u64, timeout: c_int) -> c_int;
+    pub fn close(fd: c_int) -> c_int;
+}
 
 #[cfg(test)]
 mod tests {

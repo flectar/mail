@@ -112,7 +112,7 @@ pub enum PresentOutcome {
 /// Buffer-queue presenter for one `OHNativeWindow`.
 pub struct Presenter {
     window: *mut ffi::OHNativeWindow,
-    configured: bool,
+    configured_size: Option<(u32, u32)>,
     /// Persistent CPU frame: the software renderer repaints only dirty regions
     /// into it (`ReusedBuffer` semantics), so key repeats and cursor blinks
     /// never pay for a full-window rasterization.
@@ -128,7 +128,7 @@ impl Presenter {
     pub fn new(visible: Arc<AtomicBool>) -> Self {
         Self {
             window: null_mut(),
-            configured: false,
+            configured_size: None,
             frame: Vec::new(),
             frame_size: (0, 0),
             visible,
@@ -138,7 +138,7 @@ impl Presenter {
     /// Attach (or re-attach) the surface pointer.
     pub fn set_surface(&mut self, window: *mut c_void) {
         if self.window != window {
-            self.configured = false;
+            self.configured_size = None;
         }
         self.window = window.cast();
     }
@@ -146,7 +146,7 @@ impl Presenter {
     /// Detach the surface; draws become no-ops until the next `set_surface`.
     pub fn clear(&mut self) {
         self.window = null_mut();
-        self.configured = false;
+        self.configured_size = None;
         // The next surface must be painted from scratch; drop the frame so the
         // renderer keeps nothing stale (the renderer is invalidated separately
         // through `OhosWindow::invalidate_frame`).
@@ -231,7 +231,9 @@ impl Presenter {
         // the destroy path waits for our ack, which this thread only sends from
         // its event loop (never while present() is running).
         unsafe {
-            if !self.configured {
+            // The geometry must follow a window resize on the same native
+            // window; a boolean "configured" flag would keep the first size.
+            if self.configured_size != Some((width, height)) {
                 ffi::OH_NativeWindow_NativeWindowHandleOpt(
                     self.window,
                     ffi::SET_BUFFER_GEOMETRY,
@@ -243,7 +245,7 @@ impl Presenter {
                     ffi::SET_FORMAT,
                     ffi::NATIVEBUFFER_PIXEL_FMT_RGBA_8888,
                 );
-                self.configured = true;
+                self.configured_size = Some((width, height));
             }
 
             let mut buffer: *mut ffi::OHNativeWindowBuffer = null_mut();
@@ -253,6 +255,18 @@ impl Presenter {
                 &mut buffer,
                 &mut fence_fd,
             );
+            // The acquire fence belongs to this call. Wait for the producer to
+            // finish writing and close it; leaking it costs one fd per frame
+            // and writing before it signals shows stale buffer contents.
+            if fence_fd >= 0 {
+                let mut poll_fd = ffi::PollFd {
+                    fd: fence_fd,
+                    events: ffi::POLLIN,
+                    revents: 0,
+                };
+                let _ = ffi::poll(&mut poll_fd, 1, 1000);
+                let _ = ffi::close(fence_fd);
+            }
             if rc != 0 || buffer.is_null() {
                 return PresentOutcome::Failed(rc);
             }
@@ -312,6 +326,9 @@ impl Presenter {
             if rc == 0 {
                 PresentOutcome::Presented
             } else {
+                // A rejected flush leaves the buffer dequeued; return it so the
+                // queue is not permanently one slot short.
+                let _ = ffi::OH_NativeWindow_NativeWindowAbortBuffer(self.window, buffer);
                 PresentOutcome::Failed(rc)
             }
         }
@@ -343,7 +360,7 @@ mod tests {
 
     #[test]
     fn clear_resets_the_frame() {
-        let mut presenter = Presenter::new();
+        let mut presenter = Presenter::new(Arc::new(AtomicBool::new(true)));
         presenter.frame = vec![PremultipliedRgbaColor::default(); 4];
         presenter.frame_size = (2, 2);
         presenter.clear();

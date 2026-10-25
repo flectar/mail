@@ -33,10 +33,11 @@ const TOUCH_LOG_LIMIT: u32 = 40;
 static SCROLL_LOGGED: AtomicU32 = AtomicU32::new(0);
 const SCROLL_LOG_LIMIT: u32 = 10;
 
-/// A mouse wheel notch reports 15 degrees per scroll step. Slint scrolls 50
-/// logical pixels per wheel line (the same step the desktop backend uses), so
-/// a notch moves about three text lines.
-const LOGICAL_PX_PER_WHEEL_DEGREE: f32 = 50.0 / 15.0;
+/// Slint scrolls 50 logical pixels per wheel line, matching the desktop
+/// backend. OHOS mouse-wheel axis values are in degrees and include the user's
+/// scroll-step setting; touchpad axis values are already in pixels, and
+/// `GetScrollStep` returns 0 for them.
+const LOGICAL_PX_PER_WHEEL_STEP: f32 = 50.0;
 
 /// Modifier state used for character translation: OHOS key events carry only
 /// key codes, not text.
@@ -286,12 +287,19 @@ unsafe extern "C" fn on_axis_event(
     if vertical == 0.0 && horizontal == 0.0 {
         return;
     }
+    let scroll_step = unsafe { ffi::OH_ArkUI_AxisEvent_GetScrollStep(event) };
+    let logical_per_axis_unit = if scroll_step > 0 {
+        LOGICAL_PX_PER_WHEEL_STEP / scroll_step as f32
+    } else {
+        // Touchpad: the axis value is already a pixel delta.
+        1.0
+    };
     let x = unsafe { ffi::OH_ArkUI_PointerEvent_GetX(event) };
     let y = unsafe { ffi::OH_ArkUI_PointerEvent_GetY(event) };
     let seen = SCROLL_LOGGED.fetch_add(1, Ordering::Relaxed);
     if seen < SCROLL_LOG_LIMIT {
         crate::log::info(&format!(
-            "scroll #{seen}: action={action} raw=({horizontal:.2}, {vertical:.2}) at ({x:.0}, {y:.0})"
+            "scroll #{seen}: action={action} step={scroll_step} raw=({horizontal:.2}, {vertical:.2}) at ({x:.0}, {y:.0})"
         ));
     }
     // OHOS reports positive axis values toward the end of the content (wheel
@@ -300,8 +308,8 @@ unsafe extern "C" fn on_axis_event(
     send(BackendEvent::Scroll {
         x,
         y,
-        delta_x: -horizontal * LOGICAL_PX_PER_WHEEL_DEGREE,
-        delta_y: -vertical * LOGICAL_PX_PER_WHEEL_DEGREE,
+        delta_x: -horizontal * logical_per_axis_unit,
+        delta_y: -vertical * logical_per_axis_unit,
     });
 }
 
