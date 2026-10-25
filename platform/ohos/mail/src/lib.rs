@@ -292,9 +292,6 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     let mut platform =
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
-    // System notifications for new mail (nothing is published when the user
-    // turns notifications off in Settings).
-    platform.notification_publisher = flectar_mail::NotificationPublisher::new(bridge::notify);
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())
@@ -325,7 +322,7 @@ impl OhosFileCredentialStore {
     }
 
     fn key(account_id: i64, slot: Slot) -> String {
-        format!("{}:{}", account_id, slot.as_str())
+        format!("{}:{}", account_id, slot.key())
     }
 
     fn load_map(&self) -> CoreResult<BTreeMap<String, String>> {
@@ -414,13 +411,13 @@ const ALL_SLOTS: [Slot; 9] = [
     Slot::OAuthClientSecret,
     Slot::OAuthBundle,
     Slot::AiApiKey,
-    Slot::CaldavPassword,
+    Slot::AccountCaldavPassword,
     Slot::CarddavPassword,
 ];
 
 impl OhosAssetCredentialStore {
     fn alias(account_id: i64, slot: Slot) -> String {
-        format!("flectar:{account_id}:{}", slot.as_str())
+        format!("flectar:{account_id}:{}", slot.key())
     }
 }
 
