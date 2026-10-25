@@ -3,6 +3,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
@@ -42,6 +43,12 @@ struct Index {
   private imeAttached: boolean = false;
   private imeAttachPending: boolean = false;
   private imePassword: boolean | undefined = undefined;
+  private pendingImePassword: boolean | undefined = undefined;
+  private windowOffsetX: number = 0;
+  private windowOffsetY: number = 0;
+  private appBackgroundHandler: () => void = (): void => {
+    this.nativeModule?.suspendPreview?.();
+  };
   private lastImeCursor: string = '';
   private appliedColorMode: number = -2;
   private pasteboardPermissionRequested: boolean = false;
@@ -50,6 +57,7 @@ struct Index {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       AppStorage.setOrCreate('flectarColorMode', context.config.colorMode ?? -1);
+      context.eventHub.on('flectarBackground', this.appBackgroundHandler);
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'could not read the system color mode: %{public}s',
         (error as BusinessError).message);
@@ -62,6 +70,7 @@ struct Index {
 
   onPageShow(): void {
     this.applySystemColorScheme(this.colorMode);
+    this.updateWindowOffset();
   }
 
   onPageHide(): void {
@@ -81,9 +90,17 @@ struct Index {
       hilog.error(0x0000, LOG_TAG, 'IME listener cleanup failed: %{public}s',
         (error as BusinessError).message);
     }
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      context.eventHub.off('flectarBackground', this.appBackgroundHandler);
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'background listener cleanup failed: %{public}s',
+        (error as BusinessError).message);
+    }
     this.imeAttached = false;
     this.imeAttachPending = false;
     this.imePassword = undefined;
+    this.pendingImePassword = undefined;
     this.lastImeCursor = '';
   }
 
@@ -162,6 +179,7 @@ struct Index {
       },
     });
     this.applySystemColorScheme(this.colorMode);
+    this.updateWindowOffset();
   }
 
   private reportBridgeResult(requestId: number, path: string, error: string): boolean {
@@ -235,16 +253,17 @@ struct Index {
         this.reportBridgeResult(requestId, '', '');
         return;
       }
-      const destination = fileIo.openSync(uris[0], fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      const destination = await fileIo.open(
+        uris[0], fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       try {
-        const source = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+        const source = await fileIo.open(sourcePath, fileIo.OpenMode.READ_ONLY);
         try {
           await fileIo.copyFile(source.fd, destination.fd);
         } finally {
-          fileIo.closeSync(source);
+          await fileIo.close(source);
         }
       } finally {
-        fileIo.closeSync(destination);
+        await fileIo.close(destination);
       }
       hilog.info(0x0000, LOG_TAG, 'picker exported a document');
       this.reportBridgeResult(requestId, uris[0], '');
@@ -264,6 +283,7 @@ struct Index {
   private showIme(password: boolean): void {
     try {
       if (this.imeAttachPending) {
+        this.pendingImePassword = password;
         return;
       }
       const controller = inputMethod.getController();
@@ -289,9 +309,16 @@ struct Index {
           this.imeAttachPending = false;
           this.imePassword = undefined;
           this.lastImeCursor = '';
-          this.showIme(password);
+          const pending = this.pendingImePassword;
+          this.pendingImePassword = undefined;
+          this.showIme(pending ?? password);
         }).catch((error: BusinessError): void => {
           this.imeAttachPending = false;
+          const pending = this.pendingImePassword;
+          this.pendingImePassword = undefined;
+          if (pending !== undefined) {
+            this.showIme(pending);
+          }
           hilog.error(0x0000, LOG_TAG, 'IME detach failed: %{public}d %{public}s',
             error.code, error.message);
         });
@@ -331,8 +358,18 @@ struct Index {
           this.nativeModule?.imeFunction?.(functionKey.enterKeyType);
         });
         hilog.info(0x0000, LOG_TAG, 'IME attached');
+        const pending = this.pendingImePassword;
+        this.pendingImePassword = undefined;
+        if (pending !== undefined && pending !== password) {
+          this.showIme(pending);
+        }
       }).catch((error: BusinessError): void => {
         this.imeAttachPending = false;
+        const pending = this.pendingImePassword;
+        this.pendingImePassword = undefined;
+        if (pending !== undefined && pending !== password) {
+          this.showIme(pending);
+        }
         hilog.error(0x0000, LOG_TAG, 'IME attach failed: %{public}d %{public}s',
           error.code, error.message);
       });
@@ -356,8 +393,8 @@ struct Index {
     try {
       const ui = this.getUIContext();
       inputMethod.getController().updateCursor({
-        left: ui.vp2px(left),
-        top: ui.vp2px(top),
+        left: this.windowOffsetX + ui.vp2px(left),
+        top: this.windowOffsetY + ui.vp2px(top),
         width: ui.vp2px(width),
         height: ui.vp2px(height),
       }).catch((error: BusinessError): void => {
@@ -383,6 +420,21 @@ struct Index {
       });
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'IME hide failed: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  // CursorInfo is in absolute physical screen coordinates. The Slint caret
+  // rectangle is relative to the XComponent, so add the window origin.
+  private async updateWindowOffset(): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const appWindow = await window.getLastWindow(context);
+      const rect = appWindow.getWindowProperties().windowRect;
+      this.windowOffsetX = rect.left;
+      this.windowOffsetY = rect.top;
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'could not read the window origin: %{public}s',
         (error as BusinessError).message);
     }
   }
@@ -454,7 +506,7 @@ struct Index {
   private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<string> {
     const directory = `${context.cacheDir}/imports`;
     try {
-      fileIo.mkdirSync(directory, true);
+      await fileIo.mkdir(directory, true);
     } catch (error) {
       // OHOS's mkdir reports 13900015 when the directory already exists (the
       // previous import leaves it behind), unlike Node's recursive mkdir. That
@@ -462,9 +514,9 @@ struct Index {
       const failure = error as BusinessError;
       hilog.info(0x0000, LOG_TAG, 'stage: mkdir reported %{public}d; continuing', failure.code);
     }
-    const source = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    const source = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
     try {
-      const size = fileIo.statSync(source.fd).size;
+      const size = (await fileIo.stat(source.fd)).size;
       if (size > MAX_IMPORT_BYTES) {
         throw new Error(`the selected file is too large (${size} bytes; limit ${MAX_IMPORT_BYTES})`);
       }
@@ -477,18 +529,18 @@ struct Index {
         ? raw.substring(dot).replace(/[^A-Za-z0-9.]/g, '').substring(0, 12)
         : '';
       const destination = `${directory}/import-${util.generateRandomUUID(true)}${extension}`;
-      const target = fileIo.openSync(
+      const target = await fileIo.open(
         destination,
         fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC,
       );
       try {
         await fileIo.copyFile(source.fd, target.fd);
       } finally {
-        fileIo.closeSync(target);
+        await fileIo.close(target);
       }
       return destination;
     } finally {
-      fileIo.closeSync(source);
+      await fileIo.close(source);
     }
   }
 }

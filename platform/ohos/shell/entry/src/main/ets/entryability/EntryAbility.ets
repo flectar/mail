@@ -6,6 +6,12 @@ import { BusinessError } from '@kit.BasicServicesKit';
 const TAG = 'FlectarOhos';
 
 export default class EntryAbility extends UIAbility {
+  onBackground(): void {
+    // The page releases any preview resources when this event arrives; using
+    // the ability lifecycle covers background paths that onPageHide misses.
+    this.context.eventHub.emit('flectarBackground');
+  }
+
   onConfigurationUpdate(newConfig: Configuration): void {
     // The ArkUI page watches this AppStorage value and reports the new
     // light/dark preference to Slint.
