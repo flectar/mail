@@ -93,6 +93,16 @@ impl SurfaceGate {
         *state == Gate::Up && self.epoch.load(Ordering::Acquire) == epoch
     }
 
+    /// Run `attach` while holding the gate, so `OnSurfaceDestroyed` cannot
+    /// invalidate the window between the epoch check and the GPU attach.
+    pub fn with_surface<R>(&self, epoch: u64, attach: impl FnOnce() -> R) -> Option<R> {
+        let state = self.state.lock().unwrap();
+        if *state != Gate::Up || self.epoch.load(Ordering::Acquire) != epoch {
+            return None;
+        }
+        Some(attach())
+    }
+
     /// Called from `OnSurfaceDestroyed` (OHOS main thread). Returns the epoch
     /// of the surface being torn down, or `None` when no live surface existed.
     /// The current epoch is invalidated even when no wait is needed.
@@ -418,6 +428,15 @@ mod tests {
         let epoch = gate.surface_up();
         gate.ensure_up();
         assert!(gate.is_surface_epoch(epoch));
+    }
+
+    #[test]
+    fn with_surface_rejects_an_epoch_being_torn_down() {
+        let gate = SurfaceGate::new();
+        let epoch = gate.surface_up();
+        assert_eq!(gate.with_surface(epoch, || 7), Some(7));
+        let _ = gate.begin_destroy();
+        assert_eq!(gate.with_surface(epoch, || 7), None);
     }
 
     #[test]

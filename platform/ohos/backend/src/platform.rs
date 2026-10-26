@@ -160,9 +160,23 @@ impl OhosPlatform {
                     w.dispatch_scale_factor(density);
                     w.adapt_size(size);
                     // Fresh surface: repaint everything before partial updates
-                    // resume (software), or (re)attach the GPU surface.
+                    // resume (software), or (re)attach the GPU surface. The
+                    // gate stays locked across attach so a teardown cannot
+                    // invalidate the pointer mid-call.
                     w.invalidate_frame();
-                    w.attach_surface(window.0, size);
+                    if self
+                        .gate
+                        .with_surface(epoch, || w.attach_surface(window.0, size))
+                        .is_none()
+                    {
+                        crate::log::info(&format!(
+                            "platform: surface epoch {epoch} torn down before attach"
+                        ));
+                        *active_surface_epoch = None;
+                        *surface_size = None;
+                        presenter.clear();
+                        return;
+                    }
                     w.request_redraw();
                 }
                 crate::log::info(&format!(
