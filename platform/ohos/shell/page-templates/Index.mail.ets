@@ -9,6 +9,8 @@ import { util } from '@kit.ArkTS';
 const LOG_TAG = 'FlectarOhos';
 // Keep picker imports bounded: a mail attachment is copied into the app
 // cache, so a mis-picked multi-GB file must not fill the sandbox.
+// Per-file cache guard for the picker; the shared compose/draft limit is
+// 25 MiB total across attachments on every platform.
 const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
