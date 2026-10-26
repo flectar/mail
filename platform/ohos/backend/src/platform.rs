@@ -65,6 +65,7 @@ impl OhosPlatform {
 
         let mut presenter = Presenter::new(self.visible.clone());
         let mut surface_size: Option<PhysicalSize> = None;
+        let mut active_surface_epoch: Option<u64> = None;
         let mut next_frame = Instant::now();
 
         loop {
@@ -89,13 +90,23 @@ impl OhosPlatform {
             }
 
             match rx.recv_timeout(timeout) {
-                Ok(event) => self.handle_event(event, &mut presenter, &mut surface_size),
+                Ok(event) => self.handle_event(
+                    event,
+                    &mut presenter,
+                    &mut surface_size,
+                    &mut active_surface_epoch,
+                ),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
             // Drain the queue before drawing so bursts coalesce into one frame.
             while let Ok(event) = rx.try_recv() {
-                self.handle_event(event, &mut presenter, &mut surface_size);
+                self.handle_event(
+                    event,
+                    &mut presenter,
+                    &mut surface_size,
+                    &mut active_surface_epoch,
+                );
             }
 
             slint::platform::update_timers_and_animations();
@@ -119,15 +130,27 @@ impl OhosPlatform {
         event: BackendEvent,
         presenter: &mut Presenter,
         surface_size: &mut Option<PhysicalSize>,
+        active_surface_epoch: &mut Option<u64>,
     ) {
         match event {
             BackendEvent::Surface {
+                epoch,
                 window,
                 width,
                 height,
             } => {
+                // A Surface event can sit in the queue while OnSurfaceDestroyed
+                // times out and the compositor releases the window. Never
+                // attach a pointer whose epoch was invalidated by that
+                // teardown.
+                if !self.gate.is_surface_epoch(epoch) {
+                    crate::log::info(&format!(
+                        "platform: ignoring stale surface epoch {epoch} ({width}x{height})"
+                    ));
+                    return;
+                }
+                *active_surface_epoch = Some(epoch);
                 presenter.set_surface(window.0);
-                self.gate.surface_up();
                 let size = PhysicalSize::new(width, height);
                 *surface_size = Some(size);
                 // Slint works in logical pixels; the surface size is physical.
@@ -143,16 +166,33 @@ impl OhosPlatform {
                     w.request_redraw();
                 }
                 crate::log::info(&format!(
-                    "platform: surface {width}x{height} density {density}"
+                    "platform: surface {width}x{height} epoch {epoch} density {density}"
                 ));
             }
-            BackendEvent::SurfaceDestroyed => {
-                presenter.clear();
-                *surface_size = None;
-                if let Some(w) = self.window.borrow().as_ref() {
-                    w.detach_surface();
+            BackendEvent::SurfaceDestroyed { epoch } => {
+                // Ignore a stale destroy if a newer surface has already been
+                // accepted; its own event will clear that generation. A destroy
+                // with no epoch had no live surface at callback time and must
+                // not clear a surface that was created afterwards.
+                let matches_active = epoch.is_some() && epoch == *active_surface_epoch;
+                let had_no_surface = epoch.is_none() && active_surface_epoch.is_none();
+                if matches_active || had_no_surface {
+                    presenter.clear();
+                    *surface_size = None;
+                    *active_surface_epoch = None;
+                    if let Some(w) = self.window.borrow().as_ref() {
+                        w.detach_surface();
+                    }
+                } else {
+                    crate::log::info(&format!(
+                        "platform: ignoring stale surface destroy {epoch:?}"
+                    ));
                 }
-                self.gate.acked();
+                // The gate itself decides whether this acknowledgement still
+                // belongs to the current generation.
+                if let Some(epoch) = epoch {
+                    self.gate.acked(epoch);
+                }
             }
             BackendEvent::Touch { x, y, phase } => {
                 if let Some(w) = self.window.borrow().as_ref() {

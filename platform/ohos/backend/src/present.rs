@@ -17,7 +17,7 @@ use core::ffi::c_void;
 use core::ptr::{NonNull, null_mut};
 use std::sync::{
     Arc, Condvar, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,11 @@ enum Gate {
 pub struct SurfaceGate {
     state: Mutex<Gate>,
     cv: Condvar,
+    /// Identifies the current surface. A `Surface` event carries the epoch
+    /// returned by [`Self::surface_up`]; `OnSurfaceDestroyed` invalidates it so
+    /// an event that was queued behind the 500 ms destroy timeout cannot attach
+    /// a window that the compositor has already released.
+    epoch: AtomicU64,
 }
 
 impl SurfaceGate {
@@ -50,13 +55,29 @@ impl SurfaceGate {
         Arc::new(Self {
             state: Mutex::new(Gate::Down),
             cv: Condvar::new(),
+            epoch: AtomicU64::new(0),
         })
     }
 
-    /// Surface is ready (called from `OnSurfaceCreated/Changed`).
-    pub fn surface_up(&self) {
-        *self.state.lock().unwrap() = Gate::Up;
+    /// Surface is ready (called from `OnSurfaceCreated/Changed`). Returns the
+    /// epoch that the corresponding `Surface` event must carry.
+    pub fn surface_up(&self) -> u64 {
+        let mut state = self.state.lock().unwrap();
+        let epoch = self.epoch.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        *state = Gate::Up;
         self.cv.notify_all();
+        epoch
+    }
+
+    /// Re-arm presentation when only the show callback arrives. This must not
+    /// allocate a new epoch: a `Surface` event for the same surface may still
+    /// be queued behind the show event.
+    pub fn ensure_up(&self) {
+        let mut state = self.state.lock().unwrap();
+        if *state != Gate::Up {
+            *state = Gate::Up;
+            self.cv.notify_all();
+        }
     }
 
     /// True while the surface is being torn down; the draw path must skip
@@ -65,25 +86,37 @@ impl SurfaceGate {
         *self.state.lock().unwrap() == Gate::Destroying
     }
 
-    /// Called from `OnSurfaceDestroyed` (OHOS main thread). Returns `true` if a
-    /// live surface was being torn down (and the caller should wait), `false`
-    /// if there was nothing to tear down.
-    pub fn begin_destroy(&self) -> bool {
-        let mut state = self.state.lock().unwrap();
-        if *state == Gate::Up {
-            *state = Gate::Destroying;
-            true
-        } else {
-            *state = Gate::Down;
-            false
-        }
+    /// Whether `epoch` identifies the live surface. Queued events from before
+    /// a destroy are rejected by this check.
+    pub fn is_surface_epoch(&self, epoch: u64) -> bool {
+        let state = self.state.lock().unwrap();
+        *state == Gate::Up && self.epoch.load(Ordering::Acquire) == epoch
     }
 
-    /// Bounded wait for the Slint thread to acknowledge destruction.
-    pub fn wait_acked(&self, timeout: Duration) {
+    /// Called from `OnSurfaceDestroyed` (OHOS main thread). Returns the epoch
+    /// of the surface being torn down, or `None` when no live surface existed.
+    /// The current epoch is invalidated even when no wait is needed.
+    pub fn begin_destroy(&self) -> Option<u64> {
+        let mut state = self.state.lock().unwrap();
+        let destroyed = (*state == Gate::Up).then(|| self.epoch.load(Ordering::Acquire));
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        *state = if destroyed.is_some() {
+            Gate::Destroying
+        } else {
+            Gate::Down
+        };
+        self.cv.notify_all();
+        destroyed
+    }
+
+    /// Bounded wait for the Slint thread to acknowledge `epoch`'s destruction.
+    /// A new surface (which increments the epoch) releases the wait too.
+    pub fn wait_acked(&self, epoch: u64, timeout: Duration) {
         let mut state = self.state.lock().unwrap();
         let deadline = Instant::now() + timeout;
-        while *state != Gate::Down {
+        while *state == Gate::Destroying
+            && self.epoch.load(Ordering::Acquire) == epoch.wrapping_add(1)
+        {
             let now = Instant::now();
             if now >= deadline {
                 break;
@@ -93,10 +126,15 @@ impl SurfaceGate {
         }
     }
 
-    /// Called by the Slint thread after it processed `SurfaceDestroyed`.
-    pub fn acked(&self) {
-        *self.state.lock().unwrap() = Gate::Down;
-        self.cv.notify_all();
+    /// Called by the Slint thread after it processed `SurfaceDestroyed`. A
+    /// stale acknowledgement must not tear down a newer surface.
+    pub fn acked(&self, epoch: u64) {
+        let mut state = self.state.lock().unwrap();
+        if *state == Gate::Destroying && self.epoch.load(Ordering::Acquire) == epoch.wrapping_add(1)
+        {
+            *state = Gate::Down;
+            self.cv.notify_all();
+        }
     }
 }
 
@@ -348,14 +386,38 @@ mod tests {
     #[test]
     fn gate_destroy_waits_for_ack() {
         let gate = SurfaceGate::new();
-        gate.surface_up();
+        let epoch = gate.surface_up();
         assert!(!gate.is_destroying());
-        assert!(gate.begin_destroy());
+        assert!(gate.is_surface_epoch(epoch));
+        assert_eq!(gate.begin_destroy(), Some(epoch));
         assert!(gate.is_destroying());
-        gate.acked();
+        // The destroyed surface's queued event is no longer current.
+        assert!(!gate.is_surface_epoch(epoch));
+        gate.acked(epoch);
         assert!(!gate.is_destroying());
         // A second destroy without a live surface does not wait.
-        assert!(!gate.begin_destroy());
+        assert_eq!(gate.begin_destroy(), None);
+    }
+
+    #[test]
+    fn stale_ack_does_not_tear_down_a_new_surface() {
+        let gate = SurfaceGate::new();
+        let first = gate.surface_up();
+        let destroyed = gate.begin_destroy().expect("first surface was live");
+        assert_eq!(destroyed, first);
+        let second = gate.surface_up();
+        assert!(gate.is_surface_epoch(second));
+        gate.acked(destroyed);
+        assert!(!gate.is_destroying());
+        assert!(gate.is_surface_epoch(second));
+    }
+
+    #[test]
+    fn show_without_a_new_surface_preserves_the_epoch() {
+        let gate = SurfaceGate::new();
+        let epoch = gate.surface_up();
+        gate.ensure_up();
+        assert!(gate.is_surface_epoch(epoch));
     }
 
     #[test]

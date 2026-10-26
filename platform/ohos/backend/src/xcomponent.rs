@@ -179,7 +179,7 @@ unsafe extern "C" fn on_surface_show(
         visible.store(true, Ordering::Relaxed);
     }
     if let Some(gate) = GATE.get() {
-        gate.surface_up();
+        gate.ensure_up();
     }
     send(BackendEvent::SurfaceShown);
 }
@@ -225,8 +225,13 @@ fn surface_event(component: *mut ffi::OH_NativeXComponent, window: *mut c_void) 
     if rc != 0 || width == 0 || height == 0 {
         return;
     }
-    crate::log::info(&format!("surface {width}x{height}"));
+    let Some(gate) = GATE.get() else {
+        return;
+    };
+    let epoch = gate.surface_up();
+    crate::log::info(&format!("surface {width}x{height} epoch {epoch}"));
     send(BackendEvent::Surface {
+        epoch,
         window: SendPtr(window),
         width: width.min(u32::MAX as u64) as u32,
         height: height.min(u32::MAX as u64) as u32,
@@ -241,10 +246,10 @@ unsafe extern "C" fn on_surface_destroyed(
         return;
     };
     reset_modifiers();
-    let live = gate.begin_destroy();
-    send(BackendEvent::SurfaceDestroyed);
-    if live {
-        gate.wait_acked(DESTROY_ACK_TIMEOUT);
+    let epoch = gate.begin_destroy();
+    send(BackendEvent::SurfaceDestroyed { epoch });
+    if let Some(epoch) = epoch {
+        gate.wait_acked(epoch, DESTROY_ACK_TIMEOUT);
     }
 }
 

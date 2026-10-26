@@ -70,14 +70,17 @@ impl From<MouseButton> for slint::platform::PointerEventButton {
 /// application thread.
 pub enum BackendEvent {
     /// A surface was created or resized: `OHNativeWindow*` plus physical size.
+    /// `epoch` ties the event to the gate generation; an event queued across a
+    /// teardown is stale and must be ignored.
     Surface {
+        epoch: u64,
         window: SendPtr,
         width: u32,
         height: u32,
     },
     /// The surface is going away. The Slint thread must stop using the pointer
-    /// and then acknowledge (see `present::SurfaceGate`).
-    SurfaceDestroyed,
+    /// and then acknowledge `epoch` (see `present::SurfaceGate`).
+    SurfaceDestroyed { epoch: Option<u64> },
     /// The window became invisible (another window covers it, the app went to
     /// the background, or a system picker opened). Presenting into a hidden
     /// window can block on the compositor's buffer queue, so the render loop
@@ -120,16 +123,19 @@ impl core::fmt::Debug for BackendEvent {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             BackendEvent::Surface {
+                epoch,
                 window,
                 width,
                 height,
             } => {
                 write!(
                     f,
-                    "Surface {{ window: {window:?}, width: {width}, height: {height} }}"
+                    "Surface {{ epoch: {epoch}, window: {window:?}, width: {width}, height: {height} }}"
                 )
             }
-            BackendEvent::SurfaceDestroyed => write!(f, "SurfaceDestroyed"),
+            BackendEvent::SurfaceDestroyed { epoch } => {
+                write!(f, "SurfaceDestroyed {{ epoch: {epoch:?} }}")
+            }
             BackendEvent::SurfaceHidden => write!(f, "SurfaceHidden"),
             BackendEvent::SurfaceShown => write!(f, "SurfaceShown"),
             BackendEvent::Touch { x, y, phase } => {
