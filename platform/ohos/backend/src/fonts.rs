@@ -91,14 +91,43 @@ pub fn register_system_fonts() -> usize {
                 all_families.iter().copied(),
             );
         }
+        // A generic sans-serif request must not start with the Han face:
+        // Latin text (email CSS `font-family: sans-serif`) would otherwise be
+        // rendered by a CJK font with Latin glyphs. Prefer the known Latin UI
+        // faces, then the remaining non-Han families, and keep Han only as the
+        // last fallback below.
+        let mut generic_families: Vec<_> = Vec::new();
+        for preferred in ["Roboto", "Noto Sans", "HarmonyOS Sans"] {
+            for name in &all_names {
+                if name.contains(preferred)
+                    && let Some(family) = collection.family_id(name)
+                    && !generic_families.contains(&family)
+                {
+                    generic_families.push(family);
+                }
+            }
+        }
+        for family in all_families.iter().copied() {
+            if !han_families.contains(&family) && !generic_families.contains(&family) {
+                generic_families.push(family);
+            }
+        }
+        if !generic_families.is_empty() {
+            collection.append_generic_families(
+                GenericFamily::SansSerif,
+                generic_families.iter().copied(),
+            );
+        }
         crate::log::info(&format!(
-            "fonts: {} families registered for {} non-Latin script fallbacks",
+            "fonts: {} families registered for {} non-Latin script fallbacks ({} non-Han sans families)",
             all_families.len(),
-            FALLBACK_SCRIPTS.len()
+            FALLBACK_SCRIPTS.len(),
+            generic_families.len()
         ));
     }
 
     if han_families.is_empty() {
+        crate::log::info("fonts: no Han fallback family found");
         return 0;
     }
 
@@ -108,7 +137,8 @@ pub fn register_system_fonts() -> usize {
         han_families.iter().copied(),
     );
     // Keep the CJK face reachable for generic sans-serif selections (email CSS
-    // `font-family: sans-serif` in Blitz) without replacing the app's defaults.
+    // `font-family: sans-serif` in Blitz) as the final fallback, after every
+    // non-Han family.
     collection.append_generic_families(GenericFamily::SansSerif, han_families.iter().copied());
 
     han_families.len()
