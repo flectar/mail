@@ -55,19 +55,36 @@ pub fn start(
         .name("slint-ohos".into())
         .stack_size(8 * 1024 * 1024)
         .spawn(move || {
-            log::info("slint thread started");
-            let platform = platform::OhosPlatform::new(event_tx, event_rx, gate, quit, visible);
-            if let Err(err) = slint::platform::set_platform(Box::new(platform)) {
-                log::error(&format!("set_platform failed: {err}"));
-                return;
-            }
-            log::info("slint platform installed; building UI");
-            let han_families = fonts::register_system_fonts();
-            log::info(&format!(
-                "system fonts registered; Han fallback families: {han_families}"
-            ));
-            if let Err(err) = app_factory() {
-                log::error(&format!("application terminated: {err}"));
+            // A panic in the Slint thread used to leave the last frame frozen
+            // and the event loop dead. Slint's thread-local platform cannot be
+            // safely reinitialized after a panic, so fail fast with a clear
+            // log instead of leaving an apparently alive but unusable window.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                log::info("slint thread started");
+                let platform = platform::OhosPlatform::new(event_tx, event_rx, gate, quit, visible);
+                if let Err(err) = slint::platform::set_platform(Box::new(platform)) {
+                    log::error(&format!("set_platform failed: {err}"));
+                    return;
+                }
+                log::info("slint platform installed; building UI");
+                let han_families = fonts::register_system_fonts();
+                log::info(&format!(
+                    "system fonts registered; Han fallback families: {han_families}"
+                ));
+                if let Err(err) = app_factory() {
+                    log::error(&format!("application terminated: {err}"));
+                }
+            }));
+            if let Err(payload) = result {
+                let message = payload
+                    .downcast_ref::<&str>()
+                    .map(|message| (*message).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "non-string panic payload".to_owned());
+                log::error(&format!(
+                    "slint thread panicked: {message}; aborting to avoid a frozen window"
+                ));
+                std::process::abort();
             }
         })?;
     Ok(())
