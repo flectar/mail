@@ -144,11 +144,24 @@ fn put_single(alias: &str, secret: &str) -> Result<(), String> {
     };
     // Reinstalling under a different signing identity leaves rows the asset
     // service can no longer decrypt: overwriting one fails with
-    // `ASSET_CRYPTO_ERROR`, while queries report it as missing. Deleting by
-    // alias does not need the old secret, so drop the stale row and add a
-    // fresh one.
+    // `ASSET_CRYPTO_ERROR`, while queries report it as missing. Do not delete
+    // blindly: a readable row must survive a failed overwrite. Only the
+    // confirmed-unreadable stale case is recoverable by deleting it.
     if failed != ASSET_CRYPTO_ERROR {
         return Err(format!("asset add failed: {failed}"));
+    }
+    match get_single(alias) {
+        Ok(Some(_)) => {
+            return Err(format!(
+                "asset add failed: {failed}; the existing entry is readable, refusing to delete it"
+            ));
+        }
+        Ok(None) => {}
+        Err(error) => {
+            return Err(format!(
+                "asset add failed: {failed}; could not verify the existing entry: {error}"
+            ));
+        }
     }
     let alias_bytes = alias.as_bytes();
     let query = [bytes_attr(TAG_ALIAS, alias_bytes)];
@@ -158,7 +171,7 @@ fn put_single(alias: &str, secret: &str) -> Result<(), String> {
         return Err(format!("asset remove failed: {rc}"));
     }
     crate::log::info(&format!(
-        "asset: dropped stale entry {alias} (crypto error {failed}) and retried"
+        "asset: removed unreadable entry {alias} (crypto error {failed}) and retried"
     ));
     add(alias, secret).map_err(|rc| format!("asset add failed: {rc}"))
 }
@@ -301,16 +314,14 @@ pub fn put(alias: &str, secret: &str) -> Result<(), String> {
         ));
     }
     let generation = new_generation();
-    let mut written = 0;
     for (index, chunk) in chunks.iter().enumerate() {
         let chunk_key = chunk_alias(alias, &generation, index);
         if let Err(error) = put_single(&chunk_key, chunk) {
-            for done in 0..written {
+            for done in 0..index {
                 let _ = remove_single(&chunk_alias(alias, &generation, done));
             }
             return Err(error);
         }
-        written += 1;
     }
     // Publish the marker only after every chunk is durable. A failed marker
     // write leaves the previous value readable and cleans the new chunks.
