@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/renderer-probe"]
-exclude = ["crates/candle-core", "crates/blitz-dom", "crates/blitz-paint", "crates/fontique", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
+exclude = ["crates/candle-core", "crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
 resolver = "3"
 
 [workspace.dependencies]

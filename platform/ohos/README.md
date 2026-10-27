@@ -46,9 +46,9 @@ must use the aliases.
 The workspace repeats the root `[patch.crates-io]` entries because this
 directory is a cargo workspace of its own, and it depends on the application
 with `default-features = false` (the host only drives the library; the
-desktop binary is not built). The OpenHarmony fontique patch is not vendored
-here: it lives in the root `patches/fontique/` queue next to the Blitz and
-Parley queues.
+desktop binary is not built). fontique comes from crates.io with its
+`fontconfig-dlopen` feature; OHOS has no Fontconfig, so the backend loads
+system fonts explicitly from `/system/fonts`.
 
 ## Prerequisites
 

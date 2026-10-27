@@ -23,16 +23,14 @@ slint = { version = "=1.18.1", default-features = false, features = [
     "unstable-wgpu-30",
 ] }
 
-# OpenHarmony is `target_os = "linux"` without Fontconfig. The patch queue in
-# `patches/fontique/` drops fontique's fontconfig backend (and its link-time
-# dependency) for `target_env = "ohos"`; the backend registers system fonts.
+# OpenHarmony is `target_os = "linux"` without Fontconfig. fontique's published
+# `fontconfig-dlopen` feature tolerates the missing library and leaves the
+# system backend empty; the backend registers `/system/fonts` explicitly.
 #
-# The blitz/parley/fontique patches mirror the root workspace: the application
-# code depends on APIs from the patched copies (crates/{blitz-dom,blitz-paint,
-# parley,fontique}), which the crates.io releases do not carry. Patches are
-# workspace-local, so the nested workspace must repeat them.
+# The blitz/parley patches mirror the root workspace: the application code
+# depends on APIs from the patched copies, which the crates.io releases do not
+# carry. Patches are workspace-local, so the nested workspace must repeat them.
 [patch.crates-io]
-fontique = { path = "../../crates/fontique" }
 blitz-dom = { path = "../../crates/blitz-dom" }
 blitz-paint = { path = "../../crates/blitz-paint" }
 parley = { path = "../../crates/parley" }
