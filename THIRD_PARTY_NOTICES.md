@@ -72,6 +72,14 @@ build provenance under `pdfium-licenses` beside the private desktop library,
 Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
 PDFium's third-party components retain their respective licenses.
 
+The OpenHarmony package uses the arm64 `ohos_pdfium` 7947 port. Its archive
+URL and SHA-256 digest are pinned in
+[`platform/ohos/scripts/fetch-pdfium.sh`](platform/ohos/scripts/fetch-pdfium.sh);
+the build stages and strips the library and packages this notice plus
+[`LICENSES/PDFium-BSD-3-Clause.txt`](LICENSES/PDFium-BSD-3-Clause.txt) under
+`resources/rawfile/` in the hap. The port is documented in
+[`platform/ohos/prebuilt/README.md`](platform/ohos/prebuilt/README.md).
+
 The Rust interface is [pdfium-render](https://github.com/ajrcarey/pdfium-render)
 0.9.4, used under its Apache-2.0 option. Linux process restrictions use
 [Landlock](https://github.com/landlock-lsm/rust-landlock) and
