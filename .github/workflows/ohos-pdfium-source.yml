@@ -8,6 +8,15 @@ name: Build OHOS PDFium from source
 # as an artifact. No signing material or repository secrets are used.
 
 on:
+  # Temporary fork trigger. GitHub only registers workflow_dispatch workflows
+  # from the default branch; this lets the pinned source build run directly
+  # from the feature branch before it is promoted.
+  push:
+    branches:
+      - ohos-pdfium-source
+    paths:
+      - .github/workflows/ohos-pdfium-source.yml
+      - platform/ohos/scripts/build-pdfium-source.sh
   workflow_dispatch:
     inputs:
       revision:
