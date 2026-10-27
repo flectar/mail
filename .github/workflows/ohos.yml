@@ -5,8 +5,8 @@ name: OpenHarmony hap
 # anonymously downloadable, so the build job targets a self-hosted runner with
 # the toolchain described in platform/ohos/README.md.
 #
-# Pull request checks build unsigned: this workflow only runs on dispatch, and
-# signing material exists exclusively as repository secrets.
+# This workflow is build-only. It never receives signing material; release
+# signing stays a local, explicit step outside CI.
 
 on:
   workflow_dispatch:
@@ -25,10 +25,6 @@ on:
           - release
           - debug
         default: release
-      sign:
-        description: Sign with the AGC material stored in the repository secrets
-        type: boolean
-        default: false
       run_quality:
         description: Run the shared quality suite first
         type: boolean
@@ -59,43 +55,13 @@ jobs:
       - name: Check the OHOS workspace formatting
         run: cargo fmt --manifest-path platform/ohos/Cargo.toml --all -- --check
 
-      - name: Materialize signing material
-        if: inputs.sign
-        env:
-          KEYSTORE_BASE64: ${{ secrets.FLECTAR_OHOS_KEYSTORE_BASE64 }}
-          CERTIFICATE_BASE64: ${{ secrets.FLECTAR_OHOS_CERTIFICATE_BASE64 }}
-          PROFILE_BASE64: ${{ secrets.FLECTAR_OHOS_PROFILE_BASE64 }}
-        run: |
-          test -n "$KEYSTORE_BASE64"
-          test -n "$CERTIFICATE_BASE64"
-          test -n "$PROFILE_BASE64"
-          material="$RUNNER_TEMP/ohos-signing"
-          umask 077
-          mkdir -p "$material"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$material/keystore.p12"
-          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$material/certificate.cer"
-          printf '%s' "$PROFILE_BASE64" | base64 --decode > "$material/profile.p7b"
-          {
-            echo "RELEASE_SIGN=1"
-            echo "RELEASE_P12=$material/keystore.p12"
-            echo "RELEASE_CERT=$material/certificate.cer"
-            echo "RELEASE_PROFILE=$material/profile.p7b"
-            echo "RELEASE_KEY_ALIAS=${{ secrets.FLECTAR_OHOS_KEY_ALIAS }}"
-            echo "RELEASE_KEY_PWD=${{ secrets.FLECTAR_OHOS_KEY_PASSWORD }}"
-            echo "RELEASE_STORE_PWD=${{ secrets.FLECTAR_OHOS_STORE_PASSWORD }}"
-          } >> "$GITHUB_ENV"
-
       - name: Build the hap
         env:
           APP: ${{ inputs.app }}
           PROFILE: ${{ inputs.profile }}
           CARGO_BUILD_JOBS: "4"
-          SKIP_SIGN: ${{ inputs.sign && '0' || '1' }}
+          SKIP_SIGN: "1"
         run: sh platform/ohos/scripts/build-hap.sh
-
-      - name: Remove the signing material
-        if: always() && inputs.sign
-        run: rm -rf "$RUNNER_TEMP/ohos-signing"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
