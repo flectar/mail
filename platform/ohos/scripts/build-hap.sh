@@ -31,10 +31,6 @@ SDK="$OHOS_SDK_ROOT"
 SHELL_DIR="$PLATFORM_DIR/shell"
 BUILD_DIR="$PLATFORM_DIR/build"
 STAGE="$BUILD_DIR/hap-stage"
-# The DevEco auto-signing material is bundle-bound: override BUNDLE (for
-# example with the previous name) until the signing profile is regenerated.
-BUNDLE="${BUNDLE:-com.flectar.mail}"
-
 # The hap carries the application version: versionName is the root crate
 # version and versionCode follows the Android sequence (alpha < beta < rc <
 # release < the next patch), so store uploads stay monotonic.
@@ -56,6 +52,14 @@ case "$APP" in
     mail) CRATE="flectar-mail-ohos"; LIB="flectar_mail_ohos" ;;
     *) die "APP must be demo or mail (got: $APP)" ;;
 esac
+# The demo must not install over the real mail app. Keep the mail bundle stable
+# for store uploads and signing profiles; BUNDLE still overrides either value.
+if [ "$APP" = demo ]; then
+    BUNDLE="${BUNDLE:-com.flectar.demo}"
+else
+    BUNDLE="${BUNDLE:-com.flectar.mail}"
+fi
+log "bundle: $BUNDLE"
 UNSIGNED="$BUILD_DIR/$LIB-unsigned.hap"
 SIGNED="$BUILD_DIR/$LIB-signed.hap"
 
@@ -139,7 +143,7 @@ log "hvigor assembleHap (compile step; PackageHap failure is tolerated)"
       OHOS_BASE_SDK_HOME="$SDK" DEVECO_SDK_HOME="$SDK" \
       externalApiPaths="$SDK/ets/api:$SDK/ets/kits:$SDK/ets/arkts" \
       "$NODE_BIN" "$HVIGOR_JS" \
-        assembleHap -m module -p module=entry@default -p product=default -p buildMode=debug \
+        assembleHap -m module -p module=entry@default -p product=default -p buildMode="$PROFILE" \
         > "$HVIGOR_LOG" 2>&1 ) || true
 
 ABC="$(find "$SHELL_DIR/entry/build" -name modules.abc -path '*loader_out*' 2>/dev/null | head -1)"
@@ -163,6 +167,14 @@ if [ -d "$PLATFORM_DIR/prebuilt/arm64" ]; then
     for lib in "$PLATFORM_DIR"/prebuilt/arm64/*.so; do
         [ -e "$lib" ] && cp "$lib" "$STAGE/libs/arm64-v8a/"
     done
+    # The OHOS PDFium archive is distributed unstripped. Strip the staged
+    # copy for release haps; the source archive stays untouched so its pinned
+    # checksum remains meaningful.
+    if [ "$PROFILE" = release ] && [ -x "$SDK/native/llvm/bin/llvm-strip" ]; then
+        for lib in "$STAGE"/libs/arm64-v8a/*.so; do
+            [ -e "$lib" ] && "$SDK/native/llvm/bin/llvm-strip" --strip-unneeded "$lib"
+        done
+    fi
 fi
 
 MERGED_JSON="$(find "$SHELL_DIR/entry/build" -name module.json -path '*merge_profile*' 2>/dev/null | head -1)"
@@ -224,6 +236,13 @@ head -c 10 "$RES_OUT/resources.index" | grep -q "RestoolV2" \
 cp "$RES_OUT/resources.index" "$STAGE/resources.index"
 rm -rf "$STAGE/resources"
 cp -r "$RES_OUT/resources" "$STAGE/resources"
+# Ship the notices and the PDFium license inside the hap. `resources/rawfile`
+# is the standard location for arbitrary packaged files and is included by the
+# zip step below.
+mkdir -p "$STAGE/resources/rawfile/LICENSES"
+cp "$REPO_DIR/THIRD_PARTY_NOTICES.md" "$STAGE/resources/rawfile/"
+cp "$REPO_DIR"/LICENSES/*.txt "$STAGE/resources/rawfile/LICENSES/"
+cp "$PLATFORM_DIR/prebuilt/README.md" "$STAGE/resources/rawfile/pdfium-README.md"
 
 # 3c. module.json injections -------------------------------------------------
 # The device loads the ability from `ets/modules.abc` only when the manifest
