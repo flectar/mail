@@ -33,7 +33,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      OHOS_PDFIUM_REVISION: ${{ inputs.revision }}
+      # push events have no workflow_dispatch inputs; keep the pinned default.
+      OHOS_PDFIUM_REVISION: ${{ inputs.revision || 'f2a7573b5fd1071f61388aeb642329006ae22153' }}
       OHOS_PDFIUM_SOURCE_DIR: ${{ github.workspace }}/.pdfium-src
       OHOS_PDFIUM_JOBS: "4"
       CARGO_NET_OFFLINE: "false"
