@@ -242,6 +242,10 @@ cp -r "$RES_OUT/resources" "$STAGE/resources"
 mkdir -p "$STAGE/resources/rawfile/LICENSES"
 cp "$REPO_DIR/THIRD_PARTY_NOTICES.md" "$STAGE/resources/rawfile/"
 cp "$REPO_DIR"/LICENSES/*.txt "$STAGE/resources/rawfile/LICENSES/"
+if [ -f "$PLATFORM_DIR/prebuilt/PDFium-LICENSE" ]; then
+    cp "$PLATFORM_DIR/prebuilt/PDFium-LICENSE" \
+        "$STAGE/resources/rawfile/LICENSES/PDFium-source-LICENSE.txt"
+fi
 cp "$PLATFORM_DIR/prebuilt/README.md" "$STAGE/resources/rawfile/pdfium-README.md"
 
 # 3c. module.json injections -------------------------------------------------

@@ -72,10 +72,13 @@ build provenance under `pdfium-licenses` beside the private desktop library,
 Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
 PDFium's third-party components retain their respective licenses.
 
-The OpenHarmony package uses the arm64 `ohos_pdfium` 7947 port. Its archive
-URL and SHA-256 digest are pinned in
-[`platform/ohos/scripts/fetch-pdfium.sh`](platform/ohos/scripts/fetch-pdfium.sh);
-the build stages and strips the library and packages this notice plus
+The OpenHarmony package prefers a source build from the pinned
+`OpenHarmonyPCDeveloper/pdfium` revision in
+[`platform/ohos/scripts/build-pdfium-source.sh`](platform/ohos/scripts/build-pdfium-source.sh).
+The fallback arm64 `ohos_pdfium` 7947 port has its archive URL and SHA-256
+digest pinned in
+[`platform/ohos/scripts/fetch-pdfium.sh`](platform/ohos/scripts/fetch-pdfium.sh).
+The build stages and strips the library and packages this notice plus
 [`LICENSES/PDFium-BSD-3-Clause.txt`](LICENSES/PDFium-BSD-3-Clause.txt) under
 `resources/rawfile/` in the hap. The port is documented in
 [`platform/ohos/prebuilt/README.md`](platform/ohos/prebuilt/README.md).
