@@ -12,7 +12,19 @@ platform/ohos/scripts/build-pdfium-source.sh
 `f2a7573b5fd1071f61388aeb642329006ae22153`, builds the `pdfium` target for
 `target_os="ohos"`/`target_cpu="arm64"`, links the local OHOS SDK into the
 source tree's `ohos_sdk/18` path, and stages a stripped
-`prebuilt/arm64/libpdfium.so` plus the source `LICENSE`.
+`prebuilt/arm64/libpdfium.so` plus the source `LICENSE`. The component build
+also stages the SDK's `libc++_shared.so` because the OHOS app namespace does
+not search `/system/lib64` for it. Its Apache-2.0/LLVM-exception license is
+retained in
+[`LICENSES/LLVM-exception.txt`](../../../LICENSES/LLVM-exception.txt).
+
+The pinned source lost several optional public symbols that
+`pdfium-render 0.9.4` binds at load time. `patches/pdfium-ohos-compat.patch`
+adds compatibility entry points (`FPDF_GetDocUserPermissions`, struct-tree,
+annotation, catalog, font-name and page-edit APIs) plus the synthetic
+`FPDFText_GetTextObject`; the preview path does not use those operations.
+The source-build CI workflow is
+[`.github/workflows/ohos-pdfium-source.yml`](../../../.github/workflows/ohos-pdfium-source.yml).
 
 The legacy `fetch-pdfium.sh` remains available for offline/bootstrap use. It
 downloads the aarch64 `ohos_pdfium` release 7947 prebuilt:
