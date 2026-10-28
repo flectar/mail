@@ -52,8 +52,17 @@ if ! git cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null; then
     log "fetching pinned revision $SOURCE_REVISION"
     git fetch --depth 1 origin "$SOURCE_REVISION"
 fi
-git checkout --detach "$SOURCE_REVISION" >/dev/null
+git reset --hard "$SOURCE_REVISION" >/dev/null
 [ "$(git rev-parse HEAD)" = "$SOURCE_REVISION" ] || die "source checkout is not at the pinned revision"
+
+# pdfium-render 0.9.4 exposes the FPDF_GetDocUserPermissions entry point
+# introduced in the PDFium API it binds. The pinned OHOS source revision keeps
+# the same user-permission implementation under FPDF_GetDocPermissions but no
+# longer exports the separate symbol. Add the compatibility entry point before
+# building.
+API_PATCH="$PLATFORM_DIR/patches/pdfium-doc-user-permissions.patch"
+git apply --check "$API_PATCH"
+git apply "$API_PATCH"
 
 # The OHOS port's GN configuration hard-codes //ohos_sdk/18/native/*. Point
 # that path at the SDK selected by env.sh instead of downloading the older

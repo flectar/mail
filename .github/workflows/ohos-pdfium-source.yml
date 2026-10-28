@@ -17,6 +17,7 @@ on:
     paths:
       - .github/workflows/ohos-pdfium-source.yml
       - platform/ohos/scripts/build-pdfium-source.sh
+      - platform/ohos/patches/pdfium-*.patch
   workflow_dispatch:
     inputs:
       revision:
