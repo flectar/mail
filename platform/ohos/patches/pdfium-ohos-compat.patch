@@ -12,10 +12,10 @@ index cb1da47df..70bbfb881 100644
    public_configs = [ ":pdfium_public_config" ]
 diff --git a/fpdfsdk/fpdf_ohos_compat.cpp b/fpdfsdk/fpdf_ohos_compat.cpp
 new file mode 100644
-index 000000000..890514461
+index 000000000..bd5a4c4a1
 --- /dev/null
 +++ b/fpdfsdk/fpdf_ohos_compat.cpp
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,136 @@
 +// Copyright 2026 Flectar Mail contributors.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -25,6 +25,8 @@ index 000000000..890514461
 +// the Rust dynamic bindings require these symbols to exist at load time.
 +// They are optional APIs for the preview path; unsupported operations return
 +// the documented empty/error values rather than failing the whole library load.
++
++#define FPDF_IMPLEMENTATION
 +
 +#include <cstddef>
 +#include <cstdint>
