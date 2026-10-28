@@ -77,18 +77,17 @@ jobs:
 
       - name: Verify and checksum the artifact
         run: |
-          lib=platform/ohos/prebuilt/arm64/libpdfium.so
-          test -s "$lib"
-          file "$lib"
-          sha256sum "$lib" > platform/ohos/prebuilt/arm64/libpdfium.so.sha256
-          cat platform/ohos/prebuilt/arm64/libpdfium.so.sha256
+          test -s platform/ohos/prebuilt/arm64/libpdfium.so
+          file platform/ohos/prebuilt/arm64/libpdfium.so
+          sha256sum platform/ohos/prebuilt/arm64/*.so > platform/ohos/prebuilt/SHA256SUMS
+          cat platform/ohos/prebuilt/SHA256SUMS
 
       - uses: actions/upload-artifact@v4
         with:
           name: ohos-pdfium-arm64-source
           path: |
-            platform/ohos/prebuilt/arm64/libpdfium.so
-            platform/ohos/prebuilt/arm64/libpdfium.so.sha256
+            platform/ohos/prebuilt/arm64/*.so
+            platform/ohos/prebuilt/SHA256SUMS
             platform/ohos/prebuilt/PDFium-LICENSE
             platform/ohos/prebuilt/README.md
           if-no-files-found: error

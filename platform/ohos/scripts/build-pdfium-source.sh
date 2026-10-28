@@ -83,12 +83,27 @@ log "ninja pdfium ($JOBS jobs)"
 "$NINJA" -C "$BUILD_DIR" -j"$JOBS" pdfium
 
 BUILT=$(find "$BUILD_DIR" -type f -name libpdfium.so | head -n 1)
-[ -n "$BUILT" ] || die "libpdfium.so was not produced"
+COMPONENT_BUILD=false
+if [ -z "$BUILT" ]; then
+    # The OHOS port's default GN args use is_component_build=true. PDFium is
+    # then emitted as libpdfium.cr.so with its sibling .cr.so dependencies;
+    # package those together under the stable libpdfium.so name.
+    BUILT=$(find "$BUILD_DIR" -type f -name libpdfium.cr.so | head -n 1)
+    COMPONENT_BUILD=true
+fi
+[ -n "$BUILT" ] || die "libpdfium.so/libpdfium.cr.so was not produced"
+
 mkdir -p "$PLATFORM_DIR/prebuilt/arm64"
 cp "$BUILT" "$TARGET"
+if [ "$COMPONENT_BUILD" = true ]; then
+    find "$BUILD_DIR" -type f -name '*.cr.so' -exec cp -f {} "$PLATFORM_DIR/prebuilt/arm64/" \;
+    log "component build: bundled $(find "$PLATFORM_DIR/prebuilt/arm64" -maxdepth 1 -name '*.cr.so' | wc -l) dependency libraries"
+fi
 STRIP="$OHOS_SDK_ROOT/native/llvm/bin/llvm-strip"
 if [ -x "$STRIP" ]; then
-    "$STRIP" --strip-unneeded "$TARGET"
+    for lib in "$PLATFORM_DIR"/prebuilt/arm64/*.so; do
+        [ -e "$lib" ] && "$STRIP" --strip-unneeded "$lib"
+    done
 fi
 cp "$SOURCE_DIR/LICENSE" "$PLATFORM_DIR/prebuilt/PDFium-LICENSE"
 log "installed: $TARGET ($(stat -c%s "$TARGET") bytes)"
