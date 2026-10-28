@@ -25,6 +25,13 @@ interface FlectarBridge {
   requestPasteboard: () => void;
 }
 
+interface ImeCursor {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 // The exports of the native XComponent module (`onLoad` hands them over).
 interface FlectarNativeModule {
   setBridge?: (bridge: FlectarBridge) => void;
@@ -52,6 +59,8 @@ struct Index {
     this.nativeModule?.suspendPreview?.();
   };
   private lastImeCursor: string = '';
+  private pendingImeCursor: ImeCursor | undefined = undefined;
+  private imeCursorRetries: number = 0;
   private appliedColorMode: number = -2;
   private pasteboardPermissionRequested: boolean = false;
   aboutToAppear(): void {
@@ -291,6 +300,11 @@ struct Index {
       const controller = inputMethod.getController();
       if (this.imeAttached && this.imePassword === password) {
         controller.showTextInput(inputMethod.RequestKeyboardReason.TOUCH)
+          .then((): void => {
+            // updateCursor can be rejected with 12800016 until the client is
+            // editable; replay the latest caret once the keyboard is shown.
+            this.applyImeCursor();
+          })
           .catch((error: BusinessError): void => {
             hilog.error(0x0000, LOG_TAG, 'IME show failed: %{public}d %{public}s',
               error.code, error.message);
@@ -345,6 +359,10 @@ struct Index {
         this.imeAttachPending = false;
         this.imePassword = password;
         this.lastImeCursor = '';
+        this.imeCursorRetries = 0;
+        // The first cursor update usually arrives while attach() is pending;
+        // replay it now that the controller accepts updateCursor().
+        this.applyImeCursor();
         // (Re-)register exactly one set of handlers: a stale registration from
         // an earlier attach (or a duplicate one) would double-insert text.
         controller.off('insertText');
@@ -382,25 +400,67 @@ struct Index {
   }
 
   // Slint reports the caret rectangle while the field is focused. The system
-  // IME uses it to place the candidate window.
+  // IME uses it to place the candidate window. Remember the latest rectangle
+  // even while attach() is pending; applyImeCursor() replays it afterwards.
   private imeUpdateCursor(left: number, top: number, width: number, height: number): void {
-    if (!this.imeAttached) {
+    const old = this.pendingImeCursor;
+    this.pendingImeCursor = { left, top, width, height };
+    if (old === undefined || old.left !== left || old.top !== top ||
+      old.width !== width || old.height !== height) {
+      this.imeCursorRetries = 0;
+    }
+    this.applyImeCursor();
+  }
+
+  private imeCursorKey(cursor: ImeCursor): string {
+    return `${cursor.left},${cursor.top},${cursor.width},${cursor.height}`;
+  }
+
+  private applyImeCursor(): void {
+    if (!this.imeAttached || this.pendingImeCursor === undefined) {
       return;
     }
-    const key = `${left},${top},${width},${height}`;
+    const cursor = this.pendingImeCursor;
+    const key = this.imeCursorKey(cursor);
     if (key === this.lastImeCursor) {
       return;
     }
-    this.lastImeCursor = key;
     try {
       const ui = this.getUIContext();
-      inputMethod.getController().updateCursor({
-        left: this.windowOffsetX + ui.vp2px(left),
-        top: this.windowOffsetY + ui.vp2px(top),
-        width: ui.vp2px(width),
-        height: ui.vp2px(height),
+      const px: inputMethod.CursorInfo = {
+        left: this.windowOffsetX + ui.vp2px(cursor.left),
+        top: this.windowOffsetY + ui.vp2px(cursor.top),
+        width: ui.vp2px(cursor.width),
+        height: ui.vp2px(cursor.height),
+      };
+      inputMethod.getController().updateCursor(px).then((): void => {
+        // Only remember a rectangle that is still the latest one. An older
+        // request completing late must not overwrite a newer caret.
+        const current = this.pendingImeCursor;
+        if (current !== undefined && this.imeCursorKey(current) === key) {
+          this.lastImeCursor = key;
+          this.imeCursorRetries = 0;
+        } else {
+          this.applyImeCursor();
+        }
       }).catch((error: BusinessError): void => {
         hilog.error(0x0000, LOG_TAG, 'IME cursor update failed: %{public}d', error.code);
+        // 12800016 means the client is not editable yet (often while
+        // showTextInput/attach is still settling). Do not mark this rectangle
+        // as applied; retry the current one shortly, otherwise identical
+        // updates would be deduplicated forever.
+        const current = this.pendingImeCursor;
+        if (current === undefined || this.imeCursorKey(current) !== key) {
+          this.applyImeCursor();
+          return;
+        }
+        this.lastImeCursor = '';
+        if (this.imeCursorRetries < 4) {
+          this.imeCursorRetries += 1;
+          setTimeout((): void => {
+            this.applyImeCursor();
+          }, 120);
+        }
       });
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'IME cursor update failed: %{public}s',

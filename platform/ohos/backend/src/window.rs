@@ -356,7 +356,17 @@ impl i_slint_core::window::WindowAdapterInternal for OhosWindow {
         use i_slint_core::items::InputType;
         match request {
             i_slint_core::window::InputMethodRequest::Enable(properties) => {
-                crate::ime::request(true, matches!(properties.input_type, InputType::Password))
+                crate::ime::request(true, matches!(properties.input_type, InputType::Password));
+                // Slint sends the initial caret rectangle with Enable (it only
+                // sends separate Update messages when the caret moves later).
+                // Forward it as well so the first composition is placed at the
+                // focused field rather than at the previous IME position.
+                crate::ime::update_cursor(
+                    properties.cursor_rect_origin.x,
+                    properties.cursor_rect_origin.y,
+                    properties.cursor_rect_size.width,
+                    properties.cursor_rect_size.height,
+                );
             }
             i_slint_core::window::InputMethodRequest::Update(properties) => {
                 crate::ime::update_cursor(
