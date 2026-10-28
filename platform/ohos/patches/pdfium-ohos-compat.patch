@@ -12,10 +12,10 @@ index cb1da47df..70bbfb881 100644
    public_configs = [ ":pdfium_public_config" ]
 diff --git a/fpdfsdk/fpdf_ohos_compat.cpp b/fpdfsdk/fpdf_ohos_compat.cpp
 new file mode 100644
-index 000000000..252aea25e
+index 000000000..890514461
 --- /dev/null
 +++ b/fpdfsdk/fpdf_ohos_compat.cpp
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,134 @@
 +// Copyright 2026 Flectar Mail contributors.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -34,6 +34,11 @@ index 000000000..252aea25e
 +#include "public/fpdf_sysfontinfo.h"
 +#include "public/fpdf_text.h"
 +#include "public/fpdfview.h"
++
++// Present in the PDFium API version consumed by pdfium-render 0.9.4, but no
++// longer declared by this OHOS source revision.
++typedef const struct fpdf_structelement_attr_value_t__*
++    FPDF_STRUCTELEMENT_ATTR_VALUE;
 +
 +extern "C" {
 +
