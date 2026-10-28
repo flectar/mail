@@ -196,6 +196,10 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
                 &b"suspendPreview\0"[..],
                 bridge::suspend_preview as ffi::napi_callback,
             ),
+            (
+                &b"setClipboardText\0"[..],
+                bridge::set_clipboard_text as ffi::napi_callback,
+            ),
         ] {
             let mut function: napi_value = core::ptr::null_mut();
             let rc = ffi::napi_create_function(

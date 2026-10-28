@@ -7,11 +7,34 @@
 
 use core::ffi::{CStr, c_int};
 use std::ffi::CString;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
+
+/// The Slint paste callback must never block on the system pasteboard. The
+/// ArkTS page owns the UI-thread read and pushes the latest plain text here
+/// through the NAPI bridge; Slint only reads this cache.
+static CACHED_TEXT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 /// Hook installed by the shell to ask for `ohos.permission.READ_PASTEBOARD`
 /// after a denied read. Tests and hosts without a bridge leave it unset.
 static PERMISSION_HOOK: OnceLock<fn()> = OnceLock::new();
+
+fn cache() -> &'static Mutex<Option<String>> {
+    CACHED_TEXT.get_or_init(|| Mutex::new(None))
+}
+
+/// Replace the cached clipboard text without touching the system pasteboard.
+/// Called by the ArkTS page after an update/read; empty text means "no text".
+pub fn set_cached_text(text: Option<String>) {
+    if let Ok(mut cached) = cache().lock() {
+        *cached = text;
+    }
+}
+
+/// Read the cached clipboard text. Returns `None` until the page has supplied
+/// the initial value; this function never performs pasteboard I/O.
+pub fn cached_text() -> Option<String> {
+    cache().lock().ok().and_then(|cached| cached.clone())
+}
 
 /// Install the hook that requests the pasteboard permission from the user.
 pub fn set_permission_hook(hook: fn()) {
@@ -65,6 +88,19 @@ pub fn read_text() -> Option<String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_text_does_not_touch_the_pasteboard() {
+        set_cached_text(Some("local cache".to_owned()));
+        assert_eq!(cached_text().as_deref(), Some("local cache"));
+        set_cached_text(None);
+        assert_eq!(cached_text(), None);
+    }
+}
+
 /// Replace the clipboard with `text`.
 pub fn write_text(text: &str) {
     let Ok(content) = CString::new(text) else {
@@ -89,6 +125,7 @@ pub fn write_text(text: &str) {
             if staged {
                 let rc = ffi::OH_Pasteboard_SetData(board, data);
                 if rc == 0 {
+                    set_cached_text(Some(text.to_owned()));
                     crate::log::info(&format!("clipboard: wrote {} bytes", text.len()));
                 } else {
                     crate::log::error(&format!("clipboard: write failed (status {rc})"));

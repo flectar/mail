@@ -278,6 +278,32 @@ pub(super) fn request_pasteboard() {
     let _ = call_closure(&REQUEST_PASTEBOARD, "requestPasteboard", ());
 }
 
+/// `setClipboardText(text)`: the ArkTS page read the system pasteboard on the
+/// UI thread. Empty text invalidates the cache.
+pub(super) unsafe extern "C" fn set_clipboard_text(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live `env`/`info` from the NAPI runtime.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        let rc = ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        );
+        if rc == ffi::NAPI_OK && argc >= 1 {
+            let text = read_string(env, argv[0]).unwrap_or_default();
+            slint_ohos_backend::clipboard::set_cached_text((!text.is_empty()).then_some(text));
+        }
+        undefined(env)
+    }
+}
+
 /// `imeCommit(text)`: committed text from the soft keyboard.
 pub(super) unsafe extern "C" fn ime_commit(
     env: napi_env,

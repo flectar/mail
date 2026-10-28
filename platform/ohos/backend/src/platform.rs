@@ -333,7 +333,10 @@ impl Platform for OhosPlatform {
 
     fn clipboard_text(&self, clipboard: slint::platform::Clipboard) -> Option<String> {
         if clipboard == slint::platform::Clipboard::DefaultClipboard {
-            crate::clipboard::read_text()
+            // The read happens on the ArkTS UI thread and is cached by the
+            // bridge. Never call the pasteboard from this thread: a remote
+            // clipboard can stall the compositor/event loop.
+            crate::clipboard::cached_text()
         } else {
             None
         }
