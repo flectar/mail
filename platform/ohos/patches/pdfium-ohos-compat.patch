@@ -12,10 +12,10 @@ index cb1da47df..70bbfb881 100644
    public_configs = [ ":pdfium_public_config" ]
 diff --git a/fpdfsdk/fpdf_ohos_compat.cpp b/fpdfsdk/fpdf_ohos_compat.cpp
 new file mode 100644
-index 000000000..bd5a4c4a1
+index 000000000..2beb48331
 --- /dev/null
 +++ b/fpdfsdk/fpdf_ohos_compat.cpp
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,340 @@
 +// Copyright 2026 Flectar Mail contributors.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -31,7 +31,11 @@ index 000000000..bd5a4c4a1
 +#include <cstddef>
 +#include <cstdint>
 +
++#include "public/fpdf_annot.h"
++#include "public/fpdf_attachment.h"
++#include "public/fpdf_catalog.h"
 +#include "public/fpdf_edit.h"
++#include "public/fpdf_formfill.h"
 +#include "public/fpdf_structtree.h"
 +#include "public/fpdf_sysfontinfo.h"
 +#include "public/fpdf_text.h"
@@ -148,6 +152,206 @@ index 000000000..bd5a4c4a1
 +  (void)struct_element;
 +  (void)buffer;
 +  (void)buflen;
++  return 0;
++}
++
++
++// Experimental/optional PDFium APIs that were removed from the pinned source
++// revision but are part of the dynamic binding set in pdfium-render 0.9.4.
++// The preview path does not use annotation, catalog, font-name or page-edit
++// operations; return the documented empty/error result.
++
++FPDF_EXPORT FPDF_ATTACHMENT FPDF_CALLCONV
++FPDFAnnot_AddFileAttachment(FPDF_ANNOTATION annot, FPDF_WIDESTRING name) {
++  (void)annot;
++  (void)name;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_ATTACHMENT FPDF_CALLCONV
++FPDFAnnot_GetFileAttachment(FPDF_ANNOTATION annot) {
++  (void)annot;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_GetFontColor(FPDF_FORMHANDLE hHandle,
++                       FPDF_ANNOTATION annot,
++                       unsigned int* R,
++                       unsigned int* G,
++                       unsigned int* B) {
++  (void)hHandle;
++  (void)annot;
++  (void)R;
++  (void)G;
++  (void)B;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_SetFontColor(FPDF_FORMHANDLE handle,
++                       FPDF_ANNOTATION annot,
++                       unsigned int R,
++                       unsigned int G,
++                       unsigned int B) {
++  (void)handle;
++  (void)annot;
++  (void)R;
++  (void)G;
++  (void)B;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_SetFormFieldFlags(FPDF_FORMHANDLE handle,
++                            FPDF_ANNOTATION annot,
++                            int flags) {
++  (void)handle;
++  (void)annot;
++  (void)flags;
++  return 0;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDFAttachment_GetSubtype(FPDF_ATTACHMENT attachment,
++                          FPDF_WCHAR* buffer,
++                          unsigned long buflen) {
++  (void)attachment;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDFCatalog_GetLanguage(FPDF_DOCUMENT document,
++                        FPDF_WCHAR* buffer,
++                        unsigned long buflen) {
++  (void)document;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFCatalog_SetLanguage(FPDF_DOCUMENT document, FPDF_WIDESTRING language) {
++  (void)document;
++  (void)language;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV
++FPDFFont_GetBaseFontName(FPDF_FONT font, char* buffer, size_t length) {
++  (void)font;
++  (void)buffer;
++  (void)length;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV
++FPDFFont_GetFamilyName(FPDF_FONT font, char* buffer, size_t length) {
++  (void)font;
++  (void)buffer;
++  (void)length;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFFormObj_RemoveObject(FPDF_PAGEOBJECT form_object,
++                         FPDF_PAGEOBJECT page_object) {
++  (void)form_object;
++  (void)page_object;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFImageObj_GetIccProfileDataDecoded(FPDF_PAGEOBJECT image_object,
++                                      FPDF_PAGE page,
++                                      uint8_t* buffer,
++                                      size_t buflen,
++                                      size_t* out_buflen) {
++  (void)image_object;
++  (void)page;
++  (void)buffer;
++  (void)buflen;
++  if (out_buflen != nullptr) {
++    *out_buflen = 0;
++  }
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObjMark_GetParamFloatValue(FPDF_PAGEOBJECTMARK mark,
++                                   FPDF_BYTESTRING key,
++                                   float* out_value) {
++  (void)mark;
++  (void)key;
++  (void)out_value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObjMark_SetFloatParam(FPDF_DOCUMENT document,
++                              FPDF_PAGEOBJECT page_object,
++                              FPDF_PAGEOBJECTMARK mark,
++                              FPDF_BYTESTRING key,
++                              float value) {
++  (void)document;
++  (void)page_object;
++  (void)mark;
++  (void)key;
++  (void)value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_AddExistingMark(FPDF_PAGEOBJECT page_object,
++                            FPDF_PAGEOBJECTMARK mark) {
++  (void)page_object;
++  (void)mark;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_GetIsActive(FPDF_PAGEOBJECT page_object, FPDF_BOOL* active) {
++  (void)page_object;
++  (void)active;
++  return 0;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDFPageObj_GetMarkedContentID(FPDF_PAGEOBJECT page_object) {
++  (void)page_object;
++  return -1;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_SetIsActive(FPDF_PAGEOBJECT page_object, FPDF_BOOL active) {
++  (void)page_object;
++  (void)active;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_TransformF(FPDF_PAGEOBJECT page_object, const FS_MATRIX* matrix) {
++  (void)page_object;
++  (void)matrix;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPage_InsertObjectAtIndex(FPDF_PAGE page,
++                             FPDF_PAGEOBJECT page_object,
++                             size_t index) {
++  (void)page;
++  (void)page_object;
++  (void)index;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFTextObj_SetFontSize(FPDF_PAGEOBJECT text, float size) {
++  (void)text;
++  (void)size;
 +  return 0;
 +}
 +
