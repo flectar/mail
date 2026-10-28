@@ -97,7 +97,13 @@ mkdir -p "$PLATFORM_DIR/prebuilt/arm64"
 cp "$BUILT" "$TARGET"
 if [ "$COMPONENT_BUILD" = true ]; then
     find "$BUILD_DIR" -type f -name '*.cr.so' -exec cp -f {} "$PLATFORM_DIR/prebuilt/arm64/" \;
-    log "component build: bundled $(find "$PLATFORM_DIR/prebuilt/arm64" -maxdepth 1 -name '*.cr.so' | wc -l) dependency libraries"
+    # The component build links the C++ runtime dynamically. The OHOS app
+    # namespace does not search /system/lib64 for this, so bundle the matching
+    # SDK copy beside libpdfium.so.
+    CXX_SHARED="$OHOS_SDK_ROOT/native/llvm/lib/aarch64-linux-ohos/libc++_shared.so"
+    [ -f "$CXX_SHARED" ] || die "component build needs $CXX_SHARED"
+    cp "$CXX_SHARED" "$PLATFORM_DIR/prebuilt/arm64/libc++_shared.so"
+    log "component build: bundled C++ runtime and $(find "$PLATFORM_DIR/prebuilt/arm64" -maxdepth 1 -name '*.cr.so' | wc -l) dependency libraries"
 fi
 STRIP="$OHOS_SDK_ROOT/native/llvm/bin/llvm-strip"
 if [ -x "$STRIP" ]; then
