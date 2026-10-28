@@ -60,7 +60,7 @@ git reset --hard "$SOURCE_REVISION" >/dev/null
 # the same user-permission implementation under FPDF_GetDocPermissions but no
 # longer exports the separate symbol. Add the compatibility entry point before
 # building.
-API_PATCH="$PLATFORM_DIR/patches/pdfium-doc-user-permissions.patch"
+API_PATCH="$PLATFORM_DIR/patches/pdfium-ohos-compat.patch"
 git apply --check "$API_PATCH"
 git apply "$API_PATCH"
 

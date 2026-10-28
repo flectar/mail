@@ -1,0 +1,147 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index cb1da47df..70bbfb881 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -343,6 +343,7 @@ group("pdfium_public_headers") {
+ 
+ component("pdfium") {
+   output_name = "pdfium"
++  sources = [ "fpdfsdk/fpdf_ohos_compat.cpp" ]
+   libs = []
+   configs += [ ":pdfium_strict_config" ]
+   public_configs = [ ":pdfium_public_config" ]
+diff --git a/fpdfsdk/fpdf_ohos_compat.cpp b/fpdfsdk/fpdf_ohos_compat.cpp
+new file mode 100644
+index 000000000..252aea25e
+--- /dev/null
++++ b/fpdfsdk/fpdf_ohos_compat.cpp
+@@ -0,0 +1,129 @@
++// Copyright 2026 Flectar Mail contributors.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// Compatibility entry points for pdfium-render 0.9.4. The pinned OHOS PDFium
++// source keeps the implementations under different/removed public names, but
++// the Rust dynamic bindings require these symbols to exist at load time.
++// They are optional APIs for the preview path; unsupported operations return
++// the documented empty/error values rather than failing the whole library load.
++
++#include <cstddef>
++#include <cstdint>
++
++#include "public/fpdf_edit.h"
++#include "public/fpdf_structtree.h"
++#include "public/fpdf_sysfontinfo.h"
++#include "public/fpdf_text.h"
++#include "public/fpdfview.h"
++
++extern "C" {
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDF_GetDocUserPermissions(FPDF_DOCUMENT document) {
++  return FPDF_GetDocPermissions(document);
++}
++
++FPDF_EXPORT FPDF_PAGEOBJECT FPDF_CALLCONV
++FPDFText_GetTextObject(FPDF_TEXTPAGE text_page, int index) {
++  (void)text_page;
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDFText_IsHyphen(FPDF_TEXTPAGE text_page, int index) {
++  (void)text_page;
++  (void)index;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_FONT FPDF_CALLCONV
++FPDFText_LoadCidType2Font(FPDF_DOCUMENT document,
++                          const uint8_t* font_data,
++                          uint32_t font_data_size,
++                          FPDF_BYTESTRING to_unicode_cmap,
++                          const uint8_t* cid_to_gid_map_data,
++                          uint32_t cid_to_gid_map_data_size) {
++  (void)document;
++  (void)font_data;
++  (void)font_data_size;
++  (void)to_unicode_cmap;
++  (void)cid_to_gid_map_data;
++  (void)cid_to_gid_map_data_size;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFText_SetPositions(FPDF_PAGEOBJECT text_object,
++                      const float* positions,
++                      size_t count) {
++  (void)text_object;
++  (void)positions;
++  (void)count;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV FPDF_GetDefaultTTFMapCount() {
++  return 0;
++}
++
++FPDF_EXPORT const FPDF_CharsetFontMap* FPDF_CALLCONV
++FPDF_GetDefaultTTFMapEntry(size_t index) {
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDF_MovePages(FPDF_DOCUMENT document,
++               const int* page_indices,
++               unsigned long page_indices_len,
++               int dest_page_index) {
++  (void)document;
++  (void)page_indices;
++  (void)page_indices_len;
++  (void)dest_page_index;
++  return 0;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDF_StructElement_Attr_CountChildren(FPDF_STRUCTELEMENT_ATTR_VALUE value) {
++  (void)value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_STRUCTELEMENT_ATTR_VALUE FPDF_CALLCONV
++FPDF_StructElement_Attr_GetChildAtIndex(FPDF_STRUCTELEMENT_ATTR_VALUE value,
++                                        int index) {
++  (void)value;
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_STRUCTELEMENT_ATTR_VALUE FPDF_CALLCONV
++FPDF_StructElement_Attr_GetValue(FPDF_STRUCTELEMENT_ATTR struct_attribute,
++                                 FPDF_BYTESTRING name) {
++  (void)struct_attribute;
++  (void)name;
++  return nullptr;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDF_StructElement_GetChildMarkedContentID(FPDF_STRUCTELEMENT struct_element,
++                                           int index) {
++  (void)struct_element;
++  (void)index;
++  return -1;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDF_StructElement_GetExpansion(FPDF_STRUCTELEMENT struct_element,
++                                void* buffer,
++                                unsigned long buflen) {
++  (void)struct_element;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++}  // extern "C"
