@@ -2272,12 +2272,19 @@ fn mailbox_entries_with_counts(
 }
 
 fn unified_mailbox_entries(badges: &[MailboxBadgeCounts]) -> Vec<MailboxEntry> {
-    let total = MailboxBadgeCounts {
+    // One pass over the accounts instead of three: sidebar totals rebuild on
+    // every metadata refresh.
+    let mut total = MailboxBadgeCounts {
         account_id: 0,
-        inbox: badges.iter().map(|counts| counts.inbox).sum(),
-        starred: badges.iter().map(|counts| counts.starred).sum(),
-        drafts: badges.iter().map(|counts| counts.drafts).sum(),
+        inbox: 0,
+        starred: 0,
+        drafts: 0,
     };
+    for counts in badges {
+        total.inbox += counts.inbox;
+        total.starred += counts.starred;
+        total.drafts += counts.drafts;
+    }
     // The unified inbox has a dedicated sidebar row.
     let mailboxes = StandardMailbox::ALL
         .into_iter()
