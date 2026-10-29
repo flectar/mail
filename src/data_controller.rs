@@ -276,7 +276,7 @@ fn scan_storage(paths: &Paths, generation: &AtomicU64, ticket: u64) -> Option<St
     Some(scan)
 }
 
-fn format_storage_size(bytes: u64) -> String {
+pub(super) fn format_storage_size(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
     const GB: f64 = MB * 1024.0;
@@ -966,8 +966,8 @@ fn mail_export_message(exported: &MailExport, location: &str) -> UiMessage {
     }
 }
 
-/// Mail of POP3 accounts exists only on this device, so it can be exported as
-/// mbox files before its account, or all local data, is removed.
+/// Mail of POP3 accounts, and local mail, exist only on this device, so they
+/// can be exported as mbox files before they, or all local data, are removed.
 fn register_mail_export(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -998,7 +998,7 @@ fn register_mail_export(
         }
         let (core, accounts) = {
             let state = state.borrow();
-            let accounts = state
+            let mut accounts = state
                 .account_configs
                 .iter()
                 .filter(|config| {
@@ -1007,6 +1007,16 @@ fn register_mail_export(
                 })
                 .map(|config| (config.id, config.email.clone()))
                 .collect::<Vec<_>>();
+            // Local mail's folder is named like its section of the sidebar.
+            if let Some(local) = state
+                .local_mail
+                .filter(|local| account_id < 0 || local.account_id == i64::from(account_id))
+            {
+                accounts.push((
+                    local.account_id,
+                    translated(&app, &UiMessage::plain("On this device")).to_string(),
+                ));
+            }
             (state.core.clone(), accounts)
         };
         let Some(core) = core else {
@@ -1133,6 +1143,8 @@ pub(super) fn register_data_management_callbacks(
     let load_generation = Arc::clone(&storage_generation);
     let storage_paths = paths.clone();
     let storage_app = app.as_weak();
+    let storage_state = Rc::clone(state);
+    let storage_runtime = Rc::clone(runtime);
     app.on_load_storage_usage(move || {
         let Some(app) = storage_app.upgrade() else {
             return;
@@ -1141,6 +1153,8 @@ pub(super) fn register_data_management_callbacks(
         {
             return;
         }
+        // Deleted and moved mail changes what local mail holds.
+        refresh_local_mail(&app, &storage_state, &storage_runtime);
         let ticket = load_generation.fetch_add(1, Ordering::AcqRel) + 1;
         app.set_storage_loading(true);
         app.set_storage_error("".into());

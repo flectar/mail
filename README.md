@@ -378,10 +378,22 @@ explained instead of changed silently, and POP3 accounts keep their rule for
 removing mail from the server. Existing accounts are never modified, and
 passwords are never imported.
 
+Saved mail comes over the same way: Thunderbird's Local Folders and the mail
+its POP3 accounts downloaded, mbox files such as a Google Takeout export or
+Flectar Mail's own, `.eml` messages, maildir folders, Apple Mail mailboxes, and
+ZIP archives of them. You pick the files, several at once if you like, then the
+folders, with Trash and Junk left out unless you check them, and the folder
+structure and read and starred states come along. Mail that's already there is
+skipped, so a stopped import can simply run again, and a long one can carry on
+in the background. Mail that belongs to no account goes to **On this device**:
+folders kept only here, which Settings → Storage can export or delete. It can
+also go into a POP3 account's folders, or up to the server of an IMAP, JMAP or
+Gmail account, into a folder of its own there.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-storage-light.png">
-  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, database snapshot, and account backup controls">
+  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
 </picture>
 
 ### 📱 Made for smaller screens

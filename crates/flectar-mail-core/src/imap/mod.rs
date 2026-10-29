@@ -1156,10 +1156,53 @@ pub async fn append_with_receipt(
     raw: &[u8],
     seen: bool,
 ) -> Result<Option<AppendReceipt>> {
+    let flags = if seen { " (\\Seen)" } else { "" };
     with_deadline(
         "APPEND",
         CONTENT_TIMEOUT,
-        append_inner(session, folder, raw, seen),
+        append_inner(session, folder, raw, flags, ""),
+    )
+    .await
+}
+
+/// How [`append_message`] files a message.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AppendOptions {
+    pub seen: bool,
+    pub flagged: bool,
+    /// The message's internal date, instead of the time it is appended.
+    pub internal_date: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Append a message with its flags and date, such as one copied from
+/// elsewhere. A large message gets time to upload at 64 KiB/s.
+pub async fn append_message(
+    session: &mut Session,
+    folder: &str,
+    raw: &[u8],
+    options: AppendOptions,
+) -> Result<Option<AppendReceipt>> {
+    let mut flags = Vec::new();
+    if options.seen {
+        flags.push("\\Seen");
+    }
+    if options.flagged {
+        flags.push("\\Flagged");
+    }
+    let flags = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", flags.join(" "))
+    };
+    let date = options
+        .internal_date
+        .map(|date| format!(" \"{}\"", date.format("%d-%b-%Y %H:%M:%S %z")))
+        .unwrap_or_default();
+    let deadline = CONTENT_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
+    with_deadline(
+        "APPEND",
+        deadline,
+        append_inner(session, folder, raw, &flags, &date),
     )
     .await
 }
@@ -1168,7 +1211,8 @@ async fn append_inner(
     session: &mut Session,
     folder: &str,
     raw: &[u8],
-    seen: bool,
+    flags: &str,
+    date: &str,
 ) -> Result<Option<AppendReceipt>> {
     use async_imap::imap_proto::{Response, ResponseCode, Status, UidSetMember};
     use tokio::io::AsyncWriteExt;
@@ -1177,9 +1221,11 @@ async fn append_inner(
         return Err(CoreError::Imap("invalid APPEND mailbox".into()));
     }
     let folder = folder.replace('\\', "\\\\").replace('"', "\\\"");
-    let flags = if seen { " (\\Seen)" } else { "" };
     let tag = session
-        .run_command(format!("APPEND \"{folder}\"{flags} {{{}}}", raw.len()))
+        .run_command(format!(
+            "APPEND \"{folder}\"{flags}{date} {{{}}}",
+            raw.len()
+        ))
         .await
         .map_err(|e| CoreError::Imap(format!("APPEND connection failed: {e}")))?;
     let mut sent_literal = false;
@@ -1210,10 +1256,15 @@ async fn append_inner(
                 tag: received,
                 status,
                 code,
-                ..
+                information,
             } if *received == tag => {
                 if *status != Status::Ok {
-                    return Err(CoreError::Imap(format!("{status:?}: APPEND rejected")));
+                    let reason = information.as_deref().unwrap_or_default().trim();
+                    return Err(CoreError::Imap(if reason.is_empty() {
+                        format!("{status:?}: APPEND rejected")
+                    } else {
+                        format!("{status:?}: APPEND rejected: {reason}")
+                    }));
                 }
                 if !sent_literal {
                     return Err(CoreError::Imap(

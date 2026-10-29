@@ -536,6 +536,10 @@ pub(super) fn render_current(
             account.id == email.account_id && account.mail_protocol == MailProtocol::Gmail
         })
     }));
+    app.global::<LocalMailUi>()
+        .set_selected(selected_email.as_ref().is_some_and(|email| {
+            state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
+        }));
     apply_label_rows(app, &labels, selected_email.as_ref());
     app.set_previous_email_id(previous_email_id);
     app.set_next_email_id(next_email_id);
@@ -1221,6 +1225,10 @@ pub(super) fn refresh_rows_only(
             account.id == email.account_id && account.mail_protocol == MailProtocol::Gmail
         })
     }));
+    app.global::<LocalMailUi>()
+        .set_selected(selected_email.as_ref().is_some_and(|email| {
+            state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
+        }));
     apply_label_rows(app, &labels, selected_email.as_ref());
     refresh_sidebar(state);
     let selected_domain = selected_email.as_ref().map(|email| {
@@ -1602,10 +1610,13 @@ fn mailbox_scope_title(
             .iter()
             .find(|label| label.id == id)
             .map_or_else(|| "Label".into(), |label| label.name.clone()),
-        Scope::Account { mailbox: label, .. } => mailbox().map_or_else(
-            || label.label().to_owned(),
-            |mailbox| format!("{} / {}", mailbox.context, label.label()),
-        ),
+        // Local mail's mailboxes have no account to name.
+        Scope::Account { mailbox: label, .. } => mailbox()
+            .filter(|mailbox| !mailbox.context.is_empty())
+            .map_or_else(
+                || label.label().to_owned(),
+                |mailbox| format!("{} / {}", mailbox.context, label.label()),
+            ),
     }
 }
 

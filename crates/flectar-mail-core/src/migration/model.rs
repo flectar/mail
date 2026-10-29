@@ -30,9 +30,24 @@ pub struct ImportInventory {
     /// Format version declared by the source, when it has one.
     pub source_version: Option<String>,
     pub accounts: Vec<AccountCandidate>,
-    /// Source entries that are not mail accounts (feeds, newsgroups, local
-    /// folders). They are listed so the summary can say what was left out.
+    /// Mail the source keeps on its device, which can be imported too.
+    pub mail: Vec<MailStore>,
+    /// Source entries that can't be imported (feeds, newsgroups, local
+    /// folders kept outside the profile). They are listed so the summary can
+    /// say what was left out.
     pub other_entries: Vec<OtherEntry>,
+}
+
+/// Mail a source app keeps on its device: Thunderbird's Local Folders, or
+/// what one of its POP3 accounts downloaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailStore {
+    /// The [`AccountCandidate::source_id`] of the account whose mail it is,
+    /// or `None` for mail that belongs to no account.
+    pub account: Option<String>,
+    /// The name the source shows for it.
+    pub label: String,
+    pub mail: crate::mail_import::MailSource,
 }
 
 /// One mail account as the source application configured it.
@@ -158,6 +173,8 @@ pub struct OtherEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtherEntryKind {
+    /// Local folders whose files aren't in what was chosen: kept outside the
+    /// profile, or only `prefs.js` was chosen.
     LocalFolders,
     Feeds,
     Newsgroups,

@@ -93,6 +93,8 @@ impl Core {
             }
             // SMTP servers publish no identity list.
             MailProtocol::Imap | MailProtocol::Pop3 => vec![primary_identity(&account)],
+            // It has no address to send from.
+            MailProtocol::Local => Vec::new(),
         };
         self.db
             .write(move |conn| {
@@ -387,7 +389,7 @@ pub fn manual_identity_policy(account: &AccountConfig) -> ManualIdentityPolicy {
 
 pub(crate) fn manual_identity_policy_for(protocol: MailProtocol) -> ManualIdentityPolicy {
     match protocol {
-        MailProtocol::Gmail => ManualIdentityPolicy::Never,
+        MailProtocol::Gmail | MailProtocol::Local => ManualIdentityPolicy::Never,
         MailProtocol::Jmap => ManualIdentityPolicy::WithinWildcard,
         MailProtocol::Imap | MailProtocol::Pop3 => ManualIdentityPolicy::Any,
     }

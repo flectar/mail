@@ -32,9 +32,9 @@ pub struct ActionSliceResult {
 /// Where queued actions are carried out.
 enum ActionTarget<'a> {
     /// The account's IMAP mailbox.
-    Imap(&'a mut Session),
+    Imap(&'a AccountConfig, &'a mut Session),
     /// The SMTP submission worker, which only sends.
-    Submission,
+    Submission(&'a AccountConfig),
     /// Mail that exists only on this device.
     Device,
 }
@@ -44,31 +44,27 @@ pub async fn execute_due(
     config: &AccountConfig,
     session: &mut Session,
 ) -> Result<ActionSliceResult> {
-    execute_due_except_send(ctx, config, ActionTarget::Imap(session)).await
+    execute_due_except_send(ctx, config.id, ActionTarget::Imap(config, session)).await
 }
 
 /// Complete the due actions of an account whose mail exists only on this
 /// device. Nothing here contacts a server.
-pub async fn execute_due_on_device(
-    ctx: &SyncCtx,
-    config: &AccountConfig,
-) -> Result<ActionSliceResult> {
-    execute_due_except_send(ctx, config, ActionTarget::Device).await
+pub async fn execute_due_on_device(ctx: &SyncCtx, account_id: i64) -> Result<ActionSliceResult> {
+    execute_due_except_send(ctx, account_id, ActionTarget::Device).await
 }
 
 async fn execute_due_except_send(
     ctx: &SyncCtx,
-    config: &AccountConfig,
+    account_id: i64,
     target: ActionTarget<'_>,
 ) -> Result<ActionSliceResult> {
-    let account_id = config.id;
     let due = ctx
         .db
         .read(move |conn| {
             repo::actions::due_except_send(conn, account_id, now_ms(), MAX_ACTIONS_PER_SLICE)
         })
         .await?;
-    let result = execute_actions(ctx, config, target, due).await?;
+    let result = execute_actions(ctx, account_id, target, due).await?;
     let due_remaining = ctx
         .db
         .read(move |conn| repo::actions::has_due_except_send(conn, account_id, now_ms()))
@@ -90,7 +86,7 @@ pub async fn execute_due_sends(ctx: &SyncCtx, config: &AccountConfig) -> Result<
             repo::actions::due_sends(conn, account_id, now_ms(), MAX_ACTIONS_PER_SLICE)
         })
         .await?;
-    let result = execute_actions(ctx, config, ActionTarget::Submission, due).await?;
+    let result = execute_actions(ctx, account_id, ActionTarget::Submission(config), due).await?;
     let due_remaining = ctx
         .db
         .read(move |conn| repo::actions::has_due_sends(conn, account_id, now_ms()))
@@ -103,11 +99,10 @@ pub async fn execute_due_sends(ctx: &SyncCtx, config: &AccountConfig) -> Result<
 
 async fn execute_actions(
     ctx: &SyncCtx,
-    config: &AccountConfig,
+    account_id: i64,
     mut target: ActionTarget<'_>,
     due: Vec<repo::actions::PendingAction>,
 ) -> Result<ActionSliceResult> {
-    let account_id = config.id;
     let started = Instant::now();
     let mut processed = 0;
 
@@ -129,7 +124,7 @@ async fn execute_actions(
         }
         processed += 1;
 
-        let outcome = execute_one(ctx, config, &mut target, &action).await;
+        let outcome = execute_one(ctx, &mut target, &action).await;
         match outcome {
             Ok(()) => {
                 ctx.db
@@ -264,7 +259,7 @@ fn has_permanent_smtp_reply(message: &str) -> bool {
     })
 }
 
-fn is_connection_failure(msg: &str) -> bool {
+pub(crate) fn is_connection_failure(msg: &str) -> bool {
     let msg = msg.to_ascii_lowercase();
     msg.contains("connect")
         || msg.contains("broken")
@@ -376,35 +371,30 @@ fn mark_failed_and_rollback(
 
 async fn execute_one(
     ctx: &SyncCtx,
-    config: &AccountConfig,
     target: &mut ActionTarget<'_>,
     action: &repo::actions::PendingAction,
 ) -> Result<()> {
-    if action.kind == "send" {
-        return send_action(ctx, config, action).await;
-    }
     match target {
-        ActionTarget::Imap(session) => execute_on_imap(ctx, config, session, action).await,
-        ActionTarget::Device => complete_on_device(ctx, config, action).await,
-        ActionTarget::Submission => Err(CoreError::Other(format!(
+        ActionTarget::Submission(config) if action.kind == "send" => {
+            send_action(ctx, config, action).await
+        }
+        ActionTarget::Submission(_) => Err(CoreError::Other(format!(
             "{} action was routed to the submission worker",
             action.kind
         ))),
+        ActionTarget::Imap(config, session) => execute_on_imap(ctx, config, session, action).await,
+        ActionTarget::Device => complete_on_device(ctx, action).await,
     }
 }
 
 /// Finish an action on mail that exists only on this device. Its change
 /// was made when it was queued; deletions end with the same cleanup that
 /// follows a server's confirmation.
-async fn complete_on_device(
-    ctx: &SyncCtx,
-    config: &AccountConfig,
-    action: &repo::actions::PendingAction,
-) -> Result<()> {
+async fn complete_on_device(ctx: &SyncCtx, action: &repo::actions::PendingAction) -> Result<()> {
     match action.kind.as_str() {
         "empty_trash" => {
-            let snapshot_ids = crate::sync::snapshot_trash_ids(ctx, config.id).await?;
-            crate::sync::finish_empty_trash(ctx, config.id, snapshot_ids).await
+            let snapshot_ids = crate::sync::snapshot_trash_ids(ctx, action.account_id).await?;
+            crate::sync::finish_empty_trash(ctx, action.account_id, snapshot_ids).await
         }
         "delete_permanently" => crate::sync::finish_permanent_delete(ctx, action.message_id).await,
         "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" | "mark_read"
@@ -587,7 +577,10 @@ fn valid_uid(uid: Option<i64>) -> Option<u32> {
 /// mailbox syncs, and an undo or a flag change can come first. SEARCH HEADER
 /// matches substrings, or words on some servers, so each candidate's header
 /// is compared whole, and copies awaiting expunge don't count.
-async fn uid_by_message_id(session: &mut Session, message_id: Option<&str>) -> Result<Option<u32>> {
+pub(crate) async fn uid_by_message_id(
+    session: &mut Session,
+    message_id: Option<&str>,
+) -> Result<Option<u32>> {
     let Some(bare) = message_id
         .map(|id| id.trim_matches(['<', '>']))
         .filter(|id| !id.is_empty())
@@ -1148,6 +1141,8 @@ async fn send_action(
                     .should_append(current.provider),
                 // The local Sent folder is the only one a POP3 account has.
                 MailProtocol::Pop3 => false,
+                // Mail kept on this device is never sent.
+                MailProtocol::Local => false,
                 // These submit through their own APIs, which file sent mail.
                 MailProtocol::Gmail | MailProtocol::Jmap => false,
             };

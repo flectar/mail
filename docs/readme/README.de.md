@@ -285,10 +285,12 @@ POP3-Konten laden E-Mails auf dieses Gerät und lassen sie auf dem Server, sofer
 
 Die gleiche Importfunktion übernimmt Konten aus Thunderbird (Profilordner, Archiv aus Extras › Exportieren oder `prefs.js`) sowie aus Thunderbird für Android oder K-9 Mail (`.k9s`-Einstellungsexporte). Du prüfst jedes Konto, bevor etwas hinzugefügt wird: Einstellungen, die Flectar Mail nicht abbilden kann, etwa einen Exchange-Server, werden erklärt statt stillschweigend geändert. POP3-Konten behalten ihre Regel zum Löschen von Nachrichten auf dem Server. Bestehende Konten werden nie verändert, Passwörter nie importiert.
 
+Gespeicherte E-Mails lassen sich genauso übernehmen: die Lokalen Ordner von Thunderbird und die Nachrichten, die seine POP3-Konten heruntergeladen haben, mbox-Dateien wie ein Google-Takeout-Export oder die von Flectar Mail selbst, `.eml`-Nachrichten, Maildir-Ordner, Postfächer von Apple Mail sowie ZIP-Archive davon. Du wählst die Dateien aus, auch mehrere auf einmal, und dann die Ordner – Papierkorb und Junk bleiben außen vor, sofern du sie nicht ankreuzt –, und Ordnerstruktur sowie Gelesen- und Markiert-Status werden übernommen. Bereits vorhandene Nachrichten werden übersprungen, sodass ein abgebrochener Import einfach erneut laufen kann, und ein langer Import kann im Hintergrund weiterlaufen. E-Mails ohne Konto landen unter **Auf diesem Gerät**: Ordner, die nur hier existieren und sich unter Einstellungen → Speicher exportieren oder löschen lassen. Sie können auch in die Ordner eines POP3-Kontos gehen oder auf den Server eines IMAP-, JMAP- oder Gmail-Kontos, dort in einen eigenen Ordner.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Speichereinstellungen von Flectar Mail mit lokaler Belegung, Datenbank-Snapshots und Kontosicherungen">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Speichereinstellungen von Flectar Mail mit lokaler Belegung, E-Mails auf diesem Gerät, Datenbank-Snapshots und Kontosicherungen">
 </picture>
 
 ### 📱 Für kleinere Bildschirme

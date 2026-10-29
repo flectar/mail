@@ -3,6 +3,10 @@ use crate::models::{FolderInfo, MailProtocol, now_ms};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::collections::{HashMap, HashSet};
 
+/// Separates the levels of folders that exist only on this device: those
+/// of POP3 accounts and of mail kept on this device.
+pub const DEVICE_DELIMITER: &str = "/";
+
 #[derive(Debug, Clone)]
 pub struct Folder {
     pub id: i64,
@@ -154,13 +158,15 @@ pub fn list_info(conn: &Connection, account_id: Option<i64>) -> Result<Vec<Folde
             id: f.id,
             account_id: f.account_id,
             parent_id: f.parent_id,
-            // IMAP names are modified UTF-7 on the wire; JMAP names and local
-            // POP3 folders are stored as shown.
+            // IMAP names are modified UTF-7 on the wire; JMAP names and
+            // folders on this device are stored as shown.
             display_name: match protocols.get(&f.account_id) {
                 Some(MailProtocol::Gmail | MailProtocol::Imap) => {
                     crate::imap::decode_mailbox_name(&f.path)
                 }
-                Some(MailProtocol::Jmap | MailProtocol::Pop3) | None => f.path.clone(),
+                Some(MailProtocol::Jmap | MailProtocol::Pop3 | MailProtocol::Local) | None => {
+                    f.path.clone()
+                }
             },
             is_jmap: f.jmap_id.is_some(),
             path: f.path,
@@ -534,6 +540,17 @@ pub fn mark_missing_on_server(
 pub fn set_last_seen_uid(conn: &Connection, id: i64, uid: i64) -> Result<()> {
     conn.execute(
         "UPDATE folders SET last_seen_uid = MAX(last_seen_uid, ?2) WHERE id = ?1",
+        params![id, uid],
+    )?;
+    Ok(())
+}
+
+/// Let the sync fetch again the messages above `uid`, such as those
+/// uploaded to the folder before its first sync, which would otherwise count
+/// as history and could fall outside the account's history window.
+pub fn lower_last_seen_uid(conn: &Connection, id: i64, uid: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET last_seen_uid = MIN(last_seen_uid, ?2) WHERE id = ?1",
         params![id, uid],
     )?;
     Ok(())

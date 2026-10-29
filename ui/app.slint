@@ -36,7 +36,10 @@ import { FolderDialog } from "dialogs/folder-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
-export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow } from "dialogs/import-dialog.slint";
+export { LocalMailUi } from "local-mail.slint";
+export { Numbers } from "numbers.slint";
+import { LocalMailUi } from "local-mail.slint";
+export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
 export { ThemeDraft } from "components/theme-editor.slint";
 import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
@@ -324,6 +327,11 @@ export global I18n {
         if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
         if (key == "Could not remove account: {}") { return @tr("Could not remove account: {}", argument); }
         if (key == "Removing account…") { return @tr("Removing account…"); }
+        if (key == "Deleting mail on this device…") { return @tr("Deleting mail on this device…"); }
+        if (key == "Mail on this device deleted.") { return @tr("Mail on this device deleted."); }
+        if (key == "Mail on this device deleted. Mail refresh will retry.") { return @tr("Mail on this device deleted. Mail refresh will retry."); }
+        if (key == "Mail on this device deleted; local cleanup needs a retry: {}") { return @tr("Mail on this device deleted; local cleanup needs a retry: {}", argument); }
+        if (key == "Could not delete mail on this device: {}") { return @tr("Could not delete mail on this device: {}", argument); }
         if (key == "Synchronizing account…") { return @tr("Synchronizing account…"); }
         if (key == "Could not update mail history: {}") { return @tr("Could not update mail history: {}", argument); }
         if (key == "Connected {}. Initial sync is running in the background.") { return @tr("Connected {}. Initial sync is running in the background.", argument); }
@@ -354,9 +362,9 @@ export global I18n {
         if (key == "Connect an account before creating a backup.") { return @tr("Connect an account before creating a backup."); }
         if (key == "Export Flectar Mail account backup") { return @tr("Export Flectar Mail account backup"); }
         if (key == "Flectar Mail backup") { return @tr("Flectar Mail backup"); }
-        if (key == "Import accounts") { return @tr("Import accounts"); }
-        if (key == "Account settings") { return @tr("Account settings"); }
-        if (key == "Choose a Thunderbird profile folder") { return @tr("Choose a Thunderbird profile folder"); }
+        if (key == "Import accounts and mail") { return @tr("Import accounts and mail"); }
+        if (key == "Choose a Thunderbird profile or a folder of mail") { return @tr("Choose a Thunderbird profile or a folder of mail"); }
+        if (key == "Imported messages") { return @tr("Imported messages"); }
         if (key == "Choose where to export the database snapshot") { return @tr("Choose where to export the database snapshot"); }
         if (key == "Backup exported. Passwords and OAuth tokens were not included.") { return @tr("Backup exported. Passwords and OAuth tokens were not included."); }
         if (key == "Could not export backup: {}") { return @tr("Could not export backup: {}", argument); }
@@ -493,6 +501,8 @@ export global I18n {
         if (key == "Could not open draft: invalid account identifier") { return @tr("Could not open draft: invalid account identifier"); }
         if (key == "Connected account") { return @tr("Connected account"); }
         if (key == "Could not open composer: {}") { return @tr("Could not open composer: {}", argument); }
+        if (key == "Add an account to send mail.") { return @tr("Add an account to send mail."); }
+        if (key == "On this device") { return @tr("On this device"); }
         if (key == "Could not open composer: invalid account identifier") { return @tr("Could not open composer: invalid account identifier"); }
         return "";
     }
@@ -1110,6 +1120,8 @@ export component AppWindow inherits Window {
     private property <color> secondary-text: AppTheme.secondary;
     private property <color> muted-text: AppTheme.muted;
     private property <color> faint-text: AppTheme.faint;
+    // Mail to show: an account's, or mail imported to this device alone.
+    private property <bool> has-mail: root.connected_accounts.length > 0 || LocalMailUi.account-id >= 0;
     // This content-driven breakpoint is the smallest width that can hold the
     // rail, folders, message list, and a useful reading pane simultaneously.
     private property <bool> compact-layout: root.width - root.safe-area-insets.left - root.safe-area-insets.right < 980px;
@@ -1118,7 +1130,7 @@ export component AppWindow inherits Window {
     // Desktop windows with accounts show the tabs in a top bar above the
     // product rail; in the integrated frame it also holds the window
     // controls. Compact layouts navigate from the bottom bar.
-    private property <bool> top-bar: !root.compact-layout && root.connected_accounts.length > 0;
+    private property <bool> top-bar: !root.compact-layout && root.has-mail;
     // A tone apart from the workspace, so the active tab can open into it.
     private property <color> tab-strip-bg: AppTheme.sidebar-tint.mix(AppTheme.title, 0.94);
     changed top-bar => { root.sync-window-chrome(); }
@@ -1339,7 +1351,7 @@ export component AppWindow inherits Window {
 
     // Account discovery is asynchronous. Paint a small initial view while
     // neither the cached mailbox nor the onboarding decision is available.
-    if !root.startup_ready && !root.startup_failed && root.connected_accounts.length == 0 : Rectangle {
+    if !root.startup_ready && !root.startup_failed && !root.has-mail : Rectangle {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;
@@ -1376,7 +1388,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.connected_accounts.length > 0 : Rectangle {
+    if root.has-mail : Rectangle {
         // Do not construct the mailbox on a fresh profile. `visible: false`
         // retains the entire tree, and constructing it before the account
         // query touches code and assets that onboarding never needs.
@@ -2177,6 +2189,10 @@ export component AppWindow inherits Window {
             root.settings_tab = "Accounts";
             root.settings_open = true;
         }
+        show-mail => {
+            root.active_view = "mail";
+            root.settings_open = false;
+        }
     }
 
     if root.folder-dialog-open : FolderDialog {
@@ -2233,7 +2249,7 @@ export component AppWindow inherits Window {
 
     // Slint conditional elements are instantiated lazily. The comparatively
     // large onboarding form is unnecessary on normal launches with an account.
-    if root.startup_ready && root.connected_accounts.length == 0 : OnboardingView {
+    if root.startup_ready && !root.has-mail : OnboardingView {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;

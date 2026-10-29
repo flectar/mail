@@ -1165,6 +1165,8 @@ pub struct ExportedMessage {
     pub id: i64,
     pub raw_path: Option<String>,
     pub is_draft: bool,
+    pub is_read: bool,
+    pub is_starred: bool,
     pub date: i64,
     pub from: String,
 }
@@ -1172,7 +1174,7 @@ pub struct ExportedMessage {
 /// A folder's messages for an export, oldest first.
 pub fn in_folder_for_export(conn: &Connection, folder_id: i64) -> Result<Vec<ExportedMessage>> {
     let mut statement = conn.prepare(
-        "SELECT id, raw_path, is_draft, date, COALESCE(from_addr, '')
+        "SELECT id, raw_path, is_draft, is_read, is_starred, date, COALESCE(from_addr, '')
          FROM messages WHERE folder_id = ?1 ORDER BY date, id",
     )?;
     Ok(statement
@@ -1181,8 +1183,10 @@ pub fn in_folder_for_export(conn: &Connection, folder_id: i64) -> Result<Vec<Exp
                 id: row.get(0)?,
                 raw_path: row.get(1)?,
                 is_draft: row.get::<_, i64>(2)? != 0,
-                date: row.get(3)?,
-                from: row.get(4)?,
+                is_read: row.get::<_, i64>(3)? != 0,
+                is_starred: row.get::<_, i64>(4)? != 0,
+                date: row.get(5)?,
+                from: row.get(6)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?)

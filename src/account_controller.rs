@@ -123,6 +123,12 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     state
         .mailboxes
         .retain(|mailbox| mailbox.account_id != account_id);
+    if state
+        .local_mail
+        .is_some_and(|local| local.account_id == account_id)
+    {
+        state.local_mail = None;
+    }
     let accounts = std::mem::take(&mut state.connected_accounts)
         .into_iter()
         .filter(|account| account.id != account_id)
@@ -169,7 +175,7 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     for mailbox in &mut state.unified_mailboxes {
         mailbox.count.clear();
     }
-    if state.connected_accounts.is_empty() {
+    if !state.has_mail() {
         state.messages.clear();
         state.mailboxes.clear();
         state.unified_mailboxes.clear();
@@ -194,6 +200,7 @@ pub(super) fn apply_connected_accounts(
     calendar_errors: &HashMap<i64, String>,
     avatars: &HashMap<i64, ProfileAvatarImages>,
     presentation: &AccountPresentationSettings,
+    has_local_mail: bool,
 ) {
     let configs: HashMap<i64, &AccountConfig> =
         configs.iter().map(|config| (config.id, config)).collect();
@@ -302,9 +309,10 @@ pub(super) fn apply_connected_accounts(
         .collect::<Vec<_>>();
     apply_connected_account_rows(app, rows);
     app.set_has_device_mail(
-        accounts
-            .iter()
-            .any(|account| account.mail_protocol == MailProtocol::Pop3),
+        has_local_mail
+            || accounts
+                .iter()
+                .any(|account| account.mail_protocol == MailProtocol::Pop3),
     );
     let known_accounts = accounts
         .iter()
@@ -351,12 +359,76 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
         &state.calendar_errors,
         &state.profile_avatar_images,
         &state.account_presentation,
+        state.local_mail.is_some(),
+    );
+    let ui = app.global::<LocalMailUi>();
+    ui.set_can_send(!state.connected_accounts.is_empty());
+    ui.set_account_id(
+        state
+            .local_mail
+            .and_then(|local| i32::try_from(local.account_id).ok())
+            .unwrap_or(-1),
+    );
+    ui.set_messages(
+        state
+            .local_mail
+            .map_or(0, |local| i32::try_from(local.messages).unwrap_or(i32::MAX)),
+    );
+    ui.set_size(
+        state
+            .local_mail
+            .map(|local| crate::data_controller::format_storage_size(local.bytes))
+            .unwrap_or_default()
+            .into(),
     );
     prefer_shown_compose_account(app, &state);
     drop(state);
     app.global::<AccountMailPreferences>()
         .invoke_context_changed();
     app.global::<FilesUi>().invoke_context_changed();
+}
+
+/// Show the mail kept on this device, or that there is none.
+pub(super) fn apply_local_mail(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    local_mail: Option<flectar_mail_core::models::LocalMail>,
+) {
+    state.borrow_mut().local_mail = local_mail;
+    refresh_connected_accounts(app, state);
+}
+
+/// Reload the mail kept on this device, as an import or its removal left it.
+/// Counting a large import takes a moment, so it happens off the UI thread.
+pub(super) fn refresh_local_mail(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+) {
+    let (core, reload) = {
+        let mut state = state.borrow_mut();
+        let Some(core) = state.core.clone() else {
+            return;
+        };
+        state.local_mail_reloads += 1;
+        (core, state.local_mail_reloads)
+    };
+    let load: documents::DocumentFuture<Option<flectar_mail_core::models::LocalMail>> =
+        Box::pin(async move { core.load_local_mail().await });
+    let app = app.as_weak();
+    let state = Rc::clone(state);
+    documents::run_request(runtime, load, move |local_mail| {
+        let Some(app) = app.upgrade() else {
+            return;
+        };
+        if state.borrow().local_mail_reloads != reload {
+            return;
+        }
+        match local_mail {
+            Ok(local_mail) => apply_local_mail(&app, &state, local_mail),
+            Err(error) => tracing::warn!(%error, "reloading local mail failed"),
+        }
+    });
 }
 
 pub(super) fn update_connected_accounts(

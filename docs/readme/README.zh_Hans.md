@@ -281,10 +281,12 @@ POP3 账户会把邮件下载到本机，默认保留在服务器上；你也可
 
 同一导入功能还可以从 Thunderbird（配置文件夹、「工具 › 导出」生成的归档或 `prefs.js`）以及 Android 版 Thunderbird 或 K-9 Mail（`.k9s` 设置导出）迁移账户。添加之前你会逐一检查每个账户：Flectar Mail 无法沿用的设置（例如 Exchange 服务器）会说明原因，而不会被悄悄更改；POP3 账户会沿用从服务器移除邮件的规则。现有账户不会被修改，密码也永远不会被导入。
 
+已保存的邮件也可以用同样的方式导入：Thunderbird 的本地文件夹及其 POP3 账户下载的邮件、mbox 文件（例如 Google Takeout 导出或 Flectar Mail 自己导出的文件）、`.eml` 邮件、maildir 文件夹、Apple Mail 邮箱，以及包含它们的 ZIP 归档。你可以选择文件（可一次选择多个），再选择要导入的文件夹（除非勾选，否则会跳过废纸篓和垃圾邮件），文件夹结构以及已读、星标状态都会保留。目标位置中已有的邮件会被跳过，因此中途停止的导入可以直接重新运行，耗时较长的导入也可以在后台继续。不属于任何账户的邮件会放入 **在此设备上**：这些文件夹只存在于本机，可在「设置 → 存储」中导出或删除。邮件也可以导入到 POP3 账户的文件夹中，或上传到 IMAP、JMAP 或 Gmail 账户的服务器，放在单独的文件夹里。
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail 存储设置，包含本地用量、数据库快照与账户备份控件">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail 存储设置，包含本地用量、此设备上的邮件、数据库快照与账户备份控件">
 </picture>
 
 ### 📱 为小屏幕而设计

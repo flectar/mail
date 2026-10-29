@@ -25,6 +25,8 @@ import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slin
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
+import { LocalMailUi } from "../local-mail.slint";
+import { Numbers } from "../numbers.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -542,6 +544,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> delete_account_name: "";
     // The account being removed keeps its mail only on this device (POP3).
     private property <bool> delete_account_device_mail: false;
+    private property <bool> delete_local_mail_confirmation: false;
     // Some account keeps its mail only on this device (POP3).
     in property <bool> has_device_mail: false;
     in property <bool> mail_export_running: false;
@@ -2144,6 +2147,25 @@ export component SettingsDialog inherits Rectangle {
                                 refresh => { root.load_storage_usage(); }
                             }
 
+                            // Mail imported to this device alone.
+                            if LocalMailUi.account-id >= 0 : Rectangle {
+                                height: local-status.y + local-status.height + (root.compact ? 74px : 22px);
+                                vertical-stretch: 0;
+                                local-card := SettingsCard { title: @tr("Mail on this device"); description: @tr("Mail you imported. It is kept only here, so export it to keep a copy elsewhere."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                Image { x: 20px; y: local-note.y + (local-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/file-directory.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                local-note := Text { x: 48px; y: local-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 352px; height: max(42px, self.preferred-height); text: @tr("One message" | "{} messages" % LocalMailUi.messages, Numbers.count(LocalMailUi.messages)) + " · " + LocalMailUi.size; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                local-status := Text { x: 48px; y: local-note.y + local-note.height; width: local-note.width; height: root.mail_export_status == "" ? 0px : max(18px, self.preferred-height); text: root.mail_export_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    x: root.compact ? 20px : parent.width - self.width - 20px;
+                                    y: root.compact ? local-status.y + local-status.height + 25px : local-note.y + (local-note.height - self.height) / 2;
+                                    width: root.compact ? parent.width - 40px : 264px;
+                                    height: 32px;
+                                    spacing: 8px;
+                                    Button { text: @tr("Export mail…"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; enabled: !root.mail_export_running; clicked => { root.export_device_mail(LocalMailUi.account-id); } }
+                                    Button { text: @tr("Delete…"); icon: @image-url("../icons/lucide/outline/trash.svg"); has-icon: true; enabled: !root.account_setup_in_progress; clicked => { root.delete_local_mail_confirmation = true; } }
+                                }
+                            }
+
                             Rectangle {
                                 visible: root.account-transfer-supported;
                                 height: root.account-transfer-supported ? snapshot-note.y + snapshot-note.height + (root.compact ? 74px : 22px) : 0px;
@@ -2158,13 +2180,14 @@ export component SettingsDialog inherits Rectangle {
                                 visible: root.account-transfer-supported;
                                 height: root.account-transfer-supported ? transfer-note.y + transfer-note.height + (root.compact ? 74px : 22px) : 0px;
                                 vertical-stretch: 0;
-                                transfer-card := SettingsCard { title: @tr("Transfer account setup"); description: @tr("Import accounts from Thunderbird, K-9 Mail, or a backup, or export one connected account and your preferences." | "Import accounts from Thunderbird, K-9 Mail, or a backup, or export {n} connected accounts and your preferences." % root.connected_accounts.length); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                transfer-card := SettingsCard { title: @tr("Transfer account setup"); description: @tr("Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a backup, or export one connected account and your preferences." | "Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a backup, or export {n} connected accounts and your preferences." % root.connected_accounts.length); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: transfer-note.y + (transfer-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/check-circle.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
-                                transfer-note := Text { x: 48px; y: transfer-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 360px; height: max(42px, self.preferred-height); text: @tr("Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
-                                HorizontalBox {
-                                    x: root.compact ? 20px : parent.width - 300px;
+                                transfer-note := Text { x: 48px; y: transfer-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 352px; height: max(42px, self.preferred-height); text: @tr("Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                // Unpadded, so the buttons line up with the other cards'.
+                                HorizontalLayout {
+                                    x: root.compact ? 20px : parent.width - self.width - 20px;
                                     y: root.compact ? transfer-note.y + transfer-note.height + 25px : transfer-note.y + (transfer-note.height - self.height) / 2;
-                                    width: root.compact ? parent.width - 40px : 280px;
+                                    width: root.compact ? parent.width - 40px : 264px;
                                     height: 32px;
                                     spacing: 8px;
                                     Button { text: @tr("Import"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; clicked => { root.import_accounts(); } }
@@ -2177,7 +2200,7 @@ export component SettingsDialog inherits Rectangle {
                                 vertical-stretch: 0;
                                 delete-card := SettingsCard { title: @tr("Delete all local data"); description: @tr("Remove accounts, downloaded mail, calendars, contacts, preferences, and credentials from this device."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: delete-note.y + (delete-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/trash.svg"); colorize: #d04a43; image-fit: contain; accessible-role: none; }
-                                delete-note := Text { x: 48px; y: delete-card.content-y + 14px; width: root.compact ? parent.width - 68px : delete-button.x - 70px; height: max(42px, self.preferred-height); text: root.has_device_mail ? @tr("POP3 mail is stored only on this device. Nothing is deleted from Gmail, Outlook, or IMAP servers.") : @tr("This does not delete anything from Gmail, Outlook, or your IMAP server."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                delete-note := Text { x: 48px; y: delete-card.content-y + 14px; width: root.compact ? parent.width - 68px : delete-button.x - 70px; height: max(42px, self.preferred-height); text: LocalMailUi.account-id >= 0 ? @tr("Imported mail and the mail of any POP3 account are stored only on this device. Nothing is deleted from Gmail, Outlook, or IMAP servers.") : root.has_device_mail ? @tr("POP3 mail is stored only on this device. Nothing is deleted from Gmail, Outlook, or IMAP servers.") : @tr("This does not delete anything from Gmail, Outlook, or your IMAP server."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                                 delete-button := Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? delete-note.y + delete-note.height + 25px : delete-note.y + (delete-note.height - self.height) / 2; width: root.compact ? parent.width - 40px : max(170px, self.content-width); text: @tr("Delete everything"); icon: @image-url("../icons/lucide/outline/trash.svg"); has-icon: true; clicked => { root.delete_data_confirmation = true; } }
                             }
 
@@ -3085,10 +3108,12 @@ export component SettingsDialog inherits Rectangle {
             open <=> root.delete_data_confirmation;
             title: @tr("Delete all local data?");
             description: @tr("This removes every account, downloaded message, calendar, contact, preference, and credential stored by Flectar Mail on this device.");
-            detail: root.has_device_mail
+            detail: LocalMailUi.account-id >= 0
+                ? @tr("Imported mail and the mail of any POP3 account are stored only on this device and will be deleted. Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.")
+                : root.has_device_mail
                 ? @tr("POP3 mail is stored only on this device and will be deleted. Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.")
                 : @tr("Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.");
-            action-label: root.has_device_mail ? @tr("Export POP3 mail…") : "";
+            action-label: LocalMailUi.account-id >= 0 ? @tr("Export mail…") : root.has_device_mail ? @tr("Export POP3 mail…") : "";
             action-status: root.mail_export_status;
             action-enabled: !root.mail_export_running;
             action => { root.export_device_mail(-1); }
@@ -3101,6 +3126,29 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_all_data(); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.delete_local_mail_confirmation;
+            title: @tr("Delete mail on this device?");
+            subject: @tr("One message" | "{} messages" % LocalMailUi.messages, Numbers.count(LocalMailUi.messages));
+            description: @tr("Delete the mail you imported and its folders from this device.");
+            detail: @tr("It exists only here. Export it first to keep a copy.");
+            action-label: @tr("Export mail…");
+            action-status: root.mail_export_status;
+            action-enabled: !root.mail_export_running;
+            action => { root.export_device_mail(LocalMailUi.account-id); }
+            confirm-label: @tr("Delete mail");
+            cancel-label: @tr("Keep mail");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.delete_account(LocalMailUi.account-id); }
         }
 
         ConfirmationDialog {

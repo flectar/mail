@@ -52,9 +52,13 @@ pub enum DetectedFormat {
 /// What a selected file or folder contains.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
+    /// Accounts, and any mail their app keeps with them.
     Accounts(ImportInventory),
     /// The bytes of a Flectar Mail account backup, for the restore path.
     FlectarBackup(Vec<u8>),
+    /// Saved mail without accounts: mbox files, messages, or folders or
+    /// archives of them.
+    Mail(crate::mail_import::MailSource),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -85,6 +89,10 @@ pub enum SourceError {
     /// which is only opened when the user chooses it directly.
     #[error("the folder's Thunderbird profile is on a network location")]
     NetworkProfile,
+    /// A folder or archive with neither a Thunderbird profile nor saved
+    /// mail in it.
+    #[error("no saved mail was found")]
+    NoMail,
 }
 
 pub fn detect(bytes: &[u8]) -> Option<DetectedFormat> {
@@ -109,19 +117,39 @@ pub fn detect(bytes: &[u8]) -> Option<DetectedFormat> {
 }
 
 /// Reads a K-9 export, a Thunderbird `prefs.js`, profile folder or profile
-/// export, or a Flectar backup. Only settings files are read into memory, so
-/// a profile export may be far larger than [`MAX_SOURCE_BYTES`].
+/// export, a Flectar backup, or saved mail: an mbox file, a message, or a
+/// folder or ZIP archive of them. Only settings files are read into memory,
+/// so a profile export or mail may be far larger than [`MAX_SOURCE_BYTES`].
 pub fn open(path: &Path) -> Result<Source, SourceError> {
     if path.is_dir() {
-        return accounts(thunderbird::read_profile_dir(path)?);
+        if path.join("prefs.js").is_file() || path.join("profiles.ini").is_file() {
+            return accounts(thunderbird::read_profile_dir(path)?);
+        }
+        return crate::mail_import::scan_folder(path).map(Source::Mail);
     }
     let mut file =
         std::fs::File::open(path).map_err(|error| SourceError::Unreadable(error.to_string()))?;
-    let mut magic = [0; 4];
-    let magic_len = read_prefix(&mut file, &mut magic)?;
-    if detect(&magic[..magic_len]) == Some(DetectedFormat::Zip) {
+    let mut head = vec![0; 64 * 1024];
+    let head_len = read_prefix(&mut file, &mut head)?;
+    let head = &head[..head_len];
+    if detect(&head[..head.len().min(4)]) == Some(DetectedFormat::Zip) {
         drop(file);
-        return accounts(thunderbird::read_export(path)?);
+        return match thunderbird::read_export(path) {
+            // Not a profile export; it may hold saved mail.
+            Err(SourceError::UnknownFormat) => {
+                match crate::mail_import::scan::scan_archive(path, "") {
+                    Ok(mail) => Ok(Source::Mail(mail)),
+                    Err(SourceError::NoMail) => Err(SourceError::UnknownFormat),
+                    Err(error) => Err(error),
+                }
+            }
+            inventory => accounts(inventory?),
+        };
+    }
+    // Settings never start like mail: with `From ` or a header field.
+    if crate::mail_import::scan::is_mbox(head) || crate::mail_import::scan::is_message(head) {
+        drop(file);
+        return crate::mail_import::scan_files(&[path.to_owned()]).map(Source::Mail);
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|error| SourceError::Unreadable(error.to_string()))?;
@@ -135,7 +163,7 @@ pub fn open(path: &Path) -> Result<Source, SourceError> {
 }
 
 fn accounts(inventory: ImportInventory) -> Result<Source, SourceError> {
-    if inventory.accounts.is_empty() {
+    if inventory.accounts.is_empty() && inventory.mail.is_empty() {
         Err(SourceError::NoAccounts)
     } else {
         Ok(Source::Accounts(inventory))

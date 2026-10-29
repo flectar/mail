@@ -14,6 +14,8 @@ import { WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { LocalMailUi } from "../local-mail.slint";
+import { ImportActivity } from "../dialogs/import-dialog.slint";
 
 // A chip on a message-list row that acts on what it shows instead of
 // opening the message. Other buttons act on the row, as anywhere else on it.
@@ -424,6 +426,8 @@ export component MailListPane inherits FocusScope {
         }
         let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
         if target.id < 0 { return; }
+        // Local mail has no archive or spam to move it to.
+        if (action == "archive" || action == "spam") && root.list_entries[target.entry_index].email.account_id == LocalMailUi.account-id { return; }
         let at-cursor = list-keyboard.has-focus && target.id == root.keyboard-email-id;
         if !at-cursor && !root.list_entries[target.entry_index].email.selected { return; }
         let last = MailListNavigation.target(root.list_entries, target.id, "next", 1).id == target.id;
@@ -755,6 +759,8 @@ export component MailListPane inherits FocusScope {
                         }
                     }
 
+                    ImportActivity { compact: root.compact; }
+
                     Rectangle {
                         vertical-stretch: 1;
                         background: root.surface;
@@ -831,6 +837,8 @@ export component MailListPane inherits FocusScope {
 
                             for entry in root.list_entries : mail-row := Rectangle {
                                 private property <EmailRow> mail-data: entry.email;
+                                private property <bool> local-mail: mail-data.account_id == LocalMailUi.account-id;
+                                private property <string> account-name: self.local-mail ? @tr("On this device") : mail-data.account;
                                 // Chips lead the detail line while it has room for them:
                                 // the code first, then the conversation's first file.
                                 private property <bool> shows-code: mail-data.verification_code != ""
@@ -873,7 +881,7 @@ export component MailListPane inherits FocusScope {
                                     background: transparent;
                                     accessible-role: list-item;
                                     accessible-label: @tr("{}, {}", mail-data.sender, mail-data.subject == "" ? @tr("(No subject)") : mail-data.subject)
-                                        + ", " + mail-data.account
+                                        + ", " + mail-row.account-name
                                         + (mail-data.account_profile == "" ? "" : ", " + @tr("Profile: {}", mail-data.account_profile))
                                         + (mail-data.message_count > 1 ? ", " + @tr("{} messages", mail-data.message_count) : "")
                                         + (mail-data.label_summary == "" ? "" : ", " + mail-data.label_summary)
@@ -1144,7 +1152,7 @@ export component MailListPane inherits FocusScope {
                                                     y: root.sender-line + root.subject-line + 10px;
                                                     width: 88px;
                                                     height: root.detail-line;
-                                                    text: mail-data.account;
+                                                    text: mail-row.account-name;
                                                     color: root.muted-text;
                                                     font-size: TypeScale.caption;
                                                     overflow: elide;
@@ -1159,7 +1167,7 @@ export component MailListPane inherits FocusScope {
                                                     height: 22px;
                                                     background: transparent;
                                                     accessible-role: text;
-                                                    accessible-label: @tr("Account: {}", mail-data.account);
+                                                    accessible-label: @tr("Account: {}", mail-row.account-name);
 
                                                     Rectangle {
                                                         visible: mail-data.show_account_marker;
@@ -1174,7 +1182,7 @@ export component MailListPane inherits FocusScope {
                                                         x: mail-data.show_account_marker ? 10px : 0px;
                                                         width: mail-data.show_account_marker ? 38px : 48px;
                                                         height: parent.height;
-                                                        text: mail-data.account;
+                                                        text: mail-row.account-name;
                                                         color: root.muted-text;
                                                         font-size: TypeScale.caption;
                                                         overflow: elide;
@@ -1331,8 +1339,9 @@ export component MailListPane inherits FocusScope {
                                             if TabsUi.enabled : MenuSeparator {}
                                             MenuItem { title: mail-data.starred ? @tr("Remove star") : @tr("Star message"); activated => { root.message_action_for_email(mail-data.id, mail-data.starred ? "unstar" : "star"); } }
                                             MenuItem { title: mail-data.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(mail-data.id, mail-data.unread ? "mark_read" : "mark_unread"); } }
-                                            MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
-                                            MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }
+                                            // Local mail has no archive or spam.
+                                            if !mail-row.local-mail : MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
+                                            if !mail-row.local-mail : MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }
                                             MenuItem { title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"); activated => { root.message_action_for_email(mail-data.id, root.trash_view ? "delete_permanently" : "trash"); } }
                                         }
                                     }
@@ -1409,7 +1418,7 @@ export component MailListPane inherits FocusScope {
                         FloatingActionButton {
                             // Replaces the full-width sidebar action whenever
                             // folders are collapsed or unavailable.
-                            visible: root.single-pane-navigation || root.mail_sidebar_collapsed;
+                            visible: (root.single-pane-navigation || root.mail_sidebar_collapsed) && LocalMailUi.can-send;
                             x: parent.width - self.width - 16px;
                             y: parent.height - self.height - 16px;
                             icon: @image-url("../icons/lucide/filled/compose.svg");

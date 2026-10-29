@@ -301,6 +301,9 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
             labels,
             &gmail_account_ids,
             &state.collapsed_sidebar_sections,
+            state
+                .local_mail
+                .and_then(|local| i32::try_from(local.account_id).ok()),
         )
     };
     // Model notifications can synchronously inspect application state.
@@ -551,6 +554,7 @@ fn make_sidebar_rows(
     labels: Vec<MailLabelRow>,
     gmail_account_ids: &HashSet<i32>,
     collapsed: &HashSet<String>,
+    local_mail: Option<i32>,
 ) -> Vec<SidebarRow> {
     let shared = shared_navigation_rows(&labels, collapsed);
     let accounts = account_rows(mailboxes, &labels, gmail_account_ids, collapsed);
@@ -562,9 +566,13 @@ fn make_sidebar_rows(
             rows.extend(accounts);
             rows
         }
+        // Mail kept on this device comes last, after what the account shares.
         SidebarLayout::SingleAccount => {
-            let mut rows = accounts;
+            let (local, mut rows): (Vec<_>, Vec<_>) = accounts
+                .into_iter()
+                .partition(|row| Some(row.mailbox.account_id) == local_mail);
             rows.extend(shared);
+            rows.extend(local);
             rows
         }
     }
@@ -787,6 +795,7 @@ mod tests {
                 labels.clone(),
                 &HashSet::new(),
                 &HashSet::new(),
+                None,
             );
             for kind in [
                 Kind::UnifiedHeading,
@@ -838,6 +847,7 @@ mod tests {
                 vec![],
                 &HashSet::new(),
                 &collapsed,
+                None,
             );
             model.reconcile(rows.clone());
             assert_rows_equal(&model.iter().collect::<Vec<_>>(), &rows);
@@ -894,6 +904,7 @@ mod tests {
                 vec![],
                 &HashSet::new(),
                 &defaults(),
+                None,
             );
             assert_eq!(
                 rows.iter().filter(|row| row.kind == Kind::Folder).count(),
@@ -928,6 +939,7 @@ mod tests {
             vec![],
             &HashSet::new(),
             &defaults(),
+            None,
         );
         let ids: Vec<_> = rows
             .iter()
@@ -970,6 +982,7 @@ mod tests {
             labels,
             &HashSet::new(),
             &HashSet::new(),
+            None,
         );
         let account_labels = rows
             .iter()
@@ -995,6 +1008,7 @@ mod tests {
             vec![],
             &HashSet::from([1]),
             &HashSet::new(),
+            None,
         );
         assert!(
             rows.iter()
@@ -1017,6 +1031,57 @@ mod tests {
     }
 
     #[test]
+    fn local_mail_follows_what_a_single_account_shares() {
+        // One account, then local mail with one folder.
+        let rows = make_sidebar_rows(
+            SidebarLayout::SingleAccount,
+            accounts(2, 1),
+            vec![],
+            vec![],
+            &HashSet::new(),
+            &defaults(),
+            Some(2),
+        );
+        let categories = rows
+            .iter()
+            .position(|row| row.kind == Kind::CategoriesSection)
+            .unwrap();
+        assert!(
+            rows[..categories]
+                .iter()
+                .all(|row| row.mailbox.account_id != 2)
+        );
+        assert_eq!(rows[categories + 1].kind, Kind::Account);
+        assert!(
+            rows[categories + 1..]
+                .iter()
+                .all(|row| row.mailbox.account_id == 2)
+        );
+
+        // With several accounts it comes last already: the mailbox list puts
+        // it after them.
+        let rows = make_sidebar_rows(
+            SidebarLayout::Unified,
+            accounts(3, 1),
+            vec![],
+            vec![],
+            &HashSet::new(),
+            &defaults(),
+            Some(3),
+        );
+        let local = rows
+            .iter()
+            .position(|row| row.mailbox.account_id == 3)
+            .unwrap();
+        assert!(
+            rows[..local]
+                .iter()
+                .any(|row| row.kind == Kind::AccountsHeading)
+        );
+        assert!(rows[local..].iter().all(|row| row.mailbox.account_id == 3));
+    }
+
+    #[test]
     fn account_without_root_creation_right_has_no_new_folder_action() {
         let mut rows_input = accounts(1, 0);
         rows_input[0].can_create_children = false;
@@ -1027,6 +1092,7 @@ mod tests {
             vec![],
             &HashSet::new(),
             &HashSet::new(),
+            None,
         );
         assert!(!rows.iter().any(|row| row.kind == Kind::NewFolder));
     }
@@ -1053,6 +1119,7 @@ mod tests {
             labels.clone(),
             &HashSet::from([1]),
             &HashSet::new(),
+            None,
         );
         let visible = rows
             .iter()
@@ -1083,6 +1150,7 @@ mod tests {
             labels,
             &HashSet::from([1]),
             &HashSet::from(["gmail-label:1:1".into()]),
+            None,
         );
         assert_eq!(
             collapsed
@@ -1151,6 +1219,7 @@ mod tests {
             labels.clone(),
             &HashSet::new(),
             &collapsed,
+            None,
         );
         assert!(open.iter().any(|row| row.kind == Kind::Category));
         assert!(open.iter().any(|row| row.kind == Kind::GlobalLabel));
@@ -1167,6 +1236,7 @@ mod tests {
             labels.clone(),
             &HashSet::new(),
             &collapsed,
+            None,
         );
         assert!(
             !closed
@@ -1184,11 +1254,20 @@ mod tests {
                 labels,
                 &HashSet::new(),
                 &collapsed,
+                None,
             ),
         );
         let mut reordered = accounts(2, 3);
         reordered.rotate_left(4);
-        let rows = make_sidebar_rows(SidebarLayout::Unified, reordered, vec![], vec![], &HashSet::new(), &collapsed);
+        let rows = make_sidebar_rows(
+            SidebarLayout::Unified,
+            reordered,
+            vec![],
+            vec![],
+            &HashSet::new(),
+            &collapsed,
+            None,
+        );
         assert!(!rows.iter().find(|row| row.key == "account:1").unwrap().open);
         assert!(rows.iter().find(|row| row.key == "account:2").unwrap().open);
     }
@@ -1515,6 +1594,7 @@ mod interaction_tests {
                 vec![],
                 &HashSet::new(),
                 &collapsed.borrow(),
+                None,
             ),
             false,
         );
@@ -1541,6 +1621,7 @@ mod interaction_tests {
                     vec![],
                     &HashSet::new(),
                     &collapsed_for_click.borrow(),
+                    None,
                 ),
                 animate,
             );

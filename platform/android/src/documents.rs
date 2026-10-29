@@ -1,9 +1,9 @@
 use flectar_mail::documents::{
-    DocumentFuture, DocumentProvider, DocumentRequestGuard, ImportedDocument,
+    DocumentDialog, DocumentFuture, DocumentProvider, DocumentRequestGuard, ImportedDocument,
 };
 use jni::{
     JNIEnv, JavaVM,
-    objects::{GlobalRef, JClass, JObject, JString, JValue},
+    objects::{GlobalRef, JClass, JObject, JObjectArray, JString, JValue},
     sys::{jboolean, jlong},
 };
 use std::{
@@ -13,12 +13,30 @@ use std::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicI64, Ordering},
     },
+    time::Duration,
 };
 use tokio::sync::oneshot;
-type PendingReply = (
-    oneshot::Sender<Result<Option<ImportedDocument>, String>>,
-    bool,
-);
+/// How long a picker may take to choose and copy one document.
+const PICKER_TIMEOUT: Duration = Duration::from_secs(600);
+/// Several documents can be gigabytes of mail to copy.
+const SEVERAL_TIMEOUT: Duration = Duration::from_secs(3600);
+/// Where a request's result goes: one document, imported or exported, or
+/// several imported for one action.
+enum PendingReply {
+    One(
+        oneshot::Sender<Result<Option<ImportedDocument>, String>>,
+        bool,
+    ),
+    Many(oneshot::Sender<Result<Vec<ImportedDocument>, String>>),
+}
+impl PendingReply {
+    fn is_closed(&self) -> bool {
+        match self {
+            Self::One(sender, _) => sender.is_closed(),
+            Self::Many(sender) => sender.is_closed(),
+        }
+    }
+}
 pub struct AndroidDocuments {
     vm: JavaVM,
     activity: Mutex<GlobalRef>,
@@ -51,12 +69,38 @@ impl AndroidDocuments {
         Ok(provider)
     }
     fn request(&self, path: String, name: String) -> DocumentFuture<Option<ImportedDocument>> {
+        let importing = path.is_empty();
+        self.start(
+            |sender| PendingReply::One(sender, importing),
+            PICKER_TIMEOUT,
+            |env, activity, id| {
+                let path = env.new_string(path)?;
+                let name = env.new_string(name)?;
+                env.call_method(
+                    activity,
+                    "chooseDocument",
+                    "(JLjava/lang/String;Ljava/lang/String;)V",
+                    &[
+                        JValue::Long(id),
+                        JValue::Object(&path),
+                        JValue::Object(&name),
+                    ],
+                )?;
+                Ok(())
+            },
+        )
+    }
+    /// Registers request `id`, has `call` open its picker, and waits for its
+    /// result, cancelling the picker if the request is dropped first.
+    fn start<T: Send + 'static>(
+        &self,
+        reply: impl FnOnce(oneshot::Sender<Result<T, String>>) -> PendingReply,
+        timeout: Duration,
+        call: impl FnOnce(&mut JNIEnv, &JObject, i64) -> jni::errors::Result<()>,
+    ) -> DocumentFuture<T> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        self.pending
-            .lock()
-            .unwrap()
-            .insert(id, (sender, path.is_empty()));
+        self.pending.lock().unwrap().insert(id, reply(sender));
         let guard = DocumentRequestGuard(Box::new(move || {
             if let Some(provider) = PROVIDER.get() {
                 let pending = provider.pending.lock().unwrap().remove(&id);
@@ -67,20 +111,11 @@ impl AndroidDocuments {
         }));
         let result = (|| -> Result<(), String> {
             let mut env = self.vm.attach_current_thread().map_err(|e| e.to_string())?;
-            let path = env.new_string(path).map_err(|e| e.to_string())?;
-            let name = env.new_string(name).map_err(|e| e.to_string())?;
-            env.call_method(
-                self.activity.lock().unwrap().as_obj(),
-                "chooseDocument",
-                "(JLjava/lang/String;Ljava/lang/String;)V",
-                &[
-                    JValue::Long(id),
-                    JValue::Object(&path),
-                    JValue::Object(&name),
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(())
+            let activity = self.activity.lock().unwrap();
+            call(&mut env, activity.as_obj(), id).map_err(|error| {
+                let _ = env.exception_clear();
+                error.to_string()
+            })
         })();
         Box::pin(async move {
             let _guard = guard;
@@ -90,7 +125,7 @@ impl AndroidDocuments {
                 }
                 return Err(e);
             }
-            tokio::time::timeout(std::time::Duration::from_secs(600), receiver)
+            tokio::time::timeout(timeout, receiver)
                 .await
                 .map_err(|_| "Document selection timed out.".to_string())
                 .and_then(|v| v.map_err(|_| "Document selection ended.".to_string()))
@@ -143,6 +178,22 @@ impl DocumentProvider for AndroidDocuments {
         let request = self.request(path.to_string_lossy().into_owned(), name);
         Box::pin(async move { Ok(request.await?.is_some()) })
     }
+    fn import_many(
+        &self,
+        limit: usize,
+        _dialog: DocumentDialog,
+    ) -> DocumentFuture<Vec<ImportedDocument>> {
+        let limit = i32::try_from(limit).unwrap_or(i32::MAX);
+        self.start(PendingReply::Many, SEVERAL_TIMEOUT, |env, activity, id| {
+            env.call_method(
+                activity,
+                "chooseDocuments",
+                "(JI)V",
+                &[JValue::Long(id), JValue::Int(limit)],
+            )?;
+            Ok(())
+        })
+    }
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentResult(
@@ -160,7 +211,7 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentResul
         .map(|s| s.to_string_lossy().into_owned());
     if let Some(provider) = PROVIDER.get() {
         let pending = provider.pending.lock().unwrap().remove(&id);
-        let importing = pending.as_ref().is_none_or(|(_, importing)| *importing);
+        let importing = !matches!(pending, Some(PendingReply::One(_, false)));
         let result = match (path, error) {
             (Ok(p), Ok(e)) if e.is_empty() => Ok((!p.is_empty()).then(|| {
                 if importing {
@@ -172,11 +223,50 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentResul
             (Ok(_), Ok(e)) => Err(e),
             _ => Err("Invalid document picker result.".into()),
         };
-        if let Some((sender, _)) = pending {
+        if let Some(PendingReply::One(sender, _)) = pending {
             // A dropped receiver drops its owned import, including the race
             // between native completion and cancellation of the Rust task.
             let _ = sender.send(result);
         }
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentsResult(
+    mut env: JNIEnv,
+    _class: JClass,
+    id: jlong,
+    paths: JObjectArray,
+    error: JString,
+) {
+    let paths = (|| -> jni::errors::Result<Vec<String>> {
+        let count = env.get_array_length(&paths)?;
+        let mut strings = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
+        for index in 0..count {
+            let path = JString::from(env.get_object_array_element(&paths, index)?);
+            strings.push(env.get_string(&path)?.to_string_lossy().into_owned());
+        }
+        Ok(strings)
+    })();
+    let error = env
+        .get_string(&error)
+        .map(|s| s.to_string_lossy().into_owned());
+    // The copies are Rust's from here; dropping them releases them.
+    let documents = paths.map(|paths| {
+        paths
+            .into_iter()
+            .map(|path| ImportedDocument::temporary(PathBuf::from(path), AndroidDocuments::release))
+            .collect::<Vec<_>>()
+    });
+    let result = match (documents, error) {
+        (Ok(documents), Ok(error)) if error.is_empty() => Ok(documents),
+        (Ok(_), Ok(error)) => Err(error),
+        _ => Err("Invalid document picker result.".into()),
+    };
+    let pending = PROVIDER
+        .get()
+        .and_then(|provider| provider.pending.lock().unwrap().remove(&id));
+    if let Some(PendingReply::Many(sender)) = pending {
+        let _ = sender.send(result);
     }
 }
 #[unsafe(no_mangle)]
@@ -190,6 +280,6 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentReque
             .lock()
             .unwrap()
             .get(&id)
-            .is_some_and(|(sender, _)| !sender.is_closed())
+            .is_some_and(|reply| !reply.is_closed())
     }))
 }

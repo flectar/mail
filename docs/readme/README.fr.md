@@ -285,10 +285,12 @@ Les comptes POP3 téléchargent les e-mails sur cet appareil et les laissent sur
 
 La même fonction importe les comptes de Thunderbird (dossier de profil, archive Outils › Exporter ou `prefs.js`), de Thunderbird pour Android ou de K-9 Mail (exports de paramètres `.k9s`). Vous vérifiez chaque compte avant tout ajout : les réglages que Flectar Mail ne peut pas reproduire, comme un serveur Exchange, sont expliqués plutôt que modifiés sans avertissement, et les comptes POP3 conservent leur règle de suppression des messages du serveur. Les comptes existants ne sont jamais modifiés et les mots de passe ne sont jamais importés.
 
+Le courrier enregistré s’importe de la même façon : les Dossiers locaux de Thunderbird et les messages téléchargés par ses comptes POP3, les fichiers mbox comme un export Google Takeout ou ceux de Flectar Mail, les messages `.eml`, les dossiers maildir, les boîtes aux lettres d’Apple Mail et les archives ZIP qui les contiennent. Vous choisissez les fichiers, plusieurs à la fois si vous le souhaitez, puis les dossiers (la Corbeille et les Indésirables sont exclus sauf si vous les cochez), et l’arborescence ainsi que les états lu et suivi sont conservés. Les messages déjà présents sont ignorés : une importation interrompue peut simplement être relancée, et une longue importation peut se poursuivre en arrière-plan. Le courrier qui n’appartient à aucun compte va dans **Sur cet appareil** : des dossiers qui n’existent qu’ici, que Paramètres → Stockage permet d’exporter ou de supprimer. Il peut aussi rejoindre les dossiers d’un compte POP3, ou être envoyé sur le serveur d’un compte IMAP, JMAP ou Gmail, dans un dossier à part.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Paramètres de stockage de Flectar Mail avec l’utilisation locale, les instantanés de bases de données et les sauvegardes des comptes">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Paramètres de stockage de Flectar Mail avec l’utilisation locale, le courrier sur cet appareil, les instantanés de bases de données et les sauvegardes des comptes">
 </picture>
 
 ### 📱 Pour les petits écrans

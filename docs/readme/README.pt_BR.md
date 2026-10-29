@@ -285,10 +285,12 @@ Contas POP3 baixam e-mails para este dispositivo e os deixam no servidor, a meno
 
 A mesma importação também traz contas do Thunderbird (uma pasta de perfil, seu arquivo de Ferramentas › Exportar ou `prefs.js`), do Thunderbird para Android ou do K-9 Mail (exportações de configurações `.k9s`). Você revisa cada conta antes de qualquer adição: configurações que o Flectar Mail não pode reproduzir, como um servidor Exchange, são explicadas em vez de alteradas silenciosamente, e as contas POP3 mantêm sua regra de remoção de e-mails do servidor. Contas existentes nunca são modificadas e senhas nunca são importadas.
 
+E-mails salvos também podem ser importados: as Pastas locais do Thunderbird e os e-mails que suas contas POP3 baixaram, arquivos mbox como uma exportação do Google Takeout ou os do próprio Flectar Mail, mensagens `.eml`, pastas maildir, caixas de correio do Apple Mail e arquivos ZIP que os contenham. Você escolhe os arquivos, vários de uma vez se quiser, e depois as pastas (Lixeira e Spam ficam de fora, a menos que você as marque), e a estrutura de pastas e os estados de lido e com estrela são mantidos. E-mails que já estão lá são ignorados, então uma importação interrompida pode simplesmente ser executada de novo, e uma importação longa pode continuar em segundo plano. E-mails que não pertencem a nenhuma conta vão para **Neste dispositivo**: pastas que existem só aqui e que Configurações → Armazenamento pode exportar ou excluir. Eles também podem ir para as pastas de uma conta POP3 ou ser enviados ao servidor de uma conta IMAP, JMAP ou Gmail, em uma pasta própria.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Configurações de armazenamento do Flectar Mail com uso local, instantâneos dos bancos de dados e backups das contas">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Configurações de armazenamento do Flectar Mail com uso local, e-mails neste dispositivo, instantâneos dos bancos de dados e backups das contas">
 </picture>
 
 ### 📱 Feito para telas menores

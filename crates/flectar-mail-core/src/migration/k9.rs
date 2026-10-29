@@ -205,6 +205,8 @@ pub fn parse(bytes: &[u8]) -> Result<ImportInventory, SourceError> {
             .into_iter()
             .map(|element| account(element, content_version))
             .collect(),
+        // K-9 keeps its mail in its own database, which exports leave out.
+        mail: Vec::new(),
         other_entries: Vec::new(),
     })
 }

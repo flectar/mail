@@ -57,6 +57,8 @@ public final class NativeCallbacksTest {
                 new Class<?>[]{long.class}, UNKNOWN_REQUEST));
         invoke("nativeDocumentResult", new Class<?>[]{long.class, String.class, String.class},
                 UNKNOWN_REQUEST, "", "");
+        invoke("nativeDocumentsResult", new Class<?>[]{long.class, String[].class, String.class},
+                UNKNOWN_REQUEST, new String[0], "");
     }
 
     @Test
@@ -77,6 +79,7 @@ public final class NativeCallbacksTest {
         tested.add("nativeMicrosoftRedirect");
         tested.add("nativeDocumentRequestActive");
         tested.add("nativeDocumentResult");
+        tested.add("nativeDocumentsResult");
         tested.add("nativeSuspendPdfPreview");
         assertEquals("Add a JNI invocation test when adding a native callback", tested, declarations);
     }

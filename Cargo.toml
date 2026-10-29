@@ -87,7 +87,7 @@ style_traits = { package = "stylo_traits", version = "=0.22.0" }
 unicode-segmentation = "1.13"
 # Parley 0.12 includes the upstream emoji presentation fix.
 parley = "=0.12.0"
-pulldown-cmark = "0.13.4"
+pulldown-cmark = "0.13.5"
 vello = { version = "0.11", optional = true }
 # This native shell currently exposes keyword/FTS search, not local semantic
 # search. Do not link Candle, tokenizers, or Hugging Face into every AppImage.

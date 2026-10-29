@@ -69,7 +69,7 @@ async fn copy_device_mail(snapshot_db: &Path, staging: &Path) -> Result<bool> {
         let mut statement = conn.prepare(
             "SELECT m.account_id, m.raw_path
              FROM messages m JOIN accounts a ON a.id = m.account_id
-             WHERE a.mail_protocol = 'pop3' AND m.raw_path IS NOT NULL",
+             WHERE a.mail_protocol IN ('pop3', 'local') AND m.raw_path IS NOT NULL",
         )?;
         let rows = statement
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?

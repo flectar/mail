@@ -263,6 +263,13 @@ pub(crate) struct WarmStartProjection<'a> {
 
 impl WarmStartSnapshot {
     pub(crate) fn capture(projection: WarmStartProjection<'_>) -> Self {
+        // Local mail is left out: until the core is open, nothing names it.
+        let connected = |account_id: i64| {
+            projection
+                .accounts
+                .iter()
+                .any(|account| account.id == account_id)
+        };
         Self {
             format_version: WARM_START_FORMAT_VERSION,
             saved_at_ms: chrono::Utc::now().timestamp_millis(),
@@ -279,12 +286,14 @@ impl WarmStartSnapshot {
             messages: projection
                 .messages
                 .iter()
+                .filter(|message| connected(message.account_id))
                 .take(MAX_WARM_START_MESSAGES)
                 .map(WarmStartMessage::from)
                 .collect(),
             mailboxes: projection
                 .mailboxes
                 .iter()
+                .filter(|mailbox| connected(mailbox.account_id))
                 .take(MAX_WARM_START_MAILBOXES)
                 .map(WarmStartMailbox::from)
                 .collect(),
@@ -496,6 +505,7 @@ pub(crate) struct StartupSnapshot {
     pub(crate) remote_images_enabled: bool,
     pub(crate) accounts: Vec<Account>,
     pub(crate) account_configs: Vec<AccountConfig>,
+    pub(crate) local_mail: Option<flectar_mail_core::models::LocalMail>,
     pub(crate) settings: Option<Settings>,
 }
 
@@ -571,12 +581,13 @@ pub(crate) async fn load_startup_snapshot(
     let _ = core.set_profile_accounts(settings.as_ref().and_then(|settings| {
         AccountPresentationSettings::from_settings(settings).active_profile_accounts()
     }));
-    let (mail, configs) = tokio::join!(
+    let (mail, configs, local_mail) = tokio::join!(
         // Counts walk every mailbox and can dominate startup on a large local
         // store. The first useful frame only needs one bounded page; sidebar
         // totals arrive as a separate progressive update.
         core.load_startup_page(preferred_scope, PAGE_SIZE as i64),
         core.load_account_configs(),
+        core.load_local_mail(),
     );
 
     let (accounts, scope, page) =
@@ -598,6 +609,7 @@ pub(crate) async fn load_startup_snapshot(
             .is_some_and(|settings| settings.load_remote_images),
         accounts,
         account_configs: configs.unwrap_or_default(),
+        local_mail: local_mail.ok().flatten(),
         settings,
     })
 }

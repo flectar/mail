@@ -1282,6 +1282,107 @@ async fn sync_sender_identities(
         .await
 }
 
+const GMAIL_UPLOAD_API: &str = "https://gmail.googleapis.com/upload/gmail/v1/users/me";
+
+/// Imports messages into a Gmail mailbox, as if they had been delivered,
+/// for mail brought over from files or another app.
+pub(crate) struct Uploader {
+    api: GmailApi,
+    base: String,
+    upload_base: String,
+}
+
+impl Uploader {
+    pub(crate) fn new(ctx: SyncCtx, config: AccountConfig) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: GMAIL_API.to_owned(),
+            upload_base: GMAIL_UPLOAD_API.to_owned(),
+        })
+    }
+
+    /// An uploader that talks to a test server instead of Gmail.
+    #[cfg(test)]
+    pub(crate) fn with_base(ctx: SyncCtx, config: AccountConfig, origin: &str) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: format!("{origin}/gmail/v1/users/me"),
+            upload_base: format!("{origin}/upload/gmail/v1/users/me"),
+        })
+    }
+
+    /// Bring the account's labels up to date.
+    pub(crate) async fn refresh_labels(&self) -> Result<()> {
+        sync_labels(&self.api.ctx, &self.api.account, &self.api).await
+    }
+
+    /// Whether the mailbox has a message with this Message-ID anywhere,
+    /// Spam and Trash included.
+    pub(crate) async fn has_message(&self, message_id: &str) -> Result<bool> {
+        let query = format!("rfc822msgid:<{}>", message_id.trim_matches(['<', '>']));
+        let value = self
+            .api
+            .get_json(&format!(
+                "{}/messages?maxResults=1&includeSpamTrash=true&q={}",
+                self.base,
+                urlencode(&query)
+            ))
+            .await?;
+        Ok(value
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| !messages.is_empty()))
+    }
+
+    /// Import a raw message with these labels. Its date stays the one in its
+    /// Date header, and the spam filter leaves it alone.
+    pub(crate) async fn import(&self, raw: &[u8], label_ids: &[&str]) -> Result<()> {
+        let boundary = format!("flectar-{:032x}", rand::random::<u128>());
+        let metadata = json!({ "labelIds": label_ids });
+        let mut body = Vec::with_capacity(raw.len() + 512);
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n\
+                 --{boundary}\r\nContent-Type: message/rfc822\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(raw);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let url = format!(
+            "{}/messages/import?uploadType=multipart&internalDateSource=dateHeader\
+             &neverMarkSpam=true&processForCalendar=false",
+            self.upload_base
+        );
+        // A large message gets time to upload at 64 KiB/s.
+        let timeout = HTTP_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
+        for attempt in 0..2 {
+            let token = self.api.token().await?;
+            let response = self
+                .api
+                .http
+                .post(&url)
+                .bearer_auth(token)
+                .timeout(timeout)
+                .header(
+                    CONTENT_TYPE,
+                    format!("multipart/related; boundary={boundary}"),
+                )
+                .body(body.clone())
+                .send()
+                .await
+                .map_err(network_error)?;
+            let result = google_json(response).await;
+            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
+                self.api.ctx.tokens.invalidate(self.api.account.id).await;
+                continue;
+            }
+            return result.map(|_| ());
+        }
+        Err(CoreError::NeedsReauth)
+    }
+}
+
 pub(crate) async fn create_user_folder(
     ctx: &SyncCtx,
     config: &AccountConfig,

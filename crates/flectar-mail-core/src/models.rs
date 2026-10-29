@@ -56,6 +56,10 @@ pub enum MailProtocol {
     /// POP3 download into folders that exist only on this device, with SMTP
     /// submission.
     Pop3,
+    /// No server at all: mail the user imported, kept in folders that exist
+    /// only on this device. There is at most one such account, and it has no
+    /// address, sign-in, or settings, so it never sends.
+    Local,
 }
 
 impl MailProtocol {
@@ -65,6 +69,7 @@ impl MailProtocol {
             Self::Imap => "imap",
             Self::Jmap => "jmap",
             Self::Pop3 => "pop3",
+            Self::Local => "local",
         }
     }
 
@@ -74,6 +79,7 @@ impl MailProtocol {
             "imap" => Some(Self::Imap),
             "jmap" => Some(Self::Jmap),
             "pop3" => Some(Self::Pop3),
+            "local" => Some(Self::Local),
             _ => None,
         }
     }
@@ -84,7 +90,7 @@ impl MailProtocol {
     pub const fn has_multi_mailbox_messages(self) -> bool {
         match self {
             Self::Gmail | Self::Jmap => true,
-            Self::Imap | Self::Pop3 => false,
+            Self::Imap | Self::Pop3 | Self::Local => false,
         }
     }
 }
@@ -536,6 +542,17 @@ pub struct Account {
     pub server_keeps_mail_days: Option<u32>,
 }
 
+/// Mail imported into folders that exist only on this device. It belongs to
+/// an account of protocol [`MailProtocol::Local`], which account lists leave
+/// out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMail {
+    pub account_id: i64,
+    pub messages: u64,
+    pub bytes: u64,
+}
+
 /// Full account row including server config; internal to the native application.
 #[derive(Debug, Clone)]
 pub struct AccountConfig {
@@ -929,7 +946,8 @@ pub enum View {
 pub struct ThreadSummary {
     pub id: i64,
     pub account_id: i64,
-    pub account_email: String,
+    /// `None` for local mail, which has no address.
+    pub account_email: Option<String>,
     /// Verified addresses owned by this account, including send-as aliases.
     pub account_addresses: Vec<String>,
     pub subject: String,
@@ -2354,6 +2372,7 @@ mod tests {
             MailProtocol::Imap,
             MailProtocol::Jmap,
             MailProtocol::Pop3,
+            MailProtocol::Local,
         ] {
             assert_eq!(MailProtocol::parse(protocol.as_str()), Some(protocol));
         }

@@ -393,10 +393,24 @@ avisar, y las cuentas POP3 conservan su regla de eliminación del correo del
 servidor. Las cuentas existentes nunca se modifican y las contraseñas nunca
 se importan.
 
+El correo guardado se importa de la misma forma: las Carpetas locales de
+Thunderbird y el correo que descargaron sus cuentas POP3, archivos mbox como
+una exportación de Google Takeout o los del propio Flectar Mail, mensajes
+`.eml`, carpetas maildir, buzones de Apple Mail y archivos ZIP que los
+contengan. Eliges los archivos, varios a la vez si quieres, y luego las carpetas
+(la Papelera y el Correo no deseado quedan fuera salvo que los marques), y se
+conservan la estructura de carpetas y los estados de leído y destacado. El
+correo que ya está allí se omite, así que una importación detenida puede volver
+a ejecutarse sin más, y una larga puede seguir en segundo plano. El correo que
+no pertenece a ninguna cuenta va a **En este dispositivo**: carpetas que solo
+existen aquí y que puedes exportar o eliminar desde Ajustes → Almacenamiento.
+También puede ir a las carpetas de una cuenta POP3, o subirse al servidor de una
+cuenta IMAP, JMAP o Gmail, a una carpeta propia.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Ajustes de almacenamiento de Flectar Mail con el uso local, las instantáneas de bases de datos y las copias de seguridad de cuentas">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Ajustes de almacenamiento de Flectar Mail con el uso local, el correo en este dispositivo, las instantáneas de bases de datos y las copias de seguridad de cuentas">
 </picture>
 
 ### 📱 Para pantallas pequeñas

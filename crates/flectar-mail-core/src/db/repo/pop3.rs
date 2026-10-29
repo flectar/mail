@@ -20,9 +20,6 @@ const LOCAL_FOLDERS: [(&str, &str); 6] = [
     ("Trash", roles::TRASH),
 ];
 
-/// Local folder paths separate their levels with this.
-pub const FOLDER_DELIMITER: &str = "/";
-
 /// How long a message the server stopped listing stays recorded, in case the
 /// server lists it again.
 const MISSING_RETENTION_MS: i64 = 90 * 24 * 60 * 60 * 1000;
@@ -31,7 +28,13 @@ const MISSING_RETENTION_MS: i64 = 90 * 24 * 60 * 60 * 1000;
 /// transaction.
 pub fn create_account_state(conn: &Connection, account_id: i64) -> Result<()> {
     for (path, role) in LOCAL_FOLDERS {
-        super::folders::upsert(conn, account_id, path, Some(FOLDER_DELIMITER), Some(role))?;
+        super::folders::upsert(
+            conn,
+            account_id,
+            path,
+            Some(super::folders::DEVICE_DELIMITER),
+            Some(role),
+        )?;
     }
     conn.execute(
         "INSERT INTO pop3_sync_state (account_id) VALUES (?1)",
@@ -472,7 +475,7 @@ mod tests {
         assert!(
             folders
                 .iter()
-                .all(|f| f.delimiter.as_deref() == Some(FOLDER_DELIMITER))
+                .all(|f| f.delimiter.as_deref() == Some(crate::db::repo::folders::DEVICE_DELIMITER))
         );
         assert_eq!(sync_state(&conn, id).unwrap(), SyncState::default());
     }

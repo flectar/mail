@@ -18,6 +18,7 @@ import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../des
 import { MessageColors } from "../message-colors.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { LocalMailUi } from "../local-mail.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -365,6 +366,38 @@ export component MailReadingPane inherits FocusScope {
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
+    // Local mail has no archive or spam.
+    private property <[ActionMenuEntry]> local-action-menu: [
+        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
+        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
+        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
+        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
+        { id: "print", title: @tr("Print message"), icon: @image-url("../icons/lucide/outline/printer.svg") },
+        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
+        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
+        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
+        { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
+        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+    ];
+    private property <[ActionMenuEntry]> local-action-menu-no-print: [
+        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
+        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
+        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
+        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
+        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
+        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
+        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
+        { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
+        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+    ];
     // The reader toolbar drops actions that the More menu also offers when
     // integrated window controls or a narrow pane leave too little room.
     private property <length> toolbar-room: 1000px;
@@ -508,12 +541,12 @@ export component MailReadingPane inherits FocusScope {
     private property <bool> message-keys: root.has_selected && !root.rendering_info_open && !root.label-editor-open;
     KeyBinding {
         keys: Shortcuts.archive;
-        enabled: root.message-keys && !root.selected_is_draft;
+        enabled: root.message-keys && !root.selected_is_draft && !LocalMailUi.selected;
         activated => { root.message_action("archive"); }
     }
     KeyBinding {
         keys: Shortcuts.spam;
-        enabled: root.message-keys && !root.selected_is_draft;
+        enabled: root.message-keys && !root.selected_is_draft && !LocalMailUi.selected;
         activated => { root.message_action("spam"); }
     }
     KeyBinding {
@@ -694,7 +727,7 @@ export component MailReadingPane inherits FocusScope {
                             }
                             Rectangle { horizontal-stretch: 1; }
                             if !root.selected_is_draft : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 compact: root.compact;
                                 icon: @image-url("../icons/lucide/outline/reply.svg");
                                 icon-color: root.secondary-text;
@@ -704,7 +737,7 @@ export component MailReadingPane inherits FocusScope {
                                 clicked => { root.compose_message_action("reply"); }
                             }
                             if !root.selected_is_draft && root.show-all-compose-actions : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 icon: @image-url("../icons/lucide/outline/reply-all.svg");
                                 icon-color: root.secondary-text;
                                 hover-background: root.muted-control-bg;
@@ -713,7 +746,7 @@ export component MailReadingPane inherits FocusScope {
                                 clicked => { root.compose_message_action("reply_all"); }
                             }
                             if !root.selected_is_draft && root.show-all-compose-actions : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 icon: @image-url("../icons/lucide/outline/forward.svg");
                                 icon-color: root.secondary-text;
                                 hover-background: root.muted-control-bg;
@@ -721,7 +754,7 @@ export component MailReadingPane inherits FocusScope {
                                 accessible-id: "message-toolbar-forward-button";
                                 clicked => { root.compose_message_action("forward"); }
                             }
-                            if root.show-primary-actions : ToolbarIconButton {
+                            if root.show-primary-actions && !LocalMailUi.selected : ToolbarIconButton {
                                 visible: !root.selected_is_draft;
                                 interactive: root.has_selected;
                                 compact: root.compact;
@@ -753,7 +786,7 @@ export component MailReadingPane inherits FocusScope {
                                 tooltip-text: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread");
                                 clicked => { root.message_action(root.selected_unread ? "mark_read" : "mark_unread"); }
                             }
-                            if !root.compact && !root.selected_is_draft && root.show-secondary-actions : ToolbarIconButton {
+                            if !root.compact && !root.selected_is_draft && !LocalMailUi.selected && root.show-secondary-actions : ToolbarIconButton {
                                 interactive: root.has_selected;
                                 icon: @image-url("../icons/lucide/outline/alert.svg");
                                 icon-color: root.secondary-text;
@@ -985,6 +1018,8 @@ export component MailReadingPane inherits FocusScope {
                                 max-menu-height: max(160px, root.height - (root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height) - 12px);
                                 entries: root.selected_is_draft
                                     ? root.draft-action-menu
+                                    : LocalMailUi.selected
+                                        ? (root.print_supported ? root.local-action-menu : root.local-action-menu-no-print)
                                     : root.print_supported
                                         ? root.message-action-menu
                                         : root.message-action-menu-no-print;
@@ -1815,7 +1850,7 @@ export component MailReadingPane inherits FocusScope {
 
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/reply.svg");
                                             tooltip-text: @tr("Reply");
                                             accessible-id: "message-reply-button";
@@ -1823,7 +1858,7 @@ export component MailReadingPane inherits FocusScope {
                                         }
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/reply-all.svg");
                                             tooltip-text: @tr("Reply all");
                                             accessible-id: "message-reply-all-button";
@@ -1831,7 +1866,7 @@ export component MailReadingPane inherits FocusScope {
                                         }
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/forward.svg");
                                             tooltip-text: @tr("Forward");
                                             accessible-id: "message-forward-button";

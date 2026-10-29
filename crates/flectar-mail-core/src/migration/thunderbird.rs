@@ -4,16 +4,18 @@
 //! Tools › Export, or a lone `prefs.js`. Account data comes from the
 //! `mail.account.*`, `mail.server.*`, `mail.identity.*` and `mail.smtpserver.*`
 //! preference branches; defaults for absent values follow `mailnews.js`.
-//! Files are only read from inside the selected profile, and the mail folders
-//! themselves are never opened.
+//! Files are only read from inside the selected profile. Of the mail folders,
+//! only those of Local Folders and of POP3 accounts are listed, since IMAP
+//! mail is still on its server.
 
 use super::model::{
-    AccountCandidate, IdentityCandidate, ImportInventory, OtherEntry, OtherEntryKind,
+    AccountCandidate, IdentityCandidate, ImportInventory, MailStore, OtherEntry, OtherEntryKind,
     ServerCandidate, ServerProtocol, SignatureCandidate, SourceAuth, SourceKind, SourceRetention,
     SourceSecurity,
 };
 use super::prefs::Prefs;
 use super::{MAX_SOURCE_BYTES, SourceError};
+use crate::mail_import::MailSource;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -49,6 +51,20 @@ trait ProfileFiles {
     fn relative_of(&self, _absolute: &str) -> Option<String> {
         None
     }
+
+    /// The saved mail in the folder `relative`.
+    fn mail(&mut self, _relative: &str) -> MailLookup {
+        MailLookup::Unavailable
+    }
+}
+
+/// What a mail folder of the profile holds.
+enum MailLookup {
+    Found(MailSource),
+    /// Nothing to import.
+    Empty,
+    /// The folder isn't in what was chosen.
+    Unavailable,
 }
 
 /// A lone `prefs.js`: no other profile files are available.
@@ -94,6 +110,21 @@ impl ProfileFiles for DirectoryFiles {
         Some(self.file(relative)?.metadata().ok()?.len())
     }
 
+    fn mail(&mut self, relative: &str) -> MailLookup {
+        let Some(folder) = safe_relative(relative)
+            .and_then(|relative| self.root.join(relative).canonicalize().ok())
+        else {
+            return MailLookup::Empty;
+        };
+        if !folder.starts_with(&self.root) {
+            return MailLookup::Unavailable;
+        }
+        match crate::mail_import::scan_folder(&folder) {
+            Ok(mail) => MailLookup::Found(mail),
+            Err(_) => MailLookup::Empty,
+        }
+    }
+
     fn relative_of(&self, absolute: &str) -> Option<String> {
         // Compare text first: resolving an arbitrary recorded path could reach
         // a network share (and send Windows credentials) or a dead mount.
@@ -113,6 +144,8 @@ impl ProfileFiles for DirectoryFiles {
 }
 
 struct ZipFiles<R: Read + std::io::Seek> {
+    /// The archive's file, which mail is read from separately.
+    path: PathBuf,
     archive: zip::ZipArchive<R>,
     /// Entry indexes by decoded name with `/` separators, so archives with
     /// code page names or the `\` some Windows tools write are read too.
@@ -148,6 +181,24 @@ impl<R: Read + std::io::Seek> ProfileFiles for ZipFiles<R> {
 
     fn size(&mut self, relative: &str) -> Option<u64> {
         Some(self.entry(relative)?.size())
+    }
+
+    fn mail(&mut self, relative: &str) -> MailLookup {
+        let Some(relative) = safe_relative(relative) else {
+            return MailLookup::Unavailable;
+        };
+        let folder = relative
+            .components()
+            .map(|component| component.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        match crate::mail_import::scan::scan_archive(
+            &self.path,
+            &format!("{}{folder}/", self.prefix),
+        ) {
+            Ok(mail) => MailLookup::Found(mail),
+            Err(_) => MailLookup::Empty,
+        }
     }
 }
 
@@ -243,6 +294,7 @@ pub fn read_export(path: &Path) -> Result<ImportInventory, SourceError> {
         _ => return Err(SourceError::MultipleProfiles),
     };
     read_profile(&mut ZipFiles {
+        path: path.to_owned(),
         archive,
         entries,
         prefix,
@@ -291,6 +343,7 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
     .unwrap_or_default();
 
     let mut accounts = Vec::new();
+    let mut mail = Vec::new();
     let mut other_entries = Vec::new();
     let mut seen = HashSet::new();
     let mut size = 0;
@@ -322,6 +375,20 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
         };
         if let Some(kind) = other {
             let label = label.unwrap_or_default();
+            if kind == OtherEntryKind::LocalFolders {
+                match mail_of(prefs, server, files) {
+                    MailLookup::Found(found) => {
+                        mail.push(MailStore {
+                            account: None,
+                            label,
+                            mail: found,
+                        });
+                        continue;
+                    }
+                    MailLookup::Empty => continue,
+                    MailLookup::Unavailable => {}
+                }
+            }
             size = spend(size, label.len())?;
             other_entries.push(OtherEntry { kind, label });
             continue;
@@ -352,6 +419,16 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
         let incoming = incoming_server(prefs, server, kind);
         let retention =
             (incoming.protocol == ServerProtocol::Pop3).then(|| pop3_retention(prefs, server));
+        // What a POP3 account downloaded exists only in the profile.
+        if incoming.protocol == ServerProtocol::Pop3
+            && let MailLookup::Found(found) = mail_of(prefs, server, files)
+        {
+            mail.push(MailStore {
+                account: Some(key.clone()),
+                label: label.clone().unwrap_or_else(|| incoming.username.clone()),
+                mail: found,
+            });
+        }
         let account = AccountCandidate {
             source_id: key.clone(),
             color: root_folder_color(&colors, prefs, server, incoming.protocol),
@@ -373,15 +450,34 @@ fn inventory(prefs: &Prefs, files: &mut dyn ProfileFiles) -> Result<ImportInvent
         size = spend(size, text_size(&account))?;
         accounts.push(account);
     }
-    if accounts.is_empty() && other_entries.is_empty() {
+    if accounts.is_empty() && mail.is_empty() && other_entries.is_empty() {
         return Err(SourceError::NoAccounts);
     }
     Ok(ImportInventory {
         source: SourceKind::ThunderbirdProfile,
         source_version: None,
         accounts,
+        mail,
         other_entries,
     })
+}
+
+/// The mail a server keeps in the profile, found through the folder its
+/// `directory-rel`, or else `directory`, names.
+fn mail_of(prefs: &Prefs, server: &str, files: &mut dyn ProfileFiles) -> MailLookup {
+    let relative = prefs
+        .string(&format!("mail.server.{server}.directory-rel"))
+        .and_then(|path| path.strip_prefix("[ProfD]"))
+        .map(|path| path.replace('\\', "/"))
+        .or_else(|| {
+            prefs
+                .string(&format!("mail.server.{server}.directory"))
+                .and_then(|path| files.relative_of(path))
+        });
+    match relative {
+        Some(relative) => files.mail(&relative),
+        None => MailLookup::Unavailable,
+    }
 }
 
 /// Adds `bytes` of text to what the inventory holds.
