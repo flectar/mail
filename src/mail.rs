@@ -2098,7 +2098,9 @@ fn append_mailboxes(
             role_folder_ids.contains(&folder.id) || (!gmail && !is_standard_folder(folder))
         })
         .collect::<Vec<_>>();
-    tree_folders.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
+    // Lowercase once per folder: `sort_by_key` would re-allocate the key on
+    // every comparison (O(n log n) allocations for n folders).
+    tree_folders.sort_by_cached_key(|folder| (folder.display_name.to_lowercase(), folder.id));
 
     // Fresh discovery provides explicit local parent ids. Path inference
     // preserves an upgraded database's existing hierarchy until its first
