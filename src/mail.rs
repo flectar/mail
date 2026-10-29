@@ -2253,6 +2253,13 @@ fn mailbox_entries_with_counts(
     local_mail: Option<i64>,
     badges: &[MailboxBadgeCounts],
 ) -> Vec<MailboxEntry> {
+    // Index badges once: the sidebar rebuilds on every metadata refresh, so a
+    // linear scan per entry would cost O(entries x accounts) each time. First
+    // row wins, matching the previous linear search.
+    let mut badges_by_account = std::collections::HashMap::with_capacity(badges.len());
+    for counts in badges {
+        badges_by_account.entry(counts.account_id).or_insert(counts);
+    }
     let mut entries = mailbox_entries(accounts, folders, local_mail);
     for entry in &mut entries {
         // Badges belong to the standard mailboxes, not to custom folders that
@@ -2260,10 +2267,7 @@ fn mailbox_entries_with_counts(
         let Some(Scope::Account { mailbox, .. }) = entry.scope else {
             continue;
         };
-        let Some(counts) = badges
-            .iter()
-            .find(|counts| counts.account_id == entry.account_id)
-        else {
+        let Some(counts) = badges_by_account.get(&entry.account_id) else {
             continue;
         };
         entry.count = mailbox_badge(mailbox, counts);
