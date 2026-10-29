@@ -1860,7 +1860,9 @@ fn compose_args(
 
 fn parse_recipients(value: &str) -> Result<Vec<Address>, String> {
     value
-        .split([',', ';'])
+        // Recipient rows wrap onto multiple lines, and pasted lists often put
+        // one address per line: accept newlines as separators like `,`/`;`.
+        .split([',', ';', '\n'])
         .map(str::trim)
         .filter(|recipient| !recipient.is_empty())
         .map(parse_address)
@@ -1873,7 +1875,9 @@ fn parse_address(value: &str) -> Result<Address, String> {
         .and_then(|(name, email)| email.strip_suffix('>').map(|email| (Some(name), email)))
         .unwrap_or((None, value));
     let email = email.trim();
-    if !email.contains('@') {
+    // Multiline/pasted input must never smuggle a header break into an
+    // address: reject any surviving control characters.
+    if email.contains(['\r', '\n']) || !email.contains('@') {
         return Err(format!("invalid recipient: {value}"));
     }
     Ok(Address {
@@ -3214,6 +3218,26 @@ mod tests {
         assert_eq!(duplicate_leaf.scope, Some(Scope::Folder(12)));
         assert_eq!(custom_inbox.scope, Some(Scope::Folder(13)));
         assert!(custom_inbox.count.is_empty());
+    }
+
+    #[test]
+    fn recipients_split_on_commas_semicolons_and_newlines() {
+        let parsed = super::parse_recipients(
+            "Ada <ada@example.com>,\nGrace <grace@example.com>; alan@example.com\n\n",
+        )
+        .unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].email, "ada@example.com");
+        assert_eq!(parsed[0].name.as_deref(), Some("Ada"));
+        assert_eq!(parsed[1].email, "grace@example.com");
+        assert_eq!(parsed[2].email, "alan@example.com");
+        assert!(parsed[2].name.is_none());
+    }
+
+    #[test]
+    fn recipient_addresses_reject_embedded_control_characters() {
+        assert!(super::parse_recipients("ok@example.com").is_ok());
+        assert!(super::parse_recipients("a@example.com\rb@example.com").is_err());
     }
 
     #[test]

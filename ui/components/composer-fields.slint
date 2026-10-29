@@ -324,7 +324,7 @@ export component ComposerRecipients inherits Rectangle {
         }
     }
 
-            height: 40px + (root.show-cc ? 40px : 0px) + (root.show-bcc ? 40px : 0px);
+            height: to-row.height + (root.show-cc ? cc-row.height : 0px) + (root.show-bcc ? bcc-row.height : 0px);
             background: root.background-color;
 
             to-row := RecipientRow {
@@ -386,9 +386,10 @@ export component ComposerRecipients inherits Rectangle {
                 }
             }
 
-            if root.show-cc : RecipientRow {
+            cc-row := RecipientRow {
+                visible: root.show-cc;
                 x: 0px;
-                y: 40px;
+                y: to-row.height;
                 width: parent.width;
                 label: @tr("Cc");
                 placeholder-text: @tr("Carbon copy");
@@ -400,9 +401,10 @@ export component ComposerRecipients inherits Rectangle {
                 focus-color: root.accent-color;
             }
 
-            if root.show-bcc : RecipientRow {
+            bcc-row := RecipientRow {
+                visible: root.show-bcc;
                 x: 0px;
-                y: 40px + (root.show-cc ? 40px : 0px);
+                y: to-row.height + (root.show-cc ? cc-row.height : 0px);
                 width: parent.width;
                 label: @tr("Bcc");
                 placeholder-text: @tr("Blind carbon copy");
@@ -419,7 +421,7 @@ export component ComposerRecipients inherits Rectangle {
 
             contact-popup := PopupWindow {
                 x: 44px;
-                y: 37px;
+                y: to-row.height - 3px;
                 width: min(430px, root.width - 56px);
                 height: min(6, root.contacts.length) * root.suggestion-pitch + 8px;
                 close-policy: close-on-click-outside;

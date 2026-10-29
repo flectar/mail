@@ -19,8 +19,13 @@ export component RecipientRow inherits Rectangle {
 
     forward-focus: field;
 
-    height: 40px;
+    // Recipient lists wrap onto multiple lines (up to five) so long To/Cc/Bcc
+    // content stays visible and keyboard-navigable (issue #141). The height
+    // mirrors an invisible wrapping twin below: the editable field cannot
+    // size itself, as wrapping needs the laid-out width first.
+    height: min(132px, max(40px, field-mirror.preferred-height + 14px));
     background: root.background-color;
+    clip: true;
 
     row-label := Text {
         x: 12px;
@@ -47,15 +52,17 @@ export component RecipientRow inherits Rectangle {
 
     field := TextInput {
         x: row-label.x + row-label.width + 4px;
+        y: 7px;
         width: max(0px, parent.width - self.x - root.right-padding);
-        height: parent.height;
+        height: max(0px, parent.height - 14px);
         text <=> root.text;
         color: root.text-color;
         selection-background-color: root.focus-color;
         selection-foreground-color: white;
         font-size: TypeScale.body;
-        single-line: true;
-        vertical-alignment: center;
+        single-line: false;
+        wrap: word-wrap;
+        vertical-alignment: top;
         edited => {
             root.edited(self.text);
         }
@@ -78,6 +85,19 @@ export component RecipientRow inherits Rectangle {
             }
             reject
         }
+    }
+
+    // Invisible twin that sizes the row: same origin, font and wrapping as the
+    // field, a few px narrower so it never wraps less than the editable text.
+    // Invisible probe Texts still report preferred-height (see the account and
+    // suggestion probes in composer-fields.slint).
+    field-mirror := Text {
+        visible: false;
+        x: field.x;
+        width: max(0px, field.width - 4px);
+        text: root.text + " ";
+        font-size: TypeScale.body;
+        wrap: word-wrap;
     }
 }
 
