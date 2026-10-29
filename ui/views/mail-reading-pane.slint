@@ -1160,7 +1160,7 @@ export component MailReadingPane inherits FocusScope {
                                     width: max(0px, email-scroll.visible-width - 2 * root.message-card-inset);
                                     height: clamp(root.paint-bottom, self.card-top, self.card-bottom) - self.y;
                                     background: root.surface;
-                                    border-radius: 8px;
+                                    border-radius: (clamp(root.paint-bottom, self.card-top, self.card-bottom) - self.y) > 30000px ? 0px : 8px;
                                     border-width: 1px;
                                     border-color: root.border-subtle;
                                 }
