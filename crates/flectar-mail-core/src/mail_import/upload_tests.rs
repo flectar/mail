@@ -464,7 +464,8 @@ async fn messages_chosen_one_by_one_go_in_a_folder_of_their_own() {
         write(&path, &message(id, "Saved", ""));
         path
     });
-    let source = crate::mail_import::scan_files(&paths).unwrap();
+    let source =
+        crate::mail_import::scan_files(&paths.map(crate::mail_import::ChosenFile::at)).unwrap();
     let (progress, _) = watch::channel(MailImportProgress::default());
 
     let report = core

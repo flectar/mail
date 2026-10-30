@@ -6,23 +6,48 @@ pub type DocumentFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Se
 /// request or an unread channel result must release the copy as well.
 pub struct ImportedDocument {
     path: PathBuf,
+    /// The name the user picked the document by, when the host stores the
+    /// copy under a generated name. The path stays the only filesystem input.
+    picked_name: Option<String>,
     cleanup: Option<Box<dyn FnOnce(PathBuf) + Send>>,
 }
 impl ImportedDocument {
     pub fn source(path: PathBuf) -> Self {
         Self {
             path,
+            picked_name: None,
             cleanup: None,
         }
     }
     pub fn temporary(path: PathBuf, cleanup: impl FnOnce(PathBuf) + Send + 'static) -> Self {
         Self {
             path,
+            picked_name: None,
             cleanup: Some(Box::new(cleanup)),
         }
     }
+    /// Records the name the user picked the document by. Hosts store picked
+    /// copies under names they generate instead of trusting the provider's,
+    /// and pass the picker's name here. A name that is not a single valid file
+    /// name is ignored.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        if flectar_mail_core::files::validate_name(&name).is_ok() {
+            self.picked_name = Some(name);
+        }
+        self
+    }
     pub fn path(&self) -> &std::path::Path {
         &self.path
+    }
+    /// The document's name for the user, attachments, uploads and imports:
+    /// the picked name, or the stored file's own name.
+    pub fn name(&self) -> Option<String> {
+        self.picked_name.clone().or_else(|| {
+            self.path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
     }
 }
 impl Drop for ImportedDocument {
@@ -200,6 +225,27 @@ mod tests {
             std::fs::remove_file(path).unwrap();
             drops.fetch_add(1, Ordering::SeqCst);
         })
+    }
+
+    #[test]
+    fn picked_names_replace_the_stored_name() {
+        let path = PathBuf::from("/private/cache/import-random.pdf");
+        let document = ImportedDocument::source(path.clone()).with_name("Report 2026.pdf");
+        assert_eq!(document.path(), path);
+        assert_eq!(document.name().as_deref(), Some("Report 2026.pdf"));
+        assert_eq!(
+            ImportedDocument::source(path.clone()).name().as_deref(),
+            Some("import-random.pdf")
+        );
+        let long = "x".repeat(256);
+        for invalid in ["", ".", "..", "a/b", "a\\b", "line\nbreak", long.as_str()] {
+            let document = ImportedDocument::source(path.clone()).with_name(invalid);
+            assert_eq!(
+                document.name().as_deref(),
+                Some("import-random.pdf"),
+                "{invalid:?}"
+            );
+        }
     }
 
     #[tokio::test]

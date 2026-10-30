@@ -15,7 +15,7 @@ pub(crate) mod state;
 mod upload;
 mod write;
 
-pub use scan::{scan_files, scan_folder};
+pub use scan::{ChosenFile, scan_files, scan_folder};
 pub use write::{Destination, MailImportProgress, MailImportReport, MailImportRequest};
 
 use std::path::PathBuf;

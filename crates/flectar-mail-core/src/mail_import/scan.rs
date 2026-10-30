@@ -113,28 +113,45 @@ pub(crate) fn scan_archive(path: &Path, prefix: &str) -> Result<MailSource, Sour
     source(folders, Some(path.to_owned()))
 }
 
-/// Files chosen one by one: each mbox file is a folder, and single
-/// messages share one folder with no name, which the import names.
-pub fn scan_files(paths: &[PathBuf]) -> Result<MailSource, SourceError> {
-    let mut tree = Tree::Folder;
-    let mut folders = Vec::new();
-    let mut loose = Found::default();
-    for path in paths {
-        let location = Location::File(path.clone());
-        let head = tree.head(&location).map_err(unreadable)?;
-        let size = std::fs::metadata(path).map_err(unreadable)?.len();
+/// A file the user chose, by the name they chose it as. A host may store its
+/// copy of a picked file under a generated name, so the name is not taken
+/// from the path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChosenFile {
+    pub path: PathBuf,
+    pub name: String,
+}
+
+impl ChosenFile {
+    /// A file chosen where it is, known by its own name.
+    pub fn at(path: PathBuf) -> Self {
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
+        Self { path, name }
+    }
+}
+
+/// Files chosen one by one: each mbox file is a folder, and single
+/// messages share one folder with no name, which the import names.
+pub fn scan_files(files: &[ChosenFile]) -> Result<MailSource, SourceError> {
+    let mut tree = Tree::Folder;
+    let mut folders = Vec::new();
+    let mut loose = Found::default();
+    for file in files {
+        let location = Location::File(file.path.clone());
+        let head = tree.head(&location).map_err(unreadable)?;
+        let size = std::fs::metadata(&file.path).map_err(unreadable)?.len();
+        let name = file.name.as_str();
         if is_mbox(&head) {
             folders.push(Found {
-                name: strip_mbox_extension(&name).to_owned(),
+                name: strip_mbox_extension(name).to_owned(),
                 parts: vec![Part::Mbox(location)],
                 size,
                 children: Vec::new(),
             });
-        } else if has_extension(&name, "eml") || is_message(&head) {
+        } else if has_extension(name, "eml") || is_message(&head) {
             loose.parts.push(Part::Message(location));
             loose.size += size;
         } else {

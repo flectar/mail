@@ -144,6 +144,9 @@ impl FilesService {
         self.offline = false;
         Ok(())
     }
+    /// `local_name` is the name the user picked an upload by, which a host may
+    /// store under a generated name; it defaults to the local file's name.
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute(
         &mut self,
         core: &Core,
@@ -152,6 +155,7 @@ impl FilesService {
         b: &str,
         selected: i32,
         local_path: Option<PathBuf>,
+        local_name: Option<&str>,
     ) -> Result<Output> {
         // Mail metadata reads must remain responsive during a large remote
         // tree scan. They use Mail's own SQLite queue and do not touch file
@@ -403,8 +407,7 @@ impl FilesService {
                     tokio::fs::create_dir_all(&directory)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let destination =
-                        directory.join(source.file_name().ok_or("Invalid file name.")?);
+                    let destination = directory.join(upload_name(source, local_name)?);
                     files::save_cached_file(source, &destination)
                         .await
                         .map_err(|e| e.to_string())?;
@@ -1436,6 +1439,19 @@ fn safe_name(name: &str) -> String {
         "download".into()
     }
 }
+/// The name an upload is staged and sent under: the name the user picked the
+/// file by, or the local file's own name.
+fn upload_name<'a>(source: &'a Path, picked: Option<&'a str>) -> Result<&'a std::ffi::OsStr> {
+    match picked {
+        Some(name) => {
+            files::validate_name(name).map_err(|error| error.to_string())?;
+            Ok(std::ffi::OsStr::new(name))
+        }
+        None => source
+            .file_name()
+            .ok_or_else(|| "Invalid file name.".into()),
+    }
+}
 fn details(entry: &Entry) -> String {
     match entry {
         Entry::Attachment(a) => format!(
@@ -1467,5 +1483,22 @@ fn details(entry: &Entry) -> String {
                 .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
                 .unwrap_or_else(|| "No sharing details returned".into())
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uploads_keep_the_picked_name() {
+        let source = Path::new("/cache/imports/import-123.pdf");
+        assert_eq!(
+            upload_name(source, Some("Report 2026.pdf")).unwrap(),
+            "Report 2026.pdf"
+        );
+        assert_eq!(upload_name(source, None).unwrap(), "import-123.pdf");
+        assert!(upload_name(source, Some("../escape")).is_err());
+        assert!(upload_name(source, Some("")).is_err());
     }
 }

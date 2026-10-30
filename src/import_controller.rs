@@ -11,7 +11,8 @@
 use super::*;
 use crate::data_controller::{format_storage_size, restore_account_backup};
 use flectar_mail_core::mail_import::{
-    self, Destination, FolderKind, MailImportProgress, MailImportRequest, MailSource, SourceFolder,
+    self, ChosenFile, Destination, FolderKind, MailImportProgress, MailImportRequest, MailSource,
+    SourceFolder,
 };
 use flectar_mail_core::migration::{
     self, AccountImportReport, AccountPlan, MailStore, OtherEntryKind, PlanStatus, Severity,
@@ -849,20 +850,23 @@ fn refresh_accounts(
 }
 
 /// The name of a chosen file or folder, for the mail it holds. Files
-/// chosen together are named by their folder.
-fn source_label(paths: &[PathBuf]) -> String {
-    let path = match paths {
-        [path] => Some(path.as_path()),
-        // A phone copies each file into a folder of its own, which names
-        // nothing.
-        [first, rest @ ..] => first
+/// chosen together are named by their folder when they sit in it under their
+/// own names. A phone's copies, each in a folder of its own or under a
+/// generated name, name nothing.
+fn source_label(files: &[ChosenFile]) -> String {
+    let in_place =
+        |file: &ChosenFile| file.path.file_name() == Some(std::ffi::OsStr::new(&file.name));
+    match files {
+        [file] => file.name.clone(),
+        [first, rest @ ..] if files.iter().all(in_place) => first
+            .path
             .parent()
-            .filter(|parent| rest.iter().all(|path| path.parent() == Some(*parent))),
-        [] => None,
-    };
-    path.and_then(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default()
+            .filter(|parent| rest.iter().all(|file| file.path.parent() == Some(*parent)))
+            .and_then(|parent| parent.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
 }
 
 pub(super) fn register_import_callbacks(
@@ -1133,20 +1137,23 @@ pub(super) fn register_import_callbacks(
                     Ok(documents) if documents.is_empty() => {}
                     // Several files can only be mail.
                     Ok(documents) => {
-                        let paths = documents
+                        let files = documents
                             .iter()
-                            .map(|document| document.path().to_owned())
+                            .map(|document| ChosenFile {
+                                path: document.path().to_owned(),
+                                name: document.name().unwrap_or_default(),
+                            })
                             .collect::<Vec<_>>();
-                        let mut label = source_label(&paths);
+                        let mut label = source_label(&files);
                         if label.is_empty() {
                             label = translated(&app, &UiMessage::plain("Imported messages"))
                                 .to_string();
                         }
-                        let read: SourceReader = if paths.len() == 1 {
-                            let path = paths[0].clone();
-                            Box::new(move || migration::open(&path))
+                        let read: SourceReader = if files.len() == 1 {
+                            let file = files[0].clone();
+                            Box::new(move || migration::open_chosen(&file))
                         } else {
-                            Box::new(move || mail_import::scan_files(&paths).map(Source::Mail))
+                            Box::new(move || mail_import::scan_files(&files).map(Source::Mail))
                         };
                         inspect(read, label, documents);
                     }
@@ -1192,7 +1199,7 @@ pub(super) fn register_import_callbacks(
                 }
                 match picked {
                     Ok(Some(folder)) => {
-                        let label = source_label(std::slice::from_ref(&folder));
+                        let label = source_label(&[ChosenFile::at(folder.clone())]);
                         inspect(
                             Box::new(move || migration::open(&folder)),
                             label,
@@ -1691,22 +1698,39 @@ mod tests {
 
     #[test]
     fn mail_without_accounts_is_named_after_what_was_chosen() {
+        let chosen = |path: &str| ChosenFile::at(PathBuf::from(path));
         assert_eq!(
-            source_label(&[PathBuf::from("/home/me/Mail/Inbox.mbox")]),
+            source_label(&[chosen("/home/me/Mail/Inbox.mbox")]),
             "Inbox.mbox"
         );
         assert_eq!(
             source_label(&[
-                PathBuf::from("/home/me/Saved/a.eml"),
-                PathBuf::from("/home/me/Saved/b.eml"),
+                chosen("/home/me/Saved/a.eml"),
+                chosen("/home/me/Saved/b.eml")
             ]),
             "Saved"
         );
         // Copies a phone made each sit in a folder of their own.
         assert_eq!(
             source_label(&[
-                PathBuf::from("/cache/file-imports/0b7c/a.eml"),
-                PathBuf::from("/cache/file-imports/9f21/b.eml"),
+                chosen("/cache/file-imports/0b7c/a.eml"),
+                chosen("/cache/file-imports/9f21/b.eml"),
+            ]),
+            ""
+        );
+        // Or share one folder under generated names, and keep the picked ones.
+        let picked = |path: &str, name: &str| ChosenFile {
+            path: PathBuf::from(path),
+            name: name.into(),
+        };
+        assert_eq!(
+            source_label(&[picked("/cache/imports/import-0b7c.mbox", "Work.mbox")]),
+            "Work.mbox"
+        );
+        assert_eq!(
+            source_label(&[
+                picked("/cache/imports/import-0b7c.eml", "a.eml"),
+                picked("/cache/imports/import-9f21.eml", "b.eml"),
             ]),
             ""
         );
