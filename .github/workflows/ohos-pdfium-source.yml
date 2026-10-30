@@ -8,16 +8,6 @@ name: Build OHOS PDFium from source
 # as an artifact. No signing material or repository secrets are used.
 
 on:
-  # Temporary fork trigger. GitHub only registers workflow_dispatch workflows
-  # from the default branch; this lets the pinned source build run directly
-  # from the feature branch before it is promoted.
-  push:
-    branches:
-      - ohos-pdfium-source
-    paths:
-      - .github/workflows/ohos-pdfium-source.yml
-      - platform/ohos/scripts/build-pdfium-source.sh
-      - platform/ohos/patches/pdfium-*.patch
   workflow_dispatch:
     inputs:
       revision:
@@ -34,13 +24,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     env:
-      # push events have no workflow_dispatch inputs; keep the pinned default.
-      OHOS_PDFIUM_REVISION: ${{ inputs.revision || 'f2a7573b5fd1071f61388aeb642329006ae22153' }}
+      OHOS_PDFIUM_REVISION: ${{ inputs.revision }}
       OHOS_PDFIUM_SOURCE_DIR: ${{ github.workspace }}/.pdfium-src
       OHOS_PDFIUM_JOBS: "4"
       CARGO_NET_OFFLINE: "false"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Install build prerequisites
         run: |
@@ -64,9 +53,16 @@ jobs:
       - name: Install the public OHOS SDK
         id: sdk
         run: |
-          cd "$OHOS_PDFIUM_SOURCE_DIR"
-          bash ohos_sdk/.install
-          sdk_root="$OHOS_PDFIUM_SOURCE_DIR/ohos_sdk/openharmony"
+          sdk_dir="$OHOS_PDFIUM_SOURCE_DIR/ohos_sdk"
+          sdk_archive="$sdk_dir/ohos-sdk-windows_linux-public.tar.gz"
+          curl -fL --retry 3 \
+            "https://mirrors.huaweicloud.com/openharmony/os/5.1.0-Release/ohos-sdk-windows_linux-public.tar.gz" \
+            -o "$sdk_archive"
+          echo "8c1f97df34812e45fa4f0e3275987b261e80622abb7c51392bb063f853451344  $sdk_archive" \
+            | sha256sum -c -
+          cd "$sdk_dir"
+          bash .install
+          sdk_root="$sdk_dir/openharmony"
           test -d "$sdk_root/native/llvm"
           test -d "$sdk_root/native/sysroot"
           echo "OHOS_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
@@ -83,7 +79,7 @@ jobs:
           sha256sum platform/ohos/prebuilt/arm64/*.so > platform/ohos/prebuilt/SHA256SUMS
           cat platform/ohos/prebuilt/SHA256SUMS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ohos-pdfium-arm64-source
           path: |

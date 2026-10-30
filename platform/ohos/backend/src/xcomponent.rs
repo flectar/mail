@@ -351,7 +351,10 @@ unsafe extern "C" fn on_axis_event(
     }
     let scroll_step = unsafe { ffi::OH_ArkUI_AxisEvent_GetScrollStep(event) };
     let logical_per_axis_unit = if scroll_step > 0 {
-        LOGICAL_PX_PER_WHEEL_STEP / scroll_step as f32
+        // The wheel axis value already includes the user's scroll step; the
+        // standard notch is 15 degrees and should scroll 50 logical pixels.
+        // Do not divide by GetScrollStep, which cancels the system setting.
+        LOGICAL_PX_PER_WHEEL_STEP / 15.0
     } else {
         // Touchpad: the axis value is already a pixel delta.
         1.0

@@ -330,6 +330,16 @@ impl Presenter {
                 return PresentOutcome::Failed(-1);
             }
 
+            let row_bytes = width as usize * PIXEL_BYTES;
+            let stride = handle.stride as usize;
+            let last_row_end = (height as usize - 1)
+                .checked_mul(stride)
+                .and_then(|offset| offset.checked_add(row_bytes));
+            if stride < row_bytes || last_row_end.is_none_or(|end| end > handle.size as usize) {
+                let _ = ffi::OH_NativeWindow_NativeWindowAbortBuffer(self.window, buffer);
+                return PresentOutcome::Failed(-1);
+            }
+
             let length = handle.size as usize;
             let base = ffi::mmap(
                 null_mut(),
@@ -349,8 +359,6 @@ impl Presenter {
             // frames. The rasterization saved by partial repaint is what
             // matters; an 11 MB copy is a few milliseconds.
             let source = self.frame.as_ptr().cast::<u8>();
-            let row_bytes = width as usize * PIXEL_BYTES;
-            let stride = handle.stride as usize;
             let destination = base.cast::<u8>();
             if stride == row_bytes {
                 core::ptr::copy_nonoverlapping(source, destination, row_bytes * height as usize);
