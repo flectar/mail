@@ -16,19 +16,23 @@ pub(super) struct OhosDocuments;
 impl DocumentProvider for OhosDocuments {
     fn import(&self) -> DocumentFuture<Option<ImportedDocument>> {
         Box::pin(async {
-            let Some(path) = super::bridge::pick_open().await? else {
+            let Some(file) = super::bridge::pick_open().await? else {
                 return Ok(None);
             };
             // The page staged a copy in the app cache; deleting it once the
-            // core is done mirrors the Android provider.
-            let staged = PathBuf::from(path);
-            Ok(Some(ImportedDocument::temporary(staged, |path| {
-                if let Err(error) = std::fs::remove_file(&path) {
-                    slint_ohos_backend::ohos_info!(
-                        "mail: could not remove the imported copy: {error}"
-                    );
-                }
-            })))
+            // core is done mirrors the Android provider. The display name is
+            // metadata only; the staged path remains the filesystem input.
+            let staged = PathBuf::from(file.path);
+            Ok(Some(
+                ImportedDocument::temporary(staged, |path| {
+                    if let Err(error) = std::fs::remove_file(&path) {
+                        slint_ohos_backend::ohos_info!(
+                            "mail: could not remove the imported copy: {error}"
+                        );
+                    }
+                })
+                .with_name(file.name),
+            ))
         })
     }
 

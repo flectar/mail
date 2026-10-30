@@ -32,10 +32,15 @@ interface ImeCursor {
   height: number;
 }
 
+interface StagedFile {
+  path: string;
+  name: string;
+}
+
 // The exports of the native XComponent module (`onLoad` hands them over).
 interface FlectarNativeModule {
   setBridge?: (bridge: FlectarBridge) => void;
-  submitBridgeResult?: (requestId: number, path: string, error: string) => boolean;
+  submitBridgeResult?: (requestId: number, path: string, name: string, error: string) => boolean;
   imeCommit?: (text: string) => void;
   imeDelete?: (count: number) => void;
   imeFunction?: (key: number) => void;
@@ -207,8 +212,9 @@ struct Index {
     this.installClipboardListener();
   }
 
-  private reportBridgeResult(requestId: number, path: string, error: string): boolean {
-    return this.nativeModule?.submitBridgeResult?.(requestId, path, error) ?? false;
+  private reportBridgeResult(
+    requestId: number, path: string, error: string, name: string = ''): boolean {
+    return this.nativeModule?.submitBridgeResult?.(requestId, path, name, error) ?? false;
   }
 
   // The Slint thread must never read the pasteboard: a cross-device clipboard
@@ -284,10 +290,10 @@ struct Index {
       }
       const staged = await this.stageCopy(context, uris[0]);
       hilog.info(0x0000, LOG_TAG, 'picker imported a document (%{public}d picked)', uris.length);
-      if (!this.reportBridgeResult(requestId, staged, '')) {
+      if (!this.reportBridgeResult(requestId, staged.path, '', staged.name)) {
         // The native request timed out or was cancelled while the picker was
         // open; do not leave the staged copy behind.
-        fileIo.unlink(staged).catch((error: BusinessError): void => {
+        fileIo.unlink(staged.path).catch((error: BusinessError): void => {
           hilog.error(0x0000, LOG_TAG, 'could not remove the orphaned import: %{public}s',
             error.message);
         });
@@ -615,7 +621,7 @@ struct Index {
    * @throws { BusinessError } when the picked file cannot be opened or copied;
    * the caller reports it through the bridge result.
    */
-  private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<string> {
+  private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<StagedFile> {
     const directory = `${context.cacheDir}/imports`;
     try {
       await fileIo.mkdir(directory, true);
@@ -635,7 +641,18 @@ struct Index {
       // Never reuse the picked file name (or a predictable timestamp) in the
       // cache: it can leak the user's document name and collide with another
       // staged import. Keep only a short extension for content detection.
-      const raw = uri.split('/').pop() ?? '';
+      // The display name is a separate field; decode the URI basename so a
+      // Chinese or spaced filename is not shown as `%E8%AE%BE...`.
+      let raw = uri.split('/').pop() ?? '';
+      const query = raw.search(/[?#]/);
+      if (query >= 0) {
+        raw = raw.substring(0, query);
+      }
+      try {
+        raw = decodeURIComponent(raw);
+      } catch (error) {
+        // Keep the encoded name rather than failing the attachment import.
+      }
       const dot = raw.lastIndexOf('.');
       const extension = dot > 0
         ? raw.substring(dot).replace(/[^A-Za-z0-9.]/g, '').substring(0, 12)
@@ -650,7 +667,7 @@ struct Index {
       } finally {
         await fileIo.close(target);
       }
-      return destination;
+      return { path: destination, name: raw };
     } finally {
       await fileIo.close(source);
     }
