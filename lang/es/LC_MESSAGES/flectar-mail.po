@@ -386,7 +386,7 @@ msgstr "Historial de conversaciones disponible"
 msgid "New address-book entry"
 msgstr "Nueva entrada de contactos"
 
-#: ui/app.slint:178 ui/app.slint:1011 ui/components/composer-fields.slint:66
+#: ui/app.slint:178 ui/app.slint:1010 ui/components/composer-fields.slint:66
 #: ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr "No hay ninguna cuenta conectada"
@@ -1649,18 +1649,14 @@ msgid "Certificate import failed: {}"
 msgstr "Error al importar el certificado: {}"
 
 #: ui/app.slint:555
-msgid "Paste the PEM certificate into the certificate field."
-msgstr "Pega el certificado PEM en el campo del certificado."
-
-#: ui/app.slint:556
 msgid "Testing IMAP and SMTP connections…"
 msgstr "Comprobando las conexiones IMAP y SMTP…"
 
-#: ui/app.slint:557
+#: ui/app.slint:556
 msgid "Testing POP3 and SMTP connections…"
 msgstr "Comprobando las conexiones POP3 y SMTP…"
 
-#: ui/app.slint:562
+#: ui/app.slint:561
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
@@ -1668,150 +1664,150 @@ msgstr ""
 "Ya hay otra autorización del navegador en curso; termínala o selecciona "
 "Cancelar."
 
-#: ui/app.slint:563 ui/dialogs/settings-dialog.slint:1761
+#: ui/app.slint:562 ui/dialogs/settings-dialog.slint:1761
 #: ui/dialogs/settings-dialog.slint:1804 ui/views/onboarding-view.slint:161
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 "Añade claves de aplicación en los ajustes de inicio de sesión para habilitar "
 "este proveedor."
 
-#: ui/app.slint:564
+#: ui/app.slint:563
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Elige OAuth de Gmail o Outlook."
 
-#: ui/app.slint:565
+#: ui/app.slint:564
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 "Completa el inicio de sesión en el navegador o selecciona Cancelar aquí."
 
-#: ui/app.slint:566
+#: ui/app.slint:565
 msgid "Cancelling browser sign-in…"
 msgstr "Cancelando el inicio de sesión en el navegador…"
 
-#: ui/app.slint:567
+#: ui/app.slint:566
 msgid "Finishing browser sign-in…"
 msgstr "Finalizando el inicio de sesión en el navegador…"
 
-#: ui/app.slint:568
+#: ui/app.slint:567
 msgid "Could not use that browser address: {}"
 msgstr "No se pudo usar esa dirección del navegador: {}"
 
-#: ui/app.slint:569
+#: ui/app.slint:568
 msgid "Calendar core is unavailable."
 msgstr "El núcleo del calendario no está disponible."
 
-#: ui/app.slint:570
+#: ui/app.slint:569
 msgid "Account no longer exists."
 msgstr "La cuenta ya no existe."
 
-#: ui/app.slint:571
+#: ui/app.slint:570
 msgid "Authorize calendar access in your browser."
 msgstr "Autoriza el acceso al calendario en el navegador."
 
-#: ui/app.slint:572
+#: ui/app.slint:571
 msgid "OAuth app keys saved."
 msgstr "Claves de la aplicación OAuth guardadas."
 
-#: ui/app.slint:573
+#: ui/app.slint:572
 msgid "{} OAuth settings saved."
 msgstr "Ajustes de OAuth de {} guardados."
 
-#: ui/app.slint:574
+#: ui/app.slint:573
 msgid "OAuth settings failed: {}"
 msgstr "Fallaron los ajustes de OAuth: {}"
 
-#: ui/app.slint:575
+#: ui/app.slint:574
 msgid "Mail refresh failed: {}"
 msgstr "Falló la actualización del correo: {}"
 
-#: ui/app.slint:576
+#: ui/app.slint:575
 msgid "Mail filter failed: {}"
 msgstr "Falló el filtro de correo: {}"
 
-#: ui/app.slint:577
+#: ui/app.slint:576
 msgid "Mail pagination failed: {}"
 msgstr "Falló la paginación del correo: {}"
 
-#: ui/app.slint:578
+#: ui/app.slint:577
 msgid "Could not mark message as read: {}"
 msgstr "No se pudo marcar el mensaje como leído: {}"
 
-#: ui/app.slint:579 ui/views/mail-reading-pane.slint:196
+#: ui/app.slint:578 ui/views/mail-reading-pane.slint:196
 #: ui/views/mail-reading-pane.slint:1279
 msgid "Loading message…"
 msgstr "Cargando mensaje…"
 
-#: ui/app.slint:585 ui/components/workspace-navigation.slint:854
+#: ui/app.slint:584 ui/components/workspace-navigation.slint:854
 #: ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1233 ui/app.slint:1246
+#: ui/app.slint:1232 ui/app.slint:1245
 msgid "Global Labels (local only)"
 msgstr "Etiquetas globales (solo locales)"
 
-#: ui/app.slint:2156
+#: ui/app.slint:2155
 msgid "Empty Trash?"
 msgstr "¿Vaciar la papelera?"
 
-#: ui/app.slint:2156 ui/views/files-view.slint:541
+#: ui/app.slint:2155 ui/views/files-view.slint:541
 msgid "Delete permanently?"
 msgstr "¿Eliminar permanentemente?"
 
-#: ui/app.slint:2160
+#: ui/app.slint:2159
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 "¿Eliminar permanentemente todos los mensajes de la papelera de todas las "
 "cuentas conectadas?"
 
-#: ui/app.slint:2161
+#: ui/app.slint:2160
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 "¿Eliminar permanentemente todos los mensajes de la papelera de esta cuenta?"
 
-#: ui/app.slint:2163
+#: ui/app.slint:2162
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 "¿Eliminar permanentemente las conversaciones seleccionadas de la papelera?"
 
-#: ui/app.slint:2164
+#: ui/app.slint:2163
 msgid "Permanently delete this conversation from Trash?"
 msgstr "¿Eliminar permanentemente esta conversación de la papelera?"
 
-#: ui/app.slint:2165 ui/components/calendar.slint:942
+#: ui/app.slint:2164 ui/components/calendar.slint:942
 msgid "This action cannot be undone."
 msgstr "Esta acción no se puede deshacer."
 
-#: ui/app.slint:2166
+#: ui/app.slint:2165
 msgid "Empty Trash"
 msgstr "Vaciar la papelera"
 
-#: ui/app.slint:2166 ui/views/files-view.slint:623
+#: ui/app.slint:2165 ui/views/files-view.slint:623
 msgid "Delete permanently"
 msgstr "Eliminar permanentemente"
 
-#: ui/app.slint:2340
+#: ui/app.slint:2339
 msgid "Mailbox startup failed"
 msgstr "Error al iniciar el buzón"
 
-#: ui/app.slint:2346
+#: ui/app.slint:2345
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail no pudo abrir el almacenamiento local"
 
-#: ui/app.slint:2359
+#: ui/app.slint:2358
 msgid "Diagnostic ID: {}"
 msgstr "ID de diagnóstico: {}"
 
-#: ui/app.slint:2362
+#: ui/app.slint:2361
 msgid "Diagnostic ID {}"
 msgstr "ID de diagnóstico {}"
 
-#: ui/app.slint:2367
+#: ui/app.slint:2366
 msgid "Retry"
 msgstr "Reintentar"
 
-#: ui/app.slint:2375 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2374 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Copiar datos de diagnóstico"
 

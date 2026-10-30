@@ -384,7 +384,7 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:178 ui/app.slint:1011 ui/components/composer-fields.slint:66
+#: ui/app.slint:178 ui/app.slint:1010 ui/components/composer-fields.slint:66
 #: ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr ""
@@ -1600,160 +1600,156 @@ msgid "Certificate import failed: {}"
 msgstr ""
 
 #: ui/app.slint:555
-msgid "Paste the PEM certificate into the certificate field."
-msgstr ""
-
-#: ui/app.slint:556
 msgid "Testing IMAP and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:557
+#: ui/app.slint:556
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:562
+#: ui/app.slint:561
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr ""
 
-#: ui/app.slint:563 ui/dialogs/settings-dialog.slint:1761
+#: ui/app.slint:562 ui/dialogs/settings-dialog.slint:1761
 #: ui/dialogs/settings-dialog.slint:1804 ui/views/onboarding-view.slint:161
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr ""
 
-#: ui/app.slint:564
+#: ui/app.slint:563
 msgid "Choose Gmail or Outlook OAuth."
 msgstr ""
 
-#: ui/app.slint:565
+#: ui/app.slint:564
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr ""
 
-#: ui/app.slint:566
+#: ui/app.slint:565
 msgid "Cancelling browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:567
+#: ui/app.slint:566
 msgid "Finishing browser sign-in…"
 msgstr ""
 
-#: ui/app.slint:568
+#: ui/app.slint:567
 msgid "Could not use that browser address: {}"
 msgstr ""
 
-#: ui/app.slint:569
+#: ui/app.slint:568
 msgid "Calendar core is unavailable."
 msgstr ""
 
-#: ui/app.slint:570
+#: ui/app.slint:569
 msgid "Account no longer exists."
 msgstr ""
 
-#: ui/app.slint:571
+#: ui/app.slint:570
 msgid "Authorize calendar access in your browser."
 msgstr ""
 
-#: ui/app.slint:572
+#: ui/app.slint:571
 msgid "OAuth app keys saved."
 msgstr ""
 
-#: ui/app.slint:573
+#: ui/app.slint:572
 msgid "{} OAuth settings saved."
 msgstr ""
 
-#: ui/app.slint:574
+#: ui/app.slint:573
 msgid "OAuth settings failed: {}"
 msgstr ""
 
-#: ui/app.slint:575
+#: ui/app.slint:574
 msgid "Mail refresh failed: {}"
 msgstr ""
 
-#: ui/app.slint:576
+#: ui/app.slint:575
 msgid "Mail filter failed: {}"
 msgstr ""
 
-#: ui/app.slint:577
+#: ui/app.slint:576
 msgid "Mail pagination failed: {}"
 msgstr ""
 
-#: ui/app.slint:578
+#: ui/app.slint:577
 msgid "Could not mark message as read: {}"
 msgstr ""
 
-#: ui/app.slint:579 ui/views/mail-reading-pane.slint:196
+#: ui/app.slint:578 ui/views/mail-reading-pane.slint:196
 #: ui/views/mail-reading-pane.slint:1279
 msgid "Loading message…"
 msgstr ""
 
-#: ui/app.slint:585 ui/components/workspace-navigation.slint:854
+#: ui/app.slint:584 ui/components/workspace-navigation.slint:854
 #: ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1233 ui/app.slint:1246
+#: ui/app.slint:1232 ui/app.slint:1245
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2156
+#: ui/app.slint:2155
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2156 ui/views/files-view.slint:541
+#: ui/app.slint:2155 ui/views/files-view.slint:541
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2160
+#: ui/app.slint:2159
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2161
+#: ui/app.slint:2160
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2163
+#: ui/app.slint:2162
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2164
+#: ui/app.slint:2163
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2165 ui/components/calendar.slint:942
+#: ui/app.slint:2164 ui/components/calendar.slint:942
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2166
+#: ui/app.slint:2165
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2166 ui/views/files-view.slint:623
+#: ui/app.slint:2165 ui/views/files-view.slint:623
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2340
+#: ui/app.slint:2339
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2346
+#: ui/app.slint:2345
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2359
+#: ui/app.slint:2358
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2362
+#: ui/app.slint:2361
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2367
+#: ui/app.slint:2366
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2375 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2374 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 

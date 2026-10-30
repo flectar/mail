@@ -391,7 +391,7 @@ msgstr "Historique de conversation disponible"
 msgid "New address-book entry"
 msgstr "Nouvelle entrée dans le carnet d’adresses"
 
-#: ui/app.slint:178 ui/app.slint:1011 ui/components/composer-fields.slint:66
+#: ui/app.slint:178 ui/app.slint:1010 ui/components/composer-fields.slint:66
 #: ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr "Aucun compte connecté"
@@ -1866,19 +1866,14 @@ msgstr "Échec de l’importation du certificat : {}"
 
 #: ui/app.slint:555
 #, fuzzy
-msgid "Paste the PEM certificate into the certificate field."
-msgstr "Collez le certificat PEM dans le champ prévu à cet effet."
-
-#: ui/app.slint:556
-#, fuzzy
 msgid "Testing IMAP and SMTP connections…"
 msgstr "Test des connexions IMAP et SMTP…"
 
-#: ui/app.slint:557
+#: ui/app.slint:556
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:562
+#: ui/app.slint:561
 #, fuzzy
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
@@ -1887,7 +1882,7 @@ msgstr ""
 "Une autre autorisation via navigateur est déjà en cours ; terminez-la ou "
 "choisissez Annuler."
 
-#: ui/app.slint:563 ui/dialogs/settings-dialog.slint:1761
+#: ui/app.slint:562 ui/dialogs/settings-dialog.slint:1761
 #: ui/dialogs/settings-dialog.slint:1804 ui/views/onboarding-view.slint:161
 #, fuzzy
 msgid "Add app keys in Sign-in settings to enable this provider."
@@ -1895,109 +1890,109 @@ msgstr ""
 "Ajoutez les clés d’application dans les paramètres de connexion pour activer "
 "ce fournisseur."
 
-#: ui/app.slint:564
+#: ui/app.slint:563
 #, fuzzy
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "Choisissez l’authentification OAuth Gmail ou Outlook."
 
-#: ui/app.slint:565
+#: ui/app.slint:564
 #, fuzzy
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr "Terminez la connexion dans votre navigateur ou choisissez Annuler ici."
 
-#: ui/app.slint:566
+#: ui/app.slint:565
 #, fuzzy
 msgid "Cancelling browser sign-in…"
 msgstr "Annulation de la connexion via navigateur…"
 
-#: ui/app.slint:567
+#: ui/app.slint:566
 #, fuzzy
 msgid "Finishing browser sign-in…"
 msgstr "Finalisation de la connexion via navigateur…"
 
-#: ui/app.slint:568
+#: ui/app.slint:567
 #, fuzzy
 msgid "Could not use that browser address: {}"
 msgstr "Impossible d’utiliser cette adresse du navigateur : {}"
 
-#: ui/app.slint:569
+#: ui/app.slint:568
 #, fuzzy
 msgid "Calendar core is unavailable."
 msgstr "Le moteur de calendrier est indisponible."
 
-#: ui/app.slint:570
+#: ui/app.slint:569
 #, fuzzy
 msgid "Account no longer exists."
 msgstr "Le compte n’existe plus."
 
-#: ui/app.slint:571
+#: ui/app.slint:570
 #, fuzzy
 msgid "Authorize calendar access in your browser."
 msgstr "Autorisez l’accès au calendrier dans votre navigateur."
 
-#: ui/app.slint:572
+#: ui/app.slint:571
 #, fuzzy
 msgid "OAuth app keys saved."
 msgstr "Clés d’application OAuth enregistrées."
 
-#: ui/app.slint:573
+#: ui/app.slint:572
 #, fuzzy
 msgid "{} OAuth settings saved."
 msgstr "Paramètres OAuth de {} enregistrés."
 
-#: ui/app.slint:574
+#: ui/app.slint:573
 #, fuzzy
 msgid "OAuth settings failed: {}"
 msgstr "Échec des paramètres OAuth : {}"
 
-#: ui/app.slint:575
+#: ui/app.slint:574
 #, fuzzy
 msgid "Mail refresh failed: {}"
 msgstr "Échec de l’actualisation des messages : {}"
 
-#: ui/app.slint:576
+#: ui/app.slint:575
 #, fuzzy
 msgid "Mail filter failed: {}"
 msgstr "Échec du filtrage des messages : {}"
 
-#: ui/app.slint:577
+#: ui/app.slint:576
 #, fuzzy
 msgid "Mail pagination failed: {}"
 msgstr "Échec de la pagination des messages : {}"
 
-#: ui/app.slint:578
+#: ui/app.slint:577
 #, fuzzy
 msgid "Could not mark message as read: {}"
 msgstr "Impossible de marquer le message comme lu : {}"
 
-#: ui/app.slint:579 ui/views/mail-reading-pane.slint:196
+#: ui/app.slint:578 ui/views/mail-reading-pane.slint:196
 #: ui/views/mail-reading-pane.slint:1279
 #, fuzzy
 msgid "Loading message…"
 msgstr "Chargement du message…"
 
-#: ui/app.slint:585 ui/components/workspace-navigation.slint:854
+#: ui/app.slint:584 ui/components/workspace-navigation.slint:854
 #: ui/tray.slint:13 ui/tray.slint:14
 #, fuzzy
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1233 ui/app.slint:1246
+#: ui/app.slint:1232 ui/app.slint:1245
 #, fuzzy
 msgid "Global Labels (local only)"
 msgstr "Étiquettes globales (locales uniquement)"
 
-#: ui/app.slint:2156
+#: ui/app.slint:2155
 #, fuzzy
 msgid "Empty Trash?"
 msgstr "Vider la corbeille ?"
 
-#: ui/app.slint:2156 ui/views/files-view.slint:541
+#: ui/app.slint:2155 ui/views/files-view.slint:541
 #, fuzzy
 msgid "Delete permanently?"
 msgstr "Supprimer définitivement ?"
 
-#: ui/app.slint:2160
+#: ui/app.slint:2159
 #, fuzzy
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
@@ -2005,64 +2000,64 @@ msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de tous les "
 "comptes connectés ?"
 
-#: ui/app.slint:2161
+#: ui/app.slint:2160
 #, fuzzy
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de ce compte ?"
 
-#: ui/app.slint:2163
+#: ui/app.slint:2162
 #, fuzzy
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 "Supprimer définitivement les conversations sélectionnées dans la corbeille ?"
 
-#: ui/app.slint:2164
+#: ui/app.slint:2163
 #, fuzzy
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Supprimer définitivement cette conversation de la corbeille ?"
 
-#: ui/app.slint:2165 ui/components/calendar.slint:942
+#: ui/app.slint:2164 ui/components/calendar.slint:942
 #, fuzzy
 msgid "This action cannot be undone."
 msgstr "Cette action est irréversible."
 
-#: ui/app.slint:2166
+#: ui/app.slint:2165
 #, fuzzy
 msgid "Empty Trash"
 msgstr "Vider la corbeille"
 
-#: ui/app.slint:2166 ui/views/files-view.slint:623
+#: ui/app.slint:2165 ui/views/files-view.slint:623
 #, fuzzy
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: ui/app.slint:2340
+#: ui/app.slint:2339
 #, fuzzy
 msgid "Mailbox startup failed"
 msgstr "Échec de l’initialisation de la boîte aux lettres"
 
-#: ui/app.slint:2346
+#: ui/app.slint:2345
 #, fuzzy
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail n’a pas pu ouvrir le stockage local"
 
-#: ui/app.slint:2359
+#: ui/app.slint:2358
 #, fuzzy
 msgid "Diagnostic ID: {}"
 msgstr "Identifiant de diagnostic : {}"
 
-#: ui/app.slint:2362
+#: ui/app.slint:2361
 #, fuzzy
 msgid "Diagnostic ID {}"
 msgstr "Identifiant de diagnostic {}"
 
-#: ui/app.slint:2367
+#: ui/app.slint:2366
 #, fuzzy
 msgid "Retry"
 msgstr "Réessayer"
 
-#: ui/app.slint:2375 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2374 ui/components/copyable-diagnostic.slint:43
 #, fuzzy
 msgid "Copy diagnostics"
 msgstr "Copier le diagnostic"
