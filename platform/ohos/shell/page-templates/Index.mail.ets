@@ -18,6 +18,7 @@ const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
 interface FlectarBridge {
   openUrl: (url: string) => void;
   pickOpen: (requestId: number) => void;
+  pickOpenMany: (requestId: number, limit: number) => void;
   pickSave: (requestId: number, sourcePath: string, suggestedName: string) => void;
   showIme: (password: boolean) => void;
   imeUpdateCursor: (left: number, top: number, width: number, height: number) => void;
@@ -191,6 +192,9 @@ struct Index {
       pickOpen: (requestId: number): void => {
         this.pickOpen(requestId);
       },
+      pickOpenMany: (requestId: number, limit: number): void => {
+        this.pickOpenMany(requestId, limit);
+      },
       pickSave: (requestId: number, sourcePath: string, suggestedName: string): void => {
         this.pickSave(requestId, sourcePath, suggestedName);
       },
@@ -303,6 +307,45 @@ struct Index {
       hilog.error(0x0000, LOG_TAG, 'document picker failed: %{public}d %{public}s',
         failure.code, failure.message);
       this.reportBridgeResult(requestId, '', failure.message ?? 'document picker failed');
+    }
+  }
+
+  // Select several documents and stage each copy. The native side receives a
+  // JSON array only after every copy succeeds; the paths never leave the app.
+  private async pickOpenMany(requestId: number, limit: number): Promise<void> {
+    const staged: StagedFile[] = [];
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const viewPicker = new picker.DocumentViewPicker(context);
+      const options = new picker.DocumentSelectOptions();
+      options.maxSelectNumber = Math.max(1, Math.min(limit, 64));
+      const uris = await viewPicker.select(options);
+      if (uris.length === 0) {
+        this.reportBridgeResult(requestId, '', '');
+        return;
+      }
+      for (const uri of uris) {
+        staged.push(await this.stageCopy(context, uri));
+      }
+      const result = this.reportBridgeResult(requestId, JSON.stringify(staged), '');
+      if (!result) {
+        this.discardStaged(staged);
+      }
+    } catch (error) {
+      this.discardStaged(staged);
+      const failure = error as BusinessError;
+      hilog.error(0x0000, LOG_TAG, 'multi-document picker failed: %{public}d %{public}s',
+        failure.code, failure.message);
+      this.reportBridgeResult(requestId, '', failure.message ?? 'document picker failed');
+    }
+  }
+
+  private discardStaged(files: StagedFile[]): void {
+    for (const file of files) {
+      fileIo.unlink(file.path).catch((error: BusinessError): void => {
+        hilog.error(0x0000, LOG_TAG, 'could not remove the orphaned import: %{public}s',
+          error.message);
+      });
     }
   }
 

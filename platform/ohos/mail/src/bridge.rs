@@ -25,6 +25,7 @@ use tokio::sync::oneshot;
 /// Thread-safe handles to the ArkTS closures; `0` until installed.
 static OPEN_URL: AtomicUsize = AtomicUsize::new(0);
 static PICK_OPEN: AtomicUsize = AtomicUsize::new(0);
+static PICK_OPEN_MANY: AtomicUsize = AtomicUsize::new(0);
 static PICK_SAVE: AtomicUsize = AtomicUsize::new(0);
 static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
@@ -87,6 +88,13 @@ pub(super) unsafe extern "C" fn set_bridge(
         }
         install_property(env, argv[0], b"openUrl\0", &OPEN_URL, call_open_url);
         install_property(env, argv[0], b"pickOpen\0", &PICK_OPEN, call_pick_open);
+        install_property(
+            env,
+            argv[0],
+            b"pickOpenMany\0",
+            &PICK_OPEN_MANY,
+            call_pick_open_many,
+        );
         install_property(env, argv[0], b"pickSave\0", &PICK_SAVE, call_pick_save);
         install_property(env, argv[0], b"showIme\0", &SHOW_IME, call_bool_arg);
         install_property(env, argv[0], b"hideIme\0", &HIDE_IME, call_zero_arg);
@@ -216,6 +224,54 @@ pub(super) async fn pick_open() -> Result<Option<PickedFile>, String> {
     let (path, name) = await_result(receiver).await?;
     drop(guard);
     Ok((!path.is_empty()).then_some(PickedFile { path, name }))
+}
+
+/// Arguments of one multi-file picker request.
+struct OpenManyRequest {
+    id: i64,
+    limit: i64,
+}
+
+/// Run the system file picker for several documents. The ArkTS page serializes
+/// the staged files as `[{ "path": ..., "name": ... }]` in the normal bridge
+/// result, keeping the presentation hold and timeout behavior unchanged.
+pub(super) async fn pick_open_many(limit: usize) -> Result<Vec<PickedFile>, String> {
+    let (id, receiver) = register_picker()?;
+    let guard = PendingGuard(id);
+    call_closure(
+        &PICK_OPEN_MANY,
+        "pickOpenMany",
+        OpenManyRequest {
+            id,
+            limit: limit.clamp(1, 64) as i64,
+        },
+    )?;
+    let (json, _name) = await_result(receiver).await?;
+    drop(guard);
+    if json.is_empty() {
+        return Ok(Vec::new());
+    }
+    let values: Vec<serde_json::Value> = serde_json::from_str(&json)
+        .map_err(|error| format!("the file picker returned invalid metadata: {error}"))?;
+    let mut files = Vec::with_capacity(values.len());
+    for value in values {
+        let path = value
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if path.is_empty() {
+            continue;
+        }
+        let name = value
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        files.push(PickedFile {
+            path: path.to_owned(),
+            name: name.to_owned(),
+        });
+    }
+    Ok(files)
 }
 
 /// Ask the system file picker for a destination and copy `source_path` there.
@@ -553,6 +609,26 @@ unsafe extern "C" fn call_pick_open(
             return;
         };
         call_with_args(env, js_callback, &[argument], "pickOpen");
+    }
+}
+
+/// JS-thread half of [`pick_open_many`] (request id and selection limit).
+unsafe extern "C" fn call_pick_open_many(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `OpenManyRequest` boxed in `pick_open_many`; this
+    // callback owns it.
+    let request = unsafe { Box::from_raw(data.cast::<OpenManyRequest>()) };
+    // SAFETY: NAPI calls are made on the JS thread with live handles.
+    unsafe {
+        let (Some(id), Some(limit)) = (int_value(env, request.id), int_value(env, request.limit))
+        else {
+            return;
+        };
+        call_with_args(env, js_callback, &[id, limit], "pickOpenMany");
     }
 }
 
