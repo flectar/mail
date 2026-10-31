@@ -55,7 +55,10 @@ pub(crate) fn lower_current_thread_priority() {
 pub(crate) fn install_preview_lifecycle() {}
 
 /// Switching the home screen icon is a system API on OpenHarmony
-/// (`bundleManager.enableDynamicIcon`), so the choice applies inside the app.
+/// (`bundleManager.enableDynamicIcon`), so Settings does not offer the choice.
+pub(crate) const SWITCHES_APP_ICON: bool = false;
+
+/// Only the default icon reaches here; see [`SWITCHES_APP_ICON`].
 pub(crate) fn show_app_icon(_icon: AppIcon) {}
 
 /// Directory the email (Blitz/Parley) renderer loads fonts from. OpenHarmony

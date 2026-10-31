@@ -61,6 +61,9 @@ pub fn configure_launcher_icon(switch: impl Fn(&str) + Send + Sync + 'static) {
     let _ = LAUNCHER_ICON.set(Box::new(switch));
 }
 
+/// Android apps may switch their launcher icon, so Settings offers the choice.
+pub(crate) const SWITCHES_APP_ICON: bool = true;
+
 pub(crate) fn show_app_icon(icon: AppIcon) {
     if let Some(switch) = LAUNCHER_ICON.get() {
         switch(icon.as_str());

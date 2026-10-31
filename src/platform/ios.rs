@@ -73,6 +73,9 @@ pub(crate) fn install_preview_lifecycle() {
     unsafe { install_pdf_lifecycle_observers() }
 }
 
+/// iOS apps may switch to alternate icons, so Settings offers the choice.
+pub(crate) const SWITCHES_APP_ICON: bool = true;
+
 /// Show the alternate icon set declared in project.yml, or the primary icon.
 pub(crate) fn show_app_icon(icon: AppIcon) {
     let name: Option<&CStr> = match icon {
