@@ -28,10 +28,13 @@ impl ImportedDocument {
     }
     /// Records the name the user picked the document by. Hosts store picked
     /// copies under names they generate instead of trusting the provider's,
-    /// and pass the picker's name here. A name that is not a single valid file
-    /// name is ignored.
+    /// and pass the picker's name here. Slashes, backslashes and control
+    /// characters, which some cloud providers allow in names, become
+    /// underscores; a name that is still not a valid file name is ignored.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        let name = name.into();
+        let name = name
+            .into()
+            .replace(|c: char| c.is_control() || matches!(c, '/' | '\\'), "_");
         if flectar_mail_core::files::validate_name(&name).is_ok() {
             self.picked_name = Some(name);
         }
@@ -237,8 +240,16 @@ mod tests {
             ImportedDocument::source(path.clone()).name().as_deref(),
             Some("import-random.pdf")
         );
+        for (picked, kept) in [
+            ("Invoice 10/2026.pdf", "Invoice 10_2026.pdf"),
+            ("a\\b", "a_b"),
+            ("line\nbreak", "line_break"),
+        ] {
+            let document = ImportedDocument::source(path.clone()).with_name(picked);
+            assert_eq!(document.name().as_deref(), Some(kept), "{picked:?}");
+        }
         let long = "x".repeat(256);
-        for invalid in ["", ".", "..", "a/b", "a\\b", "line\nbreak", long.as_str()] {
+        for invalid in ["", ".", "..", long.as_str()] {
             let document = ImportedDocument::source(path.clone()).with_name(invalid);
             assert_eq!(
                 document.name().as_deref(),

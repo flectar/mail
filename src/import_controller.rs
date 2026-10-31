@@ -1710,27 +1710,20 @@ mod tests {
             ]),
             "Saved"
         );
-        // Copies a phone made each sit in a folder of their own.
-        assert_eq!(
-            source_label(&[
-                chosen("/cache/file-imports/0b7c/a.eml"),
-                chosen("/cache/file-imports/9f21/b.eml"),
-            ]),
-            ""
-        );
-        // Or share one folder under generated names, and keep the picked ones.
+        // Phones copy picked files into one folder under generated names, and
+        // keep the picked ones.
         let picked = |path: &str, name: &str| ChosenFile {
             path: PathBuf::from(path),
             name: name.into(),
         };
         assert_eq!(
-            source_label(&[picked("/cache/imports/import-0b7c.mbox", "Work.mbox")]),
+            source_label(&[picked("/cache/file-imports/0b7c", "Work.mbox")]),
             "Work.mbox"
         );
         assert_eq!(
             source_label(&[
-                picked("/cache/imports/import-0b7c.eml", "a.eml"),
-                picked("/cache/imports/import-9f21.eml", "b.eml"),
+                picked("/cache/file-imports/0b7c", "a.eml"),
+                picked("/cache/file-imports/9f21", "b.eml"),
             ]),
             ""
         );

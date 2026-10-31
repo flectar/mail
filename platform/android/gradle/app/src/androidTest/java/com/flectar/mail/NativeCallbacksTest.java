@@ -55,10 +55,12 @@ public final class NativeCallbacksTest {
     public void documentCallbacksResolve() throws Throwable {
         assertEquals(Boolean.FALSE, invoke("nativeDocumentRequestActive",
                 new Class<?>[]{long.class}, UNKNOWN_REQUEST));
-        invoke("nativeDocumentResult", new Class<?>[]{long.class, String.class, String.class},
-                UNKNOWN_REQUEST, "", "");
-        invoke("nativeDocumentsResult", new Class<?>[]{long.class, String[].class, String.class},
-                UNKNOWN_REQUEST, new String[0], "");
+        invoke("nativeDocumentResult",
+                new Class<?>[]{long.class, String.class, String.class, String.class},
+                UNKNOWN_REQUEST, "", "", "");
+        invoke("nativeDocumentsResult",
+                new Class<?>[]{long.class, String[].class, String[].class, String.class},
+                UNKNOWN_REQUEST, new String[0], new String[0], "");
     }
 
     @Test
