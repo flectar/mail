@@ -251,7 +251,13 @@ jobs:
         # from zbus 5. These are maintenance notices, not vulnerability waivers.
         # Deny every other warning and all known vulnerabilities.
         run: |
-          for lockfile in Cargo.lock platform/android/Cargo.lock; do
+          lockfiles="Cargo.lock platform/android/Cargo.lock"
+          # Tier 3 ports are audited daily and when their own workflow runs,
+          # not on pull requests (platform/README.md).
+          case "$GITHUB_EVENT_NAME" in
+            schedule | workflow_dispatch) lockfiles="$lockfiles platform/ohos/Cargo.lock" ;;
+          esac
+          for lockfile in $lockfiles; do
             cargo audit --file "$lockfile" --deny warnings \
               --ignore RUSTSEC-2025-0141 \
               --ignore RUSTSEC-2024-0436 \
