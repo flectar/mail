@@ -466,6 +466,16 @@ The older `0.1.0-alpha.7` RPM was built on Fedora 44 and cannot install on
 Fedora 43 because it requires glibc 2.43. Its Flatpak bundle is an alternative
 while waiting for an RPM release built with the compatibility checks above.
 
+On Linux, passwords, OAuth tokens, and API keys are kept in the system keyring
+through the freedesktop Secret Service, never in Flectar Mail's database. Any
+Secret Service provider works, on any desktop or window manager, sway included:
+GNOME Keyring, KWallet, or KeePassXC with its Secret Service integration turned
+on. The Flatpak uses the same keyring as the rest of your session. If the
+session has no default keyring yet, adding the first account asks the provider
+to create one, and the provider asks you to choose its password. Without a
+provider, adding an account stops with an error that says what is missing,
+because Flectar Mail never stores secrets anywhere less safe.
+
 Each GitHub release includes `SHA256SUMS` and signed build-provenance
 attestations. With GitHub CLI installed, verify a download with
 `gh attestation verify <download> --repo flectar/mail`.
@@ -496,12 +506,11 @@ You can also build Flectar Mail from source with the
 cargo run --bin flectar-mail
 ```
 
-Linux desktop OAuth uses the system browser through the desktop portal and
-stores refresh credentials through the freedesktop Secret Service. A normal
-desktop session therefore needs an `xdg-desktop-portal` backend and a Secret
-Service provider such as GNOME Keyring. Release builds stop before opening the
-OAuth page when secure credential storage is unavailable, so an authorization
-grant can never be completed without a safe place to persist it.
+Linux desktop OAuth also opens the system browser through the desktop portal,
+so the session needs an `xdg-desktop-portal` backend as well as the keyring
+described above. Release builds stop before opening the OAuth page when secure
+credential storage is unavailable, so an authorization grant can never be
+completed without a safe place to persist it.
 
 Podman and Docker development shells commonly have neither the host session
 D-Bus nor the host browser's loopback network. Debug builds support that setup

@@ -329,6 +329,8 @@ Das RPM richtet sich an Fedora 43 und 44 auf x86_64. Veröffentlichungs-Builds n
 
 Das ältere RPM `0.1.0-alpha.7` wurde auf Fedora 44 gebaut und lässt sich wegen seiner Anforderung an glibc 2.43 nicht auf Fedora 43 installieren. Das zugehörige Flatpak-Paket ist eine Alternative, bis ein RPM mit den genannten Kompatibilitätsprüfungen veröffentlicht wird.
 
+Unter Linux speichert Flectar Mail Passwörter, OAuth-Tokens und API-Schlüssel über freedesktop Secret Service im Schlüsselbund des Systems, nie in seiner Datenbank. Jeder Secret-Service-Anbieter funktioniert, unter jedem Desktop und jedem Fenstermanager, auch unter sway: GNOME Keyring, KWallet oder KeePassXC mit eingeschalteter Secret-Service-Integration. Das Flatpak nutzt denselben Schlüsselbund wie der Rest deiner Sitzung. Hat die Sitzung noch keinen Standard-Schlüsselbund, bittet Flectar Mail beim Hinzufügen des ersten Kontos den Anbieter, einen anzulegen, und der Anbieter lässt dich ein Passwort dafür festlegen. Ohne Anbieter bricht das Hinzufügen eines Kontos mit einer Fehlermeldung ab, die nennt, was fehlt, denn Flectar Mail legt Zugangsdaten nie an einem weniger sicheren Ort ab.
+
 Jede GitHub-Veröffentlichung enthält `SHA256SUMS` und signierte Nachweise zur Build-Herkunft. Mit installiertem GitHub CLI prüfst du einen Download über `gh attestation verify <download> --repo flectar/mail`.
 
 Ab alpha 8 verwenden Android-Alpha-, Beta-, Release-Candidate- und stabile Builds ein Paket (`com.flectar.mail`) und eine dauerhafte Signaturidentität. Spätere Versionen können die Anwendung aktualisieren und lokale Daten erhalten. Alpha 6 und alpha 7 nutzten andere Schlüssel und können nicht auf diese Signaturidentität aktualisiert werden.
@@ -345,7 +347,7 @@ Du kannst Flectar Mail auch mit der [Rust-Toolchain](https://rustup.rs/) aus dem
 cargo run --bin flectar-mail
 ```
 
-OAuth auf dem Linux-Desktop verwendet den Systembrowser über das Desktop-Portal und speichert Zugangsdaten zur Token-Erneuerung über freedesktop Secret Service. Eine normale Sitzung benötigt daher ein `xdg-desktop-portal`-Backend und einen Secret-Service-Anbieter wie GNOME Keyring. Ist kein sicherer Zugangsdaten-Speicher verfügbar, stoppen Veröffentlichungs-Builds vor dem Öffnen der OAuth-Seite, damit keine Autorisierung ohne sicheren Speicherort abgeschlossen wird.
+OAuth auf dem Linux-Desktop öffnet außerdem den Systembrowser über das Desktop-Portal, daher braucht die Sitzung neben dem oben beschriebenen Schlüsselbund ein `xdg-desktop-portal`-Backend. Ist kein sicherer Zugangsdaten-Speicher verfügbar, stoppen Veröffentlichungs-Builds vor dem Öffnen der OAuth-Seite, damit keine Autorisierung ohne sicheren Speicherort abgeschlossen wird.
 
 Podman- und Docker-Entwicklungsumgebungen haben häufig weder Zugriff auf den D-Bus der Host-Sitzung noch auf das Loopback-Netz des Host-Browsers. Debug-Builds unterstützen dies durch eine klar gekennzeichnete, nur für den Eigentümer zugängliche Entwicklungs-Zugangsdaten-Datei und einen aufklappbaren Bereich zum Einfügen der endgültigen Loopback-Rückruf-URL. Der dateibasierte Speicher ist aus Veröffentlichungs-Builds ausgeschlossen.
 

@@ -325,6 +325,8 @@ RPM 支持 x86_64 架构的 Fedora 43 和 44。发布构建以 Fedora 43 为兼�
 
 旧版 `0.1.0-alpha.7` RPM 在 Fedora 44 上构建，依赖 glibc 2.43，因此无法在 Fedora 43 上安装。在等待通过上述兼容性检查的新 RPM 发布期间，可以使用该版本的 Flatpak 包。
 
+在 Linux 上，密码、OAuth 令牌和 API 密钥通过 freedesktop Secret Service 保存在系统密钥环中，绝不会存入 Flectar Mail 的数据库。任何 Secret Service 提供程序都可以使用，适用于任何桌面环境或窗口管理器，包括 sway：GNOME Keyring、KWallet，或已开启 Secret Service 集成的 KeePassXC。Flatpak 版本与会话中的其他程序使用同一个密钥环。如果当前会话还没有默认密钥环，添加第一个账户时 Flectar Mail 会请提供程序创建一个，提供程序会让你为它设置密码。如果没有提供程序，添加账户会停止并显示错误，说明缺少什么，因为 Flectar Mail 绝不会把机密存放在不够安全的地方。
+
 每个 GitHub 发布版本都包含 `SHA256SUMS` 和已签名的构建来源证明。安装 GitHub CLI 后，可用 `gh attestation verify <download> --repo flectar/mail` 校验下载内容。
 
 Android APK 更新需要使用相同的签名密钥；未使用固定测试密钥的构建版本可能需要先卸载旧版应用，而卸载会删除本地应用数据。
@@ -335,7 +337,7 @@ Android APK 更新需要使用相同的签名密钥；未使用固定测试密�
 cargo run --bin flectar-mail
 ```
 
-Linux 桌面端的 OAuth 通过桌面门户（desktop portal）调用系统浏览器，并借助 freedesktop Secret Service 保存刷新凭证。因此，常规桌面会话需要 `xdg-desktop-portal` 后端，以及 GNOME Keyring 之类的 Secret Service 提供程序。当无法安全存储凭证时，发布版本会在打开 OAuth 页面之前中止；没有安全的持久化位置，授权流程就不可能完成。
+Linux 桌面端的 OAuth 还会通过桌面门户（desktop portal）调用系统浏览器，因此除了上文所述的密钥环，会话还需要 `xdg-desktop-portal` 后端。当无法安全存储凭证时，发布版本会在打开 OAuth 页面之前中止；没有安全的持久化位置，授权流程就不可能完成。
 
 Podman 和 Docker 开发环境通常既没有宿主会话的 D-Bus，也无法访问宿主浏览器的回环网络。调试构建支持这种环境：它提供标记明确、仅限所有者访问的开发凭证文件，以及用于粘贴最终回环回调 URL 的折叠面板。该文件后端不会包含在发布版本中。
 
