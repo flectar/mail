@@ -107,3 +107,12 @@ rustix = { version = "1", features = ["fs"] }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 dirs = "6"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }
+
+# This is `secret_service`. keyring reaches the Secret Service through this
+# client; the core uses it to create a missing default collection and to explain
+# keyring's errors.
+[target.'cfg(all(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")))'.dependencies]
+dbus-secret-service = "4"
+
+[target.'cfg(all(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")))'.dev-dependencies]
+dbus = "0.9"

@@ -5,6 +5,9 @@
 use super::{CredentialStore, Slot};
 use crate::error::{CoreError, Result};
 
+#[cfg(secret_service)]
+mod secret_service;
+
 const SERVICE: &str = "flectar-mail";
 #[cfg(any(test, debug_assertions))]
 const MAX_INSECURE_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
@@ -25,6 +28,28 @@ pub struct DevelopmentFileCredentialStore {
 impl DevelopmentFileCredentialStore {
     pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
         Self { path: path.into() }
+    }
+}
+
+impl From<keyring::Error> for CoreError {
+    fn from(error: keyring::Error) -> Self {
+        let (cause, fallback) = match &error {
+            keyring::Error::PlatformFailure(cause) => (
+                cause,
+                "the system keyring could not be reached; start or unlock it and try again",
+            ),
+            keyring::Error::NoStorageAccess(cause) => (
+                cause,
+                "the system keyring is locked or denied access; unlock it and try again",
+            ),
+            _ => return CoreError::Keyring(error.to_string()),
+        };
+        tracing::warn!(%error, "platform credential service is unavailable");
+        #[cfg(secret_service)]
+        if let Some(reason) = secret_service::unavailable_reason(cause.as_ref()) {
+            return CoreError::CredentialStoreUnavailable(reason);
+        }
+        CoreError::CredentialStoreUnavailable(format!("{fallback} ({cause})"))
     }
 }
 
@@ -482,6 +507,99 @@ impl CredentialStore for SystemCredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unusable_platform_storage_keeps_the_platform_error() {
+        let failure = keyring::Error::PlatformFailure(Box::new(std::io::Error::other("offline")));
+        assert_eq!(
+            CoreError::from(failure).to_string(),
+            "secure credential storage is unavailable: the system keyring could not be reached; \
+             start or unlock it and try again (offline)"
+        );
+        let denied = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("denied")));
+        assert_eq!(
+            CoreError::from(denied).to_string(),
+            "secure credential storage is unavailable: the system keyring is locked or denied \
+             access; unlock it and try again (denied)"
+        );
+        assert!(matches!(
+            CoreError::from(keyring::Error::NoEntry),
+            CoreError::Keyring(_)
+        ));
+    }
+
+    #[cfg(secret_service)]
+    #[test]
+    fn secret_service_failures_say_what_to_fix() {
+        use dbus_secret_service::Error;
+        let reason = |error: keyring::Error| match CoreError::from(error) {
+            CoreError::CredentialStoreUnavailable(reason) => reason,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        let bus = |name: &str, message: &str| {
+            keyring::Error::PlatformFailure(Box::new(Error::Dbus(dbus::Error::new_custom(
+                name, message,
+            ))))
+        };
+        let access = |error: Error| keyring::Error::NoStorageAccess(Box::new(error));
+
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.ServiceUnknown",
+                "The name org.freedesktop.secrets was not provided by any .service files"
+            )),
+            "no keyring service is running; install or start one that provides the Secret \
+             Service, such as GNOME Keyring, KWallet or KeePassXC, and try again \
+             (org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was \
+             not provided by any .service files)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.Spawn.ChildExited",
+                "Process org.freedesktop.secrets exited with status 1"
+            )),
+            "the keyring service failed to start (org.freedesktop.DBus.Error.Spawn.ChildExited: \
+             Process org.freedesktop.secrets exited with status 1)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.NameHasNoOwner",
+                "Could not activate remote peer 'org.freedesktop.secrets': unit failed"
+            )),
+            "the keyring service failed to start (org.freedesktop.DBus.Error.NameHasNoOwner: \
+             Could not activate remote peer 'org.freedesktop.secrets': unit failed)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.Secret.Error.IsLocked",
+                "Cannot create an item in a locked collection"
+            )),
+            "the keyring is locked; unlock it and try again \
+             (org.freedesktop.Secret.Error.IsLocked: Cannot create an item in a locked collection)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.NoReply",
+                "Did not receive a reply"
+            )),
+            "the keyring service failed (org.freedesktop.DBus.Error.NoReply: Did not receive a \
+             reply)"
+        );
+        assert_eq!(
+            reason(access(Error::Prompt)),
+            "the keyring prompt was dismissed or could not be shown; try again and unlock or \
+             create the keyring when asked"
+        );
+        assert_eq!(
+            reason(access(Error::NoResult)),
+            "the keyring service has no default keyring; choose one as the default in your \
+             keyring manager and try again"
+        );
+        assert_eq!(
+            reason(access(Error::Locked)),
+            "the keyring is locked; unlock it and try again"
+        );
+    }
 
     #[test]
     fn short_secret_is_one_chunk() {

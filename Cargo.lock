@@ -2226,6 +2226,8 @@ dependencies = [
  "candle-transformers",
  "cfg_aliases",
  "chrono",
+ "dbus",
+ "dbus-secret-service",
  "deunicode",
  "dirs",
  "encoding_rs",

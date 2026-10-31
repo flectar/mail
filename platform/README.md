@@ -26,6 +26,7 @@ these aliases with [`cfg_aliases`](https://crates.io/crates/cfg_aliases):
 | `linux_desktop` | A Linux desktop session (portals, X11/Wayland, Secret Service). Excludes OpenHarmony, which also reports `target_os = "linux"`. |
 | `glibc` | Linux with the GNU C library. |
 | `rename_noreplace` | Core only: kernels with an atomic no-replace directory rename. |
+| `secret_service` | Core only: desktops where `keyring` stores secrets through the freedesktop Secret Service (Linux, FreeBSD and OpenBSD, not OpenHarmony). |
 
 Use them like any other `cfg`: `#[cfg(desktop)]`, `cfg!(mobile)`.
 
