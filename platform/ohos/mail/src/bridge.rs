@@ -34,10 +34,13 @@ static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
 
+/// A picker's reported path and picked name, or why it failed.
+type PickerReply = Result<(String, String), String>;
+
 /// One open picker: where its result goes, and the hold that keeps the Slint
 /// thread from presenting while the picker covers the window.
 struct Pending {
-    sender: oneshot::Sender<Result<(String, String), String>>,
+    sender: oneshot::Sender<PickerReply>,
     _hold: PresentationHold,
 }
 
@@ -185,7 +188,7 @@ pub(super) fn open_url(url: &str) -> Result<(), String> {
 
 /// Registers a picker request. Its entry holds presentation until the page
 /// reports the result or the request is dropped, whichever thread awaits it.
-fn register_picker() -> Result<(i64, oneshot::Receiver<Result<(String, String), String>>), String> {
+fn register_picker() -> Result<(i64, oneshot::Receiver<PickerReply>), String> {
     let id = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
     let (sender, receiver) = oneshot::channel();
     let request = Pending {
@@ -249,9 +252,7 @@ struct SaveRequest {
     name: String,
 }
 
-async fn await_result(
-    receiver: oneshot::Receiver<Result<(String, String), String>>,
-) -> Result<(String, String), String> {
+async fn await_result(receiver: oneshot::Receiver<PickerReply>) -> PickerReply {
     match tokio::time::timeout(Duration::from_secs(600), receiver).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("the file picker was closed".to_owned()),
