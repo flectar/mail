@@ -195,17 +195,34 @@ impl DocumentProvider for AndroidDocuments {
         })
     }
 }
+/// The strings in a Java `String[]`.
+fn strings(env: &mut JNIEnv, array: &JObjectArray) -> jni::errors::Result<Vec<String>> {
+    let count = env.get_array_length(array)?;
+    let mut values = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
+    for index in 0..count {
+        let string = JString::from(env.get_object_array_element(array, index)?);
+        values.push(env.get_string(&string)?.to_string_lossy().into_owned());
+        // JNI guarantees room for only 16 local references.
+        env.delete_local_ref(string)?;
+    }
+    Ok(values)
+}
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentResult(
     mut env: JNIEnv,
     _class: JClass,
     id: jlong,
     path: JString,
+    name: JString,
     error: JString,
 ) {
     let path = env
         .get_string(&path)
         .map(|s| s.to_string_lossy().into_owned());
+    let name = env
+        .get_string(&name)
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let error = env
         .get_string(&error)
         .map(|s| s.to_string_lossy().into_owned());
@@ -216,6 +233,7 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentResul
             (Ok(p), Ok(e)) if e.is_empty() => Ok((!p.is_empty()).then(|| {
                 if importing {
                     ImportedDocument::temporary(PathBuf::from(p), AndroidDocuments::release)
+                        .with_name(name)
                 } else {
                     ImportedDocument::source(PathBuf::from(p))
                 }
@@ -236,17 +254,11 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentsResu
     _class: JClass,
     id: jlong,
     paths: JObjectArray,
+    names: JObjectArray,
     error: JString,
 ) {
-    let paths = (|| -> jni::errors::Result<Vec<String>> {
-        let count = env.get_array_length(&paths)?;
-        let mut strings = Vec::with_capacity(usize::try_from(count).unwrap_or(0));
-        for index in 0..count {
-            let path = JString::from(env.get_object_array_element(&paths, index)?);
-            strings.push(env.get_string(&path)?.to_string_lossy().into_owned());
-        }
-        Ok(strings)
-    })();
+    let paths = strings(&mut env, &paths);
+    let mut names = strings(&mut env, &names).unwrap_or_default().into_iter();
     let error = env
         .get_string(&error)
         .map(|s| s.to_string_lossy().into_owned());
@@ -254,7 +266,10 @@ pub extern "system" fn Java_com_flectar_mail_FlectarActivity_nativeDocumentsResu
     let documents = paths.map(|paths| {
         paths
             .into_iter()
-            .map(|path| ImportedDocument::temporary(PathBuf::from(path), AndroidDocuments::release))
+            .map(|path| {
+                ImportedDocument::temporary(PathBuf::from(path), AndroidDocuments::release)
+                    .with_name(names.next().unwrap_or_default())
+            })
             .collect::<Vec<_>>()
     });
     let result = match (documents, error) {

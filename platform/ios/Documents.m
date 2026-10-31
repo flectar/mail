@@ -1,8 +1,10 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 
-typedef void (*FlectarDocumentCallback)(long long, const char *, const char *);
-typedef void (*FlectarDocumentsCallback)(long long, const char *const *, unsigned long, const char *);
+// Imported copies take generated names. Each result carries the name the user
+// picked alongside, which Rust validates before using it.
+typedef void (*FlectarDocumentCallback)(long long, const char *, const char *, const char *);
+typedef void (*FlectarDocumentsCallback)(long long, const char *const *, const char *const *, unsigned long, const char *);
 // Accessed only on the main queue. The delegate survives picker dismissal
 // while a coordinated background import is still running.
 static NSMutableDictionary<NSNumber *, id> *requests;
@@ -37,30 +39,32 @@ static unsigned long long freeSpace(void) {
 @property(nonatomic, strong) UIDocumentPickerViewController *picker;
 @end
 
-// Copies the document at `url` into a folder of its own in the caches, in
-// no more than `limit` bytes. Returns the copy, or nil and the reason.
-static NSURL *copyDocument(FlectarDocumentDelegate *delegate, NSURL *url, unsigned long long limit, NSError **error) {
+// Copies the document at `url` into the caches under a generated name, in no
+// more than `limit` bytes. Returns the copy and the document's own name, or
+// nil and the reason.
+static NSURL *copyDocument(FlectarDocumentDelegate *delegate, NSURL *url, unsigned long long limit,
+                           NSString **name, NSError **error) {
     BOOL scoped = [url startAccessingSecurityScopedResource];
     __block NSError *readError = nil;
+    __block NSString *readName = nil;
     NSError *coordinationError = nil;
-    __block NSURL *destination = nil;
-    NSURL *folder = [[[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory
+    NSURL *folder = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory
                   inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"file-imports"
-                  isDirectory:YES] URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
+                  isDirectory:YES];
+    // The picked name never names a file here.
+    NSURL *destination = [folder URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
     NSFileCoordinator *coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
     [coordinator coordinateReadingItemAtURL:url options:0 error:&coordinationError
                                byAccessor:^(NSURL *readURL) {
         NSNumber *regular = nil;
         [readURL getResourceValue:&regular forKey:NSURLIsRegularFileKey error:&readError];
-        NSString *name = readURL.lastPathComponent;
         if (readError) return;
-        if (!regular.boolValue || name.length == 0 || [name isEqualToString:@"."] ||
-            [name isEqualToString:@".."] || [name containsString:@"/"] || [name containsString:@"\\"]) {
-            readError = documentError(@"Select a regular file with a valid name.");
+        if (!regular.boolValue) {
+            readError = documentError(@"Select a regular file.");
             return;
         }
         if (delegate.cancelled) { readError = documentError(@"Document transfer cancelled."); return; }
-        destination = [folder URLByAppendingPathComponent:name];
+        readName = readURL.lastPathComponent;
         [[NSFileManager defaultManager] createDirectoryAtURL:folder withIntermediateDirectories:YES
                                 attributes:@{NSFilePosixPermissions: @0700} error:&readError];
         if (readError) return;
@@ -102,32 +106,39 @@ static NSURL *copyDocument(FlectarDocumentDelegate *delegate, NSURL *url, unsign
     }];
     if (scoped) [url stopAccessingSecurityScopedResource];
     NSError *failure = coordinationError ?: readError;
-    if (failure || !destination) {
-        [[NSFileManager defaultManager] removeItemAtURL:folder error:nil];
+    if (failure || !readName) {
+        [[NSFileManager defaultManager] removeItemAtURL:destination error:nil];
         if (error) *error = failure ?: documentError(@"Could not read the document.");
         return nil;
     }
+    if (name) *name = readName;
     return destination;
 }
 
 @implementation FlectarDocumentDelegate
-- (void)finishPaths:(NSArray<NSString *> *)paths error:(NSString *)error {
+- (void)finishPaths:(NSArray<NSString *> *)paths names:(NSArray<NSString *> *)names error:(NSString *)error {
     if (self.finished) return;
     self.finished = YES;
     if (self.documentsCallback) {
         NSUInteger count = paths.count;
-        const char **strings = count ? (const char **)calloc(count, sizeof(const char *)) : NULL;
-        for (NSUInteger index = 0; index < count; index++) strings[index] = paths[index].UTF8String ?: "";
-        self.documentsCallback(self.requestId, strings, (unsigned long)count, error.UTF8String ?: "");
+        // The paths, then a name for each.
+        const char **strings = count ? (const char **)calloc(2 * count, sizeof(const char *)) : NULL;
+        for (NSUInteger index = 0; index < count; index++) {
+            strings[index] = paths[index].UTF8String ?: "";
+            strings[count + index] = index < names.count ? (names[index].UTF8String ?: "") : "";
+        }
+        self.documentsCallback(self.requestId, strings, strings ? strings + count : NULL, (unsigned long)count,
+                               error.UTF8String ?: "");
         free(strings);
     } else {
-        self.callback(self.requestId, paths.firstObject.UTF8String ?: "", error.UTF8String ?: "");
+        self.callback(self.requestId, paths.firstObject.UTF8String ?: "", names.firstObject.UTF8String ?: "",
+                      error.UTF8String ?: "");
     }
     [requests removeObjectForKey:@(self.requestId)];
     self.picker = nil;
 }
 - (void)finish:(NSString *)path error:(NSString *)error {
-    [self finishPaths:(path.length ? @[path] : @[]) error:error];
+    [self finishPaths:(path.length ? @[path] : @[]) names:@[] error:error];
 }
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     self.cancelled = YES;
@@ -148,6 +159,7 @@ static NSURL *copyDocument(FlectarDocumentDelegate *delegate, NSURL *url, unsign
     unsigned long long limit = self.documentsCallback ? ULLONG_MAX : singleDocumentLimit;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSMutableArray<NSURL *> *copies = [NSMutableArray array];
+        NSMutableArray<NSString *> *names = [NSMutableArray array];
         NSError *error = nil;
         // Sizes known beforehand are checked before anything is copied.
         unsigned long long known = 0;
@@ -165,21 +177,25 @@ static NSURL *copyDocument(FlectarDocumentDelegate *delegate, NSURL *url, unsign
         }
         for (NSURL *url in urls) {
             if (error) break;
-            NSURL *copy = copyDocument(self, url, limit, &error);
-            if (copy) [copies addObject:copy];
+            NSString *name = nil;
+            NSURL *copy = copyDocument(self, url, limit, &name, &error);
+            if (copy) {
+                [copies addObject:copy];
+                [names addObject:name ?: @""];
+            }
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error || self.cancelled || self.finished) {
                 for (NSURL *copy in copies) {
-                    [[NSFileManager defaultManager] removeItemAtURL:copy.URLByDeletingLastPathComponent error:nil];
+                    [[NSFileManager defaultManager] removeItemAtURL:copy error:nil];
                 }
-                [self finishPaths:@[] error:error.localizedDescription ?: @""];
+                [self finishPaths:@[] names:@[] error:error.localizedDescription ?: @""];
             } else {
                 NSMutableArray<NSString *> *paths = [NSMutableArray arrayWithCapacity:copies.count];
                 for (NSURL *copy in copies) [paths addObject:copy.path];
                 // Rust owns the copies from this callback, even if its
                 // receiver was cancelled immediately before delivery.
-                [self finishPaths:paths error:@""];
+                [self finishPaths:paths names:names error:@""];
             }
         });
     });
