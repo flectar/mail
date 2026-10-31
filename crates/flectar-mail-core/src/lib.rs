@@ -340,6 +340,32 @@ fn local_mail_has_no_server() -> CoreError {
     CoreError::Auth("mail kept on this device has no server to sign in to".into())
 }
 
+/// Apple answers a wrong password, a regular Apple password, or an alias
+/// username with a bare AUTHENTICATIONFAILED, which reads as a broken app.
+/// Point those users at the app-specific password and full-address username
+/// they actually need instead of the raw protocol rejection.
+fn explain_imap_sign_in(args: &AddPasswordAccountArgs, error: CoreError) -> CoreError {
+    let rejected = matches!(error, CoreError::Auth(_));
+    if !rejected || !is_apple_mailbox(&args.email, &args.incoming_host) {
+        return error;
+    }
+    CoreError::Auth(format!(
+        "sign-in was rejected ({error}). iCloud needs an app-specific password from your Apple Account settings, not your Apple password, with your full iCloud email address as the username."
+    ))
+}
+
+/// iCloud addresses (@icloud.com/@me.com/@mac.com) or Apple mail hosts.
+fn is_apple_mailbox(email: &str, host: &str) -> bool {
+    let domain = email
+        .rsplit_once('@')
+        .map(|(_, domain)| domain.to_ascii_lowercase());
+    if matches!(domain.as_deref(), Some("icloud.com" | "me.com" | "mac.com")) {
+        return true;
+    }
+    let host = host.to_ascii_lowercase();
+    host.contains("apple") || host.ends_with("mail.me.com")
+}
+
 /// Whether an account stored as `stored` takes the address `signed_in` that
 /// its provider reported for a sign-in. Google ignores dots in Gmail
 /// addresses and treats googlemail.com as gmail.com, so an imported login can
@@ -421,6 +447,72 @@ mod account_input_tests {
         assert_eq!(
             normalize_account_password("\r\n secret\nvalue \r\n".into()),
             " secretvalue "
+        );
+    }
+}
+
+#[cfg(test)]
+mod apple_sign_in_guidance_tests {
+    use super::{explain_imap_sign_in, is_apple_mailbox};
+    use crate::error::CoreError;
+    use crate::models::{
+        AddPasswordAccountArgs, ConnectionSecurity, MailConnectionSettings, MailProtocol,
+    };
+
+    fn args(email: &str, host: &str) -> AddPasswordAccountArgs {
+        AddPasswordAccountArgs {
+            email: email.into(),
+            display_name: None,
+            username: email.into(),
+            password: "secret".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            incoming_host: host.into(),
+            incoming_port: 993,
+            smtp_host: "smtp.mail.me.com".into(),
+            smtp_port: 587,
+            connection: MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Starttls,
+            ),
+        }
+    }
+
+    #[test]
+    fn apple_mailboxes_are_recognized_by_address_or_host() {
+        assert!(is_apple_mailbox("user@icloud.com", "imap.mail.me.com"));
+        assert!(is_apple_mailbox("user@me.com", "imap.example.com"));
+        assert!(is_apple_mailbox("user@mac.com", "imap.example.com"));
+        assert!(is_apple_mailbox("User@ICLOUD.COM", "imap.mail.me.com"));
+        assert!(is_apple_mailbox("user@example.com", "imap.mail.me.com"));
+        assert!(is_apple_mailbox("user@example.com", "apple-imap.example.com"));
+        assert!(!is_apple_mailbox("user@example.com", "imap.example.com"));
+        assert!(!is_apple_mailbox("user@noticloud.com", "imap.example.com"));
+    }
+
+    #[test]
+    fn apple_auth_rejection_names_the_app_specific_password() {
+        let message = explain_imap_sign_in(
+            &args("user@mac.com", "imap.mail.me.com"),
+            CoreError::Auth("imap login: no response".into()),
+        )
+        .to_string();
+        assert!(message.contains("app-specific password"), "{message}");
+        assert!(message.contains("full iCloud email address"), "{message}");
+        assert!(message.contains("imap login: no response"), "{message}");
+    }
+
+    #[test]
+    fn other_sign_in_failures_pass_through_untouched() {
+        let network = CoreError::Imap("connect fail".into());
+        assert_eq!(
+            explain_imap_sign_in(&args("user@mac.com", "imap.mail.me.com"), network).to_string(),
+            "imap error: connect fail"
+        );
+        let other = CoreError::Auth("imap login: no response".into());
+        assert_eq!(
+            explain_imap_sign_in(&args("user@example.com", "imap.example.com"), other).to_string(),
+            "auth failed: imap login: no response"
         );
     }
 }
@@ -1472,7 +1564,8 @@ impl Core {
             creds,
             &args.connection,
         )
-        .await?;
+        .await
+        .map_err(|error| explain_imap_sign_in(args, error))?;
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
         mailbox_result?;
