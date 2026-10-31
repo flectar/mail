@@ -58,6 +58,34 @@ fn entry(account_id: i64, slot: &Slot) -> Result<keyring::Entry> {
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
 }
 
+/// Store `secret` in `entry`. A Secret Service session without a default
+/// collection gets one first, as libsecret does.
+fn set_password(entry: &keyring::Entry, secret: &str) -> Result<()> {
+    let result = entry.set_password(secret);
+    #[cfg(secret_service)]
+    if result
+        .as_ref()
+        .is_err_and(secret_service::missing_default_collection)
+    {
+        secret_service::create_default_collection()?;
+        return entry.set_password(secret).map_err(Into::into);
+    }
+    result.map_err(Into::into)
+}
+
+/// Whether `error` means nothing is stored. When no item matches, keyring also
+/// searches the default collection for entries an older keyring wrote, and that
+/// fails in a session without one; libsecret reports a missing item there. Like
+/// libsecret, this trusts the provider's search, so a provider that hides its
+/// items while it has no default collection reads as empty.
+fn is_absent(error: &keyring::Error) -> bool {
+    #[cfg(secret_service)]
+    if secret_service::missing_default_collection(error) {
+        return true;
+    }
+    matches!(error, keyring::Error::NoEntry)
+}
+
 // Windows Credential Manager caps a credential blob at 2560 bytes
 // (CRED_MAX_CREDENTIAL_BLOB_SIZE) and the native store encodes secrets as
 // UTF-16, so ~1280 code units. Microsoft AAD refresh tokens routinely exceed
@@ -137,7 +165,7 @@ fn delete_chunks_from(account_id: i64, slot: &Slot, start: usize) -> Result<()> 
     for index in start..start + MAX_CHUNKS {
         match chunk_entry(account_id, slot, index)?.delete_credential() {
             Ok(()) => {}
-            Err(keyring::Error::NoEntry) => break,
+            Err(error) if is_absent(&error) => break,
             Err(error) => return Err(error.into()),
         }
     }
@@ -294,9 +322,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
     if chunks.len() <= 1 {
         // Replacing the primary entry commits the new value before stale
         // Windows chunks are cleaned up.
-        let result = entry(account_id, &slot)?
-            .set_password(secret)
-            .map_err(Into::into);
+        let result = set_password(&entry(account_id, &slot)?, secret);
         #[cfg(target_os = "windows")]
         if result.is_ok() {
             for cleanup in [
@@ -357,14 +383,13 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
         // MAX_SECRET_UTF16 is unlimited on this platform, so this is only
         // a defensive fallback for an impossible oversized branch.
         for (index, part) in chunks.iter().enumerate() {
-            chunk_entry(account_id, &slot, index)?
-                .set_password(part)
-                .map_err(CoreError::from)?;
+            set_password(&chunk_entry(account_id, &slot, index)?, part)?;
         }
         delete_chunks_from(account_id, &slot, chunks.len())?;
-        entry(account_id, &slot)?
-            .set_password(&format!("{CHUNK_MARKER}{}", chunks.len()))
-            .map_err(Into::into)
+        set_password(
+            &entry(account_id, &slot)?,
+            &format!("{CHUNK_MARKER}{}", chunks.len()),
+        )
     }
 }
 
@@ -385,7 +410,7 @@ fn system_load(account_id: i64, slot: Slot) -> Result<String> {
 fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
     let head = match entry(account_id, slot)?.get_password() {
         Ok(secret) => secret,
-        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(error) if is_absent(&error) => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     if let Some((generation, count)) = parse_generation_chunk_header(&head)? {
@@ -426,7 +451,7 @@ fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
         let chunk = chunk_entry(account_id, slot, index)?;
         match chunk.get_password() {
             Ok(s) => out.push_str(&s),
-            Err(keyring::Error::NoEntry) => {
+            Err(e) if is_absent(&e) => {
                 return Err(CoreError::Auth("no stored credential".into()));
             }
             Err(e) => return Err(e.into()),
@@ -474,7 +499,8 @@ fn system_delete(account_id: i64, slot: Slot) -> Result<()> {
         return file_save(&path, &map);
     }
     match entry(account_id, &slot)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Ok(()) => {}
+        Err(error) if is_absent(&error) => {}
         Err(error) => return Err(error.into()),
     }
     #[cfg(target_os = "windows")]
@@ -599,6 +625,22 @@ mod tests {
             reason(access(Error::Locked)),
             "the keyring is locked; unlock it and try again"
         );
+    }
+
+    #[cfg(secret_service)]
+    #[test]
+    fn a_session_without_a_default_collection_stores_nothing() {
+        use dbus_secret_service::Error;
+        assert!(is_absent(&keyring::Error::NoEntry));
+        assert!(is_absent(&keyring::Error::NoStorageAccess(Box::new(
+            Error::NoResult
+        ))));
+        assert!(!is_absent(&keyring::Error::NoStorageAccess(Box::new(
+            Error::Prompt
+        ))));
+        assert!(!is_absent(&keyring::Error::PlatformFailure(Box::new(
+            Error::NoResult
+        ))));
     }
 
     #[test]
