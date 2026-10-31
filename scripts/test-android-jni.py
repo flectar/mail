@@ -6,6 +6,7 @@ The fixture functions test symbol visibility only, not the callbacks' ABI.
 """
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,6 +36,15 @@ class JniExportsTests(unittest.TestCase):
         subprocess.run(command + [str(source), "-o", str(library)],
                        check=True, capture_output=True, text=True)
         return library.read_bytes()
+
+    def test_every_native_declaration_is_required(self):
+        activity = (Path(__file__).resolve().parents[1] / "platform/android/gradle/app/src/main"
+                    / "java/com/flectar/mail/FlectarActivity.java")
+        declared = set(re.findall(r"\bnative\s+\w+\s+(\w+)\s*\(", activity.read_text()))
+        prefix = "Java_com_flectar_mail_FlectarActivity_"
+        required = {name.removeprefix(prefix) for name in native.REQUIRED_EXPORTS
+                    if name.startswith(prefix)}
+        self.assertEqual(declared, required)
 
     def test_release_stripping_preserves_required_dynamic_exports(self):
         with tempfile.TemporaryDirectory() as directory:
