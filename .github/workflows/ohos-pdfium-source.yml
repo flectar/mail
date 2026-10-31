@@ -1,0 +1,91 @@
+name: Build OHOS PDFium from source
+
+# Fork-only, manually dispatched build for the OHOS PDFium source port.
+# This job intentionally runs on a Linux x86_64 GitHub-hosted runner: Chromium's
+# bundled GN/Ninja are linux64 binaries and cannot execute on the OHOS device.
+# It downloads the public OHOS SDK at build time (the SDK is not committed),
+# builds the pinned PDFium source revision, strips the library and uploads it
+# as an artifact. No signing material or repository secrets are used.
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: OHOS PDFium source revision
+        type: string
+        default: f2a7573b5fd1071f61388aeb642329006ae22153
+
+permissions:
+  contents: read
+
+jobs:
+  pdfium:
+    name: PDFium arm64 source build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    env:
+      OHOS_PDFIUM_REVISION: ${{ inputs.revision }}
+      OHOS_PDFIUM_SOURCE_DIR: ${{ github.workspace }}/.pdfium-src
+      OHOS_PDFIUM_JOBS: "4"
+      CARGO_NET_OFFLINE: "false"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang lld ninja-build pkg-config \
+            python3 python3-pip git curl unzip zip \
+            libglib2.0-dev libfontconfig1-dev libfreetype6-dev \
+            libjpeg-dev libpng-dev libtiff-dev libwebp-dev
+
+      - name: Clone the pinned OHOS PDFium source
+        run: |
+          git clone --filter=blob:none \
+            https://gitcode.com/OpenHarmonyPCDeveloper/pdfium.git \
+            "$OHOS_PDFIUM_SOURCE_DIR"
+          cd "$OHOS_PDFIUM_SOURCE_DIR"
+          git fetch --depth 1 origin "$OHOS_PDFIUM_REVISION"
+          git checkout --detach "$OHOS_PDFIUM_REVISION"
+          test "$(git rev-parse HEAD)" = "$OHOS_PDFIUM_REVISION"
+
+      - name: Install the public OHOS SDK
+        id: sdk
+        run: |
+          sdk_dir="$OHOS_PDFIUM_SOURCE_DIR/ohos_sdk"
+          sdk_archive="$sdk_dir/ohos-sdk-windows_linux-public.tar.gz"
+          curl -fL --retry 3 \
+            "https://mirrors.huaweicloud.com/openharmony/os/5.1.0-Release/ohos-sdk-windows_linux-public.tar.gz" \
+            -o "$sdk_archive"
+          echo "8c1f97df34812e45fa4f0e3275987b261e80622abb7c51392bb063f853451344  $sdk_archive" \
+            | sha256sum -c -
+          cd "$sdk_dir"
+          bash .install
+          sdk_root="$sdk_dir/openharmony"
+          test -d "$sdk_root/native/llvm"
+          test -d "$sdk_root/native/sysroot"
+          echo "OHOS_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "OHOS_SDK_NATIVE=$sdk_root/native" >> "$GITHUB_ENV"
+
+      - name: Build PDFium
+        run: |
+          bash platform/ohos/scripts/build-pdfium-source.sh
+
+      - name: Verify and checksum the artifact
+        run: |
+          test -s platform/ohos/prebuilt/arm64/libpdfium.so
+          file platform/ohos/prebuilt/arm64/libpdfium.so
+          sha256sum platform/ohos/prebuilt/arm64/*.so > platform/ohos/prebuilt/SHA256SUMS
+          cat platform/ohos/prebuilt/SHA256SUMS
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ohos-pdfium-arm64-source
+          path: |
+            platform/ohos/prebuilt/arm64/*.so
+            platform/ohos/prebuilt/SHA256SUMS
+            platform/ohos/prebuilt/PDFium-LICENSE
+            platform/ohos/prebuilt/README.md
+          if-no-files-found: error
+          retention-days: 14

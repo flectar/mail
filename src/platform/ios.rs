@@ -73,6 +73,9 @@ pub(crate) fn install_preview_lifecycle() {
     unsafe { install_pdf_lifecycle_observers() }
 }
 
+/// iOS apps may switch to alternate icons, so Settings offers the choice.
+pub(crate) const SWITCHES_APP_ICON: bool = true;
+
 /// Show the alternate icon set declared in project.yml, or the primary icon.
 pub(crate) fn show_app_icon(icon: AppIcon) {
     let name: Option<&CStr> = match icon {
@@ -86,4 +89,9 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
     // SAFETY: AppIcon.m copies the NUL-terminated name, or takes NULL for the
     // primary icon, before returning.
     unsafe { flectar_set_app_icon(name.map_or(std::ptr::null(), CStr::as_ptr)) }
+}
+
+/// iOS reaches system fonts through the fontique system backend.
+pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+    None
 }

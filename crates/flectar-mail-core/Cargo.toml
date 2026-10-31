@@ -104,6 +104,6 @@ rustix = { version = "1", features = ["fs"] }
 
 # This is `desktop`. Mobile hosts inject their storage paths and a
 # platform-owned credential store instead.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 dirs = "6"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }

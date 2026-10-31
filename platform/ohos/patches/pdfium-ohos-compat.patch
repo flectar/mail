@@ -1,0 +1,358 @@
+diff --git a/BUILD.gn b/BUILD.gn
+index cb1da47df..70bbfb881 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -343,6 +343,7 @@ group("pdfium_public_headers") {
+ 
+ component("pdfium") {
+   output_name = "pdfium"
++  sources = [ "fpdfsdk/fpdf_ohos_compat.cpp" ]
+   libs = []
+   configs += [ ":pdfium_strict_config" ]
+   public_configs = [ ":pdfium_public_config" ]
+diff --git a/fpdfsdk/fpdf_ohos_compat.cpp b/fpdfsdk/fpdf_ohos_compat.cpp
+new file mode 100644
+index 000000000..2beb48331
+--- /dev/null
++++ b/fpdfsdk/fpdf_ohos_compat.cpp
+@@ -0,0 +1,340 @@
++// Copyright 2026 Flectar Mail contributors.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++//
++// Compatibility entry points for pdfium-render 0.9.4. The pinned OHOS PDFium
++// source keeps the implementations under different/removed public names, but
++// the Rust dynamic bindings require these symbols to exist at load time.
++// They are optional APIs for the preview path; unsupported operations return
++// the documented empty/error values rather than failing the whole library load.
++
++#define FPDF_IMPLEMENTATION
++
++#include <cstddef>
++#include <cstdint>
++
++#include "public/fpdf_annot.h"
++#include "public/fpdf_attachment.h"
++#include "public/fpdf_catalog.h"
++#include "public/fpdf_edit.h"
++#include "public/fpdf_formfill.h"
++#include "public/fpdf_structtree.h"
++#include "public/fpdf_sysfontinfo.h"
++#include "public/fpdf_text.h"
++#include "public/fpdfview.h"
++
++// Present in the PDFium API version consumed by pdfium-render 0.9.4, but no
++// longer declared by this OHOS source revision.
++typedef const struct fpdf_structelement_attr_value_t__*
++    FPDF_STRUCTELEMENT_ATTR_VALUE;
++
++extern "C" {
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDF_GetDocUserPermissions(FPDF_DOCUMENT document) {
++  return FPDF_GetDocPermissions(document);
++}
++
++FPDF_EXPORT FPDF_PAGEOBJECT FPDF_CALLCONV
++FPDFText_GetTextObject(FPDF_TEXTPAGE text_page, int index) {
++  (void)text_page;
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDFText_IsHyphen(FPDF_TEXTPAGE text_page, int index) {
++  (void)text_page;
++  (void)index;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_FONT FPDF_CALLCONV
++FPDFText_LoadCidType2Font(FPDF_DOCUMENT document,
++                          const uint8_t* font_data,
++                          uint32_t font_data_size,
++                          FPDF_BYTESTRING to_unicode_cmap,
++                          const uint8_t* cid_to_gid_map_data,
++                          uint32_t cid_to_gid_map_data_size) {
++  (void)document;
++  (void)font_data;
++  (void)font_data_size;
++  (void)to_unicode_cmap;
++  (void)cid_to_gid_map_data;
++  (void)cid_to_gid_map_data_size;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFText_SetPositions(FPDF_PAGEOBJECT text_object,
++                      const float* positions,
++                      size_t count) {
++  (void)text_object;
++  (void)positions;
++  (void)count;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV FPDF_GetDefaultTTFMapCount() {
++  return 0;
++}
++
++FPDF_EXPORT const FPDF_CharsetFontMap* FPDF_CALLCONV
++FPDF_GetDefaultTTFMapEntry(size_t index) {
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDF_MovePages(FPDF_DOCUMENT document,
++               const int* page_indices,
++               unsigned long page_indices_len,
++               int dest_page_index) {
++  (void)document;
++  (void)page_indices;
++  (void)page_indices_len;
++  (void)dest_page_index;
++  return 0;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDF_StructElement_Attr_CountChildren(FPDF_STRUCTELEMENT_ATTR_VALUE value) {
++  (void)value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_STRUCTELEMENT_ATTR_VALUE FPDF_CALLCONV
++FPDF_StructElement_Attr_GetChildAtIndex(FPDF_STRUCTELEMENT_ATTR_VALUE value,
++                                        int index) {
++  (void)value;
++  (void)index;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_STRUCTELEMENT_ATTR_VALUE FPDF_CALLCONV
++FPDF_StructElement_Attr_GetValue(FPDF_STRUCTELEMENT_ATTR struct_attribute,
++                                 FPDF_BYTESTRING name) {
++  (void)struct_attribute;
++  (void)name;
++  return nullptr;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDF_StructElement_GetChildMarkedContentID(FPDF_STRUCTELEMENT struct_element,
++                                           int index) {
++  (void)struct_element;
++  (void)index;
++  return -1;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDF_StructElement_GetExpansion(FPDF_STRUCTELEMENT struct_element,
++                                void* buffer,
++                                unsigned long buflen) {
++  (void)struct_element;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++
++// Experimental/optional PDFium APIs that were removed from the pinned source
++// revision but are part of the dynamic binding set in pdfium-render 0.9.4.
++// The preview path does not use annotation, catalog, font-name or page-edit
++// operations; return the documented empty/error result.
++
++FPDF_EXPORT FPDF_ATTACHMENT FPDF_CALLCONV
++FPDFAnnot_AddFileAttachment(FPDF_ANNOTATION annot, FPDF_WIDESTRING name) {
++  (void)annot;
++  (void)name;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_ATTACHMENT FPDF_CALLCONV
++FPDFAnnot_GetFileAttachment(FPDF_ANNOTATION annot) {
++  (void)annot;
++  return nullptr;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_GetFontColor(FPDF_FORMHANDLE hHandle,
++                       FPDF_ANNOTATION annot,
++                       unsigned int* R,
++                       unsigned int* G,
++                       unsigned int* B) {
++  (void)hHandle;
++  (void)annot;
++  (void)R;
++  (void)G;
++  (void)B;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_SetFontColor(FPDF_FORMHANDLE handle,
++                       FPDF_ANNOTATION annot,
++                       unsigned int R,
++                       unsigned int G,
++                       unsigned int B) {
++  (void)handle;
++  (void)annot;
++  (void)R;
++  (void)G;
++  (void)B;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFAnnot_SetFormFieldFlags(FPDF_FORMHANDLE handle,
++                            FPDF_ANNOTATION annot,
++                            int flags) {
++  (void)handle;
++  (void)annot;
++  (void)flags;
++  return 0;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDFAttachment_GetSubtype(FPDF_ATTACHMENT attachment,
++                          FPDF_WCHAR* buffer,
++                          unsigned long buflen) {
++  (void)attachment;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++FPDF_EXPORT unsigned long FPDF_CALLCONV
++FPDFCatalog_GetLanguage(FPDF_DOCUMENT document,
++                        FPDF_WCHAR* buffer,
++                        unsigned long buflen) {
++  (void)document;
++  (void)buffer;
++  (void)buflen;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFCatalog_SetLanguage(FPDF_DOCUMENT document, FPDF_WIDESTRING language) {
++  (void)document;
++  (void)language;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV
++FPDFFont_GetBaseFontName(FPDF_FONT font, char* buffer, size_t length) {
++  (void)font;
++  (void)buffer;
++  (void)length;
++  return 0;
++}
++
++FPDF_EXPORT size_t FPDF_CALLCONV
++FPDFFont_GetFamilyName(FPDF_FONT font, char* buffer, size_t length) {
++  (void)font;
++  (void)buffer;
++  (void)length;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFFormObj_RemoveObject(FPDF_PAGEOBJECT form_object,
++                         FPDF_PAGEOBJECT page_object) {
++  (void)form_object;
++  (void)page_object;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFImageObj_GetIccProfileDataDecoded(FPDF_PAGEOBJECT image_object,
++                                      FPDF_PAGE page,
++                                      uint8_t* buffer,
++                                      size_t buflen,
++                                      size_t* out_buflen) {
++  (void)image_object;
++  (void)page;
++  (void)buffer;
++  (void)buflen;
++  if (out_buflen != nullptr) {
++    *out_buflen = 0;
++  }
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObjMark_GetParamFloatValue(FPDF_PAGEOBJECTMARK mark,
++                                   FPDF_BYTESTRING key,
++                                   float* out_value) {
++  (void)mark;
++  (void)key;
++  (void)out_value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObjMark_SetFloatParam(FPDF_DOCUMENT document,
++                              FPDF_PAGEOBJECT page_object,
++                              FPDF_PAGEOBJECTMARK mark,
++                              FPDF_BYTESTRING key,
++                              float value) {
++  (void)document;
++  (void)page_object;
++  (void)mark;
++  (void)key;
++  (void)value;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_AddExistingMark(FPDF_PAGEOBJECT page_object,
++                            FPDF_PAGEOBJECTMARK mark) {
++  (void)page_object;
++  (void)mark;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_GetIsActive(FPDF_PAGEOBJECT page_object, FPDF_BOOL* active) {
++  (void)page_object;
++  (void)active;
++  return 0;
++}
++
++FPDF_EXPORT int FPDF_CALLCONV
++FPDFPageObj_GetMarkedContentID(FPDF_PAGEOBJECT page_object) {
++  (void)page_object;
++  return -1;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_SetIsActive(FPDF_PAGEOBJECT page_object, FPDF_BOOL active) {
++  (void)page_object;
++  (void)active;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPageObj_TransformF(FPDF_PAGEOBJECT page_object, const FS_MATRIX* matrix) {
++  (void)page_object;
++  (void)matrix;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFPage_InsertObjectAtIndex(FPDF_PAGE page,
++                             FPDF_PAGEOBJECT page_object,
++                             size_t index) {
++  (void)page;
++  (void)page_object;
++  (void)index;
++  return 0;
++}
++
++FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
++FPDFTextObj_SetFontSize(FPDF_PAGEOBJECT text, float size) {
++  (void)text;
++  (void)size;
++  return 0;
++}
++
++}  // extern "C"

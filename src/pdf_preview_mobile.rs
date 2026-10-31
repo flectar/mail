@@ -181,8 +181,9 @@ fn render_page(
     cancellation.check()?;
     let bindings = ENGINE
         .get_or_init(|| {
-            let bindings = Pdfium::bind_to_library(library_path()?).map_err(|_| {
-                "The bundled PDF preview component could not be loaded.".to_string()
+            let bindings = Pdfium::bind_to_library(library_path()?).map_err(|error| {
+                tracing::error!(%error, "PDFium library bind failed");
+                format!("The bundled PDF preview component could not be loaded: {error}")
             })?;
             // SAFETY: only this OnceLock initializer initializes this engine. The
             // owning bindings and loaded library outlive every native handle.

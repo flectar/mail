@@ -1,0 +1,70 @@
+name: OpenHarmony hap
+
+# Tier 3 (platform/README.md): a community port built by a manually dispatched
+# workflow, never on pull requests. The HarmonyOS SDK and hvigor are not
+# anonymously downloadable, so the build job targets a self-hosted runner with
+# the toolchain described in platform/ohos/README.md.
+#
+# This workflow is build-only. It never receives signing material; release
+# signing stays a local, explicit step outside CI.
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: Application to package
+        type: choice
+        options:
+          - mail
+          - demo
+        default: mail
+      profile:
+        description: Cargo profile
+        type: choice
+        options:
+          - release
+          - debug
+        default: release
+      run_quality:
+        description: Run the shared quality suite first
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ohos-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    if: inputs.run_quality
+    name: Shared quality suite
+    uses: ./.github/workflows/quality.yml
+
+  hap:
+    name: ${{ inputs.app }} hap (${{ inputs.profile }})
+    needs: quality
+    if: always() && (needs.quality.result == 'success' || needs.quality.result == 'skipped')
+    runs-on: [self-hosted, linux, ohos]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Check the OHOS workspace formatting
+        run: cargo fmt --manifest-path platform/ohos/Cargo.toml --all -- --check
+
+      - name: Build the hap
+        env:
+          APP: ${{ inputs.app }}
+          PROFILE: ${{ inputs.profile }}
+          CARGO_BUILD_JOBS: "4"
+          SKIP_SIGN: "1"
+        run: sh platform/ohos/scripts/build-hap.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-ohos-${{ inputs.app }}-${{ inputs.profile }}
+          path: platform/ohos/build/*.hap
+          if-no-files-found: error
