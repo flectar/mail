@@ -55,6 +55,11 @@ jobs:
       - name: Check the OHOS workspace formatting
         run: cargo fmt --manifest-path platform/ohos/Cargo.toml --all -- --check
 
+      - name: Clippy the OHOS workspace
+        run: >-
+          RUSTFLAGS="-D warnings" cargo clippy
+          --manifest-path platform/ohos/Cargo.toml --locked -- -D warnings
+
       - name: Build the hap
         env:
           APP: ${{ inputs.app }}
