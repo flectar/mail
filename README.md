@@ -438,6 +438,10 @@ When preview builds are published, download them from
 - **macOS Apple silicon or Intel (macOS 14+):** DMG or application ZIP
 - **Android arm64 (Android 8.0+):** Signed APK; previews and stable releases share one app identity
 
+HarmonyOS and OpenHarmony have a community port maintained by
+[springmin](https://github.com/springmin). It isn't part of GitHub releases;
+see [platform/ohos](platform/ohos/README.md) to build it.
+
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.

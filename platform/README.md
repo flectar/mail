@@ -135,7 +135,7 @@ up changes that one function.
 | --- | --- | --- |
 | 1 | Linux, Windows, macOS | Release packages. Lint and tests pass on every pull request. |
 | 2 | Android, iOS | Experimental builds. Lint passes on every pull request; a broken build blocks merging. |
-| 3 | Community ports | In-tree with a named maintainer listed in the host README. Built by a manually dispatched workflow, not on pull requests. A port that stays broken while its maintainer can't be reached is marked unmaintained, and is removed only if nobody takes it over. |
+| 3 | OpenHarmony | In-tree with a named maintainer listed in the host README. Built by a manually dispatched workflow, not on pull requests. A port that stays broken while its maintainer can't be reached is marked unmaintained, and is removed only if nobody takes it over. |
 
 New platforms start at tier 3. A maintainer may promote a platform once it has
 been kept green for several releases and has an owner for its release builds.
