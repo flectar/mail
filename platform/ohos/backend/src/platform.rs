@@ -146,10 +146,7 @@ impl OhosPlatform {
         };
         let context = i_slint_core::window::WindowInner::from_pub(window.window()).context();
         context
-            .next_timer_timeout()
-            .map(|deadline| {
-                deadline.duration_since(i_slint_core::animations::Instant::now(context))
-            })
+            .duration_until_next_timer_update()
             .unwrap_or(IDLE_FALLBACK)
             .min(IDLE_FALLBACK)
     }
