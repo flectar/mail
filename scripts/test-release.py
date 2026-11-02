@@ -406,6 +406,16 @@ class ReleaseTests(unittest.TestCase):
                 f"print({str(libraries)!r})\n"
             )
             pkg_config.chmod(0o755)
+            # The fixture ELFs carry no RUNPATH; report the one linuxdeploy sets.
+            readelf = root / "bin/readelf"
+            readelf.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "assert sys.argv[1] == '-d'\n"
+                "runpath = '$ORIGIN/../lib' if sys.argv[2].endswith('/usr/bin/flectar-mail') else '$ORIGIN'\n"
+                "print(f' 0x000000000000001d (RUNPATH)            Library runpath: [{runpath}]')\n"
+            )
+            readelf.chmod(0o755)
             deploy = root / "bin/linuxdeploy"
             deploy.write_text('''#!/usr/bin/env python3
 import pathlib, shutil, sys

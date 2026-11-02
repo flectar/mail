@@ -17,6 +17,8 @@ fn apply_account_presentation_settings(
     state.borrow_mut().account_presentation = AccountPresentationSettings::from_settings(settings);
     refresh_connected_accounts(app, state);
     refresh_rows_only(app, state, runtime);
+    // A profile change can change which accounts the mail view shows.
+    app.invoke_mail_profile_changed();
 }
 
 /// Persists the download location and only then reflects it in the UI, so a
@@ -360,6 +362,52 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_time_format = Rc::clone(state);
+    let runtime_for_time_format = Rc::clone(runtime);
+    app.on_save_time_format(move |value| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(format) = flectar_mail_core::models::TimeFormat::parse(&value) else {
+            return;
+        };
+        date_format::reload(&app);
+        let Some(core) = state_for_time_format.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Time format updated for this session."));
+            return;
+        };
+        match runtime_for_time_format.block_on(core.set_time_format(format)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Time format preference saved.")),
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not save time format: {}", error))
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_app_icon = Rc::clone(state);
+    let runtime_for_app_icon = Rc::clone(runtime);
+    app.global::<AppIcon>().on_choose(move |variant| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let previous = crate::app_icon::choice(app.global::<AppIcon>().get_variant());
+        let icon = crate::app_icon::choice(variant);
+        crate::app_icon::apply(&app, icon);
+        let Some(core) = state_for_app_icon.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("App icon updated for this session."));
+            return;
+        };
+        match runtime_for_app_icon.block_on(core.set_app_icon(icon)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("App icon saved.")),
+            Err(error) => {
+                crate::app_icon::apply(&app, previous);
+                app.set_sync_status(UiMessage::detail("Could not save app icon: {}", error));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sidebar_icons = Rc::clone(state);
     let runtime_for_sidebar_icons = Rc::clone(runtime);
     app.on_save_sidebar_icon_style(move |monochrome| {
@@ -443,26 +491,76 @@ pub(super) fn register_settings_preference_callbacks(
             return Default::default();
         };
         let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
-        match runtime_for_profiles.block_on(core.save_mail_profile(
+        let (mut settings, profile) = match runtime_for_profiles.block_on(core.save_mail_profile(
             profile_id,
             name.to_string(),
             theme::color_to_hex(color),
         )) {
-            Ok((settings, profile)) => {
-                apply_account_presentation_settings(
-                    &app,
-                    &state_for_profiles,
-                    &runtime_for_profiles,
-                    &settings,
-                );
-                app.set_sync_status(UiMessage::plain("Profile saved."));
-                profile.id.into()
-            }
+            Ok(saved) => saved,
             Err(error) => {
                 app.set_sync_status(UiMessage::detail("Could not save profile: {}", error));
-                Default::default()
+                return Default::default();
+            }
+        };
+        // The editor's checked accounts become the profile's accounts.
+        let members = app.get_profile_members();
+        let mut failure = None;
+        for member in members.iter() {
+            let account_id = i64::from(member.id);
+            let in_profile = profile.account_ids.contains(&account_id);
+            let assignment = match (member.checked, in_profile) {
+                (true, false) => Some(profile.id.clone()),
+                (false, true) => None,
+                _ => continue,
+            };
+            match runtime_for_profiles.block_on(core.assign_account_profile(account_id, assignment))
+            {
+                Ok(updated) => settings = updated,
+                Err(error) => failure = Some(error),
             }
         }
+        apply_account_presentation_settings(
+            &app,
+            &state_for_profiles,
+            &runtime_for_profiles,
+            &settings,
+        );
+        match failure {
+            Some(error) => app.set_sync_status(UiMessage::detail(
+                "Could not update account profile: {}",
+                error,
+            )),
+            None => app.set_sync_status(UiMessage::plain("Profile saved.")),
+        }
+        profile.id.into()
+    });
+
+    let app_weak = app.as_weak();
+    app.on_prepare_profile_members(move |profile_id, checked_account| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let rows = connected_account_rows(&app)
+            .into_iter()
+            .map(|account| {
+                let member = !profile_id.is_empty() && account.profile_id == profile_id;
+                ProfileMemberRow {
+                    id: account.id,
+                    name: account.name,
+                    email: account.email,
+                    initials: account.initials,
+                    avatar: account.avatar_small,
+                    has_avatar: account.has_avatar,
+                    other_profile: if member {
+                        Default::default()
+                    } else {
+                        account.profile_name
+                    },
+                    checked: member || account.id == checked_account,
+                }
+            })
+            .collect::<Vec<_>>();
+        app.set_profile_members(ModelRc::new(VecModel::from(rows)));
     });
 
     let app_weak = app.as_weak();
@@ -526,6 +624,31 @@ pub(super) fn register_settings_preference_callbacks(
                 "Could not update account color: {}",
                 error,
             )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_active_profile = Rc::clone(state);
+    let runtime_for_active_profile = Rc::clone(runtime);
+    app.on_select_mail_profile(move |profile_id| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_active_profile.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain("Profile changes require local mail data."));
+            return;
+        };
+        let profile_id = (!profile_id.trim().is_empty()).then(|| profile_id.to_string());
+        match runtime_for_active_profile.block_on(core.set_active_mail_profile(profile_id)) {
+            Ok(settings) => apply_account_presentation_settings(
+                &app,
+                &state_for_active_profile,
+                &runtime_for_active_profile,
+                &settings,
+            ),
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not switch profile: {}", error))
+            }
         }
     });
 
@@ -739,4 +862,49 @@ fn save_oauth_settings(
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hiding_settings_discards_an_unsaved_palette() {
+        use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
+        struct Headless(Rc<MinimalSoftwareWindow>);
+        impl slint::platform::Platform for Headless {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+                Ok(self.0.clone())
+            }
+        }
+        let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(Headless(window))).unwrap();
+        let app = AppWindow::new().unwrap();
+        let theme = app.global::<AppTheme>();
+        let draft = app.global::<ThemeDraft>();
+        let saved = theme.get_custom_light_primary();
+        app.set_settings_open(true);
+        slint::platform::update_timers_and_animations();
+
+        // The editor previews a color before it is saved.
+        draft.invoke_begin();
+        theme.set_custom_light_primary(slint::Color::from_rgb_u8(0xff, 0, 0));
+        app.set_settings_open(false);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_custom_light_primary(), saved);
+        assert!(!draft.get_dirty());
+
+        // A saved palette stays.
+        app.set_settings_open(true);
+        slint::platform::update_timers_and_animations();
+        draft.invoke_begin();
+        let chosen = slint::Color::from_rgb_u8(0, 0x80, 0);
+        theme.set_custom_light_primary(chosen);
+        draft.set_dirty(false);
+        app.set_settings_open(false);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(theme.get_custom_light_primary(), chosen);
+    }
 }

@@ -7,13 +7,14 @@ use crate::calendar::parse_ics;
 use crate::db::Db;
 use crate::db::repo;
 use crate::error::{CoreError, Result};
-use crate::events::{CoreEvent, EventBus, NewEventInfo};
+use crate::events::{EventBus, NewEventInfo};
 use crate::models::now_ms;
 
+use super::route::PendingPush;
 use super::{Transport, err, push, xml};
 
 const MULTIGET_BATCH: usize = 50;
-const MAX_NEW_EVENT_NOTIFICATIONS: usize = 1_000;
+pub(crate) const MAX_NEW_EVENT_NOTIFICATIONS: usize = 1_000;
 
 /// Normalize an href to path form so stored values compare stably no matter
 /// whether the server answered with absolute URLs or paths.
@@ -24,50 +25,59 @@ fn href_path(href: &str) -> String {
     }
 }
 
-/// One account's full pull. Returns true when anything changed.
-pub async fn sync_account(
+/// What one connection's cycle did.
+#[derive(Debug, Default)]
+pub struct Synced {
+    pub changed: bool,
+    pub new_events: Vec<NewEventInfo>,
+    /// The first calendar that could not sync, named; the connection's other
+    /// calendars still did.
+    pub calendar_error: Option<String>,
+}
+
+impl Synced {
+    pub(crate) fn add_new_events(&mut self, events: Vec<NewEventInfo>) {
+        let remaining = MAX_NEW_EVENT_NOTIFICATIONS.saturating_sub(self.new_events.len());
+        self.new_events.extend(events.into_iter().take(remaining));
+    }
+}
+
+/// One CalDAV connection's cycle: its routed local changes first (local
+/// intent wins, and their PUTs establish etags the pull then agrees with),
+/// then every enabled calendar of the connection.
+pub async fn sync_connection(
     db: &Db,
     bus: &EventBus,
     t: &dyn Transport,
     account_id: i64,
+    connection_id: i64,
     self_email: &str,
-) -> Result<bool> {
-    // Local changes first - their PUTs establish etags the pull then agrees with.
-    let pushed = push::push_dirty(db, bus, t, account_id, self_email).await?;
+    pushes: &[PendingPush],
+) -> Result<Synced> {
+    let pushed = push::push_routed(db, bus, t, account_id, self_email, pushes).await?;
 
     let calendars = db
-        .read(move |conn| repo::caldav::list_calendars(conn, Some(account_id)))
+        .read(move |conn| repo::caldav::connection_calendars(conn, connection_id))
         .await?;
-    let mut changed_any = pushed;
-    let mut new_events: Vec<NewEventInfo> = Vec::new();
-
+    let mut synced = Synced {
+        changed: pushed,
+        ..Synced::default()
+    };
     for cal in calendars.into_iter().filter(|c| c.enabled) {
         match sync_calendar(db, t, account_id, cal.id, &cal.url).await {
             Ok((changed, fresh)) => {
-                changed_any |= changed;
-                let remaining = MAX_NEW_EVENT_NOTIFICATIONS.saturating_sub(new_events.len());
-                new_events.extend(fresh.into_iter().take(remaining));
+                synced.changed |= changed;
+                synced.add_new_events(fresh);
             }
-            Err(CoreError::NeedsReauth) => return Err(CoreError::NeedsReauth),
+            Err(error @ (CoreError::NeedsReauth | CoreError::Offline)) => return Err(error),
             Err(e) => {
                 tracing::warn!("calendar {} sync failed: {e}", cal.id);
-                let msg = e.to_string();
-                db.write(move |conn| repo::caldav::set_config_error(conn, account_id, Some(&msg)))
-                    .await?;
+                let name = cal.display_name.unwrap_or(cal.url);
+                synced.calendar_error.get_or_insert(format!("{name}: {e}"));
             }
         }
     }
-
-    if changed_any {
-        bus.emit(CoreEvent::CalendarUpdated { account_id });
-    }
-    if !new_events.is_empty() {
-        bus.emit(CoreEvent::CalendarEventsAdded {
-            account_id,
-            events: new_events,
-        });
-    }
-    Ok(changed_any)
+    Ok(synced)
 }
 
 async fn sync_calendar(
@@ -307,16 +317,17 @@ pub(crate) mod tests {
     use super::*;
     use crate::caldav::http::{DavResponse, MockTransport};
 
+    /// Account 1 with one CalDAV connection (id 1) syncing calendar 10.
     pub(crate) async fn seed_db() -> (Db, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open_calendar(&dir.path().join("t.db")).unwrap();
         db.write(|c| {
             c.execute(
-                "INSERT INTO caldav_config (account_id, kind, base_url) VALUES (1,'generic','https://dav.example.com/')",
+                "INSERT INTO calendar_connections (id, account_id, kind, base_url) VALUES (1, 1, 'generic', 'https://dav.example.com/')",
                 [],
             )?;
             c.execute(
-                "INSERT INTO calendars (id, account_id, url, enabled) VALUES (10, 1, 'https://dav.example.com/cal/me/work/', 1)",
+                "INSERT INTO calendars (id, account_id, connection_id, url, enabled) VALUES (10, 1, 1, 'https://dav.example.com/cal/me/work/', 1)",
                 [],
             )?;
             Ok(())
@@ -324,6 +335,23 @@ pub(crate) mod tests {
         .await
         .unwrap();
         (db, dir)
+    }
+
+    /// The calendar task's cycle for the seeded account's one connection.
+    pub(crate) async fn sync_account(
+        db: &Db,
+        bus: &EventBus,
+        t: &dyn Transport,
+        account_id: i64,
+        self_email: &str,
+    ) -> Result<bool> {
+        let routes = db
+            .read(move |c| crate::caldav::route::pending(c, account_id))
+            .await?;
+        let pushes: Vec<PendingPush> = routes.pushes.into_values().flatten().collect();
+        sync_connection(db, bus, t, account_id, 1, self_email, &pushes)
+            .await
+            .map(|synced| synced.changed)
     }
 
     pub(crate) fn ms207(body: &str) -> DavResponse {
@@ -451,5 +479,76 @@ END:VCALENDAR</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:
             .await
             .unwrap();
         assert_eq!(events[0].summary.as_deref(), Some("Mine"));
+    }
+
+    #[tokio::test]
+    async fn a_connection_pulls_only_its_calendars_and_names_a_failing_one() {
+        let (db, _dir) = seed_db().await;
+        db.write(|c| {
+            c.execute(
+                "UPDATE calendars SET display_name = 'Work' WHERE id = 10",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO calendars (id, account_id, connection_id, url, display_name, enabled)
+                 VALUES (11, 1, 1, 'https://dav.example.com/cal/me/home/', 'Home', 1)",
+                [],
+            )?;
+            // A second server of the same account syncs on its own.
+            c.execute(
+                "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                 VALUES (2, 1, 'generic', 'https://shared.example.com/')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO calendars (id, account_id, connection_id, url, enabled)
+                 VALUES (20, 1, 2, 'https://shared.example.com/team/', 1)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let bus = EventBus::new();
+        let forbidden = DavResponse {
+            status: 403,
+            etag: None,
+            body: String::new(),
+        };
+        // Home syncs normally; Work refuses both its ctag probe and the
+        // calendar-query that follows.
+        let home = |body: &str| body.replace("/cal/me/work/", "/cal/me/home/");
+        let t = MockTransport::new(vec![
+            ms207(&home(CTAG_1)),
+            ms207(&home(QUERY_ONE)),
+            ms207(&home(MULTIGET_ONE)),
+            forbidden.clone(),
+            forbidden,
+        ]);
+        let synced = sync_connection(&db, &bus, &t, 1, 1, "me@test.dev", &[])
+            .await
+            .unwrap();
+        assert!(synced.changed);
+        assert_eq!(
+            synced.calendar_error.as_deref(),
+            Some("Work: caldav error: calendar-query: HTTP 403")
+        );
+        let urls: Vec<String> = t
+            .seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, url, _)| url.clone())
+            .collect();
+        assert!(
+            urls.iter()
+                .all(|url| url.starts_with("https://dav.example.com/"))
+        );
+        let events = db
+            .read(|c| repo::calendar::list_range(c, 0, i64::MAX / 2))
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].calendar_id, Some(11));
     }
 }

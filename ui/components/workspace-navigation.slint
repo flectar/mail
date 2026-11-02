@@ -1,7 +1,10 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { LayoutMetrics } from "../design-system.slint";
+import { LayoutMetrics, MotionSettings } from "../design-system.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
+import { MailProfileRow } from "../models.slint";
+import { ProfileSwitcher } from "profile-switcher.slint";
+import { PaneDivider } from "workspace-layout.slint";
 
 
 component ProductRailItem inherits Rectangle {
@@ -81,11 +84,10 @@ export component ProductRail inherits Rectangle {
     width: LayoutMetrics.product-rail-width;
     background: root.background-color;
 
-    Rectangle {
-        x: parent.width - 1px;
-        width: 1px;
+    PaneDivider {
+        x: parent.width - self.width;
         height: parent.height;
-        background: root.divider-color;
+        divider-color: root.divider-color;
     }
 
     VerticalBox {
@@ -333,7 +335,7 @@ export component CompactProductNav inherits Rectangle {
 
 export struct TabRow {
     id: int,
-    // "mail" | "calendar" | "contacts" | "files"
+    // "mail" | "calendar" | "contacts" | "files" | "settings"
     workspace: string,
     // Saved title for inactive tabs; empty uses the workspace name.
     title: string,
@@ -346,21 +348,43 @@ export global TabsUi {
     in property <[TabRow]> rows;
     // True while the desktop top bar shows the tabs.
     in property <bool> enabled;
+    // A closed tab can be reopened.
+    in property <bool> can-reopen;
     callback select(int);
     callback close(int);
+    // Close every tab except this one, or the tabs to its right.
+    callback close-others(int);
+    callback close-to-right(int);
     callback create();
+    // Reopen the most recently closed tab.
+    callback reopen();
     // Move the tab with this id to a new index.
     callback move(int, int);
     // Open a conversation from the current list in a new tab; the flag
     // activates the tab, otherwise it opens in the background.
     callback open-conversation(int, bool);
-    // Keyboard commands: "new", "close", "next", "previous", "last", or a
-    // zero-based index.
+    // Keyboard commands: "new", "close", "reopen", "next", "previous",
+    // "last", or a zero-based index.
     callback command(string);
+    // The active tab's place changed through ordinary navigation.
+    callback navigated();
+    // The mail list's scroll offset from the top, kept current by the mail
+    // view, and the offset a shown tab scrolls back to. Each request makes
+    // the list scroll to `list-restore` once its rows are laid out; a
+    // negative value means nothing is pending. `list-restore-view` names the
+    // mailbox, search and filter it belongs to, one per line.
+    in-out property <length> list-offset;
+    in-out property <length> list-restore: -1px;
+    in-out property <string> list-restore-view;
+    in-out property <int> list-restore-request;
     // Re-apply the active tab once local mail storage is ready.
     callback restore-active();
     // Forget every tab and its saved state, leaving one Inbox tab.
     callback reset();
+    // An account was removed: tabs forget its mailboxes and conversations.
+    callback account-removed(string);
+    // Save every tab now, before the application exits.
+    callback flush();
 }
 
 component WorkspaceIcon inherits Image {
@@ -372,20 +396,399 @@ component WorkspaceIcon inherits Image {
             ? (root.filled ? @image-url("../icons/lucide/filled/files.svg") : @image-url("../icons/lucide/outline/files.svg"))
         : root.workspace == "contacts"
             ? (root.filled ? @image-url("../icons/lucide/filled/contacts.svg") : @image-url("../icons/lucide/outline/contacts.svg"))
+        : root.workspace == "settings"
+            ? (root.filled ? @image-url("../icons/lucide/filled/gear.svg") : @image-url("../icons/lucide/outline/gear.svg"))
         : (root.filled ? @image-url("../icons/lucide/filled/mail.svg") : @image-url("../icons/lucide/outline/mail.svg"));
     image-fit: contain;
     accessible-role: none;
 }
 
+// Tabs share the strip's height below a small top margin.
+global TabMetrics {
+    out property <length> top: 6px;
+    // The active tab's top corner radius.
+    out property <length> radius: 8px;
+    // How far the active tab's foot curves out on each side to meet the
+    // content below.
+    out property <length> foot: 12px;
+
+    // The line tab labels, the profile pill and "+" are centred on: a touch
+    // above the tab's middle, as its foot is open, and in line with the
+    // window controls.
+    public pure function middle(height: length) -> length {
+        return (height + root.top) / 2 - 2px;
+    }
+}
+
+// The active tab: rounded top corners, and a foot that curves out on both
+// sides into the strip's bottom border. Its border rises out of that line,
+// runs round the tab and drops back into it; the open bottom joins the
+// content below. The border's centre line runs half a pixel inside the edge,
+// so the 1px line covers whole pixels at 1x and 2x.
+component ActiveTabShape inherits Rectangle {
+    in property <brush> fill;
+    in property <brush> stroke;
+
+    private property <float> w: self.width / 1px;
+    private property <float> h: self.height / 1px;
+    private property <float> r: TabMetrics.radius / 1px;
+    private property <float> f: TabMetrics.foot / 1px;
+    // The border's centre line, half its width in from the edge.
+    private property <float> s: 0.5;
+
+    // Both paths are drawn in place, as fitting would shrink the outline
+    // inside its stroke. The fill reaches down through the strip's border,
+    // hiding it under the tab.
+    Path {
+        width: parent.width;
+        height: parent.height;
+        fit: preserve;
+        fill: root.fill;
+        accessible-role: none;
+
+        MoveTo { x: root.s; y: root.h; }
+        LineTo { x: root.s; y: root.h - root.s; }
+        ArcTo { x: root.f + root.s; y: root.h - root.s - root.f; radius-x: root.f; radius-y: root.f; sweep: false; }
+        LineTo { x: root.f + root.s; y: root.r + root.s; }
+        ArcTo { x: root.f + root.s + root.r; y: root.s; radius-x: root.r; radius-y: root.r; sweep: true; }
+        LineTo { x: root.w - root.f - root.s - root.r; y: root.s; }
+        ArcTo { x: root.w - root.f - root.s; y: root.r + root.s; radius-x: root.r; radius-y: root.r; sweep: true; }
+        LineTo { x: root.w - root.f - root.s; y: root.h - root.s - root.f; }
+        ArcTo { x: root.w - root.s; y: root.h - root.s; radius-x: root.f; radius-y: root.f; sweep: false; }
+        LineTo { x: root.w - root.s; y: root.h; }
+        Close {}
+    }
+    // The border is open at the bottom, where the tab meets the content.
+    Path {
+        width: parent.width;
+        height: parent.height;
+        fit: preserve;
+        stroke: root.stroke;
+        stroke-width: 1px;
+        accessible-role: none;
+
+        MoveTo { x: root.s; y: root.h - root.s; }
+        ArcTo { x: root.f + root.s; y: root.h - root.s - root.f; radius-x: root.f; radius-y: root.f; sweep: false; }
+        LineTo { x: root.f + root.s; y: root.r + root.s; }
+        ArcTo { x: root.f + root.s + root.r; y: root.s; radius-x: root.r; radius-y: root.r; sweep: true; }
+        LineTo { x: root.w - root.f - root.s - root.r; y: root.s; }
+        ArcTo { x: root.w - root.f - root.s; y: root.r + root.s; radius-x: root.r; radius-y: root.r; sweep: true; }
+        LineTo { x: root.w - root.f - root.s; y: root.h - root.s - root.f; }
+        ArcTo { x: root.w - root.s; y: root.h - root.s; radius-x: root.f; radius-y: root.f; sweep: false; }
+    }
+}
+
+// A tab: icon, title and close button. The active tab is the content's
+// color and curves into it; the others sit on the strip, divided by short
+// rules.
+component TabItem inherits Rectangle {
+    in property <TabRow> entry;
+    in property <int> index;
+    in property <int> count;
+    // Where the active tab is now; the saved row only describes inactive tabs.
+    in property <string> live-workspace;
+    in property <string> live-title;
+    // Room this tab makes while another tab is dragged past it.
+    in property <length> shift;
+    in property <bool> reordering;
+    in property <color> title-color;
+    in property <color> text-color;
+    in property <color> accent-color;
+    // The color of the content the active tab opens into.
+    in property <color> active-background;
+    in property <color> hover-background;
+    in property <color> divider-color;
+    // The rule on the right; hidden next to the active or a hovered tab.
+    in property <bool> divided;
+    out property <bool> hovered: hit.has-hover && !hit.dragging;
+    // Horizontal travel while this tab is dragged, and where it was dropped.
+    callback dragged(length);
+    callback dropped(length);
+    // The pointer is closing this tab.
+    callback closing();
+
+    private property <string> workspace: root.entry.active && root.live-workspace != ""
+        ? root.live-workspace : root.entry.workspace;
+    private property <string> workspace-name: root.workspace == "calendar" ? @tr("Calendar")
+        : root.workspace == "files" ? @tr("Files")
+        : root.workspace == "contacts" ? @tr("Contacts")
+        : root.workspace == "settings" ? @tr("Settings")
+        : @tr("Mail");
+    private property <string> title: root.entry.active
+        ? (root.live-title != "" ? root.live-title : root.workspace-name)
+        : (root.entry.title != "" ? root.entry.title : root.workspace-name);
+    // Narrow tabs keep only their icon, as in a browser.
+    private property <bool> labelled: root.width >= 72px;
+    private property <bool> truncated: !root.labelled || label.preferred-width > label.width;
+    private property <bool> tooltip-due;
+    // A click hides the tooltip until the pointer leaves.
+    private property <bool> tooltip-dismissed;
+    private property <length> offset: hit.dragging ? hit.travel : root.shift;
+
+    function close() {
+        root.closing();
+        TabsUi.close(root.entry.id);
+    }
+    function end-drag() {
+        if hit.dragging {
+            root.dragged(0px);
+        }
+        hit.dragging = false;
+        hit.travel = 0px;
+    }
+
+    // The active tab's foot overlaps its neighbours.
+    z: hit.dragging ? 2 : root.entry.active ? 1 : 0;
+    changed hovered => {
+        if !root.hovered {
+            root.tooltip-due = false;
+            root.tooltip-dismissed = false;
+        }
+    }
+    // Rows update in place, so this element can come to show another tab,
+    // which starts without the last one's drag or tooltip.
+    private property <int> entry-id: root.entry.id;
+    changed entry-id => {
+        root.end-drag();
+        root.tooltip-due = false;
+        root.tooltip-dismissed = false;
+    }
+
+    face := Rectangle {
+        x: root.offset;
+        width: parent.width;
+        height: parent.height;
+        animate x {
+            duration: MotionSettings.enabled && root.reordering && !hit.dragging ? 160ms : 0ms;
+            easing: ease-out;
+        }
+
+        if root.entry.active : ActiveTabShape {
+            x: -TabMetrics.foot;
+            y: TabMetrics.top;
+            width: parent.width + 2 * TabMetrics.foot;
+            height: parent.height - TabMetrics.top;
+            fill: root.active-background;
+            stroke: root.divider-color;
+        }
+        if !root.entry.active : Rectangle {
+            x: 2px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
+            width: parent.width - 4px;
+            height: 30px;
+            border-radius: TabMetrics.radius - 1px;
+            background: root.hovered ? root.hover-background : transparent;
+            animate background { duration: MotionSettings.enabled ? 120ms : 0ms; easing: ease-out; }
+        }
+        if root.divided : Rectangle {
+            x: parent.width - 1px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
+            width: 1px;
+            height: 16px;
+            background: root.divider-color;
+        }
+        WorkspaceIcon {
+            x: root.labelled ? 12px : (parent.width - self.width) / 2;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
+            width: 14px;
+            height: 14px;
+            workspace: root.workspace;
+            filled: root.entry.active;
+            colorize: root.entry.active ? root.accent-color : root.text-color;
+        }
+        label := Text {
+            visible: root.labelled;
+            x: 34px;
+            y: TabMetrics.middle(parent.height) - self.height / 2;
+            width: max(0px, parent.width - self.x - 34px);
+            height: 2 * (parent.height - TabMetrics.middle(parent.height));
+            text: root.title;
+            color: root.entry.active || root.hovered ? root.title-color : root.text-color;
+            font-size: TypeScale.secondary;
+            font-weight: 500;
+            vertical-alignment: center;
+            overflow: elide;
+            accessible-role: none;
+        }
+    }
+
+    menu-area := ContextMenuArea {
+        width: parent.width;
+        height: parent.height;
+
+        hit := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            property <bool> dragging;
+            property <length> travel;
+            // The tab the left button went down on; this element can come to
+            // show another while it is held.
+            property <int> pressed-id: -1;
+            // A middle press here closes the tab when released over it.
+            property <bool> middle-pressed;
+            mouse-cursor: pointer;
+            accessible-role: tab;
+            accessible-label: root.title;
+            accessible-item-selectable: true;
+            accessible-item-selected: root.entry.active;
+            accessible-item-index: root.index;
+            accessible-action-default => { TabsUi.select(root.entry.id); }
+            pointer-event(event) => {
+                if event.kind == PointerEventKind.cancel {
+                    self.pressed-id = -1;
+                    self.middle-pressed = false;
+                    root.end-drag();
+                } else if event.kind == PointerEventKind.down && event.button != PointerEventButton.left
+                    && (self.pressed || self.dragging) {
+                    // Another button while the tab is held lets it go.
+                    self.pressed-id = -1;
+                    root.end-drag();
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                    root.tooltip-dismissed = true;
+                    self.pressed-id = root.entry.id;
+                    TabsUi.select(root.entry.id);
+                } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
+                    if self.dragging {
+                        root.dropped(self.travel);
+                    }
+                    self.dragging = false;
+                    self.travel = 0px;
+                    self.pressed-id = -1;
+                } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.down {
+                    self.middle-pressed = true;
+                } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up {
+                    // Only when released over the tab it was pressed on.
+                    if self.middle-pressed && self.mouse-x >= 0px && self.mouse-x < self.width
+                        && self.mouse-y >= 0px && self.mouse-y < self.height {
+                        root.close();
+                    }
+                    self.middle-pressed = false;
+                } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                    menu-area.show({ x: self.mouse-x, y: self.mouse-y });
+                }
+            }
+            // The wheel leaves the tab and the strip hovered.
+            scroll-event(event) => { return accept; }
+            moved => {
+                if self.pressed && self.pressed-id == root.entry.id && !self.dragging
+                    && abs(self.mouse-x - self.pressed-x) > 6px {
+                    self.dragging = true;
+                }
+                if self.dragging {
+                    // The tab stays within the strip.
+                    self.travel = max(-root.index * root.width,
+                        min((root.count - 1 - root.index) * root.width, self.mouse-x - self.pressed-x));
+                    root.dragged(self.travel);
+                }
+            }
+
+            // Inside the tab's hit area, so pointing at it keeps the tab hovered.
+            if root.labelled && (root.entry.active || root.hovered) : Rectangle {
+                x: root.offset + parent.width - 28px;
+                y: TabMetrics.middle(parent.height) - self.height / 2;
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                background: close-hit.pressed ? root.title-color.with-alpha(0.18)
+                    : close-hit.has-hover ? root.title-color.with-alpha(0.10) : transparent;
+
+                Image {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    width: 12px;
+                    height: 12px;
+                    source: @image-url("../icons/lucide/outline/x.svg");
+                    colorize: close-hit.has-hover ? root.title-color : root.text-color;
+                    accessible-role: none;
+                }
+                close-hit := TouchArea {
+                    mouse-cursor: pointer;
+                    accessible-role: button;
+                    accessible-label: @tr("Close tab");
+                    accessible-action-default => { TabsUi.close(root.entry.id); }
+                    clicked => { root.close(); }
+                    // The button takes every press over it; other buttons act
+                    // as they do on the rest of the tab.
+                    pointer-event(event) => {
+                        if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up
+                            && self.mouse-x >= 0px && self.mouse-x < self.width
+                            && self.mouse-y >= 0px && self.mouse-y < self.height {
+                            root.close();
+                        } else if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                            menu-area.show({ x: parent.x + self.mouse-x, y: parent.y + self.mouse-y });
+                        }
+                    }
+                }
+            }
+        }
+
+        Menu {
+            MenuItem {
+                title: @tr("New tab");
+                activated => { TabsUi.create(); }
+            }
+            MenuItem {
+                title: @tr("Reopen closed tab");
+                enabled: TabsUi.can-reopen;
+                activated => { TabsUi.reopen(); }
+            }
+            MenuSeparator {}
+            MenuItem {
+                title: @tr("Close tab");
+                activated => { TabsUi.close(root.entry.id); }
+            }
+            MenuItem {
+                title: @tr("Close other tabs");
+                enabled: root.count > 1;
+                activated => { TabsUi.close-others(root.entry.id); }
+            }
+            MenuItem {
+                title: @tr("Close tabs to the right");
+                enabled: root.index < root.count - 1;
+                activated => { TabsUi.close-to-right(root.entry.id); }
+            }
+        }
+    }
+
+    // The full title of a shortened tab, after a short hover.
+    Timer {
+        interval: 500ms;
+        running: root.hovered && root.truncated && !root.tooltip-due && !root.tooltip-dismissed;
+        triggered => { root.tooltip-due = true; }
+    }
+    if root.tooltip-due && root.hovered && root.truncated && !root.tooltip-dismissed : Rectangle {
+        // Below the tab, kept inside the window.
+        x: max(8px - root.absolute-position.x,
+            min(8px, WindowChrome.window-width - root.absolute-position.x - self.width - 8px));
+        y: parent.height + 4px;
+        width: min(tooltip-label.preferred-width + 16px, 480px);
+        height: 28px;
+        border-radius: 5px;
+        background: #292929;
+
+        tooltip-label := Text {
+            x: 8px;
+            width: parent.width - 16px;
+            text: root.title;
+            color: white;
+            font-size: TypeScale.secondary;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// The new-tab button. Like the tabs, it leaves keyboard focus where it is.
 component NewTabButton inherits Rectangle {
     in property <color> hover-background;
-    in property <color> muted-color;
+    in property <color> icon-color;
+    out property <bool> hovered: hit.has-hover;
 
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: LayoutMetrics.corner-radius - 2px;
     background: hit.has-hover ? root.hover-background : transparent;
-    animate background { duration: 140ms; easing: ease-out; }
+    animate background { duration: MotionSettings.enabled ? 120ms : 0ms; easing: ease-out; }
 
     Image {
         x: (parent.width - self.width) / 2;
@@ -393,10 +796,9 @@ component NewTabButton inherits Rectangle {
         width: 16px;
         height: 16px;
         source: @image-url("../icons/lucide/outline/plus.svg");
-        colorize: root.muted-color;
+        colorize: root.icon-color;
         accessible-role: none;
     }
-
     hit := TouchArea {
         mouse-cursor: pointer;
         accessible-role: button;
@@ -404,202 +806,182 @@ component NewTabButton inherits Rectangle {
         accessible-action-default => { TabsUi.create(); }
         clicked => { TabsUi.create(); }
     }
-
     if hit.has-hover : Rectangle {
-        x: (parent.width - self.width) / 2;
+        // Centred below the button, kept inside the window.
+        x: max(8px - root.absolute-position.x,
+            min((root.width - self.width) / 2,
+                WindowChrome.window-width - root.absolute-position.x - self.width - 8px));
         y: parent.height + 6px;
-        width: tooltip-text.preferred-width + 16px;
-        height: 26px;
+        width: tooltip-label.preferred-width + 16px;
+        height: 28px;
         border-radius: 5px;
         background: #292929;
-        tooltip-text := Text {
+
+        tooltip-label := Text {
             text: @tr("New tab");
             color: white;
-            font-size: TypeScale.caption;
+            font-size: TypeScale.secondary;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
     }
 }
 
-component TabItem inherits Rectangle {
-    in property <TabRow> entry;
-    in property <int> index;
-    // Live title of the active tab; inactive tabs use their saved title.
-    in property <string> live-title;
-    in property <length> slot-width;
-    in property <int> count;
-    in property <color> title-color;
-    in property <color> muted-color;
-    in property <color> accent-color;
-    in property <color> active-background;
-    in property <color> hover-background;
-    in property <color> tab-border-color;
-
-    private property <string> workspace-name: root.entry.workspace == "calendar" ? @tr("Calendar")
-        : root.entry.workspace == "files" ? @tr("Files")
-        : root.entry.workspace == "contacts" ? @tr("Contacts")
-        : @tr("Mail");
-    private property <string> title: root.entry.active && root.live-title != "" ? root.live-title
-        : root.entry.title != "" ? root.entry.title : root.workspace-name;
-    private property <bool> show-close: root.width >= 88px && (root.entry.active || hit.has-hover);
-    private property <length> drag-offset: hit.dragging ? hit.mouse-x - hit.pressed-x : 0px;
-
-    width: root.slot-width;
-    height: 32px;
-    z: hit.dragging ? 1 : 0;
-
-    face := Rectangle {
-        x: root.drag-offset;
-        width: parent.width;
-        height: parent.height;
-        border-radius: 8px;
-        background: root.entry.active ? root.active-background
-            : hit.has-hover ? root.hover-background : transparent;
-        border-width: root.entry.active ? 1px : 0px;
-        border-color: root.tab-border-color;
-        animate background { duration: 120ms; easing: ease-out; }
-
-        WorkspaceIcon {
-            x: 10px;
-            y: (parent.height - self.height) / 2;
-            width: 14px;
-            height: 14px;
-            workspace: root.entry.workspace;
-            filled: root.entry.active;
-            colorize: root.entry.active ? root.accent-color : root.muted-color;
-        }
-        Text {
-            x: 30px;
-            width: parent.width - self.x - (root.show-close ? 30px : 10px);
-            height: parent.height;
-            text: root.title;
-            color: root.entry.active ? root.title-color : root.muted-color;
-            font-size: TypeScale.secondary;
-            font-weight: root.entry.active ? 600 : 500;
-            vertical-alignment: center;
-            overflow: elide;
-        }
-    }
-
-    hit := TouchArea {
-        property <bool> dragging;
-        mouse-cursor: pointer;
-        accessible-role: tab;
-        accessible-label: root.title;
-        accessible-checked: root.entry.active;
-        accessible-action-default => { TabsUi.select(root.entry.id); }
-        pointer-event(event) => {
-            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
-                TabsUi.select(root.entry.id);
-            } else if event.button == PointerEventButton.left && event.kind == PointerEventKind.up {
-                if self.dragging {
-                    // Drop where the tab's centre lands.
-                    let target = ((root.index * root.slot-width + root.drag-offset + root.slot-width / 2) / root.slot-width).floor();
-                    TabsUi.move(root.entry.id, max(0, min(root.count - 1, target)));
-                }
-                self.dragging = false;
-            } else if event.button == PointerEventButton.middle && event.kind == PointerEventKind.up {
-                TabsUi.close(root.entry.id);
-            }
-        }
-        moved => {
-            if self.pressed && !self.dragging && abs(self.mouse-x - self.pressed-x) > 6px {
-                self.dragging = true;
-            }
-        }
-    }
-
-    if root.show-close : Rectangle {
-        x: root.drag-offset + parent.width - 26px;
-        y: (parent.height - self.height) / 2;
-        width: 20px;
-        height: 20px;
-        border-radius: 5px;
-        background: close-hit.has-hover ? root.hover-background.darker(8%) : transparent;
-        Image {
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            width: 12px;
-            height: 12px;
-            source: @image-url("../icons/lucide/outline/x.svg");
-            colorize: root.muted-color;
-            accessible-role: none;
-        }
-        close-hit := TouchArea {
-            accessible-role: button;
-            accessible-label: @tr("Close tab");
-            accessible-action-default => { TabsUi.close(root.entry.id); }
-            clicked => { TabsUi.close(root.entry.id); }
-        }
-    }
-}
-
-// Desktop top bar with the tabs. It meets the product rail in the top-left
-// corner, where the integrated frame places leading window controls; trailing
-// controls sit in its right corner.
+// Desktop top bar with the tabs. It spans the window above the rail and the
+// sidebar: leading window controls, the profile pill, then the tabs.
+// Trailing controls sit in its right corner.
 export component WindowTopBar inherits Rectangle {
+    // The active tab's live place: "settings" or a workspace, and its title.
+    in property <string> live-workspace;
     in property <string> live-title;
     in property <color> background-color;
-    in property <color> divider-color;
-    in property <color> title-color;
-    in property <color> accent-color;
+    // The color the active tab opens into: the panes' shared surface below.
     in property <color> active-tab-background;
     in property <color> hover-background;
-    in property <color> muted-color;
+    in property <color> divider-color;
+    in property <color> title-color;
+    in property <color> text-color;
+    in property <color> accent-color;
+    in property <[MailProfileRow]> profiles;
+    in property <MailProfileRow> active-profile;
+    in property <int> account-count;
+    callback choose-profile(string);
+    callback create-profile();
+    callback manage-profiles();
 
     background: root.background-color;
     accessible-role: window-title-bar;
     accessible-label: @tr("Flectar Mail");
 
-    // Tabs start at the window edge unless leading controls need the room.
-    private property <length> tabs-x: max(8px, WindowChrome.leading-width);
+    // The pill follows the leading window controls, and the tabs the pill.
+    private property <length> pill-x: max(8px, WindowChrome.leading-width);
+    // The first tab stands 8px from the pill, about the pill's own inset from
+    // the bar's edges; its foot curves out below the pill's end. Tabs start
+    // and end on whole pixels, so their borders stay sharp.
+    private property <length> tabs-x: ((profile-pill.x + profile-pill.width) / 1px).ceil() * 1px + 8px;
     private property <length> trailing: WindowChrome.trailing-width + 8px;
-    // Tabs share the space up to the new-tab button.
-    private property <length> tabs-room: root.width - root.tabs-x - 4px - 32px - root.trailing;
-    private property <length> slot-width: TabsUi.rows.length == 0 ? 0px
-        : max(48px, min(220px, (root.tabs-room - (TabsUi.rows.length - 1) * 4px) / TabsUi.rows.length));
+    private property <int> count: TabsUi.rows.length;
+    // Tabs share the room up to the new-tab button. In the integrated frame
+    // some of the bar stays free to drag the window by, however many tabs.
+    // At the narrowest desktop width, 32 tabs still fit as icons.
+    private property <length> drag-room: WindowChrome.controls-visible ? 48px : 0px;
+    private property <length> tabs-room: max(0px, root.width - root.tabs-x - 44px - root.drag-room - root.trailing);
+    private property <length> fitted-slot-width: root.count == 0 ? 0px
+        : max(22px, min(240px, (root.tabs-room / root.count / 1px).floor() * 1px));
+    // Tabs closed one after another keep their width, and the strip its
+    // length, while the pointer stays on it or on "+", so the next close
+    // button is still under the pointer. Tabs opened meanwhile still fit.
+    private property <length> held-slot-width: 0px;
+    private property <length> held-strip-width: 0px;
+    private property <length> slot-width: root.held-slot-width > 0px
+        ? min(root.held-slot-width, root.fitted-slot-width) : root.fitted-slot-width;
+    private property <bool> strip-hovered: strip.has-hover || new-tab.hovered;
+    changed strip-hovered => {
+        if !root.strip-hovered {
+            root.held-slot-width = 0px;
+            root.held-strip-width = 0px;
+        }
+    }
+    // The dragged tab, its travel, and the slot it would land in.
+    private property <int> drag-index: -1;
+    private property <length> drag-travel;
+    private property <int> drop-index: root.drag-index < 0 ? -1
+        : max(0, min(root.count - 1, round(root.drag-index + root.drag-travel / root.slot-width)));
+    // A tab closed during a drag may have been the dragged one.
+    changed count => {
+        root.drag-index = -1;
+        root.drag-travel = 0px;
+    }
+    // The hovered tab hides its rules like the active one.
+    private property <int> hovered-index: -1;
 
     if WindowChrome.controls-visible : WindowDragArea {
         width: parent.width;
         height: parent.height;
     }
 
-    tab-strip := HorizontalLayout {
+    // The bottom border runs under every tab except the active one.
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: root.divider-color;
+    }
+
+    profile-pill := ProfileSwitcher {
+        x: root.pill-x;
+        y: TabMetrics.middle(parent.height) - self.height / 2;
+        profiles: root.profiles;
+        active: root.active-profile;
+        account-count: root.account-count;
+        choose(id) => { root.choose-profile(id); }
+        create-profile => { root.create-profile(); }
+        manage-profiles => { root.manage-profiles(); }
+    }
+
+    strip := TouchArea {
         x: root.tabs-x;
-        y: (parent.height - 32px) / 2;
-        width: min(root.tabs-room, self.preferred-width);
-        height: 32px;
-        spacing: 4px;
+        width: max(root.count * root.slot-width, min(root.held-strip-width, root.tabs-room));
+        height: parent.height;
         accessible-role: tab-list;
         accessible-label: @tr("Tabs");
+        accessible-item-count: root.count;
 
         for tab-row[index] in TabsUi.rows : TabItem {
+            x: index * root.slot-width;
+            width: root.slot-width;
+            height: parent.height;
             entry: tab-row;
             index: index;
-            count: TabsUi.rows.length;
-            slot-width: root.slot-width;
+            count: root.count;
+            live-workspace: root.live-workspace;
             live-title: root.live-title;
+            reordering: root.drag-index >= 0;
+            shift: root.drag-index < 0 || index == root.drag-index ? 0px
+                : index > root.drag-index && index <= root.drop-index ? -root.slot-width
+                : index < root.drag-index && index >= root.drop-index ? root.slot-width
+                : 0px;
+            // Rules only separate two resting tabs.
+            divided: index < root.count - 1 && root.drag-index < 0
+                && !tab-row.active && !TabsUi.rows[index + 1].active
+                && root.hovered-index != index && root.hovered-index != index + 1;
             title-color: root.title-color;
-            muted-color: root.muted-color;
+            text-color: root.text-color;
             accent-color: root.accent-color;
             active-background: root.active-tab-background;
             hover-background: root.hover-background;
-            tab-border-color: root.divider-color;
+            divider-color: root.divider-color;
+            changed hovered => {
+                if self.hovered {
+                    root.hovered-index = index;
+                } else if root.hovered-index == index {
+                    root.hovered-index = -1;
+                }
+            }
+            dragged(travel) => {
+                root.drag-index = travel == 0px ? -1 : index;
+                root.drag-travel = travel;
+            }
+            dropped(travel) => {
+                root.drag-index = index;
+                root.drag-travel = travel;
+                let target = root.drop-index;
+                root.drag-index = -1;
+                root.drag-travel = 0px;
+                if target != index {
+                    TabsUi.move(tab-row.id, target);
+                }
+            }
+            closing => {
+                root.held-slot-width = root.slot-width;
+                root.held-strip-width = strip.width;
+            }
         }
     }
 
-    NewTabButton {
-        x: root.tabs-x + tab-strip.width + 4px;
-        y: (parent.height - self.height) / 2;
+    new-tab := NewTabButton {
+        x: root.tabs-x + strip.width + TabMetrics.foot;
+        y: TabMetrics.middle(parent.height) - self.height / 2;
         hover-background: root.hover-background;
-        muted-color: root.muted-color;
-    }
-
-    Rectangle {
-        y: parent.height - 1px;
-        width: parent.width;
-        height: 1px;
-        background: root.divider-color;
+        icon-color: root.text-color;
     }
 }

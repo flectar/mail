@@ -52,6 +52,7 @@ pub(super) fn create_and_register_window_lifecycle(
 
     if let Some(tray) = tray.as_ref() {
         tray.set_enabled(app.get_close_to_tray());
+        crate::app_icon::attach_tray(app, tray);
 
         let app_for_tray = app.as_weak();
         tray.on_show_window(move || {
@@ -333,21 +334,25 @@ pub(super) fn register_window_preference_callbacks(
     runtime: &Rc<tokio::runtime::Runtime>,
     ui_task_tx: &UiSender<UiTaskUpdate>,
 ) {
-    #[cfg(desktop)]
-    let launch_at_login = LaunchAtLogin::register(app, runtime);
     let app_weak = app.as_weak();
     app.on_toggle_settings(move || {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        let open = !app.get_settings_open();
-        app.set_settings_open(open);
-        // The entry can also change in the system's own startup settings.
-        #[cfg(desktop)]
-        if open {
-            launch_at_login.refresh(&app, false);
+        if let Some(app) = app_weak.upgrade() {
+            app.set_settings_open(!app.get_settings_open());
         }
     });
+    // The entry can also change in the system's own startup settings, so
+    // read it again whenever Settings appears: from the rail, a tab or a
+    // shortcut into a settings page.
+    #[cfg(desktop)]
+    {
+        let launch_at_login = LaunchAtLogin::register(app, runtime);
+        let app_weak = app.as_weak();
+        app.on_settings_shown(move || {
+            if let Some(app) = app_weak.upgrade() {
+                launch_at_login.refresh(&app, false);
+            }
+        });
+    }
 
     let app_weak = app.as_weak();
     let state_for_frame = Rc::clone(state);

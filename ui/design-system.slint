@@ -60,6 +60,23 @@ export global MailIconPalette {
     out property <color> drafts: #d946ef;
     out property <color> folders: #22a06b;
     out property <color> other: #64748b;
+    // The key on a message's verification code.
+    out property <color> verification-code: #f5b301;
+}
+
+// A file's type keeps one color wherever the file shows, in both themes.
+export global FileIconPalette {
+    out property <color> pdf: #e5484d;
+    out property <color> document: #2f81f7;
+    out property <color> spreadsheet: #22a06b;
+    out property <color> presentation: #ea580c;
+    out property <color> image: #8b5cf6;
+    out property <color> video: #db2777;
+    out property <color> audio: #0ea5e9;
+    out property <color> archive: #d97706;
+    out property <color> code: #64748b;
+    out property <color> calendar: #2f9cf4;
+    out property <color> other: #80817e;
 }
 
 // Settings destinations use the same preference-controlled color strategy as
@@ -98,6 +115,8 @@ export global AppTheme {
     in-out property <color> custom-dark-surface: #18191a;
     in-out property <color> custom-dark-text: #f3f3f2;
     in-out property <color> custom-dark-border: #3a3b3c;
+    // Set with WindowChrome.top-bar, while the tab strip spans the window.
+    in property <bool> top-bar: false;
 
     out property <bool> dark: Palette.color-scheme == ColorScheme.dark;
 
@@ -142,8 +161,13 @@ export global AppTheme {
     out property <color> surface: preset == "default" ? (dark ? #18191a : #ffffff) : themed-surface;
     out property <color> surface-raised: preset == "default" ? (dark ? #131415 : #fafaf8)
         : themed-surface.mix(themed-page-bg, 0.72);
-    out property <color> sidebar-bg: preset == "default" ? (dark ? #151617 : #f0f0ee)
+    // The sidebars' own tint, also a soft fill on the content.
+    out property <color> sidebar-tint: preset == "default" ? (dark ? #151617 : #f0f0ee)
         : themed-page-bg.mix(themed-surface, 0.72);
+    // Under the tab strip, sidebars share the content's surface, so the
+    // active tab opens into one color wherever it sits; dividers alone
+    // separate the panes there.
+    out property <color> sidebar-bg: root.top-bar ? root.surface : root.sidebar-tint;
     out property <color> control-bg: preset == "default" ? (dark ? #232425 : #f1f1ef)
         : themed-surface.mix(themed-text, dark ? 0.90 : 0.94);
     out property <color> muted-control-bg: preset == "default" ? (dark ? #242526 : #e8e8e5)

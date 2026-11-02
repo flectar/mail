@@ -150,7 +150,7 @@ impl OAuthRedirectBroker for LoopbackRedirectBroker {
         let redirect_uri = match provider {
             Provider::Gmail => server.ipv4_redirect_uri(),
             Provider::Microsoft => server.localhost_redirect_uri(),
-            Provider::Imap => return Err(CoreError::Auth("provider does not use oauth".into())),
+            Provider::Generic => return Err(CoreError::Auth("provider does not use oauth".into())),
         };
         let (sender, manual_redirect) = tokio::sync::oneshot::channel();
         let mut pending = self

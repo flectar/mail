@@ -209,7 +209,7 @@ fn validate_claims(
         Provider::Microsoft if !valid_microsoft_issuer(issuer, claims) => {
             Err(CoreError::Auth("identity token issuer mismatch".into()))
         }
-        Provider::Imap => Err(CoreError::Auth(
+        Provider::Generic => Err(CoreError::Auth(
             "password accounts do not use identity tokens".into(),
         )),
         _ => Ok(()),
@@ -281,7 +281,7 @@ fn identity(provider: Provider, claims: &Value) -> Result<VerifiedIdentity> {
     let claim_names: &[&str] = match provider {
         Provider::Gmail => &["email"],
         Provider::Microsoft => &["preferred_username", "email", "upn"],
-        Provider::Imap => &[],
+        Provider::Generic => &[],
     };
     let email = claim_names
         .iter()
@@ -414,7 +414,7 @@ async fn signing_keys(provider: Provider, force_refresh: bool) -> Result<Arc<[Jw
     let cache = match provider {
         Provider::Gmail => &*GOOGLE_KEY_CACHE,
         Provider::Microsoft => &*MICROSOFT_KEY_CACHE,
-        Provider::Imap => {
+        Provider::Generic => {
             return Err(CoreError::Auth(
                 "password accounts do not use identity tokens".into(),
             ));
@@ -431,7 +431,7 @@ async fn signing_keys(provider: Provider, force_refresh: bool) -> Result<Arc<[Jw
     let url = match provider {
         Provider::Gmail => GOOGLE_JWKS,
         Provider::Microsoft => MICROSOFT_JWKS,
-        Provider::Imap => unreachable!(),
+        Provider::Generic => unreachable!(),
     };
     let response = oidc_http_client()?.get(url).send().await.map_err(|error| {
         if error.is_timeout() || error.is_connect() {

@@ -19,12 +19,13 @@ fn account(id: i64) -> Account {
         email: format!("account-{id}@example.test"),
         display_name: Some(format!("Account {id}")),
         avatar_url: None,
-        provider: Provider::Imap,
+        provider: Provider::Generic,
         auth_kind: flectar_mail_core::models::AuthKind::Password,
         mail_protocol: MailProtocol::Imap,
         sync_state: "idle".into(),
         sync_error: None,
         can_create_top_level_mailbox: true,
+        server_keeps_mail_days: None,
     }
 }
 fn config(account: &Account) -> AccountConfig {
@@ -39,11 +40,14 @@ fn config(account: &Account) -> AccountConfig {
         username: account.email.clone(),
         jmap_url: String::new(),
         jmap_account_id: None,
-        imap_host: "imap.example.test".into(),
-        imap_port: 993,
+        incoming_host: "imap.example.test".into(),
+        incoming_port: 993,
         smtp_host: "smtp.example.test".into(),
         smtp_port: 465,
-        settings: Default::default(),
+        settings: flectar_mail_core::models::AccountSettings::new(MailConnectionSettings::new(
+            ConnectionSecurity::Tls,
+            ConnectionSecurity::Tls,
+        )),
     }
 }
 

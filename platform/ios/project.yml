@@ -6,6 +6,9 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     PRODUCT_BUNDLE_IDENTIFIER: com.flectar.mail
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    # Alternate icons chosen in Settings; resources/app-icon/generate.py
+    # writes their icon sets and checks this list.
+    ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIconGraphite AppIconLight AppIconBlue AppIconGreen AppIconPurple"
 targets:
   FlectarMail:
     type: application

@@ -85,6 +85,10 @@ provides these crate-internal items, which shared code calls without a `cfg`:
 | `pdfium_library()` | Path of the bundled PDFium library. |
 | `lower_current_thread_priority()` | Run the PDF worker thread at background priority. |
 | `install_preview_lifecycle()` | Register for background/memory-pressure notifications, which must call `flectar_mail::suspend_file_preview()`. |
+| `NAME` | The platform's name, which Settings uses to describe where the app icon appears. |
+| `SWITCHES_APP_ICON` | Whether apps may switch their home screen icon. Settings offers the choice only where they may. |
+| `show_app_icon(icon)` | Show the app icon chosen in Settings on the home screen. Android forwards it to the bridge its host registers with `configure_launcher_icon`; iOS switches to the alternate icon sets declared in `platform/ios/project.yml`. |
+| `email_font_dir()` | Platform font directory for the email (Blitz/Parley) renderer on hosts without Fontconfig; `None` when the fontique system backend provides the fonts. |
 
 Hosts that launch through `src/desktop.rs` (desktop and iOS) also provide
 `platform::launch_context()`.
@@ -131,7 +135,7 @@ up changes that one function.
 | --- | --- | --- |
 | 1 | Linux, Windows, macOS | Release packages. Lint and tests pass on every pull request. |
 | 2 | Android, iOS | Experimental builds. Lint passes on every pull request; a broken build blocks merging. |
-| 3 | Community ports | In-tree with a named maintainer listed in the host README. Built by a manually dispatched workflow, not on pull requests. A port that stays broken while its maintainer can't be reached is marked unmaintained, and is removed only if nobody takes it over. |
+| 3 | OpenHarmony | In-tree with a named maintainer listed in the host README. Built by a manually dispatched workflow, not on pull requests. A port that stays broken while its maintainer can't be reached is marked unmaintained, and is removed only if nobody takes it over. |
 
 New platforms start at tier 3. A maintainer may promote a platform once it has
 been kept green for several releases and has an owner for its release builds.

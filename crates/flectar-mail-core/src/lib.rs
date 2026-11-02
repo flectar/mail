@@ -21,11 +21,15 @@ pub mod graphcal;
 mod http_body;
 pub mod imap;
 pub mod jmap;
+pub mod mail_import;
 pub mod mail_security;
+mod mbox;
 pub mod migration;
 pub mod mime;
 pub mod models;
+pub mod net;
 pub mod oauth;
+pub mod pop3;
 pub mod queue;
 pub mod route;
 pub mod scheduler;
@@ -35,6 +39,7 @@ pub mod signatures;
 pub mod smtp;
 pub mod sync;
 pub mod unsubscribe;
+pub mod verification_code;
 
 use crate::accounts::credentials::{self, CredentialStoreHandle, Slot};
 use crate::config::Paths;
@@ -61,6 +66,10 @@ const MAX_DRAFT_ATTACHMENTS: usize = 32;
 const MAX_DRAFT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_DRAFT_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CACHED_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
+/// Originals written durably before the transaction that refers to them
+/// commits. One nothing refers to was left by an interrupted write.
+const DURABLE_ORIGINAL_SUFFIXES: [&str; 2] =
+    [sync::pop3::ORIGINAL_SUFFIX, mail_import::ORIGINAL_SUFFIX];
 const MAX_CACHED_HEADER_BYTES: usize = 256 * 1024;
 const SEND_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const SEND_STATUS_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
@@ -106,6 +115,23 @@ fn normalize_mail_profile_name(value: &str) -> Result<String> {
         ));
     }
     Ok(value.to_owned())
+}
+
+/// The mail view only shows a profile that exists and has accounts. Drop it
+/// once a deletion or membership change leaves neither.
+fn retire_active_mail_profile(settings: &mut Settings) {
+    let showable = settings
+        .active_mail_profile
+        .as_deref()
+        .is_some_and(|active| {
+            settings
+                .mail_profiles
+                .iter()
+                .any(|profile| profile.id == active && !profile.account_ids.is_empty())
+        });
+    if !showable {
+        settings.active_mail_profile = None;
+    }
 }
 
 fn normalize_mail_profile_color(value: &str) -> Result<String> {
@@ -171,7 +197,7 @@ fn normalize_account_email(value: &str) -> Option<String> {
 /// Rules every account created from portable or migrated settings must
 /// satisfy. Interactive setup checks the same fields as the user types them.
 pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Result<()> {
-    imap::trusted_certificates(&config.settings.connection.trusted_certificate_pem)?;
+    net::tls::trusted_certificates(&config.settings.connection.trusted_certificate_pem)?;
     let email = config.email.trim();
     if email.len() > 320 || !email.contains('@') {
         return Err(CoreError::Other(format!(
@@ -181,43 +207,156 @@ pub(crate) fn validate_portable_account(config: &PortableAccountConfig) -> Resul
     }
     if config.username.len() > 512
         || config.jmap_url.len() > 2048
-        || config.imap_host.len() > 253
+        || config.incoming_host.len() > 253
         || config.smtp_host.len() > 253
     {
         return Err(CoreError::Other("an account field is too long".into()));
     }
-    let valid_pair = matches!(
-        (config.provider, config.auth_kind),
-        (Provider::Imap, AuthKind::Password)
-            | (Provider::Gmail, AuthKind::Oauth2)
-            | (Provider::Microsoft, AuthKind::Oauth2)
-    );
-    if !valid_pair {
+    let account_kind = (config.provider, config.auth_kind);
+    let supported = match config.mail_protocol {
+        MailProtocol::Gmail => account_kind == (Provider::Gmail, AuthKind::Oauth2),
+        MailProtocol::Imap => matches!(
+            account_kind,
+            (Provider::Generic, AuthKind::Password) | (Provider::Microsoft, AuthKind::Oauth2)
+        ),
+        MailProtocol::Jmap | MailProtocol::Pop3 => {
+            account_kind == (Provider::Generic, AuthKind::Password)
+        }
+        // Mail kept on this device has no server to sign in to again.
+        MailProtocol::Local => false,
+    };
+    if !supported {
         return Err(CoreError::Other(format!(
             "unsupported sign-in type for {email}"
         )));
     }
-    if config.provider == Provider::Imap
-        && config.mail_protocol == MailProtocol::Imap
-        && (config.username.trim().is_empty()
-            || config.imap_host.trim().is_empty()
-            || config.smtp_host.trim().is_empty()
-            || config.imap_port == 0
-            || config.smtp_port == 0)
+    if config.mail_protocol != MailProtocol::Pop3
+        && config.settings.keep_on_server != KeepOnServer::Always
+    {
+        return Err(CoreError::Other(
+            "only POP3 accounts remove downloaded mail from their server".into(),
+        ));
+    }
+    let connection = &config.settings.connection;
+    if config.auth_kind == AuthKind::Oauth2
+        && !(connection.incoming_security.is_encrypted() && connection.smtp_security.is_encrypted())
     {
         return Err(CoreError::Other(format!(
-            "incomplete IMAP settings for {email}"
+            "{email} signs in with OAuth, which needs encrypted connections"
         )));
     }
-    if config.provider == Provider::Imap
-        && config.mail_protocol == MailProtocol::Jmap
-        && config.username.trim().is_empty()
-    {
+    let complete = match config.mail_protocol {
+        // Provider presets own the server settings of OAuth accounts.
+        MailProtocol::Gmail => true,
+        MailProtocol::Imap if config.provider == Provider::Microsoft => true,
+        MailProtocol::Imap | MailProtocol::Pop3 => {
+            !config.username.trim().is_empty()
+                && !config.incoming_host.trim().is_empty()
+                && !config.smtp_host.trim().is_empty()
+                && config.incoming_port != 0
+                && config.smtp_port != 0
+        }
+        MailProtocol::Jmap => !config.username.trim().is_empty(),
+        MailProtocol::Local => false,
+    };
+    if !complete {
         return Err(CoreError::Other(format!(
-            "incomplete JMAP settings for {email}"
+            "incomplete {} settings for {email}",
+            config.mail_protocol.as_str().to_ascii_uppercase()
         )));
     }
     Ok(())
+}
+
+/// Separator between the levels of a stored folder path. JMAP paths are
+/// composed by Flectar from mailbox names; IMAP servers and Gmail labels
+/// report their own, and POP3 and local folders exist only on this device.
+fn folder_path_delimiter(protocol: MailProtocol, folder: &repo::folders::Folder) -> String {
+    match protocol {
+        MailProtocol::Jmap => " / ".to_owned(),
+        MailProtocol::Gmail | MailProtocol::Imap => {
+            folder.delimiter.clone().unwrap_or_else(|| "/".into())
+        }
+        MailProtocol::Pop3 | MailProtocol::Local => repo::folders::DEVICE_DELIMITER.to_owned(),
+    }
+}
+
+/// The configuration a password account would have, for checks before it
+/// exists.
+fn password_account_config(args: &AddPasswordAccountArgs) -> AccountConfig {
+    AccountConfig {
+        id: 0,
+        email: args.email.clone(),
+        display_name: None,
+        avatar_url: None,
+        provider: Provider::Generic,
+        auth_kind: AuthKind::Password,
+        mail_protocol: args.mail_protocol,
+        username: args.username.clone(),
+        jmap_url: String::new(),
+        jmap_account_id: None,
+        incoming_host: args.incoming_host.clone(),
+        incoming_port: args.incoming_port,
+        smtp_host: args.smtp_host.clone(),
+        smtp_port: args.smtp_port,
+        settings: AccountSettings::new(args.connection.clone()),
+    }
+}
+
+async fn check_smtp(args: &AddPasswordAccountArgs) -> Result<()> {
+    smtp::test_connection(
+        &password_account_config(args),
+        &smtp::SmtpAuth::Password(args.password.clone()),
+    )
+    .await
+}
+
+/// The setup check signed in, so the first sync respects the server's
+/// minimum time between sign-ins.
+fn record_pop3_probe(
+    conn: &rusqlite::Connection,
+    account_id: i64,
+    probe: sync::pop3::Probe,
+) -> Result<()> {
+    repo::pop3::record_sign_in(
+        conn,
+        account_id,
+        probe.signed_in_at,
+        probe.login_delay,
+        probe.expire,
+    )
+}
+
+fn folder_exists() -> CoreError {
+    CoreError::Other("a folder with this name already exists".into())
+}
+
+/// Gmail mail is only reachable through Google sign-in.
+fn gmail_needs_google_sign_in() -> CoreError {
+    CoreError::Auth("Gmail accounts sign in with Google, not with a password".into())
+}
+
+fn local_mail_has_no_server() -> CoreError {
+    CoreError::Auth("mail kept on this device has no server to sign in to".into())
+}
+
+/// Whether an account stored as `stored` takes the address `signed_in` that
+/// its provider reported for a sign-in. Google ignores dots in Gmail
+/// addresses and treats googlemail.com as gmail.com, so an imported login can
+/// be another spelling of the address Google reports. Addresses that differ
+/// only in case keep the stored spelling.
+fn sign_in_respells(provider: Provider, stored: &str, signed_in: &str) -> Result<bool> {
+    if signed_in.eq_ignore_ascii_case(stored) {
+        Ok(false)
+    } else if provider == Provider::Gmail && accounts::same_mailbox(signed_in, stored) {
+        Ok(true)
+    } else {
+        // Refuse to graft another mailbox's tokens onto this account. Signing
+        // in as a different address is "add account", not "reauth".
+        Err(CoreError::Auth(format!(
+            "signed in as {signed_in} but this account is {stored}"
+        )))
+    }
 }
 
 fn normalize_account_password(value: String) -> String {
@@ -228,6 +367,38 @@ fn normalize_account_password(value: String) -> String {
         .chars()
         .filter(|character| !matches!(character, '\r' | '\n'))
         .collect()
+}
+
+#[cfg(test)]
+mod sign_in_address_tests {
+    use super::*;
+
+    #[test]
+    fn gmail_sign_ins_take_googles_spelling_of_the_same_mailbox() {
+        use Provider::{Gmail, Microsoft};
+        for (provider, stored, signed_in, respells) in [
+            (Gmail, "JohnDoe@gmail.com", "johndoe@gmail.com", Some(false)),
+            (Gmail, "johndoe@gmail.com", "john.doe@gmail.com", Some(true)),
+            (Gmail, "J.Doe@googlemail.com", "jdoe@gmail.com", Some(true)),
+            (Gmail, "johndoe@gmail.com", "jane@gmail.com", None),
+            // Workspace addresses and Microsoft sign-ins keep their dots.
+            (Gmail, "jane.doe@example.com", "janedoe@example.com", None),
+            (Microsoft, "johndoe@gmail.com", "john.doe@gmail.com", None),
+            (Microsoft, "Jo@Contoso.test", "jo@contoso.test", Some(false)),
+        ] {
+            assert_eq!(
+                sign_in_respells(provider, stored, signed_in).ok(),
+                respells,
+                "{stored} signed in as {signed_in}"
+            );
+        }
+        assert_eq!(
+            sign_in_respells(Gmail, "johndoe@gmail.com", "jane@gmail.com")
+                .unwrap_err()
+                .to_string(),
+            "auth failed: signed in as jane@gmail.com but this account is johndoe@gmail.com"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -317,7 +488,7 @@ fn oauth_calendar_scopes(provider: Provider, enabled: bool) -> &'static [&'stati
             oauth::providers::MS_ONLINE_MEETINGS_SCOPE,
             oauth::providers::MS_CALENDARS_SCOPE,
         ],
-        Provider::Imap => &[],
+        Provider::Generic => &[],
     }
 }
 
@@ -510,6 +681,13 @@ impl Core {
         if removed_staged_files > 0 {
             tracing::info!(removed_staged_files, "removed orphaned draft staging files");
         }
+        let removed_mail_files = core.remove_interrupted_mail_files().await?;
+        if removed_mail_files > 0 {
+            tracing::info!(
+                removed_mail_files,
+                "removed files of interrupted mail writes"
+            );
+        }
 
         // Make saved OAuth app registrations available before any actor
         // needs a token refresh.
@@ -605,16 +783,24 @@ impl Core {
                 for cfg in configs {
                     core.spawn_actor(cfg).await;
                 }
+                match core.db.read(|conn| repo::local::id(conn)).await {
+                    Ok(Some(account_id)) => core.spawn_local_actor(account_id).await,
+                    Ok(None) => {}
+                    Err(error) => tracing::error!("finding local mail for startup: {error}"),
+                }
                 events::sync_diagnostic("startup_workers", None, "ready");
-                // Calendar sync tasks for accounts with a connected CalDAV server.
-                if core.paths.calendar_db_file().exists()
-                    && let Ok(cal_accounts) = core
+                // Calendar sync tasks for accounts with a syncing calendar
+                // connection, once older CalDAV passwords have moved to theirs.
+                if core.paths.calendar_db_file().exists() {
+                    core.move_calendar_secrets().await;
+                    if let Ok(cal_accounts) = core
                         .calendar_db
-                        .read(|conn| repo::caldav::all_configs(conn))
+                        .read(|conn| repo::caldav::accounts_with_enabled_connections(conn))
                         .await
-                {
-                    for cfg in cal_accounts {
-                        core.spawn_cal_task(cfg.account_id).await;
+                    {
+                        for account_id in cal_accounts {
+                            core.spawn_cal_task(account_id).await;
+                        }
                     }
                 }
                 if let Ok(card_accounts) = core
@@ -706,6 +892,13 @@ impl Core {
             tokio::spawn(async move { c.ai_router_loop().await });
         }
 
+        // Verification codes past a message's preview reach the list without
+        // the message being opened.
+        {
+            let c = core.clone();
+            tokio::spawn(async move { c.code_body_loop().await });
+        }
+
         Ok(core)
     }
 
@@ -727,6 +920,49 @@ impl Core {
                         }
                     }
                 },
+                Ok(_) => {}
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    }
+
+    /// Long-lived loop: on every mail change, reads the bodies of recent
+    /// received messages that mention a code their subject and preview do
+    /// not show. Gmail and JMAP read bodies only when a message is opened,
+    /// and IMAP's background reading can be far behind, while a code is
+    /// wanted now.
+    async fn code_body_loop(&self) {
+        use tokio::sync::broadcast::error::RecvError;
+        // Older codes have expired.
+        const RECENT_MS: i64 = 24 * 60 * 60 * 1000;
+        // Bodies read for one change at most, newest first.
+        const LIMIT: usize = 32;
+        let mut rx = self.bus.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(CoreEvent::MailUpdated { thread_ids }) => {
+                    let since = now_ms() - RECENT_MS;
+                    let pending = self
+                        .db
+                        .read(move |conn| {
+                            repo::messages::pending_code_bodies(conn, &thread_ids, since)
+                        })
+                        .await
+                        .unwrap_or_else(|error| {
+                            tracing::warn!("finding bodies for verification codes failed: {error}");
+                            Vec::new()
+                        });
+                    for (message_id, account_id, _, _) in pending
+                        .into_iter()
+                        .filter(|(_, _, subject, snippet)| {
+                            verification_code::mentioned(subject, snippet)
+                        })
+                        .take(LIMIT)
+                    {
+                        self.request_body(account_id, message_id).await;
+                    }
+                }
                 Ok(_) => {}
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
@@ -770,6 +1006,33 @@ impl Core {
         self.handles.write().await.insert(handle.account_id, handle);
     }
 
+    /// Starts local mail's worker unless it runs already.
+    async fn spawn_local_actor(&self, account_id: i64) {
+        let mut handles = self.handles.write().await;
+        if let std::collections::hash_map::Entry::Vacant(entry) = handles.entry(account_id) {
+            entry.insert(sync::engine::spawn_local(self.sync_ctx(), account_id));
+        }
+    }
+
+    /// Replace the account's mail worker with one that uses its stored
+    /// configuration, after a change the running worker would not see.
+    async fn restart_actor(&self, account_id: i64) {
+        if let Some(handle) = self.handles.write().await.remove(&account_id) {
+            handle.abort();
+        }
+        match self
+            .db
+            .read(move |conn| repo::accounts::get_config(conn, account_id))
+            .await
+        {
+            Ok(Some(cfg)) => self.spawn_actor(cfg).await,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(account_id, %error, "could not restart the mail worker");
+            }
+        }
+    }
+
     async fn spawn_cal_task(&self, account_id: i64) {
         let handle = caldav::task::spawn(
             self.calendar_db.clone(),
@@ -780,6 +1043,106 @@ impl Core {
             account_id,
         );
         self.cal_handles.write().await.insert(account_id, handle);
+    }
+
+    /// Keep the account's calendar task running exactly while one of its
+    /// connections syncs. Runs after a change was saved, so a failed read
+    /// leaves the task as it is rather than failing that change.
+    async fn refresh_cal_task(&self, account_id: i64) {
+        let syncing = self
+            .calendar_db
+            .read(move |conn| {
+                Ok(repo::caldav::account_connections(conn, account_id)?
+                    .iter()
+                    .any(|connection| connection.enabled))
+            })
+            .await;
+        match syncing {
+            Ok(false) => {
+                self.cal_handles.write().await.remove(&account_id);
+            }
+            Ok(true) => {
+                if !self.cal_handles.read().await.contains_key(&account_id) {
+                    self.spawn_cal_task(account_id).await;
+                }
+            }
+            Err(error) => tracing::warn!(account_id, "reading calendar connections: {error}"),
+        }
+    }
+
+    /// Move CalDAV passwords saved before an account could sync several
+    /// servers to their connections. A locked keyring leaves the rest for the
+    /// connection's first sync.
+    async fn move_calendar_secrets(&self) {
+        let pending = match self
+            .calendar_db
+            .read(|conn| repo::caldav::pending_secret_moves(conn))
+            .await
+        {
+            Ok(pending) => pending,
+            Err(error) => {
+                tracing::warn!("listing calendar passwords to move: {error}");
+                return;
+            }
+        };
+        for (connection_id, account_id) in pending {
+            if let Err(error) = caldav::task::move_secret(
+                &self.calendar_db,
+                self.credentials.clone(),
+                connection_id,
+                account_id,
+            )
+            .await
+            {
+                tracing::warn!(connection_id, "moving calendar password: {error}");
+            }
+        }
+    }
+
+    /// Delete a CalDAV connection's password, including one still waiting
+    /// under its account from before connections had their own.
+    async fn delete_connection_password(
+        &self,
+        connection: &repo::caldav::ConnectionConfig,
+    ) -> Result<()> {
+        if connection.kind != CalendarConnectionKind::Generic {
+            return Ok(());
+        }
+        let connection_id = connection.id;
+        let account_id = connection.account_id;
+        credentials::delete_async(
+            self.credentials.clone(),
+            account_id,
+            Slot::CaldavPassword(connection_id),
+        )
+        .await?;
+        let pending = self
+            .calendar_db
+            .read(move |conn| repo::caldav::secret_move_pending(conn, connection_id))
+            .await?;
+        if pending {
+            credentials::delete_async(
+                self.credentials.clone(),
+                account_id,
+                Slot::AccountCaldavPassword,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Delete the passwords of every CalDAV connection of an account. The
+    /// keyring cannot list entries, so they are found through their
+    /// connections, before those go.
+    async fn delete_calendar_passwords(&self, account_id: i64) -> Result<()> {
+        let connections = self
+            .calendar_db
+            .read(move |conn| repo::caldav::account_connections(conn, account_id))
+            .await?;
+        for connection in &connections {
+            self.delete_connection_password(connection).await?;
+        }
+        Ok(())
     }
 
     async fn spawn_card_task(&self, account_id: i64) {
@@ -840,6 +1203,29 @@ impl Core {
         self.db.read(|conn| repo::accounts::list(conn)).await
     }
 
+    /// The account of local mail, once an import has created it. Cheaper
+    /// than [`Self::local_mail`], which also measures it.
+    pub async fn local_mail_account(&self) -> Result<Option<i64>> {
+        self.db.read(|conn| repo::local::id(conn)).await
+    }
+
+    /// Mail kept on this device, once an import has created it.
+    pub async fn local_mail(&self) -> Result<Option<LocalMail>> {
+        self.db
+            .read(|conn| {
+                let Some(account_id) = repo::local::id(conn)? else {
+                    return Ok(None);
+                };
+                let contents = repo::local::contents(conn, account_id)?;
+                Ok(Some(LocalMail {
+                    account_id,
+                    messages: contents.messages,
+                    bytes: contents.bytes,
+                }))
+            })
+            .await
+    }
+
     /// Native settings surfaces need the editable server fields alongside the
     /// public account summary. Credentials remain in the OS keyring and are
     /// deliberately not included.
@@ -865,10 +1251,11 @@ impl Core {
                 let transaction = conn.transaction()?;
                 let mut imported = 0usize;
                 for config in &configs {
-                    if repo::accounts::find_by_email(&transaction, config.email.trim())?.is_some() {
+                    if repo::accounts::find_by_mailbox(&transaction, config.email.trim())?.is_some()
+                    {
                         continue;
                     }
-                    let account_id = repo::accounts::insert(
+                    repo::accounts::insert_with_sync_state(
                         &transaction,
                         &repo::accounts::NewAccount {
                             email: config.email.trim(),
@@ -880,14 +1267,14 @@ impl Core {
                             username: config.username.trim(),
                             jmap_url: config.jmap_url.trim(),
                             jmap_account_id: None,
-                            imap_host: config.imap_host.trim(),
-                            imap_port: config.imap_port,
+                            incoming_host: config.incoming_host.trim(),
+                            incoming_port: config.incoming_port,
                             smtp_host: config.smtp_host.trim(),
                             smtp_port: config.smtp_port,
                         },
+                        &config.settings,
+                        "needs_reauth",
                     )?;
-                    repo::accounts::set_settings(&transaction, account_id, &config.settings)?;
-                    repo::accounts::set_sync_state(&transaction, account_id, "needs_reauth")?;
                     imported += 1;
                 }
                 transaction.commit()?;
@@ -927,16 +1314,24 @@ impl Core {
 
                 config.settings.mail_history = mail_history;
                 repo::accounts::set_settings(&transaction, account_id, &config.settings)?;
-                match (config.provider, config.mail_protocol) {
-                    (Provider::Gmail, _) => repo::gmail::expire_history(&transaction, account_id)?,
-                    (_, MailProtocol::Jmap) => {
+                match config.mail_protocol {
+                    MailProtocol::Gmail => repo::gmail::expire_history(&transaction, account_id)?,
+                    MailProtocol::Jmap => {
                         transaction.execute(
                             "UPDATE jmap_sync_state SET email_state = NULL WHERE account_id = ?1",
                             rusqlite::params![account_id],
                         )?;
                     }
-                    (Provider::Imap | Provider::Microsoft, MailProtocol::Imap) => {
+                    MailProtocol::Imap => {
                         repo::folders::reopen_backfill_for_account(&transaction, account_id)?;
+                    }
+                    // The next sync weighs skipped server messages against
+                    // the new boundary.
+                    MailProtocol::Pop3 => {}
+                    MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "mail kept on this device has no server history".into(),
+                        ));
                     }
                 }
                 transaction.commit()?;
@@ -965,7 +1360,57 @@ impl Core {
                 let tx = conn.transaction()?;
                 let mut config = repo::accounts::get_config(&tx, account_id)?
                     .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {}
+                    MailProtocol::Pop3 => {
+                        return Err(CoreError::Other(
+                            "POP3 accounts keep sent mail on this device".into(),
+                        ));
+                    }
+                    MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "mail kept on this device is never sent".into(),
+                        ));
+                    }
+                }
                 config.settings.sent_copy_policy = policy;
+                repo::accounts::set_settings(&tx, account_id, &config.settings)?;
+                tx.commit()?;
+                Ok(config.settings)
+            })
+            .await?;
+        if let Some(handle) = self.handles.read().await.get(&account_id).cloned() {
+            handle.update_settings(settings);
+        }
+        self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
+        Ok(())
+    }
+
+    /// Choose how long a POP3 account leaves downloaded mail on its server.
+    /// The account's next sync applies the choice.
+    pub async fn set_account_keep_on_server(
+        &self,
+        account_id: i64,
+        keep: KeepOnServer,
+    ) -> Result<()> {
+        let settings = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut config = repo::accounts::get_config(&tx, account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+                match config.mail_protocol {
+                    MailProtocol::Pop3 => {}
+                    MailProtocol::Gmail
+                    | MailProtocol::Imap
+                    | MailProtocol::Jmap
+                    | MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "only POP3 accounts remove downloaded mail from their server".into(),
+                        ));
+                    }
+                }
+                config.settings.keep_on_server = keep;
                 repo::accounts::set_settings(&tx, account_id, &config.settings)?;
                 tx.commit()?;
                 Ok(config.settings)
@@ -981,8 +1426,8 @@ impl Core {
     pub async fn test_connection(&self, args: &AddPasswordAccountArgs) -> ConnectionTestResult {
         let mut args = args.clone();
         args.password = normalize_account_password(args.password);
-        if args.mail_protocol == MailProtocol::Jmap {
-            return match crate::jmap::client::connect_with(
+        let result = match args.mail_protocol {
+            MailProtocol::Jmap => crate::jmap::client::connect_with(
                 &args.email,
                 &args.username,
                 &args.password,
@@ -990,25 +1435,28 @@ impl Core {
                 None,
             )
             .await
-            {
-                Ok(_) => ConnectionTestResult {
-                    ok: true,
-                    error: None,
-                },
-                Err(error) => ConnectionTestResult {
-                    ok: false,
-                    error: Some(error.to_client_json()),
-                },
-            };
-        }
-        match self.check_imap_smtp(&args).await {
+            .map(|_| ())
+            .map_err(|error| error.to_client_json()),
+            MailProtocol::Imap => self
+                .check_imap_smtp(&args)
+                .await
+                .map_err(|error| error.to_string()),
+            MailProtocol::Pop3 => self
+                .check_pop3_smtp(&args)
+                .await
+                .map(drop)
+                .map_err(|error| error.to_string()),
+            MailProtocol::Gmail => Err(gmail_needs_google_sign_in().to_string()),
+            MailProtocol::Local => Err(local_mail_has_no_server().to_string()),
+        };
+        match result {
             Ok(()) => ConnectionTestResult {
                 ok: true,
                 error: None,
             },
-            Err(e) => ConnectionTestResult {
+            Err(error) => ConnectionTestResult {
                 ok: false,
-                error: Some(e.to_string()),
+                error: Some(error),
             },
         }
     }
@@ -1018,37 +1466,29 @@ impl Core {
             user: args.username.clone(),
             password: args.password.clone(),
         };
-        let mut session =
-            imap::connect_with_settings(&args.imap_host, args.imap_port, creds, &args.connection)
-                .await?;
+        let mut session = imap::connect_with_settings(
+            &args.incoming_host,
+            args.incoming_port,
+            creds,
+            &args.connection,
+        )
+        .await?;
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
         imap::logout(session).await;
         mailbox_result?;
-        let config = AccountConfig {
-            id: 0,
-            email: args.email.clone(),
-            display_name: None,
-            avatar_url: None,
-            provider: Provider::Imap,
-            auth_kind: AuthKind::Password,
-            mail_protocol: MailProtocol::Imap,
-            username: args.username.clone(),
-            jmap_url: String::new(),
-            jmap_account_id: None,
-            imap_host: args.imap_host.clone(),
-            imap_port: args.imap_port,
-            smtp_host: args.smtp_host.clone(),
-            smtp_port: args.smtp_port,
-            settings: AccountSettings {
-                connection: args.connection.clone(),
-                ..Default::default()
-            },
-        };
-        smtp::test_connection(&config, &smtp::SmtpAuth::Password(args.password.clone())).await
+        check_smtp(args).await
+    }
+
+    /// Returns what the POP3 server announced, which the first sync has to
+    /// respect.
+    async fn check_pop3_smtp(&self, args: &AddPasswordAccountArgs) -> Result<sync::pop3::Probe> {
+        let probe = sync::pop3::probe(&password_account_config(args), &args.password).await?;
+        check_smtp(args).await?;
+        Ok(probe)
     }
 
     pub async fn add_account_password(&self, args: AddPasswordAccountArgs) -> Result<Account> {
-        imap::trusted_certificates(&args.connection.trusted_certificate_pem)?;
+        net::tls::trusted_certificates(&args.connection.trusted_certificate_pem)?;
         let email = normalize_account_email(&args.email)
             .ok_or_else(|| CoreError::Auth("enter a valid email address".into()))?;
         let mut args = AddPasswordAccountArgs {
@@ -1061,8 +1501,8 @@ impl Core {
             password: normalize_account_password(args.password),
             mail_protocol: args.mail_protocol,
             jmap_url: args.jmap_url.trim().to_owned(),
-            imap_host: args.imap_host.trim().to_owned(),
-            imap_port: args.imap_port,
+            incoming_host: args.incoming_host.trim().to_owned(),
+            incoming_port: args.incoming_port,
             smtp_host: args.smtp_host.trim().to_owned(),
             smtp_port: args.smtp_port,
             connection: args.connection,
@@ -1075,38 +1515,69 @@ impl Core {
         }
         if args.username.len() > 512
             || args.jmap_url.len() > 2048
-            || args.imap_host.len() > 253
+            || args.incoming_host.len() > 253
             || args.smtp_host.len() > 253
         {
             return Err(CoreError::Auth("an account field is too long".into()));
         }
-        if args.mail_protocol == MailProtocol::Imap
-            && (args.imap_host.is_empty()
-                || args.smtp_host.is_empty()
-                || args.imap_port == 0
-                || args.smtp_port == 0)
-        {
-            return Err(CoreError::Auth(
-                "IMAP and SMTP server hosts and ports are required".into(),
-            ));
-        }
-        let args = if args.mail_protocol == MailProtocol::Jmap {
-            AddPasswordAccountArgs {
-                jmap_url: crate::jmap::client::normalize_base_url(&args.jmap_url, &args.email)?,
-                ..args
+        match args.mail_protocol {
+            MailProtocol::Imap | MailProtocol::Pop3 => {
+                if args.incoming_host.is_empty()
+                    || args.smtp_host.is_empty()
+                    || args.incoming_port == 0
+                    || args.smtp_port == 0
+                {
+                    return Err(CoreError::Auth(format!(
+                        "{} and SMTP server hosts and ports are required",
+                        args.mail_protocol.as_str().to_ascii_uppercase()
+                    )));
+                }
             }
-        } else {
-            args
-        };
+            MailProtocol::Jmap => {
+                args.jmap_url =
+                    crate::jmap::client::normalize_base_url(&args.jmap_url, &args.email)?;
+            }
+            MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
+            MailProtocol::Local => return Err(local_mail_has_no_server()),
+        }
 
         credentials::check_available_async(self.credentials.clone()).await?;
         self.recover_incomplete_account_credentials().await?;
 
+        let existing = self
+            .db
+            .read({
+                let email = args.email.clone();
+                move |conn| repo::accounts::find_by_mailbox(conn, &email)
+            })
+            .await?;
+        // A Gmail account is edited under the spelling it was added with:
+        // the update below would take another spelling for another user.
+        if let Some(existing) = &existing
+            && !existing.email.eq_ignore_ascii_case(&args.email)
+        {
+            return Err(CoreError::Auth(format!(
+                "{} is already added",
+                existing.email
+            )));
+        }
+        // POP3 mail exists only on this device, so it can't move to or from
+        // a protocol that keeps mail on the server.
+        if let Some(existing) = &existing
+            && (existing.mail_protocol == MailProtocol::Pop3)
+                != (args.mail_protocol == MailProtocol::Pop3)
+        {
+            return Err(CoreError::Auth(
+                "an account can't switch between POP3 and IMAP or JMAP".into(),
+            ));
+        }
+
         // Verify credentials before storing anything. For JMAP, also pin the
         // exact Mail account selected from the authenticated Session so a
         // later reconnect can never drift to a different shared account.
-        let jmap_account_id = if args.mail_protocol == MailProtocol::Jmap {
-            Some(
+        let mut pop3_probe = None;
+        let jmap_account_id = match args.mail_protocol {
+            MailProtocol::Jmap => Some(
                 crate::jmap::client::connect_with(
                     &args.email,
                     &args.username,
@@ -1116,23 +1587,22 @@ impl Core {
                 )
                 .await?
                 .account_id,
-            )
-        } else {
-            self.check_imap_smtp(&args).await?;
-            None
+            ),
+            MailProtocol::Imap => {
+                self.check_imap_smtp(&args).await?;
+                None
+            }
+            MailProtocol::Pop3 => {
+                pop3_probe = Some(self.check_pop3_smtp(&args).await?);
+                None
+            }
+            MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
+            MailProtocol::Local => return Err(local_mail_has_no_server()),
         };
-
-        let existing = self
-            .db
-            .read({
-                let email = args.email.clone();
-                move |conn| repo::accounts::find_by_email(conn, &email)
-            })
-            .await?;
         let is_new_account = existing.is_none();
 
         let id = if let Some(existing) = existing {
-            if existing.provider != Provider::Imap || existing.auth_kind != AuthKind::Password {
+            if existing.provider != Provider::Generic || existing.auth_kind != AuthKind::Password {
                 return Err(CoreError::Auth(format!(
                     "{} is already connected through {}; reconnect it through that provider",
                     existing.email,
@@ -1161,14 +1631,14 @@ impl Core {
                             email: &a.email,
                             display_name: a.display_name.as_deref(),
                             avatar_url: None,
-                            provider: Provider::Imap,
+                            provider: Provider::Generic,
                             auth_kind: AuthKind::Password,
                             mail_protocol: a.mail_protocol,
                             username: &a.username,
                             jmap_url: &a.jmap_url,
                             jmap_account_id: remote_account.as_deref(),
-                            imap_host: &a.imap_host,
-                            imap_port: a.imap_port,
+                            incoming_host: &a.incoming_host,
+                            incoming_port: a.incoming_port,
                             smtp_host: &a.smtp_host,
                             smtp_port: a.smtp_port,
                         },
@@ -1178,6 +1648,9 @@ impl Core {
                         .settings;
                     settings.connection = a.connection.clone();
                     repo::accounts::set_settings(&transaction, id, &settings)?;
+                    if let Some(probe) = pop3_probe {
+                        record_pop3_probe(&transaction, id, probe)?;
+                    }
                     transaction.commit()?;
                     Ok(())
                 })
@@ -1206,24 +1679,23 @@ impl Core {
                             email: &a.email,
                             display_name: a.display_name.as_deref(),
                             avatar_url: None,
-                            provider: Provider::Imap,
+                            provider: Provider::Generic,
                             auth_kind: AuthKind::Password,
                             mail_protocol: a.mail_protocol,
                             username: &a.username,
                             jmap_url: &a.jmap_url,
                             jmap_account_id: remote_account.as_deref(),
-                            imap_host: &a.imap_host,
-                            imap_port: a.imap_port,
+                            incoming_host: &a.incoming_host,
+                            incoming_port: a.incoming_port,
                             smtp_host: &a.smtp_host,
                             smtp_port: a.smtp_port,
                         },
+                        &AccountSettings::new(a.connection.clone()),
                         repo::accounts::CREDENTIAL_SETUP_STATE,
                     )?;
-                    let settings = AccountSettings {
-                        connection: a.connection.clone(),
-                        ..Default::default()
-                    };
-                    repo::accounts::set_settings(&transaction, id, &settings)?;
+                    if let Some(probe) = pop3_probe {
+                        record_pop3_probe(&transaction, id, probe)?;
+                    }
                     transaction.commit()?;
                     Ok(id)
                 })
@@ -1374,14 +1846,7 @@ impl Core {
         if connect_calendar {
             match provider {
                 Provider::Gmail => {
-                    self.connect_calendar(ConnectCalendarArgs {
-                        account_id: account.id,
-                        kind: "google".into(),
-                        url: None,
-                        username: None,
-                        password: None,
-                    })
-                    .await?;
+                    self.attach_google_calendar(account.id).await?;
                 }
                 Provider::Microsoft => {
                     // The initial consent already included Calendars.ReadWrite;
@@ -1390,7 +1855,7 @@ impl Core {
                     self.connect_microsoft_calendar(account.id, open_url)
                         .await?;
                 }
-                Provider::Imap => {}
+                Provider::Generic => {}
             }
         }
         Ok(account)
@@ -1405,7 +1870,7 @@ impl Core {
         let servers = match provider {
             Provider::Gmail => &accounts::providers::GMAIL,
             Provider::Microsoft => &accounts::providers::MICROSOFT,
-            Provider::Imap => return Err(CoreError::Auth("not an oauth provider".into())),
+            Provider::Generic => return Err(CoreError::Auth("not an oauth provider".into())),
         };
         credentials::check_available_async(self.credentials.clone()).await?;
         self.recover_incomplete_account_credentials().await?;
@@ -1427,7 +1892,7 @@ impl Core {
             .db
             .read({
                 let email = email.clone();
-                move |conn| repo::accounts::find_by_email(conn, &email)
+                move |conn| repo::accounts::find_by_mailbox(conn, &email)
             })
             .await?;
         if let Some(existing) = existing {
@@ -1438,50 +1903,7 @@ impl Core {
                     existing.provider.as_str()
                 )));
             }
-
-            let id = existing.id;
-            let display_name = outcome.display_name.clone();
-            let avatar_url = outcome.avatar_url.clone();
-            self.tokens
-                .store_initial(
-                    id,
-                    outcome.access_token,
-                    outcome.expires_in,
-                    outcome.refresh_token,
-                    outcome.client_id,
-                    outcome.client_secret,
-                )
-                .await?;
-            self.db
-                .write(move |conn| {
-                    repo::accounts::update_oauth_identity(
-                        conn,
-                        id,
-                        display_name.as_deref(),
-                        avatar_url.as_deref(),
-                    )
-                })
-                .await?;
-            self.db
-                .write(move |conn| repo::accounts::set_sync_state(conn, id, "idle"))
-                .await?;
-
-            if let Some(handle) = self.handles.read().await.get(&id).cloned() {
-                handle.send(SyncCmd::SyncNow { complete: None });
-            } else {
-                let cfg = self
-                    .db
-                    .read(move |conn| repo::accounts::get_config(conn, id))
-                    .await?
-                    .ok_or_else(|| CoreError::NotFound("account".into()))?;
-                self.spawn_actor(cfg).await;
-            }
-
-            return self
-                .db
-                .read(move |conn| repo::accounts::get(conn, id))
-                .await?
-                .ok_or_else(|| CoreError::NotFound("account".into()));
+            return self.reconnect(existing, outcome).await;
         }
 
         let display_name = outcome.display_name.clone();
@@ -1497,15 +1919,16 @@ impl Core {
                         avatar_url: avatar_url.as_deref(),
                         provider,
                         auth_kind: AuthKind::Oauth2,
-                        mail_protocol: MailProtocol::Imap,
+                        mail_protocol: servers.mail_protocol,
                         username: &email,
                         jmap_url: "",
                         jmap_account_id: None,
-                        imap_host: servers.imap_host,
-                        imap_port: servers.imap_port,
+                        incoming_host: servers.incoming_host,
+                        incoming_port: servers.incoming_port,
                         smtp_host: servers.smtp_host,
                         smtp_port: servers.smtp_port,
                     },
+                    &AccountSettings::new(servers.connection()),
                     repo::accounts::CREDENTIAL_SETUP_STATE,
                 )
             })
@@ -1571,13 +1994,13 @@ impl Core {
                 oauth::providers::MS_CALENDARS_SCOPE,
             ],
             Provider::Gmail => &[],
-            Provider::Imap => return Err(CoreError::Auth("not an oauth provider".into())),
+            Provider::Generic => return Err(CoreError::Auth("not an oauth provider".into())),
         };
         credentials::check_available_async(self.credentials.clone()).await?;
         let outcome = tokio::select! {
             // Hint the provider at the account being repaired so the browser
             // preselects it instead of silently reusing whatever session is
-            // active (which then fails the email match below).
+            // active (which then fails the mailbox check).
             r = oauth::flow::authorize_with_broker(
                 account.provider,
                 consent_extra,
@@ -1589,37 +2012,18 @@ impl Core {
                 return Err(CoreError::Auth("sign-in cancelled".into()));
             }
         };
-        // Refuse to graft another mailbox's tokens onto this account. Signing in
-        // as a different address is "add account", not "reauth".
-        if !outcome.email.eq_ignore_ascii_case(&account.email) {
-            return Err(CoreError::Auth(format!(
-                "signed in as {} but this account is {}",
-                outcome.email, account.email
-            )));
-        }
+        self.reconnect(account, outcome).await
+    }
 
-        let display_name = outcome.display_name.clone();
-        let avatar_url = outcome.avatar_url.clone();
-        self.tokens
-            .store_initial(
-                account_id,
-                outcome.access_token,
-                outcome.expires_in,
-                outcome.refresh_token,
-                outcome.client_id,
-                outcome.client_secret,
-            )
-            .await?;
-        self.db
-            .write(move |conn| {
-                repo::accounts::update_oauth_identity(
-                    conn,
-                    account_id,
-                    display_name.as_deref(),
-                    avatar_url.as_deref(),
-                )
-            })
-            .await?;
+    /// Store a completed sign-in for an existing account and resume its sync,
+    /// which waits paused while the account needs a sign-in.
+    async fn reconnect(
+        &self,
+        account: Account,
+        outcome: oauth::flow::OAuthOutcome,
+    ) -> Result<Account> {
+        let account_id = account.id;
+        self.store_sign_in(&account, outcome).await?;
 
         // Clear needs_reauth and wake the actor. The reauth pause loop retries
         // its connect on the next SyncNow; if no actor is live (e.g. reauth
@@ -1647,6 +2051,64 @@ impl Core {
             .ok_or_else(|| CoreError::NotFound("account".into()))
     }
 
+    /// Store the tokens and profile of a sign-in for an existing account.
+    /// When the provider spells the account's address differently, such as
+    /// Gmail's dotted form of an imported login, the account takes that
+    /// spelling and its mail worker restarts with it.
+    async fn store_sign_in(
+        &self,
+        account: &Account,
+        outcome: oauth::flow::OAuthOutcome,
+    ) -> Result<()> {
+        let account_id = account.id;
+        let respelled = sign_in_respells(account.provider, &account.email, &outcome.email)?;
+        if respelled {
+            let email = outcome.email.clone();
+            self.db
+                .write(move |conn| {
+                    let transaction = conn.transaction()?;
+                    repo::accounts::set_signed_in_address(&transaction, account_id, &email)?;
+                    transaction.commit()?;
+                    Ok(())
+                })
+                .await?;
+        }
+
+        let display_name = outcome.display_name.clone();
+        let avatar_url = outcome.avatar_url.clone();
+        let stored = async {
+            self.tokens
+                .store_initial(
+                    account_id,
+                    outcome.access_token,
+                    outcome.expires_in,
+                    outcome.refresh_token,
+                    outcome.client_id,
+                    outcome.client_secret,
+                )
+                .await?;
+            self.db
+                .write(move |conn| {
+                    repo::accounts::update_oauth_identity(
+                        conn,
+                        account_id,
+                        display_name.as_deref(),
+                        avatar_url.as_deref(),
+                    )
+                })
+                .await
+        }
+        .await;
+        // Only an account that never signed in can have another spelling of
+        // its Gmail address, so its worker waits paused with no work in
+        // flight. It restarts with the new spelling even when the tokens
+        // could not be stored.
+        if respelled {
+            self.restart_actor(account_id).await;
+        }
+        stored
+    }
+
     async fn purge_calendar_account(&self, account_id: i64) -> Result<()> {
         self.calendar_db
             .write(move |conn| {
@@ -1664,7 +2126,7 @@ impl Core {
                     rusqlite::params![account_id],
                 )?;
                 tx.execute(
-                    "DELETE FROM caldav_config WHERE account_id = ?1",
+                    "DELETE FROM calendar_connections WHERE account_id = ?1",
                     rusqlite::params![account_id],
                 )?;
                 tx.commit()?;
@@ -1754,6 +2216,7 @@ impl Core {
             handle.abort();
         }
         self.tokens.forget_account(account_id).await;
+        self.delete_calendar_passwords(account_id).await?;
         self.purge_calendar_account(account_id).await?;
         self.files_db
             .write(move |conn| {
@@ -1761,7 +2224,15 @@ impl Core {
                 Ok(())
             })
             .await?;
-        credentials::delete_all_async(self.credentials.clone(), account_id).await?;
+        // Local mail never signs in. A removal resumed after its row is gone
+        // clears the credentials again.
+        let protocol = self
+            .db
+            .read(move |conn| repo::accounts::protocol(conn, account_id))
+            .await?;
+        if protocol != Some(MailProtocol::Local) {
+            credentials::delete_all_async(self.credentials.clone(), account_id).await?;
+        }
         self.db
             .write(move |conn| {
                 conn.execute(
@@ -1772,6 +2243,7 @@ impl Core {
                 for profile in &mut settings.mail_profiles {
                     profile.account_ids.retain(|id| *id != account_id);
                 }
+                retire_active_mail_profile(&mut settings);
                 let account_key = account_id.to_string();
                 settings.account_colors.remove(&account_key);
                 settings.account_short_names.remove(&account_key);
@@ -1846,7 +2318,7 @@ impl Core {
                 let mut statement = conn.prepare(
                     "SELECT account_id FROM calendar_events WHERE account_id != 0
                      UNION SELECT account_id FROM calendars WHERE account_id != 0
-                     UNION SELECT account_id FROM caldav_config WHERE account_id != 0
+                     UNION SELECT account_id FROM calendar_connections WHERE account_id != 0
                      UNION SELECT account_id FROM pending_actions WHERE account_id != 0",
                 )?;
                 Ok(statement
@@ -1857,6 +2329,9 @@ impl Core {
         for account_id in calendar_accounts {
             if !valid_accounts.contains(&account_id) {
                 tracing::warn!(account_id, "removing orphaned calendar account data");
+                if let Err(error) = self.delete_calendar_passwords(account_id).await {
+                    tracing::warn!(account_id, "orphaned calendar passwords stay: {error}");
+                }
                 self.purge_calendar_account(account_id).await?;
                 self.files_db
                     .write(move |conn| {
@@ -1871,6 +2346,58 @@ impl Core {
             tracing::info!(detached, "detached orphaned calendar message links");
         }
         Ok(())
+    }
+
+    /// Remove what interrupted mail writes left behind: temporary files, and
+    /// POP3 and imported originals nothing refers to because their
+    /// transaction never committed. A POP3 session that stopped then never
+    /// sent QUIT, so the server still has those messages, and an import can
+    /// be run again. Runs before any account worker writes.
+    async fn remove_interrupted_mail_files(&self) -> Result<usize> {
+        let mut accounts = match tokio::fs::read_dir(self.paths.mail_root()).await {
+            Ok(accounts) => accounts,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        };
+        let stored: HashSet<std::ffi::OsString> = self
+            .db
+            .read(|conn| {
+                let mut statement = conn.prepare(
+                    "SELECT raw_path FROM messages
+                     WHERE raw_path LIKE '%' || ?1 OR raw_path LIKE '%' || ?2",
+                )?;
+                let paths = statement
+                    .query_map(DURABLE_ORIGINAL_SUFFIXES, |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(paths
+                    .iter()
+                    .filter_map(|path| std::path::Path::new(path).file_name())
+                    .map(std::ffi::OsStr::to_owned)
+                    .collect())
+            })
+            .await?;
+        let mut removed = 0;
+        while let Some(account) = accounts.next_entry().await? {
+            if !account.file_type().await?.is_dir() {
+                continue;
+            }
+            removed += crate::file_io::remove_partial_writes(account.path()).await?;
+            let mut files = tokio::fs::read_dir(account.path()).await?;
+            while let Some(file) = files.next_entry().await? {
+                let name = file.file_name();
+                if name.to_str().is_some_and(|name| {
+                    DURABLE_ORIGINAL_SUFFIXES
+                        .iter()
+                        .any(|suffix| name.ends_with(suffix))
+                }) && !stored.contains(&name)
+                    && file.file_type().await?.is_file()
+                {
+                    tokio::fs::remove_file(file.path()).await?;
+                    removed += 1;
+                }
+            }
+        }
+        Ok(removed)
     }
 
     async fn cleanup_orphaned_draft_files(&self) -> Result<usize> {
@@ -1989,7 +2516,8 @@ impl Core {
         self.db
             .write(|conn| {
                 conn.execute_batch(
-                    "DELETE FROM contacts;
+                    "DELETE FROM contact_entries;
+                     DELETE FROM contacts;
                      DELETE FROM snippets;
                      DELETE FROM split_rules;
                      DELETE FROM route_cache;
@@ -2005,7 +2533,7 @@ impl Core {
                     "DELETE FROM pending_actions;
                      DELETE FROM calendar_events;
                      DELETE FROM calendars;
-                     DELETE FROM caldav_config;",
+                     DELETE FROM calendar_connections;",
                 )?;
                 Ok(())
             })
@@ -2033,23 +2561,7 @@ impl Core {
         &self,
         destination: std::path::PathBuf,
     ) -> Result<DatabaseSnapshotManifest> {
-        let parent = destination.parent().ok_or_else(|| {
-            CoreError::Other("database snapshot destination has no parent directory".into())
-        })?;
-        let canonical_parent = tokio::fs::canonicalize(parent).await.map_err(|error| {
-            CoreError::Other(format!(
-                "resolving snapshot destination {}: {error}",
-                parent.display()
-            ))
-        })?;
-        let data_dir = tokio::fs::canonicalize(&self.paths.data_dir).await?;
-        let cache_dir = tokio::fs::canonicalize(&self.paths.cache_dir).await?;
-        if canonical_parent.starts_with(&data_dir) || canonical_parent.starts_with(&cache_dir) {
-            return Err(CoreError::Other(
-                "database snapshots must be exported outside the application data and cache directories"
-                    .into(),
-            ));
-        }
+        self.check_export_destination(&destination).await?;
         let _files_guard = self.file_work_lock.lock().await;
         db::snapshot::create(
             &self.db,
@@ -2059,6 +2571,218 @@ impl Core {
             &destination,
         )
         .await
+    }
+
+    /// Exports go outside the app's own directories, where nothing the app
+    /// cleans up can take them away, and never replace an earlier export.
+    async fn check_export_destination(&self, destination: &std::path::Path) -> Result<()> {
+        let parent = destination
+            .parent()
+            .ok_or_else(|| CoreError::Other("the destination has no parent directory".into()))?;
+        let canonical_parent = tokio::fs::canonicalize(parent).await.map_err(|error| {
+            CoreError::Other(format!(
+                "resolving the destination {}: {error}",
+                parent.display()
+            ))
+        })?;
+        let data_dir = tokio::fs::canonicalize(&self.paths.data_dir).await?;
+        let cache_dir = tokio::fs::canonicalize(&self.paths.cache_dir).await?;
+        if canonical_parent.starts_with(&data_dir) || canonical_parent.starts_with(&cache_dir) {
+            return Err(CoreError::Other(
+                "exports must go outside the application data and cache directories".into(),
+            ));
+        }
+        if tokio::fs::try_exists(destination).await? {
+            return Err(CoreError::Other(format!(
+                "{} already exists",
+                destination.display()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Write the mail of a POP3 account, or the mail kept on this device, to
+    /// a new directory as one mbox file per folder, so mail that exists only
+    /// here can be kept before it is removed. The directory must not exist
+    /// yet.
+    pub async fn export_account_mail(
+        &self,
+        account_id: i64,
+        destination: std::path::PathBuf,
+    ) -> Result<MailExport> {
+        match self.account_protocol(account_id).await? {
+            MailProtocol::Pop3 | MailProtocol::Local => {}
+            MailProtocol::Gmail | MailProtocol::Imap | MailProtocol::Jmap => {
+                return Err(CoreError::Other(
+                    "only POP3 accounts and mail kept on this device are here alone".into(),
+                ));
+            }
+        }
+        self.check_export_destination(&destination).await?;
+        let staging = crate::file_io::staging_directory(&destination)?;
+        tokio::fs::create_dir(&staging).await?;
+        let result = async {
+            crate::file_io::restrict_permissions(&staging, &[])?;
+            let export = self.write_mail_export(account_id, &staging).await?;
+            crate::file_io::publish_directory(&staging, &destination)?;
+            Ok(export)
+        }
+        .await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+        }
+        result
+    }
+
+    async fn write_mail_export(
+        &self,
+        account_id: i64,
+        directory: &std::path::Path,
+    ) -> Result<MailExport> {
+        use tokio::io::AsyncWriteExt;
+        let folders = self
+            .db
+            .read(move |conn| repo::folders::list(conn, Some(account_id)))
+            .await?;
+        let layout = mbox::layout(
+            folders
+                .iter()
+                .map(|folder| (folder.id, folder.path.as_str())),
+        );
+        let mut export = MailExport::default();
+        for (folder_id, file) in layout {
+            let messages = self
+                .db
+                .read(move |conn| repo::messages::in_folder_for_export(conn, folder_id))
+                .await?;
+            if messages.is_empty() {
+                continue;
+            }
+            // A subfolder's file goes into a folder named like its folder's.
+            let mut parent = directory.to_owned();
+            for level in file
+                .parent()
+                .into_iter()
+                .flat_map(std::path::Path::components)
+            {
+                parent.push(level);
+                if !tokio::fs::try_exists(&parent).await? {
+                    tokio::fs::create_dir(&parent).await?;
+                    crate::file_io::restrict_permissions(&parent, &[])?;
+                }
+            }
+            let path = directory.join(&file);
+            let mut file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .await?;
+            for message in messages {
+                let original = match &message.raw_path {
+                    Some(raw_path) => self
+                        .read_original(
+                            account_id,
+                            message.id,
+                            raw_path,
+                            MAX_CACHED_MESSAGE_BYTES,
+                            "exported message",
+                        )
+                        .await
+                        .inspect_err(|error| {
+                            tracing::warn!(message_id = message.id, %error, "message left out of a mail export");
+                        })
+                        .ok(),
+                    None if message.is_draft => Some(self.draft_message(message.id).await?),
+                    None => None,
+                };
+                let Some(original) = original else {
+                    export.missing += 1;
+                    continue;
+                };
+                file.write_all(mbox::separator(&message.from, message.date).as_bytes())
+                    .await?;
+                file.write_all(&mbox::entry(&original, message.is_read, message.is_starred))
+                    .await?;
+                export.messages += 1;
+            }
+            // The account may be removed right after its export.
+            file.sync_all().await?;
+            crate::file_io::restrict_permissions(&parent, &[&path])?;
+            export.folders += 1;
+        }
+        Ok(export)
+    }
+
+    /// A draft as a message file. Drafts have no original until they are
+    /// sent.
+    async fn draft_message(&self, draft_id: i64) -> Result<Vec<u8>> {
+        let (detail, bcc, staged) = self
+            .db
+            .read(move |conn| {
+                let detail = repo::messages::detail(conn, draft_id)?;
+                let bcc: String = conn.query_row(
+                    "SELECT bcc_json FROM messages WHERE id = ?1",
+                    [draft_id],
+                    |row| row.get(0),
+                )?;
+                let mut statement = conn.prepare(
+                    "SELECT file_path, filename FROM draft_attachments WHERE draft_id = ?1",
+                )?;
+                let staged = statement
+                    .query_map([draft_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok((detail, serde_json::from_str::<Vec<Address>>(&bcc)?, staged))
+            })
+            .await?;
+        // Like sending, only ever read files from the app's own staging area.
+        let staging_root = tokio::fs::canonicalize(self.paths.draft_attachments_dir())
+            .await
+            .ok();
+        let mut attachments = Vec::new();
+        let mut budget = MAX_DRAFT_ATTACHMENT_BYTES;
+        for (path, filename) in staged {
+            let path = tokio::fs::canonicalize(&path).await?;
+            if !staging_root
+                .as_ref()
+                .is_some_and(|root| path.starts_with(root))
+            {
+                return Err(CoreError::Other(format!(
+                    "attachment {filename}: refusing to read a file outside the staging area"
+                )));
+            }
+            let bytes = crate::file_io::read(&path, budget, "draft attachment").await?;
+            budget -= bytes.len();
+            attachments.push(crate::mime::OutgoingAttachment {
+                mime_type: crate::queue::mime_guess_from_name(&filename),
+                filename,
+                bytes,
+            });
+        }
+        let domain = detail
+            .from
+            .email
+            .split('@')
+            .nth(1)
+            .unwrap_or("localhost")
+            .to_owned();
+        let (_, raw) = crate::mime::build_message_owned(crate::mime::OutgoingMessage {
+            from: detail.from.clone(),
+            reply_to: None,
+            to: &detail.to,
+            cc: &detail.cc,
+            bcc: &bcc,
+            subject: &detail.subject,
+            body_text: detail.text_body.as_deref().unwrap_or(""),
+            body_html: detail.html_body.as_deref(),
+            in_reply_to: None,
+            references: &[],
+            message_id: None,
+            message_id_domain: &domain,
+            attachments,
+        })?;
+        Ok(raw)
     }
 
     pub async fn sync_now(&self, account_id: Option<i64>) -> Result<()> {
@@ -2116,8 +2840,54 @@ impl Core {
         folder_id: Option<i64>,
         page: impl Into<ThreadPageRequest>,
     ) -> Result<ThreadPage> {
+        self.list_threads_where(
+            view,
+            split_id,
+            account_id,
+            None,
+            label_id,
+            folder_id,
+            page.into(),
+        )
+        .await
+    }
+
+    /// `list_threads` across a set of accounts, such as a mail profile's,
+    /// instead of one account or all of them. An empty set lists nothing.
+    pub async fn list_threads_for_accounts(
+        &self,
+        view: View,
+        split_id: Option<i64>,
+        account_ids: Vec<i64>,
+        label_id: Option<i64>,
+        folder_id: Option<i64>,
+        page: impl Into<ThreadPageRequest>,
+    ) -> Result<ThreadPage> {
+        self.list_threads_where(
+            view,
+            split_id,
+            None,
+            Some(account_ids),
+            label_id,
+            folder_id,
+            page.into(),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn list_threads_where(
+        &self,
+        view: View,
+        split_id: Option<i64>,
+        account_id: Option<i64>,
+        account_ids: Option<Vec<i64>>,
+        label_id: Option<i64>,
+        folder_id: Option<i64>,
+        page: ThreadPageRequest,
+    ) -> Result<ThreadPage> {
         use repo::threads::TabFilter;
-        let ThreadPageRequest { cursor, limit } = page.into();
+        let ThreadPageRequest { cursor, limit } = page;
         // A category label filters to its single resolved tab; a manual label is
         // a cross-cutting filter. Split conventions: -1 = Important, -2 = Other,
         // positive ids = custom split tabs.
@@ -2148,6 +2918,7 @@ impl Core {
                         view,
                         tab,
                         account_id,
+                        account_ids,
                         folder_id,
                         cursor,
                         limit: limit.clamp(1, 200),
@@ -2208,6 +2979,7 @@ impl Core {
                         view,
                         tab,
                         account_id,
+                        account_ids: None,
                         folder_id,
                         cursor: None,
                         limit: 1,
@@ -2807,113 +3579,214 @@ impl Core {
         parent_folder_id: Option<i64>,
         name: String,
     ) -> Result<()> {
+        self.create_folder_in(account_id, parent_folder_id, name)
+            .await
+            .map(|_| ())
+    }
+
+    /// Create a folder, here and on the account's server, and return its id.
+    pub(crate) async fn create_folder_in(
+        &self,
+        account_id: i64,
+        parent_folder_id: Option<i64>,
+        name: String,
+    ) -> Result<i64> {
         let name = validate_folder_leaf(&name)?;
-        let config = self.folder_account_config(account_id).await?;
+        let protocol = self.account_protocol(account_id).await?;
         let parent = match parent_folder_id {
             Some(folder_id) => Some(self.folder_for_child(account_id, folder_id).await?),
             None => None,
         };
-        if config.provider == Provider::Gmail {
-            if name.contains('/') {
-                return Err(CoreError::Other(
-                    "folder names cannot contain the hierarchy separator \"/\"".into(),
-                ));
-            }
-            let full_name = parent
-                .as_ref()
-                .map(|parent| format!("{}/{}", parent.imap_name, name))
-                .unwrap_or(name);
-            sync::gmail::create_user_folder(&self.sync_ctx(), &config, &full_name).await?;
-        } else if config.mail_protocol == MailProtocol::Jmap {
-            let secret =
-                credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
-                    .await?;
-            let connected = jmap::client::connect(&config, &secret).await?;
-            if parent.is_none() && !connected.may_create_top_level_mailbox {
-                return Err(CoreError::Other(
-                    "the server does not allow creating top-level mailboxes".into(),
-                ));
-            }
-            let parent_remote = parent.as_ref().and_then(|folder| folder.jmap_id.clone());
-            let parent_local_id = parent.as_ref().map(|folder| folder.id);
-            let mailbox = connected
-                .mailbox_create(&name, parent_remote, jmap_client::mailbox::Role::None)
-                .await
-                .map_err(jmap::client::map_error)?;
-            let rights = mailbox.my_rights();
-            let permissions = repo::folders::FolderPermissions {
-                can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
-                can_rename: rights.is_some_and(|rights| rights.may_rename()),
-                can_delete: rights.is_some_and(|rights| rights.may_delete()),
-            };
-            let remote_id = mailbox
-                .id()
-                .ok_or_else(|| CoreError::Jmap("Mailbox/set returned no id".into()))?
-                .to_owned();
-            let display_path = parent
-                .as_ref()
-                .map(|parent| format!("{} / {name}", parent.imap_name))
-                .unwrap_or(name);
-            self.db
-                .write(move |conn| {
-                    let folder_id = repo::folders::upsert_jmap(
-                        conn,
-                        account_id,
-                        &remote_id,
-                        &display_path,
-                        None,
-                    )?;
-                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
-                    repo::folders::set_permissions(conn, folder_id, permissions)?;
-                    Ok(())
-                })
-                .await?;
-        } else {
-            let delimiter = match parent.as_ref().and_then(|folder| folder.delimiter.clone()) {
-                Some(delimiter) if !delimiter.is_empty() => delimiter,
-                _ => {
-                    self.db
-                        .read(move |conn| {
-                            Ok(repo::folders::list(conn, Some(account_id))?
-                                .into_iter()
-                                .find_map(|folder| {
-                                    folder.delimiter.filter(|value| !value.is_empty())
-                                })
-                                .unwrap_or_else(|| "/".into()))
-                        })
-                        .await?
+        let folder_id = match protocol {
+            MailProtocol::Gmail => {
+                let config = self.folder_account_config(account_id).await?;
+                if name.contains('/') {
+                    return Err(CoreError::Other(
+                        "folder names cannot contain the hierarchy separator \"/\"".into(),
+                    ));
                 }
-            };
-            if name.contains(&delimiter) {
-                return Err(CoreError::Other(format!(
-                    "folder names cannot contain the hierarchy separator {delimiter:?}"
-                )));
+                let full_name = parent
+                    .as_ref()
+                    .map(|parent| format!("{}/{}", parent.path, name))
+                    .unwrap_or(name);
+                sync::gmail::create_user_folder(&self.sync_ctx(), &config, &full_name).await?;
+                self.db
+                    .read(move |conn| {
+                        repo::folders::list(conn, Some(account_id))?
+                            .into_iter()
+                            .find(|folder| folder.path == full_name)
+                            .map(|folder| folder.id)
+                            .ok_or_else(|| CoreError::NotFound(format!("Gmail folder {full_name}")))
+                    })
+                    .await?
             }
-            let encoded_leaf = imap::encode_mailbox_name(&name);
-            let parent_local_id = parent.as_ref().map(|folder| folder.id);
-            let remote_name = parent
-                .as_ref()
-                .map(|parent| format!("{}{delimiter}{encoded_leaf}", parent.imap_name))
-                .unwrap_or(encoded_leaf);
-            let mut session = self.connect_folder_imap(&config).await?;
-            imap::create_folder(&mut session, &remote_name).await?;
-            imap::logout(session).await;
-            self.db
-                .write(move |conn| {
-                    let folder_id = repo::folders::upsert(
-                        conn,
-                        account_id,
-                        &remote_name,
-                        Some(&delimiter),
-                        None,
-                    )?;
-                    repo::folders::set_parent(conn, folder_id, parent_local_id)?;
-                    Ok(())
-                })
-                .await?;
-        }
+            MailProtocol::Jmap => {
+                let config = self.folder_account_config(account_id).await?;
+                let secret =
+                    credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
+                        .await?;
+                let connected = jmap::client::connect(&config, &secret).await?;
+                if parent.is_none() && !connected.may_create_top_level_mailbox {
+                    return Err(CoreError::Other(
+                        "the server does not allow creating top-level mailboxes".into(),
+                    ));
+                }
+                let parent_remote = parent.as_ref().and_then(|folder| folder.jmap_id.clone());
+                let parent_local_id = parent.as_ref().map(|folder| folder.id);
+                let mailbox = connected
+                    .mailbox_create(&name, parent_remote, jmap_client::mailbox::Role::None)
+                    .await
+                    .map_err(jmap::client::map_error)?;
+                let rights = mailbox.my_rights();
+                let permissions = repo::folders::FolderPermissions {
+                    can_create_children: rights.is_some_and(|rights| rights.may_create_child()),
+                    can_rename: rights.is_some_and(|rights| rights.may_rename()),
+                    can_delete: rights.is_some_and(|rights| rights.may_delete()),
+                };
+                let remote_id = mailbox
+                    .id()
+                    .ok_or_else(|| CoreError::Jmap("Mailbox/set returned no id".into()))?
+                    .to_owned();
+                let display_path = parent
+                    .as_ref()
+                    .map(|parent| format!("{} / {name}", parent.path))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        let folder_id = repo::folders::upsert_jmap(
+                            conn,
+                            account_id,
+                            &remote_id,
+                            &display_path,
+                            None,
+                        )?;
+                        repo::folders::set_parent(conn, folder_id, parent_local_id)?;
+                        repo::folders::set_permissions(conn, folder_id, permissions)?;
+                        Ok(folder_id)
+                    })
+                    .await?
+            }
+            MailProtocol::Imap => {
+                let config = self.folder_account_config(account_id).await?;
+                let delimiter = match parent.as_ref().and_then(|folder| folder.delimiter.clone()) {
+                    Some(delimiter) if !delimiter.is_empty() => delimiter,
+                    _ => {
+                        self.db
+                            .read(move |conn| {
+                                Ok(repo::folders::list(conn, Some(account_id))?
+                                    .into_iter()
+                                    .find_map(|folder| {
+                                        folder.delimiter.filter(|value| !value.is_empty())
+                                    })
+                                    .unwrap_or_else(|| "/".into()))
+                            })
+                            .await?
+                    }
+                };
+                if name.contains(&delimiter) {
+                    return Err(CoreError::Other(format!(
+                        "folder names cannot contain the hierarchy separator {delimiter:?}"
+                    )));
+                }
+                let encoded_leaf = imap::encode_mailbox_name(&name);
+                let parent_local_id = parent.as_ref().map(|folder| folder.id);
+                let remote_name = parent
+                    .as_ref()
+                    .map(|parent| format!("{}{delimiter}{encoded_leaf}", parent.path))
+                    .unwrap_or(encoded_leaf);
+                let mut session = self.connect_folder_imap(&config).await?;
+                imap::create_folder(&mut session, &remote_name).await?;
+                imap::logout(session).await;
+                self.db
+                    .write(move |conn| {
+                        let folder_id = repo::folders::upsert(
+                            conn,
+                            account_id,
+                            &remote_name,
+                            Some(&delimiter),
+                            None,
+                        )?;
+                        repo::folders::set_parent(conn, folder_id, parent_local_id)?;
+                        Ok(folder_id)
+                    })
+                    .await?
+            }
+            MailProtocol::Pop3 | MailProtocol::Local => {
+                let delimiter = repo::folders::DEVICE_DELIMITER;
+                if name.contains(delimiter) {
+                    return Err(CoreError::Other(format!(
+                        "folder names cannot contain the hierarchy separator {delimiter:?}"
+                    )));
+                }
+                let parent_local_id = parent.as_ref().map(|folder| folder.id);
+                let path = parent
+                    .as_ref()
+                    .map(|parent| format!("{}{delimiter}{name}", parent.path))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        if repo::folders::path_exists(&tx, account_id, &path)? {
+                            return Err(folder_exists());
+                        }
+                        let folder_id =
+                            repo::folders::upsert(&tx, account_id, &path, Some(delimiter), None)?;
+                        repo::folders::set_parent(&tx, folder_id, parent_local_id)?;
+                        tx.commit()?;
+                        Ok(folder_id)
+                    })
+                    .await?
+            }
+        };
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
-        Ok(())
+        Ok(folder_id)
+    }
+
+    /// The folder named `name` in `parent`, or at the top of the account,
+    /// found the way [`Self::create_folder_in`] names the folders it creates.
+    pub(crate) async fn child_folder(
+        &self,
+        account_id: i64,
+        parent_folder_id: Option<i64>,
+        name: &str,
+    ) -> Result<Option<i64>> {
+        let protocol = self.account_protocol(account_id).await?;
+        let name = name.trim().to_owned();
+        self.db
+            .read(move |conn| {
+                let folders = repo::folders::list(conn, Some(account_id))?;
+                let leaf = match protocol {
+                    MailProtocol::Imap => imap::encode_mailbox_name(&name),
+                    _ => name,
+                };
+                let path = match parent_folder_id {
+                    Some(id) => {
+                        let parent = folders
+                            .iter()
+                            .find(|folder| folder.id == id)
+                            .ok_or_else(|| CoreError::NotFound(format!("folder {id}")))?;
+                        let delimiter = match protocol {
+                            MailProtocol::Gmail => "/".to_owned(),
+                            // As for a new IMAP folder: its parent's, or
+                            // the account's.
+                            MailProtocol::Imap => std::iter::once(parent)
+                                .chain(&folders)
+                                .find_map(|folder| {
+                                    folder.delimiter.clone().filter(|value| !value.is_empty())
+                                })
+                                .unwrap_or_else(|| "/".into()),
+                            _ => folder_path_delimiter(protocol, parent),
+                        };
+                        format!("{}{delimiter}{leaf}", parent.path)
+                    }
+                    None => leaf,
+                };
+                Ok(folders
+                    .iter()
+                    .find(|folder| folder.path == path)
+                    .map(|folder| folder.id))
+            })
+            .await
     }
 
     pub async fn rename_folder(&self, folder_id: i64, name: String) -> Result<()> {
@@ -2932,59 +3805,86 @@ impl Core {
             ));
         }
         let account_id = folder.account_id;
-        let config = self.folder_account_config(account_id).await?;
-        let delimiter = if config.mail_protocol == MailProtocol::Jmap {
-            " / ".to_owned()
-        } else {
-            folder.delimiter.clone().unwrap_or_else(|| "/".into())
-        };
+        let protocol = self.account_protocol(account_id).await?;
+        let delimiter = folder_path_delimiter(protocol, &folder);
         if name.contains(&delimiter) {
             return Err(CoreError::Other(format!(
                 "folder names cannot contain the hierarchy separator {delimiter:?}"
             )));
         }
-        let old_name = folder.imap_name.clone();
+        let old_name = folder.path.clone();
         let parent_prefix = old_name.rsplit_once(&delimiter).map(|(parent, _)| parent);
-        if config.provider == Provider::Gmail {
-            let full_name = parent_prefix
-                .map(|parent| format!("{parent}{delimiter}{name}"))
-                .unwrap_or(name);
-            sync::gmail::rename_user_folder(&self.sync_ctx(), &config, folder_id, &full_name)
-                .await?;
-        } else if config.mail_protocol == MailProtocol::Jmap {
-            let secret =
-                credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
+        match protocol {
+            MailProtocol::Gmail => {
+                let config = self.folder_account_config(account_id).await?;
+                let full_name = parent_prefix
+                    .map(|parent| format!("{parent}{delimiter}{name}"))
+                    .unwrap_or(name);
+                sync::gmail::rename_user_folder(&self.sync_ctx(), &config, folder_id, &full_name)
                     .await?;
-            let connected = jmap::client::connect(&config, &secret).await?;
-            let remote_id = folder
-                .jmap_id
-                .as_deref()
-                .ok_or_else(|| CoreError::NotFound(format!("remote folder {folder_id}")))?;
-            connected
-                .mailbox_rename(remote_id, &name)
-                .await
-                .map_err(jmap::client::map_error)?;
-            let new_name = parent_prefix
-                .map(|parent| format!("{parent}{delimiter}{name}"))
-                .unwrap_or(name);
-            self.db
-                .write(move |conn| {
-                    repo::folders::rename_tree(conn, account_id, &old_name, &new_name, &delimiter)
-                })
-                .await?;
-        } else {
-            let encoded = imap::encode_mailbox_name(&name);
-            let new_name = parent_prefix
-                .map(|parent| format!("{parent}{delimiter}{encoded}"))
-                .unwrap_or(encoded);
-            let mut session = self.connect_folder_imap(&config).await?;
-            imap::rename_folder(&mut session, &old_name, &new_name).await?;
-            imap::logout(session).await;
-            self.db
-                .write(move |conn| {
-                    repo::folders::rename_tree(conn, account_id, &old_name, &new_name, &delimiter)
-                })
-                .await?;
+            }
+            MailProtocol::Jmap => {
+                let config = self.folder_account_config(account_id).await?;
+                let secret =
+                    credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
+                        .await?;
+                let connected = jmap::client::connect(&config, &secret).await?;
+                let remote_id = folder
+                    .jmap_id
+                    .as_deref()
+                    .ok_or_else(|| CoreError::NotFound(format!("remote folder {folder_id}")))?;
+                connected
+                    .mailbox_rename(remote_id, &name)
+                    .await
+                    .map_err(jmap::client::map_error)?;
+                let new_name = parent_prefix
+                    .map(|parent| format!("{parent}{delimiter}{name}"))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        repo::folders::rename_tree(
+                            conn, account_id, &old_name, &new_name, &delimiter,
+                        )
+                    })
+                    .await?;
+            }
+            MailProtocol::Imap => {
+                let config = self.folder_account_config(account_id).await?;
+                let encoded = imap::encode_mailbox_name(&name);
+                let new_name = parent_prefix
+                    .map(|parent| format!("{parent}{delimiter}{encoded}"))
+                    .unwrap_or(encoded);
+                let mut session = self.connect_folder_imap(&config).await?;
+                imap::rename_folder(&mut session, &old_name, &new_name).await?;
+                imap::logout(session).await;
+                self.db
+                    .write(move |conn| {
+                        repo::folders::rename_tree(
+                            conn, account_id, &old_name, &new_name, &delimiter,
+                        )
+                    })
+                    .await?;
+            }
+            MailProtocol::Pop3 | MailProtocol::Local => {
+                let new_name = parent_prefix
+                    .map(|parent| format!("{parent}{delimiter}{name}"))
+                    .unwrap_or(name);
+                self.db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        if new_name != old_name
+                            && repo::folders::path_exists(&tx, account_id, &new_name)?
+                        {
+                            return Err(folder_exists());
+                        }
+                        repo::folders::rename_tree(
+                            &tx, account_id, &old_name, &new_name, &delimiter,
+                        )?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await?;
+            }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(())
@@ -3005,64 +3905,74 @@ impl Core {
             ));
         }
         let account_id = folder.account_id;
-        let config = self.folder_account_config(account_id).await?;
-        let delimiter = if config.mail_protocol == MailProtocol::Jmap {
-            " / ".to_owned()
-        } else {
-            folder.delimiter.clone().unwrap_or_else(|| "/".into())
-        };
-        let prefix = format!("{}{delimiter}", folder.imap_name);
+        let protocol = self.account_protocol(account_id).await?;
+        let delimiter = folder_path_delimiter(protocol, &folder);
+        let prefix = format!("{}{delimiter}", folder.path);
         let mut tree = self
             .db
             .read(move |conn| {
                 Ok(repo::folders::list(conn, Some(account_id))?
                     .into_iter()
                     .filter(|candidate| {
-                        candidate.id == folder_id || candidate.imap_name.starts_with(&prefix)
+                        candidate.id == folder_id || candidate.path.starts_with(&prefix)
                     })
                     .collect::<Vec<_>>())
             })
             .await?;
-        tree.sort_by_key(|candidate| std::cmp::Reverse(candidate.imap_name.len()));
-        if config.provider == Provider::Gmail {
-            for candidate in &tree {
-                sync::gmail::delete_user_folder(&self.sync_ctx(), &config, candidate.id).await?;
+        tree.sort_by_key(|candidate| std::cmp::Reverse(candidate.path.len()));
+        match protocol {
+            MailProtocol::Gmail => {
+                let config = self.folder_account_config(account_id).await?;
+                for candidate in &tree {
+                    sync::gmail::delete_user_folder(&self.sync_ctx(), &config, candidate.id)
+                        .await?;
+                }
             }
-        } else if config.mail_protocol == MailProtocol::Jmap {
-            let secret =
-                credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
+            MailProtocol::Jmap => {
+                let config = self.folder_account_config(account_id).await?;
+                let secret =
+                    credentials::load_async(self.credentials.clone(), config.id, Slot::Password)
+                        .await?;
+                let connected = jmap::client::connect(&config, &secret).await?;
+                for candidate in &tree {
+                    let remote_id = candidate.jmap_id.as_deref().ok_or_else(|| {
+                        CoreError::NotFound(format!("remote folder {}", candidate.id))
+                    })?;
+                    connected
+                        .mailbox_destroy(remote_id, true)
+                        .await
+                        .map_err(jmap::client::map_error)?;
+                }
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
                     .await?;
-            let connected = jmap::client::connect(&config, &secret).await?;
-            for candidate in &tree {
-                let remote_id = candidate.jmap_id.as_deref().ok_or_else(|| {
-                    CoreError::NotFound(format!("remote folder {}", candidate.id))
-                })?;
-                connected
-                    .mailbox_destroy(remote_id, true)
-                    .await
-                    .map_err(jmap::client::map_error)?;
             }
-            let root_name = folder.imap_name;
-            self.db
-                .write(move |conn| {
-                    repo::folders::delete_tree(conn, account_id, &root_name, &delimiter)
-                })
-                .await?;
-        } else {
-            let mut session = self.connect_folder_imap(&config).await?;
-            for candidate in &tree {
-                imap::delete_folder(&mut session, &candidate.imap_name).await?;
+            MailProtocol::Imap => {
+                let config = self.folder_account_config(account_id).await?;
+                let mut session = self.connect_folder_imap(&config).await?;
+                for candidate in &tree {
+                    imap::delete_folder(&mut session, &candidate.path).await?;
+                }
+                imap::logout(session).await;
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
+                    .await?;
             }
-            imap::logout(session).await;
-            let root_name = folder.imap_name;
-            self.db
-                .write(move |conn| {
-                    repo::folders::delete_tree(conn, account_id, &root_name, &delimiter)
-                })
-                .await?;
+            // The folders and their mail exist only here.
+            MailProtocol::Pop3 | MailProtocol::Local => {
+                sync::delete_folder_tree(&self.sync_ctx(), account_id, folder.path, delimiter)
+                    .await?;
+            }
         }
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(())
+    }
+
+    /// The protocol of any account, including the one holding mail kept on
+    /// this device, which has no [`AccountConfig`].
+    async fn account_protocol(&self, account_id: i64) -> Result<MailProtocol> {
+        self.db
+            .read(move |conn| repo::accounts::protocol(conn, account_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))
     }
 
     async fn folder_account_config(&self, account_id: i64) -> Result<AccountConfig> {
@@ -3112,8 +4022,8 @@ impl Core {
             },
         };
         imap::connect_with_settings(
-            &config.imap_host,
-            config.imap_port,
+            &config.incoming_host,
+            config.incoming_port,
             credentials,
             &config.settings.connection,
         )
@@ -3442,11 +4352,12 @@ impl Core {
             .write(move |conn| {
                 let tx = conn.transaction()?;
 
-                let (provider, mail_protocol): (String, String) = tx.query_row(
-                    "SELECT provider,mail_protocol FROM accounts WHERE id = ?1",
+                let mail_protocol: MailProtocol = tx.query_row(
+                    "SELECT mail_protocol FROM accounts WHERE id = ?1",
                     rusqlite::params![args.account_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    |row| row.get(0),
                 )?;
+                let gmail = mail_protocol == MailProtocol::Gmail;
                 // A user can compose immediately after OAuth, before the first
                 // provider page has created folders. Give drafts a valid local
                 // home up front; Gmail's names match the native label/synthetic
@@ -3460,12 +4371,12 @@ impl Core {
                     None => repo::folders::upsert(
                         &tx,
                         args.account_id,
-                        if provider == "gmail" { "DRAFT" } else { "Drafts" },
+                        if gmail { "DRAFT" } else { "Drafts" },
                         Some("/"),
                         Some(roles::DRAFTS),
                     )?,
                 };
-                let gmail_all_folder = if provider == "gmail" {
+                let gmail_all_folder = if gmail {
                     Some(match repo::folders::by_role(&tx, args.account_id, roles::ALL)? {
                         Some(folder) => folder.id,
                         None => repo::folders::upsert(
@@ -3480,11 +4391,14 @@ impl Core {
                     None
                 };
 
-                // Thread: replies join the parent's thread.
-                let thread_id = if let Some(parent_id) = args.in_reply_to_message_id {
-                    repo::messages::get_row(&tx, parent_id)?.and_then(|r| r.thread_id)
-                } else {
-                    None
+                // Thread: replies join the parent's thread when it is this
+                // account's. A reply sent from another account, such as one
+                // to local mail, starts a thread of its own there.
+                let thread_id = match args.in_reply_to_message_id {
+                    Some(parent_id) => repo::messages::get_row(&tx, parent_id)?
+                        .filter(|parent| parent.account_id == args.account_id)
+                        .and_then(|parent| parent.thread_id),
+                    None => None,
                 };
 
                 let draft_id = match args.draft_id {
@@ -3607,7 +4521,11 @@ impl Core {
                 let security = repo::accounts::get_config(&tx, args.account_id)?.ok_or_else(|| CoreError::NotFound("account".into()))?.settings.security;
                 // Protected drafts stay local until explicit Send. Even incomplete
                 // recipient lists must never cause a plaintext server upload.
-                let sync_remote_account = if !security.enabled() && (provider == "gmail" || mail_protocol == "jmap") {
+                let uploads_drafts = match mail_protocol {
+                    MailProtocol::Gmail | MailProtocol::Jmap => true,
+                    MailProtocol::Imap | MailProtocol::Pop3 | MailProtocol::Local => false,
+                };
+                let sync_remote_account = if !security.enabled() && uploads_drafts {
                     tx.execute(
                         "UPDATE pending_actions SET state='cancelled',finished_at=?2
                          WHERE message_id=?1 AND kind='save_draft' AND state='pending'",
@@ -3761,8 +4679,8 @@ impl Core {
                 let row = conn
                     .query_row(
                         "SELECT m.account_id, m.thread_id, m.folder_id, m.uid, m.is_draft,
-                                COALESCE(f.role, ''), a.provider,
-                                m.gm_msgid, m.gmail_draft_id, a.mail_protocol, m.jmap_id
+                                COALESCE(f.role, ''), m.gm_msgid, m.gmail_draft_id,
+                                a.mail_protocol, m.jmap_id
                          FROM messages m LEFT JOIN folders f ON f.id = m.folder_id
                          JOIN accounts a ON a.id = m.account_id
                          WHERE m.id = ?1",
@@ -3775,11 +4693,10 @@ impl Core {
                                 row.get::<_, Option<i64>>(3)?,
                                 row.get::<_, i64>(4)? != 0,
                                 row.get::<_, String>(5)?,
-                                row.get::<_, String>(6)?,
+                                row.get::<_, Option<String>>(6)?,
                                 row.get::<_, Option<String>>(7)?,
-                                row.get::<_, Option<String>>(8)?,
-                                row.get::<_, String>(9)?,
-                                row.get::<_, Option<String>>(10)?,
+                                row.get::<_, MailProtocol>(8)?,
+                                row.get::<_, Option<String>>(9)?,
                             ))
                         },
                     )
@@ -3810,80 +4727,85 @@ impl Core {
 
                 let mut nudge_account = None;
                 let mut staged_paths = Vec::new();
-                if row.9 == "jmap" {
-                    conn.execute(
-                        "UPDATE pending_actions SET state='cancelled',finished_at=?2
-                         WHERE message_id=?1 AND kind='save_draft'
-                           AND state IN ('pending','inflight')",
-                        rusqlite::params![draft_id, now_ms()],
-                    )?;
-                    if let Some(remote_id) = row.10.as_deref() {
+                match row.8 {
+                    MailProtocol::Jmap => {
+                        conn.execute(
+                            "UPDATE pending_actions SET state='cancelled',finished_at=?2
+                             WHERE message_id=?1 AND kind='save_draft'
+                               AND state IN ('pending','inflight')",
+                            rusqlite::params![draft_id, now_ms()],
+                        )?;
+                        if let Some(remote_id) = row.9.as_deref() {
+                            repo::actions::enqueue(
+                                conn,
+                                row.0,
+                                "delete_draft",
+                                None,
+                                row.1,
+                                &serde_json::json!({ "jmapEmailId": remote_id }),
+                                None,
+                            )?;
+                            nudge_account = Some(row.0);
+                        }
+                        staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
+                        repo::messages::delete(conn, draft_id)?;
+                    }
+                    MailProtocol::Gmail => {
+                        // Cancel any queued autosaves before deleting the local
+                        // row. If a remote resource already exists, retain its
+                        // opaque ids in a message-independent delete action.
+                        conn.execute(
+                            "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
+                             WHERE message_id = ?1 AND kind = 'save_draft'
+                               AND state = 'pending'",
+                            rusqlite::params![draft_id, now_ms()],
+                        )?;
+                        if row.6.is_some() || row.7.is_some() {
+                            repo::actions::enqueue(
+                                conn,
+                                row.0,
+                                "delete_draft",
+                                None,
+                                row.1,
+                                &serde_json::json!({
+                                    "gmailMessageId": row.6,
+                                    "gmailDraftId": row.7,
+                                }),
+                                None,
+                            )?;
+                            nudge_account = Some(row.0);
+                        }
+                        staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
+                        repo::messages::delete(conn, draft_id)?;
+                    }
+                    MailProtocol::Imap if row.3.is_some() && row.5 != roles::TRASH => {
+                        // This draft exists on IMAP. Move it optimistically and
+                        // queue the matching remote move so the next sync cannot
+                        // resurrect the local row in Drafts.
+                        let trash = repo::folders::by_role(conn, row.0, roles::TRASH)?
+                            .ok_or_else(|| CoreError::NotFound("no trash folder".into()))?;
+                        let payload = serde_json::json!({
+                            "srcFolderId": row.2,
+                            "srcUid": row.3,
+                            "targetFolderId": trash.id,
+                        });
+                        repo::messages::set_uid_and_folder(conn, draft_id, trash.id, None)?;
                         repo::actions::enqueue(
                             conn,
                             row.0,
-                            "delete_draft",
-                            None,
+                            "trash",
+                            Some(draft_id),
                             row.1,
-                            &serde_json::json!({ "jmapEmailId": remote_id }),
+                            &payload,
                             None,
                         )?;
                         nudge_account = Some(row.0);
                     }
-                    staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
-                    repo::messages::delete(conn, draft_id)?;
-                } else if row.6 == "gmail" {
-                    // Cancel any queued autosaves before deleting the local
-                    // row. If a remote resource already exists, retain its
-                    // opaque ids in a message-independent delete action.
-                    conn.execute(
-                        "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
-                         WHERE message_id = ?1 AND kind = 'save_draft'
-                           AND state = 'pending'",
-                        rusqlite::params![draft_id, now_ms()],
-                    )?;
-                    if row.7.is_some() || row.8.is_some() {
-                        repo::actions::enqueue(
-                            conn,
-                            row.0,
-                            "delete_draft",
-                            None,
-                            row.1,
-                            &serde_json::json!({
-                                "gmailMessageId": row.7,
-                                "gmailDraftId": row.8,
-                            }),
-                            None,
-                        )?;
-                        nudge_account = Some(row.0);
+                    MailProtocol::Imap | MailProtocol::Pop3 | MailProtocol::Local => {
+                        // Purely local drafts have no remote copy to preserve.
+                        staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
+                        repo::messages::delete(conn, draft_id)?;
                     }
-                    staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
-                    repo::messages::delete(conn, draft_id)?;
-                } else if row.3.is_some() && row.5 != roles::TRASH {
-                    // This draft exists on IMAP. Move it optimistically and
-                    // queue the matching remote move so the next sync cannot
-                    // resurrect the local row in Drafts.
-                    let trash = repo::folders::by_role(conn, row.0, roles::TRASH)?
-                        .ok_or_else(|| CoreError::NotFound("no trash folder".into()))?;
-                    let payload = serde_json::json!({
-                        "srcFolderId": row.2,
-                        "srcUid": row.3,
-                        "targetFolderId": trash.id,
-                    });
-                    repo::messages::set_uid_and_folder(conn, draft_id, trash.id, None)?;
-                    repo::actions::enqueue(
-                        conn,
-                        row.0,
-                        "trash",
-                        Some(draft_id),
-                        row.1,
-                        &payload,
-                        None,
-                    )?;
-                    nudge_account = Some(row.0);
-                } else {
-                    // Purely local drafts have no remote copy to preserve.
-                    staged_paths = repo::messages::take_draft_attachment_paths(conn, draft_id)?;
-                    repo::messages::delete(conn, draft_id)?;
                 }
                 if let Some(tid) = row.1 {
                     repo::threads::recompute(conn, tid)?;
@@ -3986,6 +4908,45 @@ impl Core {
         })
     }
 
+    /// Read a downloaded message's original file. A POP3 account keeps the
+    /// only copy of its mail here, so when the file has gone missing it is
+    /// downloaded again while the server still has the message.
+    pub(crate) async fn read_original(
+        &self,
+        account_id: i64,
+        message_id: i64,
+        path: &str,
+        max_bytes: usize,
+        context: &'static str,
+    ) -> Result<Vec<u8>> {
+        let error = match crate::file_io::read(path, max_bytes, context).await {
+            Ok(raw) => return Ok(raw),
+            Err(error) => error,
+        };
+        let protocol = self.account_protocol(account_id).await?;
+        let missing = !tokio::fs::try_exists(path).await.unwrap_or(true);
+        match protocol {
+            MailProtocol::Pop3 if missing => {}
+            // Imported mail has no other copy here to restore from.
+            MailProtocol::Pop3
+            | MailProtocol::Gmail
+            | MailProtocol::Imap
+            | MailProtocol::Jmap
+            | MailProtocol::Local => {
+                return Err(error);
+            }
+        }
+        let handle = self
+            .handles
+            .read()
+            .await
+            .get(&account_id)
+            .cloned()
+            .ok_or_else(|| CoreError::NotFound(format!("account {account_id}")))?;
+        let restored = handle.restore_message(message_id).await?;
+        crate::file_io::read(restored, max_bytes, context).await
+    }
+
     /// Return a stable cached attachment path. Legacy messages extract from
     /// their raw MIME; selectively-cached messages download only the requested
     /// IMAP section through the priority reader.
@@ -4058,7 +5019,14 @@ impl Core {
             part_id.as_deref(),
         ) {
             (Some(raw_path), Some(part_id)) => {
-                match crate::file_io::read(raw_path, MAX_CACHED_MESSAGE_BYTES, "cached message")
+                match self
+                    .read_original(
+                        row.account_id,
+                        message_id,
+                        raw_path,
+                        MAX_CACHED_MESSAGE_BYTES,
+                        "cached message",
+                    )
                     .await
                 {
                     Ok(raw) => match crate::mime::extract_attachment(&raw, part_id) {
@@ -4243,28 +5211,46 @@ impl Core {
         Ok(removed)
     }
 
+    pub async fn contact_photo(&self, hash: String) -> Result<Option<Vec<u8>>> {
+        self.db
+            .read(move |conn| repo::contact_entries::photo_bytes(conn, &hash))
+            .await
+    }
+
+    pub async fn resolve_contact_conflict(
+        &self,
+        id: i64,
+        revision: i64,
+        keep_local: bool,
+    ) -> Result<()> {
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                repo::carddav::resolve_conflict(&tx, id, revision, keep_local)?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await?;
+        self.bus.emit(CoreEvent::ContactsUpdated { account_id: 0 });
+        self.nudge_card(None).await;
+        Ok(())
+    }
+
+    /// Save a contact. A new contact, or a promoted suggestion, created for a
+    /// single account is also uploaded to that account's address book.
     pub async fn save_contact(&self, record: ContactRecord) -> Result<ContactRecord> {
-        let now_ms = chrono::Utc::now().timestamp_millis();
-        let account_ids = record.account_ids.clone();
-        let was_new = record.id <= 0;
         let saved = self
             .db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                let was_saved = if was_new {
-                    false
-                } else {
-                    repo::contacts::get_record(&tx, record.id)?
-                        .is_some_and(|existing| existing.is_managed)
-                };
-                let saved = repo::contacts::save_record(&tx, &record, now_ms)?;
-                if was_new || !was_saved {
-                    if account_ids.len() == 1 {
-                        repo::carddav::attach_new_contact(&tx, account_ids[0], saved.id)?;
-                    }
-                } else {
-                    repo::carddav::mark_saved_contact_dirty(&tx, saved.id)?;
+                let id = repo::contact_entries::save(&tx, &record)?;
+                if let [account_id] = record.account_ids[..]
+                    && record.id <= 0
+                {
+                    repo::carddav::attach_new_contact(&tx, account_id, id)?;
                 }
+                let saved = repo::contacts::get_record(&tx, id)?
+                    .ok_or_else(|| CoreError::Other("Contact no longer exists".into()))?;
                 tx.commit()?;
                 Ok(saved)
             })
@@ -4273,12 +5259,12 @@ impl Core {
         Ok(saved)
     }
 
-    pub async fn delete_contact(&self, id: i64) -> Result<()> {
+    /// Delete a saved contact as of `revision`, or forget a suggestion.
+    pub async fn delete_contact(&self, id: i64, revision: i64) -> Result<()> {
         self.db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                repo::carddav::mark_deleted_contact(&tx, id)?;
-                repo::contacts::delete_record(&tx, id)?;
+                repo::contact_entries::delete(&tx, id, revision)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -4626,18 +5612,17 @@ impl Core {
         // Teams and Outlook show. Best-effort: a Graph failure (e.g. the
         // account predates the calendar consent) must not fail event creation,
         // which already succeeded locally. Skipped when the account has a
-        // connected calendar: the sync task's push already writes it (and a
-        // second direct POST would duplicate the event in Outlook).
+        // calendar connection: the sync task pushes the event to its calendar
+        // (and a second direct POST would duplicate the event in Outlook).
         if account
             .as_ref()
             .is_some_and(|account| account.provider == Provider::Microsoft)
         {
-            let has_cal_config = self
+            let has_connection = self
                 .calendar_db
-                .read(move |conn| repo::caldav::get_config(conn, account_id))
-                .await?
-                .is_some();
-            if !has_cal_config && let Err(e) = self.push_event_to_graph(account_id, &args).await {
+                .read(move |conn| repo::caldav::account_has_connections(conn, account_id))
+                .await?;
+            if !has_connection && let Err(e) = self.push_event_to_graph(account_id, &args).await {
                 tracing::warn!(error = %e, "graph: could not sync event to Outlook calendar");
             }
         }
@@ -4962,175 +5947,251 @@ impl Core {
         Ok(())
     }
 
-    /// Connect a calendar server to an account. Generic servers store the app
-    /// password in the keyring; Google reuses the account's OAuth tokens (the
-    /// caller must have completed the calendar-scope re-consent first).
-    /// Discovery doubles as the connection test - nothing persists on failure.
-    pub async fn connect_calendar(&self, args: ConnectCalendarArgs) -> Result<Vec<Calendar>> {
+    /// Add a CalDAV server to an account, or change one of its CalDAV
+    /// connections. The address is a server's, or one calendar's own address
+    /// such as a shared mailbox's calendar reached with the account's sign-in.
+    /// Events created in its calendars use the account's address as
+    /// organizer. Discovery doubles as the connection test, so nothing
+    /// persists on failure, and calendars another connection of the account
+    /// already syncs stay with it. The app password goes to the keyring; an
+    /// empty one keeps the saved password of the connection being changed.
+    pub async fn connect_caldav(&self, args: ConnectCaldavArgs) -> Result<CalendarConnection> {
         let account_id = args.account_id;
-        let kind = if args.kind == "google" {
-            "google"
-        } else {
-            "generic"
-        };
-        let base_url = match kind {
-            "google" => {
-                let calendar_id = self
-                    .db
-                    .read(move |conn| {
-                        Ok(repo::accounts::get(conn, account_id)?.map(|account| account.email))
-                    })
+        self.db
+            .read(move |conn| repo::accounts::get(conn, account_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("account".into()))?;
+        let existing = match args.connection_id {
+            Some(connection_id) => Some(
+                self.calendar_db
+                    .read(move |conn| repo::caldav::get_connection(conn, connection_id))
                     .await?
-                    .ok_or_else(|| CoreError::NotFound("account".into()))?;
-                caldav::google_calendar_url(&calendar_id)?
-            }
-            _ => {
-                let url = args
-                    .url
-                    .clone()
-                    .filter(|u| !u.trim().is_empty())
-                    .ok_or_else(|| CoreError::CalDav("server URL is required".into()))?;
-                let mut url = url.trim().to_string();
-                if !url.contains("://") {
-                    url = format!("https://{url}");
-                }
-                url
-            }
-        };
-
-        let submitted_password = args.password.clone().filter(|p| !p.is_empty());
-
-        // Build auth without persisting anything yet. An empty password on an
-        // existing generic connection means "keep the current app password",
-        // so settings can be edited without exposing or re-entering it.
-        let auth = match kind {
-            "google" => caldav::DavAuth::Bearer(
-                self.tokens
-                    .access_token(account_id, Provider::Gmail)
-                    .await?,
+                    .filter(|connection| {
+                        connection.account_id == account_id
+                            && connection.kind == CalendarConnectionKind::Generic
+                    })
+                    .ok_or_else(|| CoreError::NotFound("calendar connection".into()))?,
             ),
-            _ => {
-                let user = args.username.clone().unwrap_or_default();
-                credentials::check_available_async(self.credentials.clone()).await?;
-                let pass = match submitted_password.clone() {
-                    Some(password) => password,
-                    None => {
-                        let has_existing_generic_config = self
-                            .calendar_db
-                            .read(move |conn| {
-                                Ok(repo::caldav::get_config(conn, account_id)?
-                                    .is_some_and(|config| config.kind == "generic"))
-                            })
-                            .await?;
-                        if !has_existing_generic_config {
-                            return Err(CoreError::CalDav("password is required".into()));
-                        }
-                        credentials::load_async(
-                            self.credentials.clone(),
-                            account_id,
-                            Slot::CaldavPassword,
-                        )
-                        .await?
-                    }
-                };
-                caldav::DavAuth::Basic(user, pass)
-            }
+            None => None,
         };
-        let google_access_token = match &auth {
-            caldav::DavAuth::Bearer(token) if kind == "google" => Some(token.clone()),
-            _ => None,
-        };
-        let transport = caldav::HttpTransport::new(auth, &base_url)?;
-        let (discovery, google_calendars) = if kind == "google" {
-            // Validate the primary DAV collection so a disabled CalDAV API is
-            // reported immediately. Calendar API metadata then supplies every
-            // secondary/shared/special calendar id; CalDAV itself only knows
-            // about the one id embedded in its collection URL.
-            let primary =
-                caldav::discovery::discover_known_collection(&transport, &base_url).await?;
-            let access_token = google_access_token.as_deref().ok_or_else(|| {
-                CoreError::CalDav("Google calendar authentication was not initialized".into())
-            })?;
-            let listed = googlecal::list_calendars(access_token).await?;
-            if listed.is_empty() {
-                return Err(CoreError::CalDav("no Google calendars found".into()));
-            }
-            (primary, Some(listed))
+        let url = args.url.trim();
+        if url.is_empty() {
+            return Err(CoreError::CalDav("server URL is required".into()));
+        }
+        let url = if url.contains("://") {
+            url.to_owned()
         } else {
-            (
-                caldav::discovery::discover(&transport, &base_url).await?,
-                None,
-            )
+            format!("https://{url}")
+        };
+        let username = args.username.trim().to_owned();
+        let submitted_password = args.password.filter(|password| !password.is_empty());
+
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let password = match (&submitted_password, &existing) {
+            (Some(password), _) => password.clone(),
+            // A saved password only goes back to the server it was saved for,
+            // so a mistyped address cannot receive it.
+            (None, Some(connection)) if !same_origin(&connection.base_url, &url) => {
+                return Err(CoreError::CalDav(
+                    "enter the app password again for a different server".into(),
+                ));
+            }
+            (None, Some(connection)) => {
+                caldav::task::connection_password(
+                    &self.calendar_db,
+                    self.credentials.clone(),
+                    connection,
+                )
+                .await?
+            }
+            (None, None) => return Err(CoreError::CalDav("password is required".into())),
         };
 
-        // Persist: keyring first, then config + collections.
-        if kind == "generic"
-            && let Some(pass) = submitted_password
-        {
-            credentials::store_async(
-                self.credentials.clone(),
-                account_id,
-                Slot::CaldavPassword,
-                pass,
-            )
-            .await?;
+        let transport =
+            caldav::HttpTransport::new(caldav::DavAuth::Basic(username.clone(), password), &url)?;
+        // Google answers for one calendar at its own address without always
+        // naming it a calendar collection.
+        let discovery = if caldav::google_calendar_id(&url).is_some() {
+            caldav::discovery::discover_known_collection(&transport, &url).await?
+        } else {
+            caldav::discovery::discover(&transport, &url).await?
+        };
+
+        let editing = existing.as_ref().map(|connection| connection.id);
+        let taken: HashSet<String> = self
+            .calendar_db
+            .read(move |conn| repo::caldav::list_calendars(conn, Some(account_id)))
+            .await?
+            .into_iter()
+            .filter(|calendar| Some(calendar.connection_id) != editing)
+            .map(|calendar| caldav::collection_identity(&calendar.url))
+            .collect();
+        let calendars: Vec<caldav::discovery::DiscoveredCalendar> = discovery
+            .calendars
+            .into_iter()
+            .filter(|calendar| !taken.contains(&caldav::collection_identity(&calendar.url)))
+            .collect();
+        if calendars.is_empty() {
+            return Err(CoreError::CalDav(
+                "this account already syncs these calendars".into(),
+            ));
         }
-        let cfg = repo::caldav::CaldavConfig {
+
+        let mut connection = repo::caldav::ConnectionConfig {
+            id: editing.unwrap_or_default(),
             account_id,
-            kind: kind.to_string(),
-            base_url,
-            username: args.username.clone(),
-            principal_url: discovery.principal_url.clone(),
-            home_set_url: Some(discovery.home_set_url.clone()),
+            kind: CalendarConnectionKind::Generic,
+            base_url: url,
+            username,
+            principal_url: discovery.principal_url,
+            home_set_url: Some(discovery.home_set_url),
             enabled: true,
             last_error: None,
         };
-        let calendars = discovery.calendars.clone();
+        let connection_id = match editing {
+            Some(connection_id) => {
+                if let Some(password) = submitted_password {
+                    caldav::task::save_password(
+                        &self.calendar_db,
+                        self.credentials.clone(),
+                        connection_id,
+                        account_id,
+                        password,
+                    )
+                    .await?;
+                }
+                self.calendar_db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        repo::caldav::update_connection(&tx, &connection)?;
+                        store_discovered_calendars(&tx, &connection, &calendars)?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await?;
+                connection_id
+            }
+            None => {
+                // A new connection waits, paused, until its password is saved.
+                connection.enabled = false;
+                let connection_id = self
+                    .calendar_db
+                    .write(move |conn| {
+                        let tx = conn.transaction()?;
+                        connection.id = repo::caldav::insert_connection(&tx, &connection)?;
+                        store_discovered_calendars(&tx, &connection, &calendars)?;
+                        tx.commit()?;
+                        Ok(connection.id)
+                    })
+                    .await?;
+                let saved = caldav::task::save_password(
+                    &self.calendar_db,
+                    self.credentials.clone(),
+                    connection_id,
+                    account_id,
+                    submitted_password.unwrap_or_default(),
+                )
+                .await;
+                if let Err(error) = saved {
+                    self.calendar_db
+                        .write(move |conn| {
+                            let tx = conn.transaction()?;
+                            repo::caldav::remove_connection(&tx, connection_id)?;
+                            repo::caldav::ensure_default_calendar(&tx, account_id, None)?;
+                            tx.commit()?;
+                            Ok(())
+                        })
+                        .await?;
+                    return Err(error);
+                }
+                self.calendar_db
+                    .write(move |conn| {
+                        repo::caldav::set_connection_enabled(conn, connection_id, true).map(|_| ())
+                    })
+                    .await?;
+                connection_id
+            }
+        };
+
+        self.refresh_cal_task(account_id).await;
+        self.nudge_cal(Some(account_id)).await;
+        self.bus.emit(CoreEvent::CalendarUpdated { account_id });
+        self.calendar_connection(connection_id).await
+    }
+
+    async fn calendar_connection(&self, connection_id: i64) -> Result<CalendarConnection> {
+        self.calendar_db
+            .read(|conn| repo::caldav::list_connections(conn))
+            .await?
+            .into_iter()
+            .find(|connection| connection.id == connection_id)
+            .ok_or_else(|| CoreError::NotFound("calendar connection".into()))
+    }
+
+    /// Sync the account's Google calendars over CalDAV with its own OAuth
+    /// tokens; the caller must have completed the calendar-scope consent.
+    /// The primary collection is checked first so a disabled CalDAV API is
+    /// reported immediately; Calendar API metadata then supplies every
+    /// secondary, shared and special calendar id, since CalDAV itself only
+    /// knows the one id embedded in its collection URL.
+    async fn attach_google_calendar(&self, account_id: i64) -> Result<Vec<Calendar>> {
+        let email = self
+            .db
+            .read(move |conn| Ok(repo::accounts::get(conn, account_id)?.map(|a| a.email)))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("account".into()))?;
+        let base_url = caldav::google_calendar_url(&email)?;
+        let token = self
+            .tokens
+            .access_token(account_id, Provider::Gmail)
+            .await?;
+        let transport =
+            caldav::HttpTransport::new(caldav::DavAuth::Bearer(token.clone()), &base_url)?;
+        caldav::discovery::discover_known_collection(&transport, &base_url).await?;
+        let listed = googlecal::list_calendars(&token).await?;
+        if listed.is_empty() {
+            return Err(CoreError::CalDav("no Google calendars found".into()));
+        }
+
         let out = self
             .calendar_db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                repo::caldav::upsert_config(&tx, &cfg)?;
-                if let Some(google_calendars) = &google_calendars {
-                    googlecal::reconcile_calendars(&tx, account_id, google_calendars)?;
-                } else {
-                    let calendar_urls = calendars
-                        .iter()
-                        .map(|calendar| calendar.url.clone())
-                        .collect::<HashSet<_>>();
-                    let mut first_id = None;
-                    for c in &calendars {
-                        let id = repo::caldav::upsert_calendar(
-                            &tx,
+                let mut connection = match repo::caldav::provider_connection(
+                    &tx,
+                    account_id,
+                    CalendarConnectionKind::Google,
+                )? {
+                    Some(connection) => connection,
+                    None => {
+                        let mut connection = repo::caldav::ConnectionConfig {
+                            id: 0,
                             account_id,
-                            &c.url,
-                            c.display_name.as_deref(),
-                            c.color.as_deref(),
-                            false,
-                        )?;
-                        first_id.get_or_insert(id);
+                            kind: CalendarConnectionKind::Google,
+                            base_url: base_url.clone(),
+                            username: String::new(),
+                            principal_url: None,
+                            home_set_url: None,
+                            enabled: true,
+                            last_error: None,
+                        };
+                        connection.id = repo::caldav::insert_connection(&tx, &connection)?;
+                        connection
                     }
-                    repo::caldav::retain_calendars(&tx, account_id, &calendar_urls)?;
-                    if let Some(id) = first_id {
-                        // Keep an existing default if one is set; else first wins.
-                        let has_default: i64 = tx.query_row(
-                            "SELECT COUNT(*) FROM calendars WHERE account_id = ?1 AND is_default = 1",
-                            rusqlite::params![account_id],
-                            |r| r.get(0),
-                        )?;
-                        if has_default == 0 {
-                            repo::caldav::set_default_calendar(&tx, account_id, id)?;
-                        }
-                    }
-                }
-                let list = repo::caldav::list_calendars(&tx, Some(account_id))?;
+                };
+                connection.home_set_url = Some(base_url.clone());
+                connection.base_url = base_url;
+                connection.enabled = true;
+                repo::caldav::update_connection(&tx, &connection)?;
+                let calendars = googlecal::reconcile_calendars(&tx, &connection, &listed)?;
                 tx.commit()?;
-                Ok(list)
+                Ok(calendars)
             })
             .await?;
 
-        self.spawn_cal_task(account_id).await;
+        self.refresh_cal_task(account_id).await;
         self.nudge_cal(Some(account_id)).await;
+        self.bus.emit(CoreEvent::CalendarUpdated { account_id });
         Ok(out)
     }
 
@@ -5167,31 +6228,9 @@ impl Core {
                 return Err(CoreError::Auth("sign-in cancelled".into()));
             }
         };
-        if !outcome.email.eq_ignore_ascii_case(&account.email) {
-            return Err(CoreError::Auth(format!(
-                "consent was granted for {} - expected {}",
-                outcome.email, account.email
-            )));
-        }
-        self.tokens
-            .store_initial(
-                account_id,
-                outcome.access_token,
-                outcome.expires_in,
-                outcome.refresh_token,
-                outcome.client_id,
-                outcome.client_secret,
-            )
-            .await?;
+        self.store_sign_in(&account, outcome).await?;
 
-        self.connect_calendar(ConnectCalendarArgs {
-            account_id,
-            kind: "google".into(),
-            url: None,
-            username: None,
-            password: None,
-        })
-        .await
+        self.attach_google_calendar(account_id).await
     }
 
     /// Mint a Graph token for one extra scope, widening consent in the
@@ -5235,22 +6274,7 @@ impl Core {
                         return Err(CoreError::Auth("sign-in cancelled".into()));
                     }
                 };
-                if !outcome.email.eq_ignore_ascii_case(&account.email) {
-                    return Err(CoreError::Auth(format!(
-                        "consent was granted for {} - expected {}",
-                        outcome.email, account.email
-                    )));
-                }
-                self.tokens
-                    .store_initial(
-                        account_id,
-                        outcome.access_token,
-                        outcome.expires_in,
-                        outcome.refresh_token,
-                        outcome.client_id,
-                        outcome.client_secret,
-                    )
-                    .await?;
+                self.store_sign_in(&account, outcome).await?;
                 self.tokens
                     .access_token_for_scope(account_id, Provider::Microsoft, scope)
                     .await
@@ -5285,8 +6309,8 @@ impl Core {
     /// Microsoft calendar connection: Outlook / Microsoft 365 has no CalDAV
     /// endpoint, so the calendar syncs via Graph. Widens consent to
     /// `Calendars.ReadWrite` when needed, lists the account's calendars and
-    /// persists them under a "microsoft"-kind config; the shared calendar
-    /// task then pulls via calendarView delta.
+    /// persists them under the account's Microsoft connection; the account's
+    /// calendar task then pulls via calendarView delta.
     pub async fn connect_microsoft_calendar(
         &self,
         account_id: i64,
@@ -5300,74 +6324,89 @@ impl Core {
             return Err(CoreError::CalDav("no calendars found".into()));
         }
 
-        let cfg = repo::caldav::CaldavConfig {
-            account_id,
-            kind: "microsoft".to_string(),
-            base_url: graph::GRAPH_BASE.to_string(),
-            username: None,
-            principal_url: None,
-            home_set_url: None,
-            enabled: true,
-            last_error: None,
-        };
         let out = self
             .calendar_db
             .write(move |conn| {
                 let tx = conn.transaction()?;
-                repo::caldav::upsert_config(&tx, &cfg)?;
+                let mut connection = match repo::caldav::provider_connection(
+                    &tx,
+                    account_id,
+                    CalendarConnectionKind::Microsoft,
+                )? {
+                    Some(connection) => connection,
+                    None => {
+                        let mut connection = repo::caldav::ConnectionConfig {
+                            id: 0,
+                            account_id,
+                            kind: CalendarConnectionKind::Microsoft,
+                            base_url: graph::GRAPH_BASE.to_string(),
+                            username: String::new(),
+                            principal_url: None,
+                            home_set_url: None,
+                            enabled: true,
+                            last_error: None,
+                        };
+                        connection.id = repo::caldav::insert_connection(&tx, &connection)?;
+                        connection
+                    }
+                };
+                connection.enabled = true;
+                repo::caldav::update_connection(&tx, &connection)?;
+                let mut listed = HashSet::new();
                 let mut default_id = None;
-                let mut first_id = None;
                 for c in &discovered {
                     let id = repo::caldav::upsert_calendar(
                         &tx,
-                        account_id,
+                        &connection,
                         &c.id,
                         c.name.as_deref(),
                         c.hex_color.as_deref(),
                         !c.can_edit,
                     )?;
-                    first_id.get_or_insert(id);
                     if c.is_default {
                         default_id.get_or_insert(id);
                     }
+                    listed.insert(c.id.clone());
                 }
-                if let Some(id) = default_id.or(first_id) {
-                    // Keep an existing default if one is set; else Outlook's
-                    // default calendar (or the first) wins.
-                    let has_default: i64 = tx.query_row(
-                        "SELECT COUNT(*) FROM calendars WHERE account_id = ?1 AND is_default = 1",
-                        rusqlite::params![account_id],
-                        |r| r.get(0),
-                    )?;
-                    if has_default == 0 {
-                        repo::caldav::set_default_calendar(&tx, account_id, id)?;
-                    }
-                }
-                let list = repo::caldav::list_calendars(&tx, Some(account_id))?;
+                repo::caldav::retain_calendars(&tx, connection.id, &listed)?;
+                // Keep an existing default if one is set; else Outlook's
+                // default calendar (or the first writable one) wins.
+                repo::caldav::ensure_default_calendar(&tx, account_id, default_id)?;
+                let list = repo::caldav::connection_calendars(&tx, connection.id)?;
                 tx.commit()?;
                 Ok(list)
             })
             .await?;
 
-        self.spawn_cal_task(account_id).await;
+        self.refresh_cal_task(account_id).await;
         self.nudge_cal(Some(account_id)).await;
+        self.bus.emit(CoreEvent::CalendarUpdated { account_id });
         Ok(out)
     }
 
-    /// Disconnect the calendar server: events stay locally, sync bookkeeping
-    /// is cleared, credentials removed.
-    pub async fn disconnect_calendar(&self, account_id: i64) -> Result<()> {
-        self.cal_handles.write().await.remove(&account_id);
+    /// Stop syncing a calendar connection and forget its calendars here (see
+    /// `repo::caldav::forget_calendar` for the events that stay). Nothing
+    /// changes on the server. The password goes first: a connection that
+    /// outlives it only asks for a new one, while a password outliving its
+    /// connection could never be found again.
+    pub async fn remove_calendar_connection(&self, connection_id: i64) -> Result<()> {
+        let connection = self
+            .calendar_db
+            .read(move |conn| repo::caldav::get_connection(conn, connection_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("calendar connection".into()))?;
+        let account_id = connection.account_id;
+        self.delete_connection_password(&connection).await?;
         self.calendar_db
-            .write(move |conn| repo::caldav::delete_config(conn, account_id))
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                repo::caldav::remove_connection(&tx, connection_id)?;
+                repo::caldav::ensure_default_calendar(&tx, account_id, None)?;
+                tx.commit()?;
+                Ok(())
+            })
             .await?;
-        let _ = credentials::store_async(
-            self.credentials.clone(),
-            account_id,
-            Slot::CaldavPassword,
-            String::new(),
-        )
-        .await;
+        self.refresh_cal_task(account_id).await;
         self.bus.emit(CoreEvent::CalendarUpdated { account_id });
         Ok(())
     }
@@ -5380,39 +6419,29 @@ impl Core {
 
     pub async fn list_calendar_connections(&self) -> Result<Vec<CalendarConnection>> {
         self.calendar_db
-            .read(|conn| {
-                Ok(repo::caldav::list_configs(conn)?
-                    .into_iter()
-                    .map(|cfg| CalendarConnection {
-                        account_id: cfg.account_id,
-                        kind: cfg.kind,
-                        base_url: cfg.base_url,
-                        username: cfg.username.unwrap_or_default(),
-                        enabled: cfg.enabled,
-                        last_error: cfg.last_error,
-                    })
-                    .collect())
-            })
+            .read(|conn| repo::caldav::list_connections(conn))
             .await
     }
 
-    /// Pause/resume a connected calendar without deleting local events,
+    /// Pause/resume one calendar connection without deleting local events,
     /// discovered collections, sync tokens, or credentials.
-    pub async fn set_account_calendar_enabled(&self, account_id: i64, enabled: bool) -> Result<()> {
-        let found = self
+    pub async fn set_calendar_connection_enabled(
+        &self,
+        connection_id: i64,
+        enabled: bool,
+    ) -> Result<()> {
+        let account_id = self
             .calendar_db
-            .write(move |conn| repo::caldav::set_config_enabled(conn, account_id, enabled))
+            .write(move |conn| {
+                let connection = repo::caldav::get_connection(conn, connection_id)?
+                    .ok_or_else(|| CoreError::NotFound("calendar connection".into()))?;
+                repo::caldav::set_connection_enabled(conn, connection_id, enabled)?;
+                Ok(connection.account_id)
+            })
             .await?;
-        if !found {
-            return Err(CoreError::NotFound("calendar connection".into()));
-        }
+        self.refresh_cal_task(account_id).await;
         if enabled {
-            if !self.cal_handles.read().await.contains_key(&account_id) {
-                self.spawn_cal_task(account_id).await;
-            }
             self.nudge_cal(Some(account_id)).await;
-        } else {
-            self.cal_handles.write().await.remove(&account_id);
         }
         self.bus.emit(CoreEvent::CalendarUpdated { account_id });
         Ok(())
@@ -5486,13 +6515,14 @@ impl Core {
         self.nudge_cal(account_id).await;
     }
 
-    /// Queue a CalDAV write for the account's calendar task, when the account
-    /// has one configured. No-op otherwise (purely local calendars).
+    /// Queue a calendar write for the account's calendar task, when the
+    /// account has a calendar connection. No-op otherwise (purely local
+    /// calendars).
     async fn enqueue_cal_push(&self, event_id: i64, account_id: i64, kind: &str) -> Result<()> {
         let kind = kind.to_string();
         self.calendar_db
             .write(move |conn| {
-                if repo::caldav::get_config(conn, account_id)?.is_none() {
+                if !repo::caldav::account_has_connections(conn, account_id)? {
                     return Ok(());
                 }
                 // Dirty guards the row against being clobbered by a pull that
@@ -5960,6 +6990,31 @@ impl Core {
     ) -> Result<models::SearchPage> {
         let mut parsed = search::parse(&query);
         parsed.account_id = account_id;
+        self.search_chronological_parsed(parsed, cursor, limit)
+            .await
+    }
+
+    /// `search_chronological_page` across a set of accounts, such as a mail
+    /// profile's. An empty set matches nothing.
+    pub async fn search_chronological_page_for_accounts(
+        &self,
+        query: String,
+        account_ids: Vec<i64>,
+        cursor: Option<models::SearchCursor>,
+        limit: i64,
+    ) -> Result<models::SearchPage> {
+        let mut parsed = search::parse(&query);
+        parsed.account_ids = Some(account_ids);
+        self.search_chronological_parsed(parsed, cursor, limit)
+            .await
+    }
+
+    async fn search_chronological_parsed(
+        &self,
+        parsed: search::ParsedQuery,
+        cursor: Option<models::SearchCursor>,
+        limit: i64,
+    ) -> Result<models::SearchPage> {
         let limit = limit.clamp(1, 100);
         self.db
             .read(move |conn| repo::search::chronological_page(conn, &parsed, cursor, limit))
@@ -7110,6 +8165,7 @@ impl Core {
                     profile.account_ids.push(account_id);
                     profile.account_ids.sort_unstable();
                 }
+                retire_active_mail_profile(&mut settings);
                 repo::settings::set(conn, &settings)?;
                 Ok(settings)
             })
@@ -7136,6 +8192,7 @@ impl Core {
                 for profile in &mut settings.mail_profiles {
                     profile.account_ids.retain(|id| *id != account_id);
                 }
+                retire_active_mail_profile(&mut settings);
                 let key = account_id.to_string();
                 if let Some(color) = color {
                     settings.account_colors.insert(key, color);
@@ -7161,6 +8218,36 @@ impl Core {
                 if settings.mail_profiles.len() == before {
                     return Err(CoreError::NotFound(format!("mail profile {profile_id}")));
                 }
+                retire_active_mail_profile(&mut settings);
+                repo::settings::set(conn, &settings)?;
+                Ok(settings)
+            })
+            .await
+    }
+
+    /// Show only one profile's accounts in the mail view, or every account
+    /// with `None`. The profile must have at least one account.
+    pub async fn set_active_mail_profile(&self, profile_id: Option<String>) -> Result<Settings> {
+        let profile_id = profile_id
+            .map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty());
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                if let Some(id) = &profile_id {
+                    let profile = settings
+                        .mail_profiles
+                        .iter()
+                        .find(|profile| &profile.id == id)
+                        .ok_or_else(|| CoreError::NotFound(format!("mail profile {id}")))?;
+                    if profile.account_ids.is_empty() {
+                        return Err(CoreError::Other(format!(
+                            "mail profile {:?} has no accounts",
+                            profile.name
+                        )));
+                    }
+                }
+                settings.active_mail_profile = profile_id;
                 repo::settings::set(conn, &settings)?;
                 Ok(settings)
             })
@@ -7183,6 +8270,16 @@ impl Core {
             .write(move |conn| {
                 let mut settings = repo::settings::get(conn)?;
                 settings.group_mail_by_date = enabled;
+                repo::settings::set(conn, &settings)
+            })
+            .await
+    }
+
+    pub async fn set_time_format(&self, format: TimeFormat) -> Result<()> {
+        self.db
+            .write(move |conn| {
+                let mut settings = repo::settings::get(conn)?;
+                settings.time_format = format;
                 repo::settings::set(conn, &settings)
             })
             .await
@@ -7559,6 +8656,39 @@ pub(crate) async fn remove_staged_attachment(root: &std::path::Path, path: &str)
     }
 }
 
+/// Whether two addresses share scheme, host and port.
+fn same_origin(left: &str, right: &str) -> bool {
+    match (url::Url::parse(left), url::Url::parse(right)) {
+        (Ok(left), Ok(right)) => left.origin() == right.origin(),
+        _ => false,
+    }
+}
+
+/// Store what a CalDAV discovery found for `connection`: its collections
+/// are exactly these now, and the account keeps or gains a default calendar.
+fn store_discovered_calendars(
+    conn: &rusqlite::Connection,
+    connection: &repo::caldav::ConnectionConfig,
+    calendars: &[caldav::discovery::DiscoveredCalendar],
+) -> Result<()> {
+    let mut urls = HashSet::new();
+    let mut first = None;
+    for calendar in calendars {
+        let id = repo::caldav::upsert_calendar(
+            conn,
+            connection,
+            &calendar.url,
+            calendar.display_name.as_deref(),
+            calendar.color.as_deref(),
+            false,
+        )?;
+        first.get_or_insert(id);
+        urls.insert(calendar.url.clone());
+    }
+    repo::caldav::retain_calendars(conn, connection.id, &urls)?;
+    repo::caldav::ensure_default_calendar(conn, connection.account_id, first)
+}
+
 /// Plain-text body for an outgoing invite email (the ICS carries the real
 /// event; this is what non-calendar clients show).
 fn invite_body_text(args: &CreateEventArgs) -> String {
@@ -7639,15 +8769,14 @@ fn apply_thread_action(
     let tx = conn.transaction()?;
     let mut out: Vec<(i64, i64)> = Vec::new();
 
-    let (account_id, account_provider, mail_protocol): (i64, String, String) = tx.query_row(
-        "SELECT t.account_id, a.provider, a.mail_protocol
+    let (account_id, mail_protocol): (i64, MailProtocol) = tx.query_row(
+        "SELECT t.account_id, a.mail_protocol
          FROM threads t JOIN accounts a ON a.id = t.account_id
          WHERE t.id = ?1",
         rusqlite::params![thread_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    let gmail = account_provider == "gmail";
-    let multi_mailbox = gmail || mail_protocol == "jmap";
+    let multi_mailbox = mail_protocol.has_multi_mailbox_messages();
 
     // Most thread actions intentionally ignore drafts. Archive and Trash are
     // exceptions: users can file or discard a draft from the Drafts view, and
@@ -7833,7 +8962,9 @@ fn apply_thread_action(
             for (id, f, u, _r, _s, role) in &msgs {
                 let movable = match kind {
                     ActionKind::Archive => role == roles::INBOX || role == roles::DRAFTS,
-                    _ => role != target_role && !role.is_empty(),
+                    // Mail in folders without a role, such as the user's
+                    // own, moves too.
+                    _ => role != target_role,
                 };
                 if movable && f.is_some() {
                     let aid = enqueue_move(
@@ -8000,7 +9131,7 @@ mod move_action_validation_tests {
             .write(|conn| {
                 db::testutil::seed_account(conn);
                 conn.execute(
-                    "INSERT INTO folders (id, account_id, imap_name, role)
+                    "INSERT INTO folders (id, account_id, path, role)
                      VALUES (2, 1, 'Trash', 'trash')",
                     [],
                 )?;
@@ -8059,7 +9190,7 @@ mod move_action_validation_tests {
             .write(move |conn| {
                 db::testutil::seed_account(conn);
                 conn.execute(
-                    "INSERT INTO folders (id, account_id, imap_name, role)
+                    "INSERT INTO folders (id, account_id, path, role)
                      VALUES (2, 1, 'Trash', 'trash')",
                     [],
                 )?;
@@ -8135,7 +9266,7 @@ mod move_action_validation_tests {
         let mut conn = db::testutil::conn();
         db::testutil::seed_account(&conn);
         conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role)
+            "INSERT INTO folders (id, account_id, path, role)
                       VALUES (2, 1, 'Trash', 'trash')",
             [],
         )
@@ -8166,18 +9297,45 @@ mod move_action_validation_tests {
     }
 
     #[test]
+    fn trash_and_spam_take_mail_from_custom_folders() {
+        let mut conn = db::testutil::conn();
+        db::testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role)
+             VALUES (2, 1, 'Trash', 'trash'), (3, 1, 'Junk', 'spam'), (4, 1, 'Projects', NULL)",
+            [],
+        )
+        .unwrap();
+        for (kind, target) in [(ActionKind::Trash, 2), (ActionKind::Spam, 3)] {
+            let (thread_id, message_id) =
+                db::testutil::seed_message(&conn, "sender@test.dev", "filed away", false);
+            conn.execute(
+                "UPDATE messages SET folder_id = 4 WHERE id = ?1",
+                [message_id],
+            )
+            .unwrap();
+
+            let actions = apply_thread_action(&mut conn, thread_id, kind, None).unwrap();
+
+            assert_eq!(actions.len(), 1);
+            let row = repo::messages::get_row(&conn, message_id).unwrap().unwrap();
+            assert_eq!(row.folder_id, Some(target));
+        }
+    }
+
+    #[test]
     fn move_rejects_a_folder_owned_by_another_account_without_local_mutation() {
         let mut conn = db::testutil::conn();
         db::testutil::seed_account(&conn);
         conn.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (2,'other@test.dev','imap','password','other','h',993,'h',587,0)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'other@test.dev','generic','password','other','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role)
+            "INSERT INTO folders (id, account_id, path, role)
              VALUES (2, 2, 'Archive', 'archive')",
             [],
         )
@@ -8216,8 +9374,8 @@ mod move_action_validation_tests {
         db::testutil::seed_account(&conn);
         conn.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (2,'other@test.dev','imap','password','other','h',993,'h',587,0)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'other@test.dev','generic','password','other','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
@@ -8355,8 +9513,8 @@ fn revert_action(
                 let src_uid = action.payload["srcUid"].as_i64();
                 let cur_folder = action.payload["targetFolderId"].as_i64();
                 if let Some(src) = src_folder {
-                    let gmail: bool = tx.query_row(
-                        "SELECT a.provider = 'gmail'
+                    let protocol: MailProtocol = tx.query_row(
+                        "SELECT a.mail_protocol
                          FROM messages m JOIN accounts a ON a.id = m.account_id
                          WHERE m.id = ?1",
                         rusqlite::params![mid],
@@ -8366,11 +9524,16 @@ fn revert_action(
                         // Remote never changed; restore the original mapping.
                         repo::messages::set_uid_and_folder(&tx, mid, src, src_uid)?;
                     } else {
-                        // Remote moved; move it back.
+                        // Remote moved; move it back. The message's UID there
+                        // is known once that mailbox has synced, and the move
+                        // looks it up otherwise.
+                        let current_uid = repo::messages::get_row(&tx, mid)?
+                            .filter(|row| row.folder_id == cur_folder)
+                            .and_then(|row| row.uid);
                         repo::messages::set_uid_and_folder(&tx, mid, src, None)?;
                         let payload = serde_json::json!({
                             "srcFolderId": cur_folder,
-                            "srcUid": serde_json::Value::Null,
+                            "srcUid": current_uid,
                             "targetFolderId": src,
                         });
                         repo::actions::enqueue(
@@ -8383,7 +9546,7 @@ fn revert_action(
                             None,
                         )?;
                     }
-                    if gmail {
+                    if protocol.has_multi_mailbox_messages() {
                         if let Some(current) = cur_folder {
                             tx.execute(
                                 "DELETE FROM message_folders
@@ -8621,6 +9784,81 @@ mod draft_staging_tests {
                 filename: filename.into(),
             }],
         }
+    }
+
+    #[tokio::test]
+    async fn replies_join_threads_of_their_own_account_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let (own_thread, own_parent, other_parent) = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO accounts (id, email, provider, auth_kind, username,
+                     incoming_host, incoming_port, smtp_host, smtp_port, created_at,
+                     mail_protocol, settings_json)
+                     VALUES (2, 'other@test.dev', 'generic', 'password', 'other', 'h', 993,
+                             'h', 587, 0, 'imap',
+                             '{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+                    [],
+                )?;
+                let (own_thread, own_parent) =
+                    db::testutil::seed_message(conn, "sender@test.dev", "here", false);
+                let (_, other_parent) =
+                    db::testutil::seed_message(conn, "sender@test.dev", "elsewhere", false);
+                conn.execute(
+                    "UPDATE threads SET account_id = 2 WHERE id =
+                       (SELECT thread_id FROM messages WHERE id = ?1)",
+                    [other_parent],
+                )?;
+                conn.execute(
+                    "UPDATE messages SET account_id = 2, folder_id = NULL WHERE id = ?1",
+                    [other_parent],
+                )?;
+                Ok((own_thread, own_parent, other_parent))
+            })
+            .await
+            .unwrap();
+        let reply = |parent: i64| SaveDraftArgs {
+            draft_id: None,
+            account_id: 1,
+            from: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Re: reply".into(),
+            body_text: "body".into(),
+            body_html: None,
+            mode: "reply".into(),
+            in_reply_to_message_id: Some(parent),
+            attachments: Vec::new(),
+        };
+        let thread_of = |message_id: i64| {
+            let core = core.clone();
+            async move {
+                core.db
+                    .read(move |conn| {
+                        Ok(conn.query_row(
+                            "SELECT t.id, t.account_id FROM messages m
+                             JOIN threads t ON t.id = m.thread_id WHERE m.id = ?1",
+                            [message_id],
+                            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                        )?)
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let own_reply = core.save_draft(reply(own_parent)).await.unwrap();
+        assert_eq!(thread_of(own_reply).await, (own_thread, 1));
+        let other_reply = core.save_draft(reply(other_parent)).await.unwrap();
+        let (thread, account) = thread_of(other_reply).await;
+        assert_eq!(account, 1);
+        assert_ne!(thread, thread_of(other_parent).await.0);
     }
 
     #[tokio::test]
@@ -8914,7 +10152,7 @@ mod thread_read_tests {
                 )?;
                 repo::threads::recompute(conn, thread_id)?;
                 conn.execute(
-                    "INSERT INTO contacts (email, name, is_managed)
+                    "INSERT INTO contacts (email, name, send_count)
                      VALUES ('person@example.com', 'Person', 1)",
                     [],
                 )?;
@@ -8935,8 +10173,13 @@ mod thread_read_tests {
         core.calendar_db
             .write(|conn| {
                 conn.execute(
-                    "INSERT INTO calendars (id, account_id, url, display_name)
-                     VALUES (1, 1, 'local://primary', 'Primary')",
+                    "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+                     VALUES (1, 1, 'generic', 'https://dav.example.test/')",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO calendars (id, account_id, connection_id, url, display_name)
+                     VALUES (1, 1, 1, 'local://primary', 'Primary')",
                     [],
                 )?;
                 conn.execute(
@@ -8996,7 +10239,15 @@ mod thread_read_tests {
             })
             .await
             .unwrap();
-        assert_eq!(calendar_contract, (1, 1, false, "ok".to_owned()));
+        assert_eq!(
+            calendar_contract,
+            (
+                crate::db::calendar_migrations::LATEST_VERSION,
+                1,
+                false,
+                "ok".to_owned()
+            )
+        );
     }
 }
 
@@ -9008,17 +10259,55 @@ mod account_backup_import_tests {
         PortableAccountConfig {
             email: email.into(),
             display_name: Some("Portable account".into()),
-            provider: Provider::Imap,
+            provider: Provider::Generic,
             auth_kind: AuthKind::Password,
             mail_protocol: MailProtocol::Imap,
             username: email.into(),
             jmap_url: String::new(),
-            imap_host: "imap.example.com".into(),
-            imap_port: 993,
+            incoming_host: "imap.example.com".into(),
+            incoming_port: 993,
             smtp_host: "smtp.example.com".into(),
             smtp_port: 465,
-            settings: AccountSettings::default(),
+            settings: crate::db::testutil::account_settings(),
         }
+    }
+
+    #[test]
+    fn only_password_accounts_may_connect_without_encryption() {
+        let mut plain = portable_imap("plain@example.com");
+        plain.settings.connection.incoming_security = ConnectionSecurity::None;
+        plain.settings.connection.smtp_security = ConnectionSecurity::None;
+        validate_portable_account(&plain).unwrap();
+
+        let mut microsoft = portable_imap("oauth@example.com");
+        microsoft.provider = Provider::Microsoft;
+        microsoft.auth_kind = AuthKind::Oauth2;
+        validate_portable_account(&microsoft).unwrap();
+        microsoft.settings.connection.smtp_security = ConnectionSecurity::None;
+        assert!(validate_portable_account(&microsoft).is_err());
+    }
+
+    #[test]
+    fn pop3_accounts_import_only_with_password_sign_in() {
+        let mut pop3 = portable_imap("pop3@example.com");
+        pop3.mail_protocol = MailProtocol::Pop3;
+        pop3.incoming_port = 995;
+        validate_portable_account(&pop3).unwrap();
+
+        let mut oauth = pop3.clone();
+        oauth.provider = Provider::Microsoft;
+        oauth.auth_kind = AuthKind::Oauth2;
+        assert!(validate_portable_account(&oauth).is_err());
+
+        // Only POP3 accounts remove mail from their server.
+        pop3.settings.keep_on_server = KeepOnServer::UntilDownloaded;
+        validate_portable_account(&pop3).unwrap();
+        let mut imap = portable_imap("imap@example.com");
+        imap.settings.keep_on_server = KeepOnServer::UntilDownloaded;
+        assert!(validate_portable_account(&imap).is_err());
+
+        pop3.incoming_host.clear();
+        assert!(validate_portable_account(&pop3).is_err());
     }
 
     #[tokio::test]
@@ -9054,7 +10343,40 @@ mod account_backup_import_tests {
         let configs = core.list_account_configs().await.unwrap();
         assert_eq!(accounts.len(), 1);
         assert_eq!(accounts[0].sync_state, "needs_reauth");
-        assert_eq!(configs[0].imap_host, "imap.example.com");
+        assert_eq!(configs[0].incoming_host, "imap.example.com");
+    }
+
+    #[tokio::test]
+    async fn imported_gmail_configuration_merges_by_mailbox() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let gmail = |email: &str| PortableAccountConfig {
+            provider: Provider::Gmail,
+            auth_kind: AuthKind::Oauth2,
+            mail_protocol: MailProtocol::Gmail,
+            ..portable_imap(email)
+        };
+
+        assert_eq!(
+            core.import_account_configs(vec![
+                gmail("jane.doe@gmail.com"),
+                gmail("JaneDoe@googlemail.com"),
+            ])
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            core.import_account_configs(vec![gmail("janedoe@gmail.com")])
+                .await
+                .unwrap(),
+            0
+        );
+        let accounts = core.list_accounts().await.unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].email, "jane.doe@gmail.com");
     }
 }
 
@@ -9281,6 +10603,438 @@ mod local_data_reset_tests {
                 ("linked-existing".to_owned(), Some(existing_message_id)),
                 ("linked-missing".to_owned(), None),
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod move_undo_tests {
+    use super::*;
+    use crate::db::testutil;
+
+    fn mailboxes(conn: &rusqlite::Connection, message_id: i64) -> Vec<i64> {
+        conn.prepare(
+            "SELECT folder_id FROM message_folders WHERE message_id = ?1 ORDER BY folder_id",
+        )
+        .unwrap()
+        .query_map([message_id], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn undoing_a_completed_jmap_move_restores_its_mailbox_membership() {
+        let mut conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute_batch(
+            "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1;
+             UPDATE folders SET jmap_id = 'inbox' WHERE id = 1;
+             INSERT INTO folders (id, account_id, path, role, jmap_id)
+               VALUES (2, 1, 'Archive', 'archive', 'archive');",
+        )
+        .unwrap();
+        let (thread_id, message_id) =
+            testutil::seed_message(&conn, "a@example.com", "Plans", false);
+        // The archive already reached the server.
+        conn.execute(
+            "UPDATE messages SET folder_id = 2, uid = NULL WHERE id = ?1",
+            [message_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2)",
+            [message_id],
+        )
+        .unwrap();
+        let action_id = repo::actions::enqueue(
+            &conn,
+            1,
+            "archive",
+            Some(message_id),
+            Some(thread_id),
+            &serde_json::json!({"srcFolderId": 1, "srcUid": null, "targetFolderId": 2}),
+            None,
+        )
+        .unwrap();
+        repo::actions::set_state(&conn, action_id, "done", None).unwrap();
+        let action = repo::actions::get(&conn, action_id).unwrap().unwrap();
+
+        revert_action(&mut conn, &action).unwrap();
+
+        let folder: i64 = conn
+            .query_row(
+                "SELECT folder_id FROM messages WHERE id = ?1",
+                [message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(folder, 1);
+        assert_eq!(mailboxes(&conn, message_id), [1]);
+    }
+}
+
+#[cfg(test)]
+mod calendar_connection_tests {
+    use super::*;
+    use base64::Engine;
+    use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A loopback CalDAV server with one calendar collection per path, each
+    /// accepting only its own credentials. It stores uploaded events and
+    /// records every request as (method, path, credentials).
+    #[derive(Default)]
+    struct DavServer {
+        // (collection path, display name, "user:password")
+        collections: Mutex<Vec<(String, String, String)>>,
+        requests: Mutex<Vec<(String, String, Option<String>)>>,
+    }
+
+    impl DavServer {
+        fn set_secret(&self, collection: &str, secret: &str) {
+            for entry in self.collections.lock().unwrap().iter_mut() {
+                if entry.0 == collection {
+                    entry.2 = secret.to_owned();
+                }
+            }
+        }
+
+        fn uploads(&self) -> Vec<(String, Option<String>)> {
+            self.requests
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(method, _, _)| method == "PUT")
+                .map(|(_, path, credentials)| (path.clone(), credentials.clone()))
+                .collect()
+        }
+
+        fn respond(&self, method: &str, path: &str, credentials: Option<&str>) -> String {
+            self.requests.lock().unwrap().push((
+                method.to_owned(),
+                path.to_owned(),
+                credentials.map(str::to_owned),
+            ));
+            let collections = self.collections.lock().unwrap();
+            let Some((collection, name, secret)) = collections
+                .iter()
+                .find(|(collection, _, _)| {
+                    path.trim_end_matches('/') == collection.trim_end_matches('/')
+                        || path.starts_with(collection.as_str())
+                })
+                .cloned()
+            else {
+                return "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".into();
+            };
+            drop(collections);
+            if credentials != Some(secret.as_str()) {
+                return "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".into();
+            }
+            let body = match method {
+                "PUT" => {
+                    return "HTTP/1.1 201 Created\r\nETag: \"1\"\r\nContent-Length: 0\r\n\r\n"
+                        .into();
+                }
+                "PROPFIND" => format!(
+                    r#"<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:response><d:href>{collection}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype><d:displayname>{name}</d:displayname></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>"#
+                ),
+                _ => r#"<d:multistatus xmlns:d="DAV:"></d:multistatus>"#.to_owned(),
+            };
+            format!(
+                "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+        }
+    }
+
+    async fn dav_server(collections: &[(&str, &str, &str)]) -> (String, Arc<DavServer>) {
+        let server = Arc::new(DavServer::default());
+        *server.collections.lock().unwrap() = collections
+            .iter()
+            .map(|(path, name, secret)| {
+                ((*path).to_owned(), (*name).to_owned(), (*secret).to_owned())
+            })
+            .collect();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let shared = server.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let server = shared.clone();
+                tokio::spawn(async move {
+                    let mut buffer = Vec::new();
+                    loop {
+                        let head_end = loop {
+                            if let Some(end) =
+                                buffer.windows(4).position(|window| window == b"\r\n\r\n")
+                            {
+                                break end + 4;
+                            }
+                            let mut chunk = [0u8; 4096];
+                            match stream.read(&mut chunk).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                            }
+                        };
+                        let head = String::from_utf8_lossy(&buffer[..head_end]).to_string();
+                        let header = |name: &str| {
+                            head.lines().find_map(|line| {
+                                let (key, value) = line.split_once(':')?;
+                                key.eq_ignore_ascii_case(name)
+                                    .then(|| value.trim().to_owned())
+                            })
+                        };
+                        let length: usize = header("content-length")
+                            .and_then(|value| value.parse().ok())
+                            .unwrap_or(0);
+                        while buffer.len() < head_end + length {
+                            let mut chunk = [0u8; 4096];
+                            match stream.read(&mut chunk).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                            }
+                        }
+                        buffer.drain(..head_end + length);
+                        let mut request_line = head.lines().next().unwrap_or_default().split(' ');
+                        let method = request_line.next().unwrap_or_default().to_owned();
+                        let path = request_line.next().unwrap_or_default().to_owned();
+                        let credentials = header("authorization")
+                            .and_then(|value| value.strip_prefix("Basic ").map(str::to_owned))
+                            .and_then(|value| {
+                                base64::engine::general_purpose::STANDARD.decode(value).ok()
+                            })
+                            .map(|bytes| String::from_utf8_lossy(&bytes).to_string());
+                        let response = server.respond(&method, &path, credentials.as_deref());
+                        if stream.write_all(response.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        (format!("http://{address}"), server)
+    }
+
+    async fn start_test_core(paths: &Paths) -> Core {
+        let core = Core::start_mail_ui_with_credentials(
+            paths.clone(),
+            Arc::new(credentials::DevelopmentFileCredentialStore::new(
+                paths.data_dir.join("test-credentials.json"),
+            )),
+        )
+        .await
+        .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        core
+    }
+
+    fn caldav(connection_id: Option<i64>, url: &str, password: Option<&str>) -> ConnectCaldavArgs {
+        ConnectCaldavArgs {
+            account_id: 1,
+            connection_id,
+            url: url.to_owned(),
+            username: " me ".to_owned(),
+            password: password.map(str::to_owned),
+        }
+    }
+
+    /// Wait for the account's calendar task to reach a state.
+    async fn eventually(mut done: impl AsyncFnMut() -> bool) {
+        for _ in 0..200 {
+            if done().await {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        panic!("the calendar task never reached the expected state");
+    }
+
+    #[tokio::test]
+    async fn an_account_adds_changes_and_removes_several_caldav_servers() {
+        let (server, dav) = dav_server(&[
+            ("/dav/own/", "Me", "me:own-password"),
+            ("/dav/shared/", "Team", "me:shared-password"),
+            ("/dav/third/", "Third", "me:third-password"),
+        ])
+        .await;
+        let temp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_tests(temp.path());
+        let core = start_test_core(&paths).await;
+
+        let own = core
+            .connect_caldav(caldav(
+                None,
+                &format!("{server}/dav/own/"),
+                Some("own-password"),
+            ))
+            .await
+            .unwrap();
+        let shared = core
+            .connect_caldav(caldav(
+                None,
+                &format!("{server}/dav/shared/"),
+                Some("shared-password"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            (own.calendars.clone(), shared.calendars.clone()),
+            (vec!["Me".to_owned()], vec!["Team".to_owned()])
+        );
+        assert_eq!(shared.username, "me");
+        assert!(own.enabled && shared.enabled);
+        assert!(core.cal_handles.read().await.contains_key(&1));
+
+        // One calendar syncs through one connection per account, however
+        // its address is written.
+        let duplicate = core
+            .connect_caldav(caldav(
+                None,
+                &format!("{server}/dav/shared"),
+                Some("shared-password"),
+            ))
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(duplicate.contains("already syncs"), "{duplicate}");
+        // A wrong password never creates a connection.
+        assert!(matches!(
+            core.connect_caldav(caldav(None, &format!("{server}/dav/third/"), Some("wrong")))
+                .await,
+            Err(CoreError::NeedsReauth)
+        ));
+        assert_eq!(core.list_calendar_connections().await.unwrap().len(), 2);
+
+        // Changing a connection without a new password keeps the saved one;
+        // the server accepts nothing else.
+        let changed = core
+            .connect_caldav(caldav(
+                Some(shared.id),
+                &format!("{server}/dav/shared/"),
+                None,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(changed.id, shared.id);
+        // Moving it to another server needs the password again; the new
+        // server never sees the saved one.
+        let (moved, elsewhere) =
+            dav_server(&[("/dav/shared/", "Team", "me:shared-password")]).await;
+        let refused = core
+            .connect_caldav(caldav(
+                Some(shared.id),
+                &format!("{moved}/dav/shared/"),
+                None,
+            ))
+            .await
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(refused.contains("different server"), "{refused}");
+        assert!(elsewhere.requests.lock().unwrap().is_empty());
+        // A connection belongs to its account and its kind of server.
+        assert!(
+            core.connect_caldav(ConnectCaldavArgs {
+                account_id: 2,
+                ..caldav(Some(shared.id), &format!("{server}/dav/shared/"), None)
+            })
+            .await
+            .is_err()
+        );
+
+        let calendars = core.list_calendars(Some(1)).await.unwrap();
+        let default = calendars
+            .iter()
+            .find(|calendar| calendar.is_default)
+            .unwrap();
+        assert_eq!(default.connection_id, own.id);
+        let team = calendars
+            .iter()
+            .find(|calendar| calendar.connection_id == shared.id)
+            .unwrap()
+            .id;
+
+        // An event created in the shared calendar goes to that server only,
+        // signed in as that connection.
+        core.create_event(CreateEventArgs {
+            account_id: 1,
+            calendar_id: Some(team),
+            summary: "Front desk rota".into(),
+            description: None,
+            location: None,
+            join_url: None,
+            starts_at: 1_800_000_000_000,
+            ends_at: 1_800_003_600_000,
+            all_day: false,
+            attendees: Vec::new(),
+        })
+        .await
+        .unwrap();
+        eventually(async || !dav.uploads().is_empty()).await;
+        let uploads = dav.uploads();
+        assert_eq!(uploads.len(), 1);
+        assert!(uploads[0].0.starts_with("/dav/shared/"), "{uploads:?}");
+        assert_eq!(uploads[0].1.as_deref(), Some("me:shared-password"));
+
+        // A server that stops accepting its password marks only its own
+        // connection; the other keeps syncing.
+        dav.set_secret("/dav/shared/", "me:rotated");
+        core.calendar_sync_now(Some(1)).await;
+        eventually(async || {
+            let connections = core.list_calendar_connections().await.unwrap();
+            connections
+                .iter()
+                .any(|c| c.id == shared.id && c.last_error.as_deref() == Some("needs_reauth"))
+        })
+        .await;
+        let connections = core.list_calendar_connections().await.unwrap();
+        let own_state = connections.iter().find(|c| c.id == own.id).unwrap();
+        assert_eq!(own_state.last_error, None);
+
+        core.remove_calendar_connection(own.id).await.unwrap();
+        let calendars = core.list_calendars(Some(1)).await.unwrap();
+        assert_eq!(calendars.len(), 1);
+        assert!(calendars[0].is_default, "the account keeps a default");
+        assert!(
+            credentials::load_async(core.credentials.clone(), 1, Slot::CaldavPassword(own.id))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            credentials::load_async(core.credentials.clone(), 1, Slot::CaldavPassword(shared.id))
+                .await
+                .unwrap(),
+            "shared-password"
+        );
+
+        core.set_calendar_connection_enabled(shared.id, false)
+            .await
+            .unwrap();
+        assert!(!core.cal_handles.read().await.contains_key(&1));
+        core.set_calendar_connection_enabled(shared.id, true)
+            .await
+            .unwrap();
+        assert!(core.cal_handles.read().await.contains_key(&1));
+
+        // Removing the account takes the connection passwords along, which
+        // the system keyring could not list by itself.
+        core.remove_account(1).await.unwrap();
+        assert!(core.list_calendar_connections().await.unwrap().is_empty());
+        assert!(
+            credentials::load_async(core.credentials.clone(), 1, Slot::CaldavPassword(shared.id))
+                .await
+                .is_err()
         );
     }
 }

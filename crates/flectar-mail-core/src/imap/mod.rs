@@ -7,17 +7,16 @@
 
 use crate::error::{CoreError, Result};
 use crate::mime::{self, MimePlan};
+use crate::net::{self, MailStream};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use futures::StreamExt;
 use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
 // async-imap with runtime-tokio speaks tokio's AsyncRead/AsyncWrite natively.
-pub type ImapStream = tokio_rustls::client::TlsStream<TcpStream>;
-pub type Session = async_imap::Session<ImapStream>;
+pub type Session = async_imap::Session<MailStream>;
 
 /// Metadata and mutation commands must never be able to wedge a sync actor.
 pub const METADATA_TIMEOUT: Duration = Duration::from_secs(30);
@@ -39,231 +38,6 @@ where
         );
         CoreError::Imap(format!("{label} timed out after {}s", timeout.as_secs()))
     })?
-}
-
-/// Dev/self-hosted escape hatch: FLECTAR_MAIL_TLS_INSECURE=1 disables certificate
-/// verification (e.g. self-signed Dovecot). Off by default; never set it for
-/// real accounts.
-pub fn tls_insecure() -> bool {
-    std::env::var("FLECTAR_MAIL_TLS_INSECURE")
-        .map(|v| v == "1")
-        .unwrap_or(false)
-}
-
-#[derive(Debug)]
-struct NoVerify(Arc<rustls::crypto::CryptoProvider>);
-
-impl rustls::client::danger::ServerCertVerifier for NoVerify {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls12_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        rustls::crypto::verify_tls13_signature(
-            message,
-            cert,
-            dss,
-            &self.0.signature_verification_algorithms,
-        )
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.0.signature_verification_algorithms.supported_schemes()
-    }
-}
-
-/// Verify normal PKI chains first, then allow an imported certificate to act
-/// as an explicitly pinned endpoint when it is the exact CA-marked certificate
-/// presented by Proton Bridge. The narrow fallback preserves expiry and name
-/// validation while the exact DER match supplies the endpoint identity check.
-#[derive(Debug)]
-struct ImportedCertificateVerifier {
-    standard: Arc<rustls::client::WebPkiServerVerifier>,
-    imported: Vec<rustls::pki_types::CertificateDer<'static>>,
-}
-
-impl ImportedCertificateVerifier {
-    fn is_ca_used_as_end_entity(error: &rustls::Error) -> bool {
-        let rustls::Error::InvalidCertificate(rustls::CertificateError::Other(other)) = error
-        else {
-            return false;
-        };
-        other
-            .0
-            .downcast_ref::<webpki::Error>()
-            .is_some_and(|error| matches!(error, webpki::Error::CaUsedAsEndEntity))
-    }
-}
-
-impl rustls::client::danger::ServerCertVerifier for ImportedCertificateVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &rustls::pki_types::CertificateDer<'_>,
-        intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        server_name: &rustls::pki_types::ServerName<'_>,
-        ocsp_response: &[u8],
-        now: rustls::pki_types::UnixTime,
-    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        match self.standard.verify_server_cert(
-            end_entity,
-            intermediates,
-            server_name,
-            ocsp_response,
-            now,
-        ) {
-            Ok(verified) => Ok(verified),
-            Err(error)
-                if Self::is_ca_used_as_end_entity(&error)
-                    && self
-                        .imported
-                        .iter()
-                        .any(|certificate| certificate.as_ref() == end_entity.as_ref()) =>
-            {
-                // WebPKI checked validity before reporting CaUsedAsEndEntity.
-                // Check the name separately because chain validation failed
-                // before the standard verifier reached its name check. rustls
-                // verifies proof of possession in verify_tls{12,13}_signature.
-                let certificate = rustls::server::ParsedCertificate::try_from(end_entity)?;
-                rustls::client::verify_server_name(&certificate, server_name)?;
-                Ok(rustls::client::danger::ServerCertVerified::assertion())
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        self.standard.verify_tls12_signature(message, cert, dss)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        cert: &rustls::pki_types::CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        self.standard.verify_tls13_signature(message, cert, dss)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        self.standard.supported_verify_schemes()
-    }
-}
-
-pub fn tls_connector() -> TlsConnector {
-    static CONFIG: once_cell::sync::Lazy<Arc<rustls::ClientConfig>> =
-        once_cell::sync::Lazy::new(|| {
-            // Multiple rustls backends may be enabled via the dependency
-            // graph; pick ring explicitly so there's always a default.
-            let _ = rustls::crypto::ring::default_provider().install_default();
-            let mut roots = rustls::RootCertStore::empty();
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let mut config = rustls::ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            if tls_insecure() {
-                tracing::warn!(
-                    "FLECTAR_MAIL_TLS_INSECURE=1: TLS certificate verification is DISABLED"
-                );
-                let provider = rustls::crypto::CryptoProvider::get_default()
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(rustls::crypto::ring::default_provider()));
-                config
-                    .dangerous()
-                    .set_certificate_verifier(Arc::new(NoVerify(provider)));
-            }
-            Arc::new(config)
-        });
-    TlsConnector::from(CONFIG.clone())
-}
-
-/// Parse a bounded PEM bundle and reject private keys or non-certificate data.
-pub fn trusted_certificates(pem: &str) -> Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
-    use rustls::pki_types::pem::PemObject;
-    if pem.is_empty() {
-        return Ok(Vec::new());
-    }
-    if pem.len() > 256 * 1024 || pem.contains("PRIVATE KEY") {
-        return Err(CoreError::Tls(
-            "Import a public PEM certificate, not a private key (maximum 256 KiB).".into(),
-        ));
-    }
-    let certificates = rustls::pki_types::CertificateDer::pem_slice_iter(pem.as_bytes())
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| CoreError::Tls("The imported file is not a valid PEM certificate.".into()))?;
-    if certificates.is_empty() {
-        return Err(CoreError::Tls(
-            "No certificates found in the PEM file.".into(),
-        ));
-    }
-    let mut roots = rustls::RootCertStore::empty();
-    for cert in &certificates {
-        roots
-            .add(cert.clone())
-            .map_err(|_| CoreError::Tls("The imported certificate is invalid.".into()))?;
-    }
-    Ok(certificates)
-}
-
-pub(crate) fn account_tls_connector(pem: &str) -> Result<TlsConnector> {
-    if pem.is_empty() {
-        return Ok(tls_connector());
-    }
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let mut roots = rustls::RootCertStore::empty();
-    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    let imported = trusted_certificates(pem)?;
-    for cert in &imported {
-        roots
-            .add(cert.clone())
-            .map_err(|e| CoreError::Tls(e.to_string()))?;
-    }
-    let verifier = rustls::client::WebPkiServerVerifier::builder_with_provider(
-        Arc::new(roots),
-        provider.clone(),
-    )
-    .build()
-    .map_err(|e| CoreError::Tls(e.to_string()))?;
-    let config = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()
-        .map_err(|e| CoreError::Tls(e.to_string()))?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(ImportedCertificateVerifier {
-            standard: verifier,
-            imported,
-        }))
-        .with_no_client_auth();
-    Ok(TlsConnector::from(Arc::new(config)))
 }
 
 #[derive(Clone)]
@@ -318,12 +92,14 @@ impl async_imap::Authenticator for XOAuth2Authenticator {
     }
 }
 
+/// Connect with TLS from the first byte, trusting only the system roots.
 pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
+    use crate::models::{ConnectionSecurity, MailConnectionSettings};
     connect_with_settings(
         host,
         port,
         creds,
-        &crate::models::MailConnectionSettings::default(),
+        &MailConnectionSettings::new(ConnectionSecurity::Tls, ConnectionSecurity::Tls),
     )
     .await
 }
@@ -353,57 +129,43 @@ async fn connect_inner(
     settings: &crate::models::MailConnectionSettings,
 ) -> Result<Session> {
     use crate::models::ConnectionSecurity;
-    let connector = account_tls_connector(&settings.trusted_certificate_pem)?;
-    let tcp = TcpStream::connect((host, port))
+    let security = settings.incoming_security;
+    if !security.is_encrypted() && matches!(creds, ImapCredentials::XOAuth2 { .. }) {
+        return Err(CoreError::Tls(
+            "OAuth sign-in needs an encrypted connection.".into(),
+        ));
+    }
+    let connector = net::tls::connector(&settings.trusted_certificate_pem)?;
+    let tcp = net::connect_tcp(host, port)
         .await
         .map_err(|e| CoreError::Imap(format!("connect {host}:{port}: {e}")))?;
-    tcp.set_nodelay(true).ok();
-    let starttls = match settings.imap_security {
-        ConnectionSecurity::Starttls => true,
-        ConnectionSecurity::Tls => false,
-        ConnectionSecurity::Auto => port == 143,
-    };
-    let tcp = if starttls {
-        let mut client = async_imap::Client::new(tcp);
-        if client
-            .read_response()
-            .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?
-            .is_none()
-        {
-            return Err(CoreError::Imap(
-                "Server closed before the IMAP greeting.".into(),
-            ));
+    let stream = match security {
+        ConnectionSecurity::Tls => tls_handshake(&connector, tcp, host, port).await?,
+        ConnectionSecurity::Starttls => {
+            let mut client = async_imap::Client::new(tcp);
+            read_greeting(&mut client).await?;
+            // Required upgrade: never send credentials if STARTTLS is rejected.
+            client
+                .run_command_and_check_ok("STARTTLS", None)
+                .await
+                .map_err(|e| {
+                    CoreError::Tls(format!(
+                        "IMAP STARTTLS was rejected: {e}. Check the server port and security mode."
+                    ))
+                })?;
+            tls_handshake(&connector, client.into_inner(), host, port).await?
         }
-        // Required upgrade: never send credentials if STARTTLS is rejected.
-        client
-            .run_command_and_check_ok("STARTTLS", None)
-            .await
-            .map_err(|e| {
-                CoreError::Tls(format!(
-                    "IMAP STARTTLS was rejected: {e}. Check the server port and security mode."
-                ))
-            })?;
-        client.into_inner()
-    } else {
-        tcp
+        ConnectionSecurity::None => MailStream::Plain(tcp),
     };
-    let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
-        .map_err(|e| CoreError::Tls(e.to_string()))?;
-    let tls = connector.connect(server_name, tcp).await
-        .map_err(|e| CoreError::Tls(format!("IMAP {host}:{port}: {e}. Check SSL/TLS versus STARTTLS and use the hostname on the server certificate. For Proton Bridge, import its exported certificate.")))?;
-    let mut client = async_imap::Client::new(tls);
+    let mut client = async_imap::Client::new(stream);
     // STARTTLS has already consumed the greeting; no second greeting follows.
-    if !starttls
-        && client
-            .read_response()
-            .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?
-            .is_none()
-    {
-        return Err(CoreError::Imap(
-            "Server closed before the IMAP greeting.".into(),
-        ));
+    if security != ConnectionSecurity::Starttls {
+        read_greeting(&mut client).await?;
+    }
+    if !security.is_encrypted() && login_disabled(&mut client).await? {
+        return Err(CoreError::Imap(format!(
+            "{host} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
+        )));
     }
 
     let mut session = match creds {
@@ -425,6 +187,89 @@ async fn connect_inner(
     identify_client(&mut session).await;
     tracing::debug!(%host, "imap connect: authenticated");
     Ok(session)
+}
+
+async fn tls_handshake(
+    connector: &TlsConnector,
+    tcp: TcpStream,
+    host: &str,
+    port: u16,
+) -> Result<MailStream> {
+    let tls = net::tls::handshake(connector, tcp, host).await.map_err(|e| {
+        CoreError::Tls(format!(
+            "IMAP {host}:{port}: {e}. Check SSL/TLS versus STARTTLS and use the hostname on the server certificate. For Proton Bridge, import its exported certificate."
+        ))
+    })?;
+    Ok(MailStream::Tls(Box::new(tls)))
+}
+
+/// Whether the server refuses LOGIN on this connection (RFC 9051
+/// LOGINDISABLED). Asked before any credentials are sent, so a server that
+/// only accepts passwords over TLS is reported as such rather than as a
+/// failed sign-in.
+async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<bool> {
+    use async_imap::imap_proto::{Capability, Response, Status};
+    use tokio::io::AsyncWriteExt;
+    // async-imap has no CAPABILITY command before sign-in, so send it with a
+    // tag its own counter (a1, a2, ...) never produces. Nothing else has been
+    // sent yet, so no buffered command can interleave with it.
+    const TAG: &str = "flectar0";
+    let stream = client.get_mut();
+    stream
+        .write_all(format!("{TAG} CAPABILITY\r\n").as_bytes())
+        .await
+        .map_err(|e| CoreError::Imap(format!("CAPABILITY: {e}")))?;
+    stream
+        .flush()
+        .await
+        .map_err(|e| CoreError::Imap(format!("CAPABILITY: {e}")))?;
+    let mut disabled = false;
+    loop {
+        let response = client
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .ok_or_else(|| CoreError::Imap("Server closed during CAPABILITY.".into()))?;
+        match response.parsed() {
+            Response::Capabilities(capabilities) => {
+                disabled |= capabilities.iter().any(|capability| {
+                    matches!(capability, Capability::Atom(name) if name.eq_ignore_ascii_case("LOGINDISABLED"))
+                });
+            }
+            Response::Done {
+                tag,
+                status,
+                information,
+                ..
+            } if tag.0 == TAG => {
+                return match status {
+                    Status::Ok => Ok(disabled),
+                    _ => Err(CoreError::Imap(format!(
+                        "CAPABILITY failed: {}",
+                        information.as_deref().unwrap_or_default()
+                    ))),
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn read_greeting<T>(client: &mut async_imap::Client<T>) -> Result<()>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    if client
+        .read_response()
+        .await
+        .map_err(|e| CoreError::Imap(e.to_string()))?
+        .is_none()
+    {
+        return Err(CoreError::Imap(
+            "Server closed before the IMAP greeting.".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Identify Flectar Mail to servers that implement RFC 2971. Some services
@@ -1311,10 +1156,53 @@ pub async fn append_with_receipt(
     raw: &[u8],
     seen: bool,
 ) -> Result<Option<AppendReceipt>> {
+    let flags = if seen { " (\\Seen)" } else { "" };
     with_deadline(
         "APPEND",
         CONTENT_TIMEOUT,
-        append_inner(session, folder, raw, seen),
+        append_inner(session, folder, raw, flags, ""),
+    )
+    .await
+}
+
+/// How [`append_message`] files a message.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AppendOptions {
+    pub seen: bool,
+    pub flagged: bool,
+    /// The message's internal date, instead of the time it is appended.
+    pub internal_date: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Append a message with its flags and date, such as one copied from
+/// elsewhere. A large message gets time to upload at 64 KiB/s.
+pub async fn append_message(
+    session: &mut Session,
+    folder: &str,
+    raw: &[u8],
+    options: AppendOptions,
+) -> Result<Option<AppendReceipt>> {
+    let mut flags = Vec::new();
+    if options.seen {
+        flags.push("\\Seen");
+    }
+    if options.flagged {
+        flags.push("\\Flagged");
+    }
+    let flags = if flags.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", flags.join(" "))
+    };
+    let date = options
+        .internal_date
+        .map(|date| format!(" \"{}\"", date.format("%d-%b-%Y %H:%M:%S %z")))
+        .unwrap_or_default();
+    let deadline = CONTENT_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
+    with_deadline(
+        "APPEND",
+        deadline,
+        append_inner(session, folder, raw, &flags, &date),
     )
     .await
 }
@@ -1323,7 +1211,8 @@ async fn append_inner(
     session: &mut Session,
     folder: &str,
     raw: &[u8],
-    seen: bool,
+    flags: &str,
+    date: &str,
 ) -> Result<Option<AppendReceipt>> {
     use async_imap::imap_proto::{Response, ResponseCode, Status, UidSetMember};
     use tokio::io::AsyncWriteExt;
@@ -1332,9 +1221,11 @@ async fn append_inner(
         return Err(CoreError::Imap("invalid APPEND mailbox".into()));
     }
     let folder = folder.replace('\\', "\\\\").replace('"', "\\\"");
-    let flags = if seen { " (\\Seen)" } else { "" };
     let tag = session
-        .run_command(format!("APPEND \"{folder}\"{flags} {{{}}}", raw.len()))
+        .run_command(format!(
+            "APPEND \"{folder}\"{flags}{date} {{{}}}",
+            raw.len()
+        ))
         .await
         .map_err(|e| CoreError::Imap(format!("APPEND connection failed: {e}")))?;
     let mut sent_literal = false;
@@ -1365,10 +1256,15 @@ async fn append_inner(
                 tag: received,
                 status,
                 code,
-                ..
+                information,
             } if *received == tag => {
                 if *status != Status::Ok {
-                    return Err(CoreError::Imap(format!("{status:?}: APPEND rejected")));
+                    let reason = information.as_deref().unwrap_or_default().trim();
+                    return Err(CoreError::Imap(if reason.is_empty() {
+                        format!("{status:?}: APPEND rejected")
+                    } else {
+                        format!("{status:?}: APPEND rejected: {reason}")
+                    }));
                 }
                 if !sent_literal {
                     return Err(CoreError::Imap(

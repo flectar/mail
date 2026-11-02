@@ -4,6 +4,7 @@
 blitz-dom = { path = "../../crates/blitz-dom" }
 blitz-paint = { path = "../../crates/blitz-paint" }
 parley = { path = "../../crates/parley" }
+i-slint-backend-winit = { path = "../../crates/i-slint-backend-winit" }
 
 [profile.release]
 opt-level = 3

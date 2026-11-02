@@ -227,7 +227,7 @@ pub fn record_delivery(
 
 /// Every address that belongs to the account, for telling outgoing mail and
 /// the user's own addresses apart from correspondents.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct OwnAddresses {
     exact: HashSet<String>,
     domains: HashSet<String>,
@@ -272,6 +272,20 @@ pub fn own_addresses(conn: &Connection, account_id: i64) -> Result<OwnAddresses>
     Ok(own)
 }
 
+/// The addresses of every account, for mail that may have been sent from
+/// any of them.
+pub fn own_addresses_of_all(conn: &Connection) -> Result<OwnAddresses> {
+    let mut own = OwnAddresses::default();
+    let mut statement = conn.prepare(
+        "SELECT email FROM sender_identities
+         WHERE is_primary = 1 OR verification_status = 'accepted'",
+    )?;
+    for email in statement.query_map([], |row| row.get::<_, String>(0))? {
+        own.insert(email?);
+    }
+    Ok(own)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +293,11 @@ mod tests {
     use crate::models::{AuthKind, MailProtocol, Provider};
 
     fn account(conn: &Connection, provider: Provider) -> i64 {
+        let (auth_kind, mail_protocol) = match provider {
+            Provider::Gmail => (AuthKind::Oauth2, MailProtocol::Gmail),
+            Provider::Microsoft => (AuthKind::Oauth2, MailProtocol::Imap),
+            Provider::Generic => (AuthKind::Password, MailProtocol::Imap),
+        };
         accounts::insert(
             conn,
             &NewAccount {
@@ -286,16 +305,17 @@ mod tests {
                 display_name: Some("Login"),
                 avatar_url: None,
                 provider,
-                auth_kind: AuthKind::Oauth2,
-                mail_protocol: MailProtocol::Imap,
+                auth_kind,
+                mail_protocol,
                 username: "login@example.test",
                 jmap_url: "",
                 jmap_account_id: None,
-                imap_host: "",
-                imap_port: 993,
+                incoming_host: "",
+                incoming_port: 993,
                 smtp_host: "",
                 smtp_port: 465,
             },
+            &crate::db::testutil::account_settings(),
         )
         .unwrap()
     }
@@ -355,7 +375,7 @@ mod tests {
     #[test]
     fn provider_refresh_keeps_manual_identities_and_learned_delivery() {
         let mut conn = crate::db::testutil::conn();
-        let account_id = account(&conn, Provider::Imap);
+        let account_id = account(&conn, Provider::Generic);
         let mut alias = identity(account_id, "alias@example.test", false, "accepted");
         alias.display_name = Some("Alias".into());
         alias.reply_to_email = Some("desk@example.test".into());
@@ -427,7 +447,7 @@ mod tests {
     #[test]
     fn wildcard_identities_authorize_concrete_addresses_only() {
         let mut conn = crate::db::testutil::conn();
-        let account_id = account(&conn, Provider::Imap);
+        let account_id = account(&conn, Provider::Generic);
         let mut wildcard = identity(account_id, "*@team.test", false, "accepted");
         wildcard.display_name = Some("Team".into());
         wildcard.reply_to_email = Some("help@team.test".into());

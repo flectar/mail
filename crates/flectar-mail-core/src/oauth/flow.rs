@@ -247,7 +247,7 @@ pub async fn authorize_with_broker(
             Provider::Microsoft => {
                 "Microsoft did not return an offline refresh token; reconnect and grant access"
             }
-            Provider::Imap => unreachable!(),
+            Provider::Generic => unreachable!(),
         };
         return Err(CoreError::Auth(message.into()));
     }

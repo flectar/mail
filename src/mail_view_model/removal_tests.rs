@@ -24,7 +24,11 @@ struct Case {
     dropped: Vec<i32>,
     collapsed: Option<i32>,
     starred_only: bool,
+    /// Rows the refresh returns unstarred.
+    unstarred: Vec<i32>,
     paginated: bool,
+    /// The loaded rows afterwards, for a paginated case.
+    listed: Vec<i32>,
     clear_selection: bool,
 }
 
@@ -115,6 +119,13 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             ..Default::default()
         },
         Case {
+            name: "a list replaced by new mail closes the reader",
+            old: vec![1, 2],
+            refreshed: vec![98, 99],
+            opened: Some(2),
+            ..Default::default()
+        },
+        Case {
             name: "new arrivals do not steal the selection",
             old: vec![1, 2],
             refreshed: vec![99, 1],
@@ -139,6 +150,29 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             expected: Some(31),
             dropped: vec![30],
             paginated: true,
+            listed: (1..=50).filter(|id| *id != 30).collect(),
+            ..Default::default()
+        },
+        Case {
+            name: "the open message stays listed when it leaves the quick filter",
+            old: vec![1, 2, 3, 4],
+            refreshed: vec![1, 2, 3, 4],
+            opened: Some(2),
+            expected: Some(2),
+            starred_only: true,
+            unstarred: vec![2],
+            ..Default::default()
+        },
+        Case {
+            // The deeper read needs the mail workers this test runs without,
+            // so the list and reader stay as they were.
+            name: "new mail filling the refresh reads further for the open message",
+            old: (1..=PAGE_SIZE as i32).collect(),
+            refreshed: (101..=100 + PAGE_SIZE as i32).collect(),
+            opened: Some(20),
+            expected: Some(20),
+            paginated: true,
+            listed: (1..=PAGE_SIZE as i32).collect(),
             ..Default::default()
         },
         Case {
@@ -209,7 +243,16 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             &runtime,
             mail::MailPage {
                 account_revision: core.account_revision(),
-                messages: case.refreshed.iter().copied().map(make_message).collect(),
+                messages: case
+                    .refreshed
+                    .iter()
+                    .copied()
+                    .map(make_message)
+                    .map(|mut message| {
+                        message.starred &= !case.unstarred.contains(&message.id);
+                        message
+                    })
+                    .collect(),
                 labels: Vec::new(),
                 mailboxes: Vec::new(),
                 next_cursor: case.paginated.then(|| cursor(PAGE_SIZE as i32)).flatten(),
@@ -252,9 +295,17 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             );
         }
         if case.paginated {
-            assert_eq!(state.next_cursor, cursor(50));
-            assert_eq!(state.messages.len(), 49);
-            assert!(!state.messages.iter().any(|message| message.id == 30));
+            assert_eq!(state.next_cursor, cursor(50), "{}", case.name);
+            assert_eq!(
+                state
+                    .messages
+                    .iter()
+                    .map(|message| message.id)
+                    .collect::<Vec<_>>(),
+                case.listed,
+                "{}",
+                case.name
+            );
         }
         if case.clear_selection
             && let Some(path) = std::env::var_os("FLECTAR_SELECTION_SCREENSHOT")

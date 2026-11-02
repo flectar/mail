@@ -667,7 +667,14 @@ mod tests {
 
     fn seed_calendar_at(c: &Connection, url: &str, name: &str) -> i64 {
         c.execute(
-            "INSERT INTO calendars (account_id, url, display_name) VALUES (1, ?1, ?2)",
+            "INSERT OR IGNORE INTO calendar_connections (id, account_id, kind, base_url)
+             VALUES (1, 1, 'generic', 'https://cal/')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO calendars (account_id, connection_id, url, display_name)
+             VALUES (1, 1, ?1, ?2)",
             params![url, name],
         )
         .unwrap();

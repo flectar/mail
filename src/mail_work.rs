@@ -6,6 +6,25 @@ struct PageRequest {
     core: CoreMailSource,
     scope: Scope,
     query: String,
+    limit: i64,
+}
+
+/// Rows the mail store returns from one read of a mailbox, and of a search.
+/// Rows loaded beyond this keep the merge's retained tail.
+const MAX_REFRESH_ROWS: usize = 200;
+const MAX_SEARCH_REFRESH_ROWS: usize = 100;
+
+/// Rows a refresh of `loaded` rows re-reads: every loaded row up to what one
+/// read returns, so read state, stars and removals reach rows past the first
+/// page and a restored tab's cached rows come back current. Exactly the loaded
+/// count, so the list grows only by the mail that arrives.
+pub(super) fn refresh_limit(loaded: usize, query: &str) -> i64 {
+    let most = if query.trim().is_empty() {
+        MAX_REFRESH_ROWS
+    } else {
+        MAX_SEARCH_REFRESH_ROWS
+    };
+    i64::try_from(loaded.clamp(PAGE_SIZE, most)).unwrap_or(PAGE_SIZE as i64)
 }
 
 pub(super) struct MailWork {
@@ -97,13 +116,7 @@ pub(super) fn register(
         |request: PageRequest| async move {
             request
                 .core
-                .load_page(
-                    request.scope,
-                    &request.query,
-                    None,
-                    PAGE_SIZE as i64,
-                    false,
-                )
+                .load_page(request.scope, &request.query, None, request.limit, false)
                 .await
         },
         move |generation, result| {
@@ -189,16 +202,38 @@ pub(super) fn register(
                 state.messages = page.messages;
                 state.labels = page.labels;
                 state.next_cursor = page.next_cursor;
+                // A restored tab whose conversation is not on the first page
+                // looks as far down as one read goes.
+                if state.pending_selection.is_some_and(|id| {
+                    state.next_cursor.is_some()
+                        && state.messages.len() <= PAGE_SIZE
+                        && !state.messages.iter().any(|row| row.id == id)
+                }) {
+                    drop(state);
+                    if let Err(error) = reload(&app, &page_state, &page_runtime, usize::MAX) {
+                        app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
+                    }
+                    continue;
+                }
                 // A restored tab reopens its conversation if it is still in
-                // the first page, and otherwise shows an empty reader rather
+                // the loaded rows, and otherwise shows an empty reader rather
                 // than an unrelated first row.
+                let opens = std::mem::take(&mut state.pending_selection_opens);
+                let mut open = None;
                 if let Some(id) = state.pending_selection.take() {
                     let found = state.messages.iter().any(|row| row.id == id);
                     state.selected_id = found.then_some(id);
                     state.preview_closed = !found;
+                    if !found {
+                        state.restore_thread_message = None;
+                    }
+                    open = (found && opens).then_some(id);
                 }
                 drop(state);
-                if let Err(error) = render_current(&app, &page_state, &page_runtime) {
+                // A background tab's conversation is opened as it is shown.
+                if let Some(id) = open {
+                    app.invoke_select_email(id);
+                } else if let Err(error) = render_current(&app, &page_state, &page_runtime) {
                     app.set_render_status(UiMessage::detail("Mail refresh failed: {}", error));
                 }
             } else {
@@ -206,6 +241,8 @@ pub(super) fn register(
             }
             app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
         }
+        // A core-event refresh waits while a navigation load runs.
+        app.invoke_drain_core_updates();
     });
     let weak = app.as_weak();
     let action_state = state.clone();
@@ -262,12 +299,49 @@ pub(super) fn refresh(
     preserve: bool,
     moved: &[i32],
 ) -> Result<(), String> {
+    // A replacement starts over at the first page.
+    let rows = (!preserve).then_some(PAGE_SIZE);
+    load(app, state, runtime, preserve, moved, rows)
+}
+
+/// Merge up to `rows` rows into the list like any refresh, when new mail
+/// filled one before it reached a loaded row.
+pub(super) fn refresh_rows(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    rows: usize,
+    moved: &[i32],
+) -> Result<(), String> {
+    load(app, state, runtime, true, moved, Some(rows))
+}
+
+/// Replace the list with up to `rows` rows (at least a page, at most one
+/// read), for a tab that returns to a conversation further down.
+pub(super) fn reload(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    rows: usize,
+) -> Result<(), String> {
+    load(app, state, runtime, false, &[], Some(rows))
+}
+
+fn load(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    preserve: bool,
+    moved: &[i32],
+    rows: Option<usize>,
+) -> Result<(), String> {
     {
         let mut state = state.borrow_mut();
         let request = PageRequest {
             core: state.core.clone().ok_or("mail core is unavailable")?,
             scope: state.scope,
             query: state.query.clone(),
+            limit: refresh_limit(rows.unwrap_or(state.messages.len()), &state.query),
         };
         let work = state
             .mail_work
@@ -332,6 +406,20 @@ pub(super) fn accepts_background(state: &InboxState, generation: u64) -> bool {
 }
 pub(super) fn generation(state: &InboxState) -> u64 {
     state.mail_work.as_ref().map_or(0, |work| work.generation)
+}
+
+/// A navigation load is in flight; its result supersedes a background one.
+pub(super) fn loading(state: &InboxState) -> bool {
+    state.mail_work.as_ref().is_some_and(|work| work.loading)
+}
+
+/// A load that replaces the list is in flight, so the list is empty until it
+/// lands.
+pub(super) fn replacing(state: &InboxState) -> bool {
+    state
+        .mail_work
+        .as_ref()
+        .is_some_and(|work| work.loading && work.replace)
 }
 
 pub(super) fn invalidate(state: &mut InboxState) {
@@ -419,6 +507,18 @@ mod tests {
         assert_eq!(receiver.try_recv().unwrap(), "first");
         enqueue_batch(&sender, &mut pending, &[3], "retry").unwrap();
         assert_eq!(receiver.try_recv().unwrap(), "retry");
+    }
+
+    #[test]
+    fn refreshes_reread_every_loaded_row_up_to_one_read() {
+        assert_eq!(refresh_limit(0, ""), PAGE_SIZE as i64);
+        assert_eq!(refresh_limit(PAGE_SIZE + 1, ""), PAGE_SIZE as i64 + 1);
+        assert_eq!(refresh_limit(150, ""), 150);
+        assert_eq!(refresh_limit(100_000, ""), MAX_REFRESH_ROWS as i64);
+        assert_eq!(
+            refresh_limit(150, "invoice"),
+            MAX_SEARCH_REFRESH_ROWS as i64
+        );
     }
 
     #[tokio::test]

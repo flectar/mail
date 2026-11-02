@@ -148,8 +148,9 @@ async fn metadata_snapshot_contains_all_three_stores() {
         .create_database_snapshot(out.path().join("snapshot"))
         .await
         .unwrap();
-    assert_eq!(manifest.version, 2);
+    assert_eq!(manifest.version, 3);
     assert!(manifest.files.is_some());
+    assert!(!manifest.device_mail_payloads);
     for name in ["mail.sqlite3", "calendar.sqlite3", "files.sqlite3"] {
         assert!(out.path().join("snapshot").join(name).exists());
     }
@@ -329,7 +330,7 @@ async fn attachment_metadata_browsing_does_not_wait_for_remote_tree_sync() {
     };
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        service.execute(&core, "load", "", "", -1, None),
+        service.execute(&core, "load", "", "", -1, None, None),
     )
     .await
     .expect("Mail attachments must not wait for the storage scan")
@@ -353,7 +354,7 @@ async fn sidebar_selects_account_by_identity_and_enters_attachment_scope() {
     let mut service = service::FilesService::default();
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        service.execute(&core, "account-id", "1", "attachments", -1, None),
+        service.execute(&core, "account-id", "1", "attachments", -1, None, None),
     )
     .await
     .expect("Switching to mail attachments must not wait for file sync")
@@ -362,13 +363,13 @@ async fn sidebar_selects_account_by_identity_and_enters_attachment_scope() {
     assert_eq!(service.account_id(), Some(1));
     assert!(
         service
-            .execute(&core, "account-id", "9999", "attachments", -1, None)
+            .execute(&core, "account-id", "9999", "attachments", -1, None, None)
             .await
             .is_err()
     );
     assert_eq!(service.account_id(), Some(1));
     service
-        .execute(&core, "account", "0", "attachments", -1, None)
+        .execute(&core, "account", "0", "attachments", -1, None, None)
         .await
         .unwrap();
     assert!(service.account_id().is_none());

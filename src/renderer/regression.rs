@@ -1264,6 +1264,37 @@ fn long_table_content_reflows_at_readable_zoom() {
 }
 
 #[test]
+fn preformatted_plain_text_wraps_at_readable_zoom() {
+    let paragraph = "Ben asked me to pass this along, it is the recipe from the book.".repeat(16);
+    let url = format!("https://example.com/{}", "a".repeat(300));
+    let text = format!("Hi Suzy,\n\n{paragraph}\n\n  1 cup flour\n\n{url}");
+    for tag in ["pre", "listing", "xmp", "plaintext"] {
+        let mut r = renderer(&format!(
+            "<body style='margin:0'><{tag}>{text}</{tag}></body>"
+        ));
+        r.set_auto_fit(true);
+        r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+        assert_eq!(r.zoom, 1.0, "<{tag}> text should wrap, not shrink");
+        assert!(
+            r.layout_width <= 601.0,
+            "<{tag}> overflowed: {}",
+            r.layout_width
+        );
+        assert!(r.notice.is_none(), "<{tag}> notice: {:?}", r.notice);
+        if tag == "pre" {
+            assert_eq!(r.plain_text(), text, "wrapping must not change copy");
+        }
+    }
+
+    let mut r = renderer(&format!(
+        "<body style='margin:0'><pre style='white-space:pre'>{paragraph}</pre></body>"
+    ));
+    r.set_auto_fit(true);
+    r.render_cpu_if_needed(600, 400, 1.0).unwrap();
+    assert!(r.zoom < 1.0, "authored white-space should still apply");
+}
+
+#[test]
 fn workflow_status_table_keeps_header_and_job_columns_readable() {
     let html = r#"<body style="margin:0;font:14px Arial,sans-serif">
       <table width="450" style="border-collapse:collapse;width:450px;max-width:100%"><tr><td>

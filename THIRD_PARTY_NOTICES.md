@@ -9,7 +9,11 @@ authors.
 Slint 1.18 is copyright © SixtyFPS GmbH and Slint contributors. Flectar Mail
 uses Slint under the `GPL-3.0-only` option offered by the Slint crates. The
 license text is in [`LICENSES/GPL-3.0-only.txt`](LICENSES/GPL-3.0-only.txt), and
-the upstream source is <https://github.com/slint-ui/slint>.
+the upstream source is <https://github.com/slint-ui/slint>. The locally patched
+`i-slint-backend-winit` 1.18.1 crate retains its upstream license texts in
+[`crates/i-slint-backend-winit/LICENSES`](crates/i-slint-backend-winit/LICENSES).
+Its Wayland clipboard backport, source checksum, and removal condition are
+documented in [`patches/slint-winit/README.md`](patches/slint-winit/README.md).
 
 ## Blitz
 
@@ -67,6 +71,24 @@ package retains the archive's `LICENSE`, complete `licenses/` directory, and
 build provenance under `pdfium-licenses` beside the private desktop library,
 Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
 PDFium's third-party components retain their respective licenses.
+
+The OpenHarmony package prefers a source build from the pinned
+`OpenHarmonyPCDeveloper/pdfium` revision in
+[`platform/ohos/scripts/build-pdfium-source.sh`](platform/ohos/scripts/build-pdfium-source.sh).
+The fallback arm64 `ohos_pdfium` 7947 port has its archive URL and SHA-256
+digest pinned in
+[`platform/ohos/scripts/fetch-pdfium.sh`](platform/ohos/scripts/fetch-pdfium.sh).
+The build stages and strips the library and packages this notice plus
+[`LICENSES/PDFium-BSD-3-Clause.txt`](LICENSES/PDFium-BSD-3-Clause.txt) under
+`resources/rawfile/` in the hap. The port is documented in
+[`platform/ohos/prebuilt/README.md`](platform/ohos/prebuilt/README.md).
+
+The source-built OpenHarmony PDFium component links the OHOS SDK's
+`libc++_shared.so` C++ runtime. LLVM libc++ is Apache-2.0 with the LLVM
+exception; the license and exception are retained in
+[`LICENSES/LLVM-exception.txt`](LICENSES/LLVM-exception.txt). The pinned OHOS
+source compatibility patch is
+[`platform/ohos/patches/pdfium-ohos-compat.patch`](platform/ohos/patches/pdfium-ohos-compat.patch).
 
 The Rust interface is [pdfium-render](https://github.com/ajrcarey/pdfium-render)
 0.9.4, used under its Apache-2.0 option. Linux process restrictions use

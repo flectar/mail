@@ -33,6 +33,14 @@ def build(sources):
     page = cut(solid(p("file", 0)), line(p("file", 1), 1.5))
     draft = over(page, solid(p("file-pen-line", 0), OUTLINE_WIDTH))
 
+    # File types share file's complete page and cut their own fold and mark
+    # out of it. Archive and music open their page around the mark instead.
+    def typed_page(name, *marks):
+        return cut(solid(p("file", 0)), line(p(name, 1), 1.5), *marks)
+
+    # The note stands on the page's corner, so it stays solid in front.
+    music = over(page, group(line(p("file-music", 2)), solid(p("file-music", 3), OUTLINE_WIDTH)))
+
     # Close the hidden rear page. Front path ends join across its folded corner;
     # retain the original fold curve and translate file's seam by one unit.
     back_page = solid(p("files", 2, append="V7Z"))
@@ -124,8 +132,26 @@ def build(sources):
             "Solid cylinder; two curved seams from the upstream divider."),
         "draft": Recipe("file-pen-line", draft,
             "Complete solid file; fold cutout; separated solid exterior pencil."),
+        "file": Recipe("file", page, "Solid page; fold cutout."),
+        "file-archive": Recipe("file-archive", typed_page(
+            "file-archive", lines("file-archive", 2, 3, 4), line(p("file-archive", 5))),
+            "Complete solid page from file; fold, zipper and pull cutouts."),
+        "file-audio": Recipe("file-music", music,
+            "Solid page from file; separated solid note on its corner."),
+        "file-code": Recipe("file-code", typed_page("file-code", lines("file-code", 2, 3)),
+            "Solid page; fold and bracket cutouts."),
         "file-directory": Recipe("folder", solid(p("folder", 0)),
             "Original closed folder silhouette."),
+        "file-image": Recipe("file-image", typed_page(
+            "file-image", solid(p("file-image", 2), OUTLINE_WIDTH), line(p("file-image", 3))),
+            "Solid page; fold, sun and hill cutouts."),
+        "file-spreadsheet": Recipe("file-spreadsheet", typed_page(
+            "file-spreadsheet", lines("file-spreadsheet", 2, 3, 4, 5)),
+            "Solid page; fold and cell cutouts."),
+        "file-text": Recipe("file-text", typed_page("file-text", lines("file-text", 2, 3, 4)),
+            "Solid page; fold and text line cutouts."),
+        "file-video": Recipe("file-play", typed_page("file-play", solid(p("file-play", 2))),
+            "Solid page; fold and play triangle cutouts."),
         "files": Recipe("files", over(back_page, front_page),
             "Two solid pages in original order; separation and fold cutout."),
         "folder-open": Recipe("folder-open", over(open_back, open_front),
@@ -143,6 +169,8 @@ def build(sources):
             "Preserved earlier Flectar tray opening."),
         "info": Recipe("info", cut(solid(p("info", 0)), lines("info", 1, 2)),
             "Solid circle; information mark cutout."),
+        "key": Recipe("key-round", cut(solid(p("key-round", 0)), solid(p("key-round", 1), width=2)),
+            "Solid key; hole includes the original circle's stroke footprint."),
         "keyboard": Recipe("keyboard", cut(solid(p("keyboard", 8)), lines("keyboard", *range(8))),
             "Solid keyboard; original keys and space bar become cutouts."),
         "mail": Recipe("mail", cut(solid(p("mail", 1)), line(p("mail", 0))),

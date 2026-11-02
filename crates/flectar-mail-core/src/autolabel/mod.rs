@@ -186,7 +186,7 @@ fn label_id_for(conn: &Connection, category: Category) -> Result<Option<i64>> {
 
 pub fn sender_known(conn: &Connection, from_addr: &str) -> bool {
     conn.query_row(
-        "SELECT 1 FROM contacts WHERE email = ?1 COLLATE NOCASE LIMIT 1",
+        "SELECT 1 FROM contacts WHERE email = ?1 COLLATE NOCASE UNION ALL SELECT 1 FROM contact_values WHERE kind='EMAIL' AND value=?1 COLLATE NOCASE LIMIT 1",
         params![from_addr],
         |_| Ok(()),
     )

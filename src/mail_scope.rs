@@ -117,6 +117,22 @@ impl Scope {
         }
     }
 
+    /// The same place across every shown account: an account's standard
+    /// mailbox becomes the unified one, and its folders and labels the
+    /// unified inbox.
+    #[must_use]
+    pub(crate) const fn unified(self) -> Self {
+        match self {
+            Self::Account { mailbox, .. } => Self::Unified(mailbox),
+            Self::Folder(_)
+            | Self::Label {
+                kind: LabelKind::Account,
+                ..
+            } => Self::UNIFIED_INBOX,
+            Self::Unified(_) | Self::Important | Self::Other | Self::Label { .. } => self,
+        }
+    }
+
     /// The scope the sidebar can show for these accounts. Unified shortcuts
     /// are absent with exactly one account, so they resolve to that account's
     /// own mailbox; the message list is identical. Other scopes and the
@@ -247,12 +263,13 @@ mod tests {
             email: format!("{id}@example.test"),
             display_name: Some("Work / Unified Folder:1".into()),
             avatar_url: None,
-            provider: Provider::Imap,
+            provider: Provider::Generic,
             auth_kind: AuthKind::Password,
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
             can_create_top_level_mailbox: true,
+            server_keeps_mail_days: None,
         }
     }
 
@@ -330,6 +347,22 @@ mod tests {
             assert!(key.parse::<Scope>().is_err(), "{key:?}");
         }
         assert!(serde_json::from_str::<Scope>("\"Person / Inbox\"").is_err());
+    }
+
+    #[test]
+    fn an_accounts_places_unify_to_the_same_mailbox_or_the_inbox() {
+        for scope in every_scope() {
+            let expected = match scope {
+                Scope::Account { mailbox, .. } => Scope::Unified(mailbox),
+                Scope::Folder(_)
+                | Scope::Label {
+                    kind: LabelKind::Account,
+                    ..
+                } => Scope::UNIFIED_INBOX,
+                other => other,
+            };
+            assert_eq!(scope.unified(), expected, "{scope}");
+        }
     }
 
     #[test]

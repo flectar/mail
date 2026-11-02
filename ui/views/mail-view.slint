@@ -1,10 +1,13 @@
 import { HorizontalBox } from "std-widgets.slint";
-import { EmailLink, EmailRow, EmailTile, EmailReader, SidebarRow, MailLabelRow, MailListEntry, ThreadMessageRow } from "../models.slint";
+import { EmailLink, EmailRow, EmailTile, EmailReader, MailProfileRow, SidebarRow, MailLabelRow, MailListEntry, ThreadMessageRow } from "../models.slint";
 import { LayoutMetrics } from "../design-system.slint";
 import { MailSidebar } from "../components/sidebar.slint";
 import { WorkspacePaneResizeHandle } from "../components/workspace-layout.slint";
 import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
+import { TabsUi } from "../components/workspace-navigation.slint";
+import { Shortcuts } from "../shortcuts.slint";
+import { LocalMailUi } from "../local-mail.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -27,6 +30,12 @@ export component MailView inherits FocusScope {
     in property <[ThreadMessageRow]> thread_messages: [];
     in property <int> selected_thread_index: 0;
     in property <[SidebarRow]> sidebar_rows: [];
+    // Compact layouts choose the profile from the sidebar.
+    in property <[MailProfileRow]> mail_profiles: [];
+    in property <MailProfileRow> active_mail_profile;
+    in property <int> account_count;
+    callback select_mail_profile(string);
+    callback create_mail_profile();
     in-out property <string> folder_filter_query: "";
     private property <length> sidebar-scroll-y: 0px;
     in property <[MailLabelRow]> mail_labels: [];
@@ -40,7 +49,7 @@ export component MailView inherits FocusScope {
     in property <string> selected_scope_title: "Unified Inbox";
     in property <bool> trash_view: false;
     in property <string> unified_count: "";
-    in property <string> search_query: "";
+    in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
@@ -83,9 +92,13 @@ export component MailView inherits FocusScope {
     in-out property <string> compact-page: "list";
     in-out property <bool> folders-open: false;
     private property <bool> focus-list-after-settings: false;
+    private property <bool> focus-search-after-page-change: false;
     out property <bool> list-focus-visible: root.single-pane
         ? compact-list-pane.keyboard-focus-visible : desktop-list-pane.keyboard-focus-visible;
     private property <bool> single-pane: root.compact || root.layout-mode == "minimal";
+    // The shown list's offset, saved with the tab when it is left.
+    private property <length> list-scroll-offset: -(root.single-pane ? compact-list-pane.scroll-y : desktop-list-pane.scroll-y);
+    changed list-scroll-offset => { TabsUi.list-offset = root.list-scroll-offset; }
     private property <length> list-pane-maximum-width: max(
         LayoutMetrics.list-pane-width,
         root.available-width - root.desktop-sidebar-width - LayoutMetrics.divider-width - LayoutMetrics.detail-pane-min-width
@@ -94,7 +107,7 @@ export component MailView inherits FocusScope {
         LayoutMetrics.list-pane-width,
         root.list-pane-maximum-width
     );
-    private property <length> single-pane-content-x: root.compact ? 0px : root.desktop-sidebar-width + 1px;
+    private property <length> single-pane-content-x: root.compact ? 0px : root.desktop-sidebar-width;
     private property <length> single-pane-content-width: max(0px, root.width - root.single-pane-content-x);
     private property <length> page-transition-distance: root.compact
         ? root.single-pane-content-width
@@ -179,27 +192,67 @@ export component MailView inherits FocusScope {
         }
     }
 
+    function focus-search() {
+        root.folders-open = false;
+        if root.single-pane && root.compact-page != "list" {
+            // The list page takes focus once it is shown; send it to the field.
+            root.focus-search-after-page-change = true;
+            root.compact-page = "list";
+            root.close_preview();
+        } else if root.single-pane {
+            compact-list-pane.focus-search();
+        } else {
+            desktop-list-pane.focus-search();
+        }
+    }
+
+    function switch-pane() {
+        if root.single-pane && root.compact-page == "message" {
+            root.compact-page = "list";
+            root.close_preview();
+        } else if !root.single-pane && desktop-list-pane.keyboard-focused {
+            root.focus-reader();
+        } else {
+            root.focus-list(true);
+        }
+    }
+
+    KeyBinding {
+        keys: Shortcuts.compose;
+        enabled: LocalMailUi.can-send;
+        activated => { root.open_compose(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.search;
+        activated => { root.focus-search(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.search-alternate;
+        activated => { root.focus-search(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.switch-pane;
+        activated => { root.switch-pane(); }
+    }
+
     init => {
+        // A new mail view starts at the top; an earlier view's offset is stale.
+        TabsUi.list-offset = root.list-scroll-offset;
         if root.single-pane && root.compact-page == "message" { root.focus-reader(); }
         else { root.focus-list(false); }
     }
     changed compact-page => {
-        if root.compact-page == "list" { root.focus-list(false); }
-        else { root.focus-reader(); }
+        if root.compact-page == "list" && root.focus-search-after-page-change {
+            root.focus-search-after-page-change = false;
+            compact-list-pane.focus-search();
+        } else if root.compact-page == "list" {
+            root.focus-list(false);
+        } else {
+            root.focus-reader();
+        }
     }
     capture-key-pressed(event) => {
         if event.modifiers.control || event.modifiers.meta || event.modifiers.alt { return reject; }
-        if event.text == Key.F6 {
-            if root.single-pane && root.compact-page == "message" {
-                root.compact-page = "list";
-                root.close_preview();
-            } else if !root.single-pane && desktop-list-pane.keyboard-focused {
-                root.focus-reader();
-            } else {
-                root.focus-list(true);
-            }
-            return accept;
-        }
         if event.text == Key.Escape && root.single-pane && root.compact-page == "message"
             && !EmailReader.find-open && !root.has_selection && !EmailReader.caret-mode {
             root.compact-page = "list";
@@ -280,6 +333,7 @@ export component MailView inherits FocusScope {
             }
 
             desktop-list-pane := MailListPane {
+                restores-scroll: !root.single-pane;
                 width: root.effective-list-pane-width;
                 show-avatars: root.show-avatars;
                 loading: root.loading;
@@ -289,7 +343,7 @@ export component MailView inherits FocusScope {
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 trash_view: root.trash_view;
-                search_query: root.search_query;
+                search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
                 can_load_more: root.can_load_more;
@@ -487,16 +541,8 @@ export component MailView inherits FocusScope {
                 }
             }
 
-            Rectangle {
-                visible: !root.compact;
-                x: root.desktop-sidebar-width;
-                y: 0px;
-                width: 1px;
-                height: parent.height;
-                background: root.border;
-            }
-
             compact-list-pane := MailListPane {
+                restores-scroll: root.single-pane;
                 loading: root.loading;
                 visible: root.compact-page == "list";
                 x: root.single-pane-content-x
@@ -518,7 +564,7 @@ export component MailView inherits FocusScope {
                 selected_scope: root.selected_scope;
                 scope_title: root.selected_scope_title;
                 trash_view: root.trash_view;
-                search_query: root.search_query;
+                search_query <=> root.search_query;
                 search_filter: root.search_filter;
                 sync_in_progress: root.sync_in_progress;
                 can_load_more: root.can_load_more;
@@ -676,6 +722,7 @@ export component MailView inherits FocusScope {
                     enabled: root.folders-open;
                     accessible-role: button;
                     accessible-label: @tr("Close folders");
+                    accessible-action-default => { root.folders-open = false; }
                     clicked => { root.folders-open = false; }
                 }
             }
@@ -694,6 +741,24 @@ export component MailView inherits FocusScope {
                 animate opacity { duration: 180ms; easing: ease-out; }
                 animate drop-shadow-blur { duration: 180ms; easing: ease-out; }
                 touch-mode: true;
+                show-profiles: true;
+                profiles: root.mail_profiles;
+                active-profile: root.active_mail_profile;
+                account-count: root.account_count;
+                choose-profile(id) => {
+                    root.select_mail_profile(id);
+                    root.folders-open = false;
+                    root.compact-page = "list";
+                }
+                create-profile => {
+                    root.folders-open = false;
+                    root.create_mail_profile();
+                }
+                manage-profiles => {
+                    root.folders-open = false;
+                    root.settings_tab = "Accounts";
+                    root.settings_open = true;
+                }
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;

@@ -1,41 +1,232 @@
 use crate::error::{CoreError, Result};
 use rusqlite::Connection;
 
+/// How one schema step is applied.
+enum Migration {
+    /// Runs in a single transaction with foreign keys enforced.
+    Plain(&'static str),
+    /// Rebuilds a table that other tables reference, following SQLite's
+    /// documented procedure for schema changes ALTER TABLE cannot make.
+    /// Enforcement is disabled for the step so dropping the old table neither
+    /// cascades into nor is blocked by the referencing rows; the step only
+    /// commits when it introduced no foreign-key violation.
+    TableRebuild(&'static str),
+}
+
 // File metadata search is additive and preserves existing mail profiles.
-const MIGRATIONS: &[&str] = &[
-    include_str!("migrations/001_init.sql"),
-    include_str!("migrations/002_attachment_files.sql"),
-    include_str!("migrations/003_attachment_content.sql"),
-    include_str!("migrations/004_carddav.sql"),
-    include_str!("migrations/005_mailbox_count_indexes.sql"),
-    include_str!("migrations/006_contact_recovery.sql"),
-    include_str!("migrations/007_account_label_ownership.sql"),
-    include_str!("migrations/008_sender_identities.sql"),
-    include_str!("migrations/009_contact_learning_clean_start.sql"),
-    include_str!("migrations/010_folder_hierarchy.sql"),
-    include_str!("migrations/011_pending_body_page.sql"),
-    include_str!("migrations/012_sender_identity_sources.sql"),
+const MIGRATIONS: &[Migration] = &[
+    Migration::Plain(include_str!("migrations/001_init.sql")),
+    Migration::Plain(include_str!("migrations/002_attachment_files.sql")),
+    Migration::Plain(include_str!("migrations/003_attachment_content.sql")),
+    Migration::Plain(include_str!("migrations/004_carddav.sql")),
+    Migration::Plain(include_str!("migrations/005_mailbox_count_indexes.sql")),
+    Migration::Plain(include_str!("migrations/006_contact_recovery.sql")),
+    Migration::Plain(include_str!("migrations/007_account_label_ownership.sql")),
+    Migration::Plain(include_str!("migrations/008_sender_identities.sql")),
+    Migration::Plain(include_str!(
+        "migrations/009_contact_learning_clean_start.sql"
+    )),
+    Migration::Plain(include_str!("migrations/010_folder_hierarchy.sql")),
+    Migration::Plain(include_str!("migrations/011_pending_body_page.sql")),
+    Migration::Plain(include_str!("migrations/012_sender_identity_sources.sql")),
+    Migration::Plain(include_str!("migrations/013_contact_entries.sql")),
+    Migration::Plain(include_str!("migrations/014_folder_paths.sql")),
+    Migration::TableRebuild(include_str!("migrations/015_account_protocols.sql")),
+    Migration::Plain(include_str!("migrations/016_pop3.sql")),
+    Migration::Plain(include_str!("migrations/017_jmap_attachment_listing.sql")),
+    Migration::Plain(include_str!("migrations/018_jmap_full_sync_progress.sql")),
+    Migration::Plain(include_str!("migrations/019_clean_snippets.sql")),
+    Migration::Plain(include_str!("migrations/020_server_relink.sql")),
+    Migration::Plain(include_str!("migrations/021_verification_codes.sql")),
+    Migration::Plain(include_str!("migrations/022_search_leftovers.sql")),
+    Migration::TableRebuild(include_str!("migrations/023_local_mail.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
+/// Data conversions SQL cannot express, run after a migration's SQL in the
+/// same transaction.
+fn convert(conn: &Connection, version: i64) -> Result<()> {
+    match version {
+        13 => super::repo::contact_entries::migrate(conn),
+        19 => clean_snippets(conn),
+        21 => find_verification_codes(conn),
+        _ => Ok(()),
+    }
+}
+
+/// Finds the codes in received mail stored before codes were looked for,
+/// the way new mail is read. Only mail whose subject or preview mentions a
+/// code or a sign-in is read in full, so the upgrade stays quick.
+fn find_verification_codes(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("may_hold_verification_code", 2, flags, |ctx| {
+        Ok(crate::verification_code::mentioned(
+            &ctx.get::<String>(0)?,
+            &ctx.get::<String>(1)?,
+        ))
+    })?;
+    conn.create_scalar_function("find_verification_code", 4, flags, |ctx| {
+        Ok(super::repo::messages::find_verification_code(
+            &ctx.get::<String>(0)?,
+            ctx.get::<Option<String>>(1)?.as_deref(),
+            ctx.get::<Option<String>>(2)?.as_deref(),
+            &ctx.get::<String>(3)?,
+        ))
+    })?;
+    let found = conn.execute_batch(
+        "UPDATE messages SET verification_code = find_verification_code(
+           subject,
+           (SELECT text_body FROM message_bodies WHERE message_id = messages.id),
+           (SELECT html_body FROM message_bodies WHERE message_id = messages.id),
+           snippet)
+         WHERE is_outgoing = 0 AND is_draft = 0
+           AND may_hold_verification_code(subject, snippet);",
+    );
+    for (name, arguments) in [
+        ("may_hold_verification_code", 2),
+        ("find_verification_code", 4),
+    ] {
+        conn.remove_function(name, arguments)?;
+    }
+    Ok(found?)
+}
+
+/// Rewrites stored snippets the way new ones are made. SQLite calls back into
+/// the snippet builders, so rows stream through without being loaded at once
+/// and only the ones that change are written.
+///
+/// A Gmail snippet holding `&` may still be HTML-escaped. Every path that
+/// stores a body-derived snippet also stores the body, so a message with a
+/// body takes its snippet from it again, and one without can only hold
+/// Gmail's snippet, which is safe to decode.
+fn clean_snippets(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
+    conn.create_scalar_function("make_snippet", 1, flags, |ctx| {
+        Ok(crate::mime::make_snippet(&ctx.get::<String>(0)?))
+    })?;
+    conn.create_scalar_function("make_html_snippet", 1, flags, |ctx| {
+        Ok(crate::mime::make_html_snippet(&ctx.get::<String>(0)?))
+    })?;
+    conn.create_scalar_function("make_body_snippet", 2, flags, |ctx| {
+        Ok(crate::mime::make_body_snippet(
+            ctx.get::<Option<String>>(0)?.as_deref(),
+            ctx.get::<Option<String>>(1)?.as_deref(),
+        ))
+    })?;
+    let converted = conn.execute_batch(
+        "UPDATE messages SET snippet = COALESCE(
+           NULLIF((SELECT make_body_snippet(b.text_body, b.html_body)
+                   FROM message_bodies b WHERE b.message_id = messages.id), ''),
+           make_html_snippet(snippet))
+         WHERE snippet LIKE '%&%'
+           AND account_id IN (SELECT id FROM accounts WHERE mail_protocol = 'gmail');
+         UPDATE threads SET snippet = COALESCE(
+           (SELECT snippet FROM messages WHERE thread_id = threads.id ORDER BY date DESC LIMIT 1), '')
+         WHERE snippet LIKE '%&%'
+           AND account_id IN (SELECT id FROM accounts WHERE mail_protocol = 'gmail');
+         UPDATE messages SET snippet = make_snippet(snippet) WHERE snippet <> make_snippet(snippet);
+         UPDATE threads SET snippet = make_snippet(snippet) WHERE snippet <> make_snippet(snippet);",
+    );
+    for (name, arguments) in [
+        ("make_snippet", 1),
+        ("make_html_snippet", 1),
+        ("make_body_snippet", 2),
+    ] {
+        conn.remove_function(name, arguments)?;
+    }
+    Ok(converted?)
+}
+
 pub fn run(conn: &mut Connection) -> Result<()> {
+    upgrade_to(conn, LATEST_VERSION)
+}
+
+fn upgrade_to(conn: &mut Connection, latest: i64) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    let latest = LATEST_VERSION;
-    if version > latest {
+    if version > LATEST_VERSION {
         return Err(CoreError::Other(format!(
             "mail database schema {version} requires a newer application; open this profile with a compatible version. Existing data has not been changed."
         )));
     }
 
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+    for (index, migration) in MIGRATIONS
+        .iter()
+        .enumerate()
+        .take(latest as usize)
+        .skip(version as usize)
+    {
         let target = (index + 1) as i64;
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", target)?;
-        tx.commit()?;
+        apply(conn, migration, target)?;
         tracing::info!("applied mail db migration {target}");
     }
     Ok(())
+}
+
+fn apply(conn: &mut Connection, migration: &Migration, target: i64) -> Result<()> {
+    match migration {
+        Migration::Plain(sql) => {
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            convert(&tx, target)?;
+            tx.pragma_update(None, "user_version", target)?;
+            tx.commit()?;
+            Ok(())
+        }
+        Migration::TableRebuild(sql) => rebuild(conn, sql, target),
+    }
+}
+
+fn rebuild(conn: &mut Connection, sql: &str, target: i64) -> Result<()> {
+    rebuild_tables(conn, "mail", target, |tx| {
+        tx.execute_batch(sql)?;
+        convert(tx, target)
+    })
+}
+
+/// Applies schema step `target` of the `store` database with foreign-key
+/// enforcement off, as SQLite's procedure for rebuilding a referenced table
+/// requires: dropping the old table then neither cascades into nor is
+/// blocked by the referencing rows. The step only commits when it introduced
+/// no foreign-key violation.
+pub(super) fn rebuild_tables(
+    conn: &mut Connection,
+    store: &str,
+    target: i64,
+    step: impl FnOnce(&Connection) -> Result<()>,
+) -> Result<()> {
+    let enforced: bool = conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))?;
+    // The setting is ignored inside a transaction, so change it first.
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let applied = (|| -> Result<()> {
+        let tx = conn.transaction()?;
+        // Compare instead of requiring zero so a violation left by an older
+        // build elsewhere in the profile cannot block this upgrade.
+        let before = foreign_key_violations(&tx)?;
+        step(&tx)?;
+        let after = foreign_key_violations(&tx)?;
+        if after > before {
+            return Err(CoreError::Other(format!(
+                "{store} database migration {target} would orphan existing data; the profile has not been changed."
+            )));
+        }
+        tx.pragma_update(None, "user_version", target)?;
+        tx.commit()?;
+        Ok(())
+    })();
+    let restored = conn.pragma_update(None, "foreign_keys", enforced);
+    applied?;
+    restored?;
+    Ok(())
+}
+
+fn foreign_key_violations(conn: &Connection) -> Result<i64> {
+    Ok(
+        conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+            row.get(0)
+        })?,
+    )
 }
 
 #[cfg(test)]
@@ -48,6 +239,14 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         run(&mut conn).unwrap();
+        conn
+    }
+
+    /// A profile left at `version` by an older build.
+    fn staged(version: i64) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        upgrade_to(&mut conn, version).unwrap();
         conn
     }
 
@@ -68,18 +267,38 @@ mod tests {
         .unwrap()
     }
 
+    /// One account with two folders, a thread, and a message, written in the
+    /// shape of whichever schema version `conn` is at.
     fn seed_mail_graph(conn: &Connection) {
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        if version >= 15 {
+            conn.execute(
+                "INSERT INTO accounts (
+                   id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+                   incoming_port, smtp_host, smtp_port, created_at, settings_json
+                 ) VALUES (1, 'me@test.dev', 'generic', 'password', 'imap', 'me', 'h', 993,
+                           'h', 587, 0, '{}')",
+                [],
+            )
+            .unwrap();
+        } else {
+            conn.execute(
+                "INSERT INTO accounts (
+                   id, email, provider, auth_kind, username, imap_host, imap_port,
+                   smtp_host, smtp_port, created_at
+                 ) VALUES (1, 'me@test.dev', 'imap', 'password', 'me', 'h', 993, 'h', 587, 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let folder_path = if version >= 14 { "path" } else { "imap_name" };
         conn.execute(
-            "INSERT INTO accounts (
-               id, email, provider, auth_kind, username, imap_host, imap_port,
-               smtp_host, smtp_port, created_at
-             ) VALUES (1, 'me@test.dev', 'imap', 'password', 'me', 'h', 993, 'h', 587, 0)",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role)
-             VALUES (1, 1, 'INBOX', 'inbox'), (2, 1, 'STARRED', NULL)",
+            &format!(
+                "INSERT INTO folders (id, account_id, {folder_path}, role)
+                 VALUES (1, 1, 'INBOX', 'inbox'), (2, 1, 'STARRED', NULL)"
+            ),
             [],
         )
         .unwrap();
@@ -112,6 +331,9 @@ mod tests {
             "attachment_text_fts",
             "attachments",
             "contact_accounts",
+            "contact_entries",
+            "contact_values",
+            "contact_photos",
             "carddav_addressbooks",
             "carddav_config",
             "carddav_objects",
@@ -123,6 +345,7 @@ mod tests {
             "folders",
             "gmail_labels",
             "gmail_sync_state",
+            "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
             "message_bodies",
@@ -134,6 +357,8 @@ mod tests {
             "messages_fts",
             "notification_outbox",
             "pending_actions",
+            "pop3_sync_state",
+            "pop3_uidls",
             "route_cache",
             "sender_identities",
             "snippets",
@@ -175,7 +400,12 @@ mod tests {
             ["account_id", "starred_count"]
         );
 
-        for forbidden in ["calendar_events", "calendars", "caldav_config"] {
+        for forbidden in [
+            "calendar_events",
+            "calendars",
+            "caldav_config",
+            "calendar_connections",
+        ] {
             assert!(!application_tables(&conn).contains(forbidden));
         }
         let seeded: i64 = conn
@@ -202,12 +432,7 @@ mod tests {
 
     #[test]
     fn pending_body_index_upgrade_includes_existing_rows_and_tracks_completion() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        for (index, sql) in MIGRATIONS.iter().take(10).enumerate() {
-            conn.execute_batch(sql).unwrap();
-            conn.pragma_update(None, "user_version", (index + 1) as i64)
-                .unwrap();
-        }
+        let mut conn = staged(10);
         seed_mail_graph(&conn);
         run(&mut conn).unwrap();
         let indexed: i64 = conn
@@ -233,14 +458,250 @@ mod tests {
     }
 
     #[test]
+    fn jmap_attachment_listing_upgrade_keeps_what_header_sync_listed() {
+        let mut conn = staged(16);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET jmap_id = 'email-1', jmap_blob_id = 'blob-1', has_attachments = 1
+             WHERE id = 1;
+             INSERT INTO messages (id, account_id, thread_id, folder_id, subject, date, has_attachments)
+             VALUES (2, 1, 1, 1, 'Not on a JMAP server', 2, 1);",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let markers = conn
+            .prepare("SELECT id, jmap_attachments_blob_id FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<(i64, Option<String>)>>>()
+            .unwrap();
+        assert_eq!(markers, [(1, Some("blob-1".to_owned())), (2, None)]);
+        let queued = |conn: &Connection| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM messages INDEXED BY idx_messages_jmap_attachments_pending
+                 WHERE has_attachments = 1 AND body_state <> 'cached'
+                   AND jmap_blob_id IS NOT NULL AND jmap_attachments_blob_id IS NOT jmap_blob_id",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(queued(&conn), 0);
+        conn.execute(
+            "UPDATE messages SET jmap_blob_id = 'blob-2' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        assert_eq!(queued(&conn), 1);
+        conn.execute("UPDATE messages SET body_state = 'cached' WHERE id = 1", [])
+            .unwrap();
+        assert_eq!(queued(&conn), 0);
+    }
+
+    #[test]
+    fn snippet_upgrade_puts_stored_previews_on_one_line() {
+        let mut conn = staged(18);
+        seed_mail_graph(&conn);
+        conn.execute(
+            "UPDATE messages SET snippet = '\nDear Partner,\r\n\n  As reported' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE threads SET snippet = 'View this post\non the web' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let snippets: (String, String) = conn
+            .query_row(
+                "SELECT m.snippet, t.snippet FROM messages m JOIN threads t ON t.id = m.thread_id",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            snippets,
+            (
+                "Dear Partner, As reported".into(),
+                "View this post on the web".into()
+            )
+        );
+    }
+
+    #[test]
+    fn snippet_upgrade_decodes_only_escaped_gmail_snippets() {
+        let mut conn = staged(18);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET snippet = 'Fish &amp; chips' WHERE id = 1;
+             INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (2, 'me@gmail.test', 'gmail', 'oauth2', 'gmail', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO folders (id, account_id, path, role) VALUES (3, 2, 'INBOX', 'inbox');
+             INSERT INTO threads (id, account_id, snippet)
+             VALUES (2, 2, 'Tom & Jerry <tj@example.com>'), (3, 2, 'It&#39;s here');
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
+               date, snippet
+             ) VALUES
+               (2, 2, 2, 3, 'Hydrated', 'a@test.dev', '[]', '[]', 1,
+                'Tom & Jerry <tj@example.com>'),
+               (3, 2, 3, 3, 'Headers only', 'a@test.dev', '[]', '[]', 1, 'It&#39;s here');
+             INSERT INTO message_bodies (message_id, text_body)
+             VALUES (2, 'Tom & Jerry <tj@example.com>');",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let snippets = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT snippet FROM {table} ORDER BY id"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert_eq!(
+            snippets("messages"),
+            [
+                "Fish &amp; chips",
+                "Tom & Jerry <tj@example.com>",
+                "It's here"
+            ]
+        );
+        assert_eq!(
+            snippets("threads"),
+            ["", "Tom & Jerry <tj@example.com>", "It's here"]
+        );
+    }
+
+    #[test]
+    fn verification_code_upgrade_reads_stored_received_mail() {
+        let mut conn = staged(20);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "UPDATE messages SET subject = 'Your Acme code',
+               snippet = 'Your verification code is 482913' WHERE id = 1;
+             INSERT INTO messages (
+               id, account_id, thread_id, folder_id, subject, from_addr, to_json, cc_json,
+               date, snippet, body_state, is_outgoing
+             ) VALUES
+               (2, 1, 1, 1, 'Please verify your device', 'a@test.dev', '[]', '[]', 2,
+                'To complete the sign in, enter the', 'cached', 0),
+               (3, 1, 1, 1, 'Re: Your Acme code', 'me@test.dev', '[]', '[]', 3,
+                'Your verification code is 482913', 'none', 1),
+               (4, 1, 1, 1, 'Weekly report', 'a@test.dev', '[]', '[]', 4,
+                'Requests were up 18% in 2026', 'none', 0);
+             INSERT INTO message_bodies (message_id, text_body) VALUES (2,
+               'To complete the sign in, enter the verification code.
+                Verification code: 551203');",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let codes = conn
+            .prepare("SELECT verification_code FROM messages ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, Option<String>>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            codes,
+            [
+                Some("482913".to_owned()),
+                Some("551203".to_owned()),
+                None,
+                None
+            ]
+        );
+    }
+
+    #[test]
+    fn jmap_full_sync_progress_upgrade_keeps_sync_states() {
+        let mut conn = staged(17);
+        seed_mail_graph(&conn);
+        conn.execute(
+            "INSERT INTO jmap_sync_state(account_id,mailbox_state,email_state)
+             VALUES(1,'mailboxes','emails')",
+            [],
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let states: (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT mailbox_state,email_state,full_sync_state FROM jmap_sync_state",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(states, ("mailboxes".into(), "emails".into(), None));
+        conn.execute(
+            "INSERT INTO jmap_full_sync_stored(account_id,email_id) VALUES(1,'email-a')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM accounts WHERE id=1", []).unwrap();
+        let progress: i64 = conn
+            .query_row("SELECT COUNT(*) FROM jmap_full_sync_stored", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(progress, 0);
+    }
+
+    #[test]
+    fn relink_upgrade_flags_mail_an_earlier_switch_left() {
+        let mut conn = staged(19);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (2, 'jmap@test.dev', 'generic', 'password', 'jmap', 'me', 'h', 993,
+                       'h', 587, 0, '{}');
+             INSERT INTO messages (id, account_id, thread_id, folder_id, uid, jmap_id,
+                                   subject, date, is_outgoing)
+             VALUES (2, 1, 1, 1, NULL, NULL, 'Left by a switch from JMAP', 1, 0),
+                    (3, 1, 1, 1, NULL, NULL, 'Sent from this device', 1, 1),
+                    (4, 1, 1, 1, NULL, NULL, 'Draft', 1, 0),
+                    (5, 2, NULL, NULL, 9, NULL, 'Left by a switch to JMAP', 1, 0),
+                    (6, 2, NULL, NULL, NULL, 'email-6', 'On the JMAP server', 1, 0),
+                    (7, 2, NULL, NULL, NULL, NULL, 'Sent from this device', 1, 1);
+             INSERT INTO drafts_meta (message_id) VALUES (4);",
+        )
+        .unwrap();
+        run(&mut conn).unwrap();
+        let waiting = conn
+            .prepare(
+                "SELECT id FROM messages INDEXED BY idx_messages_relink_pending
+                 WHERE account_id IN (1, 2) AND relink_pending = 1",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(waiting, [2, 5]);
+        let missing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM folders WHERE missing_on_server = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(missing, 0);
+        assert!(
+            conn.execute("UPDATE folders SET missing_on_server = 2 WHERE id = 2", [])
+                .is_err()
+        );
+    }
+
+    #[test]
     fn sender_identity_migration_preserves_account_ownership_and_seeds_primary() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        for (index, sql) in MIGRATIONS.iter().take(7).enumerate() {
-            conn.execute_batch(sql).unwrap();
-            conn.pragma_update(None, "user_version", (index + 1) as i64)
-                .unwrap();
-        }
+        let mut conn = staged(7);
         conn.execute(
             "INSERT INTO accounts (
                id,email,display_name,provider,auth_kind,username,imap_host,
@@ -295,13 +756,7 @@ mod tests {
 
     #[test]
     fn contact_learning_migration_keeps_only_outgoing_suggestions() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        for (index, sql) in MIGRATIONS.iter().take(8).enumerate() {
-            conn.execute_batch(sql).unwrap();
-            conn.pragma_update(None, "user_version", (index + 1) as i64)
-                .unwrap();
-        }
+        let mut conn = staged(8);
         conn.execute(
             "INSERT INTO accounts (
                id,email,provider,auth_kind,username,imap_host,imap_port,
@@ -347,7 +802,8 @@ mod tests {
         .unwrap();
 
         let before = crate::models::now_ms();
-        run(&mut conn).unwrap();
+        // Migration 13 moves the profile columns checked here into entries.
+        upgrade_to(&mut conn, 12).unwrap();
         let after = crate::models::now_ms();
 
         let contacts = conn
@@ -438,13 +894,7 @@ mod tests {
 
     #[test]
     fn folder_hierarchy_migration_preserves_existing_folders() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        for (index, sql) in MIGRATIONS.iter().take(9).enumerate() {
-            conn.execute_batch(sql).unwrap();
-            conn.pragma_update(None, "user_version", (index + 1) as i64)
-                .unwrap();
-        }
+        let mut conn = staged(9);
         conn.execute(
             "INSERT INTO accounts (
                id,email,provider,auth_kind,username,imap_host,imap_port,
@@ -565,12 +1015,7 @@ mod tests {
 
     #[test]
     fn upgrade_splits_merged_provider_labels_by_account_without_losing_membership() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        for sql in &MIGRATIONS[..6] {
-            conn.execute_batch(sql).unwrap();
-        }
-        conn.pragma_update(None, "user_version", 6).unwrap();
+        let mut conn = staged(6);
         seed_mail_graph(&conn);
         conn.execute(
             "INSERT INTO accounts (
@@ -767,16 +1212,11 @@ mod tests {
 
     #[test]
     fn memory_upgrade_repairs_legacy_contacts_in_multiple_batches() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        for sql in &MIGRATIONS[..3] {
-            conn.execute_batch(sql).unwrap();
-        }
-        conn.pragma_update(None, "user_version", 3).unwrap();
+        let mut conn = staged(3);
         seed_mail_graph(&conn);
         for id in 1..=600 {
             conn.execute(
-                "INSERT INTO contacts(id, name, email, is_managed)
+                "INSERT INTO contacts(id, name, email, send_count)
                  VALUES(?1, 'Café', ?2, 1)",
                 params![id, format!("person-{id}@example.com")],
             )
@@ -805,10 +1245,7 @@ mod tests {
 
     #[test]
     fn attachment_upgrade_preserves_mail_and_reconciles_only_once() {
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        conn.execute_batch(MIGRATIONS[0]).unwrap();
-        conn.pragma_update(None, "user_version", 1).unwrap();
+        let mut conn = staged(1);
         seed_mail_graph(&conn);
         conn.execute_batch(
             "INSERT INTO attachments(id,message_id,part_id,filename,mime_type,size,file_path)
@@ -897,6 +1334,358 @@ mod tests {
         );
     }
 
+    /// Row counts of every table with a foreign key to `accounts`.
+    fn account_dependents(conn: &Connection) -> Vec<(String, i64)> {
+        let tables = conn
+            .prepare(
+                "SELECT DISTINCT m.name FROM sqlite_master m
+                 JOIN pragma_foreign_key_list(m.name) f
+                 WHERE m.type = 'table' AND f.\"table\" = 'accounts'
+                 ORDER BY m.name",
+            )
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        tables
+            .into_iter()
+            .map(|table| {
+                let count = conn
+                    .query_row(&format!("SELECT COUNT(*) FROM \"{table}\""), [], |row| {
+                        row.get(0)
+                    })
+                    .unwrap();
+                (table, count)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn account_protocol_rebuild_keeps_every_referencing_row() {
+        let mut conn = staged(13);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            r#"
+            UPDATE accounts SET settings_json = '{"mailHistory":"oneYear"}' WHERE id = 1;
+            INSERT INTO accounts (
+              id, email, provider, auth_kind, mail_protocol, username, jmap_url,
+              imap_host, imap_port, smtp_host, smtp_port, created_at, settings_json,
+              sort_order, avatar_url, can_create_top_level_mailbox
+            ) VALUES
+              (2, 'legacy@example.test', 'imap', 'password', 'imap', 'legacy', '',
+               'mail.example.test', 143, 'mail.example.test', 465, 2,
+               '{"defaultSenderEmail":"alias@example.test","connection":{"imapSecurity":"auto","smtpSecurity":"auto","trustedCertificatePem":"PEM"}}',
+               4, NULL, 1),
+              (3, 'jmap@example.test', 'imap', 'password', 'jmap', 'jmap',
+               'https://jmap.example.test', '', 0, '', 0, 3,
+               '{"connection":{"imapSecurity":"starttls","smtpSecurity":"tls"}}', 3, NULL, 0),
+              (4, 'person@gmail.com', 'gmail', 'oauth2', 'imap', 'person@gmail.com', '',
+               'imap.gmail.com', 993, 'smtp.gmail.com', 465, 4, '{}', 2,
+               'https://avatar.example.test/a.png', 1),
+              (5, 'person@outlook.com', 'microsoft', 'oauth2', 'imap', 'person@outlook.com',
+               '', 'outlook.office365.com', 993, 'smtp.office365.com', 587, 5,
+               '{"connection":{"imapSecurity":"auto","smtpSecurity":"auto"}}', 1, NULL, 1);
+            INSERT INTO folders (id, account_id, imap_name, role, jmap_id)
+              VALUES (3, 3, 'Inbox', 'inbox', 'mailbox-a'), (4, 4, 'INBOX', 'inbox', NULL);
+            INSERT INTO sender_identities (
+              account_id, email, is_primary, is_provider_default, verification_status,
+              last_synced_at
+            ) VALUES (5, 'person@outlook.com', 1, 1, 'accepted', 0);
+            INSERT INTO pending_actions (account_id, kind, payload, created_at)
+              VALUES (4, 'star', '{}', 1);
+            "#,
+        )
+        .unwrap();
+        let dependents = account_dependents(&conn);
+        assert!(dependents.iter().any(|(table, _)| table == "messages"));
+        assert!(dependents.iter().all(|(table, _)| table != "accounts"));
+
+        // Through the rebuild only: later migrations add tables of their own.
+        for (index, migration) in MIGRATIONS.iter().enumerate().take(15).skip(13) {
+            apply(&mut conn, migration, (index + 1) as i64).unwrap();
+        }
+
+        assert_eq!(account_dependents(&conn), dependents);
+        let accounts = conn
+            .prepare(
+                "SELECT id, provider, mail_protocol, incoming_host, incoming_port,
+                        settings_json, sort_order, avatar_url, can_create_top_level_mailbox
+                 FROM accounts ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, i64>(4)?,
+                    serde_json::from_str::<serde_json::Value>(&row.get::<_, String>(5)?).unwrap(),
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, bool>(8)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let connection = |incoming: &str, smtp: &str, pem: &str| {
+            serde_json::json!({
+                "incomingSecurity": incoming,
+                "smtpSecurity": smtp,
+                "trustedCertificatePem": pem,
+            })
+        };
+        assert_eq!(
+            accounts,
+            [
+                (
+                    1,
+                    "generic".into(),
+                    "imap".into(),
+                    "h".into(),
+                    993,
+                    serde_json::json!({
+                        "mailHistory": "oneYear",
+                        "connection": connection("tls", "starttls", ""),
+                    }),
+                    0,
+                    None,
+                    true,
+                ),
+                (
+                    2,
+                    "generic".into(),
+                    "imap".into(),
+                    "mail.example.test".into(),
+                    143,
+                    serde_json::json!({
+                        "defaultSenderEmail": "alias@example.test",
+                        "connection": connection("starttls", "tls", "PEM"),
+                    }),
+                    4,
+                    None,
+                    true,
+                ),
+                (
+                    3,
+                    "generic".into(),
+                    "jmap".into(),
+                    "".into(),
+                    0,
+                    serde_json::json!({"connection": connection("starttls", "tls", "")}),
+                    3,
+                    None,
+                    false,
+                ),
+                (
+                    4,
+                    "gmail".into(),
+                    "gmail".into(),
+                    "imap.gmail.com".into(),
+                    993,
+                    serde_json::json!({"connection": connection("tls", "tls", "")}),
+                    2,
+                    Some("https://avatar.example.test/a.png".into()),
+                    true,
+                ),
+                (
+                    5,
+                    "microsoft".into(),
+                    "imap".into(),
+                    "outlook.office365.com".into(),
+                    993,
+                    serde_json::json!({"connection": connection("tls", "starttls", "")}),
+                    1,
+                    None,
+                    true,
+                ),
+            ]
+        );
+        for (id, _, _, _, _, settings, _, _, _) in &accounts {
+            let settings: crate::models::AccountSettings =
+                serde_json::from_value(settings.clone()).unwrap();
+            assert_eq!(
+                settings.mail_history,
+                if *id == 1 {
+                    crate::models::MailHistory::OneYear
+                } else {
+                    crate::models::MailHistory::SixMonths
+                }
+            );
+        }
+
+        let enforced: bool = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert!(enforced);
+        let paths = conn
+            .prepare("SELECT path FROM folders ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(paths, ["INBOX", "STARRED", "Inbox", "INBOX"]);
+        assert!(
+            conn.execute(
+                "INSERT INTO folders (account_id, path) VALUES (1, 'INBOX')",
+                [],
+            )
+            .is_err(),
+            "the per-account path stays unique"
+        );
+
+        conn.execute(
+            "INSERT INTO accounts (
+               id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+               incoming_port, smtp_host, smtp_port, created_at, settings_json
+             ) VALUES (6, 'new@example.test', 'generic', 'password', 'imap', 'new', 'h', 993,
+                       'h', 587, 6, '{}')",
+            [],
+        )
+        .unwrap();
+        let learning: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM contact_learning_state WHERE account_id = 6",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(learning, 1, "the account trigger is recreated");
+        conn.execute("DELETE FROM accounts WHERE id = 4", [])
+            .unwrap();
+        let orphans: i64 = conn
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM folders WHERE account_id = 4)
+                      + (SELECT COUNT(*) FROM pending_actions WHERE account_id = 4)",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            orphans, 0,
+            "deletes still cascade through the rebuilt table"
+        );
+        let integrity: String = conn
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(integrity, "ok");
+        assert_eq!(foreign_key_violations(&conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn account_rows_must_pair_provider_and_protocol() {
+        let conn = fresh();
+        let insert = |id: i64, provider: &str, auth: &str, protocol: &str| {
+            conn.execute(
+                "INSERT INTO accounts (
+                   id, email, provider, auth_kind, mail_protocol, username, incoming_host,
+                   incoming_port, smtp_host, smtp_port, created_at, settings_json
+                 ) VALUES (?1, ?1 || '@example.test', ?2, ?3, ?4, 'me', 'h', 993, 'h', 465,
+                           0, '{}')",
+                params![id, provider, auth, protocol],
+            )
+        };
+        for (id, provider, auth, protocol) in [
+            (1, "generic", "password", "imap"),
+            (2, "generic", "password", "jmap"),
+            (3, "generic", "password", "pop3"),
+            (4, "gmail", "oauth2", "gmail"),
+            (5, "microsoft", "oauth2", "imap"),
+        ] {
+            insert(id, provider, auth, protocol).unwrap();
+        }
+        for (id, provider, auth, protocol) in [
+            (10, "imap", "password", "imap"),
+            (11, "generic", "password", "gmail"),
+            (12, "gmail", "oauth2", "imap"),
+            (13, "microsoft", "oauth2", "jmap"),
+            (14, "microsoft", "oauth2", "pop3"),
+            (15, "generic", "password", "smtp"),
+        ] {
+            assert!(
+                insert(id, provider, auth, protocol).is_err(),
+                "{provider}/{protocol} must be rejected"
+            );
+        }
+        assert!(
+            conn.execute(
+                "INSERT INTO accounts (
+                   email, provider, auth_kind, mail_protocol, username, incoming_host,
+                   incoming_port, smtp_host, smtp_port, created_at
+                 ) VALUES ('none@example.test', 'generic', 'password', 'imap', 'me', 'h', 993,
+                           'h', 465, 0)",
+                [],
+            )
+            .is_err(),
+            "settings are always written explicitly"
+        );
+    }
+
+    #[test]
+    fn upgrade_drops_search_entries_of_removed_mail() {
+        let mut conn = staged(21);
+        seed_mail_graph(&conn);
+        conn.execute_batch(
+            "INSERT INTO messages_fts (rowid, subject, from_text, to_text, body)
+             VALUES (1, 'Schema contract', '', '', 'keptterm'),
+                    (2, 'Removed account', '', '', 'leftoverterm')",
+        )
+        .unwrap();
+
+        upgrade_to(&mut conn, 22).unwrap();
+
+        let matches = |term: &str| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?1",
+                params![term],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(matches("keptterm"), 1);
+        assert_eq!(matches("leftoverterm"), 0);
+    }
+
+    #[test]
+    fn a_rebuild_that_orphans_rows_changes_nothing() {
+        let mut conn = fresh();
+        seed_mail_graph(&conn);
+        let version = LATEST_VERSION;
+        let dependents = account_dependents(&conn);
+        let error = rebuild(
+            &mut conn,
+            "CREATE TABLE accounts_copy (id INTEGER PRIMARY KEY);
+             DROP VIEW directory_accounts;
+             DROP TABLE accounts;
+             ALTER TABLE accounts_copy RENAME TO accounts;",
+            version + 1,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("would orphan existing data"),
+            "{error}"
+        );
+        assert!(rebuild(&mut conn, "SELECT no_such_function();", version + 1).is_err());
+
+        assert_eq!(
+            conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
+            version
+        );
+        let enforced: bool = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert!(enforced);
+        let accounts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM accounts", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(accounts, 1);
+        assert_eq!(account_dependents(&conn), dependents);
+    }
+
     #[test]
     fn newer_profiles_are_rejected_without_mutation() {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -909,5 +1698,188 @@ mod tests {
             28
         );
         assert!(application_tables(&conn).is_empty());
+    }
+    #[test]
+    fn contact_upgrade_converts_every_saved_contact_and_pending_change() {
+        let mut conn = staged(12);
+        conn.execute_batch(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username, imap_host,
+                                   imap_port, smtp_host, smtp_port, created_at)
+               VALUES (1, 'me@test.dev', 'imap', 'password', 'me', 'h', 993, 'h', 587, 0);
+             INSERT INTO folders (id, account_id, imap_name, role) VALUES (1, 1, 'INBOX', 'inbox');",
+        )
+        .unwrap();
+        conn.execute_batch(
+            "INSERT INTO contacts(id,email,name,phone,company,is_managed,is_favorite,send_count) VALUES
+               (1,'shared@example.test','Unsynced name','','',1,1,7),
+               (2,'solo@example.test','Solo edited','555','',1,0,0),
+               (3,'local@example.test','Local person','','Acme',1,0,0),
+               (4,'gone@example.test','Gone','','',1,0,0),
+               (5,'history@example.test','History','','',0,0,2),
+               (6,'linked@example.test','Saved before sync','','',1,1,3);
+             INSERT INTO carddav_addressbooks(id,account_id,url) VALUES
+               (1,1,'https://dav.example/one/'),(2,1,'https://dav.example/two/');",
+        )
+        .unwrap();
+        let card = |uid: &str, extra: &str| {
+            format!(
+                "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:{uid}\r\nFN:Server {uid}\r\n{extra}END:VCARD\r\n"
+            )
+        };
+        let objects = [
+            // One unsent edit shared by two cards cannot be assigned to either.
+            (
+                1,
+                Some(1),
+                "/shared.vcf",
+                card("one", "EMAIL:shared@example.test\r\n"),
+                1,
+                0,
+            ),
+            (
+                2,
+                Some(1),
+                "/shared.vcf",
+                card("two", "EMAIL:shared@example.test\r\n"),
+                1,
+                0,
+            ),
+            (
+                1,
+                Some(2),
+                "/solo.vcf",
+                card(
+                    "solo",
+                    "EMAIL:solo@example.test\r\nTEL;TYPE=CELL:111\r\nTEL;TYPE=WORK,PREF:222\r\nX-CUSTOM:kept\r\n",
+                ),
+                1,
+                0,
+            ),
+            (
+                1,
+                Some(4),
+                "/gone.vcf",
+                card("gone", "EMAIL:gone@example.test\r\n"),
+                1,
+                1,
+            ),
+            // A contact saved before the card that matched it was synced.
+            (
+                2,
+                Some(6),
+                "/linked.vcf",
+                card("linked", "EMAIL:linked@example.test\r\n"),
+                0,
+                0,
+            ),
+            // The old directory hid cards without an email address.
+            (1, None, "/hidden.vcf", card("hidden", "TEL:123\r\n"), 0, 0),
+            (
+                1,
+                None,
+                "/broken.vcf",
+                "BEGIN:VCARD\r\nEND:VCARD\r\n".into(),
+                0,
+                0,
+            ),
+        ];
+        for (book, contact, href, vcard, dirty, deleted) in objects {
+            conn.execute(
+                "INSERT INTO carddav_objects(addressbook_id,contact_id,href,etag,vcard_raw,dirty,deleted,owns_contact)
+                 VALUES (?1,?2,?3,'v1',?4,?5,?6,?7)",
+                params![book, contact, href, vcard, dirty, deleted, href != "/linked.vcf"],
+            )
+            .unwrap();
+        }
+        run(&mut conn).unwrap();
+
+        use crate::db::repo::{carddav, contacts};
+        use crate::models::ContactSync;
+        let entries = contacts::list_records(&conn, "", 20).unwrap();
+        let names = entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "Server linked",
+                "Unsynced name",
+                "Unsynced name",
+                "Local person",
+                "Server hidden",
+                "Solo edited"
+            ]
+        );
+        // Linked to a card, so it is that card's entry and not also local.
+        assert!(entries[0].is_favorite);
+        assert_eq!(entries[0].details.sync, ContactSync::Synced);
+        for shared in &entries[1..3] {
+            assert!(shared.is_favorite);
+            assert_eq!(shared.details.sync, ContactSync::Conflict);
+        }
+        assert_eq!(entries[3].company, "Acme");
+        assert_eq!(entries[3].details.sync, ContactSync::Local);
+        assert_eq!(entries[4].phone, "123");
+        assert_eq!(entries[4].details.sync, ContactSync::Synced);
+        let solo = &entries[5];
+        assert_eq!(solo.phone, "222");
+        assert_eq!(solo.details.sync, ContactSync::Pending);
+        let pending = carddav::pending_uploads(&conn, 1).unwrap();
+        assert_eq!(pending.len(), 2);
+        let solo_document = pending[0].document.as_deref().unwrap();
+        assert!(solo_document.contains("UID:solo\r\nFN:Solo edited\r\n"));
+        // The old version showed the first TEL, so the edit replaces that one.
+        assert!(
+            solo_document
+                .contains("TEL;TYPE=CELL:555\r\nTEL;TYPE=WORK,PREF:222\r\nX-CUSTOM:kept\r\n")
+        );
+        assert!(pending[1].deleted);
+        assert!(
+            conn.query_row(
+                "SELECT last_error IS NOT NULL FROM carddav_objects WHERE href='/broken.vcf'",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+        );
+
+        // Mail history keeps its counts; profile-only rows and columns are gone.
+        let history = conn
+            .prepare("SELECT email,send_count FROM contacts ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            history,
+            [
+                ("shared@example.test".into(), 7),
+                ("history@example.test".into(), 2),
+                ("linked@example.test".into(), 3)
+            ]
+        );
+        assert!(
+            !conn
+                .prepare("SELECT name FROM pragma_table_info('contacts')")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .any(|name| name.unwrap() == "is_managed")
+        );
+        assert_eq!(entries[1].interactions, 21);
+        let suggestions =
+            contacts::list_record_page(&conn, "", None, false, true, None, 20).unwrap();
+        assert_eq!(suggestions.records[0].email, "history@example.test");
+
+        run(&mut conn).unwrap();
+        assert_eq!(contacts::list_records(&conn, "", 20).unwrap().len(), 6);
+        assert!(
+            conn.prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .query([])
+                .unwrap()
+                .next()
+                .unwrap()
+                .is_none()
+        );
     }
 }

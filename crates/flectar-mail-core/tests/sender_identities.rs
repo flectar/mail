@@ -10,10 +10,10 @@ async fn setup() -> (tempfile::TempDir, Core) {
         .write(|conn| {
             conn.execute_batch(
                 "INSERT INTO accounts
-                   (id,email,display_name,provider,auth_kind,username,imap_host,imap_port,
-                    smtp_host,smtp_port,created_at)
-                 VALUES (1,'me@example.com','Me','imap','password','me','127.0.0.1',1,
-                         '127.0.0.1',1,0);",
+                   (id,email,display_name,provider,auth_kind,username,incoming_host,incoming_port,
+                    smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+                 VALUES (1,'me@example.com','Me','generic','password','me','127.0.0.1',1,
+                         '127.0.0.1',1,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');",
             )?;
             Ok(())
         })

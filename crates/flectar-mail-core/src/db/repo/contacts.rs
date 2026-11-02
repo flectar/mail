@@ -5,18 +5,8 @@ use crate::models::{
 use crate::search::fold;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
-/// A real address-book entry is explicitly saved or favorited in Flectar Mail,
-/// or backed by a live CardDAV object. Mail-derived identities deliberately
-/// stay outside this set until the user takes one of those explicit actions.
-fn saved_contact_predicate(alias: &str) -> String {
-    format!(
-        "({alias}.is_managed = 1 OR {alias}.is_favorite = 1 OR EXISTS (
-            SELECT 1 FROM carddav_objects co
-            WHERE co.contact_id = {alias}.id
-              AND co.remote_exists = 1 AND co.deleted = 0
-        ))"
-    )
-}
+/// Directory rows that are saved contacts rather than mail suggestions.
+const SAVED: &str = "is_managed = 1";
 
 fn record_from_row(row: &Row<'_>) -> rusqlite::Result<ContactRecord> {
     let account_ids = row
@@ -25,6 +15,7 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<ContactRecord> {
         .filter_map(|value| value.parse::<i64>().ok())
         .collect();
     Ok(ContactRecord {
+        details: Default::default(),
         id: row.get(0)?,
         name: row.get(1)?,
         email: row.get(2)?,
@@ -89,10 +80,10 @@ pub fn advance_learning_boundaries(
 }
 
 /// Record an address seen in mail headers on `account_id`'s mail. `sent` = we
-/// sent to them. Updates both the global `contacts` row (identity + global
-/// affinity used by search and sender_known) and the per-account
+/// sent to them. Updates both the global `contacts` row (latest header name +
+/// global affinity used by search and sender_known) and the per-account
 /// `contact_accounts` row that scopes compose autocomplete to the sending
-/// account.
+/// account. Saved contacts are never changed by mail.
 pub fn harvest(
     conn: &Connection,
     account_id: i64,
@@ -106,22 +97,17 @@ pub fn harvest(
     let email = addr.email.to_lowercase();
     let name = addr.name.as_deref().unwrap_or("");
     let folded = fold(&format!("{} {}", name, addr.email));
-    let saved = saved_contact_predicate("contacts");
     conn.execute(
-        &format!(
-            "INSERT INTO contacts (email, name, folded, send_count, recv_count, last_interacted)
+        "INSERT INTO contacts (email, name, folded, send_count, recv_count, last_interacted)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(email) DO UPDATE SET
-            name = CASE WHEN {saved} THEN contacts.name
-                   ELSE COALESCE(NULLIF(excluded.name, ''), contacts.name) END,
+            name = COALESCE(NULLIF(excluded.name, ''), contacts.name),
             folded = CASE
-                WHEN (NOT {saved} AND NULLIF(excluded.name, '') IS NOT NULL)
-                OR contacts.folded IS NULL
+                WHEN NULLIF(excluded.name, '') IS NOT NULL OR contacts.folded IS NULL
                 THEN excluded.folded ELSE contacts.folded END,
             send_count = contacts.send_count + ?4,
             recv_count = contacts.recv_count + ?5,
-            last_interacted = MAX(COALESCE(contacts.last_interacted, 0), ?6)"
-        ),
+            last_interacted = MAX(COALESCE(contacts.last_interacted, 0), ?6)",
         params![email, name, folded, sent as i64, (!sent) as i64, when_ms],
     )?;
     conn.execute(
@@ -254,14 +240,8 @@ fn folded_clauses<'a>(
         if !clauses.is_empty() {
             clauses.push_str(" AND ");
         }
-        write!(
-            clauses,
-            "LOWER(COALESCE(folded, email) || ' ' || COALESCE(job_title, '') || ' ' ||
-                   COALESCE(website, '') || ' ' || COALESCE(postal_address, ''))
-             LIKE ?{} ESCAPE '\\'",
-            bind.len()
-        )
-        .expect("writing to a String cannot fail");
+        write!(clauses, "folded LIKE ?{} ESCAPE '\\'", bind.len())
+            .expect("writing to a String cannot fail");
     }
     (!clauses.is_empty()).then_some(clauses)
 }
@@ -280,31 +260,20 @@ fn record_where_clause<'a>(
     if favorites_only {
         clauses.push("is_favorite = 1".to_owned());
     }
-    let saved = saved_contact_predicate("contacts");
     clauses.push(if suggestions_only {
-        format!("NOT {saved} AND (send_count > 0 OR recv_count > 0)")
+        format!("NOT {SAVED} AND (send_count > 0 OR recv_count > 0)")
     } else {
-        saved
+        SAVED.to_owned()
     });
     if let Some(account_id) = account_id {
         bind.push(Box::new(account_id));
-        clauses.push(if suggestions_only {
-            format!(
-                "EXISTS (
-                    SELECT 1 FROM contact_accounts ca
-                    WHERE ca.contact_id = contacts.id AND ca.account_id = ?{}
-                )",
-                bind.len()
-            )
-        } else {
-            format!(
-                "(is_managed = 1 OR EXISTS (
-                SELECT 1 FROM contact_accounts ca
+        clauses.push(format!(
+            "EXISTS (
+                SELECT 1 FROM directory_accounts ca
                 WHERE ca.contact_id = contacts.id AND ca.account_id = ?{}
-                ))",
-                bind.len()
-            )
-        });
+            )",
+            bind.len()
+        ));
     }
     if clauses.is_empty() {
         "1 = 1".to_owned()
@@ -328,46 +297,36 @@ pub fn suggest(
     let Some(where_sql) = folded_clauses(query, &mut bind) else {
         return Ok(Vec::new());
     };
-    // `contact_accounts` has no name/email/folded columns, so the folded WHERE
-    // clause stays unambiguous; only the affinity columns get an alias.
-    let saved_filter = if include_suggestions {
-        String::new()
-    } else {
-        format!(" AND {}", saved_contact_predicate("c"))
-    };
-    let sql = if let Some(aid) = account_id {
-        bind.push(Box::new(aid));
-        let aid_ix = bind.len();
-        bind.push(Box::new(limit));
-        format!(
-            "SELECT c.name, c.email,
-                    COALESCE(ca.send_count * 3 + ca.recv_count,
-                             c.send_count * 3 + c.recv_count)
-             FROM contacts c
-             LEFT JOIN contact_accounts ca
-               ON ca.contact_id = c.id AND ca.account_id = ?{aid_ix}
-             WHERE ({where_sql}) AND (ca.account_id IS NOT NULL OR c.is_managed = 1)
-                   {saved_filter}
-             ORDER BY COALESCE(ca.send_count * 3 + ca.recv_count,
-                               c.send_count * 3 + c.recv_count) DESC,
-                      COALESCE(ca.last_interacted, c.last_interacted) DESC
-             LIMIT ?{}",
-            bind.len()
-        )
-    } else {
-        bind.push(Box::new(limit));
-        format!(
-            "SELECT name, email, send_count * 3 + recv_count FROM contacts c
-             WHERE {where_sql}{saved_filter}
-             ORDER BY (send_count * 3 + recv_count) DESC, last_interacted DESC
-             LIMIT ?{}",
-            bind.len()
-        )
-    };
+    bind.push(Box::new(account_id));
+    let account_index = bind.len();
+    bind.push(Box::new(include_suggestions));
+    let include_index = bind.len();
+    bind.push(Box::new(limit.clamp(1, 500)));
+    let limit_index = bind.len();
+    // Every email of a saved entry is a candidate; suggestions are history rows
+    // no entry contains. Affinity always comes from mail history.
+    let sql = format!("WITH candidates AS (
+        SELECT e.id,e.name,v.value AS email,e.folded,1 AS saved
+        FROM contact_entries e JOIN contact_values v ON v.contact_id=e.id AND v.kind='EMAIL'
+        WHERE NOT EXISTS(SELECT 1 FROM carddav_objects o WHERE o.entry_id=e.id AND o.deleted=1)
+        UNION ALL
+        SELECT -id,name,email,COALESCE(folded,email),0 FROM contacts
+        WHERE ?{include_index}=1
+    ), matches AS (
+        SELECT name,email,saved,
+            COALESCE((SELECT ca.send_count*3+ca.recv_count FROM contact_accounts ca JOIN contacts h ON h.id=ca.contact_id WHERE h.email=c.email COLLATE NOCASE AND ca.account_id=?{account_index}),
+                     (SELECT h.send_count*3+h.recv_count FROM contacts h WHERE h.email=c.email COLLATE NOCASE),0) AS affinity
+        FROM candidates c WHERE ({where_sql}) AND instr(email,'@')>1
+        AND instr(email,char(10))=0 AND instr(email,char(13))=0
+        AND (?{account_index} IS NULL OR EXISTS(
+            SELECT 1 FROM directory_accounts d WHERE d.contact_id=c.id AND d.account_id=?{account_index}))
+    ), ranked AS (
+        SELECT *,ROW_NUMBER() OVER(PARTITION BY email COLLATE NOCASE ORDER BY saved DESC,name COLLATE NOCASE) AS rank FROM matches
+    ) SELECT name,email,affinity FROM ranked WHERE rank=1 ORDER BY affinity DESC,email COLLATE NOCASE LIMIT ?{limit_index}");
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
+    Ok(stmt
         .query_map(
-            rusqlite::params_from_iter(bind.iter().map(|value| value.as_ref())),
+            rusqlite::params_from_iter(bind.iter().map(|v| v.as_ref())),
             |r| {
                 Ok(ContactSuggestion {
                     name: r.get(0)?,
@@ -376,8 +335,10 @@ pub fn suggest(
                 })
             },
         )?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|c| crate::carddav::vcard::usable_email(&c.email))
+        .collect())
 }
 
 pub fn autocomplete(
@@ -403,18 +364,17 @@ pub fn autocomplete(
 pub fn list_records(conn: &Connection, query: &str, limit: i64) -> Result<Vec<ContactRecord>> {
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let query_sql = folded_clauses(query, &mut bind).unwrap_or_else(|| "1 = 1".to_owned());
-    let saved = saved_contact_predicate("contacts");
     bind.push(Box::new(limit.clamp(1, 500)));
     let sql = format!(
         "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
                 send_count * 3 + recv_count, last_interacted,
-                CASE WHEN {saved} THEN 1 ELSE 0 END,
+                is_managed,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
-                          FROM contact_accounts ca
+                          FROM directory_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
-         FROM contacts
-         WHERE ({query_sql}) AND {saved}
+         FROM contact_directory contacts
+         WHERE ({query_sql}) AND {SAVED}
          ORDER BY is_favorite DESC,
                   CASE WHEN name IS NULL OR name = '' THEN email ELSE name END COLLATE NOCASE,
                   email COLLATE NOCASE,
@@ -423,12 +383,14 @@ pub fn list_records(conn: &Connection, query: &str, limit: i64) -> Result<Vec<Co
         bind.len()
     );
     let mut stmt = conn.prepare(&sql)?;
-    Ok(stmt
+    let mut records = stmt
         .query_map(
             rusqlite::params_from_iter(bind.iter().map(|value| value.as_ref())),
             record_from_row,
         )?
-        .collect::<rusqlite::Result<Vec<_>>>()?)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    super::contact_entries::load_details(conn, &mut records)?;
+    Ok(records)
 }
 
 /// Query one strict directory page and the scalar counts needed by the
@@ -479,16 +441,15 @@ pub fn list_record_page(
     }
     bind.push(Box::new(limit + 1));
     let limit_index = bind.len();
-    let saved = saved_contact_predicate("contacts");
     let sql = format!(
         "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
                 website, birthday, postal_address, notes, tags, is_favorite,
                 send_count * 3 + recv_count, last_interacted,
-                CASE WHEN {saved} THEN 1 ELSE 0 END,
+                is_managed,
                 COALESCE((SELECT GROUP_CONCAT(ca.account_id)
-                          FROM contact_accounts ca
+                          FROM directory_accounts ca
                           WHERE ca.contact_id = contacts.id), '')
-         FROM contacts
+         FROM contact_directory contacts
          WHERE {where_sql}
          ORDER BY is_favorite DESC,
                   CASE WHEN name IS NULL OR name = '' THEN email ELSE name END COLLATE NOCASE,
@@ -503,6 +464,7 @@ pub fn list_record_page(
             record_from_row,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    super::contact_entries::load_details(conn, &mut records)?;
     let has_more = records.len() > limit as usize;
     if has_more {
         records.truncate(limit as usize);
@@ -511,11 +473,11 @@ pub fn list_record_page(
     let (total_count, favorite_count, suggestion_count) = conn.query_row(
         &format!(
             "SELECT
-                COALESCE(SUM(CASE WHEN {saved} THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN {saved} AND is_favorite = 1 THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN NOT {saved}
+                COALESCE(SUM(CASE WHEN {SAVED} THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN {SAVED} AND is_favorite = 1 THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN NOT {SAVED}
                     AND (send_count > 0 OR recv_count > 0) THEN 1 ELSE 0 END), 0)
-             FROM contacts"
+             FROM contact_directory contacts"
         ),
         [],
         |row| {
@@ -526,13 +488,12 @@ pub fn list_record_page(
             ))
         },
     )?;
-    let saved_for_counts = saved_contact_predicate("c");
     let mut account_stmt = conn.prepare(&format!(
         "SELECT a.id, COUNT(DISTINCT c.id)
          FROM accounts a
-         LEFT JOIN contacts c ON {saved_for_counts}
-           AND (c.is_managed = 1 OR EXISTS (
-                SELECT 1 FROM contact_accounts ca
+         LEFT JOIN contact_directory c ON c.{SAVED}
+           AND (EXISTS (
+                SELECT 1 FROM directory_accounts ca
                 WHERE ca.contact_id = c.id AND ca.account_id = a.id
            ))
          GROUP BY a.id"
@@ -572,8 +533,13 @@ pub fn list_record_page(
 /// ranking from saved contacts. CardDAV/manual entries and their account
 /// associations remain intact.
 pub fn clear_suggestions(conn: &Connection, now_ms: i64) -> Result<usize> {
-    let saved = saved_contact_predicate("contacts");
-    let removed = conn.execute(&format!("DELETE FROM contacts WHERE NOT {saved}"), [])?;
+    let removed = conn.execute(
+        "DELETE FROM contacts WHERE NOT EXISTS (
+            SELECT 1 FROM contact_values v
+            WHERE v.kind = 'EMAIL' AND v.value = contacts.email COLLATE NOCASE
+         )",
+        [],
+    )?;
     conn.execute(
         "UPDATE contacts
          SET send_count = 0, recv_count = 0, last_interacted = NULL
@@ -590,145 +556,22 @@ pub fn clear_suggestions(conn: &Connection, now_ms: i64) -> Result<usize> {
     Ok(removed)
 }
 
-/// Insert or update a user-managed contact and return the canonical stored row.
-pub fn save_record(
-    conn: &Connection,
-    record: &ContactRecord,
-    now_ms: i64,
-) -> Result<ContactRecord> {
-    let email = record.email.trim().to_lowercase();
-    let name = record.name.trim();
-    if email.is_empty() || !email.contains('@') {
-        return Err(crate::error::CoreError::Other(
-            "contact email address is invalid".into(),
-        ));
-    }
-    let folded = fold(&format!(
-        "{name} {email} {} {} {} {} {} {}",
-        record.company,
-        record.phone,
-        record.job_title,
-        record.website,
-        record.tags,
-        record.postal_address,
-    ));
-    if record.id > 0 {
-        let changed = conn.execute(
-            "UPDATE contacts SET name = ?1, email = ?2, folded = ?3, phone = ?4,
-                    company = ?5, job_title = ?6, website = ?7, birthday = ?8,
-                    postal_address = ?9, notes = ?10, tags = ?11, is_favorite = ?12,
-                    is_managed = 1, updated_at = ?13
-             WHERE id = ?14",
-            params![
-                name,
-                email,
-                folded,
-                record.phone.trim(),
-                record.company.trim(),
-                record.job_title.trim(),
-                record.website.trim(),
-                record.birthday.trim(),
-                record.postal_address.trim(),
-                record.notes.trim(),
-                record.tags.trim(),
-                record.is_favorite,
-                now_ms,
-                record.id
-            ],
-        )?;
-        if changed == 0 {
-            return Err(crate::error::CoreError::Other("contact not found".into()));
-        }
-    } else {
-        conn.execute(
-            "INSERT INTO contacts (
-                email, name, folded, phone, company, job_title, website, birthday,
-                postal_address, notes, tags, is_favorite, is_managed, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 1, ?13)
-             ON CONFLICT(email) DO UPDATE SET
-                name = excluded.name,
-                folded = excluded.folded,
-                phone = excluded.phone,
-                company = excluded.company,
-                job_title = excluded.job_title,
-                website = excluded.website,
-                birthday = excluded.birthday,
-                postal_address = excluded.postal_address,
-                notes = excluded.notes,
-                tags = excluded.tags,
-                is_favorite = excluded.is_favorite,
-                is_managed = 1,
-                updated_at = excluded.updated_at",
-            params![
-                email,
-                name,
-                folded,
-                record.phone.trim(),
-                record.company.trim(),
-                record.job_title.trim(),
-                record.website.trim(),
-                record.birthday.trim(),
-                record.postal_address.trim(),
-                record.notes.trim(),
-                record.tags.trim(),
-                record.is_favorite,
-                now_ms
-            ],
-        )?;
-    }
-    let id = if record.id > 0 {
-        record.id
-    } else {
-        conn.query_row(
-            "SELECT id FROM contacts WHERE email = ?1 COLLATE NOCASE",
-            params![email],
-            |row| row.get(0),
-        )?
-    };
-    let address_book = saved_contact_predicate("contacts");
-    let mut saved = conn.query_row(
-        &format!(
-            "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
-                website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted,
-                CASE WHEN {address_book} THEN 1 ELSE 0 END,
-                COALESCE((SELECT GROUP_CONCAT(ca.account_id)
-                          FROM contact_accounts ca
-                          WHERE ca.contact_id = contacts.id), '')
-         FROM contacts WHERE id = ?1"
-        ),
-        [id],
-        record_from_row,
-    )?;
-    saved.email = email;
-    Ok(saved)
-}
-
-pub fn delete_record(conn: &Connection, id: i64) -> Result<()> {
-    if conn.execute("DELETE FROM contacts WHERE id = ?1", params![id])? == 0 {
-        return Err(crate::error::CoreError::Other("contact not found".into()));
-    }
-    Ok(())
-}
-
 pub fn get_record(conn: &Connection, id: i64) -> Result<Option<ContactRecord>> {
-    let address_book = saved_contact_predicate("contacts");
-    conn.query_row(
-        &format!(
-            "SELECT id, COALESCE(name, ''), email, phone, company, job_title,
-                website, birthday, postal_address, notes, tags, is_favorite,
-                send_count * 3 + recv_count, last_interacted,
-                CASE WHEN {address_book} THEN 1 ELSE 0 END,
-                COALESCE((SELECT GROUP_CONCAT(ca.account_id)
-                          FROM contact_accounts ca
-                          WHERE ca.contact_id = contacts.id), '')
-         FROM contacts WHERE id = ?1"
-        ),
-        [id],
-        record_from_row,
-    )
-    .optional()
-    .map_err(Into::into)
+    let record = conn
+        .query_row(
+            "SELECT id, name, email, phone, company, job_title, website, birthday,
+                    postal_address, notes, tags, is_favorite, send_count * 3 + recv_count,
+                    last_interacted, is_managed,
+                    COALESCE((SELECT GROUP_CONCAT(account_id) FROM directory_accounts
+                              WHERE contact_id = d.id), '')
+             FROM contact_directory d WHERE id = ?1",
+            [id],
+            record_from_row,
+        )
+        .optional()?;
+    let mut records = record.into_iter().collect::<Vec<_>>();
+    super::contact_entries::load_details(conn, &mut records)?;
+    Ok(records.pop())
 }
 
 /// Affinity score (send_count*3 + recv_count) per email, for the given
@@ -765,8 +608,22 @@ pub fn affinity_for(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::testutil;
-    use crate::models::Address;
+    use crate::carddav::vcard::Card;
+    use crate::db::{repo::contact_entries, testutil};
+    use crate::models::{Address, ContactValue};
+
+    fn values(value: &str) -> Vec<ContactValue> {
+        vec![ContactValue {
+            value: value.into(),
+            preference: ContactValue::NO_PREFERENCE,
+            ..Default::default()
+        }]
+    }
+
+    fn save(c: &Connection, record: &ContactRecord) -> ContactRecord {
+        let id = contact_entries::save(c, record).unwrap();
+        get_record(c, id).unwrap().unwrap()
+    }
 
     fn addr(email: &str, name: Option<&str>) -> Address {
         Address {
@@ -888,8 +745,8 @@ mod tests {
         testutil::seed_account(&c);
         c.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (2,'two@test.dev','imap','password','two','h',993,'h',587,0)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'two@test.dev','generic','password','two','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
@@ -918,30 +775,30 @@ mod tests {
     fn managed_contact_round_trip_and_harvest_preserves_edited_name() {
         let c = testutil::conn();
         testutil::seed_account(&c);
-        let created = save_record(
-            &c,
-            &ContactRecord {
-                id: 0,
-                name: "Ada Lovelace".into(),
-                email: "ADA@EXAMPLE.COM".into(),
-                phone: "+44 20 0000 0000".into(),
-                company: "Analytical Engines".into(),
-                job_title: "Programmer".into(),
-                website: "https://example.com/ada".into(),
-                birthday: "1815-12-10".into(),
-                postal_address: "London".into(),
-                notes: "Prefers written updates.".into(),
-                tags: "vip, history".into(),
-                is_favorite: true,
-                interactions: 0,
-                last_interacted: None,
-                account_ids: Vec::new(),
-                is_managed: true,
-            },
-            100,
-        )
-        .unwrap();
+        let mut record = ContactRecord {
+            details: Default::default(),
+            id: 0,
+            name: "Ada Lovelace".into(),
+            email: String::new(),
+            phone: String::new(),
+            company: "Analytical Engines".into(),
+            job_title: "Programmer".into(),
+            website: "https://example.com/ada".into(),
+            birthday: "1815-12-10".into(),
+            postal_address: "London".into(),
+            notes: "Prefers written updates.".into(),
+            tags: "vip, history".into(),
+            is_favorite: true,
+            interactions: 0,
+            last_interacted: None,
+            account_ids: Vec::new(),
+            is_managed: true,
+        };
+        record.details.emails = values("ADA@EXAMPLE.COM");
+        record.details.phones = values("+44 20 0000 0000");
+        let created = save(&c, &record);
         assert!(created.id > 0);
+        assert_eq!(created.phone, "+44 20 0000 0000");
         assert_eq!(created.email, "ada@example.com");
         assert!(created.is_favorite);
         assert_eq!(
@@ -965,7 +822,8 @@ mod tests {
         assert_eq!(listed[0].account_ids, vec![1]);
         assert!(listed[0].is_managed);
 
-        delete_record(&c, created.id).unwrap();
+        assert!(contact_entries::delete(&c, created.id, created.details.revision - 1).is_err());
+        contact_entries::delete(&c, created.id, created.details.revision).unwrap();
         assert!(list_records(&c, "", 20).unwrap().is_empty());
     }
 
@@ -996,8 +854,10 @@ mod tests {
         );
         assert_eq!(autocomplete(&c, "grace", None, true, 10).unwrap().len(), 1);
 
-        let promoted = save_record(&c, &suggestion_page.records[0], 200).unwrap();
+        let promoted = save(&c, &suggestion_page.records[0]);
         assert!(promoted.is_managed);
+        assert_eq!(promoted.email, "grace@example.com");
+        assert_eq!(promoted.interactions, 3);
         assert_eq!(
             list_record_page(&c, "", None, false, false, None, 25)
                 .unwrap()
@@ -1036,7 +896,7 @@ mod tests {
         let saved = get_record(
             &c,
             c.query_row(
-                "SELECT id FROM contacts WHERE email = 'saved@example.com'",
+                "SELECT -id FROM contacts WHERE email = 'saved@example.com'",
                 [],
                 |row| row.get(0),
             )
@@ -1044,7 +904,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        save_record(&c, &saved, 200).unwrap();
+        save(&c, &saved);
 
         assert_eq!(clear_suggestions(&c, 300).unwrap(), 1);
         let remaining = list_records(&c, "", 20).unwrap();
@@ -1055,8 +915,8 @@ mod tests {
         let account_affinity: (i64, i64, Option<i64>) = c
             .query_row(
                 "SELECT send_count, recv_count, last_interacted
-                 FROM contact_accounts WHERE contact_id = ?1 AND account_id = 1",
-                [remaining[0].id],
+                 FROM contact_accounts WHERE contact_id = (SELECT id FROM contacts WHERE email = ?1) AND account_id = 1",
+                [&remaining[0].email],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
@@ -1085,31 +945,13 @@ mod tests {
             false,
         )
         .unwrap();
-        crate::db::repo::carddav::upsert_remote(
+        let card = "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:grace\r\nFN:Grace Hopper\r\nORG:Navy\r\nEMAIL:grace@example.com\r\nEND:VCARD\r\n";
+        crate::db::repo::carddav::apply_remote(
             &c,
-            1,
             book_id,
             "/addressbook/grace.vcf",
             Some("v1"),
-            "BEGIN:VCARD\r\nEND:VCARD\r\n",
-            &ContactRecord {
-                id: 0,
-                name: "Grace Hopper".into(),
-                email: "grace@example.com".into(),
-                phone: String::new(),
-                company: "Navy".into(),
-                job_title: String::new(),
-                website: String::new(),
-                birthday: String::new(),
-                postal_address: String::new(),
-                notes: String::new(),
-                tags: String::new(),
-                is_favorite: false,
-                interactions: 0,
-                last_interacted: None,
-                account_ids: vec![1],
-                is_managed: false,
-            },
+            &Card::parse(card).unwrap(),
         )
         .unwrap();
 

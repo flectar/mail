@@ -38,7 +38,7 @@ chrono.workspace = true
 # email protocols
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 jmap-client = { version = "0.4.2", default-features = false, features = ["async", "ring"] }
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder", "pool", "hostname"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "hostname"] }
 # full_encoding pulls in encoding_rs so non-UTF-8 header/body charsets
 # (GB2312/GBK/Big5, Shift-JIS, EUC-KR, ...) decode correctly instead of
 # turning into U+FFFD replacement chars. Default features are empty in 0.11.
@@ -95,6 +95,7 @@ ignored = ["cfg_aliases"]
 cfg_aliases = "0.2"
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Cargo cannot evaluate build.rs aliases; this is `rename_noreplace`.
@@ -103,6 +104,6 @@ rustix = { version = "1", features = ["fs"] }
 
 # This is `desktop`. Mobile hosts inject their storage paths and a
 # platform-owned credential store instead.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 dirs = "6"
 keyring = { version = "3", features = ["sync-secret-service", "apple-native", "windows-native"] }

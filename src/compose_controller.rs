@@ -31,10 +31,13 @@ pub(super) struct PreparedMessageCompose {
     pub intent: ComposeIntent,
 }
 
+/// Prepares a reply or forward. `translate` renders the quotation headers in
+/// the interface language, as mail clients write them for their user.
 pub(super) fn prepare_message_compose(
     source: &ComposeSource,
     action: &str,
     rendered_plain_text: &str,
+    translate: impl Fn(UiMessage) -> String,
 ) -> Result<PreparedMessageCompose, String> {
     if !matches!(action, "reply" | "reply_all" | "forward") {
         return Err(format!("unsupported compose action: {action}"));
@@ -49,40 +52,29 @@ pub(super) fn prepare_message_compose(
     let sent_at = chrono::Local
         .timestamp_millis_opt(source.date)
         .single()
-        .map(|date| date.format("%b %-d, %Y at %-I:%M %p").to_string())
-        .unwrap_or_else(|| "an earlier time".to_owned());
+        .map(|date| date_format::current().date_time(DateStyle::WeekdayMedium, date.naive_local()));
 
     if action == "forward" {
         let original_body = original_body.trim_end();
-        let recipient_capacity = source
-            .to
-            .iter()
-            .map(|address| {
-                address.email.len() + address.name.as_deref().map_or(0, |name| name.len() + 3) + 2
-            })
-            .sum::<usize>();
-        let mut body = String::with_capacity(
-            "\n\n---------- Forwarded message ----------\nFrom: \nDate: \nSubject: \nTo: \n\n"
-                .len()
-                + sender.len()
-                + sent_at.len()
-                + source.subject.len()
-                + recipient_capacity
-                + original_body.len(),
+        let mut header = format!(
+            "\n\n---------- {} ----------\n",
+            translate(UiMessage::plain("Forwarded message"))
         );
-        for part in [
-            "\n\n---------- Forwarded message ----------\nFrom: ",
-            &sender,
-            "\nDate: ",
-            &sent_at,
-            "\nSubject: ",
-            &source.subject,
-            "\nTo: ",
-        ] {
-            body.push_str(part);
+        let lines = [
+            Some(UiMessage::detail("From: {}", &sender)),
+            sent_at
+                .as_ref()
+                .map(|sent_at| UiMessage::detail("Date: {}", sent_at)),
+            Some(UiMessage::detail("Subject: {}", &source.subject)),
+            Some(UiMessage::detail("To: {}", join_addresses(&source.to))),
+        ];
+        for line in lines.into_iter().flatten() {
+            header.push_str(&translate(line));
+            header.push('\n');
         }
-        append_addresses(&mut body, &source.to);
-        body.push_str("\n\n");
+        header.push('\n');
+        let mut body = String::with_capacity(header.len() + original_body.len());
+        body.push_str(&header);
         body.push_str(original_body);
         // Like a reply, forward from the address the message reached.
         let sender_email = reply_sender(
@@ -134,12 +126,14 @@ pub(super) fn prepare_message_compose(
         .map(|line| line.len() + 3)
         .sum::<usize>()
         .saturating_sub(usize::from(!text.is_empty()));
-    let mut body = String::with_capacity(
-        "\n\nOn ,  wrote:\n".len() + sent_at.len() + sender.len() + quoted_len,
-    );
-    for part in ["\n\nOn ", &sent_at, ", ", &sender, " wrote:\n"] {
-        body.push_str(part);
-    }
+    let attribution = translate(match &sent_at {
+        Some(sent_at) => UiMessage::arguments("On {}, {} wrote:", sent_at, &sender),
+        None => UiMessage::detail("{} wrote:", &sender),
+    });
+    let mut body = String::with_capacity(attribution.len() + 3 + quoted_len);
+    body.push_str("\n\n");
+    body.push_str(&attribution);
+    body.push('\n');
     for (index, line) in text.lines().enumerate() {
         if index > 0 {
             body.push('\n');
@@ -578,6 +572,10 @@ mod tests {
         Address, SenderDeliveryStatus, SenderIdentity, SenderIdentitySource,
     };
 
+    fn english(message: UiMessage) -> String {
+        message.english()
+    }
+
     fn address(name: &str, email: &str) -> Address {
         Address {
             name: (!name.is_empty()).then(|| name.to_owned()),
@@ -628,7 +626,7 @@ mod tests {
 
     #[test]
     fn reply_all_excludes_the_sender_account_and_deduplicates_recipients() {
-        let prepared = prepare_message_compose(&source(), "reply_all", "").unwrap();
+        let prepared = prepare_message_compose(&source(), "reply_all", "", english).unwrap();
 
         assert_eq!(prepared.account_id, 7);
         assert_eq!(prepared.sender_email, "alex@example.com");
@@ -652,7 +650,7 @@ mod tests {
         ];
         source.cc = vec![address("Work duplicate", "WORK@example.net")];
 
-        let prepared = prepare_message_compose(&source, "reply_all", "").unwrap();
+        let prepared = prepare_message_compose(&source, "reply_all", "", english).unwrap();
 
         assert_eq!(prepared.sender_email, "work@example.net");
         assert_eq!(prepared.to, "Maya <maya@example.com>");
@@ -670,14 +668,14 @@ mod tests {
         ];
         source.cc = Vec::new();
 
-        let prepared = prepare_message_compose(&source, "reply_all", "").unwrap();
+        let prepared = prepare_message_compose(&source, "reply_all", "", english).unwrap();
 
         assert_eq!(prepared.sender_email, "support@team.example");
         assert_eq!(prepared.to, "Maya <maya@example.com>");
         assert_eq!(prepared.cc, "Jon <jon@example.com>");
 
         source.to = vec![address("Alex", "alex+launch@example.com")];
-        let prepared = prepare_message_compose(&source, "reply", "").unwrap();
+        let prepared = prepare_message_compose(&source, "reply", "", english).unwrap();
         assert_eq!(prepared.sender_email, "alex@example.com");
     }
 
@@ -685,13 +683,14 @@ mod tests {
     fn forward_uses_the_alias_that_received_the_message() {
         let mut source = source();
         source.to = vec![address("Alex at work", "work@example.net")];
-        let prepared = prepare_message_compose(&source, "forward", "").unwrap();
+        let prepared = prepare_message_compose(&source, "forward", "", english).unwrap();
         assert_eq!(prepared.sender_email, "work@example.net");
     }
 
     #[test]
     fn forward_starts_unaddressed_and_does_not_join_the_original_thread() {
-        let prepared = prepare_message_compose(&source(), "forward", "Rendered body").unwrap();
+        let prepared =
+            prepare_message_compose(&source(), "forward", "Rendered body", english).unwrap();
 
         assert!(prepared.to.is_empty());
         assert!(prepared.cc.is_empty());
@@ -707,11 +706,53 @@ mod tests {
     }
 
     #[test]
+    fn quotation_headers_use_the_interface_wording_and_date_format() {
+        let sent_at = date_format::current().date_time(
+            DateStyle::WeekdayMedium,
+            Local
+                .timestamp_millis_opt(source().date)
+                .unwrap()
+                .naive_local(),
+        );
+        let reply = prepare_message_compose(&source(), "reply", "", english).unwrap();
+        assert_eq!(
+            reply.body,
+            format!(
+                "\n\nOn {sent_at}, Maya <maya@example.com> wrote:\n> First line\n> Second line"
+            )
+        );
+
+        let forward = prepare_message_compose(&source(), "forward", "", english).unwrap();
+        assert_eq!(
+            forward.body,
+            format!(
+                "\n\n---------- Forwarded message ----------\nFrom: Maya <maya@example.com>\n\
+                 Date: {sent_at}\nSubject: Launch plan\n\
+                 To: Alex <alex@example.com>, Jon <jon@example.com>\n\nFirst line\nSecond line"
+            )
+        );
+
+        let shouted = |message: UiMessage| message.english().to_uppercase();
+        let forward = prepare_message_compose(&source(), "forward", "", shouted).unwrap();
+        assert!(forward.body.starts_with(
+            "\n\n---------- FORWARDED MESSAGE ----------\nFROM: MAYA <MAYA@EXAMPLE.COM>\nDATE: "
+        ));
+        let mut undated = source();
+        undated.date = i64::MAX;
+        let reply = prepare_message_compose(&undated, "reply", "", english).unwrap();
+        assert!(
+            reply
+                .body
+                .starts_with("\n\nMaya <maya@example.com> wrote:\n> First line")
+        );
+    }
+
+    #[test]
     fn reply_subject_does_not_stack_prefixes() {
         let mut reply = source();
         reply.subject = "RE: Launch plan".to_owned();
         assert_eq!(
-            prepare_message_compose(&reply, "reply", "")
+            prepare_message_compose(&reply, "reply", "", english)
                 .unwrap()
                 .subject,
             "RE: Launch plan"
@@ -719,7 +760,7 @@ mod tests {
 
         reply.subject = "FW: Launch plan".to_owned();
         assert_eq!(
-            prepare_message_compose(&reply, "forward", "")
+            prepare_message_compose(&reply, "forward", "", english)
                 .unwrap()
                 .subject,
             "FW: Launch plan"

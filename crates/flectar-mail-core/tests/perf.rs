@@ -22,13 +22,13 @@ async fn hundred_k_messages_stay_instant() {
         let tx = conn.transaction()?;
         tx.execute(
             "INSERT INTO accounts (id, email, display_name, provider, auth_kind, username,
-                                   imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (1, 'perf@example.com', NULL, 'imap', 'password', 'perf',
-                     'localhost', 993, 'localhost', 587, 0)",
+                                   incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (1, 'perf@example.com', NULL, 'generic', 'password', 'perf',
+                     'localhost', 993, 'localhost', 587, 0, 'imap', '{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )?;
         tx.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role) VALUES (1, 1, 'INBOX', 'inbox')",
+            "INSERT INTO folders (id, account_id, path, role) VALUES (1, 1, 'INBOX', 'inbox')",
             [],
         )?;
 
@@ -119,6 +119,7 @@ async fn hundred_k_messages_stay_instant() {
                 view: View::Inbox,
                 tab: None,
                 account_id: None,
+                account_ids: None,
                 folder_id: None,
                 cursor: None,
                 limit: 50,
@@ -138,6 +139,7 @@ async fn hundred_k_messages_stay_instant() {
                     view: View::Inbox,
                     tab: None,
                     account_id: None,
+                    account_ids: None,
                     folder_id: None,
                     cursor: None,
                     limit: 50,
@@ -159,6 +161,7 @@ async fn hundred_k_messages_stay_instant() {
                     view: View::Inbox,
                     tab: None,
                     account_id: None,
+                    account_ids: None,
                     folder_id: None,
                     cursor: None,
                     limit: 1,
@@ -192,6 +195,7 @@ async fn hundred_k_messages_stay_instant() {
                         view: View::Inbox,
                         tab: None,
                         account_id: None,
+                        account_ids: None,
                         folder_id: None,
                         cursor: Some(ThreadCursor {
                             last_message_at: cursor - 500_000_000,

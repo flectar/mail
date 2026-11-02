@@ -1,2 +1,3 @@
 # Preserve upstream formatting and collapse the vendored source in reviews.
 crates/candle-core/** linguist-vendored -whitespace
+crates/i-slint-backend-winit/** linguist-vendored -whitespace

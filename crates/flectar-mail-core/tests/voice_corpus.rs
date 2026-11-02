@@ -9,9 +9,9 @@ fn seed() -> Connection {
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     flectar_mail_core::db::migrations::run(&mut conn).unwrap();
     conn.execute_batch(
-        "INSERT INTO accounts (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-           VALUES (1,'me@example.com','imap','password','me','h',993,'h',465,0);
-         INSERT INTO folders (id,account_id,imap_name,role) VALUES (1,1,'INBOX','inbox'),(2,1,'Sent','sent'),(3,1,'Drafts','drafts');
+        "INSERT INTO accounts (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+           VALUES (1,'me@example.com','generic','password','me','h',993,'h',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+         INSERT INTO folders (id,account_id,path,role) VALUES (1,1,'INBOX','inbox'),(2,1,'Sent','sent'),(3,1,'Drafts','drafts');
          INSERT INTO threads (id,account_id,subject_norm,last_message_at) VALUES (30,1,'lunch',300);
          INSERT INTO messages (id,account_id,thread_id,folder_id,uid,subject,from_addr,date,is_read,is_draft,body_state)
            VALUES (200,1,30,1,1,'lunch?','alice@x.com',100,1,0,'cached'),        -- incoming

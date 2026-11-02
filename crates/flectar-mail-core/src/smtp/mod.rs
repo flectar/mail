@@ -1,129 +1,135 @@
-//! SMTP sending via lettre, with password or XOAUTH2 auth.
+//! SMTP submission with password or XOAUTH2 sign-in. Connections are opened
+//! here and handed to lettre's protocol client, so every security mode uses
+//! the account's own TLS trust and one code path.
 
 use crate::error::{CoreError, Result};
-use crate::models::AccountConfig;
+use crate::models::{AccountConfig, ConnectionSecurity};
+use crate::net::{self, MailStream};
 use lettre::transport::smtp::{
     authentication::{Credentials, Mechanism},
-    client::AsyncSmtpConnection,
+    client::{AsyncSmtpConnection, AsyncTokioStream},
+    commands::Noop,
     extension::ClientId,
 };
-use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use std::{
     fmt,
+    future::Future,
     net::SocketAddr,
     pin::Pin,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
+use tokio::time::{Instant, Sleep};
 
-const SMTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Bound for connecting, the greeting, STARTTLS, and sign-in. Exchange
+/// Online can leave a throttled session open without completing one of these
+/// phases; without a deadline a queued send would stay in flight forever.
+const SMTP_TIMEOUT: Duration = Duration::from_secs(30);
+/// A connection that moves no bytes for this long has stalled.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub enum SmtpAuth {
     Password(String),
     XOAuth2(String),
 }
 
-fn build_transport(
-    cfg: &AccountConfig,
-    auth: &SmtpAuth,
-) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
-    use lettre::transport::smtp::client::{Tls, TlsParameters};
-
-    use crate::models::ConnectionSecurity;
-    let implicit = match cfg.settings.connection.smtp_security {
-        ConnectionSecurity::Tls => true,
-        ConnectionSecurity::Starttls => false,
-        ConnectionSecurity::Auto => cfg.smtp_port == 465,
-    };
-    let mut params = TlsParameters::builder(cfg.smtp_host.clone());
-    if crate::imap::tls_insecure() && cfg.settings.connection.trusted_certificate_pem.is_empty() {
-        params = params
-            .dangerous_accept_invalid_certs(true)
-            .dangerous_accept_invalid_hostnames(true);
-    }
-    let params = params.build().map_err(|e| CoreError::Tls(e.to_string()))?;
-    let builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.smtp_host)
-        .port(cfg.smtp_port)
-        .tls(if implicit {
-            Tls::Wrapper(params)
-        } else {
-            Tls::Required(params)
-        });
-
-    let builder = match auth {
-        SmtpAuth::Password(pw) => builder
-            .credentials(Credentials::new(cfg.username.clone(), pw.clone()))
-            .authentication(vec![Mechanism::Plain, Mechanism::Login]),
-        SmtpAuth::XOAuth2(token) => builder
-            .credentials(Credentials::new(cfg.username.clone(), token.clone()))
-            .authentication(vec![Mechanism::Xoauth2]),
-    };
-
-    // Bound greeting, STARTTLS and AUTH. Exchange Online can leave a throttled
-    // SMTP session open without completing one of these phases; without a
-    // transport timeout a queued Outlook send remains inflight forever.
-    Ok(builder.timeout(Some(SMTP_TIMEOUT)).build())
-}
-
-/// A rustls stream that lettre can use through its public SMTP protocol
-/// client. For STARTTLS, `greeting` supplies the greeting that lettre expects
-/// before its post-upgrade EHLO; the real greeting was consumed while
-/// negotiating STARTTLS.
-struct VerifiedSmtpStream {
-    inner: tokio_rustls::client::TlsStream<TcpStream>,
+/// The stream lettre drives. After STARTTLS the server's greeting has been
+/// consumed, so `greeting` replays one for lettre's post-upgrade EHLO. Reads
+/// and writes fail once the connection has been idle for [`IDLE_TIMEOUT`].
+struct SmtpStream {
+    inner: MailStream,
     greeting: &'static [u8],
+    idle: Pin<Box<Sleep>>,
 }
 
-impl fmt::Debug for VerifiedSmtpStream {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.debug_struct("VerifiedSmtpStream").finish()
+impl SmtpStream {
+    fn new(inner: MailStream, greeting: &'static [u8]) -> Self {
+        Self {
+            inner,
+            greeting,
+            idle: Box::pin(tokio::time::sleep(IDLE_TIMEOUT)),
+        }
+    }
+
+    /// Restart the idle deadline after progress, or fail once it passed.
+    fn track<T>(
+        &mut self,
+        context: &mut Context<'_>,
+        poll: Poll<std::io::Result<T>>,
+    ) -> Poll<std::io::Result<T>> {
+        match poll {
+            Poll::Ready(result) => {
+                self.idle.as_mut().reset(Instant::now() + IDLE_TIMEOUT);
+                Poll::Ready(result)
+            }
+            Poll::Pending => match self.idle.as_mut().poll(context) {
+                Poll::Ready(()) => Poll::Ready(Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "SMTP connection timed out after {}s",
+                        IDLE_TIMEOUT.as_secs()
+                    ),
+                ))),
+                Poll::Pending => Poll::Pending,
+            },
+        }
     }
 }
 
-impl AsyncRead for VerifiedSmtpStream {
+impl fmt::Debug for SmtpStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SmtpStream")
+            .field("encrypted", &self.inner.is_encrypted())
+            .finish_non_exhaustive()
+    }
+}
+
+impl AsyncRead for SmtpStream {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         context: &mut Context<'_>,
         buffer: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        if !self.greeting.is_empty() && buffer.remaining() != 0 {
-            let length = self.greeting.len().min(buffer.remaining());
-            buffer.put_slice(&self.greeting[..length]);
-            self.greeting = &self.greeting[length..];
+        let this = self.get_mut();
+        if !this.greeting.is_empty() && buffer.remaining() != 0 {
+            let length = this.greeting.len().min(buffer.remaining());
+            buffer.put_slice(&this.greeting[..length]);
+            this.greeting = &this.greeting[length..];
             return Poll::Ready(Ok(()));
         }
-        Pin::new(&mut self.inner).poll_read(context, buffer)
+        let poll = Pin::new(&mut this.inner).poll_read(context, buffer);
+        this.track(context, poll)
     }
 }
 
-impl AsyncWrite for VerifiedSmtpStream {
+impl AsyncWrite for SmtpStream {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         context: &mut Context<'_>,
         buffer: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        Pin::new(&mut self.inner).poll_write(context, buffer)
+        let this = self.get_mut();
+        let poll = Pin::new(&mut this.inner).poll_write(context, buffer);
+        this.track(context, poll)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_flush(context)
+    fn poll_flush(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        let poll = Pin::new(&mut this.inner).poll_flush(context);
+        this.track(context, poll)
     }
 
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        context: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_shutdown(context)
+    fn poll_shutdown(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(context)
     }
 }
 
-impl lettre::transport::smtp::client::AsyncTokioStream for VerifiedSmtpStream {
+impl AsyncTokioStream for SmtpStream {
     fn peer_addr(&self) -> std::io::Result<SocketAddr> {
-        self.inner.get_ref().0.peer_addr()
+        self.inner.peer_addr()
     }
 }
 
@@ -182,14 +188,11 @@ fn expect_smtp_status(response: &str, expected: &str, stage: &str) -> Result<()>
     }
 }
 
+/// TLS is negotiated before lettre sees the connection, so its errors are
+/// protocol and sign-in failures.
 fn map_smtp_error(cfg: &AccountConfig, error: lettre::transport::smtp::Error) -> CoreError {
     let message = error.to_string();
-    if error.is_tls() {
-        CoreError::Tls(format!(
-            "SMTP {}:{}: {message}. Check SSL/TLS versus STARTTLS and the server certificate. For Proton Bridge, import its exported certificate.",
-            cfg.smtp_host, cfg.smtp_port
-        ))
-    } else if message.contains("535") || message.to_ascii_lowercase().contains("auth") {
+    if message.contains("535") || message.to_ascii_lowercase().contains("auth") {
         CoreError::Auth(format!("smtp auth: {message}"))
     } else {
         CoreError::Smtp(format!("{}:{}: {message}", cfg.smtp_host, cfg.smtp_port))
@@ -209,74 +212,93 @@ fn smtp_auth(auth: &SmtpAuth, username: &str) -> (Credentials, Vec<Mechanism>) {
     }
 }
 
-async fn imported_certificate_connection(
-    cfg: &AccountConfig,
-    auth: &SmtpAuth,
-) -> Result<AsyncSmtpConnection> {
-    use crate::models::ConnectionSecurity;
+async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream> {
+    let connector = net::tls::connector(&cfg.settings.connection.trusted_certificate_pem)?;
+    let tls = net::tls::handshake(&connector, tcp, &cfg.smtp_host)
+        .await
+        .map_err(|error| {
+        CoreError::Tls(format!(
+            "SMTP {}:{}: {error}. Check SSL/TLS versus STARTTLS and the server certificate. For Proton Bridge, import its exported certificate.",
+            cfg.smtp_host, cfg.smtp_port
+        ))
+    })?;
+    Ok(MailStream::Tls(Box::new(tls)))
+}
 
-    let connect = async {
-        let mut tcp = TcpStream::connect((&*cfg.smtp_host, cfg.smtp_port))
+/// Upgrade with STARTTLS before lettre takes over. A server that does not
+/// offer the upgrade is never sent credentials.
+async fn start_tls(cfg: &AccountConfig, mut tcp: TcpStream) -> Result<MailStream> {
+    let greeting = read_smtp_response(&mut tcp, "greeting").await?;
+    expect_smtp_status(&greeting, "220", "greeting")?;
+    tcp.write_all(b"EHLO flectar.local\r\n")
+        .await
+        .map_err(|error| CoreError::Smtp(format!("SMTP EHLO: {error}")))?;
+    let capabilities = read_smtp_response(&mut tcp, "EHLO").await?;
+    expect_smtp_status(&capabilities, "250", "EHLO")?;
+    if !capabilities.lines().any(|line| {
+        line.get(4..)
+            .and_then(|text| text.split_ascii_whitespace().next())
+            .is_some_and(|capability| capability.eq_ignore_ascii_case("STARTTLS"))
+    }) {
+        return Err(CoreError::Tls(format!(
+            "SMTP {}:{} does not advertise STARTTLS",
+            cfg.smtp_host, cfg.smtp_port
+        )));
+    }
+    tcp.write_all(b"STARTTLS\r\n")
+        .await
+        .map_err(|error| CoreError::Smtp(format!("SMTP STARTTLS: {error}")))?;
+    let response = read_smtp_response(&mut tcp, "STARTTLS").await?;
+    expect_smtp_status(&response, "220", "STARTTLS")?;
+    tls_handshake(cfg, tcp).await
+}
+
+/// Open an authenticated SMTP session as the account's security requires.
+async fn connect(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<AsyncSmtpConnection> {
+    let security = cfg.settings.connection.smtp_security;
+    if !security.is_encrypted() && matches!(auth, SmtpAuth::XOAuth2(_)) {
+        return Err(CoreError::Tls(
+            "OAuth sign-in needs an encrypted connection.".into(),
+        ));
+    }
+    let open = async {
+        let tcp = net::connect_tcp(&cfg.smtp_host, cfg.smtp_port)
             .await
             .map_err(|error| {
-                CoreError::Smtp(format!("{}:{}: {error}", cfg.smtp_host, cfg.smtp_port))
-            })?;
-        tcp.set_nodelay(true).ok();
-
-        let starttls = match cfg.settings.connection.smtp_security {
-            ConnectionSecurity::Tls => false,
-            ConnectionSecurity::Starttls => true,
-            ConnectionSecurity::Auto => cfg.smtp_port != 465,
-        };
-        if starttls {
-            let greeting = read_smtp_response(&mut tcp, "greeting").await?;
-            expect_smtp_status(&greeting, "220", "greeting")?;
-            tcp.write_all(b"EHLO flectar.local\r\n")
-                .await
-                .map_err(|error| CoreError::Smtp(format!("SMTP EHLO: {error}")))?;
-            let capabilities = read_smtp_response(&mut tcp, "EHLO").await?;
-            expect_smtp_status(&capabilities, "250", "EHLO")?;
-            if !capabilities.lines().any(|line| {
-                line.get(4..)
-                    .and_then(|text| text.split_ascii_whitespace().next())
-                    .is_some_and(|capability| capability.eq_ignore_ascii_case("STARTTLS"))
-            }) {
-                return Err(CoreError::Tls(format!(
-                    "SMTP {}:{} does not advertise STARTTLS",
+                CoreError::Smtp(format!(
+                    "could not connect to {}:{}: {error}",
                     cfg.smtp_host, cfg.smtp_port
-                )));
-            }
-            tcp.write_all(b"STARTTLS\r\n")
-                .await
-                .map_err(|error| CoreError::Smtp(format!("SMTP STARTTLS: {error}")))?;
-            let response = read_smtp_response(&mut tcp, "STARTTLS").await?;
-            expect_smtp_status(&response, "220", "STARTTLS")?;
-        }
-
-        let server_name = rustls::pki_types::ServerName::try_from(cfg.smtp_host.clone())
-            .map_err(|_| CoreError::Tls(format!("invalid SMTP hostname: {}", cfg.smtp_host)))?;
-        let tls =
-            crate::imap::account_tls_connector(&cfg.settings.connection.trusted_certificate_pem)?
-                .connect(server_name, tcp)
-                .await
-                .map_err(|error| {
-                    CoreError::Tls(format!("SMTP {}:{}: {error}", cfg.smtp_host, cfg.smtp_port))
-                })?;
-        let greeting = if starttls {
-            b"220 Flectar STARTTLS ready\r\n".as_slice()
-        } else {
-            b"".as_slice()
+                ))
+            })?;
+        let (stream, greeting) = match security {
+            ConnectionSecurity::Tls => (tls_handshake(cfg, tcp).await?, b"".as_slice()),
+            ConnectionSecurity::Starttls => (
+                start_tls(cfg, tcp).await?,
+                b"220 Flectar STARTTLS ready\r\n".as_slice(),
+            ),
+            ConnectionSecurity::None => (MailStream::Plain(tcp), b"".as_slice()),
         };
+        let encrypted = stream.is_encrypted();
         let mut connection = AsyncSmtpConnection::connect_with_transport(
-            Box::new(VerifiedSmtpStream {
-                inner: tls,
-                greeting,
-            }),
+            Box::new(SmtpStream::new(stream, greeting)),
             &ClientId::default(),
         )
         .await
         .map_err(|error| map_smtp_error(cfg, error))?;
         let (credentials, mechanisms) = smtp_auth(auth, &cfg.username);
+        // Servers commonly offer sign-in only after STARTTLS. Say so instead
+        // of reporting a failed sign-in.
+        if !encrypted
+            && !mechanisms
+                .iter()
+                .any(|mechanism| connection.server_info().supports_auth_mechanism(*mechanism))
+        {
+            connection.abort().await;
+            return Err(CoreError::Smtp(format!(
+                "{}:{} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS.",
+                cfg.smtp_host, cfg.smtp_port
+            )));
+        }
         connection
             .auth(&mechanisms, &credentials)
             .await
@@ -284,7 +306,7 @@ async fn imported_certificate_connection(
         Ok(connection)
     };
 
-    tokio::time::timeout(SMTP_TIMEOUT, connect)
+    tokio::time::timeout(SMTP_TIMEOUT, open)
         .await
         .map_err(|_| {
             CoreError::Smtp(format!(
@@ -330,42 +352,23 @@ pub async fn send_raw(
         "smtp send_raw: connecting to relay",
     );
     let message = crate::mail_security::without_bcc_for_delivery(raw)?;
-    if cfg.settings.connection.trusted_certificate_pem.is_empty() {
-        build_transport(cfg, auth)?
-            .send_raw(&envelope, &message)
-            .await
-            .map_err(|error| map_smtp_error(cfg, error))?;
-    } else {
-        let mut connection = imported_certificate_connection(cfg, auth).await?;
-        connection
-            .send(&envelope, &message)
-            .await
-            .map_err(|error| map_smtp_error(cfg, error))?;
-        connection.abort().await;
-    }
+    let mut connection = connect(cfg, auth).await?;
+    connection
+        .send(&envelope, &message)
+        .await
+        .map_err(|error| map_smtp_error(cfg, error))?;
+    // The message is accepted; a failed QUIT changes nothing about that.
+    connection.quit().await.ok();
     Ok(())
 }
 
 /// Cheap connectivity/auth probe used by test_connection.
 pub async fn test_connection(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<()> {
-    let ok = if cfg.settings.connection.trusted_certificate_pem.is_empty() {
-        build_transport(cfg, auth)?
-            .test_connection()
-            .await
-            .map_err(|error| map_smtp_error(cfg, error))?
-    } else {
-        use lettre::transport::smtp::commands::Noop;
-        let mut connection = imported_certificate_connection(cfg, auth).await?;
-        connection
-            .command(Noop)
-            .await
-            .map_err(|error| map_smtp_error(cfg, error))?;
-        connection.quit().await.ok();
-        true
-    };
-    if ok {
-        Ok(())
-    } else {
-        Err(CoreError::Smtp("connection test failed".into()))
-    }
+    let mut connection = connect(cfg, auth).await?;
+    connection
+        .command(Noop)
+        .await
+        .map_err(|error| map_smtp_error(cfg, error))?;
+    connection.quit().await.ok();
+    Ok(())
 }

@@ -1,0 +1,53 @@
+import { TypeScale } from "../typography.slint";
+
+// A label a message carries. The message list and the reading pane show the
+// same chip; the list's denser rows take the compact size.
+export component LabelChip inherits Rectangle {
+    in property <string> name;
+    in property <bool> name-has-emoji: false;
+    // Gmail labels are tags; other accounts file labels like folders.
+    in property <bool> use-label-icon: false;
+    in property <color> label-color;
+    in property <color> text-color;
+    in property <color> chip-border-color;
+    in property <bool> compact: false;
+    // The width that shows the whole name, and the least that still shows
+    // its start.
+    out property <length> natural-width: chip-name.x + chip-name.preferred-width + (root.compact ? 4px : 5px);
+    out property <length> least-width: min(root.natural-width, chip-name.x + 2.5rem + (root.compact ? 4px : 5px));
+
+    min-width: root.natural-width;
+    preferred-width: root.natural-width;
+    max-width: 180px;
+    // Grows with the platform font instead of cutting the name off.
+    height: root.compact ? max(20px, chip-name.preferred-height + 2px) : max(24px, chip-name.preferred-height + 4px);
+    border-radius: root.compact ? 6px : 8px;
+    border-width: 1px;
+    border-color: root.chip-border-color;
+    background: root.label-color.transparentize(0.88);
+
+    Image {
+        x: root.compact ? 5px : 7px;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        source: root.use-label-icon
+            ? @image-url("../icons/lucide/filled/tag.svg")
+            : @image-url("../icons/lucide/filled/file-directory.svg");
+        colorize: root.label-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+    chip-name := Text {
+        x: root.compact ? 21px : 23px;
+        width: parent.width - self.x - 4px;
+        height: parent.height;
+        text: root.name;
+        color: root.text-color;
+        font-size: TypeScale.caption;
+        font-weight: 600;
+        font-family: root.name-has-emoji ? "Noto Emoji" : "";
+        overflow: elide;
+        vertical-alignment: center;
+    }
+}

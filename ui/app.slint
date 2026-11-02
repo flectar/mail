@@ -6,6 +6,8 @@ export { MailAttachments, MailAttachment } from "models.slint";
 export { ZoomApi } from "components/zoom-controls.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
+export { AppIcon, AppIconVariant } from "app-icon.slint";
+import { AppIcon } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
@@ -17,11 +19,12 @@ export { AppTheme, MotionSettings, ThemeUtilities } from "design-system.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { Button } from "components/button.slint";
 import { LoadingSkeletonBlock } from "components/loading-skeleton.slint";
-import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
+import { AccountRow, CalendarAgendaRow, CalendarAgendaFilterRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ComposeAttachment, ComposeContact, ComposeEditorTile, ContactSidebarRow, ContactRow, ContactSyncState, ContactValueRow, EmailLink, EmailRow, EmailTemplateRow, EmailTile, LocalizedMessage, MailListEntry, MailProfileRow, ProfileMemberRow, SidebarRow, MailLabelRow, StorageUsageRow, ThreadMessageRow } from "models.slint";
 export { EmailReader, ReaderCaret, ReaderImage, ReaderItem, MailDragApi } from "models.slint";
 export { MailListNavigation, MailNavigationTarget } from "models.slint";
 export { ThreadMessageRow, StorageUsageRow } from "models.slint";
 export { CalendarAgendaNavigation } from "components/calendar-agenda.slint";
+export { KeyboardKeys, KeyChord } from "components/kbd.slint";
 import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail, WindowTopBar } from "components/workspace-navigation.slint";
 export { TabsUi, TabRow } from "components/workspace-navigation.slint";
@@ -33,7 +36,12 @@ import { FolderDialog } from "dialogs/folder-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
-export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportProfileRow } from "dialogs/import-dialog.slint";
+export { LocalMailUi } from "local-mail.slint";
+export { Numbers } from "numbers.slint";
+import { LocalMailUi } from "local-mail.slint";
+export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
+export { ThemeDraft } from "components/theme-editor.slint";
+import { ThemeDraft } from "components/theme-editor.slint";
 import { MailView } from "views/mail-view.slint";
 export { MessageColors } from "message-colors.slint";
 export { FilesUi, FileRow, OperationRow } from "views/files-view.slint";
@@ -41,15 +49,22 @@ import { FilesView, FilesUi } from "views/files-view.slint";
 import { ContactsView } from "views/contacts-view.slint";
 import { OnboardingView } from "views/onboarding-view.slint";
 
-// Rust view-models call this global for the small amount of date/status text
+// Rust view-models call this global for the date vocabulary and status text
 // that must be materialized before it enters a Slint model. Keeping the
 // translations here makes those strings part of the same bundled catalog as
 // the declarative UI.
 export global I18n {
-    pure callback month-name(int, bool) -> string;
-    pure callback weekday-short(int) -> string;
-    pure callback weekday-name(int) -> string;
-    pure callback agenda-date-label(int, int, int) -> string;
+    // Date vocabulary and patterns for src/date_format.rs. Patterns use CLDR
+    // date field symbols: y year, M month (MMM abbreviated, MMMM full),
+    // LLLL standalone month, d day, E weekday (EEEE full), a AM/PM, h and H
+    // 12- and 24-hour hours, m minutes. Text in single quotes is literal.
+    pure callback date-month(int, string) -> string;
+    pure callback date-weekday(int, bool) -> string;
+    pure callback date-day-period(bool) -> string;
+    pure callback date-yesterday() -> string;
+    pure callback date-pattern(string) -> string;
+    pure callback date-range(string, string) -> string;
+    pure callback date-at-time(string, string) -> string;
     pure callback calendar-all-day() -> string;
     pure callback untitled-event() -> string;
     pure callback no-contact-history() -> string;
@@ -57,7 +72,7 @@ export global I18n {
     pure callback new-contact-entry() -> string;
     pure callback no-connected-account() -> string;
     pure callback interaction-count(int) -> string;
-    pure callback last-contacted(int, int, int) -> string;
+    pure callback last-contacted(string) -> string;
     pure callback loading-local-data() -> string;
     pure callback local-data-ready() -> string;
     pure callback local-data-unavailable(string) -> string;
@@ -76,44 +91,84 @@ export global I18n {
     pure callback ui-message-compose(string, string, string, string) -> string;
     pure callback ui-message-oauth(string, string, string, string) -> string;
 
-    month-name(month, short) => {
-        if (month == 1) { return short ? @tr("Jan") : @tr("January"); }
-        if (month == 2) { return short ? @tr("Feb") : @tr("February"); }
-        if (month == 3) { return short ? @tr("Mar") : @tr("March"); }
-        if (month == 4) { return short ? @tr("Apr") : @tr("April"); }
-        if (month == 5) { return @tr("May"); }
-        if (month == 6) { return short ? @tr("Jun") : @tr("June"); }
-        if (month == 7) { return short ? @tr("Jul") : @tr("July"); }
-        if (month == 8) { return short ? @tr("Aug") : @tr("August"); }
-        if (month == 9) { return short ? @tr("Sep") : @tr("September"); }
-        if (month == 10) { return short ? @tr("Oct") : @tr("October"); }
-        if (month == 11) { return short ? @tr("Nov") : @tr("November"); }
-        if (month == 12) { return short ? @tr("Dec") : @tr("December"); }
+    date-month(month, form) => {
+        if (form == "abbreviated") {
+            if (month == 1) { return @tr("abbreviated month in a date" => "Jan"); }
+            if (month == 2) { return @tr("abbreviated month in a date" => "Feb"); }
+            if (month == 3) { return @tr("abbreviated month in a date" => "Mar"); }
+            if (month == 4) { return @tr("abbreviated month in a date" => "Apr"); }
+            if (month == 5) { return @tr("abbreviated month in a date" => "May"); }
+            if (month == 6) { return @tr("abbreviated month in a date" => "Jun"); }
+            if (month == 7) { return @tr("abbreviated month in a date" => "Jul"); }
+            if (month == 8) { return @tr("abbreviated month in a date" => "Aug"); }
+            if (month == 9) { return @tr("abbreviated month in a date" => "Sep"); }
+            if (month == 10) { return @tr("abbreviated month in a date" => "Oct"); }
+            if (month == 11) { return @tr("abbreviated month in a date" => "Nov"); }
+            if (month == 12) { return @tr("abbreviated month in a date" => "Dec"); }
+        }
+        if (form == "wide") {
+            if (month == 1) { return @tr("month in a date" => "January"); }
+            if (month == 2) { return @tr("month in a date" => "February"); }
+            if (month == 3) { return @tr("month in a date" => "March"); }
+            if (month == 4) { return @tr("month in a date" => "April"); }
+            if (month == 5) { return @tr("month in a date" => "May"); }
+            if (month == 6) { return @tr("month in a date" => "June"); }
+            if (month == 7) { return @tr("month in a date" => "July"); }
+            if (month == 8) { return @tr("month in a date" => "August"); }
+            if (month == 9) { return @tr("month in a date" => "September"); }
+            if (month == 10) { return @tr("month in a date" => "October"); }
+            if (month == 11) { return @tr("month in a date" => "November"); }
+            if (month == 12) { return @tr("month in a date" => "December"); }
+        }
+        if (month == 1) { return @tr("month on its own" => "January"); }
+        if (month == 2) { return @tr("month on its own" => "February"); }
+        if (month == 3) { return @tr("month on its own" => "March"); }
+        if (month == 4) { return @tr("month on its own" => "April"); }
+        if (month == 5) { return @tr("month on its own" => "May"); }
+        if (month == 6) { return @tr("month on its own" => "June"); }
+        if (month == 7) { return @tr("month on its own" => "July"); }
+        if (month == 8) { return @tr("month on its own" => "August"); }
+        if (month == 9) { return @tr("month on its own" => "September"); }
+        if (month == 10) { return @tr("month on its own" => "October"); }
+        if (month == 11) { return @tr("month on its own" => "November"); }
+        if (month == 12) { return @tr("month on its own" => "December"); }
         return "";
     }
 
-    weekday-short(day) => {
-        if (day == 0) { return @tr("Mon"); }
-        if (day == 1) { return @tr("Tue"); }
-        if (day == 2) { return @tr("Wed"); }
-        if (day == 3) { return @tr("Thu"); }
-        if (day == 4) { return @tr("Fri"); }
-        if (day == 5) { return @tr("Sat"); }
-        return @tr("Sun");
+    date-weekday(day, abbreviated) => {
+        if (day == 0) { return abbreviated ? @tr("Mon") : @tr("Monday"); }
+        if (day == 1) { return abbreviated ? @tr("Tue") : @tr("Tuesday"); }
+        if (day == 2) { return abbreviated ? @tr("Wed") : @tr("Wednesday"); }
+        if (day == 3) { return abbreviated ? @tr("Thu") : @tr("Thursday"); }
+        if (day == 4) { return abbreviated ? @tr("Fri") : @tr("Friday"); }
+        if (day == 5) { return abbreviated ? @tr("Sat") : @tr("Saturday"); }
+        return abbreviated ? @tr("Sun") : @tr("Sunday");
     }
 
-    weekday-name(day) => {
-        if (day == 0) { return @tr("Monday"); }
-        if (day == 1) { return @tr("Tuesday"); }
-        if (day == 2) { return @tr("Wednesday"); }
-        if (day == 3) { return @tr("Thursday"); }
-        if (day == 4) { return @tr("Friday"); }
-        if (day == 5) { return @tr("Saturday"); }
-        return @tr("Sunday");
+    date-day-period(pm) => {
+        return pm ? @tr("time of day" => "PM") : @tr("time of day" => "AM");
     }
-    agenda-date-label(weekday, day, month) => {
-        return @tr("{} · {} {}", root.weekday-name(weekday), day, root.month-name(month, false));
+
+    date-yesterday() => { return @tr("Yesterday"); }
+
+    date-pattern(key) => {
+        if (key == "short-day-month") { return @tr("date pattern (CLDR): day and month of recent mail in lists" => "MMM d"); }
+        if (key == "short-date") { return @tr("date pattern (CLDR): date of older mail in lists, keep it short" => "MMM d, y"); }
+        if (key == "date") { return @tr("date pattern (CLDR): a date on its own" => "MMM d, y"); }
+        if (key == "weekday-date") { return @tr("date pattern (CLDR): a date with its weekday" => "EEE, MMM d, y"); }
+        if (key == "weekday-day-month") { return @tr("date pattern (CLDR): day heading in the agenda" => "EEEE, MMMM d"); }
+        if (key == "month-year") { return @tr("date pattern (CLDR): month heading, LLLL is the month name on its own" => "LLLL y"); }
+        if (key == "same-month-start") { return @tr("date pattern (CLDR): first date of a range within one month" => "MMMM d"); }
+        if (key == "same-month-end") { return @tr("date pattern (CLDR): last date of a range within one month" => "d, y"); }
+        if (key == "same-year-start") { return @tr("date pattern (CLDR): first date of a range within one year" => "MMM d"); }
+        if (key == "same-year-end") { return @tr("date pattern (CLDR): last date of a range within one year" => "MMM d, y"); }
+        if (key == "time-24") { return @tr("time pattern (CLDR): 24-hour clock" => "HH:mm"); }
+        if (key == "time-12") { return @tr("time pattern (CLDR): 12-hour clock, a is AM or PM" => "h:mm a"); }
+        return @tr("time pattern (CLDR): whole hour on a 12-hour clock" => "h a");
     }
+
+    date-range(start, end) => { return @tr("date range" => "{0} – {1}", start, end); }
+    date-at-time(date, time) => { return @tr("date and time" => "{0} at {1}", date, time); }
 
     calendar-all-day() => { return @tr("All day"); }
     untitled-event() => { return @tr("(untitled event)"); }
@@ -124,9 +179,7 @@ export global I18n {
     interaction-count(count) => {
         return @tr("{n} interaction" | "{n} interactions" % count);
     }
-    last-contacted(month, day, year) => {
-        return @tr("Last contacted {} {}, {}", root.month-name(month, true), day, year);
-    }
+    last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
     local-data-ready() => { return @tr("Local data ready."); }
     local-data-unavailable(error) => { return @tr("Local data is unavailable: {}", error); }
@@ -199,9 +252,15 @@ export global I18n {
         if (key == "Language updated for this session.") { return @tr("Language updated for this session."); }
         if (key == "Language preference saved.") { return @tr("Language preference saved."); }
         if (key == "Could not save language: {}") { return @tr("Could not save language: {}", argument); }
+        if (key == "Time format updated for this session.") { return @tr("Time format updated for this session."); }
+        if (key == "Time format preference saved.") { return @tr("Time format preference saved."); }
+        if (key == "Could not save time format: {}") { return @tr("Could not save time format: {}", argument); }
         if (key == "Sidebar icon style updated for this session.") { return @tr("Sidebar icon style updated for this session."); }
         if (key == "Sidebar icon preference saved.") { return @tr("Sidebar icon preference saved."); }
         if (key == "Could not save sidebar icon preference: {}") { return @tr("Could not save sidebar icon preference: {}", argument); }
+        if (key == "App icon updated for this session.") { return @tr("App icon updated for this session."); }
+        if (key == "App icon saved.") { return @tr("App icon saved."); }
+        if (key == "Could not save app icon: {}") { return @tr("Could not save app icon: {}", argument); }
         if (key == "Avatar preference updated for this session.") { return @tr("Avatar preference updated for this session."); }
         if (key == "Avatar preference saved.") { return @tr("Avatar preference saved."); }
         if (key == "Could not save avatar preference: {}") { return @tr("Could not save avatar preference: {}", argument); }
@@ -222,6 +281,7 @@ export global I18n {
         if (key == "Could not update account profile: {}") { return @tr("Could not update account profile: {}", argument); }
         if (key == "Profile deleted.") { return @tr("Profile deleted."); }
         if (key == "Could not delete profile: {}") { return @tr("Could not delete profile: {}", argument); }
+        if (key == "Could not switch profile: {}") { return @tr("Could not switch profile: {}", argument); }
         if (key == "Marker preference is active for this session.") { return @tr("Marker preference is active for this session."); }
         if (key == "Mail-list marker preference saved.") { return @tr("Mail-list marker preference saved."); }
         if (key == "Could not save mail-list marker preference: {}") { return @tr("Could not save mail-list marker preference: {}", argument); }
@@ -257,6 +317,11 @@ export global I18n {
 
     ui-message-account(key, argument, second-argument, third-argument) => {
         if (key == "Database snapshot exported to {}.") { return @tr("Database snapshot exported to {}.", argument); }
+        if (key == "Choose where to export the mail") { return @tr("Choose where to export the mail"); }
+        if (key == "Exporting mail…") { return @tr("Exporting mail…"); }
+        if (key == "Mail exported to {}.") { return @tr("Mail exported to {}.", argument); }
+        if (key == "Mail exported to {}. Some messages could not be found on this device or the mail server.") { return @tr("Mail exported to {}. Some messages could not be found on this device or the mail server.", argument); }
+        if (key == "Could not export mail: {}") { return @tr("Could not export mail: {}", argument); }
         if (key == "Could not export database snapshot: {}") { return @tr("Could not export database snapshot: {}", argument); }
         if (key == "Account order saved.") { return @tr("Account order saved."); }
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
@@ -266,6 +331,11 @@ export global I18n {
         if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
         if (key == "Could not remove account: {}") { return @tr("Could not remove account: {}", argument); }
         if (key == "Removing account…") { return @tr("Removing account…"); }
+        if (key == "Deleting mail on this device…") { return @tr("Deleting mail on this device…"); }
+        if (key == "Mail on this device deleted.") { return @tr("Mail on this device deleted."); }
+        if (key == "Mail on this device deleted. Mail refresh will retry.") { return @tr("Mail on this device deleted. Mail refresh will retry."); }
+        if (key == "Mail on this device deleted; local cleanup needs a retry: {}") { return @tr("Mail on this device deleted; local cleanup needs a retry: {}", argument); }
+        if (key == "Could not delete mail on this device: {}") { return @tr("Could not delete mail on this device: {}", argument); }
         if (key == "Synchronizing account…") { return @tr("Synchronizing account…"); }
         if (key == "Could not update mail history: {}") { return @tr("Could not update mail history: {}", argument); }
         if (key == "Connected {}. Initial sync is running in the background.") { return @tr("Connected {}. Initial sync is running in the background.", argument); }
@@ -280,6 +350,8 @@ export global I18n {
         if (key == "Could not update calendar sync: {}") { return @tr("Could not update calendar sync: {}", argument); }
         if (key == "CalDAV connected and initial sync started.") { return @tr("CalDAV connected and initial sync started."); }
         if (key == "Could not connect CalDAV: {}") { return @tr("Could not connect CalDAV: {}", argument); }
+        if (key == "Calendar removed.") { return @tr("Calendar removed."); }
+        if (key == "Could not remove calendar: {}") { return @tr("Could not remove calendar: {}", argument); }
         if (key == "CardDAV connected and initial sync started.") { return @tr("CardDAV connected and initial sync started."); }
         if (key == "Could not connect CardDAV: {}") { return @tr("Could not connect CardDAV: {}", argument); }
         if (key == "CardDAV sync enabled.") { return @tr("CardDAV sync enabled."); }
@@ -294,9 +366,9 @@ export global I18n {
         if (key == "Connect an account before creating a backup.") { return @tr("Connect an account before creating a backup."); }
         if (key == "Export Flectar Mail account backup") { return @tr("Export Flectar Mail account backup"); }
         if (key == "Flectar Mail backup") { return @tr("Flectar Mail backup"); }
-        if (key == "Import accounts") { return @tr("Import accounts"); }
-        if (key == "Account settings") { return @tr("Account settings"); }
-        if (key == "Choose a Thunderbird profile folder") { return @tr("Choose a Thunderbird profile folder"); }
+        if (key == "Import accounts and mail") { return @tr("Import accounts and mail"); }
+        if (key == "Choose a Thunderbird profile or a folder of mail") { return @tr("Choose a Thunderbird profile or a folder of mail"); }
+        if (key == "Imported messages") { return @tr("Imported messages"); }
         if (key == "Choose where to export the database snapshot") { return @tr("Choose where to export the database snapshot"); }
         if (key == "Backup exported. Passwords and OAuth tokens were not included.") { return @tr("Backup exported. Passwords and OAuth tokens were not included."); }
         if (key == "Could not export backup: {}") { return @tr("Could not export backup: {}", argument); }
@@ -321,8 +393,7 @@ export global I18n {
     }
 
     ui-message-contacts(key, argument, second-argument, third-argument) => {
-        if (key == "Add an email address, then save the contact.") { return @tr("Add an email address, then save the contact."); }
-        if (key == "Enter a valid email address before saving.") { return @tr("Enter a valid email address before saving."); }
+        if (key == "Enter a name, email address, or phone number, then save.") { return @tr("Enter a name, email address, or phone number, then save."); }
         if (key == "Could not save: contact storage is unavailable.") { return @tr("Could not save: contact storage is unavailable."); }
         if (key == "Could not save contact: {}") { return @tr("Could not save contact: {}", argument); }
         if (key == "Contact saved.") { return @tr("Contact saved."); }
@@ -349,7 +420,7 @@ export global I18n {
         if (key == "Could not delete event: {}") { return @tr("Could not delete event: {}", argument); }
         if (key == "Event deleted, but refresh failed: {}") { return @tr("Event deleted, but refresh failed: {}", argument); }
         if (key == "Event deleted.") { return @tr("Event deleted."); }
-        if (key == "Use YYYY-MM-DD and a 24-hour time such as 09:30.") { return @tr("Use YYYY-MM-DD and a 24-hour time such as 09:30."); }
+        if (key == "Use YYYY-MM-DD for the date and a time such as {}.") { return @tr("Use YYYY-MM-DD for the date and a time such as {}.", argument); }
         if (key == "Event duration must be a number of minutes.") { return @tr("Event duration must be a number of minutes."); }
         if (key == "Add a title and choose a duration from 15 to 1440 minutes.") { return @tr("Add a title and choose a duration from 15 to 1440 minutes."); }
         if (key == "That local time does not exist in the current time zone.") { return @tr("That local time does not exist in the current time zone."); }
@@ -379,6 +450,10 @@ export global I18n {
         if (key == "Updating Sent copy settings…") { return @tr("Updating Sent copy settings…"); }
         if (key == "Sent copy settings updated.") { return @tr("Sent copy settings updated."); }
         if (key == "Could not update Sent copy settings: {}") { return @tr("Could not update Sent copy settings: {}", argument); }
+        if (key == "Server mail settings require local mail data.") { return @tr("Server mail settings require local mail data."); }
+        if (key == "Updating server mail settings…") { return @tr("Updating server mail settings…"); }
+        if (key == "Server mail settings updated.") { return @tr("Server mail settings updated."); }
+        if (key == "Could not update server mail settings: {}") { return @tr("Could not update server mail settings: {}", argument); }
         if (key == "Mail history requires local mail data.") { return @tr("Mail history requires local mail data."); }
         if (key == "Updating mail history…") { return @tr("Updating mail history…"); }
         if (key == "Remote images are unavailable in this minimal build.") { return @tr("Remote images are unavailable in this minimal build."); }
@@ -430,11 +505,21 @@ export global I18n {
         if (key == "Could not open draft: invalid account identifier") { return @tr("Could not open draft: invalid account identifier"); }
         if (key == "Connected account") { return @tr("Connected account"); }
         if (key == "Could not open composer: {}") { return @tr("Could not open composer: {}", argument); }
+        if (key == "Add an account to send mail.") { return @tr("Add an account to send mail."); }
+        if (key == "On this device") { return @tr("On this device"); }
         if (key == "Could not open composer: invalid account identifier") { return @tr("Could not open composer: invalid account identifier"); }
         return "";
     }
 
     ui-message-compose(key, argument, second-argument, third-argument) => {
+        // Reply and forward quotation headers, written into the draft.
+        if (key == "On {}, {} wrote:") { return @tr("On {}, {} wrote:", argument, second-argument); }
+        if (key == "{} wrote:") { return @tr("{} wrote:", argument); }
+        if (key == "Forwarded message") { return @tr("Forwarded message"); }
+        if (key == "From: {}") { return @tr("forwarded message header" => "From: {}", argument); }
+        if (key == "Date: {}") { return @tr("forwarded message header" => "Date: {}", argument); }
+        if (key == "Subject: {}") { return @tr("forwarded message header" => "Subject: {}", argument); }
+        if (key == "To: {}") { return @tr("forwarded message header" => "To: {}", argument); }
         if (key == "Attach files to this email") { return @tr("Attach files to this email"); }
         if (key == "Could not add attachments: {}") { return @tr("Could not add attachments: {}", argument); }
         if (key == "Added 1 attachment.") { return @tr("Added 1 attachment."); }
@@ -461,7 +546,9 @@ export global I18n {
         if (key == "Email template is no longer available.") { return @tr("Email template is no longer available."); }
         if (key == "Email template inserted.") { return @tr("Email template inserted."); }
         if (key == "Email template inserted, but its usage could not be saved: {}") { return @tr("Email template inserted, but its usage could not be saved: {}", argument); }
+        if (key == "Choose a supported account type and connection security.") { return @tr("Choose a supported account type and connection security."); }
         if (key == "IMAP port must be between 1 and 65535.") { return @tr("IMAP port must be between 1 and 65535."); }
+        if (key == "POP3 port must be between 1 and 65535.") { return @tr("POP3 port must be between 1 and 65535."); }
         if (key == "SMTP port must be between 1 and 65535.") { return @tr("SMTP port must be between 1 and 65535."); }
         if (key == "Local mail data is unavailable. Retry startup.") { return @tr("Local mail data is unavailable. Retry startup."); }
         if (key == "Discovering JMAP and checking capabilities…") { return @tr("Discovering JMAP and checking capabilities…"); }
@@ -469,8 +556,8 @@ export global I18n {
         if (key == "Could not load account preferences: {}") { return @tr("Could not load account preferences: {}", argument); }
         if (key == "Your edited signature was preserved. Choose No signature to keep it as message text before inserting another.") { return @tr("Your edited signature was preserved. Choose No signature to keep it as message text before inserting another."); }
         if (key == "Certificate import failed: {}") { return @tr("Certificate import failed: {}", argument); }
-        if (key == "Paste the PEM certificate into the certificate field.") { return @tr("Paste the PEM certificate into the certificate field."); }
         if (key == "Testing IMAP and SMTP connections…") { return @tr("Testing IMAP and SMTP connections…"); }
+        if (key == "Testing POP3 and SMTP connections…") { return @tr("Testing POP3 and SMTP connections…"); }
         return "";
     }
 
@@ -499,9 +586,7 @@ export global I18n {
 
 export component AppWindow inherits Window {
     title: @tr("Flectar Mail");
-    // Window managers show this at 256 px at most, and the decoded pixels stay
-    // resident for the life of the process, including while in the tray.
-    icon: @image-url("../resources/app-icon/flectar-mail-window.png");
+    icon: AppIcon.window-image(AppIcon.variant);
     // Windows keeps its native frame and macOS its traffic lights in the
     // integrated frame; only Linux removes the window manager's decorations.
     no-frame: WindowChrome.integrated && WindowChrome.platform == "linux";
@@ -551,14 +636,22 @@ export component AppWindow inherits Window {
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
     callback clear_download_directory();
+    // Save a profile's name and color, with the checked `profile_members`
+    // as its accounts.
     callback save_mail_profile(string, string, color) -> string;
+    callback prepare_profile_members(string, int);
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
     callback delete_mail_profile(string);
+    // Show only this profile's accounts in the mail view; empty shows all.
+    callback select_mail_profile(string);
+    // Rust: the active profile or its accounts changed.
+    callback mail_profile_changed();
     callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
     callback save_workspace_list_pane_width(length);
     callback save_language(string);
+    callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
@@ -599,15 +692,19 @@ export component AppWindow inherits Window {
     callback reorder_account(string, int, bool);
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
+    callback save_account_keep_on_server(int, string);
     callback connect_account_calendar(int);
-    callback set_account_calendar_enabled(int, bool);
-    callback connect_caldav(int, string, string, string);
+    // (account, connection or -1 for a new one, url, username, password)
+    callback connect_caldav(int, int, string, string, string);
+    callback set_calendar_connection_enabled(int, bool);
+    callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
     callback export_account_backup();
     callback import_accounts();
     callback export_database_snapshot();
+    callback export_device_mail(int);
     callback delete_all_data();
     callback load_storage_usage();
     callback cancel_storage_usage();
@@ -635,7 +732,13 @@ export component AppWindow inherits Window {
     callback select-contact-scope(string);
     callback toggle-contact-section(string, bool);
     callback new-contact();
-    callback save-contact(int, string, string, string, string, string, string, string, string, string, string, bool);
+    callback resolve-contact-conflict(bool);
+    pure callback usable-contact-email(string) -> bool;
+    usable-contact-email(email) => { false }
+    callback add-contact-value(string);
+    callback prefer-contact-value(string,int);
+    callback remove-contact-value(string,int);
+    callback save-contact(int, string, string, string, string, string, string, string, string, bool);
     callback delete-contact(int);
     callback load-contacts();
     callback load-more-contacts();
@@ -661,6 +764,8 @@ export component AppWindow inherits Window {
     callback drain-contact-load-updates();
     callback drain-compose-send-updates();
     callback refresh-email-resources();
+    // Calendar connections changed state while Settings shows them.
+    callback reload-calendar-connections();
 
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> mail_list_entries: [];
@@ -674,7 +779,15 @@ export component AppWindow inherits Window {
     in property <int> selected_mail_label_count: 0;
     in property <bool> selected_account_uses_labels: false;
     in property <[AccountRow]> connected_accounts: [];
+    in property <bool> has_device_mail: false;
+    in property <bool> mail_export_running: false;
+    in property <LocalizedMessage> mail-export-message;
     in property <[MailProfileRow]> mail_profiles: [];
+    in property <[ProfileMemberRow]> profile_members: [];
+    // The profile the mail view shows; an empty id means every account.
+    in property <MailProfileRow> active_mail_profile;
+    // Set to open Settings' profile editor for a new profile.
+    in-out property <bool> new_profile_requested: false;
     // The saved visible page can paint before the core is safe to use. Keep
     // that presentation milestone separate from startup-ready, which guards
     // every callback that can touch local storage.
@@ -700,6 +813,14 @@ export component AppWindow inherits Window {
     in property <string> calendar_timezone: "";
     in property <[CalendarSourceRow]> calendar_sources: [];
     in property <[ContactRow]> contacts: [];
+    in-out property <[ContactValueRow]> contact-emails;
+    in-out property <[ContactValueRow]> contact-phones;
+    in property <bool> contact-read-only;
+    in property <string> contact-source;
+    in property <ContactSyncState> contact-sync;
+    in property <string> contact-sync-detail;
+    in property <image> contact-photo;
+    in property <bool> contact-has-photo;
     in property <[ContactSidebarRow]> contact_sidebar_rows: [];
     in-out property <string> contact_scope: "All contacts";
     in-out property <string> contact_search_query: "";
@@ -711,8 +832,6 @@ export component AppWindow inherits Window {
     in property <bool> contact_has_selection: false;
     in-out property <int> contact_id: -1;
     in-out property <string> contact_name: "";
-    in-out property <string> contact_email: "";
-    in-out property <string> contact_phone: "";
     in-out property <string> contact_company: "";
     in-out property <string> contact_job_title: "";
     in-out property <string> contact_website: "";
@@ -732,6 +851,8 @@ export component AppWindow inherits Window {
     in property <string> calendar_period_title: "";
     in property <string> calendar_week_label: "";
     in property <string> calendar_selected_date: "";
+    in property <string> calendar_selected_date_label: "";
+    in property <[string]> calendar_hour_labels: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
     in property <bool> calendar_selected_date_has_events: false;
     in-out property <bool> calendar_sidebar_collapsed: false;
     in-out property <string> calendar_view_mode: "week";
@@ -748,7 +869,7 @@ export component AppWindow inherits Window {
     in-out property <bool> mail_sidebar_collapsed: false;
     in-out property <bool> contacts_sidebar_collapsed: false;
     in property <string> unified_count: "";
-    in property <string> search_query: "";
+    in-out property <string> search_query: "";
     in property <string> search_filter: "All mail";
     in property <string> selected_sender: "";
     in property <string> selected_address: "";
@@ -797,7 +918,28 @@ export component AppWindow inherits Window {
     in-out property <length> email-scroll-document-height: 0px;
     in-out property <length> email-scroll-y: 0px;
     in-out property <bool> settings_open: false;
-    changed settings_open => { root.product-changed(root.active_view); }
+    changed settings_open => {
+        root.product-changed(root.active_view);
+        // Hiding Settings destroys the dialog before its own change handlers
+        // run, so an unsaved palette and open forms are discarded here. The
+        // dialog's private state starts over when it is created again.
+        if root.settings_open {
+            root.settings-shown();
+        } else {
+            ThemeDraft.revert();
+            root.account_form_open = false;
+            root.account_password = "";
+            root.caldav_account_id = -1;
+            root.caldav_connection_id = -1;
+            root.caldav_password = "";
+            root.carddav_account_id = -1;
+            root.carddav_password = "";
+            root.carddav_manage_existing = false;
+        }
+        TabsUi.navigated();
+    }
+    // Settings appeared, whichever way it was opened.
+    callback settings-shown();
     in-out property <string> active_view: "mail";
     callback product-changed(string);
     private property <string> mail-compact-page: "list";
@@ -806,8 +948,18 @@ export component AppWindow inherits Window {
     changed active_view => {
         if root.active_view != "mail" { MailAttachments.command("close", ""); }
         root.product-changed(root.active_view);
+        TabsUi.navigated();
     }
     in-out property <string> settings_tab: "General";
+    changed settings_tab => { TabsUi.navigated(); }
+    // The active tab saves where the mail view is once it settles.
+    changed selected_scope => { TabsUi.navigated(); }
+    changed search_query => { TabsUi.navigated(); }
+    changed search_filter => { TabsUi.navigated(); }
+    changed has_selected => { TabsUi.navigated(); }
+    changed selected_subject => { TabsUi.navigated(); }
+    changed calendar_selected_date => { TabsUi.navigated(); }
+    changed calendar_view_mode => { TabsUi.navigated(); }
     // Own scan lifetime here: the conditional SettingsDialog is destroyed on
     // close, so its own change handlers cannot reliably cancel a running scan.
     private property <bool> storage-page-open: root.settings_open && root.settings_tab == "Data";
@@ -827,6 +979,9 @@ export component AppWindow inherits Window {
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
     in-out property <string> language_mode: "system";
+    // "automatic" follows the regional clock; "12h" and "24h" fix it.
+    in-out property <string> time_format: "automatic";
+    in property <string> time_format_sample: "13:30";
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
@@ -890,18 +1045,18 @@ export component AppWindow inherits Window {
     in-out property <string> jmap_url: "";
     in-out property <bool> connect_calendar_on_add: true;
     in-out property <int> caldav_account_id: -1;
+    in-out property <int> caldav_connection_id: -1;
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
-    in-out property <bool> caldav_manage_existing: false;
     in property <bool> caldav_connecting: false;
     in-out property <int> carddav_account_id: -1;
     in-out property <string> carddav_url: "";
     in-out property <string> carddav_username: "";
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
-    in-out property <string> imap_security: "auto";
-    in-out property <string> smtp_security: "auto";
+    in-out property <string> incoming_security: "tls";
+    in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
     in property <string> oauth_authorization_url;
     in property <bool> oauth_browser_error;
@@ -923,8 +1078,8 @@ export component AppWindow inherits Window {
     }
 
     callback import_mail_certificate();
-    in-out property <string> imap_host: "";
-    in-out property <string> imap_port: "993";
+    in-out property <string> incoming_host: "";
+    in-out property <string> incoming_port: "993";
     in-out property <string> smtp_host: "";
     in-out property <string> smtp_port: "465";
     in-out property <string> google_client_id: "";
@@ -975,6 +1130,8 @@ export component AppWindow inherits Window {
     private property <color> secondary-text: AppTheme.secondary;
     private property <color> muted-text: AppTheme.muted;
     private property <color> faint-text: AppTheme.faint;
+    // Mail to show: an account's, or mail imported to this device alone.
+    private property <bool> has-mail: root.connected_accounts.length > 0 || LocalMailUi.account-id >= 0;
     // This content-driven breakpoint is the smallest width that can hold the
     // rail, folders, message list, and a useful reading pane simultaneously.
     private property <bool> compact-layout: root.width - root.safe-area-insets.left - root.safe-area-insets.right < 980px;
@@ -983,7 +1140,9 @@ export component AppWindow inherits Window {
     // Desktop windows with accounts show the tabs in a top bar above the
     // product rail; in the integrated frame it also holds the window
     // controls. Compact layouts navigate from the bottom bar.
-    private property <bool> top-bar: !root.compact-layout && root.connected_accounts.length > 0;
+    private property <bool> top-bar: !root.compact-layout && root.has-mail;
+    // A tone apart from the workspace, so the active tab can open into it.
+    private property <color> tab-strip-bg: AppTheme.sidebar-tint.mix(AppTheme.title, 0.94);
     changed top-bar => { root.sync-window-chrome(); }
     private property <length> content-x: root.safe-area-insets.left;
     private property <length> content-y: root.safe-area-insets.top + (root.top-bar ? WindowChrome.band-height : 0px);
@@ -1179,6 +1338,7 @@ export component AppWindow inherits Window {
         WindowChrome.full-screen = root.full-screen;
         WindowChrome.compact = root.compact-layout;
         WindowChrome.top-bar = root.top-bar;
+        AppTheme.top-bar = root.top-bar;
         TabsUi.enabled = root.top-bar;
     }
 
@@ -1201,7 +1361,7 @@ export component AppWindow inherits Window {
 
     // Account discovery is asynchronous. Paint a small initial view while
     // neither the cached mailbox nor the onboarding decision is available.
-    if !root.startup_ready && !root.startup_failed && root.connected_accounts.length == 0 : Rectangle {
+    if !root.startup_ready && !root.startup_failed && !root.has-mail : Rectangle {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;
@@ -1211,7 +1371,7 @@ export component AppWindow inherits Window {
         accessible-label: I18n.loading-local-data();
 
         VerticalLayout {
-            width: 240px.min(parent.width - 32px);
+            width: max(240px, self.preferred-width).min(parent.width - 32px);
             height: 92px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -1238,7 +1398,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    if root.connected_accounts.length > 0 : Rectangle {
+    if root.has-mail : Rectangle {
         // Do not construct the mailbox on a fresh profile. `visible: false`
         // retains the entire tree, and constructing it before the account
         // query touches code and assets that onboarding never needs.
@@ -1299,6 +1459,15 @@ export component AppWindow inherits Window {
             thread_messages: root.thread_messages;
             selected_thread_index: root.selected_thread_index;
             sidebar_rows: root.sidebar_rows;
+            mail_profiles: root.mail_profiles;
+            active_mail_profile: root.active_mail_profile;
+            account_count: root.connected_accounts.length;
+            select_mail_profile(id) => { root.select_mail_profile(id); }
+            create_mail_profile => {
+                root.settings_tab = "Accounts";
+                root.settings_open = true;
+                root.new_profile_requested = true;
+            }
             folder_filter_query <=> root.folder_filter_query;
             mail_labels: root.mail_labels;
             mail_label_results: root.mail_label_results;
@@ -1311,7 +1480,7 @@ export component AppWindow inherits Window {
             selected_scope_title: root.selected_scope_title;
             trash_view: root.trash_view;
             unified_count: root.unified_count;
-            search_query: root.search_query;
+            search_query <=> root.search_query;
             search_filter: root.search_filter;
             selected_sender: root.selected_sender;
             selected_address: root.selected_address;
@@ -1459,6 +1628,8 @@ export component AppWindow inherits Window {
             period-title: root.calendar_period_title;
             week-label: root.calendar_week_label;
             selected-date: root.calendar_selected_date;
+            selected-date-label: root.calendar_selected_date_label;
+            hour-labels: root.calendar_hour_labels;
             selected-date-has-events: root.calendar_selected_date_has_events;
             view-mode: root.calendar_view_mode;
             background-color: root.page-bg;
@@ -1511,7 +1682,7 @@ export component AppWindow inherits Window {
             contacts: root.contacts;
             sidebar-rows: root.contact_sidebar_rows;
             toggle-section(key, open) => { root.toggle-contact-section(key, open); }
-            query: root.contact_search_query;
+            query <=> root.contact_search_query;
             filter: root.contact_scope == "Favorites" ? "favorites"
                 : root.contact_scope == "Suggestions" ? "suggestions" : "all";
             selected-scope: root.contact_scope;
@@ -1525,8 +1696,6 @@ export component AppWindow inherits Window {
             has-selected: root.contact_has_selection;
             selected-id <=> root.contact_id;
             edit-name <=> root.contact_name;
-            edit-email <=> root.contact_email;
-            edit-phone <=> root.contact_phone;
             edit-company <=> root.contact_company;
             edit-job-title <=> root.contact_job_title;
             edit-website <=> root.contact_website;
@@ -1537,6 +1706,18 @@ export component AppWindow inherits Window {
             edit-favorite <=> root.contact_favorite;
             is-suggested: root.contact_is_suggested;
             edit-initials: root.contact_initials;
+            email-values <=> root.contact-emails;
+            phone-values <=> root.contact-phones;
+            add-value(kind) => { root.add-contact-value(kind); }
+            prefer-value(kind,index) => { root.prefer-contact-value(kind,index); }
+            remove-value(kind,index) => { root.remove-contact-value(kind,index); }
+            read-only: root.contact-read-only;
+            source-name: root.contact-source;
+            sync: root.contact-sync;
+            sync-detail: root.contact-sync-detail;
+            photo: root.contact-photo;
+            has-photo: root.contact-has-photo;
+            resolve-conflict(keep-local) => { root.resolve-contact-conflict(keep-local); }
             interaction-label: root.contact_interactions + (root.contact_last_interacted != "" ? " · " + root.contact_last_interacted : "");
             accent: root.accent;
             accent-soft: root.accent-soft;
@@ -1564,16 +1745,18 @@ export component AppWindow inherits Window {
                     : filter == "all" ? "All contacts" : filter);
             }
             new-contact => { root.new-contact(); }
-            save-contact(id, name, email, phone, company, job-title, website, birthday, address, notes, tags, favorite) => {
+            save-contact(id, name, company, job-title, website, birthday, address, notes, tags, favorite) => {
                 root.save-contact(
-                    id, name, email, phone, company, job-title, website,
-                    birthday, address, notes, tags, favorite
+                    id, name, company, job-title, website, birthday, address, notes, tags, favorite
                 );
             }
             delete-contact(id) => { root.delete-contact(id); }
+            usable-email(email) => { root.usable-contact-email(email) }
             compose-to-contact(email) => {
-                root.compose_to = email;
-                root.open_compose();
+                if root.usable-contact-email(email) {
+                    root.compose_to = email;
+                    root.open_compose();
+                }
             }
         }
         }
@@ -1645,6 +1828,7 @@ export component AppWindow inherits Window {
             calendar_event_title <=> root.calendar_event_title;
             calendar_event_date <=> root.calendar_event_date;
             calendar_event_time <=> root.calendar_event_time;
+            time-placeholder: root.time_format_sample;
             calendar_event_duration <=> root.calendar_event_duration;
             calendar_event_color <=> root.calendar_event_color;
             calendar-save-event(title, date, time, duration, color) => {
@@ -1665,7 +1849,12 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             connected_accounts: root.connected_accounts;
+            has_device_mail: root.has_device_mail;
+            mail_export_running: root.mail_export_running;
+            mail_export_status: I18n.ui-message(root.mail-export-message.key, root.mail-export-message.argument, root.mail-export-message.second_argument, root.mail-export-message.third_argument);
             mail_profiles: root.mail_profiles;
+            profile_members: root.profile_members;
+            new-profile-requested <=> root.new_profile_requested;
             custom_oauth_configured: root.custom_oauth_configured;
             google_oauth_available: root.google_oauth_available;
             microsoft_oauth_available: root.microsoft_oauth_available;
@@ -1675,7 +1864,7 @@ export component AppWindow inherits Window {
             account-transfer-supported: root.document_apis_supported;
             sync_in_progress: root.sync_in_progress;
             account_setup_in_progress: root.account_setup_in_progress;
-            imap_form_open <=> root.account_form_open;
+            account_form_open <=> root.account_form_open;
             oauth_in_progress: root.oauth_in_progress;
             oauth_settings_saving: root.oauth_settings_saving;
             sync_status: root.sync_status;
@@ -1694,7 +1883,9 @@ export component AppWindow inherits Window {
             muted-text: root.muted-text;
             page-bg: root.page-bg;
             secondary-text: root.secondary-text;
-            sidebar-bg: root.sidebar-bg;
+            // Under the tab strip, the sidebar shares the pages' raised
+            // surface, so the Settings tab opens into one color.
+            sidebar-bg: root.top-bar ? root.surface-raised : root.sidebar-bg;
             surface: root.surface;
             surface-raised: root.surface-raised;
             title-color: root.title-color;
@@ -1706,6 +1897,8 @@ export component AppWindow inherits Window {
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
+            time_format <=> root.time_format;
+            time_format_sample: root.time_format_sample;
             monochrome_sidebar_icons <=> root.monochrome_sidebar_icons;
             notifications_enabled <=> root.notifications_enabled;
             notification_sound_enabled <=> root.notification_sound_enabled;
@@ -1730,14 +1923,14 @@ export component AppWindow inherits Window {
             caldav_url <=> root.caldav_url;
             caldav_username <=> root.caldav_username;
             caldav_password <=> root.caldav_password;
-            caldav_manage_existing <=> root.caldav_manage_existing;
+            caldav_connection_id <=> root.caldav_connection_id;
             caldav_connecting: root.caldav_connecting;
             carddav_account_id <=> root.carddav_account_id;
             carddav_url <=> root.carddav_url;
             carddav_username <=> root.carddav_username;
             carddav_password <=> root.carddav_password;
             carddav_manage_existing <=> root.carddav_manage_existing;
-            imap_security <=> root.imap_security;
+            incoming_security <=> root.incoming_security;
             smtp_security <=> root.smtp_security;
             trusted_certificate_pem <=> root.trusted_certificate_pem;
             oauth_authorization_url: root.oauth_authorization_url;
@@ -1746,8 +1939,8 @@ export component AppWindow inherits Window {
             copy_oauth_link => { root.copy_oauth_link(); }
             submit_oauth_redirect(address) => { root.submit_oauth_redirect(address); }
             import_mail_certificate => { root.import_mail_certificate(); }
-            imap_host <=> root.imap_host;
-            imap_port <=> root.imap_port;
+            incoming_host <=> root.incoming_host;
+            incoming_port <=> root.incoming_port;
             smtp_host <=> root.smtp_host;
             smtp_port <=> root.smtp_port;
             google_client_id <=> root.google_client_id;
@@ -1786,6 +1979,9 @@ export component AppWindow inherits Window {
                 );
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
+            prepare_profile_members(profile-id, account-id) => {
+                root.prepare_profile_members(profile-id, account-id);
+            }
             save_mail_profile(profile-id, name, color) => {
                 return root.save_mail_profile(profile-id, name, color);
             }
@@ -1801,6 +1997,7 @@ export component AppWindow inherits Window {
             }
             save_workspace_layout(mode) => { root.save_workspace_layout(mode); }
             save_language(language) => { root.save_language(language); }
+            save_time_format(format) => { root.save_time_format(format); }
             save_sidebar_icon_style(monochrome) => { root.save_sidebar_icon_style(monochrome); }
             save_notification_settings(enabled, sound-enabled, scope) => {
                 root.save_notification_settings(enabled, sound-enabled, scope);
@@ -1817,8 +2014,8 @@ export component AppWindow inherits Window {
             sync_mail => { root.sync_mail(); }
             sync_account(account-id) => { root.sync_account(account-id); }
             delete_account(account-id) => { root.delete_account(account-id); }
-            add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
-                root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
+            add_password_account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port) => {
+                root.add_password_account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port);
             }
             suggest_account_settings(email) => { root.suggest_account_settings(email); }
             start_oauth(provider) => { root.start_oauth(provider); }
@@ -1834,15 +2031,18 @@ export component AppWindow inherits Window {
             reorder_account(source, target, after) => { root.reorder_account(source, target, after); }
             save_account_mail_history(account-id, value) => { root.save_account_mail_history(account-id, value); }
             save_account_sent_copy_policy(account-id, value) => { root.save_account_sent_copy_policy(account-id, value); }
+            save_account_keep_on_server(account-id, value) => { root.save_account_keep_on_server(account-id, value); }
             connect_account_calendar(account-id) => { root.connect_account_calendar(account-id); }
-            set_account_calendar_enabled(account-id, enabled) => { root.set_account_calendar_enabled(account-id, enabled); }
-            connect_caldav(account-id, url, username, password) => { root.connect_caldav(account-id, url, username, password); }
+            connect_caldav(account-id, connection-id, url, username, password) => { root.connect_caldav(account-id, connection-id, url, username, password); }
+            set_calendar_connection_enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
+            remove_calendar_connection(connection-id) => { root.remove_calendar_connection(connection-id); }
             connect_carddav(account-id, url, username, password) => { root.connect_carddav(account-id, url, username, password); }
             set_account_carddav_enabled(account-id, enabled) => { root.set_account_carddav_enabled(account-id, enabled); }
             disconnect_carddav(account-id) => { root.disconnect_carddav(account-id); }
             export_account_backup => { root.export_account_backup(); }
             import_accounts => { root.import_accounts(); }
             export_database_snapshot => { root.export_database_snapshot(); }
+            export_device_mail(account-id) => { root.export_device_mail(account-id); }
             delete_all_data => { root.delete_all_data(); }
             load_storage_usage => { root.load_storage_usage(); }
             open-link(url) => { root.open_email_link(url); }
@@ -2003,6 +2203,10 @@ export component AppWindow inherits Window {
             root.settings_tab = "Accounts";
             root.settings_open = true;
         }
+        show-mail => {
+            root.active_view = "mail";
+            root.settings_open = false;
+        }
     }
 
     if root.folder-dialog-open : FolderDialog {
@@ -2059,7 +2263,7 @@ export component AppWindow inherits Window {
 
     // Slint conditional elements are instantiated lazily. The comparatively
     // large onboarding form is unnecessary on normal launches with an account.
-    if root.startup_ready && root.connected_accounts.length == 0 : OnboardingView {
+    if root.startup_ready && !root.has-mail : OnboardingView {
         x: root.content-x;
         y: root.content-y;
         width: root.content-width;
@@ -2092,7 +2296,7 @@ export component AppWindow inherits Window {
         account-password <=> root.account_password;
         account-protocol <=> root.account_protocol;
         jmap-url <=> root.jmap_url;
-        imap-security <=> root.imap_security;
+        incoming-security <=> root.incoming_security;
         smtp-security <=> root.smtp_security;
         trusted-certificate-pem <=> root.trusted_certificate_pem;
         account-username <=> root.account_username;
@@ -2102,12 +2306,12 @@ export component AppWindow inherits Window {
         copy-oauth-link => { root.copy_oauth_link(); }
         submit-oauth-redirect(address) => { root.submit_oauth_redirect(address); }
         import-mail-certificate => { root.import_mail_certificate(); }
-        imap-host <=> root.imap_host;
-        imap-port <=> root.imap_port;
+        incoming-host <=> root.incoming_host;
+        incoming-port <=> root.incoming_port;
         smtp-host <=> root.smtp_host;
         smtp-port <=> root.smtp_port;
-        add-password-account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port) => {
-            root.add_password_account(protocol, email, username, password, jmap-url, imap-host, imap-port, smtp-host, smtp-port);
+        add-password-account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port) => {
+            root.add_password_account(protocol, email, username, password, jmap-url, incoming-host, incoming-port, smtp-host, smtp-port);
         }
         suggest-account-settings(email) => { root.suggest_account_settings(email); }
         start-oauth(provider) => {
@@ -2206,7 +2410,12 @@ export component AppWindow inherits Window {
         compact: root.compact-layout;
     }
 
-    OpenPgpReader { width: parent.width; height: parent.height; }
+    // Below the tab strip and inside the safe area, like the dialogs.
+    OpenPgpReader {
+        x: root.content-x; y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+    }
 
     // Keep the startup shell movable while its input is blocked.
     if WindowChrome.controls-visible && !root.startup_ready : WindowDragArea {
@@ -2225,17 +2434,34 @@ export component AppWindow inherits Window {
         width: root.content-width;
         height: WindowChrome.band-height;
         z: 40000;
-        // The active tab follows the open conversation or mailbox.
-        live-title: root.active_view != "mail" ? ""
+        // The active tab follows Settings, the workspace, and in Mail the
+        // open conversation or mailbox.
+        live-workspace: root.settings_open ? "settings" : root.active_view;
+        live-title: root.settings_open || root.active_view != "mail" ? ""
             : root.has_selected && root.selected_subject != "" ? root.selected_subject
             : root.selected_scope_title;
-        background-color: root.sidebar-bg;
+        background-color: root.tab-strip-bg;
+        // The active tab opens into what lies under the strip: the raised
+        // surface across Settings, the plain one across every workspace.
+        active-tab-background: root.settings_open ? root.surface-raised : root.surface;
+        hover-background: AppTheme.sidebar-tint.mix(AppTheme.title, 0.90);
         divider-color: root.border;
         title-color: root.title-color;
+        text-color: root.secondary-text;
         accent-color: root.accent;
-        active-tab-background: AppTheme.surface;
-        hover-background: AppTheme.muted-control-bg;
-        muted-color: root.muted-text;
+        profiles: root.mail_profiles;
+        active-profile: root.active_mail_profile;
+        account-count: root.connected_accounts.length;
+        choose-profile(id) => { root.select_mail_profile(id); }
+        create-profile => {
+            root.settings_tab = "Accounts";
+            root.settings_open = true;
+            root.new_profile_requested = true;
+        }
+        manage-profiles => {
+            root.settings_tab = "Accounts";
+            root.settings_open = true;
+        }
     }
 
     if WindowChrome.controls-visible : WindowControls {
@@ -2246,7 +2472,7 @@ export component AppWindow inherits Window {
         z: 50000;
         maximized: root.maximized;
         foreground: root.title-color;
-        background-color: AppTheme.surface;
+        background-color: root.top-bar ? root.tab-strip-bg : AppTheme.surface;
     }
 
     if root.client-frame : Rectangle {

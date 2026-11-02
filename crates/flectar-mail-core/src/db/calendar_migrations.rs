@@ -3,7 +3,18 @@
 use crate::error::{CoreError, Result};
 use rusqlite::Connection;
 
-const MIGRATIONS: &[&str] = &[r#"
+/// How one schema step is applied.
+enum Migration {
+    /// Runs in a single transaction with foreign keys enforced.
+    Plain(&'static str),
+    /// Rebuilds a table that other tables reference; see
+    /// [`super::migrations::rebuild_tables`].
+    TableRebuild(&'static str),
+}
+
+const MIGRATIONS: &[Migration] = &[
+    Migration::Plain(
+        r#"
 CREATE TABLE calendars (
   id INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL,
@@ -126,24 +137,44 @@ CREATE TABLE pending_actions (
 );
 CREATE INDEX idx_calendar_actions_due
   ON pending_actions(account_id, state, not_before, created_at);
-"#];
+"#,
+    ),
+    Migration::TableRebuild(include_str!("migrations/calendar_002_connections.sql")),
+];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
 pub fn run(conn: &mut Connection) -> Result<()> {
+    upgrade_to(conn, LATEST_VERSION)
+}
+
+fn upgrade_to(conn: &mut Connection, latest: i64) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    let latest = LATEST_VERSION;
-    if version > latest {
+    if version > LATEST_VERSION {
         return Err(CoreError::Other(format!(
-            "unsupported pre-release calendar database version {version}; recreate the development profile"
+            "calendar database schema {version} requires a newer application; open this profile with a compatible version. Existing data has not been changed."
         )));
     }
 
-    for (index, sql) in MIGRATIONS.iter().enumerate().skip(version as usize) {
+    for (index, migration) in MIGRATIONS
+        .iter()
+        .enumerate()
+        .take(latest as usize)
+        .skip(version as usize)
+    {
         let target = (index + 1) as i64;
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", target)?;
-        tx.commit()?;
+        match migration {
+            Migration::Plain(sql) => {
+                let tx = conn.transaction()?;
+                tx.execute_batch(sql)?;
+                tx.pragma_update(None, "user_version", target)?;
+                tx.commit()?;
+            }
+            Migration::TableRebuild(sql) => {
+                super::migrations::rebuild_tables(conn, "calendar", target, |tx| {
+                    Ok(tx.execute_batch(sql)?)
+                })?;
+            }
+        }
         tracing::info!("applied calendar db migration {target}");
     }
     Ok(())
@@ -159,6 +190,24 @@ mod tests {
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         run(&mut conn).unwrap();
         conn
+    }
+
+    /// A profile left at `version` by an older build.
+    fn staged(version: i64) -> Connection {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        upgrade_to(&mut conn, version).unwrap();
+        conn
+    }
+
+    fn foreign_key_violations(conn: &Connection) -> bool {
+        conn.prepare("PRAGMA foreign_key_check")
+            .unwrap()
+            .query([])
+            .unwrap()
+            .next()
+            .unwrap()
+            .is_some()
     }
 
     #[test]
@@ -177,8 +226,9 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         let expected = [
+            "calendar_connections",
             "calendar_events",
-            "caldav_config",
+            "calendar_secret_moves",
             "calendars",
             "pending_actions",
         ]
@@ -189,17 +239,9 @@ mod tests {
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            1
+            LATEST_VERSION
         );
-        let violations = conn
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query([])
-            .unwrap()
-            .next()
-            .unwrap()
-            .is_some();
-        assert!(!violations);
+        assert!(!foreign_key_violations(&conn));
         let integrity: String = conn
             .query_row("PRAGMA integrity_check", [], |row| row.get(0))
             .unwrap();
@@ -210,9 +252,16 @@ mod tests {
     fn identity_constraints_preserve_distinct_calendar_copies() {
         let conn = fresh();
         conn.execute(
-            "INSERT INTO calendars (id, account_id, url, display_name)
-             VALUES (1, 7, 'https://cal.test/a/', 'A'),
-                    (2, 7, 'https://cal.test/b/', 'B')",
+            "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+             VALUES (1, 7, 'generic', 'https://cal.test/'),
+                    (2, 7, 'generic', 'https://shared.cal.test/')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO calendars (id, account_id, connection_id, url, display_name)
+             VALUES (1, 7, 1, 'https://cal.test/a/', 'A'),
+                    (2, 7, 2, 'https://shared.cal.test/b/', 'B')",
             [],
         )
         .unwrap();
@@ -278,15 +327,205 @@ mod tests {
     }
 
     #[test]
-    fn pre_release_profiles_are_rejected_without_mutation() {
+    fn collections_belong_to_their_connections_account() {
+        let conn = fresh();
+        conn.execute(
+            "INSERT INTO calendar_connections (id, account_id, kind, base_url)
+             VALUES (1, 7, 'google', 'https://google.test/'),
+                    (2, 8, 'generic', 'https://dav.test/')",
+            [],
+        )
+        .unwrap();
+        // A provider calendar exists once per account.
+        assert!(
+            conn.execute(
+                "INSERT INTO calendar_connections (account_id, kind, base_url)
+                 VALUES (7, 'google', 'https://google.test/')",
+                [],
+            )
+            .is_err()
+        );
+        conn.execute(
+            "INSERT INTO calendar_connections (account_id, kind, base_url)
+             VALUES (8, 'generic', 'https://other.dav.test/')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO calendars (account_id, connection_id, url)
+                 VALUES (7, 2, 'https://dav.test/cal/')",
+                [],
+            )
+            .is_err()
+        );
+        conn.execute(
+            "INSERT INTO calendars (id, account_id, connection_id, url)
+             VALUES (5, 8, 2, 'https://dav.test/cal/')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute("UPDATE calendars SET connection_id = 1 WHERE id = 5", [])
+                .is_err()
+        );
+        assert!(
+            conn.execute(
+                "UPDATE calendar_connections SET account_id = 9 WHERE id = 2",
+                [],
+            )
+            .is_err()
+        );
+        // Removing a connection must forget its collections first.
+        assert!(
+            conn.execute("DELETE FROM calendar_connections WHERE id = 2", [])
+                .is_err()
+        );
+        conn.execute("DELETE FROM calendars WHERE id = 5", [])
+            .unwrap();
+        conn.execute("DELETE FROM calendar_connections WHERE id = 2", [])
+            .unwrap();
+    }
+
+    #[test]
+    fn single_server_profiles_become_connections() {
+        let mut conn = staged(1);
+        conn.execute_batch(
+            "INSERT INTO caldav_config (account_id, kind, base_url, username, home_set_url, enabled, last_error)
+             VALUES (1, 'generic', 'https://dav.test/', 'me', 'https://dav.test/cal/', 0, 'offline'),
+                    (2, 'google', 'https://google.test/me/events', NULL, NULL, 1, NULL);
+             INSERT INTO calendars (id, account_id, url, display_name, ctag, sync_token, is_default)
+             VALUES (10, 1, 'https://dav.test/cal/work/', 'Work', 'c1', 't1', 1),
+                    (11, 2, 'https://google.test/me/events', 'Me', NULL, NULL, 1),
+                    (12, 3, 'https://gone.test/cal/', 'Gone', NULL, NULL, 0);
+             INSERT INTO calendar_events
+                (id, account_id, ical_uid, starts_at, calendar_id, caldav_href, etag, dirty)
+             VALUES (100, 1, 'kept@test', 1000, 10, '/cal/work/kept.ics', 'e1', 0),
+                    (101, 3, 'orphan@test', 1000, 12, '/cal/orphan.ics', 'e2', 1);",
+        )
+        .unwrap();
+
+        run(&mut conn).unwrap();
+
+        let connections: Vec<(i64, i64, String, String, bool, Option<String>)> = conn
+            .prepare(
+                "SELECT id, account_id, kind, username, enabled, last_error
+                 FROM calendar_connections ORDER BY account_id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get::<_, i64>(4)? != 0,
+                    row.get(5)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            connections,
+            vec![
+                (
+                    1,
+                    1,
+                    "generic".into(),
+                    "me".into(),
+                    false,
+                    Some("offline".into())
+                ),
+                (2, 2, "google".into(), String::new(), true, None),
+            ]
+        );
+        // Only the generic server's password still lives under its account.
+        let moves: Vec<i64> = conn
+            .prepare("SELECT connection_id FROM calendar_secret_moves")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(moves, vec![1]);
+
+        // (id, connection, ctag, sync token, default)
+        type CalendarState = (i64, i64, Option<String>, Option<String>, bool);
+        let calendars: Vec<CalendarState> = conn
+            .prepare(
+                "SELECT id, connection_id, ctag, sync_token, is_default
+                 FROM calendars ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get::<_, i64>(4)? != 0,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            calendars,
+            vec![
+                (10, 1, Some("c1".into()), Some("t1".into()), true),
+                (11, 2, None, None, true),
+            ]
+        );
+
+        let events: Vec<(i64, Option<i64>, Option<String>, bool)> = conn
+            .prepare("SELECT id, calendar_id, caldav_href, dirty FROM calendar_events ORDER BY id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get::<_, i64>(3)? != 0,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            events,
+            vec![
+                (100, Some(10), Some("/cal/work/kept.ics".into()), false),
+                (101, None, None, false),
+            ]
+        );
+        assert!(!foreign_key_violations(&conn));
+        assert!(
+            conn.pragma_query_value(None, "foreign_keys", |row| row.get::<_, bool>(0))
+                .unwrap()
+        );
+        // The recreated event triggers still guard collection ownership.
+        assert!(
+            conn.execute(
+                "INSERT INTO calendar_events (account_id, ical_uid, starts_at, calendar_id)
+                 VALUES (2, 'moved@test', 1000, 10)",
+                [],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn newer_profiles_are_rejected_without_mutation() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", 2).unwrap();
+        conn.pragma_update(None, "user_version", LATEST_VERSION + 1)
+            .unwrap();
         let error = run(&mut conn).unwrap_err().to_string();
-        assert!(error.contains("recreate the development profile"));
+        assert!(error.contains("requires a newer application"));
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            2
+            LATEST_VERSION + 1
         );
     }
 }

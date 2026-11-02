@@ -1093,7 +1093,7 @@ async fn sync_labels(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> R
                     Some(match existing {
                         Some(folder_id) => {
                             tx.execute(
-                                "UPDATE folders SET imap_name = ?2, delimiter = '/', role = ?3
+                                "UPDATE folders SET path = ?2, delimiter = '/', role = ?3
                                  WHERE id = ?1",
                                 params![folder_id, folder_name, role],
                             )?;
@@ -1282,6 +1282,107 @@ async fn sync_sender_identities(
         .await
 }
 
+const GMAIL_UPLOAD_API: &str = "https://gmail.googleapis.com/upload/gmail/v1/users/me";
+
+/// Imports messages into a Gmail mailbox, as if they had been delivered,
+/// for mail brought over from files or another app.
+pub(crate) struct Uploader {
+    api: GmailApi,
+    base: String,
+    upload_base: String,
+}
+
+impl Uploader {
+    pub(crate) fn new(ctx: SyncCtx, config: AccountConfig) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: GMAIL_API.to_owned(),
+            upload_base: GMAIL_UPLOAD_API.to_owned(),
+        })
+    }
+
+    /// An uploader that talks to a test server instead of Gmail.
+    #[cfg(test)]
+    pub(crate) fn with_base(ctx: SyncCtx, config: AccountConfig, origin: &str) -> Result<Self> {
+        Ok(Self {
+            api: GmailApi::new(ctx, config)?,
+            base: format!("{origin}/gmail/v1/users/me"),
+            upload_base: format!("{origin}/upload/gmail/v1/users/me"),
+        })
+    }
+
+    /// Bring the account's labels up to date.
+    pub(crate) async fn refresh_labels(&self) -> Result<()> {
+        sync_labels(&self.api.ctx, &self.api.account, &self.api).await
+    }
+
+    /// Whether the mailbox has a message with this Message-ID anywhere,
+    /// Spam and Trash included.
+    pub(crate) async fn has_message(&self, message_id: &str) -> Result<bool> {
+        let query = format!("rfc822msgid:<{}>", message_id.trim_matches(['<', '>']));
+        let value = self
+            .api
+            .get_json(&format!(
+                "{}/messages?maxResults=1&includeSpamTrash=true&q={}",
+                self.base,
+                urlencode(&query)
+            ))
+            .await?;
+        Ok(value
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|messages| !messages.is_empty()))
+    }
+
+    /// Import a raw message with these labels. Its date stays the one in its
+    /// Date header, and the spam filter leaves it alone.
+    pub(crate) async fn import(&self, raw: &[u8], label_ids: &[&str]) -> Result<()> {
+        let boundary = format!("flectar-{:032x}", rand::random::<u128>());
+        let metadata = json!({ "labelIds": label_ids });
+        let mut body = Vec::with_capacity(raw.len() + 512);
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n\
+                 --{boundary}\r\nContent-Type: message/rfc822\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(raw);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let url = format!(
+            "{}/messages/import?uploadType=multipart&internalDateSource=dateHeader\
+             &neverMarkSpam=true&processForCalendar=false",
+            self.upload_base
+        );
+        // A large message gets time to upload at 64 KiB/s.
+        let timeout = HTTP_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
+        for attempt in 0..2 {
+            let token = self.api.token().await?;
+            let response = self
+                .api
+                .http
+                .post(&url)
+                .bearer_auth(token)
+                .timeout(timeout)
+                .header(
+                    CONTENT_TYPE,
+                    format!("multipart/related; boundary={boundary}"),
+                )
+                .body(body.clone())
+                .send()
+                .await
+                .map_err(network_error)?;
+            let result = google_json(response).await;
+            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
+                self.api.ctx.tokens.invalidate(self.api.account.id).await;
+                continue;
+            }
+            return result.map(|_| ());
+        }
+        Err(CoreError::NeedsReauth)
+    }
+}
+
 pub(crate) async fn create_user_folder(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -1390,11 +1491,13 @@ fn parse_resource(value: &Value) -> Result<ParsedResource> {
         headers,
         internal_date,
         size: value.get("sizeEstimate").and_then(Value::as_i64),
-        snippet: value
-            .get("snippet")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
+        // Gmail returns the snippet HTML-escaped.
+        snippet: crate::mime::make_html_snippet(
+            value
+                .get("snippet")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        ),
         has_attachments: payload_has_file_attachments(payload)?,
     })
 }
@@ -2994,7 +3097,10 @@ async fn send_remote_draft(
         Err(error) => {
             let ambiguous = matches!(
                 &error,
-                CoreError::Offline | CoreError::Network(_) | CoreError::NotFound(_)
+                CoreError::Offline
+                    | CoreError::Network(_)
+                    | CoreError::ResponseTooLarge { .. }
+                    | CoreError::NotFound(_)
             );
             if ambiguous {
                 if let Some(sent) = api.find_sent_by_message_id(&prepared.message_id).await? {
@@ -3290,7 +3396,7 @@ async fn apply_action(
                             params![account_id, provider_id, latest_name, background, text],
                         )?;
                         conn.execute(
-                            "UPDATE folders SET imap_name=?3
+                            "UPDATE folders SET path=?3
                              WHERE account_id=?1 AND id=(
                                SELECT folder_id FROM gmail_labels
                                WHERE account_id=?1 AND provider_id=?2
@@ -3323,7 +3429,7 @@ async fn apply_action(
                         params![account_id, provider_id, name],
                     )?;
                     conn.execute(
-                        "UPDATE folders SET imap_name = ?3
+                        "UPDATE folders SET path = ?3
                          WHERE account_id = ?1 AND id = (
                            SELECT folder_id FROM gmail_labels
                            WHERE account_id = ?1 AND provider_id = ?2
@@ -3624,7 +3730,12 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) 
                             repo::actions::bump_attempt(conn, action_id, retry_at, &saved)
                         })
                         .await?;
-                    if matches!(error, CoreError::Offline | CoreError::Network(_)) {
+                    if matches!(
+                        error,
+                        CoreError::Offline
+                            | CoreError::Network(_)
+                            | CoreError::ResponseTooLarge { .. }
+                    ) {
                         return Err(error);
                     }
                 }
@@ -3701,7 +3812,12 @@ async fn run_actor(
             Ok::<_, CoreError>((actions_remaining, backfill_done))
         }
         .await;
-        refresh_labels = false;
+        // Labels and sender identities refresh on the first pass and on each
+        // explicit sync. A pass that could not reach Google leaves that
+        // refresh to its retry, so starting offline does not skip it.
+        if !matches!(result, Err(CoreError::Offline)) {
+            refresh_labels = false;
+        }
 
         let (delay, rerun) = match result {
             Ok((actions_remaining, backfill_done)) => {
@@ -4004,7 +4120,7 @@ mod tests {
             "internalDate": "1700000000000",
             "sizeEstimate": 42,
             "labelIds": ["INBOX", "UNREAD", "Label_1"],
-            "snippet": "hello",
+            "snippet": "Alice&#39;s\n  report &amp; notes",
             "payload": {
                 "headers": [
                     { "name": "From", "value": "Alice <alice@example.com>" },
@@ -4027,6 +4143,7 @@ mod tests {
         assert_eq!(parsed.headers.from.unwrap().email, "alice@example.com");
         assert!(parsed.labels.contains(&"UNREAD".into()));
         assert!(parsed.has_attachments);
+        assert_eq!(parsed.snippet, "Alice's report & notes");
     }
 
     #[test]

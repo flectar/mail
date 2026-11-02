@@ -59,7 +59,7 @@ pub fn for_provider(p: Provider) -> Option<&'static OAuthProviderConfig> {
     match p {
         Provider::Gmail => Some(&GOOGLE),
         Provider::Microsoft => Some(&MICROSOFT),
-        Provider::Imap => None,
+        Provider::Generic => None,
     }
 }
 
@@ -87,7 +87,7 @@ pub fn validate_client_id(provider: Provider, client_id: &str) -> Result<()> {
                 && !id.eq_ignore_ascii_case("test.apps.googleusercontent.com")
                 && !id.chars().any(|ch| ch.is_whitespace() || ch.is_control())
         }
-        Provider::Imap => false,
+        Provider::Generic => false,
     };
     if valid {
         Ok(())
@@ -95,7 +95,7 @@ pub fn validate_client_id(provider: Provider, client_id: &str) -> Result<()> {
         Err(CoreError::Auth(match provider {
             Provider::Microsoft => "Enter the Microsoft Application (client) ID from your app registration in Sign-in settings; it must be a nonzero GUID, not a placeholder.".into(),
             Provider::Gmail => "Enter your Google OAuth client ID in Sign-in settings; a test placeholder cannot be used for sign-in.".into(),
-            Provider::Imap => "provider does not use oauth".into(),
+            Provider::Generic => "provider does not use oauth".into(),
         }))
     }
 }
@@ -158,7 +158,7 @@ fn bundled_credentials(provider: Provider) -> Option<(String, Option<String>)> {
     let (client_id, client_secret) = match provider {
         Provider::Gmail => (option_env!("FLECTAR_GOOGLE_ANDROID_CLIENT_ID"), None),
         Provider::Microsoft => (option_env!("FLECTAR_MICROSOFT_ANDROID_CLIENT_ID"), None),
-        Provider::Imap => return None,
+        Provider::Generic => return None,
     };
     #[cfg(desktop)]
     let (client_id, client_secret) = match provider {
@@ -167,7 +167,7 @@ fn bundled_credentials(provider: Provider) -> Option<(String, Option<String>)> {
             option_env!("FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET"),
         ),
         Provider::Microsoft => (option_env!("FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID"), None),
-        Provider::Imap => return None,
+        Provider::Generic => return None,
     };
     // Invalid build-time defaults must not enable the sign-in buttons. Runtime
     // or user configuration may still provide a real registration.
@@ -201,7 +201,7 @@ pub fn resolve_credentials(provider: Provider) -> Result<(String, Option<String>
             Some("FLECTAR_MAIL_GOOGLE_CLIENT_SECRET"),
         ),
         Provider::Microsoft => ("FLECTAR_MAIL_MS_CLIENT_ID", None),
-        Provider::Imap => {
+        Provider::Generic => {
             return Err(CoreError::Auth("provider does not use oauth".into()));
         }
     };
@@ -226,13 +226,13 @@ fn bundled_client_id_env(provider: Provider) -> &'static str {
     return match provider {
         Provider::Gmail => "FLECTAR_GOOGLE_ANDROID_CLIENT_ID",
         Provider::Microsoft => "FLECTAR_MICROSOFT_ANDROID_CLIENT_ID",
-        Provider::Imap => "",
+        Provider::Generic => "",
     };
     #[cfg(desktop)]
     match provider {
         Provider::Gmail => GOOGLE.client_id_env,
         Provider::Microsoft => MICROSOFT.client_id_env,
-        Provider::Imap => "",
+        Provider::Generic => "",
     }
 }
 
@@ -336,6 +336,6 @@ mod tests {
 
     #[test]
     fn resolve_rejects_non_oauth_provider() {
-        assert!(resolve_credentials(Provider::Imap).is_err());
+        assert!(resolve_credentials(Provider::Generic).is_err());
     }
 }

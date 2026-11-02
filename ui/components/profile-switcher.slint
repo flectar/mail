@@ -1,0 +1,301 @@
+import { ScrollView } from "std-widgets.slint";
+import { TypeScale } from "../typography.slint";
+import { AppTheme, MotionSettings, ThemeUtilities } from "../design-system.slint";
+import { MailProfileRow } from "../models.slint";
+import { ProfilePalette } from "profile-controls.slint";
+
+// A profile's color as a pill fill that keeps white text readable, darkened
+// no more than it needs.
+export global ProfileColors {
+    public pure function fill(value: color) -> color {
+        return ThemeUtilities.contrast(white, value) >= 4.5 ? value
+            : ThemeUtilities.contrast(white, value.mix(black, 0.88)) >= 4.5 ? value.mix(black, 0.88)
+            : value.mix(black, 0.76);
+    }
+}
+
+// One line of the profile menu: a profile, "All accounts" or an action.
+component ProfileMenuRow inherits Rectangle {
+    in property <string> title;
+    in property <string> detail;
+    // A profile shows its color; the other lines an icon.
+    in property <color> dot-color: transparent;
+    in property <image> icon;
+    in property <bool> checkable;
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <bool> highlighted;
+    in property <int> index;
+    callback activated;
+
+    height: 32px;
+    border-radius: 6px;
+    background: root.enabled && (root.highlighted || hit.has-hover) ? AppTheme.control-bg : transparent;
+
+    if root.checked : Image {
+        x: 8px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: @image-url("../icons/lucide/outline/check.svg");
+        colorize: AppTheme.accent;
+        accessible-role: none;
+    }
+    if root.dot-color != transparent : Rectangle {
+        x: 30px;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: root.dot-color;
+        opacity: root.enabled ? 1 : 0.45;
+    }
+    if root.dot-color == transparent : Image {
+        x: 28px;
+        y: (parent.height - self.height) / 2;
+        width: 14px;
+        height: 14px;
+        source: root.icon;
+        colorize: AppTheme.secondary;
+        opacity: root.enabled ? 1 : 0.45;
+        accessible-role: none;
+    }
+    title-label := Text {
+        x: 50px;
+        width: max(0px, parent.width - self.x - (root.detail == "" ? 10px : detail-label.width + 20px));
+        height: parent.height;
+        text: root.title;
+        color: root.enabled ? AppTheme.heading : AppTheme.muted;
+        font-size: TypeScale.secondary;
+        font-weight: root.checked ? 600 : 500;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    detail-label := Text {
+        x: parent.width - self.width - 10px;
+        width: min(self.preferred-width, parent.width / 2);
+        height: parent.height;
+        visible: root.detail != "";
+        text: root.detail;
+        color: AppTheme.muted;
+        font-size: TypeScale.caption;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    hit := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        accessible-role: button;
+        accessible-label: root.detail == "" ? root.title : root.title + ", " + root.detail;
+        accessible-enabled: root.enabled;
+        accessible-checkable: root.checkable;
+        accessible-checked: root.checked;
+        accessible-item-index: root.index;
+        accessible-action-default => { root.activated(); }
+        clicked => { root.activated(); }
+    }
+}
+
+// The profile pill at the start of the tab strip. It names the profile the
+// mail view shows, or "All accounts", and its menu switches profiles or opens
+// the profile editor.
+export component ProfileSwitcher inherits Rectangle {
+    in property <[MailProfileRow]> profiles;
+    // The profile the mail view shows; an empty id means every account.
+    in property <MailProfileRow> active;
+    in property <int> account-count;
+    in property <length> widest: 168px;
+    callback choose(string);
+    callback create-profile();
+    callback manage-profiles();
+
+    private property <bool> all: root.active.id == "";
+    private property <color> fill: root.all ? AppTheme.title.with-alpha(0.07) : ProfileColors.fill(root.active.color);
+    private property <color> foreground: root.all ? AppTheme.title : ThemeUtilities.contrasting-foreground(root.fill);
+    private property <bool> menu-open: menu.is-open;
+    // Menu lines: "All accounts", each profile, then the two actions. Past
+    // eight profiles, their list scrolls.
+    private property <int> line-count: root.profiles.length + 3;
+    private property <int> shown-profiles: min(root.profiles.length, 8);
+    private property <int> highlighted: -1;
+    private property <string> label: root.all ? @tr("All accounts") : root.active.name;
+
+    function line-enabled(line: int) -> bool {
+        return line <= 0 || line > root.profiles.length || root.profiles[line - 1].account_count > 0;
+    }
+
+    function move-highlight(step: int) {
+        root.highlighted = root.highlighted < 0 ? (step > 0 ? 0 : root.line-count - 1)
+            : mod(root.highlighted + step + root.line-count, root.line-count);
+    }
+
+    function activate(line: int) {
+        if !root.line-enabled(line) { return; }
+        menu.close();
+        if line == 0 {
+            root.choose("");
+        } else if line <= root.profiles.length {
+            root.choose(root.profiles[line - 1].id);
+        } else if line == root.profiles.length + 1 {
+            root.create-profile();
+        } else {
+            root.manage-profiles();
+        }
+    }
+
+    // A profile's name follows its color dot.
+    private property <length> label-x: root.all ? 11px : 28px;
+
+    width: min(root.widest, root.label-x + label-text.preferred-width + 23px);
+    height: 28px;
+    border-radius: 7px;
+    background: root.menu-open || hit.pressed ? root.fill.mix(root.foreground, 0.86)
+        : hit.has-hover ? root.fill.mix(root.foreground, 0.92) : root.fill;
+    animate background { duration: MotionSettings.enabled ? 120ms : 0ms; easing: ease-out; }
+
+    if !root.all : Rectangle {
+        x: 11px;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        border-radius: 5px;
+        background: root.foreground;
+        opacity: 0.9;
+    }
+    label-text := Text {
+        x: root.label-x;
+        width: max(0px, parent.width - self.x - 23px);
+        height: parent.height;
+        text: root.label;
+        color: root.foreground;
+        font-size: TypeScale.secondary;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    Image {
+        x: parent.width - self.width - 8px;
+        y: (parent.height - self.height) / 2 + 1px;
+        width: 10px;
+        height: 10px;
+        source: @image-url("../icons/lucide/outline/chevron-down.svg");
+        colorize: root.all ? AppTheme.secondary : root.foreground;
+        accessible-role: none;
+    }
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        accessible-role: button;
+        accessible-label: @tr("Profile");
+        accessible-value: root.label;
+        accessible-expanded: root.menu-open;
+        accessible-action-default => { root.toggle-menu(); }
+        clicked => { root.toggle-menu(); }
+    }
+
+    function toggle-menu() {
+        if root.menu-open {
+            menu.close();
+        } else {
+            root.highlighted = -1;
+            menu.show();
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0px;
+        y: root.height + 6px;
+        width: 260px;
+        // Lines, the separator and the frame's padding.
+        height: (root.shown-profiles + 3) * 32px + 9px + 8px;
+        close-policy: close-on-click-outside;
+        forward-focus: menu-keys;
+
+        Rectangle {
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: AppTheme.border;
+            background: AppTheme.surface-raised;
+            drop-shadow-blur: 18px;
+            drop-shadow-offset-y: 5px;
+            drop-shadow-color: #0000002e;
+            accessible-role: groupbox;
+            accessible-label: @tr("Profiles");
+
+            menu-keys := FocusScope {
+                capture-key-pressed(event) => {
+                    if event.text == Key.DownArrow { root.move-highlight(1); return accept; }
+                    if event.text == Key.UpArrow { root.move-highlight(-1); return accept; }
+                    if event.text == Key.Return || event.text == Key.Space {
+                        if root.highlighted >= 0 { root.activate(root.highlighted); }
+                        return accept;
+                    }
+                    if event.text == Key.Escape { menu.close(); return accept; }
+                    reject
+                }
+
+                VerticalLayout {
+                    padding: 4px;
+                    spacing: 0px;
+                    accessible-role: list;
+                    accessible-label: @tr("Profiles");
+
+                    ProfileMenuRow {
+                        title: @tr("All accounts");
+                        detail: ProfilePalette.count-label(root.account-count);
+                        checkable: true;
+                        checked: root.all;
+                        highlighted: root.highlighted == 0;
+                        index: 0;
+                        activated => { root.activate(0); }
+                    }
+                    if root.profiles.length > 0 : ScrollView {
+                        height: root.shown-profiles * 32px;
+                        content-width: self.visible-width;
+
+                        VerticalLayout {
+                            for profile[index] in root.profiles : ProfileMenuRow {
+                                title: profile.name;
+                                detail: ProfilePalette.count-label(profile.account_count);
+                                dot-color: profile.color;
+                                checkable: true;
+                                checked: profile.id == root.active.id;
+                                enabled: profile.account_count > 0;
+                                highlighted: root.highlighted == index + 1;
+                                index: index + 1;
+                                activated => { root.activate(index + 1); }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        height: 9px;
+                        Rectangle {
+                            x: 8px;
+                            y: 4px;
+                            width: parent.width - 16px;
+                            height: 1px;
+                            background: AppTheme.border-subtle;
+                        }
+                    }
+                    ProfileMenuRow {
+                        title: @tr("New profile…");
+                        icon: @image-url("../icons/lucide/outline/plus.svg");
+                        highlighted: root.highlighted == root.profiles.length + 1;
+                        index: root.profiles.length + 1;
+                        activated => { root.activate(root.profiles.length + 1); }
+                    }
+                    ProfileMenuRow {
+                        title: @tr("Edit profiles…");
+                        icon: @image-url("../icons/lucide/outline/pencil.svg");
+                        highlighted: root.highlighted == root.profiles.length + 2;
+                        index: root.profiles.length + 2;
+                        activated => { root.activate(root.profiles.length + 2); }
+                    }
+                }
+            }
+        }
+    }
+}

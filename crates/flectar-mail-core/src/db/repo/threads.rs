@@ -24,6 +24,21 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
             &row.get::<_, Option<String>>("label_ids")?
                 .unwrap_or_default(),
         ),
+        verification_code: row.get("verification_code")?,
+        first_attachment: row
+            .get::<_, Option<String>>("first_attachment")?
+            .map(|json| {
+                parse_json_column::<(i64, Option<String>, Option<String>, Option<i64>)>(&json, 16)
+            })
+            .transpose()?
+            .map(|(id, filename, mime_type, size)| AttachmentMeta {
+                id,
+                filename,
+                mime_type,
+                size,
+                is_inline: false,
+            }),
+        attachment_total: row.get("attachment_total")?,
     })
 }
 
@@ -55,7 +70,17 @@ const SUMMARY_SELECT: &str = "
            s.wake_at AS snoozed_until,
            (SELECT group_concat(DISTINCT ml.label_id) FROM message_labels ml
               JOIN messages ml_m ON ml_m.id = ml.message_id
-              WHERE ml_m.thread_id = t.id) AS label_ids
+              WHERE ml_m.thread_id = t.id) AS label_ids,
+           (SELECT m.verification_code
+              FROM messages m WHERE m.thread_id = t.id ORDER BY m.date DESC LIMIT 1)
+             AS verification_code,
+           (SELECT json_array(f.id, f.filename, f.mime_type, f.size)
+              FROM messages fm JOIN attachments f ON f.message_id = fm.id
+              WHERE fm.thread_id = t.id AND f.is_inline = 0
+              ORDER BY fm.date DESC, f.id LIMIT 1) AS first_attachment,
+           (SELECT COUNT(*)
+              FROM messages fm JOIN attachments f ON f.message_id = fm.id
+              WHERE fm.thread_id = t.id AND f.is_inline = 0) AS attachment_total
     FROM threads t
     JOIN accounts a ON a.id = t.account_id
     LEFT JOIN snoozes s ON s.thread_id = t.id";
@@ -254,6 +279,9 @@ pub struct ListArgs {
     pub view: View,
     pub tab: Option<TabFilter>,
     pub account_id: Option<i64>,
+    /// Restrict to a set of accounts, such as a mail profile's; an empty set
+    /// lists nothing. Combines with `account_id`.
+    pub account_ids: Option<Vec<i64>>,
     /// Restrict to threads with a message in this folder (user-folder view).
     pub folder_id: Option<i64>,
     pub cursor: Option<ThreadCursor>,
@@ -341,6 +369,13 @@ fn build_filter(
     if let Some(acc) = args.account_id {
         bind.push(Box::new(acc));
         where_clauses.push(format!("t.account_id = ?{}", bind.len()));
+    }
+    if let Some(account_ids) = &args.account_ids {
+        where_clauses.push(super::search::account_set_clause(
+            "t.account_id",
+            account_ids,
+            &mut bind,
+        ));
     }
     match &args.tab {
         Some(TabFilter::Important) => where_clauses.push(format!(
@@ -530,6 +565,93 @@ mod tests {
     }
 
     #[test]
+    fn summary_offers_the_newest_message_code() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let (thread_id, first) =
+            crate::db::testutil::seed_message(&conn, "noreply@acme.test", "Your code", true);
+        conn.execute(
+            "UPDATE messages SET verification_code = '111111' WHERE id = ?1",
+            [first],
+        )
+        .unwrap();
+        let code = || {
+            get_summary(&conn, thread_id)
+                .unwrap()
+                .unwrap()
+                .verification_code
+        };
+        assert_eq!(code().as_deref(), Some("111111"));
+
+        // A newer code replaces the one before it.
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date, verification_code)
+             VALUES (?1, 1, 1, 2, 'second-code', 'Your code', 'noreply@acme.test', 1100, '222222')",
+            [thread_id],
+        )
+        .unwrap();
+        assert_eq!(code().as_deref(), Some("222222"));
+
+        // A reply after it leaves the row without one.
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date, is_outgoing)
+             VALUES (?1, 1, 1, 3, 'reply', 'Re: Your code', 'me@test.dev', 1200, 1)",
+            [thread_id],
+        )
+        .unwrap();
+        assert_eq!(code(), None);
+    }
+
+    #[test]
+    fn summary_offers_the_newest_file() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let (thread_id, first) =
+            crate::db::testutil::seed_message(&conn, "billing@acme.test", "Invoice", false);
+        let summary = || get_summary(&conn, thread_id).unwrap().unwrap();
+        let add_file = |message_id: i64, name: &str, size: Option<i64>, inline: bool| {
+            conn.execute(
+                "INSERT INTO attachments (message_id, filename, mime_type, size, is_inline)
+                 VALUES (?1, ?2, 'application/pdf', ?3, ?4)",
+                params![message_id, name, size, inline],
+            )
+            .unwrap();
+            conn.last_insert_rowid()
+        };
+
+        // Inline images belong to the body.
+        add_file(first, "logo.png", Some(900), true);
+        assert!(summary().first_attachment.is_none());
+        assert_eq!(summary().attachment_total, 0);
+
+        let invoice = add_file(first, "invoice.pdf", Some(52_000), false);
+        add_file(first, "terms.pdf", Some(8_000), false);
+        let file = summary().first_attachment.unwrap();
+        assert_eq!(file.id, invoice);
+        assert_eq!(file.filename.as_deref(), Some("invoice.pdf"));
+        assert_eq!(file.mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(file.size, Some(52_000));
+        assert!(!file.is_inline);
+        assert_eq!(summary().attachment_total, 2);
+
+        // A newer message's file leads, and the count spans the thread.
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date)
+             VALUES (?1, 1, 1, 2, 'receipt', 'Re: Invoice', 'billing@acme.test', 1100)",
+            [thread_id],
+        )
+        .unwrap();
+        let receipt = add_file(conn.last_insert_rowid(), "receipt.pdf", None, false);
+        let file = summary().first_attachment.unwrap();
+        assert_eq!(file.id, receipt);
+        assert_eq!(file.size, None);
+        assert_eq!(summary().attachment_total, 3);
+    }
+
+    #[test]
     fn scalar_count_matches_the_unpaginated_list_filter() {
         let conn = crate::db::testutil::conn();
         crate::db::testutil::seed_account(&conn);
@@ -541,6 +663,7 @@ mod tests {
             view: View::Inbox,
             tab: None,
             account_id: Some(1),
+            account_ids: None,
             folder_id: Some(1),
             cursor: None,
             limit: 2,
@@ -550,6 +673,63 @@ mod tests {
         assert_eq!(page.threads.len(), 2);
         assert!(page.next_cursor.is_some());
         assert_eq!(count(&conn, &args).unwrap(), 3);
+    }
+
+    #[test]
+    fn account_sets_list_and_count_only_their_accounts() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let (first, _) = crate::db::testutil::seed_message(&conn, "a@one.dev", "one", false);
+        conn.execute(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username,
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'me2@test.dev','generic','password','me2','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2,2,'INBOX','inbox')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+             VALUES (99, 2, 'two', 1, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date, is_read, is_automated, is_draft, is_outgoing)
+             VALUES (99, 2, 2, 99, 'mid-99', 'two', 'b@two.dev', 1000, 0, 0, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        let listed = |account_ids: Option<Vec<i64>>| {
+            let args = ListArgs {
+                view: View::Inbox,
+                tab: None,
+                account_id: None,
+                account_ids,
+                folder_id: None,
+                cursor: None,
+                limit: 50,
+            };
+            let mut ids = list(&conn, &args)
+                .unwrap()
+                .threads
+                .iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>();
+            ids.sort();
+            assert_eq!(count(&conn, &args).unwrap(), ids.len());
+            ids
+        };
+        assert_eq!(listed(None), vec![first, 99]);
+        assert_eq!(listed(Some(vec![2])), vec![99]);
+        assert_eq!(listed(Some(vec![1, 2])), vec![first, 99]);
+        assert_eq!(listed(Some(Vec::new())), Vec::<i64>::new());
     }
 
     #[test]
@@ -566,6 +746,7 @@ mod tests {
                 view: View::Inbox,
                 tab: None,
                 account_id: None,
+                account_ids: None,
                 folder_id: None,
                 cursor: None,
                 limit: 2,
@@ -578,6 +759,7 @@ mod tests {
                 view: View::Inbox,
                 tab: None,
                 account_id: None,
+                account_ids: None,
                 folder_id: None,
                 cursor: first.next_cursor,
                 limit: 2,
@@ -606,6 +788,7 @@ mod tests {
             view: View::Inbox,
             tab: None,
             account_id: Some(1),
+            account_ids: None,
             folder_id: None,
             cursor: Some(ThreadCursor {
                 last_message_at: i64::MAX,

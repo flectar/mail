@@ -35,6 +35,9 @@ pub struct ParsedQuery {
     /// parsed from the query string - set by the caller from the UI's active
     /// account selection.
     pub account_id: Option<i64>,
+    /// Scope results to a set of accounts, such as a mail profile's; an empty
+    /// set matches nothing. Combines with `account_id`. Set by the caller.
+    pub account_ids: Option<Vec<i64>>,
 }
 
 /// A raw query token: a bare word or a `"quoted phrase"`. A phrase can be

@@ -1,0 +1,40 @@
+import { KeyboardKeys } from "components/kbd.slint";
+
+// The keyboard shortcuts Settings lists. Handlers bind these same values, so
+// the page can only show keys that work. `Control` is Command on Apple
+// platforms and `Meta` is Control there.
+export global Shortcuts {
+    out property <keys> compose: @keys(Control + N);
+    out property <keys> search: @keys(Control + K);
+    out property <keys> search-alternate: @keys(Slash);
+    out property <keys> archive: @keys(A);
+    out property <keys> spam: @keys(J);
+    // Mac keyboards label Backspace "delete", and Apple Mail trashes with it.
+    out property <keys> trash: KeyboardKeys.apple ? @keys(Backspace) : @keys(Delete);
+
+    out property <keys> previous-message: @keys(UpArrow);
+    out property <keys> next-message: @keys(DownArrow);
+    out property <keys> open-message: @keys(Return);
+    out property <keys> select-message: @keys(Space);
+    out property <keys> switch-pane: @keys(F6);
+
+    out property <keys> find: @keys(Control + F);
+    out property <keys> zoom-in: @keys(Control + Plus);
+    // Plus is Shift+= on many layouts; browsers zoom on Control+= as well.
+    out property <keys> zoom-in-alternate: @keys(Control + Equals);
+    out property <keys> zoom-out: @keys(Control + HyphenMinus);
+    out property <keys> zoom-reset: @keys(Control + Digit0);
+    out property <keys> caret-browsing: @keys(F7);
+
+    // Tab keys work while typing, so src/tabs.rs handles them before Slint
+    // sees the event. A test there checks these values against it.
+    out property <keys> new-tab: @keys(Control + T);
+    out property <keys> close-tab: @keys(Control + W);
+    out property <keys> reopen-tab: @keys(Control + Shift + T);
+    // Tabs cycle with the Control key on every platform, as in Safari.
+    out property <keys> next-tab: KeyboardKeys.apple ? @keys(Meta + Tab) : @keys(Control + Tab);
+    out property <keys> previous-tab: KeyboardKeys.apple ? @keys(Meta + Shift + Tab) : @keys(Control + Shift + Tab);
+    out property <keys> first-tab: @keys(Control + Digit1);
+    out property <keys> eighth-tab: @keys(Control + Digit8);
+    out property <keys> last-tab: @keys(Control + Digit9);
+}

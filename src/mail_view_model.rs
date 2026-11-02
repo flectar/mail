@@ -4,7 +4,7 @@
 mod removal_tests;
 
 use super::*;
-use chrono::Datelike;
+use chrono::{Datelike, Timelike};
 
 pub(super) fn refresh_from_source(
     app: &AppWindow,
@@ -27,33 +27,37 @@ pub(super) fn refresh_from_source(
 /// while scrolling, selection, and the retained Blitz renderer stay on the UI
 /// thread and avoid repeated body preparation.
 ///
-/// The retained tail (everything beyond the refreshed head) is kept as-is
-/// without re-querying it, so it can go stale relative to the backend.
-/// `drop_ids` names messages known to no longer belong in the current view
-/// (e.g. messages the user just archived/spammed/trashed) — the only staleness
-/// this function actively corrects rather than a general tail re-sync, which a
-/// background refresh has no cheap way to verify. Pass an empty slice when the
-/// refresh does not follow a message-moving action.
+/// Refreshes re-read every loaded row up to a bound (`mail_work::refresh_limit`),
+/// so the retained tail (everything beyond the refreshed head) is only rows
+/// past that bound and the oldest rows that new mail pushed out of it. It is
+/// kept as-is without re-querying it, so it can go stale relative to the
+/// backend. `drop_ids` names messages known to no longer belong in the current
+/// view (e.g. messages the user just archived/spammed/trashed) — the only
+/// staleness this function actively corrects in that tail. Pass an empty
+/// slice when the refresh does not follow a message-moving action.
 fn merge_refreshed_mail_head(
     current: Vec<MailMessage>,
     refreshed: Vec<MailMessage>,
     next_cursor: Option<MailCursor>,
     drop_ids: &[i32],
 ) -> (Vec<MailMessage>, bool) {
-    if next_cursor.is_none() || current.len() <= PAGE_SIZE {
+    if next_cursor.is_none() {
         return (refreshed, false);
     }
 
-    // The oldest refreshed row is normally present in the retained model.
-    // Everything after it is the already-loaded tail and can stay untouched.
-    // Looking for the oldest shared row also handles new messages inserted at
-    // the head without requiring a growing refresh query.
-    let tail_start = refreshed
-        .iter()
-        .rev()
-        .find_map(|fresh| current.iter().position(|old| old.id == fresh.id))
+    // The loaded rows after the oldest refreshed row come next in the
+    // mailbox too, so they stay as they are, including rows new mail pushed
+    // out of the refresh. When the oldest refreshed row was never loaded, the
+    // refresh reached past rows that have left, which the loaded rows below
+    // it would bring back, or new mail filled it, which would leave a gap
+    // above them; the refreshed rows replace the list.
+    let Some(tail_start) = refreshed
+        .last()
+        .and_then(|oldest| current.iter().position(|old| old.id == oldest.id))
         .map(|index| index + 1)
-        .unwrap_or_else(|| PAGE_SIZE.min(current.len()));
+    else {
+        return (refreshed, false);
+    };
     let refreshed_len = refreshed.len();
     let mut merged = refreshed;
     let mut known = merged
@@ -105,6 +109,16 @@ pub(super) fn apply_background_mail_page(
     if !snapshot_is_current(state, page.account_revision) {
         return;
     }
+    let deeper = deeper_refresh(&state.borrow(), &page);
+    if let Some(rows) = deeper {
+        if let Err(error) = mail_work::refresh_rows(app, state, runtime, rows, acted_on_ids) {
+            app.set_render_status(UiMessage::detail(
+                "Background mail refresh failed: {}",
+                error,
+            ));
+        }
+        return;
+    }
     let mail::MailPage {
         mut messages,
         labels,
@@ -121,6 +135,7 @@ pub(super) fn apply_background_mail_page(
             state.scope,
             if state.using_core { "" } else { &state.query },
             &state.search_filter,
+            open_conversation(&state),
         )
         .into_iter()
         .map(|message| message.id)
@@ -165,12 +180,15 @@ pub(super) fn apply_background_mail_page(
                 state.scope,
                 if state.using_core { "" } else { &state.query },
                 &state.search_filter,
+                open_conversation(&state),
             )
             .into_iter()
             .map(|message| message.id)
             .collect::<HashSet<_>>();
             state.selected_id = successor_selection(&old_order, removed_id, &visible);
-            state.preview_closed = false;
+            // With nothing left to move to, the reader closes rather than
+            // jumping to another conversation.
+            state.preview_closed = state.selected_id.is_none();
         }
         removed.is_some()
     };
@@ -195,6 +213,25 @@ pub(super) fn apply_background_mail_page(
     // A live refresh may change both the list height and its continuation
     // cursor. Let the one-shot viewport check prefetch again when necessary.
     app.set_mail_list_revision(app.get_mail_list_revision().wrapping_add(1));
+}
+
+/// Rows to read instead when a refresh shares no row with the list while the
+/// reader shows one of them: new mail filled the refresh and pushed the open
+/// conversation below it. Each read is twice as long, up to one store read.
+fn deeper_refresh(state: &InboxState, page: &mail::MailPage) -> Option<usize> {
+    let open = state.rendered_id?;
+    let read = page.messages.len();
+    let most = usize::try_from(mail_work::refresh_limit(usize::MAX, &state.query)).ok()?;
+    let loaded = state
+        .messages
+        .iter()
+        .map(|row| row.id)
+        .collect::<HashSet<_>>();
+    (page.next_cursor.is_some()
+        && read < most
+        && loaded.contains(&open)
+        && !page.messages.iter().any(|row| loaded.contains(&row.id)))
+    .then_some(read * 2)
 }
 
 pub(super) fn append_mail_page(
@@ -249,6 +286,13 @@ pub(super) fn select_message(
         };
         if state.query.trim().is_empty() && app.get_group_mail_by_date() {
             state.mail_groups.reveal(&mail_group_key(date_ms, Local::now()));
+        }
+        // A restored tab's open message belongs to its own conversation.
+        if state
+            .restore_thread_message
+            .is_some_and(|(conversation, _)| conversation != id)
+        {
+            state.restore_thread_message = None;
         }
         state.selected_id = Some(id);
         state.preview_closed = false;
@@ -317,9 +361,14 @@ pub(super) fn render_current(
             release_unselected_bodies(&mut state.messages, selected);
         }
     }
-    let (email_renderer, use_wgpu) = {
+    let (email_renderer, use_wgpu, open) = {
         let state = state.borrow();
-        (Rc::clone(&state.email_renderer), state.use_wgpu)
+        (
+            Rc::clone(&state.email_renderer),
+            state.use_wgpu,
+            // Both projections below list the same rows.
+            open_conversation(&state),
+        )
     };
     let (
         scope,
@@ -343,6 +392,7 @@ pub(super) fn render_current(
             state.scope,
             if state.using_core { "" } else { &state.query },
             &state.search_filter,
+            open,
         );
         let visible_count = if state.using_core {
             messages.len()
@@ -419,6 +469,7 @@ pub(super) fn render_current(
             state.scope,
             if state.using_core { "" } else { &state.query },
             &state.search_filter,
+            open,
         );
         let visible = &messages[..visible_count];
         let selected_email = selected_id
@@ -481,12 +532,14 @@ pub(super) fn render_current(
     });
     app.set_has_selected(selected_email.is_some());
     app.set_selected_account_uses_labels(selected_email.as_ref().is_some_and(|email| {
-        state
-            .borrow()
-            .connected_accounts
-            .iter()
-            .any(|account| account.id == email.account_id && account.provider == Provider::Gmail)
+        state.borrow().connected_accounts.iter().any(|account| {
+            account.id == email.account_id && account.mail_protocol == MailProtocol::Gmail
+        })
     }));
+    app.global::<LocalMailUi>()
+        .set_selected(selected_email.as_ref().is_some_and(|email| {
+            state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
+        }));
     apply_label_rows(app, &labels, selected_email.as_ref());
     app.set_previous_email_id(previous_email_id);
     app.set_next_email_id(next_email_id);
@@ -621,6 +674,7 @@ fn make_thread_rows(
     selected_index: usize,
     favicon_icons: &HashMap<String, FaviconImages>,
 ) -> Vec<ThreadMessageRow> {
+    let now = Local::now();
     messages
         .iter()
         .enumerate()
@@ -638,7 +692,7 @@ fn make_thread_rows(
                     .unwrap_or_default(),
                 has_favicon: favicon.is_some(),
                 preview: display_preview(&message.preview).into(),
-                time: message.time.clone().into(),
+                time: message_time(message.date_ms, &now).into(),
                 to: message.to.clone().into(),
                 unread: message.unread,
                 outgoing: message.is_outgoing,
@@ -796,21 +850,29 @@ pub(super) fn release_unselected_bodies(messages: &mut [MailMessage], selected: 
     }
 }
 
+/// The rows the list shows. `open`, the conversation in the reader, stays
+/// listed when it stops matching the quick filter, as when opening an unread
+/// message marks it read; a refresh then cannot move the selection, which
+/// reader actions apply to, onto another row.
 pub(super) fn filtered_messages<'a>(
     messages: &'a [MailMessage],
     scope: Scope,
     query: &str,
     search_filter: &str,
+    open: Option<i32>,
 ) -> Vec<&'a MailMessage> {
     let query = query.trim().to_lowercase();
     messages
         .iter()
         .filter(|email| scope_matches(email, scope))
-        .filter(|email| match search_filter {
-            "Unread" => email.unread,
-            "Starred" => email.starred,
-            "Has attachments" => email.has_attachments,
-            _ => true,
+        .filter(|email| {
+            Some(email.id) == open
+                || match search_filter {
+                    "Unread" => email.unread,
+                    "Starred" => email.starred,
+                    "Has attachments" => email.has_attachments,
+                    _ => true,
+                }
         })
         .filter(|email| {
             if query.is_empty() {
@@ -828,6 +890,12 @@ pub(super) fn filtered_messages<'a>(
             .any(|field| field.to_lowercase().contains(&query))
         })
         .collect()
+}
+
+/// The conversation the reader shows, which the list keeps showing; see
+/// `filtered_messages`.
+pub(super) fn open_conversation(state: &InboxState) -> Option<i32> {
+    state.selected_id.filter(|_| !state.preview_closed)
 }
 
 pub(super) fn scope_matches(email: &MailMessage, scope: Scope) -> bool {
@@ -872,6 +940,10 @@ pub(super) fn same_email_row(a: &EmailRow, b: &EmailRow) -> bool {
         && a.has_replied == b.has_replied
         && a.message_count == b.message_count
         && a.label_summary == b.label_summary
+        && a.account_uses_labels == b.account_uses_labels
+        && a.verification_code == b.verification_code
+        && a.attachment == b.attachment
+        && a.attachment_total == b.attachment_total
         && a.selected == b.selected
         && a.checked == b.checked
         && (!a.has_favicon || (a.favicon == b.favicon && a.favicon_small == b.favicon_small))
@@ -916,7 +988,7 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                 has_favicon: favicon.is_some(),
                 subject: email.subject.clone().into(),
                 preview: display_preview(&email.preview).into(),
-                time: mail_list_display_time(email.date_ms, &email.time, &now).into(),
+                time: mail_list_time(email.date_ms, &now).into(),
                 unread: email.unread,
                 starred: email.starred,
                 has_attachments: email.has_attachments,
@@ -926,6 +998,20 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                     .max(1),
                 label_summary: label_summary(&email.labels, labels).into(),
                 labels: ModelRc::new(VecModel::from(applied_label_rows(labels, &email.labels))),
+                account_uses_labels: email.account_uses_labels,
+                verification_code: email.verification_code.clone().unwrap_or_default().into(),
+                verification_code_spelled: email
+                    .verification_code
+                    .as_deref()
+                    .map(spelled)
+                    .unwrap_or_default()
+                    .into(),
+                attachment: email
+                    .first_attachment
+                    .as_ref()
+                    .map(crate::attachment_controller::list_attachment)
+                    .unwrap_or_default(),
+                attachment_total: i32::try_from(email.attachment_total).unwrap_or(i32::MAX),
                 selected: Some(email.id) == selected_id,
                 checked: checked_ids.contains(&email.id),
             }
@@ -933,24 +1019,40 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
         .collect()
 }
 
-fn mail_list_display_time(
-    date_ms: i64,
-    fallback: &str,
-    now: &chrono::DateTime<Local>,
-) -> String {
+/// One character at a time, so "482913" is read as digits rather than as a
+/// number in the hundreds of thousands.
+fn spelled(code: &str) -> String {
+    code.chars().map(String::from).collect::<Vec<_>>().join(" ")
+}
+
+/// The time or date beside a mail list row. Yesterday's mail shows its time
+/// too, since the list's date sections name the day.
+fn mail_list_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
+    message_time_label(date_ms, now, false)
+}
+
+/// The time or date in a conversation's message headers.
+pub(super) fn message_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
+    message_time_label(date_ms, now, true)
+}
+
+fn message_time_label(date_ms: i64, now: &chrono::DateTime<Local>, name_yesterday: bool) -> String {
     let Some(date) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(date_ms)
         .filter(|_| date_ms > 0)
         .map(|date| date.with_timezone(&Local))
     else {
-        return fallback.to_owned();
+        return String::new();
     };
-    let days = now.date_naive().signed_duration_since(date.date_naive()).num_days();
-    if (0..=1).contains(&days) {
-        date.format("%H:%M").to_string()
-    } else if date.year() == now.year() {
-        date.format("%b %-d").to_string()
-    } else {
-        date.format("%b %-d, %Y").to_string()
+    let formats = date_format::current();
+    let days = now
+        .date_naive()
+        .signed_duration_since(date.date_naive())
+        .num_days();
+    match days {
+        1 if name_yesterday => formats.yesterday().to_owned(),
+        0 | 1 => formats.time(date.hour(), date.minute()),
+        _ if date.year() == now.year() => formats.date(DateStyle::ShortDayMonth, date.date_naive()),
+        _ => formats.date(DateStyle::Short, date.date_naive()),
     }
 }
 
@@ -1044,6 +1146,7 @@ pub(super) fn refresh_rows_only(
             state.scope,
             if state.using_core { "" } else { &state.query },
             &state.search_filter,
+            open_conversation(&state),
         );
         let visible_count = if state.using_core {
             messages.len()
@@ -1118,12 +1221,14 @@ pub(super) fn refresh_rows_only(
     );
     app.set_mail_selection_count(checked_ids.len() as i32);
     app.set_selected_account_uses_labels(selected_email.as_ref().is_some_and(|email| {
-        state
-            .borrow()
-            .connected_accounts
-            .iter()
-            .any(|account| account.id == email.account_id && account.provider == Provider::Gmail)
+        state.borrow().connected_accounts.iter().any(|account| {
+            account.id == email.account_id && account.mail_protocol == MailProtocol::Gmail
+        })
     }));
+    app.global::<LocalMailUi>()
+        .set_selected(selected_email.as_ref().is_some_and(|email| {
+            state.borrow().local_mail.map(|local| local.account_id) == Some(email.account_id)
+        }));
     apply_label_rows(app, &labels, selected_email.as_ref());
     refresh_sidebar(state);
     let selected_domain = selected_email.as_ref().map(|email| {
@@ -1167,6 +1272,33 @@ pub(super) fn refresh_rows_only(
     schedule_favicon_fetches(app, state, runtime, &visible_domains);
 }
 
+/// Rebuilds the mail text the date formats produce, after the language or the
+/// time format changed.
+pub(super) fn refresh_message_dates(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+) {
+    refresh_rows_only(app, state, runtime);
+    let date_ms = {
+        let state = state.borrow();
+        state.selected_id.and_then(|id| {
+            (state.conversation_owner_id == Some(id))
+                .then(|| {
+                    state
+                        .conversation_messages
+                        .get(state.conversation_selected_index)
+                })
+                .flatten()
+                .or_else(|| state.messages.iter().find(|message| message.id == id))
+                .map(|message| message.date_ms)
+        })
+    };
+    if let Some(date_ms) = date_ms {
+        app.set_selected_time(message_time(date_ms, &Local::now()).into());
+    }
+}
+
 pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxState>>) {
     let (
         can_load_more,
@@ -1186,6 +1318,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
                 state.scope,
                 &state.query,
                 &state.search_filter,
+                open_conversation(&state),
             )
             .len();
             paged_visible_count(state.page, total) < total
@@ -1477,10 +1610,13 @@ fn mailbox_scope_title(
             .iter()
             .find(|label| label.id == id)
             .map_or_else(|| "Label".into(), |label| label.name.clone()),
-        Scope::Account { mailbox: label, .. } => mailbox().map_or_else(
-            || label.label().to_owned(),
-            |mailbox| format!("{} / {}", mailbox.context, label.label()),
-        ),
+        // Local mail's mailboxes have no account to name.
+        Scope::Account { mailbox: label, .. } => mailbox()
+            .filter(|mailbox| !mailbox.context.is_empty())
+            .map_or_else(
+                || label.label().to_owned(),
+                |mailbox| format!("{} / {}", mailbox.context, label.label()),
+            ),
     }
 }
 
@@ -1500,7 +1636,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn list_rows_show_clock_time_for_recent_mail_and_dates_for_older_mail() {
+    fn message_times_show_the_clock_for_recent_mail_and_dates_for_older_mail() {
         let at_noon = |year, month, day| {
             let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
                 .unwrap()
@@ -1509,16 +1645,19 @@ mod tests {
             Local.from_local_datetime(&naive).single().unwrap()
         };
         let now = at_noon(2026, 1, 5);
-        assert_eq!(mail_list_display_time(now.timestamp_millis(), "Today", &now), "12:00");
-        assert_eq!(
-            mail_list_display_time(at_noon(2026, 1, 4).timestamp_millis(), "Yesterday", &now),
-            "12:00"
-        );
-        assert_eq!(
-            mail_list_display_time(at_noon(2025, 12, 20).timestamp_millis(), "Dec 20", &now),
-            "Dec 20, 2025"
-        );
-        assert_eq!(mail_list_display_time(0, "Cached", &now), "Cached");
+        let today = now.timestamp_millis();
+        let yesterday = at_noon(2026, 1, 4).timestamp_millis();
+        let this_year = at_noon(2026, 1, 2).timestamp_millis();
+        let last_year = at_noon(2025, 12, 20).timestamp_millis();
+
+        assert_eq!(mail_list_time(today, &now), "12:00");
+        assert_eq!(mail_list_time(yesterday, &now), "12:00");
+        assert_eq!(mail_list_time(this_year, &now), "Jan 2");
+        assert_eq!(mail_list_time(last_year, &now), "Dec 20, 2025");
+        assert_eq!(mail_list_time(0, &now), "");
+        assert_eq!(message_time(today, &now), "12:00");
+        assert_eq!(message_time(yesterday, &now), "Yesterday");
+        assert_eq!(message_time(last_year, &now), "Dec 20, 2025");
     }
 
     #[test]
@@ -1655,7 +1794,6 @@ mod tests {
             initials: String::new(),
             subject: String::new(),
             preview: String::new(),
-            time: String::new(),
             date_ms: 0,
             to: String::new(),
             label: String::new(),
@@ -1671,6 +1809,10 @@ mod tests {
             attachments: Vec::new(),
             body_pending: true,
             sender_verification: String::new(),
+            verification_code: None,
+            account_uses_labels: false,
+            first_attachment: None,
+            attachment_total: 0,
         }
     }
 
@@ -1685,6 +1827,7 @@ mod tests {
                 color: "#EA580C".into(),
                 account_ids: vec![1],
             }],
+            active_profile: None,
             show_markers: true,
             account_colors: HashMap::new(),
             account_short_names: HashMap::from([("1".into(), "Client".into())]),
@@ -1755,7 +1898,7 @@ mod tests {
         messages[0].folder = "Inbox".into();
         messages[1].folder = "Archive".into();
         messages[0].html = Some("large selected body".repeat(1_000));
-        let filtered = filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "All mail");
+        let filtered = filtered_messages(&messages, Scope::UNIFIED_INBOX, "", "All mail", None);
         assert_eq!(filtered.len(), 1);
         assert!(std::ptr::eq(filtered[0], &messages[0]));
         assert_eq!(filtered[0].html.as_ref().unwrap().as_ptr(), messages[0].html.as_ref().unwrap().as_ptr());
@@ -1811,6 +1954,70 @@ mod tests {
         carry_selected_detail(&mut old, &mut fresh, Some(2));
         assert!(fresh[0].html.is_none());
         assert!(old[1].html.is_some());
+    }
+
+    #[test]
+    fn refresh_without_a_shared_row_drops_the_old_rows() {
+        let current = (1..=50).map(message).collect::<Vec<_>>();
+        let refreshed = (101..=150).map(message).collect::<Vec<_>>();
+        let (merged, retained_tail) = merge_refreshed_mail_head(
+            current,
+            refreshed,
+            Some(MailCursor::Thread(ThreadCursor {
+                last_message_at: 0,
+                thread_id: 150,
+            })),
+            &[],
+        );
+        assert!(!retained_tail);
+        assert_eq!(
+            merged.iter().map(|row| row.id).collect::<Vec<_>>(),
+            (101..=150).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_row_removed_from_the_end_does_not_return_below_older_mail() {
+        // Row 50 left the mailbox, so the refresh of 50 rows reaches row 51.
+        let current = (1..=50).map(message).collect::<Vec<_>>();
+        let refreshed = (1..=49).chain([51]).map(message).collect::<Vec<_>>();
+        let (merged, retained_tail) = merge_refreshed_mail_head(
+            current,
+            refreshed,
+            Some(MailCursor::Thread(ThreadCursor {
+                last_message_at: 0,
+                thread_id: 51,
+            })),
+            &[],
+        );
+        assert!(!retained_tail);
+        assert_eq!(
+            merged.iter().map(|row| row.id).collect::<Vec<_>>(),
+            (1..=49).chain([51]).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_short_list_keeps_the_rows_new_mail_pushes_down() {
+        let current = (1..=PAGE_SIZE as i32).map(message).collect::<Vec<_>>();
+        let refreshed = (101..=106)
+            .chain(1..=PAGE_SIZE as i32 - 6)
+            .map(message)
+            .collect::<Vec<_>>();
+        let (merged, retained_tail) = merge_refreshed_mail_head(
+            current,
+            refreshed,
+            Some(MailCursor::Thread(ThreadCursor {
+                last_message_at: 0,
+                thread_id: PAGE_SIZE as i64 - 6,
+            })),
+            &[],
+        );
+        assert!(retained_tail);
+        assert_eq!(
+            merged.iter().map(|row| row.id).collect::<Vec<_>>(),
+            (101..=106).chain(1..=PAGE_SIZE as i32).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1889,6 +2096,69 @@ mod tests {
         assert_eq!(successor_selection(&order, 40, &visible(&[10, 20])), Some(20));
         assert_eq!(successor_selection(&order, 20, &visible(&[])), None);
         assert_eq!(successor_selection(&order, 99, &visible(&[10])), None);
+    }
+
+    fn project_row(email: &MailMessage) -> EmailRow {
+        make_rows(
+            std::slice::from_ref(email),
+            None,
+            &HashSet::new(),
+            &HashMap::new(),
+            &[],
+            &AccountPresentationSettings::default(),
+        )
+        .remove(0)
+    }
+
+    #[test]
+    fn mail_rows_know_how_their_account_files_labels() {
+        let mut email = message(1);
+        email.account_uses_labels = true;
+        let row = project_row(&email);
+        assert!(row.account_uses_labels);
+        email.account_uses_labels = false;
+        assert!(!same_email_row(&row, &project_row(&email)));
+    }
+
+    #[test]
+    fn mail_rows_offer_verification_codes() {
+        let mut email = message(1);
+        email.verification_code = Some("482913".into());
+        let row = project_row(&email);
+        assert_eq!(row.verification_code, "482913");
+        assert_eq!(row.verification_code_spelled, "4 8 2 9 1 3");
+
+        // A newer code refreshes the row in place.
+        email.verification_code = Some("551203".into());
+        assert!(!same_email_row(&row, &project_row(&email)));
+        email.verification_code = None;
+        let cleared = project_row(&email);
+        assert_eq!(cleared.verification_code, "");
+        assert_eq!(cleared.verification_code_spelled, "");
+    }
+
+    #[test]
+    fn mail_rows_offer_the_first_file() {
+        let mut email = message(1);
+        email.first_attachment = Some(flectar_mail_core::models::AttachmentMeta {
+            id: 9,
+            filename: Some("Joel-Solano-CV.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            size: Some(2048),
+            is_inline: false,
+        });
+        email.attachment_total = 3;
+        let row = project_row(&email);
+        assert_eq!(row.attachment.id, "9");
+        assert_eq!(row.attachment.stem, "Joel-Solano-CV");
+        assert_eq!(row.attachment.extension, ".pdf");
+        assert_eq!(row.attachment.kind, "pdf");
+        assert!(row.attachment.previewable);
+        assert_eq!(row.attachment_total, 3);
+
+        // Another file refreshes the row in place.
+        email.attachment_total = 4;
+        assert!(!same_email_row(&row, &project_row(&email)));
     }
 
     #[test]

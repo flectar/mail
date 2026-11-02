@@ -17,8 +17,8 @@ slint::slint! {
         in-out property <string> url: "https://calendar.example.com/";
         in-out property <string> username: "user@example.com";
         in-out property <string> password: "test-app-password";
-        in-out property <bool> manage-existing: false;
-        callback connect(int, string, string, string);
+        in-out property <int> connection: -1;
+        callback connect(int, int, string, string, string);
 
         SettingsDialog {
             width: parent.width;
@@ -31,10 +31,10 @@ slint::slint! {
             caldav_url <=> root.url;
             caldav_username <=> root.username;
             caldav_password <=> root.password;
-            caldav_manage_existing <=> root.manage-existing;
+            caldav_connection_id <=> root.connection;
             caldav_connecting: root.connecting;
-            connect_caldav(account, url, username, password) => {
-                root.connect(account, url, username, password);
+            connect_caldav(account, connection, url, username, password) => {
+                root.connect(account, connection, url, username, password);
             }
         }
     }
@@ -67,10 +67,10 @@ fn connect_stays_reachable_with_a_keyboard_and_wrapped_status() {
     let ui = CaldavSettingsHarness::new().unwrap();
     let calls = Rc::new(RefCell::new(Vec::new()));
     let recorded = calls.clone();
-    ui.on_connect(move |account, url, username, password| {
+    ui.on_connect(move |account, connection, url, username, password| {
         recorded
             .borrow_mut()
-            .push((account, url, username, password));
+            .push((account, connection, url, username, password));
     });
     ui.show().unwrap();
 
@@ -90,11 +90,11 @@ fn connect_stays_reachable_with_a_keyboard_and_wrapped_status() {
                 .into(),
         );
         ui.set_account(1);
-        ui.set_manage_existing(false);
+        ui.set_connection(-1);
         ui.set_password("test-app-password".into());
         calls.borrow_mut().clear();
 
-        let panel_height = (if compact { 410.0_f32 } else { 354.0 }).min(height as f32 - 24.0);
+        let panel_height = (if compact { 500.0_f32 } else { 430.0 }).min(height as f32 - 24.0);
         let panel_width = 520.0_f32.min(width as f32 - 24.0);
         let button_height = if compact { 44.0 } else { 34.0 };
         let x = (width as f32 + panel_width) / 2.0 - 60.0;
@@ -107,6 +107,7 @@ fn connect_stays_reachable_with_a_keyboard_and_wrapped_status() {
             recorded[0],
             (
                 1,
+                -1,
                 "https://calendar.example.com/".into(),
                 "user@example.com".into(),
                 "test-app-password".into(),
@@ -161,14 +162,17 @@ fn connect_stays_reachable_with_a_keyboard_and_wrapped_status() {
             2,
             "a new connection requires a password"
         );
-        ui.set_manage_existing(true);
+        // Changing a saved connection submits its id and may keep the
+        // saved password.
+        ui.set_connection(7);
         click(&ui, x, y);
         assert_eq!(
             calls.borrow().len(),
             3,
             "reconnecting can keep the saved password"
         );
-        assert_eq!(calls.borrow()[2].3, "");
+        assert_eq!(calls.borrow()[2].1, 7);
+        assert_eq!(calls.borrow()[2].4, "");
 
         ui.set_url("".into());
         click(&ui, x, y);

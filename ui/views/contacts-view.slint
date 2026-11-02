@@ -1,6 +1,6 @@
 import { InfiniteScrollController } from "../components/infinite-scroll-controller.slint";
 import { HorizontalBox, ListView, ScrollView, VerticalBox } from "std-widgets.slint";
-import { ContactSidebarRow, ContactSidebarRowKind, ContactRow } from "../models.slint";
+import { ContactSidebarRow, ContactSidebarRowKind, ContactRow, ContactSyncState, ContactValueRow } from "../models.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
@@ -12,7 +12,7 @@ import { LayoutMetrics } from "../design-system.slint";
 import { ScrollFade } from "../components/scroll-fade.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceSearchToolbar } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
-import { WindowControlsClearance } from "../window-chrome.slint";
+import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 
 component FieldLabel inherits Text {
     in property <string> label;
@@ -38,7 +38,7 @@ export component ContactsView inherits Rectangle {
     in property <bool> dark-mode: false;
     in property <[ContactRow]> contacts: [];
     in property <[ContactSidebarRow]> sidebar-rows: [];
-    in property <string> query: "";
+    in-out property <string> query: "";
     in-out property <string> filter: "all";
     in property <string> selected-scope: "All contacts";
     in property <string> status: "";
@@ -51,8 +51,6 @@ export component ContactsView inherits Rectangle {
     in property <bool> has-selected: false;
     in-out property <int> selected-id: 0;
     in-out property <string> edit-name: "";
-    in-out property <string> edit-email: "";
-    in-out property <string> edit-phone: "";
     in-out property <string> edit-company: "";
     in-out property <string> edit-job-title: "";
     in-out property <string> edit-website: "";
@@ -62,6 +60,20 @@ export component ContactsView inherits Rectangle {
     in-out property <string> edit-tags: "";
     in-out property <bool> edit-favorite: false;
     in property <bool> is-suggested: false;
+    in-out property <[ContactValueRow]> email-values;
+    in-out property <[ContactValueRow]> phone-values;
+    callback add-value(string);
+    callback prefer-value(string,int);
+    callback remove-value(string,int);
+    in property <bool> read-only;
+    in property <ContactSyncState> sync;
+    in property <string> sync-detail;
+    // Empty for a contact stored only on this device.
+    in property <string> source-name;
+    property <bool> conflict: root.sync == ContactSyncState.conflict;
+    in property <image> photo;
+    in property <bool> has-photo;
+    callback resolve-conflict(bool);
     in property <string> edit-initials: "?";
     in property <string> interaction-label: "";
     private property <bool> delete-confirming: false;
@@ -103,9 +115,10 @@ export component ContactsView inherits Rectangle {
     callback refresh;
     callback load-more;
     callback new-contact;
-    callback save-contact(int, string, string, string, string, string, string, string, string, string, string, bool);
+    callback save-contact(int, string, string, string, string, string, string, string, string, bool);
     callback delete-contact(int);
     callback compose-to-contact(string);
+    pure callback usable-email(string) -> bool;
 
     pagination := InfiniteScrollController {
         active: root.active;
@@ -311,7 +324,7 @@ export component ContactsView inherits Rectangle {
                             : @image-url("../icons/lucide/outline/sidebar-collapse.svg");
                         leading-tooltip: root.sidebar-collapsed ? @tr("Show contact groups") : @tr("Hide contact groups");
                         leading-accessible-id: "contacts-sidebar-button";
-                        text: root.query;
+                        text <=> root.query;
                         placeholder-text: @tr("Search contacts");
                         filters: [
                             { title: @tr("All contacts"), value: "all" },
@@ -362,6 +375,8 @@ export component ContactsView inherits Rectangle {
                                     y: 14px;
                                     size: 38px;
                                     fallback: contact.initials;
+                                    source: contact.avatar;
+                                    has-source: contact.has-avatar;
                                     color-tone: contact.selected ? -1 : contact.avatar-tone;
                                     dark-mode: root.dark-mode;
                                     background-color: contact.selected ? root.accent-soft : root.avatar-bg;
@@ -401,7 +416,7 @@ export component ContactsView inherits Rectangle {
                                         y: contact-name.y + contact-name.height;
                                         width: parent.width;
                                         height: max(20px, self.preferred-height);
-                                        text: contact.email;
+                                        text: contact.email != "" ? contact.email : contact.source != "" ? contact.source : @tr("Local contacts");
                                         color: root.body-text;
                                         font-size: TypeScale.secondary;
                                         overflow: elide;
@@ -519,15 +534,22 @@ export component ContactsView inherits Rectangle {
             preferred-width: 0px;
             max-width: root.detail-visible ? root.available-width : 0px;
             horizontal-stretch: root.detail-visible ? 1 : 0;
-            background: root.surface-raised;
+            // The raised canvas frames a contact; under the tab strip an empty
+            // detail shares the list's surface instead.
+            background: WindowChrome.top-bar && !root.has-selected ? root.surface : root.surface-raised;
 
             if root.has-selected : VerticalBox {
                 width: parent.width;
                 height: parent.height;
+                // The toolbar spans the pane, on the list's centerline.
+                padding: 0px;
                 spacing: 0px;
 
                     Rectangle {
                     height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
+                    // Under the tab strip the toolbar shares the list's
+                    // surface, so the band below the tabs is one color.
+                    background: WindowChrome.top-bar ? root.surface : transparent;
                     detail-clearance := WindowControlsClearance { width: parent.width; height: parent.height; }
                     HorizontalBox {
                         padding-top: 0px;
@@ -553,7 +575,7 @@ export component ContactsView inherits Rectangle {
                         }
                         Text {
                             text: root.is-suggested ? @tr("Suggested person")
-                                : root.selected-id > 0 ? @tr("Contact details") : @tr("New contact");
+                                : root.selected-id != 0 ? @tr("Contact details") : @tr("New contact");
                             color: root.secondary-text;
                             font-size: TypeScale.caption;
                             font-weight: 700;
@@ -590,7 +612,8 @@ export component ContactsView inherits Rectangle {
                             }
                         }
                         if !root.delete-confirming : ToolbarIconButton {
-                            visible: root.selected-id > 0;
+                            visible: root.selected-id != 0;
+                            interactive: !root.read-only && !root.conflict;
                             compact: root.compact;
                             icon: @image-url("../icons/lucide/outline/trash.svg");
                             icon-color: root.secondary-text;
@@ -624,6 +647,8 @@ export component ContactsView inherits Rectangle {
                             Avatar {
                                 size: 52px;
                                 fallback: root.edit-initials;
+                                source: root.photo;
+                                has-source: root.has-photo;
                                 background-color: root.accent-soft;
                                 foreground-color: root.accent;
                             }
@@ -631,7 +656,7 @@ export component ContactsView inherits Rectangle {
                                 spacing: 0px;
                                 detail-name := Text {
                                     height: max(30px, self.preferred-height);
-                                    text: root.edit-name == "" ? (root.edit-email == "" ? @tr("New contact") : root.edit-email) : root.edit-name;
+                                    text: root.edit-name != "" ? root.edit-name : root.email-values.length > 0 && root.email-values[0].value != "" ? root.email-values[0].value : @tr("New contact");
                                     color: root.title-color;
                                     font-size: TypeScale.display;
                                     font-weight: 700;
@@ -673,47 +698,114 @@ export component ContactsView inherits Rectangle {
                                 }
                             }
                         }
-                        FieldLabel { label: @tr("NAME"); }
-                        LineEdit { text <=> root.edit-name; placeholder-text: @tr("Full name"); }
-                        FieldLabel { label: @tr("EMAIL"); }
-                        LineEdit { text <=> root.edit-email; placeholder-text: @tr("name@example.com"); }
-
-                        HorizontalBox {
-                            spacing: 10px;
-                            VerticalBox {
-                                spacing: 5px;
-                                FieldLabel { label: @tr("PHONE"); }
-                                LineEdit { text <=> root.edit-phone; placeholder-text: @tr("+1 555 0100"); }
-                            }
-                            VerticalBox {
-                                spacing: 5px;
-                                FieldLabel { label: @tr("BIRTHDAY"); }
-                                LineEdit { text <=> root.edit-birthday; placeholder-text: @tr("YYYY-MM-DD"); }
+                        Text {
+                            text: (root.source-name == "" ? @tr("Local contacts") : root.source-name) + (root.read-only ? " · " + @tr("Read-only") : "");
+                            color: root.secondary-text;
+                            font-size: TypeScale.caption;
+                            wrap: word-wrap;
+                        }
+                        if root.sync != ContactSyncState.local : Text {
+                            text: root.sync == ContactSyncState.synced ? @tr("Synced")
+                                : root.sync == ContactSyncState.pending ? @tr("Saved locally; waiting to sync")
+                                : root.sync == ContactSyncState.conflict ? @tr("Conflicting server changes")
+                                : root.sync == ContactSyncState.unavailable ? @tr("Address book unavailable; changes are kept on this device")
+                                : root.sync == ContactSyncState.detached ? @tr("Address book removed before these changes synced; they are kept on this device")
+                                : @tr("Could not sync: {}", root.sync-detail);
+                            color: root.secondary-text;
+                            font-size: TypeScale.caption;
+                            wrap: word-wrap;
+                        }
+                        if root.conflict : VerticalLayout {
+                            spacing: 8px;
+                            Text { text: @tr("This contact changed on the server. Choose which complete version to keep."); wrap: word-wrap; color: root.body-text; }
+                            VerticalLayout {
+                                spacing: 8px;
+                                Button { text: @tr("Keep my version"); enabled: !root.read-only; clicked => { root.resolve-conflict(true); } }
+                                Button { text: @tr("Keep server version"); clicked => { root.resolve-conflict(false); } }
                             }
                         }
+                        FieldLabel { label: @tr("NAME"); }
+                        LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-name; placeholder-text: @tr("Full name"); }
+                        FieldLabel { label: @tr("EMAIL"); }
+                        for field[index] in root.email-values : VerticalBox {
+                            padding: 0px;
+                            spacing: 4px;
+                            LineEdit { enabled: !root.read-only && !root.conflict; text <=> field.value; placeholder-text: @tr("Email address"); }
+                            HorizontalBox {
+                                padding: 0px;
+                                spacing: 6px;
+                                LineEdit { enabled: !root.read-only && !root.conflict; text <=> field.label; placeholder-text: @tr("Label"); horizontal-stretch: 1; }
+                                ToolbarIconButton {
+                                    interactive: !root.read-only && !root.conflict;
+                                    compact: root.compact;
+                                    icon: field.preference == 1 ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg");
+                                    icon-color: field.preference == 1 ? root.accent : root.secondary-text;
+                                    tooltip-text: @tr("Preferred email");
+                                    clicked => { root.prefer-value("email",index); }
+                                }
+                                if root.usable-email(field.value) : ToolbarIconButton {
+                                    compact: root.compact;
+                                    icon: @image-url("../icons/lucide/outline/paper-airplane.svg");
+                                    icon-color: root.secondary-text;
+                                    tooltip-text: @tr("Send email");
+                                    clicked => { root.compose-to-contact(field.value); }
+                                }
+                                ToolbarIconButton {
+                                    interactive: !root.read-only && !root.conflict;
+                                    compact: root.compact;
+                                    icon: @image-url("../icons/lucide/outline/trash.svg");
+                                    icon-color: root.secondary-text;
+                                    tooltip-text: @tr("Remove email");
+                                    clicked => { root.remove-value("email",index); }
+                                }
+                            }
+                        }
+                        Button { text: @tr("Add email"); enabled: !root.read-only && !root.conflict; clicked => { root.add-value("email"); } }
+                        FieldLabel { label: @tr("PHONE"); }
+                        for field[index] in root.phone-values : VerticalBox {
+                            padding: 0px;
+                            spacing: 4px;
+                            LineEdit { enabled: !root.read-only && !root.conflict; text <=> field.value; placeholder-text: @tr("Phone number"); }
+                            HorizontalBox {
+                                padding: 0px;
+                                spacing: 6px;
+                                LineEdit { enabled: !root.read-only && !root.conflict; text <=> field.label; placeholder-text: @tr("Label"); horizontal-stretch: 1; }
+                                ToolbarIconButton {
+                                    interactive: !root.read-only && !root.conflict;
+                                    compact: root.compact;
+                                    icon: @image-url("../icons/lucide/outline/trash.svg");
+                                    icon-color: root.secondary-text;
+                                    tooltip-text: @tr("Remove phone");
+                                    clicked => { root.remove-value("phone",index); }
+                                }
+                            }
+                        }
+                        Button { text: @tr("Add phone"); enabled: !root.read-only && !root.conflict; clicked => { root.add-value("phone"); } }
+                        FieldLabel { label: @tr("BIRTHDAY"); }
+                        LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-birthday; placeholder-text: @tr("YYYY-MM-DD"); }
 
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
                                 spacing: 5px;
                                 FieldLabel { label: @tr("COMPANY"); }
-                                LineEdit { text <=> root.edit-company; placeholder-text: @tr("Company"); }
+                                LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-company; placeholder-text: @tr("Company"); }
                             }
                             VerticalBox {
                                 spacing: 5px;
                                 FieldLabel { label: @tr("JOB TITLE"); }
-                                LineEdit { text <=> root.edit-job-title; placeholder-text: @tr("Role"); }
+                                LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-job-title; placeholder-text: @tr("Role"); }
                             }
                         }
 
                         FieldLabel { label: @tr("WEBSITE"); }
-                        LineEdit { text <=> root.edit-website; placeholder-text: @tr("https://example.com"); }
+                        LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-website; placeholder-text: @tr("https://example.com"); }
                         FieldLabel { label: @tr("ADDRESS"); }
-                        TextEdit { height: 72px; text <=> root.edit-postal-address; placeholder-text: @tr("Postal address"); }
+                        TextEdit { enabled: !root.read-only && !root.conflict; height: 72px; text <=> root.edit-postal-address; placeholder-text: @tr("Postal address"); }
                         FieldLabel { label: @tr("TAGS"); }
-                        LineEdit { text <=> root.edit-tags; placeholder-text: @tr("customer, design, london"); }
+                        LineEdit { enabled: !root.read-only && !root.conflict; text <=> root.edit-tags; placeholder-text: @tr("customer, design, london"); }
                         FieldLabel { label: @tr("NOTES"); }
-                        TextEdit { height: 110px; text <=> root.edit-notes; placeholder-text: @tr("Notes about this contact"); }
+                        TextEdit { enabled: !root.read-only && !root.conflict; height: 110px; text <=> root.edit-notes; placeholder-text: @tr("Notes about this contact"); }
 
                         Rectangle { height: 8px; }
                         if root.status != "" : Text {
@@ -726,20 +818,11 @@ export component ContactsView inherits Rectangle {
                             height: 36px;
                             spacing: 8px;
                             Button {
-                                visible: root.edit-email != "";
-                                text: @tr("Send email");
-                                has-icon: true;
-                                icon: @image-url("../icons/lucide/outline/paper-airplane.svg");
-                                clicked => { root.compose-to-contact(root.edit-email); }
-                            }
-                            Rectangle { horizontal-stretch: 1; }
-                            Button {
                                 text: root.is-suggested ? @tr("Save to contacts") : @tr("Save contact");
                                 primary: true;
                                 clicked => {
                                     root.save-contact(
-                                        root.selected-id, root.edit-name, root.edit-email,
-                                        root.edit-phone, root.edit-company, root.edit-job-title,
+                                        root.selected-id, root.edit-name, root.edit-company, root.edit-job-title,
                                         root.edit-website, root.edit-birthday,
                                         root.edit-postal-address, root.edit-notes,
                                         root.edit-tags, root.edit-favorite

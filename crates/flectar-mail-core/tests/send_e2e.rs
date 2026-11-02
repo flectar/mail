@@ -89,15 +89,18 @@ async fn reply_send_reaches_smtp_and_sent_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
     core.add_account_password(AddPasswordAccountArgs {
-        connection: Default::default(),
+        connection: flectar_mail_core::models::MailConnectionSettings::new(
+            flectar_mail_core::models::ConnectionSecurity::Tls,
+            flectar_mail_core::models::ConnectionSecurity::Starttls,
+        ),
         email: "senduser@example.com".into(),
         display_name: Some("Send User".into()),
         username: "senduser".into(),
         password: "pass".into(),
         mail_protocol: flectar_mail_core::models::MailProtocol::Imap,
         jmap_url: String::new(),
-        imap_host: "127.0.0.1".into(),
-        imap_port: 10993,
+        incoming_host: "127.0.0.1".into(),
+        incoming_port: 10993,
         smtp_host: "127.0.0.1".into(),
         smtp_port: 10588, // the sink
     })

@@ -3,7 +3,7 @@ import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint"
 import { TypeScale } from "../typography.slint";
 import { LineEdit, ToolbarIconButton } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
-import { WindowControlsClearance } from "../window-chrome.slint";
+import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
 
 export struct WorkspaceSearchFilter {
     title: string,
@@ -49,6 +49,33 @@ export component WorkspaceFrame inherits Rectangle {
     @children
 }
 
+// A vertical divider between panes. Under the tab strip it fades in from the
+// strip's border, so it doesn't run into the open foot of the active tab.
+export component PaneDivider inherits Rectangle {
+    in property <color> divider-color: AppTheme.border;
+    // What the fade shows through to, for a divider not drawn over a pane.
+    in property <color> backdrop: transparent;
+    private property <length> fade: WindowChrome.top-bar ? min(24px, root.height) : 0px;
+
+    width: LayoutMetrics.divider-width;
+
+    Rectangle {
+        y: 0px;
+        height: root.fade;
+        background: root.backdrop;
+    }
+    Rectangle {
+        y: 0px;
+        height: root.fade;
+        background: @linear-gradient(180deg, root.divider-color.with-alpha(0) 0%, root.divider-color 100%);
+    }
+    Rectangle {
+        y: root.fade;
+        height: root.height - root.fade;
+        background: root.divider-color;
+    }
+}
+
 // Feature-specific sidebars share their outer geometry and divider while
 // retaining their own mailboxes, calendars, contacts, or settings controls.
 export component WorkspaceSidebarSurface inherits Rectangle {
@@ -60,12 +87,10 @@ export component WorkspaceSidebarSurface inherits Rectangle {
 
     @children
 
-    Rectangle {
-        x: parent.width - LayoutMetrics.divider-width;
-        y: 0px;
-        width: LayoutMetrics.divider-width;
+    PaneDivider {
+        x: parent.width - self.width;
         height: parent.height;
-        background: root.divider-color;
+        divider-color: root.divider-color;
     }
 }
 
@@ -113,12 +138,21 @@ export component WorkspacePaneResizeHandle inherits Rectangle {
         root.resize-finished(root.last-requested-width);
     }
 
+    private property <color> line-color: resize-hit.pressed || resize-hit.has-hover || resize-focus.focus-visible
+        ? root.active-color : root.divider-color;
+    animate line-color { duration: 150ms; easing: ease-out; }
+
     width: LayoutMetrics.divider-width;
     horizontal-stretch: 0;
     z: 2;
-    background: resize-hit.pressed || resize-hit.has-hover || resize-focus.focus-visible
-        ? root.active-color : root.divider-color;
-    animate background { duration: 150ms; easing: ease-out; }
+
+    PaneDivider {
+        height: parent.height;
+        divider-color: root.line-color;
+        // The handle sits over the frame's page color; the panes on both
+        // sides meet the tab strip on the plain surface.
+        backdrop: AppTheme.surface;
+    }
 
     resize-focus := FocusVisibleScope {
         x: -(LayoutMetrics.pane-resize-hit-width - root.width) / 2;
@@ -216,6 +250,8 @@ export component WorkspaceTitleRow inherits Rectangle {
     in property <string> leading-tooltip: "";
     in property <string> leading-accessible-id: "";
     in property <length> horizontal-inset: 0px;
+    // Where the title starts when there is no leading action.
+    in property <length> leading-inset: root.horizontal-inset;
     in property <length> item-spacing: 6px;
     in property <relative-font-size> title-font-size: TypeScale.title-small;
     in property <int> title-weight: 700;
@@ -230,16 +266,17 @@ export component WorkspaceTitleRow inherits Rectangle {
 
     HorizontalBox {
         padding-top: 0px;
-        padding-left: max(root.horizontal-inset, clearance.leading);
+        padding-left: max(root.leading-inset, clearance.leading);
         padding-right: max(root.horizontal-inset, clearance.trailing);
         padding-bottom: 0px;
         spacing: root.item-spacing;
         cross-axis-alignment: center;
 
-        ToolbarIconButton {
-            visible: root.show-leading;
+        // Created only when shown: a hidden button would still take the
+        // row's spacing and push the title off its content's edge.
+        if root.show-leading : ToolbarIconButton {
             compact: root.height >= LayoutMetrics.touch-target;
-            width: root.show-leading ? (self.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size) : 0px;
+            width: self.compact ? LayoutMetrics.touch-target : LayoutMetrics.desktop-icon-button-size;
             icon: root.leading-icon;
             icon-color: AppTheme.secondary;
             ghost: root.leading-ghost;
@@ -269,7 +306,9 @@ export component WorkspaceTitleRow inherits Rectangle {
 // The optional leading action keeps each workspace's sidebar toggle on the
 // same line, while feature-specific actions are injected before refresh.
 export component WorkspaceSearchToolbar inherits Rectangle {
-    in property <string> text;
+    // Bind with `<=>` so the field follows queries set elsewhere, such as a
+    // reset when switching account or folder.
+    in-out property <string> text;
     in property <string> placeholder-text;
     in property <bool> show-leading: false;
     in property <image> leading-icon;
@@ -299,6 +338,11 @@ export component WorkspaceSearchToolbar inherits Rectangle {
         }
     }
 
+    public function focus-search() {
+        search-edit.focus();
+        search-edit.select-all();
+    }
+
     clearance := WindowControlsClearance { width: parent.width; height: parent.height; }
 
     HorizontalBox {
@@ -307,9 +351,8 @@ export component WorkspaceSearchToolbar inherits Rectangle {
         padding-right: clearance.trailing;
         spacing: 6px;
 
-        ToolbarIconButton {
-            visible: root.show-leading;
-            width: root.show-leading ? LayoutMetrics.desktop-icon-button-size : 0px;
+        if root.show-leading : ToolbarIconButton {
+            width: LayoutMetrics.desktop-icon-button-size;
             icon: root.leading-icon;
             icon-color: AppTheme.secondary;
             ghost: true;
@@ -327,7 +370,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             search-edit := LineEdit {
                 width: parent.width;
                 height: parent.height;
-                text: root.text;
+                text <=> root.text;
                 placeholder-text: root.placeholder-text;
                 show-leading-icon: true;
                 leading-icon: @image-url("../icons/lucide/outline/search.svg");
@@ -388,6 +431,7 @@ export component CompactPageHeader inherits Rectangle {
     in property <string> leading-accessible-id: "";
     in property <color> background-color: AppTheme.surface;
     in property <bool> leading-ghost: false;
+    in property <length> leading-inset: LayoutMetrics.compact-inset;
     callback leading-clicked;
 
     height: LayoutMetrics.compact-header-height;
@@ -404,6 +448,7 @@ export component CompactPageHeader inherits Rectangle {
         leading-accessible-id: root.leading-accessible-id;
         leading-ghost: root.leading-ghost;
         horizontal-inset: LayoutMetrics.compact-inset;
+        leading-inset: root.leading-inset;
         leading-clicked => { root.leading-clicked(); }
 
         @children

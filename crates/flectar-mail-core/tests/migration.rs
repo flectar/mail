@@ -7,7 +7,9 @@ use flectar_mail_core::migration::{
     self, AccountPlan, FindingCode, ImportInventory, OtherEntryKind, PlanStatus, ServerProtocol,
     SignIn, Source, SourceError, SourceKind,
 };
-use flectar_mail_core::models::{ConnectionSecurity, Provider, SenderIdentitySource};
+use flectar_mail_core::models::{
+    ConnectionSecurity, KeepOnServer, MailProtocol, Provider, SenderIdentitySource,
+};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -20,7 +22,7 @@ fn fixture(name: &str) -> PathBuf {
 fn accounts(source: Source) -> ImportInventory {
     match source {
         Source::Accounts(inventory) => inventory,
-        Source::FlectarBackup(_) => panic!("expected accounts"),
+        Source::FlectarBackup(_) | Source::Mail(_) => panic!("expected accounts"),
     }
 }
 
@@ -79,7 +81,7 @@ fn k9_export_maps_supported_accounts_and_explains_the_rest() {
     assert_eq!(config.display_name.as_deref(), Some("Jane Doe"));
     assert_eq!(config.username, "jane@example.com");
     assert_eq!(
-        (config.imap_host.as_str(), config.imap_port),
+        (config.incoming_host.as_str(), config.incoming_port),
         ("imap.example.com", 993)
     );
     // An omitted port is the protocol default for the configured security.
@@ -88,7 +90,7 @@ fn k9_export_maps_supported_accounts_and_explains_the_rest() {
         ("smtp.example.com", 587)
     );
     assert_eq!(
-        config.settings.connection.imap_security,
+        config.settings.connection.incoming_security,
         ConnectionSecurity::Tls
     );
     assert_eq!(
@@ -117,13 +119,27 @@ fn k9_export_maps_supported_accounts_and_explains_the_rest() {
     assert_eq!(codes(gmail), [FindingCode::AliasesManagedByProvider]);
     let gmail = &gmail.draft.as_ref().unwrap().config;
     assert_eq!(gmail.provider, Provider::Gmail);
-    assert_eq!(gmail.imap_host, "imap.gmail.com");
+    assert_eq!(gmail.incoming_host, "imap.gmail.com");
 
+    // A POP3 account keeps downloading, and mail deleted here leaves the
+    // server as mail deleted in K-9 did.
     let pop = &plans[2];
-    assert_eq!(pop.status, PlanStatus::Unsupported);
+    assert_eq!(pop.status, PlanStatus::Ready);
     assert_eq!(pop.email, "old@example.net");
-    assert_eq!(codes(pop), [FindingCode::Pop3Unsupported]);
-    assert!(pop.draft.is_none());
+    assert_eq!(
+        codes(pop),
+        [
+            FindingCode::UnencryptedOutgoing,
+            FindingCode::RemovesServerMail
+        ]
+    );
+    let pop = &pop.draft.as_ref().unwrap().config;
+    assert_eq!(pop.mail_protocol, MailProtocol::Pop3);
+    assert_eq!(
+        (pop.incoming_host.as_str(), pop.incoming_port),
+        ("pop.example.net", 995)
+    );
+    assert_eq!(pop.settings.keep_on_server, KeepOnServer::UntilDeleted);
 }
 
 #[test]
@@ -164,10 +180,10 @@ fn k9_legacy_exports_use_the_defaults_k9_applies() {
     let draft = plans[0].draft.as_ref().expect("legacy account imports");
     // Before content version 92 a missing security mode meant TLS.
     assert_eq!(
-        draft.config.settings.connection.imap_security,
+        draft.config.settings.connection.incoming_security,
         ConnectionSecurity::Tls
     );
-    assert_eq!(draft.config.imap_port, 993);
+    assert_eq!(draft.config.incoming_port, 993);
     // Before version 68 signatures were on unless switched off.
     assert_eq!(draft.signatures[0].html, "<div>Legacy</div>");
     assert_eq!(draft.color.as_deref(), Some("#2196F3"));
@@ -184,12 +200,10 @@ fn thunderbird_profile_reads_accounts_identities_signatures_and_colors() {
             .iter()
             .map(|entry| entry.kind)
             .collect::<Vec<_>>(),
-        [
-            OtherEntryKind::Newsgroups,
-            OtherEntryKind::Feeds,
-            OtherEntryKind::LocalFolders
-        ]
+        // Its Local Folders hold no mail, so nothing of them is left out.
+        [OtherEntryKind::Newsgroups, OtherEntryKind::Feeds]
     );
+    assert!(inventory.mail.is_empty());
     let plans = migration::plan(&inventory, &[]);
     assert_eq!(plans.len(), 2);
 
@@ -205,7 +219,7 @@ fn thunderbird_profile_reads_accounts_identities_signatures_and_colors() {
         Some("Ana Ruiz García")
     );
     assert_eq!(draft.config.username, "ana");
-    assert_eq!(draft.config.imap_port, 993);
+    assert_eq!(draft.config.incoming_port, 993);
     assert_eq!(draft.config.smtp_port, 587);
     assert_eq!(
         draft
@@ -291,7 +305,7 @@ fn thunderbird_profile_export_archives_are_read_in_place() {
             .write_all(&std::fs::read(profile.path().join(name)).unwrap())
             .unwrap();
     }
-    // Mail stores in the archive are never opened.
+    // IMAP mail stores in the archive are never opened.
     archive
         .start_file("ImapMail/imap.example.org/INBOX", options)
         .unwrap();
@@ -343,10 +357,14 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
             .collect::<Vec<_>>(),
         [
             ("jane@example.com", SignIn::Password),
-            ("jane.doe@gmail.com", SignIn::Google)
+            ("jane.doe@gmail.com", SignIn::Google),
+            ("old@example.net", SignIn::Password)
         ]
     );
     assert!(report.already_present.is_empty() && report.failed.is_empty());
+    // An imported POP3 account starts with its folders on this device.
+    let pop3 = report.imported[2].account_id;
+    assert_eq!(core.list_folders(Some(pop3)).await.unwrap().len(), 6);
 
     let listed = core.list_accounts().await.unwrap();
     assert!(
@@ -377,7 +395,7 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
     // Repeating the import changes nothing and says so.
     let again = core.import_accounts(drafts).await.unwrap();
     assert!(again.imported.is_empty());
-    assert_eq!(again.already_present.len(), 2);
+    assert_eq!(again.already_present.len(), 3);
     let plans = migration::plan(
         &inventory,
         &listed
@@ -389,6 +407,35 @@ async fn import_creates_paused_accounts_with_identities_signatures_and_colors() 
 }
 
 #[tokio::test]
+async fn another_gmail_spelling_imports_as_the_same_account() {
+    let (_directory, core) = core().await;
+    let inventory = accounts(migration::open(&fixture("k9-settings.k9s")).unwrap());
+    let gmail = migration::plan(&inventory, &[])
+        .into_iter()
+        .filter_map(|plan| plan.draft)
+        .find(|draft| draft.config.email == "jane.doe@gmail.com")
+        .unwrap();
+    let mut respelled = gmail.clone();
+    respelled.config.email = "JaneDoe@googlemail.com".into();
+    respelled.config.username = respelled.config.email.clone();
+
+    let report = core
+        .import_accounts(vec![gmail, respelled.clone()])
+        .await
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!(
+        report.failed[0].error,
+        "the address appears twice in this import"
+    );
+
+    let again = core.import_accounts(vec![respelled]).await.unwrap();
+    assert!(again.imported.is_empty());
+    assert_eq!(again.already_present, ["JaneDoe@googlemail.com"]);
+}
+
+#[tokio::test]
 async fn one_invalid_draft_does_not_block_or_corrupt_the_others() {
     let (_directory, core) = core().await;
     let profile = thunderbird_profile();
@@ -397,7 +444,7 @@ async fn one_invalid_draft_does_not_block_or_corrupt_the_others() {
         .into_iter()
         .filter_map(|plan| plan.draft)
         .collect::<Vec<_>>();
-    drafts[0].config.imap_port = 0;
+    drafts[0].config.incoming_port = 0;
     drafts[0].color = Some("not a color".into());
 
     let report = core.import_accounts(drafts).await.unwrap();
@@ -493,6 +540,104 @@ user_pref(\"mail.smtpservers\", \"smtp1\");
         plans[0].draft.as_ref().unwrap().signatures[0].html,
         "<div>Café</div>"
     );
+}
+
+#[test]
+fn thunderbird_pop3_accounts_keep_their_rules_for_mail_on_the_server() {
+    let profile = tempfile::tempdir().unwrap();
+    let mut prefs = String::from(
+        "user_pref(\"mail.accountmanager.accounts\", \"account1,account2,account3,account4,account5\");
+user_pref(\"mail.server.default.leave_on_server\", true);
+user_pref(\"mail.smtpserver.smtp1.hostname\", \"smtp.example.org\");
+user_pref(\"mail.smtpserver.smtp1.try_ssl\", 3);
+user_pref(\"mail.smtpserver.smtp1.username\", \"me\");
+user_pref(\"mail.smtpservers\", \"smtp1\");
+",
+    );
+    // Thunderbird's account wizard, the profile's default, a day count no
+    // choice matches, removal right after download, and Gmail over POP3.
+    let servers = [
+        (
+            "wizard@example.org",
+            "pop.example.org",
+            "me",
+            &[
+                "delete_by_age_from_server\", true",
+                "num_days_to_leave_on_server\", 14",
+                "delete_mail_left_on_server\", true",
+            ][..],
+        ),
+        ("default@example.org", "pop.example.org", "me", &[][..]),
+        (
+            "ten@example.org",
+            "pop.example.org",
+            "me",
+            &[
+                "delete_by_age_from_server\", true",
+                "num_days_to_leave_on_server\", 10",
+            ][..],
+        ),
+        (
+            "once@example.org",
+            "pop.example.org",
+            "me",
+            &["leave_on_server\", false"][..],
+        ),
+        ("me@gmail.com", "pop.gmail.com", "me@gmail.com", &[][..]),
+    ];
+    for (index, (email, host, user, extra)) in servers.iter().enumerate() {
+        let n = index + 1;
+        prefs.push_str(&format!(
+            "user_pref(\"mail.account.account{n}.identities\", \"id{n}\");
+user_pref(\"mail.account.account{n}.server\", \"server{n}\");
+user_pref(\"mail.identity.id{n}.useremail\", \"{email}\");
+user_pref(\"mail.server.server{n}.hostname\", \"{host}\");
+user_pref(\"mail.server.server{n}.socketType\", 3);
+user_pref(\"mail.server.server{n}.type\", \"pop3\");
+user_pref(\"mail.server.server{n}.userName\", \"{user}\");
+"
+        ));
+        for setting in *extra {
+            prefs.push_str(&format!("user_pref(\"mail.server.server{n}.{setting});\n"));
+        }
+    }
+    std::fs::write(profile.path().join("prefs.js"), prefs).unwrap();
+
+    let plans = migration::plan(&accounts(migration::open(profile.path()).unwrap()), &[]);
+    let imported = |index: usize| {
+        let plan = &plans[index];
+        assert_eq!(plan.status, PlanStatus::Ready, "{:?}", plan.findings);
+        let config = plan.draft.as_ref().unwrap().config.clone();
+        (codes(plan), config)
+    };
+    let removes = FindingCode::RemovesServerMail;
+    let (findings, wizard) = imported(0);
+    assert_eq!(findings, [removes]);
+    assert_eq!(plans[0].findings[0].detail, "fourteenDays");
+    assert_eq!(wizard.mail_protocol, MailProtocol::Pop3);
+    assert_eq!(wizard.incoming_port, 995);
+    assert_eq!(wizard.settings.keep_on_server, KeepOnServer::FourteenDays);
+    let (findings, default) = imported(1);
+    assert!(findings.is_empty());
+    assert_eq!(default.settings.keep_on_server, KeepOnServer::Always);
+    let (findings, ten) = imported(2);
+    assert_eq!(findings, [removes, FindingCode::ServerMailRuleApproximated]);
+    assert_eq!(ten.settings.keep_on_server, KeepOnServer::FourteenDays);
+    let (findings, once) = imported(3);
+    assert_eq!(findings, [removes]);
+    assert_eq!(once.settings.keep_on_server, KeepOnServer::UntilDownloaded);
+    let (findings, gmail) = imported(4);
+    assert_eq!(
+        findings,
+        [
+            FindingCode::ProviderSyncReplacesPop3,
+            FindingCode::GoogleSignInReplacesPassword,
+            FindingCode::OutgoingServerReplaced
+        ]
+    );
+    assert_eq!(plans[4].findings[0].detail, "Gmail");
+    assert_eq!(gmail.provider, Provider::Gmail);
+    assert_eq!(gmail.settings.keep_on_server, KeepOnServer::Always);
 }
 
 #[test]
@@ -693,10 +838,8 @@ fn thunderbird_outgoing_servers_follow_thunderbird() {
 #[test]
 fn folders_that_are_not_readable_profiles_say_why() {
     let folder = tempfile::tempdir().unwrap();
-    assert_eq!(
-        migration::open(folder.path()),
-        Err(SourceError::NotAProfile)
-    );
+    // A folder holds a profile or saved mail.
+    assert_eq!(migration::open(folder.path()), Err(SourceError::NoMail));
     let prefs = std::fs::File::create(folder.path().join("prefs.js")).unwrap();
     prefs.set_len(migration::MAX_SOURCE_BYTES + 1).unwrap();
     assert_eq!(migration::open(folder.path()), Err(SourceError::TooLarge));
@@ -810,4 +953,177 @@ async fn import_keeps_an_account_whose_color_is_unusable() {
     let report = core.import_accounts(vec![draft]).await.unwrap();
     assert_eq!(report.imported.len(), 1);
     assert!(core.get_settings().await.unwrap().account_colors.is_empty());
+}
+
+/// An mbox file with one message, the way Thunderbird stores it.
+fn thunderbird_mbox(subject: &str) -> String {
+    format!(
+        "From - Mon Jan  1 10:00:00 2001\r\nX-Mozilla-Status: 0001\r\n\
+         From: Ana <ana@example.org>\r\nSubject: {subject}\r\n\
+         Message-ID: <{subject}@example.org>\r\n\r\nHello.\r\n\r\n"
+    )
+}
+
+/// The fixture profile with a POP3 account, and mail in its Local Folders
+/// and the POP3 account's folder.
+fn thunderbird_profile_with_mail() -> tempfile::TempDir {
+    let profile = thunderbird_profile();
+    let mut prefs = std::fs::read_to_string(profile.path().join("prefs.js")).unwrap();
+    prefs = prefs.replace(
+        "\"mail.accountmanager.accounts\", \"account2,",
+        "\"mail.accountmanager.accounts\", \"account6,account2,",
+    );
+    prefs.push_str(
+        "user_pref(\"mail.account.account6.identities\", \"id6\");\n\
+         user_pref(\"mail.account.account6.server\", \"server6\");\n\
+         user_pref(\"mail.identity.id6.useremail\", \"pat@example.net\");\n\
+         user_pref(\"mail.identity.id6.smtpServer\", \"smtp1\");\n\
+         user_pref(\"mail.server.server6.directory-rel\", \"[ProfD]Mail/pop.example.net\");\n\
+         user_pref(\"mail.server.server6.hostname\", \"pop.example.net\");\n\
+         user_pref(\"mail.server.server6.name\", \"pat@example.net\");\n\
+         user_pref(\"mail.server.server6.type\", \"pop3\");\n\
+         user_pref(\"mail.server.server6.userName\", \"pat\");\n",
+    );
+    std::fs::write(profile.path().join("prefs.js"), prefs).unwrap();
+    let local = profile.path().join("Mail/Local Folders");
+    std::fs::create_dir_all(local.join("Archives.sbd")).unwrap();
+    std::fs::write(local.join("Archives"), "").unwrap();
+    std::fs::write(local.join("Archives.sbd/2019"), thunderbird_mbox("old")).unwrap();
+    std::fs::write(local.join("Trash"), "").unwrap();
+    let pop = profile.path().join("Mail/pop.example.net");
+    std::fs::create_dir_all(&pop).unwrap();
+    std::fs::write(pop.join("Inbox"), thunderbird_mbox("welcome")).unwrap();
+    std::fs::write(pop.join("popstate.dat"), "# POP3 State File").unwrap();
+    // IMAP mail is still on its server.
+    let imap = profile.path().join("ImapMail/imap.example.org");
+    std::fs::create_dir_all(&imap).unwrap();
+    std::fs::write(imap.join("INBOX"), thunderbird_mbox("cached")).unwrap();
+    profile
+}
+
+fn store_paths(inventory: &ImportInventory) -> Vec<(Option<String>, String, Vec<String>)> {
+    inventory
+        .mail
+        .iter()
+        .map(|store| {
+            (
+                store.account.clone(),
+                store.label.clone(),
+                store
+                    .mail
+                    .folders
+                    .iter()
+                    .map(|folder| folder.path.join("/"))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn thunderbird_local_folders_and_pop3_mail_are_found_in_profiles_and_exports() {
+    let profile = thunderbird_profile_with_mail();
+    let expected = vec![
+        (
+            Some("account6".to_owned()),
+            "pat@example.net".to_owned(),
+            vec!["Inbox".to_owned()],
+        ),
+        (
+            None,
+            "Local Folders".to_owned(),
+            vec!["Archives".to_owned(), "Archives/2019".to_owned()],
+        ),
+    ];
+    let inventory = accounts(migration::open(profile.path()).unwrap());
+    assert_eq!(store_paths(&inventory), expected);
+    assert!(
+        !inventory
+            .other_entries
+            .iter()
+            .any(|entry| entry.kind == OtherEntryKind::LocalFolders)
+    );
+
+    // Tools › Export puts the profile in one folder of a ZIP archive.
+    let directory = tempfile::tempdir().unwrap();
+    let archive_path = directory.path().join("export.zip");
+    let mut archive = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for name in [
+        "prefs.js",
+        "Mail/Local Folders/Archives",
+        "Mail/Local Folders/Archives.sbd/2019",
+        "Mail/Local Folders/Trash",
+        "Mail/pop.example.net/Inbox",
+        "Mail/pop.example.net/popstate.dat",
+        "ImapMail/imap.example.org/INBOX",
+    ] {
+        archive
+            .start_file(format!("x7k2.default/{name}"), options)
+            .unwrap();
+        archive
+            .write_all(&std::fs::read(profile.path().join(name)).unwrap())
+            .unwrap();
+    }
+    archive.finish().unwrap();
+    let inventory = accounts(migration::open(&archive_path).unwrap());
+    assert_eq!(store_paths(&inventory), expected);
+}
+
+#[test]
+fn thunderbird_mail_without_accounts_or_outside_the_profile() {
+    let profile = tempfile::tempdir().unwrap();
+    std::fs::write(
+        profile.path().join("prefs.js"),
+        "user_pref(\"mail.accountmanager.accounts\", \"account1\");\n\
+         user_pref(\"mail.account.account1.server\", \"server1\");\n\
+         user_pref(\"mail.server.server1.directory-rel\", \"[ProfD]Mail/Local Folders\");\n\
+         user_pref(\"mail.server.server1.name\", \"Local Folders\");\n\
+         user_pref(\"mail.server.server1.type\", \"none\");\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(profile.path().join("Mail/Local Folders")).unwrap();
+    std::fs::write(
+        profile.path().join("Mail/Local Folders/Saved"),
+        thunderbird_mbox("kept"),
+    )
+    .unwrap();
+    // A profile with only Local Folders still has something to import.
+    let inventory = accounts(migration::open(profile.path()).unwrap());
+    assert!(inventory.accounts.is_empty());
+    assert_eq!(
+        store_paths(&inventory),
+        [(None, "Local Folders".to_owned(), vec!["Saved".to_owned()])]
+    );
+
+    // Folders kept elsewhere, such as on another drive, aren't read.
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("Saved"), thunderbird_mbox("far")).unwrap();
+    std::fs::write(
+        profile.path().join("prefs.js"),
+        format!(
+            "user_pref(\"mail.accountmanager.accounts\", \"account1\");\n\
+             user_pref(\"mail.account.account1.server\", \"server1\");\n\
+             user_pref(\"mail.server.server1.directory\", {:?});\n\
+             user_pref(\"mail.server.server1.name\", \"Local Folders\");\n\
+             user_pref(\"mail.server.server1.type\", \"none\");\n",
+            elsewhere.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        migration::open(profile.path()),
+        Err(SourceError::NoAccounts)
+    );
+    let inventory = migration::thunderbird::read_profile_dir(profile.path()).unwrap();
+    assert!(inventory.mail.is_empty());
+    assert_eq!(
+        inventory
+            .other_entries
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        [OtherEntryKind::LocalFolders]
+    );
 }

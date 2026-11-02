@@ -386,6 +386,57 @@ struct ThemeContrastCheck {
     ratio: float,
 }
 
+// The custom palette as last saved while the editor previews unsaved
+// changes live. It outlives the editor, which closing Settings or switching
+// to another tab destroys, so the window can still discard the draft.
+export global ThemeDraft {
+    in-out property <bool> dirty: false;
+    in-out property <color> light-primary;
+    in-out property <color> light-page-bg;
+    in-out property <color> light-surface;
+    in-out property <color> light-text;
+    in-out property <color> light-border;
+    in-out property <color> dark-primary;
+    in-out property <color> dark-page-bg;
+    in-out property <color> dark-surface;
+    in-out property <color> dark-text;
+    in-out property <color> dark-border;
+
+    // Remember the saved palette before the first unsaved change.
+    public function begin() {
+        if !root.dirty {
+            root.light-primary = AppTheme.custom-light-primary;
+            root.light-page-bg = AppTheme.custom-light-page-bg;
+            root.light-surface = AppTheme.custom-light-surface;
+            root.light-text = AppTheme.custom-light-text;
+            root.light-border = AppTheme.custom-light-border;
+            root.dark-primary = AppTheme.custom-dark-primary;
+            root.dark-page-bg = AppTheme.custom-dark-page-bg;
+            root.dark-surface = AppTheme.custom-dark-surface;
+            root.dark-text = AppTheme.custom-dark-text;
+            root.dark-border = AppTheme.custom-dark-border;
+            root.dirty = true;
+        }
+    }
+
+    // Put the saved palette back.
+    public function revert() {
+        if root.dirty {
+            AppTheme.custom-light-primary = root.light-primary;
+            AppTheme.custom-light-page-bg = root.light-page-bg;
+            AppTheme.custom-light-surface = root.light-surface;
+            AppTheme.custom-light-text = root.light-text;
+            AppTheme.custom-light-border = root.light-border;
+            AppTheme.custom-dark-primary = root.dark-primary;
+            AppTheme.custom-dark-page-bg = root.dark-page-bg;
+            AppTheme.custom-dark-surface = root.dark-surface;
+            AppTheme.custom-dark-text = root.dark-text;
+            AppTheme.custom-dark-border = root.dark-border;
+            root.dirty = false;
+        }
+    }
+}
+
 export component ThemeEditor inherits Rectangle {
     in property <bool> compact: false;
     in-out property <string> theme-mode: "system";
@@ -396,17 +447,6 @@ export component ThemeEditor inherits Rectangle {
 
     private property <string> selected-token: "primary";
     private property <bool> editing-dark: AppTheme.dark;
-    private property <bool> dirty: false;
-    private property <color> saved-light-primary;
-    private property <color> saved-light-page-bg;
-    private property <color> saved-light-surface;
-    private property <color> saved-light-text;
-    private property <color> saved-light-border;
-    private property <color> saved-dark-primary;
-    private property <color> saved-dark-page-bg;
-    private property <color> saved-dark-surface;
-    private property <color> saved-dark-text;
-    private property <color> saved-dark-border;
 
     private property <color> current-primary: root.editing-dark ? AppTheme.custom-dark-primary : AppTheme.custom-light-primary;
     private property <color> current-page-bg: root.editing-dark ? AppTheme.custom-dark-page-bg : AppTheme.custom-light-page-bg;
@@ -467,40 +507,12 @@ export component ThemeEditor inherits Rectangle {
     border-color: AppTheme.border-subtle;
     background: AppTheme.surface;
 
-    function snapshot() {
-        root.saved-light-primary = AppTheme.custom-light-primary;
-        root.saved-light-page-bg = AppTheme.custom-light-page-bg;
-        root.saved-light-surface = AppTheme.custom-light-surface;
-        root.saved-light-text = AppTheme.custom-light-text;
-        root.saved-light-border = AppTheme.custom-light-border;
-        root.saved-dark-primary = AppTheme.custom-dark-primary;
-        root.saved-dark-page-bg = AppTheme.custom-dark-page-bg;
-        root.saved-dark-surface = AppTheme.custom-dark-surface;
-        root.saved-dark-text = AppTheme.custom-dark-text;
-        root.saved-dark-border = AppTheme.custom-dark-border;
-    }
-
     function begin-edit() {
-        if !root.dirty {
-            root.snapshot();
-            root.dirty = true;
-        }
+        ThemeDraft.begin();
     }
 
     function revert() {
-        if root.dirty {
-            AppTheme.custom-light-primary = root.saved-light-primary;
-            AppTheme.custom-light-page-bg = root.saved-light-page-bg;
-            AppTheme.custom-light-surface = root.saved-light-surface;
-            AppTheme.custom-light-text = root.saved-light-text;
-            AppTheme.custom-light-border = root.saved-light-border;
-            AppTheme.custom-dark-primary = root.saved-dark-primary;
-            AppTheme.custom-dark-page-bg = root.saved-dark-page-bg;
-            AppTheme.custom-dark-surface = root.saved-dark-surface;
-            AppTheme.custom-dark-text = root.saved-dark-text;
-            AppTheme.custom-dark-border = root.saved-dark-border;
-            root.dirty = false;
-        }
+        ThemeDraft.revert();
     }
 
     function choose-mode(mode: string) {
@@ -554,7 +566,7 @@ export component ThemeEditor inherits Rectangle {
     }
 
     function persist() {
-        if root.dirty {
+        if ThemeDraft.dirty {
             let saved = root.save-custom-theme(
                 AppTheme.custom-light-primary,
                 AppTheme.custom-light-page-bg,
@@ -568,7 +580,7 @@ export component ThemeEditor inherits Rectangle {
                 AppTheme.custom-dark-border,
             );
             if saved {
-                root.dirty = false;
+                ThemeDraft.dirty = false;
             }
         }
     }
@@ -673,15 +685,15 @@ export component ThemeEditor inherits Rectangle {
             }
             Rectangle { horizontal-stretch: 1; }
             if !root.compact : Text {
-                text: root.dirty ? @tr("Unsaved changes") : @tr("Saved");
-                color: root.dirty ? AppTheme.accent : AppTheme.secondary;
+                text: ThemeDraft.dirty ? @tr("Unsaved changes") : @tr("Saved");
+                color: ThemeDraft.dirty ? AppTheme.accent : AppTheme.secondary;
                 font-size: TypeScale.caption;
                 vertical-alignment: center;
             }
         }
         if AppTheme.preset == "custom" && root.compact : Text {
-            text: root.dirty ? @tr("Unsaved changes") : @tr("Saved");
-            color: root.dirty ? AppTheme.accent : AppTheme.secondary;
+            text: ThemeDraft.dirty ? @tr("Unsaved changes") : @tr("Saved");
+            color: ThemeDraft.dirty ? AppTheme.accent : AppTheme.secondary;
             font-size: TypeScale.caption;
             wrap: word-wrap;
         }
@@ -769,8 +781,8 @@ export component ThemeEditor inherits Rectangle {
             spacing: 8px;
             Button { text: root.compact ? @tr("Reset") : @tr("Reset this palette"); label-overflow: elide; clicked => { root.reset-current-palette(); } }
             Rectangle { horizontal-stretch: 1; }
-            Button { text: @tr("Revert"); label-overflow: elide; enabled: root.dirty; clicked => { root.revert(); } }
-            Button { text: root.compact ? @tr("Save") : @tr("Save palette"); label-overflow: elide; primary: true; enabled: root.dirty; clicked => { root.persist(); } }
+            Button { text: @tr("Revert"); label-overflow: elide; enabled: ThemeDraft.dirty; clicked => { root.revert(); } }
+            Button { text: root.compact ? @tr("Save") : @tr("Save palette"); label-overflow: elide; primary: true; enabled: ThemeDraft.dirty; clicked => { root.persist(); } }
         }
     }
 }

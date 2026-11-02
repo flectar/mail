@@ -63,9 +63,9 @@ async fn save_draft_stages_external_file_into_app_dir() {
         .write(|conn| {
             conn.execute_batch(
                 "INSERT INTO accounts
-                   (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-                   VALUES (1,'me@example.com','imap','password','me','h',993,'h',465,0);
-                 INSERT INTO folders (id,account_id,imap_name,role)
+                   (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+                   VALUES (1,'me@example.com','generic','password','me','h',993,'h',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+                 INSERT INTO folders (id,account_id,path,role)
                    VALUES (1,1,'Drafts','drafts');",
             )?;
             Ok(())
@@ -115,9 +115,9 @@ async fn save_draft_neutralizes_traversal_filename_and_is_idempotent() {
         .write(|conn| {
             conn.execute_batch(
                 "INSERT INTO accounts
-                   (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-                   VALUES (1,'me@example.com','imap','password','me','h',993,'h',465,0);
-                 INSERT INTO folders (id,account_id,imap_name,role)
+                   (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+                   VALUES (1,'me@example.com','generic','password','me','h',993,'h',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+                 INSERT INTO folders (id,account_id,path,role)
                    VALUES (1,1,'Drafts','drafts');",
             )?;
             Ok(())

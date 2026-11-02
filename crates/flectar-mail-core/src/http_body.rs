@@ -73,9 +73,7 @@ fn append_bounded(
 }
 
 fn too_large(context: &'static str, max_bytes: usize) -> CoreError {
-    CoreError::Network(format!(
-        "{context} exceeded the {max_bytes}-byte response limit"
-    ))
+    CoreError::ResponseTooLarge { context, max_bytes }
 }
 
 /// Collapse Unicode whitespace while retaining at most `max_chars` visible

@@ -41,6 +41,7 @@ mod tests {
         assert!(d.mark_read_on_open);
         assert!(!d.load_remote_images);
         assert!(!d.monochrome_sidebar_icons);
+        assert_eq!(d.app_icon, crate::models::AppIcon::Orange);
         assert!(d.show_avatars);
         assert!(d.group_mail_by_date);
         assert!(d.collect_outgoing_contacts);
@@ -56,6 +57,7 @@ mod tests {
         );
         assert_eq!(d.custom_theme.light_primary, "#0969DA");
         assert!(d.mail_profiles.is_empty());
+        assert!(d.active_mail_profile.is_none());
         assert!(!d.show_account_badges);
         assert!(d.download_directory.is_empty());
 
@@ -65,6 +67,7 @@ mod tests {
         s.calendar_week_start = "sunday".into();
         s.notifications_enabled = false;
         s.monochrome_sidebar_icons = true;
+        s.app_icon = crate::models::AppIcon::Graphite;
         s.show_avatars = false;
         s.group_mail_by_date = false;
         s.workspace_layout = "minimal".into();
@@ -102,6 +105,7 @@ mod tests {
             color: "#3B82F6".into(),
             account_ids: vec![1, 2],
         });
+        s.active_mail_profile = Some("work".into());
         set(&c, &s).unwrap();
 
         let back = get(&c).unwrap();
@@ -113,6 +117,7 @@ mod tests {
         assert_eq!(back.calendar_week_start, "sunday");
         assert!(!back.notifications_enabled);
         assert!(back.monochrome_sidebar_icons);
+        assert_eq!(back.app_icon, crate::models::AppIcon::Graphite);
         assert!(!back.show_avatars);
         assert!(!back.group_mail_by_date);
         assert!(back.contact_suggest_all_accounts);
@@ -124,6 +129,7 @@ mod tests {
         assert_eq!(back.signature_list[0].html, "<b>Dean</b>");
         assert_eq!(back.ai_automation_rules, s.ai_automation_rules);
         assert_eq!(back.mail_profiles, s.mail_profiles);
+        assert_eq!(back.active_mail_profile.as_deref(), Some("work"));
         assert_eq!(
             back.signature_defaults
                 .get("1")
@@ -148,6 +154,7 @@ mod tests {
         assert!(s.load_remote_images);
         assert!(s.mark_read_on_open);
         assert!(!s.monochrome_sidebar_icons);
+        assert_eq!(s.app_icon, crate::models::AppIcon::Orange);
         assert!(s.show_avatars);
         assert!(s.group_mail_by_date);
         assert!(s.collect_outgoing_contacts);
@@ -164,6 +171,7 @@ mod tests {
         assert!(s.auto_labels_enabled);
         assert!(s.ai_automation_rules.is_empty());
         assert!(s.mail_profiles.is_empty());
+        assert!(s.active_mail_profile.is_none());
         assert!(!s.show_account_badges);
         assert!(s.download_directory.is_empty());
         assert!(!s.ai_model_instant.is_empty());

@@ -3,64 +3,125 @@ import { Button } from "button.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
 
+// Standard server ports. A port follows the chosen protocol or security only
+// while it still holds a standard port, so a custom port is never overwritten.
+export global MailPorts {
+    public pure function incoming(protocol: string, security: string) -> string {
+        if protocol == "pop3" {
+            return security == "tls" ? "995" : "110";
+        }
+        return security == "tls" ? "993" : "143";
+    }
+
+    public pure function smtp(security: string) -> string {
+        return security == "tls" ? "465" : "587";
+    }
+
+    public pure function is-standard-incoming(port: string) -> bool {
+        return port == "993" || port == "143" || port == "995" || port == "110";
+    }
+}
+
 // The same account-scoped transport settings are used during setup and edits.
 export component MailSecurityFields inherits VerticalBox {
-    in-out property <string> imap-security: "auto";
-    in-out property <string> smtp-security: "auto";
+    // "imap" or "pop3".
+    in property <string> incoming-protocol: "imap";
+    in-out property <string> incoming-security: "tls";
+    in-out property <string> smtp-security: "tls";
+    in-out property <string> incoming-port: "993";
+    in-out property <string> smtp-port: "465";
     in-out property <string> certificate-pem;
     in property <bool> enabled: true;
     callback import-certificate();
     private property <bool> certificate-expanded: false;
+    private property <bool> uses-tls: root.incoming-security != "none" || root.smtp-security != "none";
     spacing: 8px;
     padding: 0px;
     vertical-stretch: 0;
+
+    pure function security-index(security: string) -> int {
+        return security == "starttls" ? 1 : security == "none" ? 2 : 0;
+    }
+
+    pure function security-at(index: int) -> string {
+        return index == 1 ? "starttls" : index == 2 ? "none" : "tls";
+    }
+
+    function choose-incoming-security(security: string) {
+        if (root.incoming-port == MailPorts.incoming(root.incoming-protocol, root.incoming-security)) {
+            root.incoming-port = MailPorts.incoming(root.incoming-protocol, security);
+        }
+        root.incoming-security = security;
+    }
+
+    function choose-smtp-security(security: string) {
+        if (root.smtp-port == MailPorts.smtp(root.smtp-security)) {
+            root.smtp-port = MailPorts.smtp(security);
+        }
+        root.smtp-security = security;
+    }
+
+    // Choosing an item replaces a selector's binding. These keep both showing
+    // values set later, such as a reset form or a suggested server.
+    changed incoming-security => {
+        incoming-encryption.current-index = root.security-index(root.incoming-security);
+    }
+    changed smtp-security => {
+        smtp-encryption.current-index = root.security-index(root.smtp-security);
+    }
+
     Text { text: @tr("Connection security"); color: AppTheme.heading; font-size: TypeScale.secondary; font-weight: 600; }
     HorizontalBox {
         height: 58px;
         min-width: 0px;
         padding: 0px;
         spacing: 8px;
+        // Equal columns whatever each selection's label length.
         VerticalBox {
             min-width: 0px;
+            preferred-width: 0px;
+            horizontal-stretch: 1;
             padding: 0px;
             spacing: 4px;
-            Text { text: @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            ComboBox {
+            Text { text: root.incoming-protocol == "pop3" ? @tr("POP3 encryption") : @tr("IMAP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
+            incoming-encryption := ComboBox {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;
-                model: [@tr("Automatic"), "SSL/TLS", "STARTTLS"];
-                current-index: root.imap-security == "tls" ? 1 : root.imap-security == "starttls" ? 2 : 0;
-                selected(value) => { root.imap-security = self.current-index == 1 ? "tls" : self.current-index == 2 ? "starttls" : "auto"; }
+                model: ["SSL/TLS", "STARTTLS", @tr("None (unencrypted)")];
+                current-index: root.security-index(root.incoming-security);
+                selected(value) => { root.choose-incoming-security(root.security-at(self.current-index)); }
             }
         }
         VerticalBox {
             min-width: 0px;
+            preferred-width: 0px;
+            horizontal-stretch: 1;
             padding: 0px;
             spacing: 4px;
             Text { text: @tr("SMTP encryption"); color: AppTheme.secondary; font-size: TypeScale.caption; }
-            ComboBox {
+            smtp-encryption := ComboBox {
                 height: 36px;
                 min-width: 0px;
                 enabled: root.enabled;
-                model: [@tr("Automatic"), "SSL/TLS", "STARTTLS"];
-                current-index: root.smtp-security == "tls" ? 1 : root.smtp-security == "starttls" ? 2 : 0;
-                selected(value) => { root.smtp-security = self.current-index == 1 ? "tls" : self.current-index == 2 ? "starttls" : "auto"; }
+                model: ["SSL/TLS", "STARTTLS", @tr("None (unencrypted)")];
+                current-index: root.security-index(root.smtp-security);
+                selected(value) => { root.choose-smtp-security(root.security-at(self.current-index)); }
             }
         }
     }
-    Text {
-        text: @tr("Automatic: IMAP uses STARTTLS on 143, SSL/TLS otherwise. SMTP uses SSL/TLS on 465, STARTTLS otherwise.");
-        color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
+    if root.incoming-security == "none" || root.smtp-security == "none" : Text {
+        text: @tr("Without encryption, anyone on the network can read your password and mail. Use this only with a server on a network you trust.");
+        color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
     }
-    Button {
+    if root.uses-tls : Button {
         height: 36px;
         text: root.certificate-pem != "" ? @tr("Manage trusted certificate") : @tr("Custom server certificate…");
         label-overflow: elide;
         enabled: root.enabled;
         clicked => { root.certificate-expanded = !root.certificate-expanded; }
     }
-    if root.certificate-expanded : VerticalBox {
+    if root.uses-tls && root.certificate-expanded : VerticalBox {
         padding: 0px;
         spacing: 8px;
         Text {
@@ -72,7 +133,7 @@ export component MailSecurityFields inherits VerticalBox {
         Text { text: @tr("PEM certificate only. Do not paste a private key."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
         if root.certificate-pem != "" : Button { height: 36px; text: @tr("Remove certificate"); label-overflow: elide; enabled: root.enabled; clicked => { root.certificate-pem = ""; } }
     }
-    if root.certificate-pem != "" && !root.certificate-expanded : Text {
+    if root.uses-tls && root.certificate-pem != "" && !root.certificate-expanded : Text {
         text: @tr("Custom certificate added for this account."); color: AppTheme.secondary; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
     }
 }

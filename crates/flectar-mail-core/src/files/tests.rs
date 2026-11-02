@@ -240,7 +240,13 @@ fn migration_indexes_existing_attachments_without_losing_mail() {
     conn.execute_batch(include_str!("../db/migrations/001_init.sql"))
         .unwrap();
     conn.pragma_update(None, "user_version", 1).unwrap();
-    crate::db::testutil::seed_account(&conn);
+    conn.execute_batch(
+        "INSERT INTO accounts (id, email, provider, auth_kind, username, imap_host,
+                               imap_port, smtp_host, smtp_port, created_at)
+           VALUES (1, 'me@test.dev', 'imap', 'password', 'me', 'h', 993, 'h', 587, 0);
+         INSERT INTO folders (id, account_id, imap_name, role) VALUES (1, 1, 'INBOX', 'inbox');",
+    )
+    .unwrap();
     let (_, message) =
         crate::db::testutil::seed_message(&conn, "person@example.com", "Existing mail", false);
     conn.execute(

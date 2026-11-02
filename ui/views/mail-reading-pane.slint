@@ -8,13 +8,17 @@ import { Button } from "../components/button.slint";
 import { IconButton, LineEdit, TextEdit, ToolbarIconButton } from "../components/controls.slint";
 import { DetailEmptyState } from "../components/detail-empty-state.slint";
 import { EmailLinkContextArea } from "../components/email-link-context-area.slint";
+import { FileTypeIcon } from "../components/file-type-icon.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
+import { LabelChip } from "../components/label-chip.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { MessageColors } from "../message-colors.slint";
-import { WindowControlsClearance } from "../window-chrome.slint";
+import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
+import { Shortcuts } from "../shortcuts.slint";
+import { LocalMailUi } from "../local-mail.slint";
 
 component ReaderControl inherits ToolbarIconButton {
     tooltip-above: true;
@@ -22,49 +26,6 @@ component ReaderControl inherits ToolbarIconButton {
     icon-color: AppTheme.body;
     hover-background: AppTheme.control-bg;
     active-background: AppTheme.accent-soft;
-}
-
-component MailLabelChip inherits Rectangle {
-    in property <string> name;
-    in property <bool> name-has-emoji: false;
-    in property <bool> use-label-icon: false;
-    in property <color> label-color;
-    in property <color> text-color;
-    in property <color> chip-border-color;
-
-    min-width: chip-name.preferred-width + 28px;
-    preferred-width: self.min-width;
-    max-width: 180px;
-    height: 24px;
-    border-radius: 8px;
-    border-width: 1px;
-    border-color: root.chip-border-color;
-    background: root.label-color.transparentize(0.88);
-
-    Image {
-        x: 7px;
-        y: 6px;
-        width: 12px;
-        height: 12px;
-        source: root.use-label-icon
-            ? @image-url("../icons/lucide/filled/tag.svg")
-            : @image-url("../icons/lucide/filled/file-directory.svg");
-        colorize: root.label-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-    chip-name := Text {
-        x: 23px;
-        width: parent.width - 27px;
-        height: parent.height;
-        text: root.name;
-        color: root.text-color;
-        font-size: TypeScale.caption;
-        font-weight: 600;
-        font-family: root.name-has-emoji ? "Noto Emoji" : "";
-        overflow: elide;
-        vertical-alignment: center;
-    }
 }
 
 component LabelColorSwatch inherits Rectangle {
@@ -318,7 +279,9 @@ component ThreadMessageHeader inherits Rectangle {
     }
 }
 
-export component MailReadingPane inherits Rectangle {
+// A focus scope only so message shortcuts work from anywhere in the reader.
+export component MailReadingPane inherits FocusScope {
+    enabled: false;
     in property <bool> compact: false;
     in property <bool> full-width: false;
     private property <bool> attachment-menu-mode: root.height < 500px;
@@ -403,6 +366,38 @@ export component MailReadingPane inherits Rectangle {
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
+    // Local mail has no archive or spam.
+    private property <[ActionMenuEntry]> local-action-menu: [
+        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
+        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
+        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
+        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
+        { id: "print", title: @tr("Print message"), icon: @image-url("../icons/lucide/outline/printer.svg") },
+        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
+        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
+        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
+        { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
+        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+    ];
+    private property <[ActionMenuEntry]> local-action-menu-no-print: [
+        { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
+        { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
+        { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
+        { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
+        { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
+        { id: "browser", title: @tr("Open in browser"), icon: @image-url("../icons/lucide/outline/browser.svg") },
+        { id: "rendering_info", title: @tr("About email rendering"), icon: @image-url("../icons/lucide/outline/info.svg") },
+        { id: "source", title: root.source_mode ? @tr("Show rendered message") : @tr("Show source"), icon: root.source_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/code.svg") },
+        { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
+        { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
+        { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
+    ];
     // The reader toolbar drops actions that the More menu also offers when
     // integrated window controls or a narrow pane leave too little room.
     private property <length> toolbar-room: 1000px;
@@ -447,9 +442,9 @@ export component MailReadingPane inherits Rectangle {
         email-surface.height - root.thread-header-height - root.renderer-controls-height
     );
     private property <length> rendered-email-height: root.email-viewport-width * EmailReader.width-ratio * root.email-content-aspect + (root.remote-images-blocked ? 60px : 0px);
-    // Slint's software renderer (CPU mode, Android) panics when it paints a
-    // rectangle past ±32767 physical pixels (#35). Surfaces that grow with the
-    // message paint only the visible scroll content, with a margin for cut edges.
+    // Slint's software renderer (CPU mode) panics when it paints a rectangle
+    // past ±32767 physical pixels (#35). Surfaces that grow with the message
+    // paint only the visible scroll content, with a margin for cut edges.
     // Remove this clamping once a Slint release fixes slint-ui/slint#14250.
     private property <length> paint-margin: 32px;
     private property <length> paint-left: -email-scroll.content-x - root.paint-margin;
@@ -539,6 +534,25 @@ export component MailReadingPane inherits Rectangle {
         else if root.text_mode { plain-text-editor.focus(); }
         else if EmailReader.reader-mode { reader-focus.focus(); }
         else { email-focus.focus(); }
+    }
+
+    // Message shortcuts act on the open conversation, as its toolbar does,
+    // but not behind a dialog the reader shows.
+    private property <bool> message-keys: root.has_selected && !root.rendering_info_open && !root.label-editor-open;
+    KeyBinding {
+        keys: Shortcuts.archive;
+        enabled: root.message-keys && !root.selected_is_draft && !LocalMailUi.selected;
+        activated => { root.message_action("archive"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.spam;
+        enabled: root.message-keys && !root.selected_is_draft && !LocalMailUi.selected;
+        activated => { root.message_action("spam"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.trash;
+        enabled: root.message-keys;
+        activated => { root.message_action(root.trash_view ? "delete_permanently" : "trash"); }
     }
 
     private property <bool> viewport-pending: false;
@@ -648,7 +662,7 @@ export component MailReadingPane inherits Rectangle {
 
                 horizontal-stretch: 1;
                 vertical-stretch: 1;
-                background: root.surface-raised;
+                Rectangle { background: root.surface-raised; }
 
                 VerticalBox {
                     visible: root.has_selected;
@@ -660,7 +674,9 @@ export component MailReadingPane inherits Rectangle {
                         // centerline at y=32. Compact actions use the same
                         // centered 44px touch geometry as the other pages.
                         height: root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height;
-                        background: root.surface-raised;
+                        // Under the tab strip the toolbar shares the list's
+                        // surface, so the band below the tabs is one color.
+                        background: WindowChrome.top-bar ? root.surface : root.surface-raised;
                         private property <length> inset: root.compact ? 8px : 14px;
                         // Width left for buttons once integrated window
                         // controls are accounted for. Copied on change so the
@@ -711,7 +727,7 @@ export component MailReadingPane inherits Rectangle {
                             }
                             Rectangle { horizontal-stretch: 1; }
                             if !root.selected_is_draft : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 compact: root.compact;
                                 icon: @image-url("../icons/lucide/outline/reply.svg");
                                 icon-color: root.secondary-text;
@@ -721,7 +737,7 @@ export component MailReadingPane inherits Rectangle {
                                 clicked => { root.compose_message_action("reply"); }
                             }
                             if !root.selected_is_draft && root.show-all-compose-actions : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 icon: @image-url("../icons/lucide/outline/reply-all.svg");
                                 icon-color: root.secondary-text;
                                 hover-background: root.muted-control-bg;
@@ -730,7 +746,7 @@ export component MailReadingPane inherits Rectangle {
                                 clicked => { root.compose_message_action("reply_all"); }
                             }
                             if !root.selected_is_draft && root.show-all-compose-actions : ToolbarIconButton {
-                                interactive: root.has_selected;
+                                interactive: root.has_selected && LocalMailUi.can-send;
                                 icon: @image-url("../icons/lucide/outline/forward.svg");
                                 icon-color: root.secondary-text;
                                 hover-background: root.muted-control-bg;
@@ -738,7 +754,7 @@ export component MailReadingPane inherits Rectangle {
                                 accessible-id: "message-toolbar-forward-button";
                                 clicked => { root.compose_message_action("forward"); }
                             }
-                            if root.show-primary-actions : ToolbarIconButton {
+                            if root.show-primary-actions && !LocalMailUi.selected : ToolbarIconButton {
                                 visible: !root.selected_is_draft;
                                 interactive: root.has_selected;
                                 compact: root.compact;
@@ -770,7 +786,7 @@ export component MailReadingPane inherits Rectangle {
                                 tooltip-text: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread");
                                 clicked => { root.message_action(root.selected_unread ? "mark_read" : "mark_unread"); }
                             }
-                            if !root.compact && !root.selected_is_draft && root.show-secondary-actions : ToolbarIconButton {
+                            if !root.compact && !root.selected_is_draft && !LocalMailUi.selected && root.show-secondary-actions : ToolbarIconButton {
                                 interactive: root.has_selected;
                                 icon: @image-url("../icons/lucide/outline/alert.svg");
                                 icon-color: root.secondary-text;
@@ -1002,6 +1018,8 @@ export component MailReadingPane inherits Rectangle {
                                 max-menu-height: max(160px, root.height - (root.compact ? LayoutMetrics.compact-header-height : LayoutMetrics.desktop-mail-toolbar-height) - 12px);
                                 entries: root.selected_is_draft
                                     ? root.draft-action-menu
+                                    : LocalMailUi.selected
+                                        ? (root.print_supported ? root.local-action-menu : root.local-action-menu-no-print)
                                     : root.print_supported
                                         ? root.message-action-menu
                                         : root.message-action-menu-no-print;
@@ -1083,7 +1101,7 @@ export component MailReadingPane inherits Rectangle {
                             padding: 0px;
                             spacing: 6px;
                             alignment: start;
-                            for label in root.mail_labels : MailLabelChip {
+                            for label in root.mail_labels : LabelChip {
                                 visible: label.applied;
                                 name: label.name;
                                 name-has-emoji: label.name_has_emoji;
@@ -1303,10 +1321,13 @@ export component MailReadingPane inherits Rectangle {
                                         accessible-role: none;
                                     }
 
+                                    // Like the card, the banner keeps its place
+                                    // while a wide message scrolls sideways, so
+                                    // its button stays in view.
                                     if root.remote-images-blocked && !root.text_mode && !root.source_mode && !EmailReader.reader-mode : Rectangle {
-                                        x: 12px;
+                                        x: -email-scroll.content-x + 12px;
                                         y: 12px;
-                                        width: parent.width - 24px;
+                                        width: root.email-viewport-width - 24px;
                                         height: 36px;
                                         background: root.control-bg;
                                         border-radius: 6px;
@@ -1432,12 +1453,16 @@ export component MailReadingPane inherits Rectangle {
                                             }
                                         }
 
+                                        KeyBinding {
+                                            keys: Shortcuts.find;
+                                            activated => { EmailReader.find-open = true; EmailReader.reader-mode = false; find-input.focus(); }
+                                        }
+                                        KeyBinding { keys: Shortcuts.zoom-in; activated => { EmailReader.command("zoom-in"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-in-alternate; activated => { EmailReader.command("zoom-in"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-out; activated => { EmailReader.command("zoom-out"); } }
+                                        KeyBinding { keys: Shortcuts.zoom-reset; activated => { EmailReader.command("zoom-reset"); } }
+                                        KeyBinding { keys: Shortcuts.caret-browsing; activated => { EmailReader.caret-mode = !EmailReader.caret-mode; } }
                                         key-pressed(event) => {
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "f" { EmailReader.find-open = true; EmailReader.reader-mode = false; find-input.focus(); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && (event.text == "+" || event.text == "=") { EmailReader.command("zoom-in"); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "-" { EmailReader.command("zoom-out"); return accept; }
-                                            if (event.modifiers.control || event.modifiers.meta) && event.text == "0" { EmailReader.command("zoom-reset"); return accept; }
-                                            if event.text == Key.F7 { EmailReader.caret-mode = !EmailReader.caret-mode; return accept; }
                                             if event.text == Key.Escape { EmailReader.command("clear-selection"); return accept; }
                                             if !event.modifiers.shift && !EmailReader.caret-mode {
                                                 if event.text == Key.LeftArrow { email-scroll.content-x = min(0px,email-scroll.content-x + 40px); return accept; }
@@ -1686,15 +1711,12 @@ export component MailReadingPane inherits Rectangle {
                                                         image-fit: cover;
                                                         accessible-role: none;
                                                     }
-                                                    if !attachment.has_thumbnail : Image {
+                                                    if !attachment.has_thumbnail : FileTypeIcon {
                                                         x: 9px;
                                                         y: 9px;
                                                         width: 18px;
                                                         height: 18px;
-                                                        source: @image-url("../icons/lucide/outline/file.svg");
-                                                        colorize: root.secondary-text;
-                                                        image-fit: contain;
-                                                        accessible-role: none;
+                                                        kind: attachment.kind;
                                                     }
                                                 }
 
@@ -1828,7 +1850,7 @@ export component MailReadingPane inherits Rectangle {
 
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/reply.svg");
                                             tooltip-text: @tr("Reply");
                                             accessible-id: "message-reply-button";
@@ -1836,7 +1858,7 @@ export component MailReadingPane inherits Rectangle {
                                         }
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/reply-all.svg");
                                             tooltip-text: @tr("Reply all");
                                             accessible-id: "message-reply-all-button";
@@ -1844,7 +1866,7 @@ export component MailReadingPane inherits Rectangle {
                                         }
                                         if !root.selected_is_draft : ReaderControl {
                                             compact: root.compact;
-                                            interactive: root.has_selected;
+                                            interactive: root.has_selected && LocalMailUi.can-send;
                                             icon: @image-url("../icons/lucide/outline/forward.svg");
                                             tooltip-text: @tr("Forward");
                                             accessible-id: "message-forward-button";
@@ -1908,7 +1930,9 @@ export component MailReadingPane inherits Rectangle {
                     y: 0px;
                     width: parent.width;
                     height: parent.height;
-                    background: root.surface-raised;
+                    // The raised canvas frames a message; under the tab strip
+                    // an empty reader shares the list's surface instead.
+                    background: WindowChrome.top-bar ? root.surface : root.surface-raised;
                     DetailEmptyState {
                         width: parent.width;
                         height: parent.height;

@@ -4,6 +4,8 @@ export global RendererSettings {
     in property <bool> gpu-supported: false;
     in property <bool> available: true;
     in property <string> error;
+    // GPU startup failed, so this process fell back to CPU.
+    in property <bool> gpu-failed: false;
     out property <bool> restart-required: RendererSettings.gpu-supported && RendererSettings.preferred != RendererSettings.active;
     callback choose(string);
 }

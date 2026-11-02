@@ -312,13 +312,13 @@ mod tests {
         crate::db::migrations::run(&mut conn).unwrap();
         conn.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (1,'t@x.com','imap','password','t','h',993,'h',587,0)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (1,'t@x.com','generic','password','t','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role) VALUES (1,1,'INBOX','inbox')",
+            "INSERT INTO folders (id, account_id, path, role) VALUES (1,1,'INBOX','inbox')",
             [],
         )
         .unwrap();
@@ -388,8 +388,8 @@ mod tests {
         let conn = test_db();
         conn.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at, sort_order)
-             VALUES (2,'two@x.com','imap','password','two','h',993,'h',587,0,1)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, sort_order, mail_protocol, settings_json)
+             VALUES (2,'two@x.com','generic','password','two','h',993,'h',587,0,1,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
@@ -397,7 +397,7 @@ mod tests {
         conn.execute("UPDATE threads SET starred_count = 1 WHERE id = 1", [])
             .unwrap();
         conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role)
+            "INSERT INTO folders (id, account_id, path, role)
              VALUES (2,1,'Drafts','drafts')",
             [],
         )
@@ -448,13 +448,13 @@ mod tests {
         let conn = test_db();
         conn.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at, sort_order)
-             VALUES (2,'gmail@x.com','gmail','oauth2','gmail','h',993,'h',587,0,1)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, sort_order, mail_protocol, settings_json)
+             VALUES (2,'gmail@x.com','gmail','oauth2','gmail','h',993,'h',587,0,1,'gmail','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role) VALUES
+            "INSERT INTO folders (id, account_id, path, role) VALUES
              (2,2,'All Mail','all'), (3,2,'INBOX','inbox'), (4,2,'Drafts','drafts')",
             [],
         )

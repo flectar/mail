@@ -20,10 +20,10 @@ async fn empty_trash_queues_each_provider_mailbox_even_without_cached_messages()
         .write(|conn| {
             conn.execute_batch(
                 "INSERT INTO accounts (id,email,provider,auth_kind,username,
-             imap_host,imap_port,smtp_host,smtp_port,created_at) VALUES
-             (1,'a@example.com','imap','password','a','127.0.0.1',1,'127.0.0.1',1,0),
-             (2,'b@example.com','imap','password','b','127.0.0.1',1,'127.0.0.1',1,0);
-             INSERT INTO folders (id,account_id,imap_name,role) VALUES
+             incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json) VALUES
+             (1,'a@example.com','generic','password','a','127.0.0.1',1,'127.0.0.1',1,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}'),
+             (2,'b@example.com','generic','password','b','127.0.0.1',1,'127.0.0.1',1,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+             INSERT INTO folders (id,account_id,path,role) VALUES
              (11,1,'Trash','trash'),(22,2,'Trash','trash');",
             )?;
             Ok(())

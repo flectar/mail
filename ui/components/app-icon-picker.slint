@@ -1,0 +1,128 @@
+import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { AppIcon, AppIconOption, AppIconVariant } from "../app-icon.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+
+component AppIconChoice inherits FocusVisibleScope {
+    in property <AppIconOption> option;
+    in property <bool> selected: false;
+    callback chosen;
+
+    height: 66px + choice-name.height;
+    min-width: 0px;
+    horizontal-stretch: 1;
+    focus-on-click: true;
+    accessible-role: radio-button;
+    accessible-label: root.option.name;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.chosen();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.selected || root.focus-visible ? 2px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.accent : AppTheme.border;
+        background: choice-hit.has-hover ? AppTheme.control-bg : AppTheme.surface;
+
+        Image {
+            x: (parent.width - self.width) / 2;
+            y: 12px;
+            width: 40px;
+            height: 40px;
+            source: AppIcon.logo(root.option.variant);
+            image-fit: contain;
+        }
+        choice-name := Text {
+            x: 8px;
+            y: 56px;
+            width: parent.width - 16px;
+            height: max(18px, self.preferred-height);
+            text: root.option.name;
+            color: root.selected ? AppTheme.accent : AppTheme.body;
+            font-size: TypeScale.caption;
+            font-weight: root.selected ? 700 : 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        choice-hit := TouchArea {
+            clicked => { root.pointer-activated(); root.chosen(); }
+            mouse-cursor: pointer;
+        }
+    }
+}
+
+component AppIconRow inherits HorizontalBox {
+    in property <[AppIconOption]> options;
+
+    padding: 0px;
+    spacing: 8px;
+    for option in root.options : AppIconChoice {
+        option: option;
+        selected: AppIcon.variant == option.variant;
+        chosen => { AppIcon.choose(option.variant); }
+    }
+}
+
+// Settings card for choosing the application icon.
+export component AppIconPicker inherits Rectangle {
+    in property <bool> compact: false;
+
+    vertical-stretch: 0;
+    height: picker-content.preferred-height;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    background: AppTheme.surface;
+
+    picker-content := VerticalBox {
+        padding-top: 16px;
+        padding-right: 18px;
+        padding-bottom: 16px;
+        padding-left: 18px;
+        spacing: 10px;
+
+        VerticalBox {
+            padding: 0px;
+            spacing: 4px;
+            Text {
+                height: max(22px, self.preferred-height);
+                text: @tr("App icon");
+                color: AppTheme.heading;
+                font-size: TypeScale.subtitle;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                height: max(17px, self.preferred-height);
+                text: AppIcon.platform == "macos" ? @tr("Used for the Dock and the menu bar while Flectar Mail is running.")
+                    : AppIcon.platform == "windows" ? @tr("Used for the taskbar, the window, and the system tray.")
+                    : AppIcon.platform == "linux" ? @tr("Used for the app launcher, the window, and the system tray.")
+                    : @tr("Used for the app icon on your home screen.");
+                color: AppTheme.faint;
+                font-size: TypeScale.secondary;
+                wrap: word-wrap;
+            }
+            if AppIcon.platform == "linux" || AppIcon.platform == "android" : Text {
+                height: max(16px, self.preferred-height);
+                text: AppIcon.platform == "android"
+                    ? @tr("The new icon appears after you leave Flectar Mail. Some launchers remove the old icon from the home screen.")
+                    : @tr("Some desktops update the launcher icon after you sign in again.");
+                color: AppTheme.faint;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+
+        if !root.compact : AppIconRow { options: AppIcon.options; }
+        if root.compact : AppIconRow { options: [AppIcon.options[0], AppIcon.options[1], AppIcon.options[2]]; }
+        if root.compact : AppIconRow { options: [AppIcon.options[3], AppIcon.options[4], AppIcon.options[5]]; }
+    }
+}

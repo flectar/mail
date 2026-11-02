@@ -98,6 +98,9 @@ Example Ltd</value>
         <authentication-type>PLAIN</authentication-type>
         <username>old</username>
       </outgoing-server>
+      <settings>
+        <value key="deletePolicy">DELETE</value>
+      </settings>
       <identities>
         <identity>
           <name>Old</name>

@@ -1,0 +1,13 @@
+// Mail kept on this device, which belongs to no account: the mail the user
+// imported. Rust keeps it up to date.
+export global LocalMailUi {
+    // Its account's id, or -1 until mail is imported.
+    in property <int> account-id: -1;
+    in property <int> messages: 0;
+    in property <string> size: "";
+    // The conversation the reader shows is local mail.
+    in property <bool> selected: false;
+    // An account can send. With only local mail, nothing can, so writing
+    // and replying wait for one.
+    in property <bool> can-send: true;
+}

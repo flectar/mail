@@ -5,6 +5,8 @@
 //! `calendarList.list` to enumerate every calendar shown to the user, then
 //! hand each calendar id to the existing CalDAV sync engine.
 
+use std::collections::HashSet;
+
 use crate::error::{CoreError, Result};
 use crate::http_body;
 use crate::{caldav, db::repo, models::Calendar};
@@ -127,43 +129,45 @@ pub async fn list_calendars(access_token: &str) -> Result<Vec<GoogleCalendar>> {
     Ok(calendars)
 }
 
-/// Reconcile provider metadata into the shared calendar tables. The provider's
-/// selected state is used only for new rows; local visibility always survives
-/// later refreshes.
+/// Reconcile the Google calendar list into `connection`'s collections. The
+/// provider's selected state is used only for new rows; local visibility
+/// always survives later refreshes. Calendars that left the list are
+/// forgotten. One that another connection of the account already syncs,
+/// such as a shared calendar added over CalDAV, stays with that connection.
 pub fn reconcile_calendars(
     conn: &rusqlite::Connection,
-    account_id: i64,
+    connection: &repo::caldav::ConnectionConfig,
     calendars: &[GoogleCalendar],
 ) -> Result<Vec<Calendar>> {
+    let taken: HashSet<String> = repo::caldav::list_calendars(conn, Some(connection.account_id))?
+        .into_iter()
+        .filter(|calendar| calendar.connection_id != connection.id)
+        .map(|calendar| caldav::collection_identity(&calendar.url))
+        .collect();
+    let mut listed = HashSet::new();
     let mut primary_id = None;
-    let mut first_id = None;
     for calendar in calendars {
         let url = caldav::google_calendar_url(&calendar.id)?;
+        if taken.contains(&caldav::collection_identity(&url)) {
+            continue;
+        }
         let id = repo::caldav::upsert_calendar_with_initial_enabled(
             conn,
-            account_id,
+            connection,
             &url,
             calendar.name.as_deref(),
             calendar.color.as_deref(),
             calendar.read_only,
             calendar.selected,
         )?;
-        first_id.get_or_insert(id);
         if calendar.primary {
             primary_id.get_or_insert(id);
         }
+        listed.insert(url);
     }
-    let has_default: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM calendars WHERE account_id = ?1 AND is_default = 1",
-        rusqlite::params![account_id],
-        |row| row.get(0),
-    )?;
-    if has_default == 0
-        && let Some(id) = primary_id.or(first_id)
-    {
-        repo::caldav::set_default_calendar(conn, account_id, id)?;
-    }
-    repo::caldav::list_calendars(conn, Some(account_id))
+    repo::caldav::retain_calendars(conn, connection.id, &listed)?;
+    repo::caldav::ensure_default_calendar(conn, connection.account_id, primary_id)?;
+    repo::caldav::connection_calendars(conn, connection.id)
 }
 
 fn name_for_sort(calendar: &GoogleCalendar) -> String {
@@ -304,6 +308,11 @@ mod tests {
     #[test]
     fn reconciliation_uses_primary_as_default_and_encodes_special_ids() {
         let conn = crate::db::testutil::calendar_conn();
+        let google = repo::caldav::tests::add_connection(
+            &conn,
+            1,
+            crate::models::CalendarConnectionKind::Google,
+        );
         let calendars = vec![
             GoogleCalendar {
                 id: "#contacts@group.v.calendar.google.com".into(),
@@ -322,7 +331,7 @@ mod tests {
                 selected: true,
             },
         ];
-        let stored = reconcile_calendars(&conn, 1, &calendars).unwrap();
+        let stored = reconcile_calendars(&conn, &google, &calendars).unwrap();
         assert_eq!(stored.len(), 2);
         let primary = stored.iter().find(|calendar| calendar.is_default).unwrap();
         assert_eq!(primary.display_name.as_deref(), Some("Me"));
@@ -336,5 +345,59 @@ mod tests {
                 .url
                 .contains("%23contacts@group.v.calendar.google.com")
         );
+
+        // A calendar that left the list is forgotten.
+        let stored = reconcile_calendars(&conn, &google, &calendars[1..]).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].is_default);
+    }
+
+    #[test]
+    fn a_shared_calendar_already_added_over_caldav_stays_there() {
+        let conn = crate::db::testutil::calendar_conn();
+        let shared = repo::caldav::tests::add_connection(
+            &conn,
+            1,
+            crate::models::CalendarConnectionKind::Generic,
+        );
+        let legacy = "https://www.google.com/calendar/dav/shared@example.com/events/";
+        let shared_calendar =
+            repo::caldav::upsert_calendar(&conn, &shared, legacy, Some("Shared"), None, false)
+                .unwrap();
+        let google = repo::caldav::tests::add_connection(
+            &conn,
+            1,
+            crate::models::CalendarConnectionKind::Google,
+        );
+        let listed = [
+            GoogleCalendar {
+                id: "me@example.com".into(),
+                name: Some("Me".into()),
+                color: None,
+                primary: true,
+                read_only: false,
+                selected: true,
+            },
+            GoogleCalendar {
+                id: "shared@example.com".into(),
+                name: Some("Shared".into()),
+                color: None,
+                primary: false,
+                read_only: false,
+                selected: true,
+            },
+        ];
+        let stored = reconcile_calendars(&conn, &google, &listed).unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .map(|calendar| calendar.display_name.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("Me")]
+        );
+        let kept = repo::caldav::get_calendar(&conn, shared_calendar)
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.connection_id, shared.id);
     }
 }

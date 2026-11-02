@@ -297,7 +297,7 @@ impl AndroidCredentialStore {
     }
 
     fn slot_key(account_id: i64, slot: Slot) -> String {
-        format!("{account_id}:{}", slot.as_str())
+        format!("{account_id}:{}", slot.key())
     }
 }
 

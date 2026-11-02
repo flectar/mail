@@ -428,7 +428,7 @@ fn centered_brand_content_side(pixel_side: u32) -> u32 {
     .unwrap_or(rounded)
 }
 
-async fn decode_profile_avatars(
+pub(crate) async fn decode_profile_avatars(
     bytes: Vec<u8>,
     small_pixel_side: u32,
     regular_pixel_side: u32,

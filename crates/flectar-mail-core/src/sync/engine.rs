@@ -19,7 +19,7 @@
 use crate::accounts::credentials::{self, CredentialStoreHandle, Slot};
 use crate::config::Paths;
 use crate::db::Db;
-use crate::db::repo::{self, folders::Folder, messages::NewMessage};
+use crate::db::repo::{self, folders::Folder};
 use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, EventBus, SyncProgress};
 use crate::imap::{self, FetchedHeader, ImapCredentials, Session};
@@ -116,9 +116,23 @@ pub struct AccountHandle {
     /// Coalesced wake-up for the dedicated SMTP submission worker. Gmail and
     /// JMAP own their native send queues and therefore leave this unset.
     send_tx: Option<mpsc::Sender<()>>,
-    settings_tx: watch::Sender<crate::models::AccountSettings>,
+    /// Set for accounts whose mail exists only on this device (POP3), where a
+    /// message's original file can only be downloaded again from the server.
+    restore_tx: Option<mpsc::Sender<RestoreRequest>>,
+    /// Unset for local mail, which has no settings.
+    settings_tx: Option<watch::Sender<crate::models::AccountSettings>>,
     tasks: Vec<tokio::task::AbortHandle>,
 }
+
+/// A request to download a stored message's original file again after it
+/// went missing from this device. Answered with the file's new path.
+pub(crate) struct RestoreRequest {
+    pub message_id: i64,
+    pub complete: oneshot::Sender<std::result::Result<String, String>>,
+}
+
+/// Restoring waits for any running download session to end first.
+const RESTORE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 #[derive(Debug)]
 pub(crate) enum PriorityFetchCmd {
@@ -189,8 +203,30 @@ impl AccountHandle {
     }
 
     pub fn update_settings(&self, settings: crate::models::AccountSettings) {
-        self.settings_tx.send_replace(settings);
-        self.send(SyncCmd::SyncNow { complete: None });
+        if let Some(settings_tx) = &self.settings_tx {
+            settings_tx.send_replace(settings);
+            self.send(SyncCmd::SyncNow { complete: None });
+        }
+    }
+
+    /// Download a stored message's original again; see [`RestoreRequest`].
+    pub(crate) async fn restore_message(&self, message_id: i64) -> Result<String> {
+        let restore_tx = self.restore_tx.as_ref().ok_or_else(|| {
+            CoreError::Other("this account reads its messages from the server".into())
+        })?;
+        let (tx, rx) = oneshot::channel();
+        restore_tx
+            .send(RestoreRequest {
+                message_id,
+                complete: tx,
+            })
+            .await
+            .map_err(|_| CoreError::Other("mail worker stopped".into()))?;
+        tokio::time::timeout(RESTORE_TIMEOUT, rx)
+            .await
+            .map_err(|_| CoreError::Other("downloading the message again timed out".into()))?
+            .map_err(|_| CoreError::Other("mail worker stopped".into()))?
+            .map_err(CoreError::Other)
     }
 
     pub async fn fetch_attachment(&self, attachment_id: i64) -> Result<Vec<u8>> {
@@ -225,13 +261,14 @@ mod account_handle_tests {
         let (tx, mut rx) = mpsc::channel(1);
         let (body_tx, _body_rx) = mpsc::channel(1);
         let (send_tx, mut send_rx) = mpsc::channel(1);
-        let (settings_tx, _settings_rx) = watch::channel(AccountSettings::default());
+        let (settings_tx, _settings_rx) = watch::channel(crate::db::testutil::account_settings());
         let handle = AccountHandle {
             account_id: 7,
             tx,
             body_tx,
             send_tx: Some(send_tx),
-            settings_tx,
+            restore_tx: None,
+            settings_tx: Some(settings_tx),
             tasks: Vec::new(),
         };
 
@@ -253,61 +290,118 @@ pub struct SyncCtx {
 
 pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
     let account_id = config.id;
-    let dedicated_smtp =
-        config.provider != Provider::Gmail && config.mail_protocol == MailProtocol::Imap;
     let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
     let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
-    let (send_tx, send_rx) = mpsc::channel(1);
-    // These carry idempotent wakeups rather than work. A single pending item
-    // represents every newer nudge and prevents bursts from retaining memory.
-    let (pool_tx, pool_rx) = mpsc::channel(1);
-    let (hist_tx, hist_rx) = mpsc::channel(1);
     let (settings_tx, settings_rx) = watch::channel(config.settings.clone());
-    let joins = if config.provider == Provider::Gmail {
-        crate::sync::gmail::spawn(ctx, config, rx, body_rx, settings_rx)
-    } else if config.mail_protocol == MailProtocol::Jmap {
-        crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx)
-    } else {
-        vec![
-            tokio::spawn(run_send_dispatcher(
-                ctx.clone(),
-                config.clone(),
-                send_rx,
-                tx.clone(),
-            )),
-            tokio::spawn(run_actor(
-                ctx.clone(),
-                config.clone(),
-                rx,
-                pool_tx.clone(),
-                hist_tx,
-            )),
-            tokio::spawn(run_body_fetcher(ctx.clone(), config.clone(), body_rx)),
-            tokio::spawn(run_backfill_pool(
-                ctx.clone(),
-                config.clone(),
-                pool_rx,
-                settings_rx.clone(),
-            )),
-            tokio::spawn(run_history_backfill(
-                ctx,
-                config,
-                hist_rx,
-                pool_tx,
-                settings_rx,
-            )),
-        ]
+    // API protocols own their submission queues. SMTP-based protocols get a
+    // dedicated submission worker that never waits behind mailbox sync.
+    let (joins, send_tx, restore_tx) = match config.mail_protocol {
+        MailProtocol::Gmail => (
+            crate::sync::gmail::spawn(ctx, config, rx, body_rx, settings_rx),
+            None,
+            None,
+        ),
+        MailProtocol::Jmap => (
+            crate::jmap::sync::spawn(ctx, config, rx, body_rx, settings_rx),
+            None,
+            None,
+        ),
+        MailProtocol::Imap => {
+            let (send_tx, send_rx) = mpsc::channel(1);
+            // These carry idempotent wakeups rather than work. A single
+            // pending item represents every newer nudge and prevents bursts
+            // from retaining memory.
+            let (pool_tx, pool_rx) = mpsc::channel(1);
+            let (hist_tx, hist_rx) = mpsc::channel(1);
+            let joins = vec![
+                tokio::spawn(run_send_dispatcher(
+                    ctx.clone(),
+                    config.clone(),
+                    send_rx,
+                    tx.clone(),
+                )),
+                tokio::spawn(run_actor(
+                    ctx.clone(),
+                    config.clone(),
+                    rx,
+                    pool_tx.clone(),
+                    hist_tx,
+                )),
+                tokio::spawn(run_body_fetcher(ctx.clone(), config.clone(), body_rx)),
+                tokio::spawn(run_backfill_pool(
+                    ctx.clone(),
+                    config.clone(),
+                    pool_rx,
+                    settings_rx.clone(),
+                )),
+                tokio::spawn(run_history_backfill(
+                    ctx,
+                    config,
+                    hist_rx,
+                    pool_tx,
+                    settings_rx,
+                )),
+            ];
+            (joins, Some(send_tx), None)
+        }
+        MailProtocol::Pop3 => {
+            let (send_tx, send_rx) = mpsc::channel(1);
+            let (restore_tx, restore_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
+            let joins = vec![
+                tokio::spawn(run_send_dispatcher(
+                    ctx.clone(),
+                    config.clone(),
+                    send_rx,
+                    tx.clone(),
+                )),
+                tokio::spawn(crate::sync::pop3::run(
+                    ctx,
+                    config,
+                    crate::sync::pop3::Inputs {
+                        commands: rx,
+                        reads: body_rx,
+                        restores: restore_rx,
+                        settings: settings_rx,
+                    },
+                )),
+            ];
+            (joins, Some(send_tx), Some(restore_tx))
+        }
+        MailProtocol::Local => (
+            vec![tokio::spawn(crate::sync::local::run(
+                ctx, account_id, rx, body_rx,
+            ))],
+            None,
+            None,
+        ),
     };
     AccountHandle {
         account_id,
         tx,
         body_tx,
-        send_tx: dedicated_smtp.then_some(send_tx),
-        settings_tx,
+        send_tx,
+        restore_tx,
+        settings_tx: Some(settings_tx),
         tasks: joins
             .iter()
             .map(tokio::task::JoinHandle::abort_handle)
             .collect(),
+    }
+}
+
+/// The worker for local mail, which has no [`AccountConfig`].
+pub fn spawn_local(ctx: SyncCtx, account_id: i64) -> AccountHandle {
+    let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
+    let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
+    let join = tokio::spawn(crate::sync::local::run(ctx, account_id, rx, body_rx));
+    AccountHandle {
+        account_id,
+        tx,
+        body_tx,
+        send_tx: None,
+        restore_tx: None,
+        settings_tx: None,
+        tasks: vec![join.abort_handle()],
     }
 }
 
@@ -654,10 +748,10 @@ async fn select_folder_for_remote_read(
     session: &mut Session,
     folder: &Folder,
 ) -> Result<()> {
-    let selected = imap::select(session, &folder.imap_name).await?;
+    let selected = imap::select(session, &folder.path).await?;
     if selected.uid_validity != folder.uidvalidity {
         let folder_id = folder.id;
-        let folder_name = folder.imap_name.clone();
+        let folder_name = folder.path.clone();
         let expected_uidvalidity = folder.uidvalidity;
         let remote_uidvalidity = selected.uid_validity;
         let remote_uidnext = selected.uid_next;
@@ -666,7 +760,7 @@ async fn select_folder_for_remote_read(
                 let tx = conn.transaction()?;
                 let current = repo::folders::get(&tx, folder_id)?;
                 if current.as_ref().is_some_and(|current| {
-                    current.imap_name == folder_name && current.uidvalidity == expected_uidvalidity
+                    current.path == folder_name && current.uidvalidity == expected_uidvalidity
                 }) {
                     repo::folders::reset_uid_mappings(&tx, folder_id)?;
                     tx.execute(
@@ -693,13 +787,13 @@ async fn select_folder_for_remote_read(
     }
 
     let folder_id = folder.id;
-    let folder_name = folder.imap_name.clone();
+    let folder_name = folder.path.clone();
     let uidvalidity = folder.uidvalidity;
     let still_current = ctx
         .db
         .read(move |conn| {
             Ok(repo::folders::get(conn, folder_id)?.is_some_and(|current| {
-                current.imap_name == folder_name && current.uidvalidity == uidvalidity
+                current.path == folder_name && current.uidvalidity == uidvalidity
             }))
         })
         .await?;
@@ -796,7 +890,7 @@ async fn run_actor(
                     crate::events::sync_diagnostic("imap_connect", Some(account_id), e.code());
                     tracing::warn!(
                         account_id,
-                        imap_host = %config.imap_host,
+                        incoming_host = %config.incoming_host,
                         error = %e,
                         "imap connect rejected at auth; marking needs_reauth"
                     );
@@ -974,7 +1068,7 @@ async fn run_actor(
                         supports_idle = None;
                         continue;
                     };
-                    match imap::select(&mut s, &inbox.imap_name).await {
+                    match imap::select(&mut s, &inbox.path).await {
                         Ok(_) => {
                             // Cap IDLE at the next full cycle so the selected
                             // correctness backstop is preserved (a message that
@@ -1155,8 +1249,9 @@ pub async fn status_for_account(db: &Db, account_id: i64) -> Result<SyncStatus> 
         let cutoff = repo::accounts::get_config(conn, account_id)?
             .and_then(|config| config.settings.mail_history.cutoff_ms_at(now_ms()));
         let content = repo::messages::content_progress_since(conn, account_id, cutoff)?;
-        let (header_done, header_total): (i64, i64) = if account.provider == Provider::Gmail {
-            conn.query_row(
+        let gmail = account.mail_protocol == MailProtocol::Gmail;
+        let (header_done, header_total): (i64, i64) = match account.mail_protocol {
+            MailProtocol::Gmail => conn.query_row(
                 "SELECT COALESCE(backfill_done, 0), 1
                  FROM gmail_sync_state WHERE account_id = ?1
                  UNION ALL SELECT 0, 1
@@ -1164,15 +1259,21 @@ pub async fn status_for_account(db: &Db, account_id: i64) -> Result<SyncStatus> 
                  LIMIT 1",
                 rusqlite::params![account_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
-        } else {
-            conn.query_row(
+            )?,
+            // The folders the history worker fills, as `repo::folders::list`
+            // shows them.
+            MailProtocol::Imap | MailProtocol::Jmap => conn.query_row(
                 "SELECT COALESCE(SUM(backfill_done), 0), COUNT(*)
                  FROM folders
-                 WHERE account_id = ?1 AND COALESCE(role, '') <> 'all'",
-                rusqlite::params![account_id],
+                 WHERE account_id = ?1 AND COALESCE(role, '') <> 'all'
+                   AND selectable = 1 AND missing_on_server = 0
+                   AND (jmap_id IS NOT NULL) = ?2",
+                rusqlite::params![account_id, account.mail_protocol == MailProtocol::Jmap],
                 |row| Ok((row.get(0)?, row.get(1)?)),
-            )?
+            )?,
+            // POP3 downloads whole messages in its foreground sync, and
+            // imported mail has nothing to download.
+            MailProtocol::Pop3 | MailProtocol::Local => (0, 0),
         };
         let header_failed: i64 = conn.query_row(
             "SELECT COUNT(*)
@@ -1180,7 +1281,7 @@ pub async fn status_for_account(db: &Db, account_id: i64) -> Result<SyncStatus> 
              JOIN folders f ON f.id = sf.folder_id
              WHERE sf.account_id = ?1 AND sf.stage = 'header'
                AND (?2 = 1 OR COALESCE(f.role, '') <> 'all')",
-            rusqlite::params![account_id, (account.provider == Provider::Gmail) as i64],
+            rusqlite::params![account_id, gmail],
             |row| row.get(0),
         )?;
         let (indexed, index_total): (i64, i64) = conn.query_row(
@@ -1246,13 +1347,13 @@ pub(super) async fn emit_sync_status(ctx: &SyncCtx, account_id: i64) {
     }
 }
 
-async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
+pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
     crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
     let creds = imap_credentials(ctx, config).await?;
     crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
     match imap::connect_with_settings(
-        &config.imap_host,
-        config.imap_port,
+        &config.incoming_host,
+        config.incoming_port,
         creds,
         &config.settings.connection,
     )
@@ -1274,8 +1375,8 @@ async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
             ctx.tokens.invalidate(config.id).await;
             let creds = imap_credentials(ctx, config).await?;
             imap::connect_with_settings(
-                &config.imap_host,
-                config.imap_port,
+                &config.incoming_host,
+                config.incoming_port,
                 creds,
                 &config.settings.connection,
             )
@@ -1360,7 +1461,8 @@ async fn run_cycle(
         if folder.role.as_deref() == Some(roles::INBOX) {
             continue;
         }
-        if folder.role.as_deref() == Some(roles::ALL) && config.provider != Provider::Gmail {
+        // A special-use \All mailbox repeats messages stored in other folders.
+        if folder.role.as_deref() == Some(roles::ALL) {
             continue;
         }
         // Non-inbox folders get new-mail checks every cycle but heavy
@@ -1369,7 +1471,7 @@ async fn run_cycle(
         if let Err(e) =
             sync_folder(ctx, config, session, folder, heavy, hist_tx, inbox_baseline).await
         {
-            tracing::warn!(folder = %folder.imap_name, "folder sync failed: {e}");
+            tracing::warn!(folder = %folder.path, "folder sync failed: {e}");
             return Err(e); // connection likely broken; reconnect
         }
     }
@@ -1383,7 +1485,7 @@ async fn run_cycle(
     Ok(false)
 }
 
-async fn discover_folders(
+pub(crate) async fn discover_folders(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,
@@ -1466,6 +1568,10 @@ async fn discover_folders(
                     .and_then(|(parent, _)| ids_by_name.get(parent).copied());
                 repo::folders::set_parent(&tx, id, parent_id)?;
             }
+            // A LIST without folders can only be a server fault; keep them.
+            if !remote.is_empty() {
+                repo::folders::mark_missing_on_server(&tx, account_id, &known_names)?;
+            }
             tx.commit()?;
             Ok(())
         })
@@ -1482,14 +1588,14 @@ async fn sync_folder(
     inbox_baseline: &mut Option<InboxBaseline>,
 ) -> Result<bool> {
     let account_id = config.id;
-    let selected = imap::select(session, &folder.imap_name).await?;
+    let selected = imap::select(session, &folder.path).await?;
     let is_inbox = folder.role.as_deref() == Some(roles::INBOX);
 
     // UIDVALIDITY handling.
     if let (Some(stored), Some(remote)) = (folder.uidvalidity, selected.uid_validity)
         && stored != remote
     {
-        tracing::warn!(folder = %folder.imap_name, "UIDVALIDITY changed; resetting uid map");
+        tracing::warn!(folder = %folder.path, "UIDVALIDITY changed; resetting uid map");
         let fid = folder.id;
         ctx.db
             .write(move |conn| repo::folders::reset_uid_mappings(conn, fid))
@@ -1579,7 +1685,7 @@ async fn sync_folder(
             if !new.is_empty() {
                 tracing::info!(
                     account_id,
-                    folder = %folder.imap_name,
+                    folder = %folder.path,
                     count = new.len(),
                     since_uid = last_seen,
                     "receive: new mail on server",
@@ -1589,8 +1695,15 @@ async fn sync_folder(
                 } else {
                     None
                 };
-                let (thread_ids, fresh) =
-                    store_headers(ctx, config, &fresh_folder, new, notify_min_uid).await?;
+                let (thread_ids, fresh) = store_headers(
+                    ctx,
+                    config,
+                    &fresh_folder,
+                    new,
+                    notify_min_uid,
+                    NewHeaders::Insert,
+                )
+                .await?;
                 if !thread_ids.is_empty() {
                     ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
                 }
@@ -1764,8 +1877,7 @@ async fn run_history_backfill(
             });
 
             for folder in ordered {
-                if folder.role.as_deref() == Some(roles::ALL) && config.provider != Provider::Gmail
-                {
+                if folder.role.as_deref() == Some(roles::ALL) {
                     continue;
                 }
                 if folder.backfill_cursor.is_some() && folder.backfill_done {
@@ -1784,7 +1896,7 @@ async fn run_history_backfill(
                     break 'work;
                 };
                 let step = async {
-                    imap::select(s, &folder.imap_name).await?;
+                    imap::select(s, &folder.path).await?;
                     // Re-read: the sync actor may have advanced this folder.
                     let fid = folder.id;
                     let fresh = ctx
@@ -1819,7 +1931,7 @@ async fn run_history_backfill(
                     Err(e) => {
                         tracing::warn!(
                             account_id,
-                            folder = %folder.imap_name,
+                            folder = %folder.path,
                             error = %e,
                             "history backfill: step failed; dropping session",
                         );
@@ -1836,6 +1948,9 @@ async fn run_history_backfill(
             if !progressed {
                 // Fully caught up. Don't hold an idle connection open between
                 // ticks - servers reap them and the next step would fail.
+                if let Err(e) = settle_unlinked_mail(&ctx, &config, &mut session).await {
+                    tracing::warn!(account_id, error = %e, "could not settle mail without a UID; retrying later");
+                }
                 if let Some(s) = session.take() {
                     imap::logout(s).await;
                 }
@@ -1843,6 +1958,108 @@ async fn run_history_backfill(
             }
         }
     }
+}
+
+/// Settles mail that lost its UIDs to a server change, a recreated mailbox or
+/// a folder the server no longer lists, once every folder has its history.
+/// Each folder's mail since the oldest waiting message is matched by
+/// Message-ID first, so mail outside the history is found too, and whatever
+/// still waits is no longer on the server.
+async fn settle_unlinked_mail(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<Session>,
+) -> Result<()> {
+    let account_id = config.id;
+    let Some(oldest) = ctx
+        .db
+        .read(move |conn| repo::messages::oldest_relink_pending(conn, account_id))
+        .await?
+    else {
+        return Ok(());
+    };
+    let folders = ctx
+        .db
+        .read(move |conn| repo::folders::list(conn, Some(account_id)))
+        .await?;
+    let synced = folders
+        .iter()
+        .filter(|folder| folder.selectable && folder.role.as_deref() != Some(roles::ALL))
+        .collect::<Vec<_>>();
+    // Until the server's folders are known, such as right after a switch from
+    // JMAP, nothing could have been matched.
+    if !synced
+        .iter()
+        .any(|folder| folder.role.as_deref() == Some(roles::INBOX))
+        || synced
+            .iter()
+            .any(|folder| folder.backfill_cursor.is_none() || !folder.backfill_done)
+    {
+        return Ok(());
+    }
+    // A day's margin covers servers recording slightly different times.
+    let since = chrono::DateTime::from_timestamp_millis(oldest.saturating_sub(24 * 60 * 60 * 1000))
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
+        .date_naive();
+    for folder in synced {
+        relink_waiting_mail(ctx, config, session, folder, since).await?;
+    }
+    let (thread_ids, stale_paths) = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let dropped = repo::messages::drop_unrelinked_imap_mail(&tx, account_id)?;
+            tx.commit()?;
+            Ok(dropped)
+        })
+        .await?;
+    for path in stale_paths {
+        let _ = tokio::fs::remove_file(path).await;
+    }
+    if !thread_ids.is_empty() {
+        ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+    }
+    Ok(())
+}
+
+/// Links waiting messages to the folder's mail received since `since` that
+/// no local message stands for, without storing the rest.
+async fn relink_waiting_mail(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Option<Session>,
+    folder: &Folder,
+    since: chrono::NaiveDate,
+) -> Result<()> {
+    if session.is_none() {
+        *session = Some(connect(ctx, config).await?);
+    }
+    let Some(s) = session.as_mut() else {
+        return Ok(());
+    };
+    imap::select(s, &folder.path).await?;
+    let uids = imap::uid_search_since(s, since).await?;
+    let folder_id = folder.id;
+    let linked: std::collections::HashSet<i64> = ctx
+        .db
+        .read(move |conn| repo::messages::uids_in_folder(conn, folder_id))
+        .await?
+        .into_iter()
+        .map(|(_, uid)| uid)
+        .collect();
+    let older = uids
+        .into_iter()
+        .filter(|uid| !linked.contains(&i64::from(*uid)))
+        .collect::<Vec<_>>();
+    for chunk in older.chunks(HEADER_CHUNK) {
+        let headers = imap::fetch_headers(s, &imap::uid_set(chunk)).await?;
+        let (thread_ids, _) =
+            store_headers(ctx, config, folder, headers, None, NewHeaders::Skip).await?;
+        if !thread_ids.is_empty() {
+            ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
+        }
+    }
+    Ok(())
 }
 
 /// Retry one header that was fetched successfully but could not be parsed or
@@ -1893,7 +2110,7 @@ async fn retry_one_header_failure(
     let s = session
         .as_mut()
         .ok_or_else(|| CoreError::Other("header retry lost its IMAP session".into()))?;
-    imap::select(s, &folder.imap_name).await?;
+    imap::select(s, &folder.path).await?;
     let headers = imap::fetch_headers(s, &uid.to_string()).await?;
     if headers.is_empty() {
         let error = "server no longer returns this UID";
@@ -1906,7 +2123,8 @@ async fn retry_one_header_failure(
             .await?;
         return Ok(true);
     }
-    let (thread_ids, _) = store_headers(ctx, config, &folder, headers, None).await?;
+    let (thread_ids, _) =
+        store_headers(ctx, config, &folder, headers, None, NewHeaders::Insert).await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
@@ -1955,7 +2173,8 @@ async fn bounded_history_backfill(
         let set = imap::uid_set(chunk);
         let headers = imap::fetch_headers(session, &set).await?;
         fetched = headers.len() as u64;
-        let (thread_ids, _) = store_headers(ctx, config, folder, headers, None).await?;
+        let (thread_ids, _) =
+            store_headers(ctx, config, folder, headers, None, NewHeaders::Insert).await?;
         if !thread_ids.is_empty() {
             ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
         }
@@ -1986,7 +2205,7 @@ async fn bounded_history_backfill(
     let already_present = total.saturating_sub(missing.len() as u64);
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id,
-        folder: folder.imap_name.clone(),
+        folder: folder.path.clone(),
         phase: "headers".into(),
         done: already_present.saturating_add(fetched).min(total),
         total,
@@ -2015,7 +2234,8 @@ async fn extend_history(
     let lo = hi.saturating_sub(HISTORY_CHUNK - 1).max(1);
     let set = format!("{lo}:{hi}");
     let headers = imap::fetch_headers(session, &set).await?;
-    let (thread_ids, _) = store_headers(ctx, config, folder, headers, None).await?;
+    let (thread_ids, _) =
+        store_headers(ctx, config, folder, headers, None, NewHeaders::Insert).await?;
     if !thread_ids.is_empty() {
         ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
     }
@@ -2028,7 +2248,7 @@ async fn extend_history(
         .await?;
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id: config.id,
-        folder: folder.imap_name.clone(),
+        folder: folder.path.clone(),
         phase: "history".into(),
         done: 0,
         total: 0,
@@ -2037,78 +2257,27 @@ async fn extend_history(
     Ok(())
 }
 
-/// A message older than this never triggers the new-mail chime/notification,
-/// even if it lands unread - catches UIDVALIDITY resets and server-side moves
-/// replaying old mail as new-to-the-folder UIDs.
-const CHIME_RECENT_MS: i64 = 24 * 60 * 60 * 1000;
-
-/// Base candidacy for surfacing a freshly arrived message: unread, incoming,
-/// newer than the notify watermark, and genuinely recent (so replayed old UIDs
-/// from a UIDVALIDITY reset or a server-side move stay silent). This is scope-
-/// agnostic on purpose - the *desktop-notification* scope (Important / all /
-/// specific tabs) is applied later by the host dispatcher, which can see the
-/// thread's resolved tab. Bulk/robot filtering lives in [`chime_worthy`].
-fn arrival_eligible(
-    notify_min_uid: Option<u32>,
-    uid: u32,
-    is_read: bool,
-    is_outgoing: bool,
-    arrival_ms: i64,
-    now: i64,
-) -> bool {
-    notify_min_uid.is_some_and(|min_uid| uid >= min_uid)
-        && !is_read
-        && !is_outgoing
-        && now - arrival_ms < CHIME_RECENT_MS
+/// What `store_headers` does with headers that match no local message.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NewHeaders {
+    Insert,
+    /// Mail fetched only to link waiting local messages with the same
+    /// Message-ID. Nothing else about it is kept, and the folder's scan
+    /// position stays where the live sync left it.
+    Skip,
 }
 
-/// Whether a fresh arrival should ring the audible new-mail chime. The chime
-/// stays human-only regardless of the desktop-notification scope, so a
-/// newsletter/monitoring flood never rings the bell every minute.
-fn chime_worthy(is_automated: bool, from_email: &str) -> bool {
-    !is_automated && !crate::mime::robot_sender(from_email)
-}
-
-#[cfg(test)]
-mod notification_policy_tests {
-    use super::{CHIME_RECENT_MS, arrival_eligible, chime_worthy};
-
-    fn eligible(baseline: Option<u32>, uid: u32, read: bool, outgoing: bool, age_ms: i64) -> bool {
-        let now = 2 * CHIME_RECENT_MS;
-        arrival_eligible(baseline, uid, read, outgoing, now - age_ms, now)
-    }
-
-    #[test]
-    fn only_live_unread_incoming_mail_is_a_notification_candidate() {
-        // Automated/robot senders are still candidates here - scope filtering
-        // happens later in the host dispatcher, not at enqueue time.
-        assert!(eligible(Some(100), 100, false, false, 1_000));
-        // No baseline yet (initial catch-up), older UID, read, or outgoing all
-        // disqualify, as does mail that arrived outside the recency window.
-        assert!(!eligible(None, 100, false, false, 1_000));
-        assert!(!eligible(Some(100), 99, false, false, 1_000));
-        assert!(!eligible(Some(100), 100, true, false, 1_000));
-        assert!(!eligible(Some(100), 100, false, true, 1_000));
-        assert!(!eligible(Some(100), 100, false, false, CHIME_RECENT_MS));
-    }
-
-    #[test]
-    fn chime_stays_human_only() {
-        assert!(chime_worthy(false, "alice@example.com"));
-        assert!(!chime_worthy(true, "digest@example.com"));
-        assert!(!chime_worthy(false, "notifications@example.com"));
-    }
-}
-
-/// Insert fetched headers. Returns `(all, fresh)` thread ids for the newly
-/// inserted messages: `all` for list refreshes, `fresh` only for threads that
-/// gained an unread, incoming, recent message (chime/notification-worthy).
+/// Insert fetched headers. Returns `(all, fresh)` thread ids: `all` for list
+/// refreshes, of the newly inserted messages and of those that moved to the
+/// folder of their server copy, `fresh` only for threads that gained an
+/// unread, incoming, recent message (chime/notification-worthy).
 async fn store_headers(
     ctx: &SyncCtx,
     config: &AccountConfig,
     folder: &Folder,
     headers: Vec<FetchedHeader>,
     notify_min_uid: Option<u32>,
+    new_headers: NewHeaders,
 ) -> Result<(Vec<i64>, Vec<i64>)> {
     if headers.is_empty() {
         return Ok((Vec::new(), Vec::new()));
@@ -2120,19 +2289,10 @@ async fn store_headers(
     ctx.db
         .write(move |conn| {
             let tx = conn.transaction()?;
-            let settings = repo::settings::get(&tx)?;
-            let auto_labels = settings.auto_labels_enabled;
-            let ai_categorize = settings.ai_categorize;
-            let (outgoing_learning_since, incoming_learning_since) =
-                repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
-            let account_emails = repo::sender_identities::own_addresses(&tx, account_id)?;
-            let mut thread_ids: Vec<i64> = Vec::new();
-            let mut fresh_ids: Vec<i64> = Vec::new();
-            // Threads already enqueued for a desktop notification this batch, so
-            // a thread that gains several messages in one fetch notifies once.
-            let mut enqueued_threads: Vec<i64> = Vec::new();
+            let mut importer = super::ingest::Importer::new(&tx, account_id)?;
             let mut max_uid: i64 = 0;
             let mut inserted = 0u32;
+            let mut moved_threads = Vec::new();
 
             for fh in &headers {
                 max_uid = max_uid.max(fh.uid as i64);
@@ -2163,6 +2323,7 @@ async fn store_headers(
 
                 let parsed = match crate::mime::parse_header_block(&fh.header_bytes) {
                     Ok(p) => p,
+                    Err(_) if new_headers == NewHeaders::Skip => continue,
                     Err(e) => {
                         let retry_at = now_ms() + 60_000;
                         repo::sync_failures::record_header(
@@ -2218,6 +2379,10 @@ async fn store_headers(
                             folder_id,
                             Some(fh.uid as i64),
                         )?;
+                        // Its copy on the server is in another folder.
+                        if existing.folder_id != Some(folder_id) {
+                            moved_threads.extend(existing.thread_id);
+                        }
                     }
                     if let Some(plan) = fh.mime_plan.as_ref() {
                         repo::messages::set_mime_plan(&tx, existing.id, Some(plan))?;
@@ -2230,52 +2395,26 @@ async fn store_headers(
                     let _ = repo::sync_failures::clear_header(&tx, folder_id, fh.uid as i64);
                     continue;
                 }
+                if new_headers == NewHeaders::Skip {
+                    continue;
+                }
 
-                let date_ms = parsed
-                    .date_ms
-                    .or(fh.internal_date_ms)
-                    .unwrap_or_else(now_ms);
-
-                let from_email = parsed
-                    .from
-                    .as_ref()
-                    .map(|a| a.email.to_lowercase())
-                    .unwrap_or_default();
-                let is_outgoing = account_emails.contains(&from_email)
-                    || folder_role.as_deref() == Some(roles::SENT);
-
-                let thread_id =
-                    crate::sync::threading::resolve_thread(&tx, account_id, &parsed, date_ms)?;
-
-                let nm = NewMessage {
-                    account_id,
-                    folder_id,
-                    uid: Some(fh.uid as i64),
-                    message_id: parsed.message_id.clone(),
-                    gm_msgid: None,
-                    gm_thrid: None,
-                    subject: parsed.subject.clone(),
-                    from: parsed.from.clone(),
-                    to: parsed.to.clone(),
-                    cc: parsed.cc.clone(),
-                    bcc: parsed.bcc.clone(),
-                    date: date_ms,
-                    internal_date: fh.internal_date_ms,
-                    is_read: fh.flags.seen || is_outgoing,
-                    is_starred: fh.flags.flagged,
-                    is_draft: fh.flags.draft || folder_role.as_deref() == Some(roles::DRAFTS),
-                    is_outgoing,
-                    is_automated: parsed.is_automated,
-                    has_attachments: fh.has_attachments,
-                    size: fh.size.map(|s| s as i64),
-                    snippet: String::new(),
-                    references: parsed.references.clone(),
-                    list_unsubscribe: parsed.list_unsubscribe.clone(),
-                    list_unsubscribe_post: parsed.list_unsubscribe_post.clone(),
-                    sender_addr: parsed.via.clone(),
-                    sender_verification: parsed.sender_verification,
-                };
-                let msg_id = repo::messages::insert(&tx, &nm, thread_id)?;
+                let imported = importer.insert(
+                    &tx,
+                    &parsed,
+                    &super::ingest::Delivery {
+                        folder_id,
+                        folder_role: folder_role.as_deref(),
+                        uid: Some(fh.uid as i64),
+                        received_ms: fh.internal_date_ms,
+                        seen: fh.flags.seen,
+                        flagged: fh.flags.flagged,
+                        draft: fh.flags.draft,
+                        has_attachments: fh.has_attachments,
+                        size: fh.size.map(|s| s as i64),
+                    },
+                )?;
+                let msg_id = imported.message_id;
                 if let Some(plan) = fh.mime_plan.as_ref() {
                     repo::messages::set_mime_plan(&tx, msg_id, Some(plan))?;
                     repo::messages::upsert_planned_attachments(&tx, msg_id, &plan.attachments)?;
@@ -2283,91 +2422,22 @@ async fn store_headers(
                 let _ = repo::sync_failures::clear_header(&tx, folder_id, fh.uid as i64);
                 inserted += 1;
                 repo::labels::reconcile_keywords(&tx, msg_id, &fh.flags.keywords)?;
-                repo::threads::recompute(&tx, thread_id)?;
+                repo::threads::recompute(&tx, imported.thread_id)?;
                 repo::search::index_message(&tx, msg_id)?;
-
-                // Learn compose suggestions without polluting the real address
-                // book. Outgoing recipients are the useful default; incoming
-                // senders require opt-in and exclude automated/junk mail.
-                let when = fh.internal_date_ms.unwrap_or(date_ms);
-                if is_outgoing
-                    && settings.collect_outgoing_contacts
-                    && when >= outgoing_learning_since
-                {
-                    let mut harvested_addresses = std::collections::HashSet::new();
-                    for address in parsed
-                        .to
-                        .iter()
-                        .chain(parsed.cc.iter())
-                        .chain(parsed.bcc.iter())
-                    {
-                        let email = address.email.to_ascii_lowercase();
-                        if !account_emails.contains(&email) && harvested_addresses.insert(email) {
-                            repo::contacts::harvest(&tx, account_id, address, true, when)?;
-                        }
-                    }
-                } else if settings.collect_incoming_contacts
-                    && when >= incoming_learning_since
-                    && !parsed.is_automated
-                    && !matches!(
-                        folder_role.as_deref(),
-                        Some(roles::SPAM) | Some(roles::TRASH)
-                    )
-                    && let Some(from) = &parsed.from
-                    && !crate::mime::robot_sender(&from.email)
-                {
-                    repo::contacts::harvest(&tx, account_id, from, false, when)?;
-                }
-
-                if !thread_ids.contains(&thread_id) {
-                    thread_ids.push(thread_id);
-                }
-                // A fresh arrival (unread + incoming + recent, past the notify
-                // watermark) is a candidate for both the chime and a desktop
-                // notification.
-                let arrival_ms = fh.internal_date_ms.unwrap_or(date_ms);
-                if arrival_eligible(
-                    notify_min_uid,
-                    fh.uid,
-                    nm.is_read,
-                    nm.is_outgoing,
-                    arrival_ms,
-                    now_ms(),
-                ) {
-                    // Enqueue a durable outbox row (once per thread this batch).
-                    // The native dispatcher consumes it after commit and applies
-                    // the user's notification scope against the thread's resolved
-                    // tab - so bulk mail is enqueued too and filtered there, not
-                    // here. Snapshotting sender/subject now keeps delivery
-                    // independent of any later UI or hydration step.
-                    if !enqueued_threads.contains(&thread_id) {
-                        enqueued_threads.push(thread_id);
-                        repo::notifications::enqueue(&tx, msg_id)?;
-                    }
-                    // The audible chime stays human-only regardless of scope.
-                    if chime_worthy(nm.is_automated, &from_email) && !fresh_ids.contains(&thread_id)
-                    {
-                        tracing::info!(
-                            account_id,
-                            thread_id,
-                            from = %from_email,
-                            "receive: chime-worthy new mail",
-                        );
-                        fresh_ids.push(thread_id);
-                    }
-                }
+                importer.learn_contacts(&tx, &parsed, &imported)?;
+                // Only mail past the inbox watermark arrived while this
+                // account was being followed.
+                let live = notify_min_uid.is_some_and(|min_uid| fh.uid >= min_uid);
+                importer.announce(&tx, &imported, live)?;
             }
 
-            if max_uid > 0 {
+            if max_uid > 0 && new_headers == NewHeaders::Insert {
                 repo::folders::set_last_seen_uid(&tx, folder_id, max_uid)?;
             }
-            // Resolve each touched thread to a single tab (rules + heuristic, or
-            // mark it 'pending' for the async AI pass). Runs once per thread with
-            // all its messages in place. See crate::route.
-            if auto_labels {
-                let splits = repo::splits::list(&tx)?;
-                for &tid in &thread_ids {
-                    crate::route::route_thread_deterministic(&tx, &splits, ai_categorize, tid)?;
+            let (mut thread_ids, fresh_ids) = importer.finish(&tx)?;
+            for thread_id in moved_threads {
+                if !thread_ids.contains(&thread_id) {
+                    thread_ids.push(thread_id);
                 }
             }
             tx.commit()?;
@@ -2509,7 +2579,8 @@ async fn reconcile_mailbox(
     if !missing.is_empty() {
         let headers = imap::fetch_headers(session, &imap::uid_set(&missing)).await?;
         // Restoration is a list update, never a new-mail notification.
-        let (thread_ids, _) = store_headers(ctx, config, folder, headers, None).await?;
+        let (thread_ids, _) =
+            store_headers(ctx, config, folder, headers, None, NewHeaders::Insert).await?;
         if !thread_ids.is_empty() {
             ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
         }
@@ -2570,6 +2641,7 @@ fn classify_body_chunk_error(error: CoreError) -> BodyChunkError {
         error @ (CoreError::Imap(_)
         | CoreError::ImapParse(_)
         | CoreError::Network(_)
+        | CoreError::ResponseTooLarge { .. }
         | CoreError::Offline) => BodyChunkError::Reconnect(error),
         error => BodyChunkError::Fatal(error),
     }
@@ -3017,7 +3089,7 @@ async fn drain_missing_bodies(
 
         let mut chunks: VecDeque<BodyChunk> = VecDeque::new();
         for folder in ordered {
-            if folder.role.as_deref() == Some(roles::ALL) && config.provider != Provider::Gmail {
+            if folder.role.as_deref() == Some(roles::ALL) {
                 continue;
             }
             if exhausted.contains(&folder.id) {
@@ -3050,7 +3122,7 @@ async fn drain_missing_bodies(
             for chunk in missing.chunks(BODY_FETCH_CHUNK) {
                 chunks.push_back(BodyChunk {
                     folder_id: folder.id,
-                    folder_name: folder.imap_name.clone(),
+                    folder_name: folder.path.clone(),
                     uid_validity: folder.uidvalidity,
                     items: chunk.to_vec(),
                 });
@@ -3298,7 +3370,7 @@ async fn fetch_body_chunk(
             let uid_validity = chunk.uid_validity;
             move |conn| {
                 Ok(repo::folders::get(conn, folder_id)?.is_some_and(|folder| {
-                    folder.imap_name == folder_name && folder.uidvalidity == uid_validity
+                    folder.path == folder_name && folder.uidvalidity == uid_validity
                 }))
             }
         })
@@ -4017,12 +4089,7 @@ async fn persist_body(
     let path_str = path.to_string_lossy().to_string();
 
     let parsed = crate::mime::parse_message(raw)?;
-    let parsed_calendar_events: Vec<_> = parsed
-        .calendar_parts
-        .iter()
-        .flat_map(|ics| crate::calendar::parse_ics(ics))
-        .collect();
-    let config_id = config.id;
+    let calendar_events = super::ingest::calendar_events(&parsed);
     let (persisted, thread_id) = ctx
         .db
         .write(move |conn| {
@@ -4037,38 +4104,7 @@ async fn persist_body(
             ) {
                 return Ok((false, None));
             }
-            repo::messages::store_body(
-                &tx,
-                message_id,
-                parsed.text.as_deref(),
-                parsed.html.as_deref(),
-                Some(&path_str),
-                // Real files only, mirroring BODYSTRUCTURE's disposition check
-                // and the message-card footer (both ignore inline images), so
-                // the list paperclip stays consistent before and after backfill.
-                parsed.attachments.iter().any(|a| !a.is_inline),
-                Some(&parsed.snippet),
-            )?;
-            repo::messages::set_sender_verification(
-                &tx,
-                message_id,
-                parsed.headers.sender_verification,
-            )?;
-            let atts: Vec<repo::messages::NewAttachment> = parsed
-                .attachments
-                .iter()
-                .map(|a| repo::messages::NewAttachment {
-                    message_id,
-                    part_id: Some(a.part_id.as_str()),
-                    filename: a.filename.as_deref(),
-                    mime_type: a.mime_type.as_deref(),
-                    size: Some(a.size),
-                    content_id: a.content_id.as_deref(),
-                    is_inline: a.is_inline,
-                })
-                .collect();
-            repo::messages::replace_attachments(&tx, message_id, &atts)?;
-            repo::search::index_message(&tx, message_id)?;
+            super::ingest::store_body(&tx, message_id, &path_str, &parsed)?;
             let _ = repo::sync_failures::clear_content(&tx, message_id);
             let tid: Option<i64> =
                 repo::messages::get_row(&tx, message_id)?.and_then(|r| r.thread_id);
@@ -4084,23 +4120,7 @@ async fn persist_body(
         let _ = tokio::fs::remove_file(&path).await;
         return Ok(());
     }
-
-    if !parsed_calendar_events.is_empty() {
-        ctx.calendar_db
-            .write(move |conn| {
-                let tx = conn.transaction()?;
-                for event in &parsed_calendar_events {
-                    repo::calendar::upsert(&tx, config_id, message_id, event)?;
-                }
-                tx.commit()?;
-                Ok(())
-            })
-            .await?;
-        ctx.bus.emit(CoreEvent::CalendarUpdated {
-            account_id: config_id,
-        });
-    }
-
+    super::ingest::store_calendar_events(ctx, config.id, message_id, calendar_events).await?;
     if let Some(tid) = thread_id {
         ctx.bus.emit(CoreEvent::MailUpdated {
             thread_ids: vec![tid],
@@ -4143,12 +4163,20 @@ mod sent_identity_tests {
                 &folder,
                 vec![header.clone()],
                 None,
+                NewHeaders::Insert,
             )
             .await
             .unwrap();
-            store_headers(&core.sync_ctx(), &config, &folder, vec![header], None)
-                .await
-                .unwrap();
+            store_headers(
+                &core.sync_ctx(),
+                &config,
+                &folder,
+                vec![header],
+                None,
+                NewHeaders::Insert,
+            )
+            .await
+            .unwrap();
             let id = action.message_id.unwrap();
             let (count, uid) = core
                 .db
@@ -4170,7 +4198,7 @@ mod sent_identity_tests {
         let (_temp, core, config, action) = local_outgoing().await;
         let id = action.message_id.unwrap();
         core.db.write(move |c| {
-            c.execute("INSERT INTO folders(id,account_id,imap_name,role) VALUES (2,1,'Drafts','drafts')", [])?;
+            c.execute("INSERT INTO folders(id,account_id,path,role) VALUES (2,1,'Drafts','drafts')", [])?;
             c.execute("UPDATE messages SET is_outgoing=0, is_draft=1, folder_id=2, uid=12 WHERE id=?1", [id])?;
             c.execute("UPDATE pending_actions SET kind='send', state='inflight'", [])?;
             Ok(())
@@ -4186,9 +4214,16 @@ mod sent_identity_tests {
             header_bytes: b"Message-ID: <rewritten@server>\r\nX-Flectar-Submission-ID: submission@test.dev\r\nSubject: Status\r\n\r\n".to_vec(),
             has_attachments: false, mime_plan: None,
         };
-        store_headers(&core.sync_ctx(), &config, &folder, vec![header], None)
-            .await
-            .unwrap();
+        store_headers(
+            &core.sync_ctx(),
+            &config,
+            &folder,
+            vec![header],
+            None,
+            NewHeaders::Insert,
+        )
+        .await
+        .unwrap();
         let row = core
             .db
             .read(move |c| repo::messages::get_row(c, id))

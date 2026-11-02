@@ -45,10 +45,10 @@ fn has_positive_selector(q: &ParsedQuery) -> bool {
         || q.has_attachment == Some(true)
 }
 
-/// Append `from:`/`to:`/`in:`/`is:`/`has:` predicates over the `m` alias.
-/// Placeholders are `?n` keyed off the running `bind` length, so this composes
-/// with any binds already pushed by the caller.
-fn append_operator_clauses(
+/// Append the caller's account scope over the `m` alias. It narrows a search
+/// but is not a matcher by itself, so callers add it after deciding whether
+/// the query matches anything.
+fn append_account_clauses(
     q: &ParsedQuery,
     where_clauses: &mut Vec<String>,
     bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
@@ -57,6 +57,39 @@ fn append_operator_clauses(
         bind.push(Box::new(account_id));
         where_clauses.push(format!("m.account_id = ?{}", bind.len()));
     }
+    if let Some(account_ids) = &q.account_ids {
+        where_clauses.push(account_set_clause("m.account_id", account_ids, bind));
+    }
+}
+
+/// `column IN (…)` for a set of accounts; an empty set matches nothing.
+pub(crate) fn account_set_clause(
+    column: &str,
+    account_ids: &[i64],
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) -> String {
+    if account_ids.is_empty() {
+        return "0".to_owned();
+    }
+    let placeholders = account_ids
+        .iter()
+        .map(|account_id| {
+            bind.push(Box::new(*account_id));
+            format!("?{}", bind.len())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{column} IN ({placeholders})")
+}
+
+/// Append `from:`/`to:`/`in:`/`is:`/`has:` predicates over the `m` alias.
+/// Placeholders are `?n` keyed off the running `bind` length, so this composes
+/// with any binds already pushed by the caller.
+fn append_operator_clauses(
+    q: &ParsedQuery,
+    where_clauses: &mut Vec<String>,
+    bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) {
     if let Some(from) = &q.from {
         bind.push(Box::new(format!("%{}%", from.to_lowercase())));
         where_clauses.push(format!(
@@ -141,6 +174,7 @@ fn structured_thread_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Result
     if where_clauses.is_empty() && q.fts.is_empty() {
         return Ok(Vec::new());
     }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let rank_expr = if q.fts.is_empty() {
         "0.0"
@@ -207,6 +241,7 @@ fn structured_message_ids(conn: &Connection, q: &ParsedQuery, cap: i64) -> Resul
     if where_clauses.is_empty() && q.fts.is_empty() {
         return Ok(Vec::new());
     }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let rank_expr = if q.fts.is_empty() {
         "0.0"
@@ -314,6 +349,7 @@ fn allowed_message_threads(
     let mut where_clauses: Vec<String> = Vec::new();
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     append_operator_clauses(q, &mut where_clauses, &mut bind);
+    append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let id_list = ids
         .iter()
@@ -544,6 +580,7 @@ fn chronological_page_for_query(
             next_cursor: None,
         });
     }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
 
     let sql = format!(
         "SELECT m.thread_id, m.date FROM messages m {fts_join}
@@ -671,7 +708,7 @@ mod tests {
         testutil::seed_account(&c);
         // A Trash folder to move the message into.
         c.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role) VALUES (5,1,'Trash','trash')",
+            "INSERT INTO folders (id, account_id, path, role) VALUES (5,1,'Trash','trash')",
             [],
         )
         .unwrap();
@@ -741,13 +778,13 @@ mod tests {
         // Account 2 with its own inbox folder and a thread also matching "sharedterm".
         c.execute(
             "INSERT INTO accounts (id, email, provider, auth_kind, username,
-             imap_host, imap_port, smtp_host, smtp_port, created_at)
-             VALUES (2,'me2@test.dev','imap','password','me2','h',993,'h',587,0)",
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'me2@test.dev','generic','password','me2','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             [],
         )
         .unwrap();
         c.execute(
-            "INSERT INTO folders (id, account_id, imap_name, role) VALUES (2,2,'INBOX','inbox')",
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2,2,'INBOX','inbox')",
             [],
         )
         .unwrap();
@@ -779,6 +816,47 @@ mod tests {
         // Scoped: only the selected account's thread.
         assert_eq!(ids(Some(1)), vec![t1]);
         assert_eq!(ids(Some(2)), vec![99]);
+
+        // A profile's account set scopes every search branch the same way.
+        let set_ids = |account_ids: Vec<i64>| {
+            let mut q = crate::search::parse("sharedterm");
+            q.account_ids = Some(account_ids);
+            let mut lexical = lexical_thread_ids(&c, &q, 20).unwrap();
+            lexical.sort();
+            let mut timeline = chronological(&c, &q, 20)
+                .unwrap()
+                .into_iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>();
+            timeline.sort();
+            assert_eq!(lexical, timeline);
+            lexical
+        };
+        assert_eq!(set_ids(vec![2]), vec![99]);
+        assert_eq!(set_ids(vec![1, 2]), vec![t1, 99]);
+        assert_eq!(set_ids(Vec::new()), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn an_account_scope_alone_matches_nothing() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (_, message_id) = testutil::seed_message(&c, "a@one.dev", "anything", false);
+        index_message(&c, message_id).unwrap();
+
+        for scope in [
+            ParsedQuery {
+                account_id: Some(1),
+                ..ParsedQuery::default()
+            },
+            ParsedQuery {
+                account_ids: Some(vec![1]),
+                ..ParsedQuery::default()
+            },
+        ] {
+            assert!(lexical_thread_ids(&c, &scope, 20).unwrap().is_empty());
+            assert!(chronological(&c, &scope, 20).unwrap().is_empty());
+        }
     }
 
     #[test]

@@ -4,7 +4,9 @@
     Flectar Mail
   </h1>
   <p>
-    <strong>English</strong> · <a href="README.zh_Hans.md">简体中文</a>
+    <strong>English</strong> · <a href="docs/readme/README.es.md">Español</a> · <a href="docs/readme/README.de.md">Deutsch</a> ·
+    <a href="docs/readme/README.fr.md">Français</a> · <a href="docs/readme/README.pt_BR.md">Português (Brasil)</a> · <a href="docs/readme/README.ru.md">Русский</a> ·
+    <a href="docs/readme/README.hi.md">हिन्दी</a> · <a href="docs/readme/README.ar.md">العربية</a> · <a href="docs/readme/README.zh_Hans.md">简体中文</a>
   </p>
   <div align="center">
     <h3>Email, made fast again</h3>
@@ -48,7 +50,7 @@ fraction of the memory of a typical web-based mail client.
 - **Offline by design.** Your mailbox and calendar are stored locally, so your
   synced data remains useful without a connection.
 - **Works with your accounts.** Connect Gmail, Outlook and Microsoft 365, or
-  standards-based IMAP/SMTP, JMAP, CalDAV, and CardDAV services.
+  standards-based IMAP, POP3, SMTP, JMAP, CalDAV, and CardDAV services.
 - **Privacy-conscious defaults.** Remote images are blocked until you allow
   them, helping prevent tracking pixels from reporting when you read a message.
 - **Security by architecture.** Email content is never opened in a WebView.
@@ -113,7 +115,9 @@ Tauri or Wails.
 Choose the workspace that fits the way you handle email. Keep the detailed
 three-pane layout, switch to a streamlined minimal view, choose a light or dark
 theme, select a built-in color palette or create a custom one, and show or hide
-sender avatars.
+sender avatars. You can also give the app icon a different color: on the
+taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
+and iOS home screens.
 
 Message appearance can follow the app theme or stay light or dark independently.
 It uses your selected color palette for HTML, plain text, and Reader mode.
@@ -128,11 +132,16 @@ inbox more room when you need it.
 ### 👥 Profiles and account colors
 
 Group related accounts into named profiles such as Work or Personal, then give
-each profile its own color. In Settings → Accounts → Profiles, you can assign
-accounts, override an individual account's color, and show the effective color
-along the left edge of every message. The markers make accounts easy to tell
-apart while working in the unified inbox; the example below uses purple for Work
-and orange for Support.
+each profile its own color. Create a profile from the profile menu at the start
+of the tab bar, or in Settings → Accounts → Profiles, and check the accounts
+that belong to it. Choose a profile in that menu to focus the mail view on its
+accounts: the unified inbox, search, counts, and sidebar show only their mail,
+while your tabs stay the same. **All accounts** shows everything again.
+
+You can also override an individual account's color and show the effective
+color along the left edge of every message. The markers make accounts easy to
+tell apart while working in the unified inbox; the example below uses purple
+for Work and orange for Support.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-profiles-dark.png">
@@ -162,15 +171,18 @@ layout, arrow keys highlight messages and **Enter** opens them; **Escape** or
 ### 🗂️ Tabs
 
 Keep several places open at once with browser-style tabs. Each tab remembers
-its own location: a mailbox, search, or open conversation, or the calendar,
-contacts, or files. Middle-click or Ctrl/⌘-click a message to open it in a
-background tab (add Shift to switch to it), or choose **Open in new tab** from
-its menu. Drag tabs to reorder them, middle-click a tab to close it, and pick
-up where you left off the next time you open Flectar Mail.
+its own place: a mailbox, search, or open conversation, the calendar,
+contacts, files, or Settings, along with how far you scrolled the list and the
+message you were reading. Middle-click or Ctrl/⌘-click a message to open it in
+a background tab (add Shift to switch to it), or choose **Open in new tab**
+from its menu. Drag tabs to reorder them, middle-click a tab to close it,
+right-click a tab to close the others or those to its right, and pick up where
+you left off the next time you open Flectar Mail.
 
-**Ctrl/⌘+T** opens a new tab and **Ctrl/⌘+W** closes the current one.
-**Ctrl+Tab** and **Ctrl+Shift+Tab** cycle through tabs, **Ctrl/⌘+1–8** jump to
-a tab, and **Ctrl/⌘+9** jumps to the last.
+**Ctrl/⌘+T** opens a new tab, **Ctrl/⌘+W** closes the current one, and
+**Ctrl/⌘+Shift+T** reopens the last tab you closed. **Ctrl+Tab** and
+**Ctrl+Shift+Tab** cycle through tabs, **Ctrl/⌘+1–8** jump to a tab, and
+**Ctrl/⌘+9** jumps to the last.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-tabs-dark.png">
@@ -350,17 +362,38 @@ snapshots or transfer connected-account setup and preferences through a backup.
 Passwords and OAuth tokens stay in the system keyring, so a restored device asks
 you to sign in again.
 
+POP3 accounts download mail to this device and leave it on the server unless
+you choose otherwise: each account can remove mail from the server after 7, 14,
+or 30 days, once you delete it here, or as soon as it's downloaded, but never
+before it's stored on this device. Their folders exist only on this device, so
+snapshots include that mail, and removing a POP3 account or deleting all data
+offers to export it first as mbox files, one per folder, which other mail apps
+can import.
+
 The same import also brings accounts over from Thunderbird (a profile folder,
 its Tools › Export archive, or `prefs.js`) and from Thunderbird for Android or
 K-9 Mail (`.k9s` settings exports). You review each account before anything is
-added: settings Flectar Mail can't reproduce, such as POP3 or unencrypted
-servers, are explained instead of changed silently. Existing accounts are never
-modified, and passwords are never imported.
+added: settings Flectar Mail can't reproduce, such as an Exchange server, are
+explained instead of changed silently, and POP3 accounts keep their rule for
+removing mail from the server. Existing accounts are never modified, and
+passwords are never imported.
+
+Saved mail comes over the same way: Thunderbird's Local Folders and the mail
+its POP3 accounts downloaded, mbox files such as a Google Takeout export or
+Flectar Mail's own, `.eml` messages, maildir folders, Apple Mail mailboxes, and
+ZIP archives of them. You pick the files, several at once if you like, then the
+folders, with Trash and Junk left out unless you check them, and the folder
+structure and read and starred states come along. Mail that's already there is
+skipped, so a stopped import can simply run again, and a long one can carry on
+in the background. Mail that belongs to no account goes to **On this device**:
+folders kept only here, which Settings → Storage can export or delete. It can
+also go into a POP3 account's folders, or up to the server of an IMAP, JMAP or
+Gmail account, into a folder of its own there.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-storage-light.png">
-  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, database snapshot, and account backup controls">
+  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
 </picture>
 
 ### 📱 Made for smaller screens
@@ -386,11 +419,11 @@ Flectar Mail is currently in development and is not yet stable.
 >
 > Google and Microsoft OAuth verification is still in progress. Earlier GitHub
 > prereleases are intended for testers using their own OAuth registrations or
-> IMAP/JMAP accounts.
+> IMAP, POP3, or JMAP accounts.
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
 **Sign-in settings** cog on the welcome screen to save your own Google or
-Microsoft app registration, or connect an IMAP/JMAP account. Custom keys are
+Microsoft app registration, or connect an IMAP, POP3, or JMAP account. Custom keys are
 shared with Settings and take precedence over bundled keys; clearing a custom
 client ID restores the defaults when available. Each provider enables separately
 once its configuration is saved.
@@ -405,6 +438,10 @@ When preview builds are published, download them from
 - **macOS Apple silicon or Intel (macOS 14+):** DMG or application ZIP
 - **Android arm64 (Android 8.0+):** Signed APK; previews and stable releases share one app identity
 
+HarmonyOS and OpenHarmony have a community port maintained by
+[springmin](https://github.com/springmin). It isn't part of GitHub releases;
+see [platform/ohos](platform/ohos/README.md) to build it.
+
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.
@@ -414,6 +451,8 @@ Flathub package and therefore does not receive automatic Flathub updates. Its
 close-to-tray option is disabled until the tray backend can use a sandbox-safe
 D-Bus name. Starting automatically at sign-in goes through the desktop's
 Background portal and opens the window, because there is no tray to start into.
+The app icon stays orange there, because the sandbox cannot change the launcher
+icon on the host.
 
 Install the downloaded Linux package with either
 `sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` or
@@ -489,6 +528,20 @@ Getting started is easy:
 3. Translate strings directly through Weblate, no programming or GitHub experience required.
 
 Translations are synchronized with our GitHub repository and submitted as pull requests for review. Contributors can also receive GitHub attribution for their work.
+
+README translations are maintained in this repository. See
+[Contributing translations](CONTRIBUTING.md#translations) to add or update one.
+
+## ♿ Accessibility
+
+Flectar Mail includes keyboard navigation, light and dark themes, and flexible
+layouts. Accessibility work is ongoing. See [ACCESSIBILITY.md](ACCESSIBILITY.md)
+for current features, testing limitations, and how to report a barrier.
+
+## 🔒 Security
+
+To report a vulnerability privately, follow [SECURITY.md](SECURITY.md).
+Please keep vulnerability details out of public issues.
 
 ## 🌐 Open source, for everyone
 

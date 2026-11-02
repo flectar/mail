@@ -140,7 +140,7 @@ async fn add_rich_fixture(
                         *size as i64, format!("<fixture-{index}@local>"), path],
                 )?;
             }
-            tx.execute("INSERT INTO folders(id,account_id,imap_name,role) VALUES(2,1,'Drafts','drafts')", [])?;
+            tx.execute("INSERT INTO folders(id,account_id,path,role) VALUES(2,1,'Drafts','drafts')", [])?;
             let draft_thread_id: i64 = tx.query_row("SELECT MAX(id) + 1 FROM threads", [], |row| row.get(0))?;
             tx.execute(
                 "INSERT INTO threads(id,account_id,subject_norm,last_message_at,message_count,snippet)
@@ -309,9 +309,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.write(move |conn| {
         let tx = conn.transaction()?;
         tx.execute_batch(
-            "INSERT INTO accounts (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-             VALUES (1,'probe@example.test','imap','password','probe','localhost',993,'localhost',587,0);
-             INSERT INTO folders (id,account_id,imap_name,role) VALUES (1,1,'INBOX','inbox');
+            "INSERT INTO accounts (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+             VALUES (1,'probe@example.test','generic','password','probe','localhost',993,'localhost',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+             INSERT INTO folders (id,account_id,path,role) VALUES (1,1,'INBOX','inbox');
              INSERT INTO route_cache (sender_domain,route_key)
              VALUES ('__routing_backfill__','1');",
         )?;
@@ -388,6 +388,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 view: View::Inbox,
                 tab: None,
                 account_id: Some(1),
+                account_ids: None,
                 folder_id: None,
                 cursor: None,
                 limit: 50,
@@ -404,6 +405,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             view: View::Inbox,
             tab: None,
             account_id: Some(1),
+            account_ids: None,
             folder_id: None,
             cursor: None,
             limit: 50,

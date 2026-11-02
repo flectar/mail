@@ -1,13 +1,18 @@
 //! ETag-safe CardDAV push followed by incremental or full collection pull.
 
-use super::{discovery::resolve, http::Transport, vcard, xml};
+use super::{
+    discovery::resolve,
+    http::Transport,
+    vcard::{self, Card},
+    xml,
+};
 use crate::{
     db::{Db, repo},
-    error::Result,
+    error::{CoreError, Result},
     events::{CoreEvent, EventBus},
     models::now_ms,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 const MULTIGET_BATCH: usize = 50;
 
@@ -33,7 +38,6 @@ fn href_key(collection_url: &str, href: &str) -> Result<String> {
 async fn accept_server_version(
     db: &Db,
     transport: &dyn Transport,
-    account_id: i64,
     book_id: i64,
     book_url: &str,
     href: &str,
@@ -64,23 +68,20 @@ async fn accept_server_version(
     let etag = required_etag(&target, response.etag.as_deref())?;
     let href = href.to_owned();
     let card = response.body;
-    vcard::ensure_size(&card)?;
-    let parsed = vcard::parse(&card);
+    let parsed = Card::parse(card);
     db.write(move |conn| {
         let tx = conn.transaction()?;
         match parsed {
-            Ok(record) => repo::carddav::upsert_remote(
-                &tx,
-                account_id,
-                book_id,
-                &href,
-                Some(&etag),
-                &card,
-                &record,
-            )?,
+            Ok(card) => repo::carddav::apply_remote(&tx, book_id, &href, Some(&etag), &card)?,
             Err(error) => {
-                tracing::warn!(%href, %error, "retaining unsupported CardDAV conflict version");
-                repo::carddav::upsert_unmapped_remote(&tx, book_id, &href, Some(&etag), &card)?;
+                tracing::warn!(%href, %error, "unsupported CardDAV conflict version");
+                repo::carddav::record_resource_error(
+                    &tx,
+                    book_id,
+                    &href,
+                    Some(&etag),
+                    &error.to_string(),
+                )?;
             }
         }
         tx.commit()?;
@@ -100,7 +101,7 @@ pub async fn sync_account(
         .read(move |conn| repo::carddav::list_addressbooks(conn, Some(account_id)))
         .await?;
     for book in books.into_iter().filter(|book| book.enabled) {
-        changed |= sync_addressbook(db, transport, account_id, book.id, &book.url).await?;
+        changed |= sync_addressbook(db, transport, book.id, &book.url).await?;
     }
     if changed {
         bus.emit(CoreEvent::ContactsUpdated { account_id });
@@ -110,7 +111,7 @@ pub async fn sync_account(
 
 async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Result<bool> {
     let objects = db
-        .read(move |conn| repo::carddav::dirty_objects(conn, account_id))
+        .read(move |conn| repo::carddav::pending_uploads(conn, account_id))
         .await?;
     let changed = !objects.is_empty();
     for object in objects {
@@ -123,7 +124,7 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
         if object.deleted {
             if !object.remote_exists {
                 let id = object.id;
-                db.write(move |conn| repo::carddav::delete_object(conn, id))
+                db.write(move |conn| repo::carddav::forget_object(conn, id))
                     .await?;
                 continue;
             }
@@ -140,21 +141,12 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
             match response.status {
                 200..=299 | 404 => {
                     let id = object.id;
-                    db.write(move |conn| repo::carddav::delete_object(conn, id))
+                    db.write(move |conn| repo::carddav::forget_object(conn, id))
                         .await?;
                 }
                 412 => {
-                    // The resource changed after the local deletion. Fetch it
-                    // immediately so the server's version wins deterministically.
-                    accept_server_version(
-                        db,
-                        transport,
-                        account_id,
-                        book_id,
-                        &book_url,
-                        &object.href,
-                    )
-                    .await?;
+                    // Preserve the deletion intent alongside the conflicting server version.
+                    accept_server_version(db, transport, book_id, &book_url, &object.href).await?;
                 }
                 403 => {
                     db.write(move |conn| repo::carddav::mark_addressbook_read_only(conn, book_id))
@@ -168,14 +160,9 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
             }
             continue;
         }
-        let Some(contact_id) = object.contact_id else {
+        let Some(body) = object.document.clone() else {
             continue;
         };
-        let record = db
-            .read(move |conn| repo::carddav::contact(conn, contact_id))
-            .await?
-            .ok_or_else(|| super::err("contact no longer exists"))?;
-        let body = vcard::update(&object.vcard_raw, &record, &format!("flectar-{contact_id}"));
         vcard::ensure_size(&body)?;
         let headers = if object.remote_exists {
             let etag = object.etag.as_deref().ok_or_else(|| {
@@ -207,18 +194,10 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
             );
             continue;
         }
-        if response.status == 412 && object.remote_exists {
-            // Server wins a concurrent edit. Import it now rather than
-            // relying on a later ctag or sync-token response.
-            accept_server_version(db, transport, account_id, book_id, &book_url, &object.href)
-                .await?;
-            continue;
-        }
         if response.status == 412 {
-            return Err(super::err(format!(
-                "server rejected the new contact URI {target}: HTTP {}",
-                response.status
-            )));
+            // Also reconcile a creation whose successful response was lost.
+            accept_server_version(db, transport, book_id, &book_url, &object.href).await?;
+            continue;
         }
         if !response.ok() {
             return Err(super::err(format!(
@@ -226,7 +205,7 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
                 response.status
             )));
         }
-        let mut saved_body = body;
+        let mut saved_body = body.clone();
         if response
             .etag
             .as_deref()
@@ -241,17 +220,46 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
                     None,
                 )
                 .await
+            && get.ok()
+            && vcard::parse(&get.body).is_ok()
         {
-            if get.ok() && !get.body.trim().is_empty() {
-                saved_body = get.body;
-            }
+            saved_body = get.body;
             response.etag = get.etag;
         }
         let id = object.id;
         let etag = response.etag.filter(|etag| !etag.trim().is_empty());
         let missing_etag = etag.is_none();
-        db.write(move |conn| repo::carddav::clear_dirty(conn, id, etag.as_deref(), &saved_body))
-            .await?;
+        db.write(move |conn| {
+            let tx = conn.transaction()?;
+            let newer: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM carddav_objects WHERE id=?1 AND revision<>?2)",
+                rusqlite::params![id, object.revision],
+                |r| r.get(0),
+            )?;
+            if newer && etag.is_some() && !vcard::equivalent(&body, &saved_body) {
+                // A normalization or later server edit changed the document
+                // while a newer local edit was pending. Retain both versions.
+                // Without an ETag the resource is downloaded again first.
+                repo::carddav::apply_remote(
+                    &tx,
+                    book_id,
+                    &object.href,
+                    etag.as_deref(),
+                    &Card::parse(saved_body.as_str())?,
+                )?;
+            } else {
+                repo::carddav::acknowledge_upload(
+                    &tx,
+                    id,
+                    object.revision,
+                    etag.as_deref(),
+                    &saved_body,
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await?;
         if missing_etag {
             return Err(super::err(format!(
                 "server stored {target} but did not return its required ETag"
@@ -264,7 +272,6 @@ async fn push_dirty(db: &Db, transport: &dyn Transport, account_id: i64) -> Resu
 async fn sync_addressbook(
     db: &Db,
     transport: &dyn Transport,
-    account_id: i64,
     book_id: i64,
     book_url: &str,
 ) -> Result<bool> {
@@ -293,7 +300,12 @@ async fn sync_addressbook(
     } else {
         (None, None)
     };
-    if ctag.is_some() && ctag == stored_ctag {
+    // Resources that failed to import are retried even when the collection is
+    // unchanged, which needs a full listing rather than a sync-token delta.
+    let retry_resources = db
+        .read(move |conn| repo::carddav::has_failed_resources(conn, book_id))
+        .await?;
+    if !retry_resources && ctag.is_some() && ctag == stored_ctag {
         return Ok(false);
     }
 
@@ -302,7 +314,7 @@ async fn sync_addressbook(
     let mut remote = Vec::<(String, Option<String>)>::new();
     let mut token = None;
     let mut incremental = false;
-    if stored_token.is_some() || advertised_token.is_some() {
+    if !retry_resources && (stored_token.is_some() || advertised_token.is_some()) {
         // An empty token requests the initial state. RFC 6578 requires Depth
         // 0; sync-level controls the collection scope.
         let requested_token = stored_token.as_deref().unwrap_or("");
@@ -400,7 +412,11 @@ async fn sync_addressbook(
             .is_none_or(|stored| etag.is_none() || stored != etag)
     });
     let mut changed = !removed.is_empty();
-    for batch in remote.chunks(MULTIGET_BATCH) {
+    let mut batches = remote
+        .chunks(MULTIGET_BATCH)
+        .map(|batch| batch.to_vec())
+        .collect::<VecDeque<_>>();
+    while let Some(batch) = batches.pop_front() {
         let hrefs = batch
             .iter()
             .map(|(href, _)| href.clone())
@@ -414,7 +430,31 @@ async fn sync_addressbook(
                 Some("application/xml; charset=utf-8"),
                 Some(xml::multiget(&hrefs)),
             )
-            .await?;
+            .await;
+        let oversized = matches!(&response, Err(CoreError::ResponseTooLarge { .. }))
+            || matches!(&response, Ok(response) if response.status == 413);
+        if oversized {
+            if batch.len() > 1 {
+                let mid = batch.len() / 2;
+                batches.push_front(batch[mid..].to_vec());
+                batches.push_front(batch[..mid].to_vec());
+            } else {
+                let (href, etag) = batch.into_iter().next().unwrap();
+                db.write(move |conn| {
+                    repo::carddav::record_resource_error(
+                        conn,
+                        book_id,
+                        &href,
+                        etag.as_deref(),
+                        "Contact response exceeded the download limit",
+                    )
+                })
+                .await?;
+                changed = true;
+            }
+            continue;
+        }
+        let response = response?;
         if response.status != 207 {
             return Err(super::err(format!(
                 "addressbook-multiget: HTTP {}",
@@ -435,62 +475,68 @@ async fn sync_addressbook(
             seen.insert(href.clone());
             if item.status == 404 {
                 removed.push(href.clone());
-            } else if !(200..300).contains(&item.status) {
-                return Err(super::err(format!(
-                    "addressbook-multiget {href}: HTTP {}",
-                    item.status
-                )));
-            } else if item.address_data.is_none() {
-                return Err(super::err(format!(
-                    "addressbook-multiget returned no vCard for {href}"
-                )));
-            } else if item
-                .etag
-                .as_deref()
-                .is_none_or(|etag| etag.trim().is_empty())
-            {
-                return Err(super::err(format!(
-                    "addressbook-multiget returned no ETag for {href}"
-                )));
-            } else if let Some(card) = item.address_data.as_deref() {
-                vcard::ensure_size(card)?;
             }
-        }
-        if let Some(missing) = expected.difference(&seen).next() {
-            return Err(super::err(format!(
-                "addressbook-multiget omitted {missing}"
-            )));
         }
         if !seen.is_empty() {
             changed = true;
         }
         db.write(move |conn| {
             let tx = conn.transaction()?;
+            for missing in expected.difference(&seen) {
+                repo::carddav::record_resource_error(
+                    &tx,
+                    book_id,
+                    missing,
+                    None,
+                    "Server omitted this contact from its response",
+                )?;
+            }
             for (href, item) in items
                 .into_iter()
-                .filter(|(_, item)| (200..300).contains(&item.status))
+                .filter(|(href, item)| expected.contains(href) && item.status != 404)
             {
+                let error = if !(200..300).contains(&item.status) {
+                    Some(format!("Contact download failed: HTTP {}", item.status))
+                } else if item.address_data.is_none() {
+                    Some("Server returned no vCard for this contact".into())
+                } else if item
+                    .etag
+                    .as_deref()
+                    .is_none_or(|etag| etag.trim().is_empty())
+                {
+                    Some("Server returned no ETag for this contact".into())
+                } else {
+                    None
+                };
+                if let Some(error) = error {
+                    repo::carddav::record_resource_error(
+                        &tx,
+                        book_id,
+                        &href,
+                        item.etag.as_deref(),
+                        &error,
+                    )?;
+                    continue;
+                }
                 let Some(card) = item.address_data else {
                     continue;
                 };
-                match vcard::parse(&card) {
-                    Ok(record) => repo::carddav::upsert_remote(
+                match Card::parse(card) {
+                    Ok(card) => repo::carddav::apply_remote(
                         &tx,
-                        account_id,
                         book_id,
                         &href,
                         item.etag.as_deref(),
                         &card,
-                        &record,
                     )?,
                     Err(error) => {
-                        tracing::warn!(href=%item.href, %error, "retaining unsupported CardDAV resource");
-                        repo::carddav::upsert_unmapped_remote(
+                        tracing::warn!(href = %item.href, %error, "unsupported CardDAV resource");
+                        repo::carddav::record_resource_error(
                             &tx,
                             book_id,
                             &href,
                             item.etag.as_deref(),
-                            &card,
+                            &error.to_string(),
                         )?;
                     }
                 }
@@ -522,6 +568,13 @@ async fn sync_addressbook(
 mod tests {
     use super::*;
     use crate::carddav::http::{DavResponse, MockTransport};
+    fn rename_first_contact(conn: &rusqlite::Connection, name: &str) -> Result<()> {
+        let mut record = repo::contacts::list_records(conn, "", 10)?.remove(0);
+        record.name = name.into();
+        repo::contact_entries::save(conn, &record)?;
+        Ok(())
+    }
+
     fn dav(body: &str) -> DavResponse {
         DavResponse {
             status: 207,
@@ -673,8 +726,8 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
             let record = vcard::parse(
                 "BEGIN:VCARD\nVERSION:3.0\nUID:temporary\nN:;;;;\nFN:Ada\nEMAIL:ada@example.test\nEND:VCARD",
             )?;
-            let saved = repo::contacts::save_record(conn, &record, now_ms())?;
-            repo::carddav::attach_new_contact(conn, 1, saved.id)?;
+            let id = repo::contact_entries::save(conn, &record)?;
+            repo::carddav::attach_new_contact(conn, 1, id)?;
             Ok(())
         })
         .await
@@ -690,7 +743,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
         let body = seen[0].4.as_deref().unwrap();
         assert!(body.contains("VERSION:3.0"));
         assert!(body.contains("UID:urn:uuid:"));
-        assert!(body.contains("N:;;;;"));
+        assert!(body.contains("N:;Ada;;;"));
     }
 
     #[tokio::test]
@@ -718,21 +771,16 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 Some("Contacts"),
                 false,
             )?;
-            let record = vcard::parse(
-                "BEGIN:VCARD\nVERSION:4.0\nUID:ada\nFN:Ada\nEMAIL:ada@example.test\nEND:VCARD",
-            )?;
-            repo::carddav::upsert_remote(
+            let card =
+                "BEGIN:VCARD\nVERSION:4.0\nUID:ada\nFN:Ada\nEMAIL:ada@example.test\nEND:VCARD";
+            repo::carddav::apply_remote(
                 conn,
-                1,
                 book,
                 "/books/me/default/ada.vcf",
                 Some("\"old\""),
-                "old",
-                &record,
+                &Card::parse(card)?,
             )?;
-            let id = repo::contacts::list_records(conn, "", 10)?[0].id;
-            repo::carddav::mark_saved_contact_dirty(conn, id)?;
-            Ok(())
+            rename_first_contact(conn, "Ada Lovelace")
         })
         .await
         .unwrap();
@@ -746,17 +794,12 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
         assert_eq!(seen[0].0, "PUT");
         assert_eq!(seen[0].2, vec![("If-Match".into(), "\"old\"".into())]);
         assert_eq!(seen[0].3.as_deref(), Some("text/vcard; charset=utf-8"));
-        assert!(
-            seen[0]
-                .4
-                .as_deref()
-                .unwrap()
-                .contains("EMAIL;TYPE=PREF:ada@example.test")
-        );
+        let body = seen[0].4.as_deref().unwrap();
+        assert!(body.contains("UID:ada\r\nFN:Ada Lovelace\r\nEMAIL:ada@example.test"));
     }
 
     #[tokio::test]
-    async fn etag_conflict_imports_the_server_version_immediately() {
+    async fn etag_conflict_retains_local_edits_for_resolution() {
         let dir = tempfile::tempdir().unwrap();
         let db = Db::open(&dir.path().join("mail.db")).unwrap();
         db.write(|conn| {
@@ -780,21 +823,9 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 Some("Contacts"),
                 false,
             )?;
-            let record = vcard::parse(
-                "BEGIN:VCARD\nVERSION:3.0\nUID:server-id\nN:;;;;\nFN:Local edit\nEMAIL:ada@example.test\nEND:VCARD",
-            )?;
-            repo::carddav::upsert_remote(
-                conn,
-                1,
-                book,
-                "/books/me/default/ada.vcf",
-                Some("\"old\""),
-                "BEGIN:VCARD\nVERSION:3.0\nUID:server-id\nN:;;;;\nFN:Before\nEMAIL:ada@example.test\nEND:VCARD",
-                &record,
-            )?;
-            let id = repo::contacts::list_records(conn, "", 10)?[0].id;
-            repo::carddav::mark_saved_contact_dirty(conn, id)?;
-            Ok(())
+            let card = "BEGIN:VCARD\nVERSION:3.0\nUID:server-id\nN:;;;;\nFN:Before\nEMAIL:ada@example.test\nEND:VCARD";
+            repo::carddav::apply_remote(conn, book, "/books/me/default/ada.vcf", Some("\"old\""), &Card::parse(card)?)?;
+            rename_first_contact(conn, "Local edit")
         })
         .await
         .unwrap();
@@ -814,7 +845,11 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
             .read(|conn| repo::contacts::list_records(conn, "", 10))
             .await
             .unwrap();
-        assert_eq!(contacts[0].name, "Server version");
+        assert_eq!(contacts[0].name, "Local edit");
+        assert_eq!(
+            contacts[0].details.sync,
+            crate::models::ContactSync::Conflict
+        );
         let seen = transport.seen.lock().unwrap();
         assert_eq!(seen[0].0, "PUT");
         assert_eq!(seen[1].0, "GET");
@@ -846,16 +881,7 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
                 false,
             )?;
             let card = "BEGIN:VCARD\nVERSION:3.0\nUID:ada\nN:;;;;\nFN:Ada\nEMAIL:ada@example.test\nEND:VCARD";
-            let record = vcard::parse(card)?;
-            repo::carddav::upsert_remote(
-                conn,
-                1,
-                book,
-                "/books/me/default/ada.vcf",
-                Some("\"old\""),
-                card,
-                &record,
-            )
+            repo::carddav::apply_remote(conn, book, "/books/me/default/ada.vcf", Some("\"old\""), &Card::parse(card)?)
         })
         .await
         .unwrap();
@@ -873,5 +899,130 @@ END:VCARD</c:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:props
             .unwrap();
         assert_eq!(contacts.len(), 1);
         assert_eq!(contacts[0].email, "ada@example.test");
+    }
+    fn multistatus(items: &[(&str, Option<&str>)]) -> String {
+        let mut xml = String::from(
+            "<d:multistatus xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:carddav\">",
+        );
+        for (href, card) in items {
+            xml.push_str(&format!(
+                "<d:response><d:href>{href}</d:href><d:propstat><d:prop><d:getetag>v1</d:getetag>"
+            ));
+            if let Some(card) = card {
+                xml.push_str(&format!(
+                    "<c:address-data><![CDATA[{card}]]></c:address-data>"
+                ));
+            }
+            xml.push_str("</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>");
+        }
+        xml.push_str("</d:multistatus>");
+        xml
+    }
+
+    #[tokio::test]
+    async fn oversized_batches_split_and_bad_cards_do_not_block_healthy_contacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("mail.db")).unwrap();
+        let book = db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                repo::carddav::upsert_addressbook(
+                    conn,
+                    1,
+                    "https://dav.test/book/",
+                    Some("Contacts"),
+                    false,
+                )
+            })
+            .await
+            .unwrap();
+        let good =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:good\r\nFN:Phone only\r\nTEL:123\r\nEND:VCARD\r\n";
+        let too_big = format!(
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:large\r\nFN:Large\r\nNOTE:{}\r\nEND:VCARD\r\n",
+            "x".repeat(vcard::MAX_VCARD_BYTES)
+        );
+        let transport = MockTransport::new(vec![
+            dav(&multistatus(&[("/book/", None)])),
+            dav(&multistatus(&[
+                ("/book/good.vcf", None),
+                ("/book/large.vcf", None),
+            ])),
+            DavResponse {
+                status: 413,
+                ..Default::default()
+            },
+            dav(&multistatus(&[("/book/good.vcf", Some(good))])),
+            dav(&multistatus(&[("/book/large.vcf", Some(&too_big))])),
+        ]);
+        assert!(
+            sync_addressbook(&db, &transport, book, "https://dav.test/book/")
+                .await
+                .unwrap()
+        );
+        db.read(move |conn| {
+            let records = repo::contacts::list_records(conn, "", 20)?;
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].name, "Phone only");
+            let error: String = conn.query_row(
+                "SELECT last_error FROM carddav_objects WHERE href='/book/large.vcf'",
+                [],
+                |r| r.get(0),
+            )?;
+            assert!(error.contains("2 MiB"));
+            assert!(repo::carddav::sync_state(conn, book)?.0.is_none());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(transport.seen.lock().unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn lost_creation_response_reconciles_the_existing_resource() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("mail.db")).unwrap();
+        let card = db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                repo::carddav::upsert_addressbook(
+                    conn,
+                    1,
+                    "https://dav.test/book/",
+                    Some("Contacts"),
+                    false,
+                )?;
+                let record = vcard::parse(
+                    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:new\r\nFN:New person\r\nEND:VCARD\r\n",
+                )?;
+                let id = repo::contact_entries::save(conn, &record)?;
+                repo::carddav::attach_new_contact(conn, 1, id)?;
+                Ok(repo::carddav::pending_uploads(conn, 1)?
+                    .pop()
+                    .unwrap()
+                    .document
+                    .unwrap())
+            })
+            .await
+            .unwrap();
+        let transport = MockTransport::new(vec![
+            DavResponse {
+                status: 412,
+                ..Default::default()
+            },
+            DavResponse {
+                status: 200,
+                etag: Some("accepted".into()),
+                body: card,
+            },
+        ]);
+        assert!(push_dirty(&db, &transport, 1).await.unwrap());
+        db.read(|conn| {
+            assert!(repo::carddav::pending_uploads(conn, 1)?.is_empty());
+            assert_eq!(repo::contacts::list_records(conn, "", 20)?.len(), 1);
+            Ok(())
+        })
+        .await
+        .unwrap();
     }
 }

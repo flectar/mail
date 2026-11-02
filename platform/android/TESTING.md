@@ -55,6 +55,12 @@ access, OAuth registration, or mailbox data is needed. Removing the static
 initializer must make the invocation tests fail with `UnsatisfiedLinkError`.
 These tests verify linkage, not OAuth authorization semantics.
 
+`LauncherIconsTest` switches the launcher entry through every app icon offered
+in Settings and checks that exactly one entry stays visible, then restores the
+default orange icon. The app switches entries only after it leaves the
+foreground; check that by choosing an icon in Settings and returning to the
+home screen.
+
 ## Sign-in acceptance check
 
 On the reported Pixel/GrapheneOS configuration and a supported stock Android

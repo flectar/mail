@@ -1,8 +1,9 @@
 //! CardDAV connection, address-book, and remote-object persistence.
 
-use crate::error::Result;
-use crate::models::{AddressBook, CardDavConnection, ContactRecord};
-use crate::search::fold;
+use super::contact_entries;
+use crate::carddav::vcard::{self, Card};
+use crate::error::{CoreError, Result};
+use crate::models::{AddressBook, CardDavConnection};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,17 +17,17 @@ pub struct CardDavConfig {
     pub last_error: Option<String>,
 }
 
+/// A local change waiting to upload: a deletion, or the entry's document.
 #[derive(Debug, Clone)]
-pub struct CardDavObject {
+pub struct PendingUpload {
     pub id: i64,
     pub addressbook_id: i64,
-    pub contact_id: Option<i64>,
     pub href: String,
     pub etag: Option<String>,
-    pub vcard_raw: String,
     pub remote_exists: bool,
-    pub dirty: bool,
     pub deleted: bool,
+    pub revision: i64,
+    pub document: Option<String>,
 }
 
 fn config_row(row: &Row<'_>) -> rusqlite::Result<CardDavConfig> {
@@ -54,17 +55,16 @@ fn book_row(row: &Row<'_>) -> rusqlite::Result<AddressBook> {
     })
 }
 
-fn object_row(row: &Row<'_>) -> rusqlite::Result<CardDavObject> {
-    Ok(CardDavObject {
+fn pending_upload_row(row: &Row<'_>) -> rusqlite::Result<PendingUpload> {
+    Ok(PendingUpload {
         id: row.get(0)?,
         addressbook_id: row.get(1)?,
-        contact_id: row.get(2)?,
-        href: row.get(3)?,
-        etag: row.get(4)?,
-        vcard_raw: row.get(5)?,
-        remote_exists: row.get::<_, i64>(6)? != 0,
-        dirty: row.get::<_, i64>(7)? != 0,
-        deleted: row.get::<_, i64>(8)? != 0,
+        href: row.get(2)?,
+        etag: row.get(3)?,
+        remote_exists: row.get(4)?,
+        deleted: row.get(5)?,
+        revision: row.get(6)?,
+        document: row.get(7)?,
     })
 }
 
@@ -142,19 +142,9 @@ pub fn set_error(conn: &Connection, account_id: i64, error: Option<&str>) -> Res
     Ok(())
 }
 
+/// Forget an account's CardDAV connection. Deleting its address books keeps
+/// their contacts on this device (see migration 13).
 pub fn disconnect(conn: &Connection, account_id: i64) -> Result<()> {
-    // Synced contacts stay useful locally. Removing mappings prevents later
-    // edits from being sent to a server the user disconnected.
-    conn.execute(
-        "UPDATE contacts SET is_managed=1
-         WHERE id IN (
-             SELECT o.contact_id
-             FROM carddav_objects o
-             JOIN carddav_addressbooks b ON b.id=o.addressbook_id
-             WHERE b.account_id=?1 AND o.contact_id IS NOT NULL AND o.deleted=0
-         )",
-        [account_id],
-    )?;
     conn.execute(
         "DELETE FROM carddav_addressbooks WHERE account_id=?1",
         [account_id],
@@ -177,7 +167,7 @@ pub fn upsert_addressbook(
         "INSERT INTO carddav_addressbooks(account_id,url,display_name,read_only)
          VALUES (?1,?2,?3,?4)
          ON CONFLICT(account_id,url) DO UPDATE SET display_name=excluded.display_name,
-           read_only=excluded.read_only",
+           read_only=excluded.read_only,available=1",
         params![account_id, url, display_name, read_only as i64],
     )?;
     conn.query_row(
@@ -188,44 +178,38 @@ pub fn upsert_addressbook(
     .map_err(Into::into)
 }
 
-/// Remove collections no longer advertised during an explicit reconnect.
-/// Their contact rows remain local, matching disconnect behavior.
+/// Mark missing collections unavailable while retaining documents and pending work.
 pub fn retain_addressbooks(
     conn: &Connection,
     account_id: i64,
     urls: &std::collections::HashSet<String>,
 ) -> Result<()> {
-    let mut statement =
-        conn.prepare("SELECT id,url FROM carddav_addressbooks WHERE account_id=?1")?;
-    let books = statement
-        .query_map([account_id], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    let mut stmt = conn.prepare("SELECT id,url FROM carddav_addressbooks WHERE account_id=?1")?;
+    let books = stmt
+        .query_map([account_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    drop(statement);
     for (id, url) in books {
-        if !urls.contains(&url) {
-            conn.execute(
-                "UPDATE contacts SET is_managed=1
-                 WHERE id IN (
-                     SELECT contact_id FROM carddav_objects
-                     WHERE addressbook_id=?1 AND contact_id IS NOT NULL AND deleted=0
-                 )",
-                [id],
-            )?;
-            conn.execute("DELETE FROM carddav_addressbooks WHERE id=?1", [id])?;
-        }
+        conn.execute(
+            "UPDATE carddav_addressbooks SET available=?2 WHERE id=?1",
+            params![id, urls.contains(&url)],
+        )?;
     }
     Ok(())
 }
 
 pub fn ensure_default(conn: &Connection, account_id: i64, addressbook_id: i64) -> Result<()> {
     let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM carddav_addressbooks WHERE account_id=?1 AND is_default=1",
+        "SELECT COUNT(*) FROM carddav_addressbooks WHERE account_id=?1 AND is_default=1 AND available=1 AND read_only=0",
         [account_id],
         |r| r.get(0),
     )?;
     if count == 0 {
+        conn.execute(
+            "UPDATE carddav_addressbooks SET is_default=0 WHERE account_id=?1",
+            [account_id],
+        )?;
         conn.execute(
             "UPDATE carddav_addressbooks SET is_default=(id=?2) WHERE account_id=?1",
             params![account_id, addressbook_id],
@@ -236,10 +220,10 @@ pub fn ensure_default(conn: &Connection, account_id: i64, addressbook_id: i64) -
 
 pub fn list_addressbooks(conn: &Connection, account_id: Option<i64>) -> Result<Vec<AddressBook>> {
     let sql = if account_id.is_some() {
-        "SELECT id,account_id,url,display_name,read_only,enabled,is_default,last_synced_at
+        "SELECT id,account_id,url,display_name,read_only,(enabled=1 AND available=1),is_default,last_synced_at
          FROM carddav_addressbooks WHERE account_id=?1 ORDER BY is_default DESC,display_name COLLATE NOCASE,id"
     } else {
-        "SELECT id,account_id,url,display_name,read_only,enabled,is_default,last_synced_at
+        "SELECT id,account_id,url,display_name,read_only,(enabled=1 AND available=1),is_default,last_synced_at
          FROM carddav_addressbooks ORDER BY account_id,is_default DESC,display_name COLLATE NOCASE,id"
     };
     let mut stmt = conn.prepare(sql)?;
@@ -278,21 +262,41 @@ pub fn set_sync_state(
 }
 
 pub fn object_etags(conn: &Connection, book_id: i64) -> Result<Vec<(String, Option<String>)>> {
-    let mut stmt = conn
-        .prepare("SELECT href,etag FROM carddav_objects WHERE addressbook_id=?1 AND deleted=0")?;
+    // A resource that failed to import has no usable ETag, so it is
+    // downloaded again.
+    let mut stmt = conn.prepare(
+        "SELECT href,CASE WHEN last_error IS NULL THEN etag END FROM carddav_objects
+         WHERE addressbook_id=?1 AND remote_exists=1",
+    )?;
     Ok(stmt
         .query_map([book_id], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<_>>()?)
 }
 
-pub fn dirty_objects(conn: &Connection, account_id: i64) -> Result<Vec<CardDavObject>> {
+pub fn has_failed_resources(conn: &Connection, book_id: i64) -> Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM carddav_objects WHERE addressbook_id=?1 AND last_error IS NOT NULL)",
+        [book_id],
+        |r| r.get(0),
+    )
+    .map_err(Into::into)
+}
+
+/// Local changes ready to upload to an account's writable, reachable address
+/// books. Conflicts and failed resources wait for the user or the server.
+pub fn pending_uploads(conn: &Connection, account_id: i64) -> Result<Vec<PendingUpload>> {
     let mut stmt = conn.prepare(
-        "SELECT o.id,o.addressbook_id,o.contact_id,o.href,o.etag,o.vcard_raw,o.remote_exists,o.dirty,o.deleted
-         FROM carddav_objects o JOIN carddav_addressbooks b ON b.id=o.addressbook_id
-         WHERE b.account_id=?1 AND b.enabled=1 AND b.read_only=0 AND o.dirty=1 ORDER BY o.id",
+        "SELECT o.id,o.addressbook_id,o.href,o.etag,o.remote_exists,o.deleted,o.revision,e.document
+         FROM carddav_objects o
+         JOIN carddav_addressbooks b ON b.id=o.addressbook_id
+         LEFT JOIN contact_entries e ON e.id=o.entry_id
+         WHERE b.account_id=?1 AND b.enabled=1 AND b.available=1 AND b.read_only=0
+           AND o.dirty=1 AND o.last_error IS NULL AND o.conflict_vcard IS NULL
+           AND o.conflict_deleted=0
+         ORDER BY o.id",
     )?;
     Ok(stmt
-        .query_map([account_id], object_row)?
+        .query_map([account_id], pending_upload_row)?
         .collect::<rusqlite::Result<_>>()?)
 }
 
@@ -314,220 +318,362 @@ pub fn mark_addressbook_read_only(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Merge a server vCard into the unified contact row and bind its DAV object.
-pub fn upsert_remote(
+fn bump_entry_revision(conn: &Connection, entry: Option<i64>) -> Result<()> {
+    if let Some(entry) = entry {
+        conn.execute(
+            "UPDATE contact_entries SET revision=revision+1 WHERE id=?1",
+            [entry],
+        )?;
+    }
+    Ok(())
+}
+
+/// Apply the server's version of a resource. A pending local change is never
+/// overwritten: an ETag already seen keeps it, the server returning the
+/// pending document acknowledges it, and anything else becomes a conflict.
+/// A new resource whose UID matches a contact kept on this device after its
+/// address book was removed is linked to that contact again.
+pub fn apply_remote(
     conn: &Connection,
-    account_id: i64,
     book_id: i64,
     href: &str,
     etag: Option<&str>,
-    vcard: &str,
-    record: &ContactRecord,
+    card: &Card,
 ) -> Result<()> {
-    let existing_object: Option<(i64, Option<i64>, bool)> = conn.query_row(
-        "SELECT id,contact_id,owns_contact FROM carddav_objects WHERE addressbook_id=?1 AND href=?2",
-        params![book_id, href], |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)))
-        .optional()?;
-    let existing_contact: Option<i64> = conn
+    struct Existing {
+        id: i64,
+        entry: Option<i64>,
+        dirty: bool,
+        deleted: bool,
+        etag: Option<String>,
+        conflict_etag: Option<String>,
+        document: Option<String>,
+    }
+    let existing = conn
         .query_row(
-            "SELECT id FROM contacts WHERE email=?1 COLLATE NOCASE",
-            [&record.email],
-            |r| r.get(0),
+            "SELECT o.id,o.entry_id,o.dirty,o.deleted,o.etag,o.conflict_etag,e.document
+             FROM carddav_objects o LEFT JOIN contact_entries e ON e.id=o.entry_id
+             WHERE o.addressbook_id=?1 AND o.href=?2",
+            params![book_id, href],
+            |r| {
+                Ok(Existing {
+                    id: r.get(0)?,
+                    entry: r.get(1)?,
+                    dirty: r.get(2)?,
+                    deleted: r.get(3)?,
+                    etag: r.get(4)?,
+                    conflict_etag: r.get(5)?,
+                    document: r.get(6)?,
+                })
+            },
         )
         .optional()?;
-    let owns = existing_object.as_ref().is_some_and(|v| v.2) || existing_contact.is_none();
-    let old_contact = existing_object.as_ref().and_then(|value| value.1);
-    let folded = fold(&format!(
-        "{} {} {} {} {} {} {} {}",
-        record.name,
-        record.email,
-        record.company,
-        record.phone,
-        record.job_title,
-        record.website,
-        record.tags,
-        record.postal_address
-    ));
-    conn.execute(
-        "INSERT INTO contacts(email,name,folded,phone,company,job_title,website,birthday,
-          postal_address,notes,tags,is_managed,updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,0,?12)
-         ON CONFLICT(email) DO UPDATE SET name=excluded.name,folded=excluded.folded,
-          phone=excluded.phone,company=excluded.company,job_title=excluded.job_title,
-          website=excluded.website,birthday=excluded.birthday,postal_address=excluded.postal_address,
-          notes=excluded.notes,tags=excluded.tags,updated_at=excluded.updated_at",
-        params![record.email.to_lowercase(),record.name,folded,record.phone,record.company,
-                record.job_title,record.website,record.birthday,record.postal_address,record.notes,
-                record.tags,crate::models::now_ms()],
-    )?;
-    let contact_id: i64 = conn.query_row(
-        "SELECT id FROM contacts WHERE email=?1 COLLATE NOCASE",
-        [&record.email],
-        |r| r.get(0),
-    )?;
-    conn.execute(
-        "INSERT OR IGNORE INTO contact_accounts(contact_id,account_id) VALUES (?1,?2)",
-        params![contact_id, account_id],
-    )?;
-    conn.execute(
-        "INSERT INTO carddav_objects(addressbook_id,contact_id,href,etag,vcard_raw,remote_exists,owns_contact)
-         VALUES (?1,?2,?3,?4,?5,1,?6)
-         ON CONFLICT(addressbook_id,href) DO UPDATE SET contact_id=excluded.contact_id,
-          etag=excluded.etag,vcard_raw=excluded.vcard_raw,remote_exists=1,dirty=0,deleted=0",
-        params![book_id, contact_id, href, etag, vcard, owns as i64],
-    )?;
-    if owns && let Some(old_contact) = old_contact.filter(|old| *old != contact_id) {
-        let references: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM carddav_objects WHERE contact_id=?1",
-            [old_contact],
-            |row| row.get(0),
-        )?;
-        let interactions: i64 = conn.query_row(
-            "SELECT send_count+recv_count FROM contacts WHERE id=?1",
-            [old_contact],
-            |row| row.get(0),
-        )?;
-        if references == 0 && interactions == 0 {
-            conn.execute("DELETE FROM contacts WHERE id=?1", [old_contact])?;
+    // A pending deletion of a resource that never had an entry has nothing
+    // to show in a conflict, so the server's version is imported instead.
+    if let Some(object) = existing
+        .as_ref()
+        .filter(|object| object.dirty && object.entry.is_some())
+    {
+        // The server answered for this resource, so an earlier download
+        // error no longer applies.
+        if etag.is_some()
+            && (object.etag.as_deref() == etag || object.conflict_etag.as_deref() == etag)
+        {
+            conn.execute(
+                "UPDATE carddav_objects SET last_error=NULL WHERE id=?1",
+                [object.id],
+            )?;
+            return Ok(());
         }
+        if !object.deleted
+            && object
+                .document
+                .as_deref()
+                .is_some_and(|document| vcard::equivalent(document, card.document()))
+        {
+            // The upload succeeded but its response was lost.
+            conn.execute(
+                "UPDATE carddav_objects SET etag=?2,dirty=0,remote_exists=1,last_error=NULL,
+                   conflict_vcard=NULL,conflict_etag=NULL,conflict_deleted=0
+                 WHERE id=?1",
+                params![object.id, etag],
+            )?;
+            return Ok(());
+        }
+        conn.execute(
+            "UPDATE carddav_objects SET conflict_vcard=?2,conflict_etag=?3,conflict_deleted=0,
+               last_error=NULL
+             WHERE id=?1",
+            params![object.id, card.document(), etag],
+        )?;
+        return bump_entry_revision(conn, object.entry);
     }
+    let kept = match (&existing, vcard::uid(card.document())) {
+        (None, Some(uid)) => conn
+            .query_row(
+                "SELECT id,document FROM contact_entries e WHERE uid=?1
+                   AND NOT EXISTS(SELECT 1 FROM carddav_objects o WHERE o.entry_id=e.id)
+                 ORDER BY id LIMIT 1",
+                [uid],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?,
+        _ => None,
+    };
+    if let Some((entry, document)) = &kept
+        && !vcard::equivalent(document, card.document())
+    {
+        // Changed on this device while disconnected: keep both versions.
+        conn.execute(
+            "INSERT INTO carddav_objects(addressbook_id,entry_id,href,etag,dirty,revision,
+               conflict_vcard,conflict_etag)
+             VALUES (?1,?2,?3,?4,1,1,?5,?4)",
+            params![book_id, entry, href, etag, card.document()],
+        )?;
+        conn.execute(
+            "UPDATE contact_entries SET detached_unsynced=0,revision=revision+1 WHERE id=?1",
+            [*entry],
+        )?;
+        return Ok(());
+    }
+    let entry = contact_entries::store(
+        conn,
+        existing
+            .and_then(|object| object.entry)
+            .or(kept.map(|(entry, _)| entry)),
+        card,
+    )?;
+    conn.execute(
+        "UPDATE contact_entries SET detached_unsynced=0 WHERE id=?1",
+        [entry],
+    )?;
+    conn.execute(
+        "INSERT INTO carddav_objects(addressbook_id,entry_id,href,etag) VALUES (?1,?2,?3,?4)
+         ON CONFLICT(addressbook_id,href) DO UPDATE SET entry_id=excluded.entry_id,
+           etag=excluded.etag,remote_exists=1,dirty=0,deleted=0,conflict_vcard=NULL,
+           conflict_etag=NULL,conflict_deleted=0,last_error=NULL",
+        params![book_id, entry, href, etag],
+    )?;
     Ok(())
 }
 
-/// Retain the DAV identity and ETag for a resource the app cannot project
-/// into its email-keyed contact model. This prevents endless redownloads and
-/// lets a later server change make the resource importable.
-pub fn upsert_unmapped_remote(
+/// Record a resource that could not be imported; it is downloaded again on
+/// the next sync. An entry it already had keeps its last good version.
+pub fn record_resource_error(
     conn: &Connection,
     book_id: i64,
     href: &str,
     etag: Option<&str>,
-    vcard: &str,
+    error: &str,
 ) -> Result<()> {
-    remove_remote(conn, book_id, href)?;
     conn.execute(
-        "INSERT INTO carddav_objects(addressbook_id,contact_id,href,etag,vcard_raw,remote_exists,owns_contact)
-         VALUES (?1,NULL,?2,?3,?4,1,0)",
-        params![book_id, href, etag, vcard],
+        "INSERT INTO carddav_objects(addressbook_id,href,etag,last_error) VALUES (?1,?2,?3,?4)
+         ON CONFLICT(addressbook_id,href) DO UPDATE SET last_error=excluded.last_error",
+        params![book_id, href, etag, error],
     )?;
     Ok(())
 }
 
+/// The server no longer has a resource. A pending local edit turns this into
+/// a conflict; otherwise the contact is removed.
 pub fn remove_remote(conn: &Connection, book_id: i64, href: &str) -> Result<()> {
-    let object: Option<(i64, Option<i64>, bool)> = conn.query_row(
-        "SELECT id,contact_id,owns_contact FROM carddav_objects WHERE addressbook_id=?1 AND href=?2",
-        params![book_id, href], |r| Ok((r.get(0)?,r.get(1)?,r.get::<_,i64>(2)? != 0))).optional()?;
-    let Some((object_id, contact_id, owns)) = object else {
-        return Ok(());
-    };
-    conn.execute("DELETE FROM carddav_objects WHERE id=?1", [object_id])?;
-    if owns && let Some(contact_id) = contact_id {
-        let other: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM carddav_objects WHERE contact_id=?1",
-            [contact_id],
-            |r| r.get(0),
-        )?;
-        let interactions: i64 = conn.query_row(
-            "SELECT send_count+recv_count FROM contacts WHERE id=?1",
-            [contact_id],
-            |r| r.get(0),
-        )?;
-        if other == 0 && interactions == 0 {
-            conn.execute("DELETE FROM contacts WHERE id=?1", [contact_id])?;
-        } else if other == 0 {
-            conn.execute("UPDATE contacts SET is_managed=0 WHERE id=?1", [contact_id])?;
+    let object = conn
+        .query_row(
+            "SELECT id,entry_id,dirty,deleted FROM carddav_objects WHERE addressbook_id=?1 AND href=?2",
+            params![book_id, href],
+            |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, Option<i64>>(1)?,
+                    r.get::<_, bool>(2)?,
+                    r.get::<_, bool>(3)?,
+                ))
+            },
+        )
+        .optional()?;
+    match object {
+        Some((id, entry, true, false)) => {
+            conn.execute(
+                "UPDATE carddav_objects SET conflict_deleted=1,conflict_vcard=NULL,conflict_etag=NULL,
+                   last_error=NULL
+                 WHERE id=?1",
+                [id],
+            )?;
+            bump_entry_revision(conn, entry)
         }
+        Some((id, ..)) => forget_object(conn, id),
+        None => Ok(()),
     }
-    Ok(())
 }
 
-pub fn mark_saved_contact_dirty(conn: &Connection, contact_id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE carddav_objects SET dirty=1 WHERE contact_id=?1 AND deleted=0",
-        [contact_id],
-    )?;
-    Ok(())
-}
-
-pub fn mark_deleted_contact(conn: &Connection, contact_id: i64) -> Result<bool> {
-    let changed = conn.execute(
-        "UPDATE carddav_objects SET contact_id=NULL,dirty=1,deleted=1 WHERE contact_id=?1",
-        [contact_id],
-    )?;
-    Ok(changed > 0)
-}
-
-pub fn clear_dirty(
+/// Record a successful upload. `document` is what the server stored, which
+/// may be a normalization of the upload. Pending work is cleared only when no
+/// local change followed the uploaded revision.
+pub fn acknowledge_upload(
     conn: &Connection,
     object_id: i64,
+    revision: i64,
     etag: Option<&str>,
-    vcard: &str,
+    document: &str,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE carddav_objects SET etag=?2,vcard_raw=?3,remote_exists=1,dirty=0 WHERE id=?1",
-        params![object_id, etag, vcard],
+        "UPDATE carddav_objects SET etag=?3,remote_exists=1,
+           dirty=CASE WHEN revision=?2 THEN 0 ELSE 1 END,
+           last_error=CASE WHEN ?3 IS NULL THEN 'Server returned no ETag after saving; waiting to reconcile' END
+         WHERE id=?1",
+        params![object_id, revision, etag],
     )?;
+    let current = conn
+        .query_row(
+            "SELECT e.id,e.document FROM carddav_objects o JOIN contact_entries e ON e.id=o.entry_id
+             WHERE o.id=?1 AND o.revision=?2",
+            params![object_id, revision],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    if let Some((entry, stored)) = current
+        && !vcard::equivalent(&stored, document)
+        && let Ok(card) = Card::parse(document)
+    {
+        contact_entries::store(conn, Some(entry), &card)?;
+    }
     Ok(())
 }
 
-pub fn delete_object(conn: &Connection, object_id: i64) -> Result<()> {
+/// Remove a resource and its contact after the server confirmed they are gone.
+pub fn forget_object(conn: &Connection, object_id: i64) -> Result<()> {
+    conn.execute(
+        "DELETE FROM contact_entries WHERE id=(SELECT entry_id FROM carddav_objects WHERE id=?1)",
+        [object_id],
+    )?;
     conn.execute("DELETE FROM carddav_objects WHERE id=?1", [object_id])?;
     Ok(())
 }
 
-pub fn contact(conn: &Connection, id: i64) -> Result<Option<ContactRecord>> {
-    crate::db::repo::contacts::get_record(conn, id)
-}
-
-/// Queue a newly-created contact for the selected account's default writable
-/// address book. Existing contacts acquire mappings through server pull.
-pub fn attach_new_contact(conn: &Connection, account_id: i64, contact_id: i64) -> Result<bool> {
-    // `save_record` merges by email. If a "new" UI entry resolved to an
-    // existing remote contact, update that resource instead of creating a
-    // duplicate vCard on the same server.
-    if conn.execute(
-        "UPDATE carddav_objects SET dirty=1
-         WHERE contact_id=?1 AND deleted=0 AND addressbook_id IN
-           (SELECT id FROM carddav_addressbooks WHERE account_id=?2)",
-        params![contact_id, account_id],
-    )? > 0
-    {
+/// Queue a local contact for upload to the account's default writable address
+/// book. Returns false when the account has none.
+pub fn attach_new_contact(conn: &Connection, account_id: i64, entry_id: i64) -> Result<bool> {
+    if conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM carddav_objects WHERE entry_id=?1)",
+        [entry_id],
+        |r| r.get::<_, bool>(0),
+    )? {
         return Ok(true);
     }
-    let book: Option<(i64, String)> = conn
+    let book = conn
         .query_row(
             "SELECT id,url FROM carddav_addressbooks
-         WHERE account_id=?1 AND enabled=1 AND read_only=0
-         ORDER BY is_default DESC,id LIMIT 1",
+             WHERE account_id=?1 AND enabled=1 AND available=1 AND read_only=0
+             ORDER BY is_default DESC,id LIMIT 1",
             [account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
         )
         .optional()?;
-    let Some((book_id, book_url)) = book else {
+    let Some((book, url)) = book else {
         return Ok(false);
     };
-    let record = contact(conn, contact_id)?
-        .ok_or_else(|| crate::error::CoreError::CardDav("contact no longer exists".into()))?;
-    let uid = crate::carddav::vcard::new_uid();
-    let vcard = crate::carddav::vcard::serialize(&record, &uid);
-    let resource_name = format!("{}.vcf", uid.trim_start_matches("urn:uuid:"));
-    let mut url =
-        url::Url::parse(&book_url).map_err(|e| crate::error::CoreError::CardDav(e.to_string()))?;
-    url.path_segments_mut()
-        .map_err(|_| {
-            crate::error::CoreError::CardDav("address book URL cannot accept a contact path".into())
-        })?
-        .pop_if_empty()
-        .push(&resource_name);
-    let mut href = url.path().to_owned();
-    if let Some(query) = url.query() {
-        href.push('?');
-        href.push_str(query);
-    }
-    conn.execute(
-        "INSERT INTO carddav_objects(addressbook_id,contact_id,href,vcard_raw,remote_exists,dirty,owns_contact)
-         VALUES (?1,?2,?3,?4,0,1,1)",
-        params![book_id, contact_id, href, vcard],
+    let document: String = conn.query_row(
+        "SELECT document FROM contact_entries WHERE id=?1",
+        [entry_id],
+        |r| r.get(0),
     )?;
+    let uid =
+        vcard::uid(&document).ok_or_else(|| CoreError::CardDav("contact has no UID".into()))?;
+    let mut url = url::Url::parse(&url).map_err(|e| CoreError::CardDav(e.to_string()))?;
+    url.path_segments_mut()
+        .map_err(|_| CoreError::CardDav("Invalid address book URL".into()))?
+        .pop_if_empty()
+        .push(&format!("{}.vcf", uid.trim_start_matches("urn:uuid:")));
+    let href = match url.query() {
+        Some(q) => format!("{}?{q}", url.path()),
+        None => url.path().to_owned(),
+    };
+    conn.execute(
+        "INSERT INTO carddav_objects(addressbook_id,entry_id,href,remote_exists,dirty,revision)
+         VALUES (?1,?2,?3,0,1,1)",
+        params![book, entry_id, href],
+    )?;
+    bump_entry_revision(conn, Some(entry_id))?;
     Ok(true)
+}
+
+/// Keep one complete version of a conflicting contact. Keeping the local
+/// version uploads it over the server's current version on the next sync.
+pub fn resolve_conflict(
+    conn: &Connection,
+    entry: i64,
+    revision: i64,
+    keep_local: bool,
+) -> Result<()> {
+    let actual: i64 = conn.query_row(
+        "SELECT revision FROM contact_entries WHERE id=?1",
+        [entry],
+        |r| r.get(0),
+    )?;
+    if actual != revision {
+        return Err(CoreError::Other(
+            "Contact changed; reopen the conflict".into(),
+        ));
+    }
+    let (id, book, href, server, etag, server_deleted, writable): (
+        i64,
+        i64,
+        String,
+        Option<String>,
+        Option<String>,
+        bool,
+        bool,
+    ) = conn.query_row(
+        "SELECT o.id,o.addressbook_id,o.href,o.conflict_vcard,o.conflict_etag,o.conflict_deleted,
+                b.read_only=0 AND b.available=1
+         FROM carddav_objects o JOIN carddav_addressbooks b ON b.id=o.addressbook_id
+         WHERE o.entry_id=?1",
+        [entry],
+        |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+            ))
+        },
+    )?;
+    if server.is_none() && !server_deleted {
+        return Err(CoreError::Other(
+            "Conflict has already been resolved".into(),
+        ));
+    }
+    if keep_local {
+        if !writable {
+            return Err(CoreError::Other(
+                "This address book is read-only or unavailable".into(),
+            ));
+        }
+        if etag.is_none() && !server_deleted {
+            return Err(CoreError::Other(
+                "Sync again before keeping your version".into(),
+            ));
+        }
+        conn.execute(
+            "UPDATE carddav_objects SET etag=conflict_etag,remote_exists=1-conflict_deleted,
+               conflict_vcard=NULL,conflict_etag=NULL,conflict_deleted=0,dirty=1,
+               revision=revision+1,last_error=NULL
+             WHERE id=?1",
+            [id],
+        )?;
+        return bump_entry_revision(conn, Some(entry));
+    }
+    let Some(card) = server else {
+        return forget_object(conn, id);
+    };
+    conn.execute(
+        "UPDATE carddav_objects SET dirty=0,deleted=0,conflict_vcard=NULL,conflict_etag=NULL,
+           conflict_deleted=0,last_error=NULL
+         WHERE id=?1",
+        [id],
+    )?;
+    apply_remote(conn, book, &href, etag.as_deref(), &Card::parse(card)?)
 }

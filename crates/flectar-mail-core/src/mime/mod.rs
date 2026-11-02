@@ -1271,10 +1271,23 @@ pub fn make_html_snippet(html: &str) -> String {
 /// Build a preview with the same precedence everywhere. A whitespace-only
 /// plain alternative carries no useful preview, so fall back to HTML.
 pub fn make_body_snippet(text: Option<&str>, html: Option<&str>) -> String {
-    text.filter(|value| !value.trim().is_empty())
-        .map(make_snippet)
-        .or_else(|| html.map(make_html_snippet))
+    body_text(text, html)
+        .map(|text| make_snippet(&text))
         .unwrap_or_default()
+}
+
+/// The readable text of a body, chosen the way previews are.
+pub fn body_text<'a>(
+    text: Option<&'a str>,
+    html: Option<&str>,
+) -> Option<std::borrow::Cow<'a, str>> {
+    text.filter(|value| !value.trim().is_empty())
+        .map(std::borrow::Cow::Borrowed)
+        .or_else(|| {
+            html.map(|html| {
+                std::borrow::Cow::Owned(mail_parser::decoders::html::html_to_text(html))
+            })
+        })
 }
 
 /// `src="cid:<id>"` / `src='cid:<id>'` in a body (id in group 2 or 3).

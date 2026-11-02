@@ -11,7 +11,7 @@ async fn signature_ownership_defaults_sanitization_and_persistence() {
     let paths = Paths::for_tests(temp.path());
     let core = Core::start(paths.clone()).await.unwrap();
     core.db.write(|conn| {
-        conn.execute_batch("INSERT INTO accounts(id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at) VALUES (1,'alice@example.org','imap','password','alice','imap.example.org',993,'smtp.example.org',465,0),(2,'bob@example.org','imap','password','bob','imap.example.org',993,'smtp.example.org',465,0)")?;
+        conn.execute_batch("INSERT INTO accounts(id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json) VALUES (1,'alice@example.org','generic','password','alice','imap.example.org',993,'smtp.example.org',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}'),(2,'bob@example.org','generic','password','bob','imap.example.org',993,'smtp.example.org',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')")?;
         Ok(())
     }).await.unwrap();
     let saved = core
@@ -83,7 +83,7 @@ async fn protected_drafts_stay_local_and_queued_policy_cannot_downgrade() {
     };
     let stored = policy.clone();
     core.db.write(move |conn| {
-        conn.execute_batch("INSERT INTO accounts(id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at) VALUES(1,'alice@example.org','gmail','oauth2','alice','imap.example.org',993,'smtp.example.org',465,0)")?;
+        conn.execute_batch("INSERT INTO accounts(id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json) VALUES(1,'alice@example.org','gmail','oauth2','alice','imap.example.org',993,'smtp.example.org',465,0,'gmail','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')")?;
         let mut config = repo::accounts::get_config(conn, 1)?.unwrap(); config.settings.security = stored;
         repo::accounts::set_settings(conn, 1, &config.settings)
     }).await.unwrap();

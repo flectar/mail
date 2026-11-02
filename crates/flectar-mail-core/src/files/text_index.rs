@@ -103,7 +103,7 @@ mod tests {
             .unwrap();
         core.db.write(|c|{
             crate::db::testutil::seed_account(c);
-            c.execute("INSERT OR IGNORE INTO folders(id,account_id,imap_name) VALUES(1,1,'INBOX')",[])?;
+            c.execute("INSERT OR IGNORE INTO folders(id,account_id,path) VALUES(1,1,'INBOX')",[])?;
             c.execute("INSERT INTO messages(id,account_id,folder_id,subject,from_addr,date) VALUES(1,1,1,'Meeting','sender@test.dev',0)",[])?;
             c.execute("INSERT INTO attachments(id,message_id,filename,mime_type,size,is_inline) VALUES(1,1,'notes.txt','text/plain',20,0),(2,1,'document.pdf','application/pdf',20,0)",[])?;
             Ok(())

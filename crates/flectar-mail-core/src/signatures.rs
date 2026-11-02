@@ -60,16 +60,30 @@ pub fn insert(body: &str, signature: &str) -> String {
     if signature.is_empty() {
         return body.to_owned();
     }
-    let at = body
-        .find("\n\nOn ")
-        .or_else(|| body.find("\n\n---------- Forwarded message"))
-        .unwrap_or(body.len());
+    let at = quotation_start(body).unwrap_or(body.len());
     let mut result = String::with_capacity(body.len() + signature.len() + 6);
     result.push_str(&body[..at]);
     result.push_str("\n\n-- \n");
     result.push_str(signature);
     result.push_str(&body[at..]);
     result
+}
+
+/// Where a reply or forward quotation begins: the paragraph that opens with
+/// a forwarded message's dashed rule, or whose first line introduces `>`
+/// quoted lines. The structure, unlike the wording, is the same in every
+/// language the header was written in.
+fn quotation_start(body: &str) -> Option<usize> {
+    (0..body.len()).find(|&at| {
+        if !body.as_bytes()[at..].starts_with(b"\n\n") {
+            return false;
+        }
+        let paragraph = &body[at + 2..];
+        let mut lines = paragraph.lines();
+        paragraph.starts_with("---------- ")
+            || (lines.next().is_some_and(|line| !line.starts_with('>'))
+                && lines.next().is_some_and(|line| line.starts_with('>')))
+    })
 }
 
 impl Core {
@@ -184,6 +198,25 @@ mod tests {
         assert_eq!(
             insert("Reply\n\nOn Monday, Pat wrote:\n> Hello", "Me"),
             "Reply\n\n-- \nMe\n\nOn Monday, Pat wrote:\n> Hello"
+        );
+        assert_eq!(
+            insert("Hola\n\nEl lunes, Pat escribió:\n> Hola", "Yo"),
+            "Hola\n\n-- \nYo\n\nEl lunes, Pat escribió:\n> Hola"
+        );
+        assert_eq!(
+            insert(
+                "\n\n---------- Пересылаемое сообщение ----------\nОт: Pat",
+                "Я"
+            ),
+            "\n\n-- \nЯ\n\n---------- Пересылаемое сообщение ----------\nОт: Pat"
+        );
+        assert_eq!(
+            insert("Hi\n\n\nPat wrote:\n> Hello", "Me"),
+            "Hi\n\n\n-- \nMe\n\nPat wrote:\n> Hello"
+        );
+        assert_eq!(
+            insert("On Monday we met.\n\nOnward, then.", "Me"),
+            "On Monday we met.\n\nOnward, then.\n\n-- \nMe"
         );
         let s = Signature {
             id: "s".into(),

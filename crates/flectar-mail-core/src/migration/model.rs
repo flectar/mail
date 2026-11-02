@@ -30,9 +30,24 @@ pub struct ImportInventory {
     /// Format version declared by the source, when it has one.
     pub source_version: Option<String>,
     pub accounts: Vec<AccountCandidate>,
-    /// Source entries that are not mail accounts (feeds, newsgroups, local
-    /// folders). They are listed so the summary can say what was left out.
+    /// Mail the source keeps on its device, which can be imported too.
+    pub mail: Vec<MailStore>,
+    /// Source entries that can't be imported (feeds, newsgroups, local
+    /// folders kept outside the profile). They are listed so the summary can
+    /// say what was left out.
     pub other_entries: Vec<OtherEntry>,
+}
+
+/// Mail a source app keeps on its device: Thunderbird's Local Folders, or
+/// what one of its POP3 accounts downloaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailStore {
+    /// The [`AccountCandidate::source_id`] of the account whose mail it is,
+    /// or `None` for mail that belongs to no account.
+    pub account: Option<String>,
+    /// The name the source shows for it.
+    pub label: String,
+    pub mail: crate::mail_import::MailSource,
 }
 
 /// One mail account as the source application configured it.
@@ -48,6 +63,21 @@ pub struct AccountCandidate {
     pub outgoing: Option<ServerCandidate>,
     /// Account marker color as `#RRGGBB`.
     pub color: Option<String>,
+    /// What the source does with mail it downloads with POP3. `None` for
+    /// other incoming protocols.
+    pub retention: Option<SourceRetention>,
+}
+
+/// How long the source leaves mail it downloads on a POP3 server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceRetention {
+    /// Downloaded mail stays on the server. Otherwise it is removed as soon
+    /// as it is downloaded.
+    pub keep: bool,
+    /// While kept, mail is removed this many days after it was downloaded.
+    pub remove_after_days: Option<u32>,
+    /// While kept, mail is removed once it is deleted in the source.
+    pub remove_deleted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +173,8 @@ pub struct OtherEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OtherEntryKind {
+    /// Local folders whose files aren't in what was chosen: kept outside the
+    /// profile, or only `prefs.js` was chosen.
     LocalFolders,
     Feeds,
     Newsgroups,

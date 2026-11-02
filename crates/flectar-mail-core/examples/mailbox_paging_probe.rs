@@ -22,6 +22,7 @@ async fn page(
                 view: View::Inbox,
                 tab: None,
                 account_id,
+                account_ids: None,
                 folder_id: None,
                 cursor,
                 limit: 25,
@@ -39,6 +40,7 @@ async fn count(db: &Db, account_id: Option<i64>) -> Result<usize> {
                 view: View::Inbox,
                 tab: None,
                 account_id,
+                account_ids: None,
                 folder_id: None,
                 cursor: None,
                 limit: 25,
@@ -110,6 +112,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                     view: View::Inbox,
                     tab: None,
                     account_id: Some(1),
+                    account_ids: None,
                     folder_id: None,
                     cursor: Some(deep_cursor),
                     limit: 25,
@@ -130,9 +133,9 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let tx = conn.transaction()?;
         tx.execute_batch(
             "INSERT INTO accounts
-             (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-             VALUES (2,'second@example.test','imap','password','second','localhost',993,'localhost',587,0);
-             INSERT INTO folders (id,account_id,imap_name,role)
+             (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+             VALUES (2,'second@example.test','generic','password','second','localhost',993,'localhost',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+             INSERT INTO folders (id,account_id,path,role)
              VALUES (2,2,'INBOX','inbox');",
         )?;
         for (thread_id, account_id, folder_id, date) in [

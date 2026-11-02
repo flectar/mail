@@ -50,6 +50,20 @@ impl UiMessage {
         }
     }
 
+    /// The source text with its arguments, as shown without a translation.
+    #[cfg(test)]
+    pub(crate) fn english(&self) -> String {
+        let mut arguments =
+            [&self.argument, &self.second_argument, &self.third_argument].into_iter();
+        let mut parts = self.key.split("{}");
+        let mut text = parts.next().unwrap_or_default().to_owned();
+        for part in parts {
+            text.push_str(arguments.next().map_or("", String::as_str));
+            text.push_str(part);
+        }
+        text
+    }
+
     fn as_slint(&self) -> LocalizedMessage {
         LocalizedMessage {
             key: self.key.into(),
@@ -76,6 +90,7 @@ pub(crate) trait AppWindowMessages {
     fn set_render_status(&self, message: UiMessage);
     fn set_sync_status(&self, message: UiMessage);
     fn set_compose_notice(&self, message: UiMessage);
+    fn set_mail_export_status(&self, message: UiMessage);
 }
 
 impl AppWindowMessages for AppWindow {
@@ -97,5 +112,9 @@ impl AppWindowMessages for AppWindow {
 
     fn set_compose_notice(&self, message: UiMessage) {
         self.set_compose_message(message.as_slint());
+    }
+
+    fn set_mail_export_status(&self, message: UiMessage) {
+        self.set_mail_export_message(message.as_slint());
     }
 }

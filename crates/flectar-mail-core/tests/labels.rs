@@ -11,9 +11,9 @@ fn seed() -> Connection {
     conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
     flectar_mail_core::db::migrations::run(&mut conn).unwrap();
     conn.execute_batch(
-        "INSERT INTO accounts (id,email,provider,auth_kind,username,imap_host,imap_port,smtp_host,smtp_port,created_at)
-           VALUES (1,'me@example.com','imap','password','me','h',993,'h',465,0);
-         INSERT INTO folders (id,account_id,imap_name,role) VALUES (1,1,'INBOX','inbox');
+        "INSERT INTO accounts (id,email,provider,auth_kind,username,incoming_host,incoming_port,smtp_host,smtp_port,created_at,mail_protocol,settings_json)
+           VALUES (1,'me@example.com','generic','password','me','h',993,'h',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}');
+         INSERT INTO folders (id,account_id,path,role) VALUES (1,1,'INBOX','inbox');
          INSERT INTO threads (id,account_id,subject_norm,last_message_at,message_count) VALUES
            (10,1,'alpha',100,1),(20,1,'beta',200,1);
          INSERT INTO messages (id,account_id,thread_id,folder_id,uid,subject,from_addr,date,is_read,body_state)
@@ -31,6 +31,7 @@ fn list_ids(conn: &Connection, label_id: Option<i64>) -> Vec<i64> {
             view: View::All,
             tab: label_id.map(repo::threads::TabFilter::ManualLabel),
             account_id: None,
+            account_ids: None,
             folder_id: None,
             cursor: None,
             limit: 50,

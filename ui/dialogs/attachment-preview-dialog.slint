@@ -1,7 +1,6 @@
-import { HorizontalBox, StyleMetrics, VerticalBox, ScrollView } from "std-widgets.slint";
+import { HorizontalBox, StyleMetrics, VerticalBox } from "std-widgets.slint";
 import { MailAttachments } from "../models.slint";
-import { DocumentPreview } from "../components/document-preview.slint";
-import { Button } from "../components/button.slint";
+import { DocumentPreview, TextPreview } from "../components/document-preview.slint";
 import { ToolbarIconButton } from "../components/controls.slint";
 import { AppTheme } from "../design-system.slint";
 import { TypeScale } from "../typography.slint";
@@ -37,7 +36,7 @@ export component AttachmentPreviewDialog inherits Rectangle {
                         padding-left: max(StyleMetrics.layout-padding, header-clearance.leading);
                         padding-right: max(StyleMetrics.layout-padding, header-clearance.trailing);
                         Text { text: MailAttachments.name; color: AppTheme.heading; font-size: TypeScale.title; overflow: elide; horizontal-stretch: 1; }
-                        Button { text: @tr("Download"); enabled: !MailAttachments.busy; clicked => { MailAttachments.command("download-current", ""); } }
+                        ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/lucide/outline/download.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Download"); interactive: !MailAttachments.busy; clicked => { MailAttachments.command("download-current", ""); } }
                         ToolbarIconButton { compact: root.compact; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: AppTheme.secondary; tooltip-text: @tr("Close"); clicked => { MailAttachments.command("close", ""); } }
                     }
                 }
@@ -47,10 +46,7 @@ export component AttachmentPreviewDialog inherits Rectangle {
                     raster-zoom: MailAttachments.pages > 0 ? 2 : 1; document-revision: MailAttachments.revision;
                     render-page(page, zoom) => { MailAttachments.command("page", "" + page); }
                 }
-                if !MailAttachments.is-image : ScrollView {
-                    content-width: self.visible-width;
-                    Text { width: parent.visible-width; text: MailAttachments.text; wrap: word-wrap; color: AppTheme.body; }
-                }
+                if !MailAttachments.is-image : TextPreview { compact: root.compact; text: MailAttachments.text; }
                 Text { text: MailAttachments.busy ? @tr("Loading preview…") : MailAttachments.status; wrap: word-wrap; color: AppTheme.secondary; }
             }
         }

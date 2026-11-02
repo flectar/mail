@@ -744,7 +744,14 @@ impl Core {
             })
             .await?;
         let raw = if let Some(path) = path {
-            crate::file_io::read(path, MAX_CRYPTO_BYTES, "OpenPGP message").await?
+            self.read_original(
+                detail.account_id,
+                message_id,
+                &path,
+                MAX_CRYPTO_BYTES,
+                "OpenPGP message",
+            )
+            .await?
         } else if let Some(attachment) = detail.attachments.iter().find(|a| {
             a.filename
                 .as_deref()

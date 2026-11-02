@@ -7,12 +7,12 @@
 
 use super::model::{
     AccountCandidate, IdentityCandidate, ImportInventory, ServerCandidate, ServerProtocol,
-    SignatureCandidate, SourceAuth, SourceSecurity,
+    SignatureCandidate, SourceAuth, SourceRetention, SourceSecurity,
 };
-use crate::accounts::providers;
+use crate::accounts::{mailbox_key, providers};
 use crate::models::{
-    AccountSettings, AuthKind, ConnectionSecurity, MailConnectionSettings, MailProtocol,
-    PortableAccountConfig, Provider,
+    AccountSettings, AuthKind, ConnectionSecurity, KeepOnServer, MailConnectionSettings,
+    MailProtocol, PortableAccountConfig, Provider,
 };
 use crate::sender_identities::MAX_DISPLAY_NAME_CHARS;
 use crate::signatures::{MAX_SIGNATURE_BYTES, MAX_SIGNATURES_PER_ACCOUNT};
@@ -57,7 +57,7 @@ pub enum SignIn {
 impl SignIn {
     pub fn for_provider(provider: Provider) -> Self {
         match provider {
-            Provider::Imap => Self::Password,
+            Provider::Generic => Self::Password,
             Provider::Gmail => Self::Google,
             Provider::Microsoft => Self::Microsoft,
         }
@@ -124,15 +124,19 @@ pub enum FindingCode {
     /// No identity has a usable email address.
     MissingEmail,
     MissingIncomingServer,
-    /// POP3 accounts cannot be imported; detail is the host.
-    Pop3Unsupported,
-    /// Exchange Web Services, WebDAV, or another non-IMAP protocol.
+    /// Exchange Web Services, WebDAV, or another protocol Flectar can't
+    /// read mail with.
     IncomingProtocolUnsupported,
     MissingOutgoingServer,
     OutgoingProtocolUnsupported,
-    /// Flectar only connects with TLS or required STARTTLS; detail is the host.
+    /// The server is not encrypted and Flectar connects to it the same way;
+    /// detail is the host.
     UnencryptedIncoming,
     UnencryptedOutgoing,
+    /// The source keeps the password off an unencrypted connection (CRAM-MD5
+    /// or OAuth), but Flectar would send it there in the clear; detail is
+    /// the host.
+    UnprotectedPassword,
     /// Client certificates, Kerberos, NTLM, or no authentication.
     IncomingSignInUnsupported,
     OutgoingSignInUnsupported,
@@ -160,6 +164,15 @@ pub enum FindingCode {
     /// The provider's standard outgoing server replaces the configured one;
     /// detail is the source host.
     OutgoingServerReplaced,
+    /// A Google or Microsoft account the source downloaded with POP3 syncs
+    /// with the provider instead; detail is the provider's name.
+    ProviderSyncReplacesPop3,
+    /// The POP3 account removes downloaded mail from the server, as the
+    /// source did; detail is the [`KeepOnServer`] choice.
+    RemovesServerMail,
+    /// No choice matches when the source removed mail from the server, so
+    /// the nearest one that keeps mail there longer is used.
+    ServerMailRuleApproximated,
     /// Gmail controls send-as addresses; detail is the number of addresses.
     AliasesManagedByProvider,
     /// Addresses that are invalid, send through another outgoing server, or
@@ -176,12 +189,10 @@ impl FindingCode {
         match self {
             Self::MissingEmail
             | Self::MissingIncomingServer
-            | Self::Pop3Unsupported
             | Self::IncomingProtocolUnsupported
             | Self::MissingOutgoingServer
             | Self::OutgoingProtocolUnsupported
-            | Self::UnencryptedIncoming
-            | Self::UnencryptedOutgoing
+            | Self::UnprotectedPassword
             | Self::IncomingSignInUnsupported
             | Self::OutgoingSignInUnsupported
             | Self::SeparateOutgoingLogin
@@ -189,11 +200,16 @@ impl FindingCode {
             | Self::InvalidServer
             | Self::DuplicateInSource
             | Self::OAuthLoginUnsupported => Severity::Blocking,
-            Self::PasswordMechanismChanged
+            Self::UnencryptedIncoming
+            | Self::UnencryptedOutgoing
+            | Self::PasswordMechanismChanged
             | Self::MicrosoftSignInReplacesPassword
             | Self::GoogleSignInReplacesPassword
             | Self::OAuthReplacedByPassword
             | Self::OutgoingServerReplaced
+            | Self::ProviderSyncReplacesPop3
+            | Self::RemovesServerMail
+            | Self::ServerMailRuleApproximated
             | Self::AliasesManagedByProvider
             | Self::AliasesSkipped
             | Self::SignatureFileNotImported
@@ -205,12 +221,12 @@ impl FindingCode {
         match self {
             Self::MissingEmail => "missing-email",
             Self::MissingIncomingServer => "missing-incoming-server",
-            Self::Pop3Unsupported => "pop3-unsupported",
             Self::IncomingProtocolUnsupported => "incoming-protocol-unsupported",
             Self::MissingOutgoingServer => "missing-outgoing-server",
             Self::OutgoingProtocolUnsupported => "outgoing-protocol-unsupported",
             Self::UnencryptedIncoming => "unencrypted-incoming",
             Self::UnencryptedOutgoing => "unencrypted-outgoing",
+            Self::UnprotectedPassword => "unprotected-password",
             Self::IncomingSignInUnsupported => "incoming-sign-in-unsupported",
             Self::OutgoingSignInUnsupported => "outgoing-sign-in-unsupported",
             Self::SeparateOutgoingLogin => "separate-outgoing-login",
@@ -223,6 +239,9 @@ impl FindingCode {
             Self::OAuthLoginUnsupported => "oauth-login-unsupported",
             Self::OAuthReplacedByPassword => "oauth-replaced-by-password",
             Self::OutgoingServerReplaced => "outgoing-server-replaced",
+            Self::ProviderSyncReplacesPop3 => "provider-sync-replaces-pop3",
+            Self::RemovesServerMail => "removes-server-mail",
+            Self::ServerMailRuleApproximated => "server-mail-rule-approximated",
             Self::AliasesManagedByProvider => "aliases-managed-by-provider",
             Self::AliasesSkipped => "aliases-skipped",
             Self::SignatureFileNotImported => "signature-file-not-imported",
@@ -232,11 +251,12 @@ impl FindingCode {
 }
 
 /// Plans every account in `inventory`. `existing_emails` are the addresses
-/// Flectar already has; matching accounts are reported, never changed.
+/// Flectar already has; accounts for the same mailbox, in any spelling, are
+/// reported, never changed.
 pub fn plan(inventory: &ImportInventory, existing_emails: &[String]) -> Vec<AccountPlan> {
     let existing = existing_emails
         .iter()
-        .map(|email| email.trim().to_ascii_lowercase())
+        .map(|email| mailbox_key(email))
         .collect::<HashSet<_>>();
     let mut seen = HashSet::new();
     inventory
@@ -267,14 +287,15 @@ fn plan_account(
         findings.push(Finding::new(FindingCode::MissingEmail, ""));
     }
     // Only an importable account claims its address, so an unsupported one
-    // (an old POP3 setup) never hides a later account for the same mailbox.
+    // (an old Exchange setup) never hides a later account for the same
+    // mailbox.
     let blocked = blocking_count(&findings) > 0;
-    if !blocked && !email.is_empty() && !seen.insert(email.to_ascii_lowercase()) {
+    if !blocked && !email.is_empty() && !seen.insert(mailbox_key(&email)) {
         findings.push(Finding::new(FindingCode::DuplicateInSource, email.clone()));
     }
 
     let blocked = blocking_count(&findings) > 0;
-    let already_added = !email.is_empty() && existing.contains(&email.to_ascii_lowercase());
+    let already_added = !email.is_empty() && existing.contains(&mailbox_key(&email));
     let sign_in = mapping.as_ref().map_or(SignIn::Password, |mapping| {
         SignIn::for_provider(mapping.provider)
     });
@@ -309,13 +330,15 @@ fn plan_account(
 /// The Flectar provider and servers chosen for one account.
 struct ServerMapping {
     provider: Provider,
+    mail_protocol: MailProtocol,
     email: String,
     username: String,
-    imap_host: String,
-    imap_port: u16,
+    incoming_host: String,
+    incoming_port: u16,
     smtp_host: String,
     smtp_port: u16,
     connection: MailConnectionSettings,
+    keep_on_server: KeepOnServer,
 }
 
 fn map_servers(
@@ -329,12 +352,8 @@ fn map_servers(
     };
     let host = incoming.host.trim().to_ascii_lowercase();
     match incoming.protocol {
-        ServerProtocol::Imap => {}
+        ServerProtocol::Imap | ServerProtocol::Pop3 => {}
         ServerProtocol::Ews if is_microsoft_host(&host) => {}
-        ServerProtocol::Pop3 => {
-            findings.push(Finding::new(FindingCode::Pop3Unsupported, &incoming.host));
-            return None;
-        }
         ServerProtocol::Ews | ServerProtocol::Smtp | ServerProtocol::Other => {
             findings.push(Finding::new(
                 FindingCode::IncomingProtocolUnsupported,
@@ -347,26 +366,27 @@ fn map_servers(
     // Google and Microsoft accounts use their own sign-in, as Thunderbird
     // migrated them: both providers are retiring IMAP passwords.
     let oauth = incoming.auth == SourceAuth::OAuth2;
-    for (provider, matches, replaced) in [
-        (
-            Provider::Gmail,
-            is_google_host(&host),
-            FindingCode::GoogleSignInReplacesPassword,
-        ),
-        (
-            Provider::Microsoft,
-            is_microsoft_host(&host),
-            FindingCode::MicrosoftSignInReplacesPassword,
-        ),
-    ] {
-        if matches {
-            if !oauth {
-                findings.push(Finding::new(replaced, &incoming.host));
+    for oauth_provider in &OAUTH_PROVIDERS {
+        if (oauth_provider.owns_host)(&host) {
+            if incoming.protocol == ServerProtocol::Pop3 {
+                findings.push(Finding::new(
+                    FindingCode::ProviderSyncReplacesPop3,
+                    oauth_provider.name,
+                ));
             }
-            return provider_mapping(provider, candidate, incoming, primary_email, findings);
+            if !oauth {
+                findings.push(Finding::new(
+                    oauth_provider.replaces_password,
+                    &incoming.host,
+                ));
+            }
+            return provider_mapping(oauth_provider, candidate, incoming, primary_email, findings);
         }
     }
-    if incoming.protocol != ServerProtocol::Imap {
+    if !matches!(
+        incoming.protocol,
+        ServerProtocol::Imap | ServerProtocol::Pop3
+    ) {
         findings.push(Finding::new(
             FindingCode::IncomingProtocolUnsupported,
             &incoming.host,
@@ -376,19 +396,42 @@ fn map_servers(
     password_mapping(candidate, incoming, primary_email?, findings)
 }
 
-/// Gmail and Microsoft accounts use Flectar's provider configuration, which
-/// owns the server names and OAuth scopes.
-fn provider_mapping(
+/// A provider whose accounts sign in with OAuth. Flectar's provider
+/// configuration owns their server names and OAuth scopes.
+struct OAuthProvider {
     provider: Provider,
+    name: &'static str,
+    servers: &'static providers::ProviderServers,
+    owns_host: fn(&str) -> bool,
+    /// Reported when the source signed in with a password instead.
+    replaces_password: FindingCode,
+}
+
+const OAUTH_PROVIDERS: [OAuthProvider; 2] = [
+    OAuthProvider {
+        provider: Provider::Gmail,
+        name: "Gmail",
+        servers: &providers::GMAIL,
+        owns_host: is_google_host,
+        replaces_password: FindingCode::GoogleSignInReplacesPassword,
+    },
+    OAuthProvider {
+        provider: Provider::Microsoft,
+        name: "Microsoft",
+        servers: &providers::MICROSOFT,
+        owns_host: is_microsoft_host,
+        replaces_password: FindingCode::MicrosoftSignInReplacesPassword,
+    },
+];
+
+fn provider_mapping(
+    oauth_provider: &OAuthProvider,
     candidate: &AccountCandidate,
     incoming: &ServerCandidate,
     primary_email: Option<&str>,
     findings: &mut Vec<Finding>,
 ) -> Option<ServerMapping> {
-    let servers = match provider {
-        Provider::Gmail => &providers::GMAIL,
-        _ => &providers::MICROSOFT,
-    };
+    let servers = oauth_provider.servers;
     // Sign-in must return this exact mailbox, so the source login wins when
     // it is an address (a Workspace user may send as another identity). A
     // login that is not an address, such as Microsoft's shared mailbox form
@@ -404,11 +447,7 @@ fn provider_mapping(
     };
     if let Some(outgoing) = &candidate.outgoing {
         let host = outgoing.host.trim().to_ascii_lowercase();
-        let same_provider = match provider {
-            Provider::Gmail => is_google_host(&host),
-            _ => is_microsoft_host(&host),
-        };
-        if !host.is_empty() && !same_provider {
+        if !host.is_empty() && !(oauth_provider.owns_host)(&host) {
             findings.push(Finding::new(
                 FindingCode::OutgoingServerReplaced,
                 &outgoing.host,
@@ -416,14 +455,16 @@ fn provider_mapping(
         }
     }
     Some(ServerMapping {
-        provider,
+        provider: oauth_provider.provider,
+        mail_protocol: servers.mail_protocol,
         username: email.clone(),
         email,
-        imap_host: servers.imap_host.to_owned(),
-        imap_port: servers.imap_port,
+        incoming_host: servers.incoming_host.to_owned(),
+        incoming_port: servers.incoming_port,
         smtp_host: servers.smtp_host.to_owned(),
         smtp_port: servers.smtp_port,
-        connection: MailConnectionSettings::default(),
+        connection: servers.connection(),
+        keep_on_server: KeepOnServer::Always,
     })
 }
 
@@ -434,14 +475,14 @@ fn password_mapping(
     findings: &mut Vec<Finding>,
 ) -> Option<ServerMapping> {
     let blocked_before = blocking_count(findings);
-    let imap_security = check_security(incoming, FindingCode::UnencryptedIncoming, findings);
+    let incoming_security = check_security(incoming, FindingCode::UnencryptedIncoming, findings);
     check_password_auth(
         incoming,
         FindingCode::IncomingSignInUnsupported,
         SourceAuth::OAuth2,
         findings,
     );
-    let imap_host = check_host(incoming, findings);
+    let incoming_host = check_host(incoming, findings);
     let username = incoming.username.trim();
     if username.is_empty() {
         findings.push(Finding::new(FindingCode::MissingUsername, &incoming.host));
@@ -485,28 +526,76 @@ fn password_mapping(
             &incoming.host,
         ));
     }
-    if [incoming.auth, outgoing.auth].contains(&SourceAuth::EncryptedPassword) {
+    if [incoming, outgoing].iter().any(|server| {
+        server.auth == SourceAuth::EncryptedPassword && server.security != SourceSecurity::None
+    }) {
         findings.push(Finding::new(FindingCode::PasswordMechanismChanged, ""));
     }
     if blocking_count(findings) > blocked_before {
         return None;
     }
+    let (mail_protocol, keep_on_server) = match incoming.protocol {
+        ServerProtocol::Pop3 => (
+            MailProtocol::Pop3,
+            keep_on_server(candidate.retention, findings),
+        ),
+        _ => (MailProtocol::Imap, KeepOnServer::Always),
+    };
     Some(ServerMapping {
-        provider: Provider::Imap,
+        provider: Provider::Generic,
+        mail_protocol,
         email: primary_email.to_owned(),
         // Login names are opaque to the server; keep them byte for byte apart
         // from surrounding whitespace.
         username: incoming.username.trim().to_owned(),
-        imap_host: imap_host?,
-        imap_port: incoming.effective_port(),
+        incoming_host: incoming_host?,
+        incoming_port: incoming.effective_port(),
         smtp_host: smtp_host?,
         smtp_port: outgoing.effective_port(),
-        connection: MailConnectionSettings {
-            imap_security: imap_security?,
-            smtp_security: smtp_security?,
-            trusted_certificate_pem: String::new(),
-        },
+        connection: MailConnectionSettings::new(incoming_security?, smtp_security?),
+        keep_on_server,
     })
+}
+
+/// The choice that removes mail from the POP3 server as the source did. A
+/// number of days without a matching choice becomes the next longer one, so
+/// mail the user keeps never leaves the server sooner than before.
+fn keep_on_server(retention: Option<SourceRetention>, findings: &mut Vec<Finding>) -> KeepOnServer {
+    // A source that says nothing keeps mail on the server.
+    let retention = retention.unwrap_or(SourceRetention {
+        keep: true,
+        remove_after_days: None,
+        remove_deleted: false,
+    });
+    let keep = match retention.remove_after_days {
+        _ if !retention.keep => KeepOnServer::UntilDownloaded,
+        None if retention.remove_deleted => KeepOnServer::UntilDeleted,
+        None => KeepOnServer::Always,
+        Some(days) => [
+            KeepOnServer::SevenDays,
+            KeepOnServer::FourteenDays,
+            KeepOnServer::ThirtyDays,
+        ]
+        .into_iter()
+        .find(|keep| keep.days().is_some_and(|limit| days <= limit))
+        .unwrap_or(if retention.remove_deleted {
+            KeepOnServer::UntilDeleted
+        } else {
+            KeepOnServer::Always
+        }),
+    };
+    // Every choice that limits the days also removes mail deleted here.
+    let exact = !retention.keep
+        || retention
+            .remove_after_days
+            .is_none_or(|days| keep.days() == Some(days) && retention.remove_deleted);
+    if keep != KeepOnServer::Always {
+        findings.push(Finding::new(FindingCode::RemovesServerMail, keep.as_str()));
+    }
+    if !exact {
+        findings.push(Finding::new(FindingCode::ServerMailRuleApproximated, ""));
+    }
+    keep
 }
 
 fn blocking_count(findings: &[Finding]) -> usize {
@@ -524,9 +613,20 @@ fn check_security(
     match server.security {
         SourceSecurity::Tls => Some(ConnectionSecurity::Tls),
         SourceSecurity::Starttls => Some(ConnectionSecurity::Starttls),
+        // Flectar signs in with the password itself. A source that kept it
+        // off this connection must not be downgraded to sending it in clear.
+        SourceSecurity::None
+            if matches!(
+                server.auth,
+                SourceAuth::EncryptedPassword | SourceAuth::OAuth2
+            ) =>
+        {
+            findings.push(Finding::new(FindingCode::UnprotectedPassword, &server.host));
+            None
+        }
         SourceSecurity::None => {
             findings.push(Finding::new(unencrypted, &server.host));
-            None
+            Some(ConnectionSecurity::None)
         }
         SourceSecurity::Unknown => {
             findings.push(Finding::new(FindingCode::InvalidServer, &server.host));
@@ -603,16 +703,21 @@ fn draft(
         });
 
     // Every other source identity becomes a sender identity. The account
-    // address itself is the provider-owned primary identity.
+    // address itself is the provider-owned primary identity, in any spelling
+    // Gmail gives the same mailbox.
+    let identity_key = |email: &str| match mapping.provider {
+        Provider::Gmail => mailbox_key(email),
+        Provider::Microsoft | Provider::Generic => email.to_ascii_lowercase(),
+    };
     let mut aliases = Vec::new();
     let mut skipped = 0usize;
-    let mut seen = HashSet::from([mapping.email.to_ascii_lowercase()]);
+    let mut seen = HashSet::from([identity_key(&mapping.email)]);
     for identity in &candidate.identities {
         let Some(email) = sender_address(&identity.email) else {
             skipped += 1;
             continue;
         };
-        if !seen.insert(email.to_ascii_lowercase()) {
+        if !seen.insert(identity_key(&email)) {
             continue;
         }
         // Flectar sends every identity through the account's one outgoing
@@ -700,27 +805,26 @@ fn draft(
         findings.push(Finding::new(FindingCode::SignatureTooLarge, ""));
     }
 
+    let mut settings = AccountSettings::new(mapping.connection);
+    settings.default_sender_email = default_sender_email;
+    settings.keep_on_server = mapping.keep_on_server;
     AccountDraft {
         config: PortableAccountConfig {
             email: mapping.email,
             display_name,
             provider: mapping.provider,
             auth_kind: match mapping.provider {
-                Provider::Imap => AuthKind::Password,
+                Provider::Generic => AuthKind::Password,
                 Provider::Gmail | Provider::Microsoft => AuthKind::Oauth2,
             },
-            mail_protocol: MailProtocol::Imap,
+            mail_protocol: mapping.mail_protocol,
             username: mapping.username,
             jmap_url: String::new(),
-            imap_host: mapping.imap_host,
-            imap_port: mapping.imap_port,
+            incoming_host: mapping.incoming_host,
+            incoming_port: mapping.incoming_port,
             smtp_host: mapping.smtp_host,
             smtp_port: mapping.smtp_port,
-            settings: AccountSettings {
-                connection: mapping.connection,
-                default_sender_email,
-                ..AccountSettings::default()
-            },
+            settings,
         },
         aliases,
         signatures,
@@ -763,7 +867,12 @@ fn clean(value: Option<&str>) -> Option<String> {
 fn is_google_host(host: &str) -> bool {
     matches!(
         host,
-        "imap.gmail.com" | "imap.googlemail.com" | "smtp.gmail.com" | "smtp.googlemail.com"
+        "imap.gmail.com"
+            | "imap.googlemail.com"
+            | "pop.gmail.com"
+            | "pop.googlemail.com"
+            | "smtp.gmail.com"
+            | "smtp.googlemail.com"
     )
 }
 
@@ -774,6 +883,7 @@ fn is_microsoft_host(host: &str) -> bool {
             | "outlook.office.com"
             | "imap-mail.outlook.com"
             | "imap.outlook.com"
+            | "pop-mail.outlook.com"
             | "smtp.office365.com"
             | "smtp-mail.outlook.com"
             | "smtp.outlook.com"
@@ -810,7 +920,52 @@ mod tests {
             incoming: Some(server(ServerProtocol::Imap, "imap.example.com", 993)),
             outgoing: Some(server(ServerProtocol::Smtp, "smtp.example.com", 465)),
             color: None,
+            retention: None,
         }
+    }
+
+    #[test]
+    fn pop3_rules_never_remove_kept_mail_sooner_than_the_source() {
+        let rule = |keep, remove_after_days, remove_deleted| {
+            let mut findings = Vec::new();
+            let choice = keep_on_server(
+                Some(SourceRetention {
+                    keep,
+                    remove_after_days,
+                    remove_deleted,
+                }),
+                &mut findings,
+            );
+            let approximated = findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ServerMailRuleApproximated);
+            (choice, approximated)
+        };
+        assert_eq!(
+            rule(false, Some(3), true),
+            (KeepOnServer::UntilDownloaded, false)
+        );
+        assert_eq!(rule(true, None, false), (KeepOnServer::Always, false));
+        assert_eq!(rule(true, None, true), (KeepOnServer::UntilDeleted, false));
+        assert_eq!(rule(true, Some(7), true), (KeepOnServer::SevenDays, false));
+        assert_eq!(rule(true, Some(0), true), (KeepOnServer::SevenDays, true));
+        assert_eq!(
+            rule(true, Some(30), true),
+            (KeepOnServer::ThirtyDays, false)
+        );
+        assert_eq!(
+            rule(true, Some(30), false),
+            (KeepOnServer::ThirtyDays, true)
+        );
+        assert_eq!(
+            rule(true, Some(90), true),
+            (KeepOnServer::UntilDeleted, true)
+        );
+        assert_eq!(rule(true, Some(90), false), (KeepOnServer::Always, true));
+
+        let mut findings = Vec::new();
+        assert_eq!(keep_on_server(None, &mut findings), KeepOnServer::Always);
+        assert!(findings.is_empty());
     }
 
     fn plan_one(candidate: AccountCandidate) -> AccountPlan {
@@ -823,6 +978,7 @@ mod tests {
                 source: SourceKind::K9Settings,
                 source_version: None,
                 accounts,
+                mail: Vec::new(),
                 other_entries: Vec::new(),
             },
             existing,
@@ -834,12 +990,13 @@ mod tests {
     }
 
     #[test]
-    fn unencrypted_connections_are_never_upgraded_silently() {
+    fn unencrypted_servers_import_unencrypted_with_a_notice() {
         let mut account = candidate("me@example.com");
         account.incoming.as_mut().unwrap().security = SourceSecurity::None;
+        account.incoming.as_mut().unwrap().port = Some(143);
         account.outgoing.as_mut().unwrap().security = SourceSecurity::None;
         let plan = plan_one(account);
-        assert_eq!(plan.status, PlanStatus::Unsupported);
+        assert_eq!(plan.status, PlanStatus::Ready);
         assert_eq!(
             codes(&plan),
             [
@@ -847,7 +1004,30 @@ mod tests {
                 FindingCode::UnencryptedOutgoing
             ]
         );
-        assert!(plan.draft.is_none());
+        let connection = &plan.draft.unwrap().config.settings.connection;
+        assert_eq!(connection.incoming_security, ConnectionSecurity::None);
+        assert_eq!(connection.smtp_security, ConnectionSecurity::None);
+    }
+
+    #[test]
+    fn a_password_the_source_kept_off_an_unencrypted_connection_stays_off() {
+        for auth in [SourceAuth::EncryptedPassword, SourceAuth::OAuth2] {
+            let mut account = candidate("me@example.com");
+            let incoming = account.incoming.as_mut().unwrap();
+            incoming.security = SourceSecurity::None;
+            incoming.auth = auth;
+            let plan = plan_one(account);
+            assert_eq!(plan.status, PlanStatus::Unsupported, "{auth:?}");
+            assert!(codes(&plan).contains(&FindingCode::UnprotectedPassword));
+            assert!(!codes(&plan).contains(&FindingCode::PasswordMechanismChanged));
+        }
+
+        // Over TLS the same password is still protected.
+        let mut account = candidate("me@example.com");
+        account.incoming.as_mut().unwrap().auth = SourceAuth::EncryptedPassword;
+        let plan = plan_one(account);
+        assert_eq!(plan.status, PlanStatus::Ready);
+        assert_eq!(codes(&plan), [FindingCode::PasswordMechanismChanged]);
     }
 
     #[test]
@@ -975,6 +1155,47 @@ mod tests {
     }
 
     #[test]
+    fn gmail_spellings_of_one_mailbox_are_one_account() {
+        let google = |login: &str| {
+            let mut account = candidate(login);
+            let incoming = account.incoming.as_mut().unwrap();
+            incoming.host = "imap.gmail.com".into();
+            incoming.auth = SourceAuth::OAuth2;
+            incoming.username = login.into();
+            account.outgoing.as_mut().unwrap().host = "smtp.gmail.com".into();
+            account
+        };
+        let plans = plan_all(
+            vec![
+                google("johndoe@gmail.com"),
+                google("John.Doe@googlemail.com"),
+                google("jane.doe@gmail.com"),
+                google("jane.doe@workspace.example"),
+                google("janedoe@workspace.example"),
+            ],
+            &["JaneDoe@gmail.com".into()],
+        );
+        assert_eq!(
+            plans.iter().map(|plan| plan.status).collect::<Vec<_>>(),
+            [
+                PlanStatus::Ready,
+                PlanStatus::Unsupported,
+                PlanStatus::AlreadyAdded,
+                // Workspace addresses keep their dots.
+                PlanStatus::Ready,
+                PlanStatus::Ready,
+            ]
+        );
+        assert_eq!(codes(&plans[1]), [FindingCode::DuplicateInSource]);
+
+        // The source's identity in Google's spelling is the account's own
+        // address, not a send-as address that Gmail manages.
+        let mut account = google("johndoe@gmail.com");
+        account.identities[0].email = "John.Doe@gmail.com".into();
+        assert_eq!(codes(&plan_one(account)), []);
+    }
+
+    #[test]
     fn missing_pieces_are_named() {
         let mut account = candidate("not-an-address");
         account.incoming = None;
@@ -1055,9 +1276,9 @@ mod tests {
 
     #[test]
     fn an_unsupported_account_does_not_hide_a_later_one_for_the_same_address() {
-        let mut pop = candidate("me@example.com");
-        pop.incoming.as_mut().unwrap().protocol = ServerProtocol::Pop3;
-        let plans = plan_all(vec![pop, candidate("me@example.com")], &[]);
+        let mut exchange = candidate("me@example.com");
+        exchange.incoming.as_mut().unwrap().protocol = ServerProtocol::Ews;
+        let plans = plan_all(vec![exchange, candidate("me@example.com")], &[]);
         assert_eq!(plans[0].status, PlanStatus::Unsupported);
         assert_eq!(plans[1].status, PlanStatus::Ready);
     }

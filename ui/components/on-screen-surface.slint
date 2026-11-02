@@ -1,8 +1,9 @@
-// Slint's software renderer (CPU mode, Android) panics when it paints a
-// rectangle reaching past ±32767 physical pixels (#35). A surface that grows
-// with its content paints its fill and border only from just above the window
-// to below the bottom of any screen, so cut edges, with their corner radius and
-// border, stay out of view. Its width must follow the window.
+// Slint's software renderer (CPU mode) panics when it paints a rectangle
+// reaching past ±32767 physical pixels (#35). A surface that grows with its
+// content paints its fill and border only from just above the window to below
+// the bottom of any screen, so cut edges, with their corner radius and border,
+// stay out of view. Its width must follow the window. Unlike a Rectangle, it
+// does not fill its parent, so give it a size outside a layout.
 // Go back to a plain Rectangle once a Slint release fixes slint-ui/slint#14250.
 export component OnScreenSurface {
     in property <brush> background;

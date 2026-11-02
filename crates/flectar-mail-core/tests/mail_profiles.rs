@@ -54,13 +54,13 @@ async fn seeded_core() -> (tempfile::TempDir, Core) {
         .write(|conn| {
             conn.execute_batch(
                 "INSERT INTO accounts
-                    (id,email,provider,auth_kind,username,imap_host,imap_port,
-                     smtp_host,smtp_port,created_at)
+                    (id,email,provider,auth_kind,username,incoming_host,incoming_port,
+                     smtp_host,smtp_port,created_at,mail_protocol,settings_json)
                  VALUES
-                    (1,'alice@example.org','imap','password','alice',
-                     'imap.example.org',993,'smtp.example.org',465,0),
-                    (2,'bob@example.org','imap','password','bob',
-                     'imap.example.org',993,'smtp.example.org',465,0)",
+                    (1,'alice@example.org','generic','password','alice',
+                     'imap.example.org',993,'smtp.example.org',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}'),
+                    (2,'bob@example.org','generic','password','bob',
+                     'imap.example.org',993,'smtp.example.org',465,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
             )?;
             Ok(())
         })
@@ -200,4 +200,109 @@ async fn removing_an_account_cleans_local_profile_membership() {
             .iter()
             .all(|a| a.id != 1)
     );
+}
+
+#[tokio::test]
+async fn the_shown_profile_needs_accounts_and_is_dropped_when_it_loses_them() {
+    let (_temp, core) = seeded_core().await;
+    let (_, work) = core
+        .save_mail_profile(None, "Work".into(), "#3B82F6".into())
+        .await
+        .unwrap();
+    let (_, personal) = core
+        .save_mail_profile(None, "Personal".into(), "#DB2777".into())
+        .await
+        .unwrap();
+    let shown =
+        |settings: &flectar_mail_core::models::Settings| settings.active_mail_profile.clone();
+
+    // A profile without accounts would show an empty mail view.
+    assert!(
+        core.set_active_mail_profile(Some(work.id.clone()))
+            .await
+            .is_err()
+    );
+    assert!(
+        core.set_active_mail_profile(Some("missing".into()))
+            .await
+            .is_err()
+    );
+    core.assign_account_profile(1, Some(work.id.clone()))
+        .await
+        .unwrap();
+    core.assign_account_profile(2, Some(personal.id.clone()))
+        .await
+        .unwrap();
+    let settings = core
+        .set_active_mail_profile(Some(work.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&settings), Some(work.id.clone()));
+    assert_eq!(
+        shown(&core.get_settings().await.unwrap()),
+        Some(work.id.clone())
+    );
+    // Renaming keeps it shown; an empty id shows every account.
+    core.save_mail_profile(Some(work.id.clone()), "Office".into(), "#0891B2".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        shown(&core.get_settings().await.unwrap()),
+        Some(work.id.clone())
+    );
+    let settings = core
+        .set_active_mail_profile(Some(" ".into()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&settings), None);
+
+    // Moving the last account away.
+    core.set_active_mail_profile(Some(work.id.clone()))
+        .await
+        .unwrap();
+    let settings = core
+        .assign_account_profile(1, Some(personal.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&settings), None);
+
+    // Giving the last account its own color.
+    let settings = core
+        .set_active_mail_profile(Some(personal.id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&settings), Some(personal.id.clone()));
+    core.set_account_color(1, Some("#F97316".into()))
+        .await
+        .unwrap();
+    assert_eq!(
+        shown(&core.get_settings().await.unwrap()),
+        Some(personal.id.clone()),
+        "the profile still has account 2"
+    );
+    let settings = core
+        .set_account_color(2, Some("#F97316".into()))
+        .await
+        .unwrap();
+    assert_eq!(shown(&settings), None);
+
+    // Removing the last account.
+    core.assign_account_profile(2, Some(personal.id.clone()))
+        .await
+        .unwrap();
+    core.set_active_mail_profile(Some(personal.id.clone()))
+        .await
+        .unwrap();
+    core.remove_account(2).await.unwrap();
+    assert_eq!(shown(&core.get_settings().await.unwrap()), None);
+
+    // Deleting the shown profile.
+    core.assign_account_profile(1, Some(work.id.clone()))
+        .await
+        .unwrap();
+    core.set_active_mail_profile(Some(work.id.clone()))
+        .await
+        .unwrap();
+    let settings = core.delete_mail_profile(work.id).await.unwrap();
+    assert_eq!(shown(&settings), None);
 }

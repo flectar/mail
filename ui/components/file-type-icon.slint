@@ -1,0 +1,32 @@
+import { FileIconPalette } from "../design-system.slint";
+
+// A file's type at a glance, the same wherever a file shows. `kind` is one
+// of pdf, document, spreadsheet, presentation, image, video, audio, archive,
+// code, calendar or file.
+export component FileTypeIcon inherits Image {
+    in property <string> kind;
+
+    source: root.kind == "pdf" || root.kind == "document" || root.kind == "presentation"
+        ? @image-url("../icons/lucide/filled/file-text.svg")
+        : root.kind == "spreadsheet" ? @image-url("../icons/lucide/filled/file-spreadsheet.svg")
+        : root.kind == "image" ? @image-url("../icons/lucide/filled/file-image.svg")
+        : root.kind == "video" ? @image-url("../icons/lucide/filled/file-video.svg")
+        : root.kind == "audio" ? @image-url("../icons/lucide/filled/file-audio.svg")
+        : root.kind == "archive" ? @image-url("../icons/lucide/filled/file-archive.svg")
+        : root.kind == "code" ? @image-url("../icons/lucide/filled/file-code.svg")
+        : root.kind == "calendar" ? @image-url("../icons/lucide/filled/calendar.svg")
+        : @image-url("../icons/lucide/filled/file.svg");
+    colorize: root.kind == "pdf" ? FileIconPalette.pdf
+        : root.kind == "document" ? FileIconPalette.document
+        : root.kind == "spreadsheet" ? FileIconPalette.spreadsheet
+        : root.kind == "presentation" ? FileIconPalette.presentation
+        : root.kind == "image" ? FileIconPalette.image
+        : root.kind == "video" ? FileIconPalette.video
+        : root.kind == "audio" ? FileIconPalette.audio
+        : root.kind == "archive" ? FileIconPalette.archive
+        : root.kind == "code" ? FileIconPalette.code
+        : root.kind == "calendar" ? FileIconPalette.calendar
+        : FileIconPalette.other;
+    image-fit: contain;
+    accessible-role: none;
+}

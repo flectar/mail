@@ -60,8 +60,6 @@ impl MailGroupState {
 struct DateGroup {
     key: String,
     kind: &'static str,
-    month: i32,
-    year: i32,
 }
 
 fn date_group(timestamp_ms: i64, now: DateTime<Local>) -> DateGroup {
@@ -72,8 +70,6 @@ fn date_group(timestamp_ms: i64, now: DateTime<Local>) -> DateGroup {
         return DateGroup {
             key: "unknown".into(),
             kind: "unknown",
-            month: 0,
-            year: 0,
         };
     };
     let day = date.date_naive();
@@ -102,16 +98,7 @@ fn date_group(timestamp_ms: i64, now: DateTime<Local>) -> DateGroup {
     } else {
         (format!("month:{}-{:02}", date.year(), date.month()), "month")
     };
-    DateGroup {
-        key,
-        kind,
-        month: date.month() as i32,
-        year: if kind == "month" && date.year() != now.year() {
-            date.year()
-        } else {
-            0
-        },
-    }
+    DateGroup { key, kind }
 }
 
 pub(super) fn mail_group_key(timestamp_ms: i64, now: DateTime<Local>) -> String {
@@ -126,13 +113,7 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
     now: DateTime<Local>,
 ) -> Vec<MailListEntry> {
     debug_assert_eq!(messages.len(), rows.len());
-    // Legacy warm-start snapshots have display text but no timestamps. Keep
-    // their short-lived preview flat until the core supplies real dates.
-    if !group_by_date
-        || messages
-            .iter()
-            .all(|message| std::borrow::Borrow::borrow(message).date_ms <= 0)
-    {
+    if !group_by_date {
         return rows
             .iter()
             .enumerate()
@@ -174,8 +155,6 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
             is_header: true,
             group_key: group.key.clone().into(),
             group_kind: group.kind.into(),
-            group_month: group.month,
-            group_year: group.year,
             group_count: i32::try_from(group_rows.len()).unwrap_or(i32::MAX),
             expanded: !collapsed,
             show_row: false,
@@ -214,8 +193,6 @@ fn message_entry(
         is_header: false,
         group_key: group_key.into(),
         group_kind: "".into(),
-        group_month: 0,
-        group_year: 0,
         group_count: 0,
         expanded: false,
         show_row,
@@ -229,8 +206,6 @@ pub(super) fn same_mail_list_entry(a: &MailListEntry, b: &MailListEntry) -> bool
     a.is_header == b.is_header
         && a.group_key == b.group_key
         && a.group_kind == b.group_kind
-        && a.group_month == b.group_month
-        && a.group_year == b.group_year
         && a.group_count == b.group_count
         && a.expanded == b.expanded
         && a.show_row == b.show_row
@@ -273,7 +248,10 @@ mod tests {
         assert_eq!(date_group(local_day(2026, 1, 4).timestamp_millis(), now).kind, "yesterday");
         assert_eq!(date_group(local_day(2025, 12, 30).timestamp_millis(), now).kind, "last-week");
         assert_eq!(date_group(local_day(2025, 12, 20).timestamp_millis(), now).kind, "last-month");
-        assert_eq!(date_group(local_day(2025, 11, 20).timestamp_millis(), now).year, 2025);
+        assert_eq!(
+            date_group(local_day(2025, 11, 20).timestamp_millis(), now).key,
+            "month:2025-11"
+        );
     }
 
     #[test]

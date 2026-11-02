@@ -1,7 +1,8 @@
 //! Background startup snapshot and coalesced core-event ingestion.
 
 use crate::{
-    AccountRow, AppTheme, AppWindow, InboxState, MessageColors, PAGE_SIZE,
+    AccountPresentationSettings, AccountRow, AppTheme, AppWindow, InboxState, MessageColors,
+    PAGE_SIZE,
     account_controller::apply_connected_account_rows,
     avatar_initials,
     calendar::{
@@ -34,8 +35,10 @@ use std::{
 };
 use tokio::io::AsyncReadExt;
 
-// Version 4 keys account mailboxes by id instead of display name.
-const WARM_START_FORMAT_VERSION: u32 = 4;
+// Version 4 keys account mailboxes by id instead of display name. Version 5
+// stores the provider and mail protocol names of the current account model.
+// Version 6 keeps message dates as timestamps instead of English text.
+const WARM_START_FORMAT_VERSION: u32 = 6;
 const MAX_WARM_START_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WARM_START_ACCOUNTS: usize = 64;
 const MAX_WARM_START_MESSAGES: usize = 25;
@@ -55,8 +58,6 @@ pub(crate) struct WarmStartMessage {
     pub(crate) initials: String,
     pub(crate) subject: String,
     pub(crate) preview: String,
-    pub(crate) time: String,
-    #[serde(default)]
     pub(crate) date_ms: i64,
     pub(crate) label: String,
     pub(crate) unread: bool,
@@ -69,6 +70,11 @@ pub(crate) struct WarmStartMessage {
     #[serde(default)]
     pub(crate) labels: Vec<i64>,
     pub(crate) sender_verification: String,
+    #[serde(default)]
+    pub(crate) account_uses_labels: bool,
+    // Verification codes come from message bodies, which stay out of this
+    // file, and file chips act on attachment ids that a stored body can
+    // replace; the list shows both once the mail store answers.
 }
 
 impl From<&mail::MailMessage> for WarmStartMessage {
@@ -85,7 +91,6 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             initials: message.initials.clone(),
             subject: message.subject.clone(),
             preview: message.preview.clone(),
-            time: message.time.clone(),
             date_ms: message.date_ms,
             label: message.label.clone(),
             unread: message.unread,
@@ -95,6 +100,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
             has_replied: message.has_replied,
             labels: message.labels.clone(),
             sender_verification: message.sender_verification.clone(),
+            account_uses_labels: message.account_uses_labels,
         }
     }
 }
@@ -113,7 +119,6 @@ impl From<WarmStartMessage> for mail::MailMessage {
             initials: message.initials,
             subject: message.subject,
             preview: message.preview,
-            time: message.time,
             date_ms: message.date_ms,
             to: String::new(),
             label: message.label,
@@ -129,6 +134,10 @@ impl From<WarmStartMessage> for mail::MailMessage {
             attachments: Vec::new(),
             body_pending: true,
             sender_verification: message.sender_verification,
+            verification_code: None,
+            account_uses_labels: message.account_uses_labels,
+            first_attachment: None,
+            attachment_total: 0,
         }
     }
 }
@@ -233,6 +242,9 @@ pub(crate) struct WarmStartSnapshot {
     pub(crate) inbox_count: usize,
     pub(crate) next_cursor: Option<ThreadCursor>,
     pub(crate) accounts: Vec<Account>,
+    /// The active profile's accounts, which the saved rows show.
+    #[serde(default)]
+    pub(crate) profile_accounts: Option<Vec<i64>>,
     pub(crate) messages: Vec<WarmStartMessage>,
     pub(crate) mailboxes: Vec<WarmStartMailbox>,
     pub(crate) unified_mailboxes: Vec<WarmStartMailbox>,
@@ -243,6 +255,7 @@ pub(crate) struct WarmStartProjection<'a> {
     pub(crate) inbox_count: usize,
     pub(crate) next_cursor: Option<ThreadCursor>,
     pub(crate) accounts: &'a [Account],
+    pub(crate) profile_accounts: Option<&'a [i64]>,
     pub(crate) messages: &'a [mail::MailMessage],
     pub(crate) mailboxes: &'a [mail::MailboxEntry],
     pub(crate) unified_mailboxes: &'a [mail::MailboxEntry],
@@ -250,6 +263,13 @@ pub(crate) struct WarmStartProjection<'a> {
 
 impl WarmStartSnapshot {
     pub(crate) fn capture(projection: WarmStartProjection<'_>) -> Self {
+        // Local mail is left out: until the core is open, nothing names it.
+        let connected = |account_id: i64| {
+            projection
+                .accounts
+                .iter()
+                .any(|account| account.id == account_id)
+        };
         Self {
             format_version: WARM_START_FORMAT_VERSION,
             saved_at_ms: chrono::Utc::now().timestamp_millis(),
@@ -262,15 +282,18 @@ impl WarmStartSnapshot {
                 .take(MAX_WARM_START_ACCOUNTS)
                 .cloned()
                 .collect(),
+            profile_accounts: projection.profile_accounts.map(<[i64]>::to_vec),
             messages: projection
                 .messages
                 .iter()
+                .filter(|message| connected(message.account_id))
                 .take(MAX_WARM_START_MESSAGES)
                 .map(WarmStartMessage::from)
                 .collect(),
             mailboxes: projection
                 .mailboxes
                 .iter()
+                .filter(|mailbox| connected(mailbox.account_id))
                 .take(MAX_WARM_START_MAILBOXES)
                 .map(WarmStartMailbox::from)
                 .collect(),
@@ -330,6 +353,9 @@ pub(crate) fn apply_warm_start_snapshot(
         // Core remains unset: cached rows are only a presentation until local
         // storage is ready, and the startup guard keeps actions inert.
         state.using_core = true;
+        // The saved rows show the profile's accounts; so do the sidebar and
+        // scope until settings load.
+        state.profile_accounts = snapshot.profile_accounts;
         let _ = state.set_connected_accounts(snapshot.accounts);
         state.set_scope(snapshot.scope);
         state.inbox_count = snapshot.inbox_count;
@@ -479,6 +505,7 @@ pub(crate) struct StartupSnapshot {
     pub(crate) remote_images_enabled: bool,
     pub(crate) accounts: Vec<Account>,
     pub(crate) account_configs: Vec<AccountConfig>,
+    pub(crate) local_mail: Option<flectar_mail_core::models::LocalMail>,
     pub(crate) settings: Option<Settings>,
 }
 
@@ -549,18 +576,22 @@ pub(crate) async fn load_startup_snapshot(
 ) -> Result<StartupSnapshot, String> {
     let core = CoreMailSource::start(paths, credentials, oauth_redirects).await?;
     metrics.emit("core_opened", serde_json::Value::Null);
-    let (mail, configs, settings) = tokio::join!(
+    // The first page shows only the active profile's accounts.
+    let settings = core.load_settings().await.ok();
+    let _ = core.set_profile_accounts(settings.as_ref().and_then(|settings| {
+        AccountPresentationSettings::from_settings(settings).active_profile_accounts()
+    }));
+    let (mail, configs, local_mail) = tokio::join!(
         // Counts walk every mailbox and can dominate startup on a large local
         // store. The first useful frame only needs one bounded page; sidebar
         // totals arrive as a separate progressive update.
         core.load_startup_page(preferred_scope, PAGE_SIZE as i64),
         core.load_account_configs(),
-        core.load_settings(),
+        core.load_local_mail(),
     );
 
     let (accounts, scope, page) =
         mail.unwrap_or_else(|_| (Vec::new(), Scope::UNIFIED_INBOX, None));
-    let settings = settings.ok();
     metrics.emit(
         "startup_queries_loaded",
         serde_json::json!({
@@ -578,6 +609,7 @@ pub(crate) async fn load_startup_snapshot(
             .is_some_and(|settings| settings.load_remote_images),
         accounts,
         account_configs: configs.unwrap_or_default(),
+        local_mail: local_mail.ok().flatten(),
         settings,
     })
 }
@@ -707,6 +739,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
     refresh_oauth_availability(app);
+    app.set_time_format(settings.time_format.as_str().into());
     crate::apply_language(app, &settings.language);
     app.set_custom_oauth_configured(
         !settings.google_client_id.trim().is_empty() || !settings.ms_client_id.trim().is_empty(),
@@ -734,6 +767,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
         crate::window_chrome::WindowFrame::parse(&settings.window_frame),
     );
     app.set_monochrome_sidebar_icons(settings.monochrome_sidebar_icons);
+    crate::app_icon::apply(app, settings.app_icon);
     app.set_show_avatars(settings.show_avatars);
     app.set_group_mail_by_date(settings.group_mail_by_date);
     app.set_show_account_markers(settings.show_account_badges);
@@ -946,6 +980,7 @@ mod warm_start_tests {
             inbox_count: 3,
             next_cursor: None,
             accounts: &[account()],
+            profile_accounts: None,
             messages: &[message()],
             mailboxes: &mailboxes,
             unified_mailboxes: &[],
@@ -1084,12 +1119,13 @@ mod warm_start_tests {
             email: "person@example.com".into(),
             display_name: Some("Person".into()),
             avatar_url: None,
-            provider: Provider::Imap,
+            provider: Provider::Generic,
             auth_kind: AuthKind::Password,
             mail_protocol: MailProtocol::Imap,
             sync_state: "idle".into(),
             sync_error: None,
             can_create_top_level_mailbox: true,
+            server_keeps_mail_days: None,
         }
     }
 
@@ -1106,7 +1142,6 @@ mod warm_start_tests {
             initials: "S".into(),
             subject: "Cached subject".into(),
             preview: "Cached preview".into(),
-            time: "Today".into(),
             date_ms: 1_700_000_000_000,
             to: "secret-recipient@example.com".into(),
             label: "UNREAD".into(),
@@ -1122,6 +1157,16 @@ mod warm_start_tests {
             attachments: Vec::new(),
             body_pending: false,
             sender_verification: "domain".into(),
+            verification_code: Some("48291375".into()),
+            account_uses_labels: true,
+            first_attachment: Some(flectar_mail_core::models::AttachmentMeta {
+                id: 3,
+                filename: Some("cached-file-name.pdf".into()),
+                mime_type: Some("application/pdf".into()),
+                size: Some(42),
+                is_inline: false,
+            }),
+            attachment_total: 1,
         }
     }
 
@@ -1162,6 +1207,7 @@ mod warm_start_tests {
                 thread_id: 7,
             }),
             accounts: &accounts,
+            profile_accounts: Some(&[7]),
             messages: &messages,
             mailboxes: &mailboxes,
             unified_mailboxes: &[],
@@ -1172,15 +1218,20 @@ mod warm_start_tests {
         let json = String::from_utf8(bytes).unwrap();
         assert!(!json.contains("body must not enter"));
         assert!(!json.contains("secret-recipient"));
+        assert!(!json.contains("48291375"));
+        assert!(!json.contains("cached-file-name"));
 
         let restored = load_warm_start_snapshot(&path).await.unwrap();
         assert_eq!(restored.scope, PERSON_INBOX);
+        assert_eq!(restored.profile_accounts, Some(vec![7]));
         assert_eq!(restored.messages.len(), 1);
         let restored_message = mail::MailMessage::from(restored.messages[0].clone());
         assert_eq!(restored_message.subject, "Cached subject");
         assert!(restored_message.has_replied);
         assert!(restored_message.html.is_none());
         assert!(restored_message.body_pending);
+        assert!(restored_message.verification_code.is_none());
+        assert!(restored_message.account_uses_labels);
     }
 
     #[tokio::test]
@@ -1226,6 +1277,7 @@ mod warm_start_tests {
             inbox_count: messages.len(),
             next_cursor: None,
             accounts: &accounts,
+            profile_accounts: None,
             messages: &messages,
             mailboxes: &mailboxes,
             unified_mailboxes: &[],
@@ -1237,11 +1289,13 @@ mod warm_start_tests {
     #[test]
     fn benchmark_warm_cache_fixture_matches_the_current_format() {
         let snapshot: WarmStartSnapshot = serde_json::from_str(include_str!(
-            "../resources/benchmarks/warm-cache/warm-start-mailbox-v4.json"
+            "../resources/benchmarks/warm-cache/warm-start-mailbox-v6.json"
         ))
         .unwrap();
 
         assert!(snapshot.is_valid());
         assert_eq!(snapshot.messages.len(), 3);
+        // Caches written before profiles filtered mail show every account.
+        assert_eq!(snapshot.profile_accounts, None);
     }
 }

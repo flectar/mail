@@ -200,15 +200,18 @@ async fn full_sync_triage_and_search() {
     // 1. Add the account (verifies IMAP login on the way in).
     let account = core
         .add_account_password(AddPasswordAccountArgs {
-            connection: Default::default(),
+            connection: flectar_mail_core::models::MailConnectionSettings::new(
+                flectar_mail_core::models::ConnectionSecurity::Tls,
+                flectar_mail_core::models::ConnectionSecurity::Starttls,
+            ),
             email: "testuser@example.com".into(),
             display_name: Some("Test User".into()),
             username: "testuser".into(),
             password: "pass".into(),
             mail_protocol: flectar_mail_core::models::MailProtocol::Imap,
             jmap_url: String::new(),
-            imap_host: "127.0.0.1".into(),
-            imap_port: 10993,
+            incoming_host: "127.0.0.1".into(),
+            incoming_port: 10993,
             smtp_host: "127.0.0.1".into(),
             smtp_port: 10587,
         })
@@ -345,9 +348,13 @@ async fn full_sync_triage_and_search() {
     .await
     .unwrap();
 
-    // 9. Contacts were harvested for autocomplete.
+    // 9. Backfilled history never becomes compose suggestions; incoming
+    // senders are learned only from mail that arrives after opting in.
     let contacts = core.list_contacts("ali".into(), None, 5).await.unwrap();
-    assert!(contacts.iter().any(|c| c.email == "alice@example.com"));
+    assert!(!contacts.iter().any(|c| c.email == "alice@example.com"));
+    let mut settings = core.get_settings().await.unwrap();
+    settings.collect_incoming_contacts = true;
+    core.set_settings(settings).await.unwrap();
 
     // 9b. Attachment: parsed during body sync and extractable to disk.
     let eve = page
@@ -430,6 +437,26 @@ async fn full_sync_triage_and_search() {
     })
     .await;
 
+    // Undoing that archive after it reached the server moves the message
+    // back to the server's INBOX.
+    assert!(core.undo_last().await.unwrap());
+    wait_for("remote undo replay", Duration::from_secs(90), || async {
+        let creds = flectar_mail_core::imap::ImapCredentials::Password {
+            user: "testuser".into(),
+            password: "pass".into(),
+        };
+        let mut s = flectar_mail_core::imap::connect("127.0.0.1", 10993, creds)
+            .await
+            .ok()?;
+        let sel = flectar_mail_core::imap::select(&mut s, "INBOX")
+            .await
+            .ok()?;
+        let n = sel.exists;
+        flectar_mail_core::imap::logout(s).await;
+        (n == 8).then_some(())
+    })
+    .await;
+
     // 11. IMAP IDLE push: with the actor waiting in IDLE, a message appended to
     // INBOX should surface in seconds - far faster than the 60s poll cycle.
     // Wait until the actor is quiescent (state "idle" => in the IDLE wait), then
@@ -492,6 +519,8 @@ async fn full_sync_triage_and_search() {
         inbox.threads.iter().any(|t| t.subject == "Pushed via IDLE"),
         "IDLE-pushed message should appear in the inbox"
     );
+    let contacts = core.list_contacts("gra".into(), None, 5).await.unwrap();
+    assert!(contacts.iter().any(|c| c.email == "grace@example.com"));
 
     eprintln!(
         "e2e OK: sync, threading, splits, bodies, FTS, archive+undo, snooze, contacts, remote replay, IDLE push"

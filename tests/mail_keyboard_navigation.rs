@@ -4,7 +4,10 @@ use slint::platform::{
     software_renderer::{MinimalSoftwareWindow, RepaintBufferType},
 };
 use slint::{ComponentHandle, Model, ModelRc, Rgb8Pixel, VecModel};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+};
 
 slint::slint! {
     import { Palette } from "std-widgets.slint";
@@ -76,10 +79,19 @@ slint::slint! {
         in-out property <bool> text-mode: false;
         in-out property <bool> source-mode: false;
         in-out property <bool> settings-open: false;
+        in-out property <int> checked-count: 0;
+        in-out property <bool> trash: false;
+        in-out property <bool> draft: false;
+        in-out property <string> query;
         out property <string> page: view.compact-page;
         out property <bool> list-ring: view.list-focus-visible;
         callback selected(int);
         callback closed();
+        callback acted(int, string);
+        callback acted-on-open(string);
+        callback acted-on-checked(string);
+        callback composed();
+        callback searched(string);
         init => { Palette.color-scheme = ColorScheme.light; }
         changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
         public function focus-list() { view.focus-list(true); }
@@ -94,6 +106,10 @@ slint::slint! {
             text_mode: root.text-mode;
             source_mode: root.source-mode;
             settings_open <=> root.settings-open;
+            search_query <=> root.query;
+            selection-count: root.checked-count;
+            trash_view: root.trash;
+            selected_is_draft: root.draft;
             has_selected: true;
             selected_sender: "Navigation sender";
             selected_subject: "Keyboard navigation test";
@@ -114,6 +130,11 @@ slint::slint! {
             control-bg: AppTheme.control-bg;
             select_email(id) => { root.selected(id); }
             close_preview => { root.closed(); }
+            message_action_for_email(id, action) => { root.acted(id, action); }
+            message_action(action) => { root.acted-on-open(action); }
+            bulk_message_action(action) => { root.acted-on-checked(action); }
+            open_compose => { root.composed(); }
+            search_changed(query) => { root.searched(query); }
         }
     }
 }
@@ -267,6 +288,9 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
     ui.on_checked(move |id, value| count.set((id, value)));
     let count = pages.clone();
     ui.on_page_requested(move || count.set(count.get() + 1));
+    let searched = Rc::new(RefCell::new(String::new()));
+    let query = searched.clone();
+    ui.on_searched(move |text| *query.borrow_mut() = text.into());
     ui.show().unwrap();
     render(&window, 500, 400, "initial");
     ui.invoke_focus_list();
@@ -380,8 +404,11 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
         !ui.get_focused(),
         "clicking search moves focus out of the list"
     );
-    let cursor = ui.get_cursor();
+    let mail_actions = (selected.get(), opened.get(), checked.get());
     key(ui.window(), "x");
+    assert_eq!(searched.borrow().as_str(), "x");
+    // The new query starts the list over, as the app's search results do.
+    let cursor = ui.get_cursor();
     key(ui.window(), Key::Home);
     key(ui.window(), Key::DownArrow);
     key(ui.window(), Key::Return);
@@ -389,6 +416,11 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
         ui.get_cursor(),
         cursor,
         "search navigation must not move the mail cursor"
+    );
+    assert_eq!(
+        (selected.get(), opened.get(), checked.get()),
+        mail_actions,
+        "keys typed in search are not mail actions"
     );
     key(ui.window(), Key::Tab);
     assert!(!ui.get_focused(), "Tab follows the toolbar controls");
@@ -554,4 +586,118 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
             );
         }
     }
+}
+
+fn chord(window: &slint::Window, modifier: slint::platform::Key, text: &str) {
+    window.dispatch_event(WindowEvent::KeyPressed {
+        text: modifier.into(),
+    });
+    key(window, text);
+    window.dispatch_event(WindowEvent::KeyReleased {
+        text: modifier.into(),
+    });
+}
+
+#[test]
+fn mail_shortcuts_act_on_what_has_focus() {
+    use slint::platform::Key;
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+    slint::platform::set_platform(Box::new(Headless(window.clone()))).unwrap();
+    let ui = MailViewKeyboardHarness::new().unwrap();
+    ui.global::<MailListNavigation>()
+        .on_target(mail_navigation::target);
+    ui.global::<MotionSettings>().set_enabled(false);
+    ui.window().set_size(slint::PhysicalSize::new(1200, 600));
+    ui.set_emails(ModelRc::new(VecModel::from(
+        (1..=3).map(|id| message(id).email).collect::<Vec<_>>(),
+    )));
+    ui.set_entries(ModelRc::new(VecModel::from(
+        (1..=3).map(message).collect::<Vec<_>>(),
+    )));
+    let selected = Rc::new(Cell::new(-1));
+    let count = selected.clone();
+    ui.on_selected(move |id| count.set(id));
+    let acted = Rc::new(std::cell::RefCell::new(Vec::<(i32, String)>::new()));
+    let log = acted.clone();
+    ui.on_acted(move |id, action| log.borrow_mut().push((id, action.into())));
+    let log = acted.clone();
+    ui.on_acted_on_open(move |action| log.borrow_mut().push((0, action.into())));
+    let log = acted.clone();
+    ui.on_acted_on_checked(move |action| log.borrow_mut().push((-1, action.into())));
+    let composed = Rc::new(Cell::new(0));
+    let count = composed.clone();
+    ui.on_composed(move || count.set(count.get() + 1));
+    let searched = Rc::new(std::cell::RefCell::new(String::new()));
+    let query = searched.clone();
+    ui.on_searched(move |text| *query.borrow_mut() = text.into());
+    let take = || std::mem::take(&mut *acted.borrow_mut());
+    ui.show().unwrap();
+    ui.invoke_focus_list();
+
+    // The list acts on the cursor row and moves on, as after a toolbar action.
+    key(ui.window(), "a");
+    assert_eq!(take(), [(1, "archive".to_owned())]);
+    assert_eq!(selected.get(), 2, "the next message opens");
+    key(ui.window(), "j");
+    assert_eq!(take(), [(2, "spam".to_owned())]);
+    key(ui.window(), Key::Delete);
+    assert_eq!(take(), [(3, "trash".to_owned())]);
+    assert_eq!(selected.get(), 2, "the last row moves back instead");
+    chord(ui.window(), Key::Shift, "A");
+    assert!(take().is_empty(), "Shift+A is not Archive");
+
+    ui.set_trash(true);
+    selected.set(-1);
+    key(ui.window(), Key::Delete);
+    assert_eq!(take(), [(2, "delete_permanently".to_owned())]);
+    assert_eq!(selected.get(), -1, "the cursor waits for the confirmation");
+    ui.set_trash(false);
+
+    ui.set_checked_count(2);
+    key(ui.window(), "a");
+    assert_eq!(
+        take(),
+        [(-1, "archive".to_owned())],
+        "checked rows go together"
+    );
+    ui.set_checked_count(0);
+
+    // In the reader they act on the open conversation, as its toolbar does.
+    key(ui.window(), Key::Return);
+    key(ui.window(), "j");
+    key(ui.window(), Key::Delete);
+    assert_eq!(take(), [(0, "spam".to_owned()), (0, "trash".to_owned())]);
+    ui.set_draft(true);
+    key(ui.window(), "a");
+    assert!(take().is_empty(), "drafts cannot be archived");
+    ui.set_draft(false);
+
+    // Search takes focus from anywhere, and typing there is not a shortcut.
+    key(ui.window(), "/");
+    key(ui.window(), "a");
+    assert_eq!(searched.borrow().as_str(), "a");
+    assert!(take().is_empty());
+    chord(ui.window(), Key::Control, "k");
+    key(ui.window(), "b");
+    assert_eq!(searched.borrow().as_str(), "b", "the query is selected");
+    key(ui.window(), Key::Delete);
+    assert!(take().is_empty(), "Delete edits the query");
+    chord(ui.window(), Key::Control, "n");
+    assert_eq!(composed.get(), 1);
+
+    ui.set_layout_mode("minimal".into());
+    slint::platform::update_timers_and_animations();
+    ui.invoke_focus_list();
+    key(ui.window(), Key::Return);
+    assert_eq!(ui.get_page(), "message");
+    chord(ui.window(), Key::Control, "k");
+    assert_eq!(ui.get_page(), "list", "search returns to the list page");
+    slint::platform::update_timers_and_animations();
+    key(ui.window(), "c");
+    assert_eq!(searched.borrow().as_str(), "c");
+    assert_eq!(ui.get_query(), "c");
+    // A query set from outside, like a restored tab's, replaces the text.
+    ui.set_query("".into());
+    key(ui.window(), "d");
+    assert_eq!(searched.borrow().as_str(), "d");
 }

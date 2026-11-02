@@ -1,0 +1,513 @@
+import { ScrollView } from "std-widgets.slint";
+import { AccountRow, MailProfileRow, ProfileMemberRow } from "../models.slint";
+import { AppTheme } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { Avatar } from "avatar.slint";
+import { Button } from "button.slint";
+import { IconButton } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { RuntimeColorPicker } from "theme-editor.slint";
+
+// The colors offered for profiles and accounts.
+export global ProfilePalette {
+    out property <[color]> colors: [
+        #3b82f6, #8b5cf6, #0d9488, #ea580c,
+        #db2777, #65a30d, #0891b2, #9333ea,
+    ];
+
+    public pure function is-preset(value: color) -> bool {
+        return value == #3b82f6 || value == #8b5cf6 || value == #0d9488 || value == #ea580c
+            || value == #db2777 || value == #65a30d || value == #0891b2 || value == #9333ea;
+    }
+
+    public pure function count-label(count: int) -> string {
+        return count == 0 ? @tr("No accounts")
+            : count == 1 ? @tr("1 account")
+            : @tr("{} accounts", count);
+    }
+}
+
+export component ProfileColorChoice inherits FocusVisibleScope {
+    in property <color> value;
+    in property <bool> selected: false;
+    in property <string> label;
+    callback chosen;
+
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: radio-button;
+    accessible-label: root.label;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.chosen();
+            return accept;
+        }
+        reject
+    }
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-radius: self.width / 2;
+        border-width: root.selected || root.focus-visible ? 3px : 1px;
+        border-color: root.selected || root.focus-visible ? AppTheme.heading : AppTheme.border;
+        background: root.value;
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.focus(); root.pointer-activated(); root.chosen(); } }
+}
+
+// One choice in a list of profiles: its color, name and account count, with
+// a check on the current one.
+export component ProfileChoiceRow inherits FocusVisibleScope {
+    in property <string> title;
+    in property <string> detail;
+    in property <color> dot-color;
+    in property <bool> checked;
+    callback clicked;
+
+    height: max(44px, title-label.preferred-height + 22px);
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: radio-button;
+    accessible-label: root.detail == "" ? root.title : root.title + ", " + root.detail;
+    accessible-checked: root.checked;
+    accessible-action-default => { root.clicked(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.clicked();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.focus-visible ? 2px : 0px;
+        border-color: AppTheme.accent;
+        background: root.checked ? AppTheme.accent-pale
+            : hit.has-hover ? AppTheme.control-bg : transparent;
+        animate background { duration: 100ms; easing: ease-out; }
+    }
+    Rectangle {
+        x: 14px;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: root.dot-color;
+    }
+    title-label := Text {
+        x: 38px;
+        width: max(0px, parent.width - self.x - detail-label.width - 52px);
+        height: parent.height;
+        text: root.title;
+        color: AppTheme.heading;
+        font-size: TypeScale.body;
+        font-weight: root.checked ? 600 : 500;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    detail-label := Text {
+        x: parent.width - self.width - 40px;
+        width: min(self.preferred-width, parent.width / 2);
+        height: parent.height;
+        text: root.detail;
+        color: AppTheme.muted;
+        font-size: TypeScale.caption;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    if root.checked : Image {
+        x: parent.width - self.width - 14px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../icons/lucide/outline/check.svg");
+        colorize: AppTheme.accent;
+        accessible-role: none;
+    }
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.focus(); root.pointer-activated(); root.clicked(); }
+    }
+}
+
+// "New profile…" at the end of a list of profiles.
+export component ProfileActionRow inherits FocusVisibleScope {
+    in property <string> title;
+    callback clicked;
+
+    height: max(44px, action-label.preferred-height + 22px);
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.clicked(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.clicked();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.focus-visible ? 2px : 0px;
+        border-color: AppTheme.accent;
+        background: hit.has-hover ? AppTheme.control-bg : transparent;
+        animate background { duration: 100ms; easing: ease-out; }
+    }
+    Image {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../icons/lucide/outline/plus.svg");
+        colorize: AppTheme.accent;
+        accessible-role: none;
+    }
+    action-label := Text {
+        x: 38px;
+        width: max(0px, parent.width - self.x - 12px);
+        height: parent.height;
+        text: root.title;
+        color: AppTheme.accent;
+        font-size: TypeScale.body;
+        font-weight: 600;
+        vertical-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+    }
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.focus(); root.pointer-activated(); root.clicked(); }
+    }
+}
+
+// An account in the profile editor: checked accounts belong to the profile.
+// An account can be in one profile, so checking one from another moves it.
+export component ProfileMemberChoice inherits FocusVisibleScope {
+    in property <ProfileMemberRow> member;
+    callback toggled();
+
+    // An account in another profile moves to this one when checked.
+    private property <string> detail: root.member.other_profile == "" ? root.member.email
+        : root.member.checked ? @tr("{} · moves from {}", root.member.email, root.member.other_profile)
+        : @tr("{} · in {}", root.member.email, root.member.other_profile);
+
+    height: max(48px, member-name.preferred-height + member-detail.preferred-height + 16px);
+    focus-on-click: true;
+    focus-on-tab-navigation: true;
+    accessible-role: checkbox;
+    accessible-label: root.member.name;
+    accessible-description: root.detail;
+    accessible-checked: root.member.checked;
+    accessible-action-default => { root.toggled(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.toggled();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        border-width: root.focus-visible ? 2px : 0px;
+        border-color: AppTheme.accent;
+        background: hit.has-hover ? AppTheme.control-bg : transparent;
+        animate background { duration: 100ms; easing: ease-out; }
+    }
+    Rectangle {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: 18px;
+        height: 18px;
+        border-radius: 4px;
+        border-width: root.member.checked ? 0px : 1px;
+        border-color: AppTheme.secondary;
+        background: root.member.checked ? AppTheme.accent : AppTheme.input-bg;
+
+        if root.member.checked : Image {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 12px;
+            height: 12px;
+            source: @image-url("../icons/lucide/outline/check.svg");
+            colorize: white;
+            accessible-role: none;
+        }
+    }
+    Avatar {
+        x: 42px;
+        y: (parent.height - self.height) / 2;
+        size: 30px;
+        fallback: root.member.initials;
+        source: root.member.avatar;
+        has-source: root.member.has_avatar;
+        background-color: AppTheme.avatar-bg;
+        foreground-color: AppTheme.body;
+    }
+    member-name := Text {
+        x: 84px;
+        y: (parent.height - self.height - member-detail.height) / 2;
+        width: max(0px, parent.width - self.x - 12px);
+        height: self.preferred-height;
+        text: root.member.name;
+        color: AppTheme.heading;
+        font-size: TypeScale.body;
+        font-weight: 600;
+        overflow: elide;
+        accessible-role: none;
+    }
+    member-detail := Text {
+        x: 84px;
+        y: member-name.y + member-name.height;
+        width: max(0px, parent.width - self.x - 12px);
+        height: self.preferred-height;
+        text: root.detail;
+        color: AppTheme.muted;
+        font-size: TypeScale.caption;
+        overflow: elide;
+        accessible-role: none;
+    }
+    hit := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.focus(); root.pointer-activated(); root.toggled(); }
+    }
+}
+
+// Where an account's mail-list color comes from: one of the profiles, or
+// the account's own color when it has no profile. Choices apply at once.
+export component AccountProfilePicker inherits Rectangle {
+    in property <bool> compact;
+    in property <[MailProfileRow]> profiles;
+    in property <AccountRow> account;
+    callback choose-profile(string);
+    // A color, and whether it is the generated one.
+    callback choose-color(color, bool);
+    callback create-profile();
+    callback close();
+
+    private property <bool> no-profile: root.account.profile_id == "";
+    private property <bool> custom-open: false;
+    private property <color> custom-value: root.account.profile_color;
+    private property <length> swatch-size: root.width < 390px ? 26px : 30px;
+    private property <bool> generated-selected: !root.account.has_account_color && !root.custom-open;
+    private property <bool> custom-selected: root.custom-open
+        || (root.account.has_account_color && !ProfilePalette.is-preset(root.account.profile_color));
+
+    function choose-generated() {
+        root.custom-open = false;
+        root.choose-color(root.account.profile_color, true);
+    }
+
+    function open-custom() {
+        root.custom-value = root.account.profile_color;
+        root.custom-open = true;
+    }
+
+    background: AppTheme.surface;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000055;
+    clip: true;
+
+    // Up to the content's height; taller content scrolls.
+    out property <length> content-height: picker-content.preferred-height;
+
+    FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+
+        ScrollView {
+            width: parent.width;
+            height: parent.height;
+            content-width: self.visible-width;
+            mouse-drag-pan-enabled: root.compact;
+
+            picker-content := VerticalLayout {
+                width: root.width;
+                padding-top: 20px;
+                padding-right: 18px;
+                padding-bottom: 18px;
+                padding-left: 18px;
+                spacing: 12px;
+
+                HorizontalLayout {
+                    spacing: 12px;
+                    Avatar {
+                        size: 40px;
+                        fallback: root.account.initials;
+                        source: root.account.avatar;
+                        has-source: root.account.has_avatar;
+                        background-color: AppTheme.avatar-bg;
+                        foreground-color: AppTheme.body;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        Text {
+                            text: @tr("Choose profile");
+                            color: AppTheme.title;
+                            font-size: TypeScale.heading;
+                            font-weight: 700;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: root.account.name == root.account.email ? root.account.email
+                                : root.account.name + " · " + root.account.email;
+                            color: AppTheme.secondary;
+                            font-size: TypeScale.secondary;
+                            overflow: elide;
+                        }
+                    }
+                    IconButton {
+                        width: 36px;
+                        height: 36px;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        ghost: true;
+                        hover-background: AppTheme.accent-soft;
+                        tooltip-text: @tr("Close");
+                        clicked => { root.close(); }
+                    }
+                }
+
+                Text {
+                    text: @tr("Profiles group accounts, color them in the mail list and can focus the mail view on them.");
+                    color: AppTheme.muted;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+
+                VerticalLayout {
+                    spacing: 2px;
+                    accessible-role: list;
+                    accessible-label: @tr("Profiles");
+
+                    for profile in root.profiles : ProfileChoiceRow {
+                        title: profile.name;
+                        detail: ProfilePalette.count-label(profile.account_count);
+                        dot-color: profile.color;
+                        checked: root.account.profile_id == profile.id;
+                        clicked => { root.choose-profile(profile.id); }
+                    }
+                    ProfileChoiceRow {
+                        title: @tr("No profile");
+                        detail: root.account.has_account_color ? @tr("Own color") : @tr("Generated color");
+                        dot-color: root.no-profile ? root.account.profile_color : AppTheme.muted;
+                        checked: root.no-profile;
+                        clicked => { root.choose-profile(""); }
+                    }
+                    ProfileActionRow {
+                        title: @tr("New profile…");
+                        clicked => { root.create-profile(); }
+                    }
+                }
+
+                if root.no-profile : VerticalLayout {
+                    spacing: 10px;
+
+                    Rectangle { height: 1px; background: AppTheme.border-subtle; }
+                    Text {
+                        text: @tr("Account color");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.caption;
+                        font-weight: 700;
+                    }
+                    HorizontalLayout {
+                        spacing: root.width < 390px ? 5px : 8px;
+                        alignment: start;
+                        for swatch[index] in ProfilePalette.colors : ProfileColorChoice {
+                            width: root.swatch-size;
+                            height: root.swatch-size;
+                            value: swatch;
+                            selected: root.account.has_account_color && !root.custom-open
+                                && root.account.profile_color == swatch;
+                            label: @tr("Account color {}", index + 1);
+                            chosen => {
+                                root.custom-open = false;
+                                root.choose-color(swatch, false);
+                            }
+                        }
+                    }
+                    // Side by side, except on a phone, where longer labels
+                    // need the whole width.
+                    if !root.compact : HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            height: 34px;
+                            text: @tr("Generated color");
+                            selected: root.generated-selected;
+                            clicked => { root.choose-generated(); }
+                        }
+                        Button {
+                            height: 34px;
+                            text: @tr("Custom color…");
+                            selected: root.custom-selected;
+                            clicked => { root.open-custom(); }
+                        }
+                    }
+                    if root.compact : VerticalLayout {
+                        spacing: 8px;
+                        Button {
+                            height: 44px;
+                            text: @tr("Generated color");
+                            selected: root.generated-selected;
+                            clicked => { root.choose-generated(); }
+                        }
+                        Button {
+                            height: 44px;
+                            text: @tr("Custom color…");
+                            selected: root.custom-selected;
+                            clicked => { root.open-custom(); }
+                        }
+                    }
+                    if root.custom-open : RuntimeColorPicker {
+                        height: 222px;
+                        value: root.custom-value;
+                        edited(value) => { root.custom-value = value; }
+                    }
+                    if root.custom-open : HorizontalLayout {
+                        alignment: end;
+                        Button {
+                            height: 34px;
+                            text: @tr("Use custom color");
+                            primary: true;
+                            clicked => {
+                                root.custom-open = false;
+                                root.choose-color(root.custom-value, false);
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    padding-top: 4px;
+                    Button {
+                        width: max(96px, self.content-width);
+                        height: root.compact ? 44px : 34px;
+                        text: @tr("Done");
+                        primary: true;
+                        clicked => { root.close(); }
+                    }
+                }
+            }
+        }
+    }
+}

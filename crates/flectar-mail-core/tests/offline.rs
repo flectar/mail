@@ -54,17 +54,21 @@ async fn seed(db: &Db, port: u16) -> (i64, i64) {
                 email: "offline@example.com",
                 display_name: Some("Offline User"),
                 avatar_url: None,
-                provider: Provider::Imap,
+                provider: Provider::Generic,
                 auth_kind: AuthKind::Password,
                 mail_protocol: flectar_mail_core::models::MailProtocol::Imap,
                 username: "offline",
                 jmap_url: "",
                 jmap_account_id: None,
-                imap_host: "127.0.0.1",
-                imap_port: port,
+                incoming_host: "127.0.0.1",
+                incoming_port: port,
                 smtp_host: "127.0.0.1",
                 smtp_port: port,
             },
+            &AccountSettings::new(MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Tls,
+            )),
         )?;
         let inbox = repo::folders::upsert(conn, account_id, "INBOX", None, Some(roles::INBOX))?;
         repo::folders::upsert(conn, account_id, "Archive", None, Some(roles::ARCHIVE))?;

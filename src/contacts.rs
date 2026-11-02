@@ -2,10 +2,13 @@
 
 use crate::{
     AppWindow, ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, I18n,
+    date_format::{self, DateStyle},
     paged_visible_count,
 };
-use chrono::{Datelike, Local, TimeZone};
-use flectar_mail_core::models::{ContactRecord, ContactRecordCursor, ContactRecordPage};
+use chrono::{Local, TimeZone};
+use flectar_mail_core::models::{
+    ContactRecord, ContactRecordCursor, ContactRecordPage, ContactSync,
+};
 use slint::{ComponentHandle, Model, VecModel};
 use std::{
     cell::RefCell,
@@ -15,6 +18,7 @@ use std::{
 
 pub(crate) struct ContactDirectoryState {
     pub(crate) contacts: Vec<ContactRecord>,
+    pub(crate) photos: HashMap<String, (slint::Image, slint::Image)>,
     pub(crate) rows: Rc<VecModel<ContactRow>>,
     pub(crate) sidebar_rows: Rc<crate::retained_model::RetainedModel<ContactSidebarRow>>,
     pub(crate) collapsed_sections: HashSet<String>,
@@ -36,6 +40,7 @@ impl ContactDirectoryState {
         Self {
             selected_id: contacts.first().map(|contact| contact.id),
             contacts,
+            photos: HashMap::new(),
             rows: Rc::new(VecModel::default()),
             sidebar_rows: Rc::default(),
             collapsed_sections: HashSet::new(),
@@ -100,7 +105,12 @@ fn contact_avatar_tone(contact: &ContactRecord) -> i32 {
     // normalized email keeps the fallback consistent when a display name is
     // edited and avoids a visibly changing "random" color between launches.
     let mut hash = 0x811c_9dc5_u32;
-    let email = contact.email.trim();
+    let identity = if contact.email.is_empty() {
+        contact.id.to_string()
+    } else {
+        contact.email.clone()
+    };
+    let email = identity.trim();
     // Unicode lowercasing can depend on surrounding characters (Greek sigma).
     // Keep that normalization for non-ASCII addresses, but hash ordinary email
     // bytes directly without an intermediate string.
@@ -141,8 +151,9 @@ fn contact_last_interacted(app: &AppWindow, value: Option<i64>) -> String {
         .timestamp_millis_opt(value)
         .single()
         .map(|time| {
+            let date = date_format::current().date(DateStyle::Medium, time.date_naive());
             app.global::<I18n>()
-                .invoke_last_contacted(time.month() as i32, time.day() as i32, time.year())
+                .invoke_last_contacted(date.into())
                 .into()
         })
         .unwrap_or_else(|| {
@@ -240,12 +251,26 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
                 email: contact.email.clone().into(),
                 initials: record_initials(contact).into(),
                 avatar_tone: contact_avatar_tone(contact),
+                avatar: contact
+                    .details
+                    .photo_hash
+                    .as_ref()
+                    .and_then(|h| directory.photos.get(h))
+                    .map(|p| p.0.clone())
+                    .unwrap_or_default(),
+                has_avatar: app.get_show_avatars()
+                    && contact
+                        .details
+                        .photo_hash
+                        .as_ref()
+                        .is_some_and(|h| directory.photos.contains_key(h)),
+                source: contact.details.source.clone().unwrap_or_default().into(),
                 company: contact.company.clone().into(),
                 detail: match (contact.company.is_empty(), contact.job_title.is_empty()) {
                     (false, false) => format!("{} · {}", contact.company, contact.job_title),
                     (false, true) => contact.company.clone(),
                     (true, false) => contact.job_title.clone(),
-                    (true, true) => String::new(),
+                    (true, true) => contact.details.source.clone().unwrap_or_default(),
                 }
                 .into(),
                 last_contacted: contact_last_interacted(app, contact.last_interacted).into(),
@@ -297,10 +322,20 @@ pub(crate) fn apply_contact_rows(app: &AppWindow, state: &Rc<RefCell<ContactDire
 }
 
 pub(crate) fn clear_contact_form(app: &AppWindow) {
+    app.set_contact_emails(slint::ModelRc::new(slint::VecModel::from(vec![
+        crate::ContactValueRow::default(),
+    ])));
+    app.set_contact_phones(slint::ModelRc::new(slint::VecModel::from(vec![
+        crate::ContactValueRow::default(),
+    ])));
     app.set_contact_id(0);
+    app.set_contact_read_only(false);
+    app.set_contact_source("".into());
+    app.set_contact_sync(crate::ContactSyncState::Local);
+    app.set_contact_sync_detail("".into());
+    app.set_contact_has_photo(false);
+    app.set_contact_photo(Default::default());
     app.set_contact_name("".into());
-    app.set_contact_email("".into());
-    app.set_contact_phone("".into());
     app.set_contact_company("".into());
     app.set_contact_job_title("".into());
     app.set_contact_website("".into());
@@ -315,11 +350,81 @@ pub(crate) fn clear_contact_form(app: &AppWindow) {
     app.set_contact_last_interacted("".into());
 }
 
+pub(crate) fn contact_values(
+    model: slint::ModelRc<crate::ContactValueRow>,
+) -> Vec<flectar_mail_core::models::ContactValue> {
+    model
+        .iter()
+        .filter(|r| !r.value.trim().is_empty())
+        .map(|r| flectar_mail_core::models::ContactValue {
+            key: r.key.to_string(),
+            value: r.value.trim().to_owned(),
+            label: r.label.trim().to_owned(),
+            preference: if r.preference <= 0 {
+                100
+            } else {
+                r.preference.min(100) as u8
+            },
+        })
+        .collect()
+}
+
+fn editable_values(
+    values: &[flectar_mail_core::models::ContactValue],
+    primary: &str,
+) -> Vec<flectar_mail_core::models::ContactValue> {
+    if values.is_empty() && !primary.is_empty() {
+        vec![flectar_mail_core::models::ContactValue {
+            value: primary.into(),
+            preference: 100,
+            ..Default::default()
+        }]
+    } else {
+        values.to_vec()
+    }
+}
+
+fn contact_sync_state(sync: &ContactSync) -> (crate::ContactSyncState, &str) {
+    use crate::ContactSyncState as State;
+    match sync {
+        ContactSync::Local => (State::Local, ""),
+        ContactSync::Detached => (State::Detached, ""),
+        ContactSync::Synced => (State::Synced, ""),
+        ContactSync::Pending => (State::Pending, ""),
+        ContactSync::Conflict => (State::Conflict, ""),
+        ContactSync::Unavailable => (State::Unavailable, ""),
+        ContactSync::Failed(detail) => (State::Failed, detail),
+    }
+}
+
 fn apply_contact_form(app: &AppWindow, contact: &ContactRecord) {
+    let rows = |values: &[flectar_mail_core::models::ContactValue], primary: &str| {
+        let mut rows = values
+            .iter()
+            .map(|v| crate::ContactValueRow {
+                key: v.key.clone().into(),
+                value: v.value.clone().into(),
+                label: v.label.clone().into(),
+                preference: i32::from(v.preference),
+            })
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            rows.push(crate::ContactValueRow {
+                value: primary.into(),
+                ..Default::default()
+            });
+        }
+        slint::ModelRc::new(slint::VecModel::from(rows))
+    };
+    app.set_contact_emails(rows(&contact.details.emails, &contact.email));
+    app.set_contact_phones(rows(&contact.details.phones, &contact.phone));
     app.set_contact_id(i32::try_from(contact.id).unwrap_or(i32::MAX));
+    app.set_contact_read_only(contact.details.read_only);
+    app.set_contact_source(contact.details.source.clone().unwrap_or_default().into());
+    let (sync, detail) = contact_sync_state(&contact.details.sync);
+    app.set_contact_sync(sync);
+    app.set_contact_sync_detail(detail.into());
     app.set_contact_name(contact.name.clone().into());
-    app.set_contact_email(contact.email.clone().into());
-    app.set_contact_phone(contact.phone.clone().into());
     app.set_contact_company(contact.company.clone().into());
     app.set_contact_job_title(contact.job_title.clone().into());
     app.set_contact_website(contact.website.clone().into());
@@ -349,9 +454,11 @@ pub(crate) fn has_unsaved_edits(app: &AppWindow, state: &ContactDirectoryState) 
     else {
         return false;
     };
-    app.get_contact_name().as_str() != contact.name
-        || app.get_contact_email().as_str() != contact.email
-        || app.get_contact_phone().as_str() != contact.phone
+    contact_values(app.get_contact_emails())
+        != editable_values(&contact.details.emails, &contact.email)
+        || contact_values(app.get_contact_phones())
+            != editable_values(&contact.details.phones, &contact.phone)
+        || app.get_contact_name().as_str() != contact.name
         || app.get_contact_company().as_str() != contact.company
         || app.get_contact_job_title().as_str() != contact.job_title
         || app.get_contact_website().as_str() != contact.website
@@ -368,6 +475,7 @@ pub(crate) fn release_directory(app: &AppWindow, state: &mut ContactDirectorySta
         return false;
     }
     state.contacts = Vec::new();
+    state.photos.clear();
     state.rows.set_vec(Vec::new());
     state.next_cursor = None;
     true
@@ -397,6 +505,13 @@ pub(crate) fn apply_contact_directory(app: &AppWindow, state: &Rc<RefCell<Contac
         .and_then(|id| directory.contacts.iter().find(|contact| contact.id == id))
     {
         apply_contact_form(app, contact);
+        let photo = contact
+            .details
+            .photo_hash
+            .as_ref()
+            .and_then(|h| directory.photos.get(h));
+        app.set_contact_has_photo(app.get_show_avatars() && photo.is_some());
+        app.set_contact_photo(photo.map(|p| p.1.clone()).unwrap_or_default());
     } else {
         clear_contact_form(app);
         app.set_contact_has_selection(false);
@@ -540,6 +655,7 @@ mod tests {
 
     fn contact(email: &str) -> ContactRecord {
         ContactRecord {
+            details: Default::default(),
             id: 1,
             name: "Example Person".to_owned(),
             email: email.to_owned(),

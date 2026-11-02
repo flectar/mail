@@ -13,11 +13,12 @@
 // FLECTAR_TEXT_FIT_SNAPSHOTS to a directory to save a render of each state.
 
 use flectar_mail::{
-    AccountImport, AccountRow, AppTheme, AppWindow, CalendarAgendaRow, CalendarDay,
-    CalendarEventRow, CalendarSourceRow, CalendarWeekDay, ContactAccountRow, ContactRow,
-    ContactSidebarRow, ContactSidebarRowKind, EmailRow, ImportAccountRow, ImportFailureRow,
-    ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments,
-    MailLabelRow, MailListEntry, MailProfileRow, MailboxRow, MotionSettings, SidebarRow,
+    AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow,
+    CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay,
+    ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, ContactSyncState,
+    ContactValueRow, EmailRow, ImportAccountRow, ImportFailureRow, ImportFindingRow,
+    ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments, MailLabelRow,
+    MailListEntry, MailProfileRow, MailboxRow, MotionSettings, ProfileMemberRow, SidebarRow,
     SidebarRowKind, StorageUsageRow, ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
@@ -84,6 +85,32 @@ fn message(key: &str) -> LocalizedMessage {
     }
 }
 
+fn calendar(
+    id: i32,
+    kind: &str,
+    host: &str,
+    calendar_name: &str,
+    calendar_count: i32,
+    enabled: bool,
+    error: &str,
+) -> CalendarConnectionRow {
+    CalendarConnectionRow {
+        id,
+        kind: kind.into(),
+        base_url: format!("https://{host}/").into(),
+        host: host.into(),
+        username: if kind == "generic" {
+            "alex.morgan@example.com".into()
+        } else {
+            Default::default()
+        },
+        calendar_name: calendar_name.into(),
+        calendar_count,
+        enabled,
+        error: error.into(),
+    }
+}
+
 // Between them, the accounts show every calendar and contacts control an
 // account card can have.
 fn accounts() -> Vec<AccountRow> {
@@ -93,7 +120,7 @@ fn accounts() -> Vec<AccountRow> {
             drag_key: "1".into(),
             name: "Alex Morgan".into(),
             email: "alex.morgan@example.com".into(),
-            provider: "imap".into(),
+            provider: "generic".into(),
             mail_protocol: "imap".into(),
             status: "Synced".into(),
             initials: "AM".into(),
@@ -102,18 +129,27 @@ fn accounts() -> Vec<AccountRow> {
             profile_color: slint::Color::from_rgb_u8(0x8b, 0x5c, 0xf6),
             has_profile: true,
             username: "alex.morgan@example.com".into(),
-            imap_security: "auto".into(),
-            smtp_security: "auto".into(),
-            imap_host: "imap.example.com".into(),
-            imap_port: "993".into(),
+            incoming_security: "tls".into(),
+            smtp_security: "tls".into(),
+            incoming_host: "imap.example.com".into(),
+            incoming_port: "993".into(),
             smtp_host: "smtp.example.com".into(),
             smtp_port: "465".into(),
             mail_history: "sixMonths".into(),
-            calendar_connected: true,
-            calendar_enabled: true,
-            calendar_status: "Connected".into(),
-            caldav_url: "https://dav.example.com/calendars/alex/".into(),
-            caldav_username: "alex.morgan@example.com".into(),
+            calendar_connections: model(vec![
+                calendar(1, "generic", "dav.example.com", "", 3, true, ""),
+                calendar(2, "generic", "www.google.com", "Support Team", 1, true, "needs_reauth"),
+                calendar(3, "generic", "cloud.example.com", "", 2, false, ""),
+                calendar(
+                    4,
+                    "generic",
+                    "holidays.example.com",
+                    "Holidays",
+                    1,
+                    true,
+                    "Holidays: caldav error: calendar-query: HTTP 403",
+                ),
+            ]),
             carddav_connected: true,
             carddav_enabled: true,
             carddav_url: "https://dav.example.com/addressbooks/alex/".into(),
@@ -131,6 +167,9 @@ fn accounts() -> Vec<AccountRow> {
             sync_error: "The server closed the connection before the mailbox was selected.".into(),
             initials: "ST".into(),
             mail_history: "sixMonths".into(),
+            provider_calendar_error:
+                "auth failed: consent was granted for someone@example.com - expected support@example.org"
+                    .into(),
             ..Default::default()
         },
         AccountRow {
@@ -138,14 +177,24 @@ fn accounts() -> Vec<AccountRow> {
             drag_key: "3".into(),
             name: "Sam Rivera".into(),
             email: "sam@example.net".into(),
-            provider: "imap".into(),
+            provider: "microsoft".into(),
             mail_protocol: "imap".into(),
             status: "idle".into(),
             initials: "SR".into(),
             username: "sam@example.net".into(),
-            imap_security: "auto".into(),
-            smtp_security: "auto".into(),
+            incoming_security: "tls".into(),
+            smtp_security: "tls".into(),
             mail_history: "sixMonths".into(),
+            calendar_connections: model(vec![calendar(
+                5,
+                "microsoft",
+                "graph.microsoft.com",
+                "Calendar",
+                2,
+                true,
+                "offline",
+            )]),
+            provider_calendar_connected: true,
             carddav_connected: true,
             carddav_status: "Authentication failed".into(),
             ..Default::default()
@@ -321,17 +370,43 @@ fn calendar_event(id: i32, title: &str, day_index: i32, start_minutes: i32) -> C
     }
 }
 
-fn apply_fixture(app: &AppWindow) {
-    app.global::<MotionSettings>().set_enabled(false);
-    app.set_startup_ready(true);
-    app.set_startup_hydrated(true);
-    app.set_connected_accounts(model(accounts()));
-    app.set_mail_profiles(model(vec![MailProfileRow {
+fn work_profile() -> MailProfileRow {
+    MailProfileRow {
         id: "work".into(),
         name: "Work".into(),
         color: slint::Color::from_rgb_u8(0x8b, 0x5c, 0xf6),
         account_count: 1,
-    }]));
+    }
+}
+
+fn apply_fixture(app: &AppWindow) {
+    app.global::<MotionSettings>().set_enabled(false);
+    // Linux shows the app icon card with its longest description and note.
+    app.global::<AppIcon>().set_available(true);
+    app.global::<AppIcon>().set_platform("linux".into());
+    app.set_startup_ready(true);
+    app.set_startup_hydrated(true);
+    app.set_connected_accounts(model(accounts()));
+    app.set_mail_profiles(model(vec![work_profile()]));
+    // The profile editor's checklist; the app fills it as the editor opens.
+    app.set_profile_members(model(
+        accounts()
+            .into_iter()
+            .map(|account| ProfileMemberRow {
+                id: account.id,
+                checked: account.has_profile,
+                other_profile: if account.id == 3 {
+                    "Personal".into()
+                } else {
+                    Default::default()
+                },
+                name: account.name,
+                email: account.email,
+                initials: account.initials,
+                ..Default::default()
+            })
+            .collect(),
+    ));
     app.set_mail_list_entries(model(mail_entries(false)));
     app.set_emails(model(emails()));
     app.set_sidebar_rows(model(sidebar_rows()));
@@ -424,6 +499,7 @@ fn apply_fixture(app: &AppWindow) {
                 day: (19 + index).to_string().into(),
                 iso_date: format!("2026-10-{}", 19 + index).into(),
                 is_today: index == 0,
+                ..Default::default()
             })
             .collect(),
     ));
@@ -438,6 +514,7 @@ fn apply_fixture(app: &AppWindow) {
                     is_today: index == 21,
                     is_selected: index == 21,
                     has_events: index % 5 == 0,
+                    ..Default::default()
                 }
             })
             .collect(),
@@ -565,8 +642,29 @@ fn apply_fixture(app: &AppWindow) {
     app.set_contact_has_selection(true);
     app.set_contact_id(1);
     app.set_contact_name("Jamie Rivera".into());
-    app.set_contact_email("jamie.rivera@example.com".into());
-    app.set_contact_phone("+1 555 0100".into());
+    app.set_contact_emails(model(vec![
+        ContactValueRow {
+            value: "jamie.rivera@example.com".into(),
+            label: "WORK".into(),
+            preference: 1,
+            ..Default::default()
+        },
+        ContactValueRow {
+            value: "jamie@example.net".into(),
+            label: "HOME".into(),
+            preference: 100,
+            ..Default::default()
+        },
+    ]));
+    app.set_contact_phones(model(vec![ContactValueRow {
+        value: "+1 555 0100".into(),
+        label: "CELL".into(),
+        preference: 100,
+        ..Default::default()
+    }]));
+    app.set_contact_source("Personal · jamie.rivera@example.com".into());
+    app.set_contact_sync(ContactSyncState::Pending);
+    app.on_usable_contact_email(|email| flectar_mail_core::carddav::vcard::usable_email(&email));
     app.set_contact_company("Northwind".into());
     app.set_contact_job_title("Product lead".into());
     app.set_contact_notes("Prefers morning meetings.".into());
@@ -577,6 +675,11 @@ fn apply_fixture(app: &AppWindow) {
 
 // Each state starts from the populated mail window.
 fn reset(app: &AppWindow) {
+    // The phone editor stays open when switching workspaces. Return to the
+    // contact list so each scenario starts from the same navigation state.
+    if app.get_active_view() == "contacts" {
+        app.invoke_system_back_requested();
+    }
     if app.get_connected_accounts().row_count() == 0 {
         app.set_connected_accounts(model(accounts()));
     }
@@ -584,7 +687,11 @@ fn reset(app: &AppWindow) {
     app.set_workspace_layout("default".into());
     app.set_mail_list_entries(model(mail_entries(false)));
     app.set_active_view("mail".into());
+    app.set_mail_sidebar_collapsed(false);
+    app.set_active_mail_profile(MailProfileRow::default());
     app.set_settings_open(false);
+    app.set_contact_source("Personal · jamie.rivera@example.com".into());
+    app.set_contact_sync(ContactSyncState::Pending);
     app.set_settings_tab("General".into());
     app.set_compose_open(false);
     app.set_calendar_editor_open(false);
@@ -690,12 +797,18 @@ fn load_catalog(language: &str) -> BTreeMap<String, String> {
     };
     let mut catalog = BTreeMap::new();
     let (mut id, mut text, mut field) = (String::new(), String::new(), "");
+    // Slint skips fuzzy entries, so the app shows their source text.
+    let (mut fuzzy, mut next_fuzzy) = (false, false);
     for line in std::fs::read_to_string(path).unwrap().lines() {
         if let Some(rest) = line.strip_prefix("msgid ") {
-            if !id.is_empty() && !text.is_empty() {
+            if !id.is_empty() && !text.is_empty() && !fuzzy {
                 catalog.insert(std::mem::take(&mut id), std::mem::take(&mut text));
             }
             (id, text, field) = (unquote(rest), String::new(), "id");
+            fuzzy = std::mem::take(&mut next_fuzzy);
+        } else if let Some(flags) = line.strip_prefix("#,") {
+            next_fuzzy = flags.split(',').any(|flag| flag.trim() == "fuzzy");
+            field = "";
         } else if let Some(rest) = line.strip_prefix("msgstr ") {
             (text, field) = (unquote(rest), "text");
         } else if line.starts_with('"') {
@@ -708,7 +821,7 @@ fn load_catalog(language: &str) -> BTreeMap<String, String> {
             field = "";
         }
     }
-    if !id.is_empty() && !text.is_empty() {
+    if !id.is_empty() && !text.is_empty() && !fuzzy {
         catalog.insert(id, text);
     }
     catalog
@@ -772,6 +885,8 @@ struct State {
     dismiss: Option<&'static str>,
     /// Reaches controls the phone layout keeps on another page.
     desktop_only: bool,
+    /// Reaches controls only the phone layout has.
+    phone_only: bool,
 }
 
 fn state(name: &str, setup: impl Fn(&AppWindow) + 'static) -> State {
@@ -780,6 +895,7 @@ fn state(name: &str, setup: impl Fn(&AppWindow) + 'static) -> State {
         setup: Box::new(setup),
         dismiss: None,
         desktop_only: false,
+        phone_only: false,
     }
 }
 
@@ -813,6 +929,33 @@ fn states() -> Vec<State> {
         State {
             desktop_only: true,
             ..state("mail labels", |app| press(app, "Manage labels"))
+        },
+        // The tab strip with the sidebar closed, its pill before the tabs.
+        State {
+            desktop_only: true,
+            ..state("mail sidebar collapsed", |app| {
+                app.set_active_mail_profile(work_profile());
+                app.set_mail_sidebar_collapsed(true);
+            })
+        },
+        State {
+            desktop_only: true,
+            ..state("profile menu", |app| press(app, "Profile"))
+        },
+        State {
+            desktop_only: true,
+            ..state("profile menu with a profile", |app| {
+                app.set_active_mail_profile(work_profile());
+                press(app, "Profile");
+            })
+        },
+        State {
+            dismiss: Some("Close folders"),
+            phone_only: true,
+            ..state("mail folders", |app| {
+                app.set_active_mail_profile(work_profile());
+                press(app, "Hide folders");
+            })
         },
         State {
             dismiss: Some("Cancel"),
@@ -859,6 +1002,31 @@ fn states() -> Vec<State> {
             })
         },
         state("contacts", |app| app.set_active_view("contacts".into())),
+        state("contact editor", |app| {
+            app.set_active_view("contacts".into());
+            // The host callback is unset, so this opens the phone editor
+            // while retaining the populated fixture for layout checks.
+            press(app, "New contact");
+        }),
+        state("contact conflict", |app| {
+            app.set_active_view("contacts".into());
+            app.set_contact_sync(ContactSyncState::Conflict);
+            press(app, "New contact");
+        }),
+        state("contact kept after removal", |app| {
+            app.set_active_view("contacts".into());
+            app.set_contact_source("".into());
+            app.set_contact_sync(ContactSyncState::Detached);
+            press(app, "New contact");
+        }),
+        state("contact sync failure", |app| {
+            app.set_active_view("contacts".into());
+            app.set_contact_sync(ContactSyncState::Failed);
+            app.set_contact_sync_detail(
+                "Server returned no ETag after saving; waiting to reconcile".into(),
+            );
+            press(app, "New contact");
+        }),
         state("files", |app| app.set_active_view("files".into())),
         state("compose", |app| {
             app.set_compose_to("jamie.rivera@example.com".into());
@@ -893,6 +1061,21 @@ fn states() -> Vec<State> {
             app.set_settings_tab("Accounts".into());
             app.set_settings_open(true);
             press(app, "No profile");
+        }),
+        state("settings caldav form", |app| {
+            app.set_settings_tab("Accounts".into());
+            app.set_settings_open(true);
+            app.set_caldav_account_id(1);
+            app.set_caldav_url("https://dav.example.com/".into());
+            app.set_caldav_username("alex.morgan@example.com".into());
+        }),
+        state("settings caldav settings", |app| {
+            app.set_settings_tab("Accounts".into());
+            app.set_settings_open(true);
+            app.set_caldav_account_id(1);
+            app.set_caldav_connection_id(2);
+            app.set_caldav_url("https://dav.example.com/".into());
+            app.set_caldav_username("alex.morgan@example.com".into());
         }),
     ];
     for tab in [
@@ -1478,7 +1661,9 @@ fn text_fits_at_desktop_font_sizes() {
             app.window()
                 .set_size(slint::PhysicalSize::new(width, height));
             for state in states() {
-                if state.desktop_only && window_name != "desktop" {
+                if state.desktop_only && window_name != "desktop"
+                    || state.phone_only && window_name != "phone"
+                {
                     continue;
                 }
                 reset(&app);

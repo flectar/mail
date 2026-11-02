@@ -2,7 +2,7 @@
 use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
 use flectar_mail_core::config::Paths;
 use flectar_mail_core::models::*;
-use flectar_mail_core::{Core, imap, smtp};
+use flectar_mail_core::{Core, imap, net, smtp};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use std::sync::Arc;
 use tokio::{
@@ -37,7 +37,7 @@ fn settings_with_certificate(
     certificate: &str,
 ) -> MailConnectionSettings {
     MailConnectionSettings {
-        imap_security: mode,
+        incoming_security: mode,
         smtp_security: mode,
         trusted_certificate_pem: certificate.into(),
     }
@@ -183,11 +183,194 @@ async fn imap_server_with_certificate(
     });
     (port, task)
 }
+/// An unencrypted IMAP server. With `login_disabled` it announces
+/// LOGINDISABLED and fails the test if credentials arrive anyway.
+async fn plaintext_imap_server(login_disabled: bool) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        advertise_capabilities(
+            &mut stream,
+            if login_disabled {
+                "IMAP4rev1 STARTTLS LOGINDISABLED"
+            } else {
+                "IMAP4rev1 ID"
+            },
+        )
+        .await;
+        let login = line(&mut stream).await;
+        if login_disabled {
+            assert!(
+                login.is_empty(),
+                "credentials sent despite LOGINDISABLED: {login:?}"
+            );
+            return;
+        }
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    (port, task)
+}
+
+/// An unencrypted SMTP server. Without `offer_auth` it offers sign-in only
+/// after STARTTLS and fails the test if credentials arrive anyway.
+async fn plaintext_smtp_server(offer_auth: bool) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        if !offer_auth {
+            stream
+                .write_all(b"250-localhost\r\n250 STARTTLS\r\n")
+                .await
+                .unwrap();
+            assert_eq!(
+                line(&mut stream).await,
+                "QUIT\r\n",
+                "credentials sent without AUTH"
+            );
+            stream.write_all(b"221 Goodbye\r\n").await.unwrap();
+            return;
+        }
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        assert!(line(&mut stream).await.starts_with("AUTH PLAIN "));
+        stream.write_all(b"235 Authenticated\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "NOOP\r\n");
+        stream.write_all(b"250 OK\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "QUIT\r\n");
+        stream.write_all(b"221 Goodbye\r\n").await.unwrap();
+    });
+    (port, task)
+}
+
 fn credentials() -> imap::ImapCredentials {
     imap::ImapCredentials::Password {
         user: "bridge-user".into(),
         password: "bridge-password".into(),
     }
+}
+
+#[tokio::test]
+async fn imap_without_encryption_signs_in_over_plain_tcp() {
+    let (port, task) = plaintext_imap_server(false).await;
+    let session = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .unwrap();
+    imap::logout(session).await;
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn imap_never_sends_a_password_the_server_refuses_unencrypted() {
+    let (port, task) = plaintext_imap_server(true).await;
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        error
+            .to_string()
+            .contains("only over an encrypted connection"),
+        "{error}"
+    );
+    assert!(!matches!(
+        error,
+        flectar_mail_core::error::CoreError::Auth(_)
+    ));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn oauth_tokens_never_travel_unencrypted() {
+    // Refused before connecting, so nothing needs to listen on the port.
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        9,
+        imap::ImapCredentials::XOAuth2 {
+            user: "user@example.com".into(),
+            access_token: "token".into(),
+        },
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        error.to_string().contains("encrypted connection"),
+        "{error}"
+    );
+
+    let mut config = smtp_config(9, ConnectionSecurity::None, CERT);
+    config.auth_kind = AuthKind::Oauth2;
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::XOAuth2("token".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("encrypted connection"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn smtp_without_encryption_signs_in_over_plain_tcp() {
+    let (port, task) = plaintext_smtp_server(true).await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    smtp::test_connection(&config, &smtp::SmtpAuth::Password("bridge-password".into()))
+        .await
+        .unwrap();
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn smtp_never_sends_a_password_the_server_does_not_accept_unencrypted() {
+    let (port, task) = plaintext_smtp_server(false).await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("bridge-password".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("only over an encrypted connection"),
+        "{error}"
+    );
+    assert!(!matches!(
+        error,
+        flectar_mail_core::error::CoreError::Auth(_)
+    ));
+    task.await.unwrap();
 }
 
 #[tokio::test]
@@ -798,22 +981,75 @@ fn smtp_config(port: u16, mode: ConnectionSecurity, certificate: &str) -> Accoun
         email: "user@example.com".into(),
         display_name: None,
         avatar_url: None,
-        provider: Provider::Imap,
+        provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,
         username: "bridge-user".into(),
         jmap_url: String::new(),
         jmap_account_id: None,
-        imap_host: "127.0.0.1".into(),
-        imap_port: 993,
+        incoming_host: "127.0.0.1".into(),
+        incoming_port: 993,
         smtp_host: "127.0.0.1".into(),
         smtp_port: port,
-        settings: AccountSettings {
-            connection: settings_with_certificate(mode, certificate),
-            ..Default::default()
-        },
+        settings: AccountSettings::new(settings_with_certificate(mode, certificate)),
     }
 }
+/// A relay that takes the message and then never answers must not hold the
+/// submission worker forever.
+#[tokio::test]
+async fn smtp_send_gives_up_on_a_stalled_relay() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (stalled_tx, stalled) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        assert!(line(&mut stream).await.starts_with("AUTH PLAIN "));
+        stream.write_all(b"235 Authenticated\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("MAIL FROM:"));
+        stream.write_all(b"250 OK\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("RCPT TO:"));
+        stream.write_all(b"250 OK\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "DATA\r\n");
+        stream.write_all(b"354 Continue\r\n").await.unwrap();
+        while line(&mut stream).await != ".\r\n" {}
+        stalled_tx.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    let config = smtp_config(port, ConnectionSecurity::Tls, CERT);
+    let send = tokio::spawn(async move {
+        smtp::send_raw(
+            &config,
+            &smtp::SmtpAuth::Password("bridge-password".into()),
+            "user@example.com",
+            &["friend@example.com".into()],
+            b"Subject: Hello\r\n\r\nBody\r\n",
+        )
+        .await
+    });
+    // The exchange runs in real time. Time that advances on its own while the
+    // handshake still waits on the network would fire unrelated deadlines, so
+    // the clock only jumps past the idle deadline once the relay has stalled.
+    tokio::time::timeout(std::time::Duration::from_secs(10), stalled)
+        .await
+        .expect("the relay never received the message")
+        .unwrap();
+    tokio::time::pause();
+    tokio::time::advance(std::time::Duration::from_secs(61)).await;
+    let error = send.await.unwrap().unwrap_err();
+    assert!(
+        error.to_string().contains("connection timed out after 60s"),
+        "{error}"
+    );
+    server.abort();
+}
+
 #[tokio::test]
 async fn smtp_starttls_on_custom_port() {
     smtp_connection(ConnectionSecurity::Starttls).await;
@@ -825,7 +1061,7 @@ async fn smtp_implicit_tls_on_custom_port() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn smtp_delivery_does_not_wait_for_the_imap_sync_actor() {
-    smtp_sent_policy(Provider::Imap, SentCopyPolicy::Auto, 1).await;
+    smtp_sent_policy(Provider::Generic, SentCopyPolicy::Auto, 1).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -836,11 +1072,11 @@ async fn smtp_microsoft_auto_save_skips_append_and_client_override_restores_it()
 
 #[tokio::test(flavor = "multi_thread")]
 async fn smtp_server_override_takes_effect_without_restarting_worker() {
-    smtp_sent_policy(Provider::Imap, SentCopyPolicy::Server, 0).await;
+    smtp_sent_policy(Provider::Generic, SentCopyPolicy::Server, 0).await;
 }
 
 async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_appends: i64) {
-    let (imap_port, imap_task) = imap_server(false, false).await;
+    let (incoming_port, imap_task) = imap_server(false, false).await;
     let (smtp_port, delivered, smtp_task) = smtp_test_and_delivery_server().await;
     let temp = tempfile::tempdir().unwrap();
     let credentials = Arc::new(DevelopmentFileCredentialStore::new(
@@ -857,8 +1093,8 @@ async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_a
             password: "test-password".into(),
             mail_protocol: MailProtocol::Imap,
             jmap_url: String::new(),
-            imap_host: "127.0.0.1".into(),
-            imap_port,
+            incoming_host: "127.0.0.1".into(),
+            incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port,
             connection: settings(ConnectionSecurity::Tls),
@@ -1067,20 +1303,15 @@ async fn proton_bridge_ca_certificate_still_checks_hostname() {
 
 #[test]
 fn rejects_invalid_certificate_imports() {
-    assert!(imap::trusted_certificates(KEY).is_err());
-    assert!(imap::trusted_certificates(&format!("{CERT}\n{KEY}")).is_err());
-    assert!(imap::trusted_certificates("not a certificate").is_err());
-    assert!(imap::trusted_certificates(&"x".repeat(256 * 1024 + 1)).is_err());
-    assert_eq!(imap::trusted_certificates(CERT).unwrap().len(), 1);
+    assert!(net::tls::trusted_certificates(KEY).is_err());
+    assert!(net::tls::trusted_certificates(&format!("{CERT}\n{KEY}")).is_err());
+    assert!(net::tls::trusted_certificates("not a certificate").is_err());
+    assert!(net::tls::trusted_certificates(&"x".repeat(256 * 1024 + 1)).is_err());
+    assert_eq!(net::tls::trusted_certificates(CERT).unwrap().len(), 1);
 }
 #[test]
-fn settings_round_trip_and_legacy_defaults() {
-    let legacy: AccountSettings = serde_json::from_str("{}").unwrap();
-    assert_eq!(legacy.connection, MailConnectionSettings::default());
-    let configured = AccountSettings {
-        connection: settings(ConnectionSecurity::Starttls),
-        ..legacy
-    };
+fn connection_settings_round_trip() {
+    let configured = AccountSettings::new(settings(ConnectionSecurity::Starttls));
     let restored: AccountSettings =
         serde_json::from_str(&serde_json::to_string(&configured).unwrap()).unwrap();
     assert_eq!(configured.connection, restored.connection);
@@ -1119,7 +1350,7 @@ async fn smtp_failure_prevents_saving_account() {
     )
     .await
     .unwrap();
-    let (imap_port, imap_task) = imap_server(true, false).await;
+    let (incoming_port, imap_task) = imap_server(true, false).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let smtp_port = listener.local_addr().unwrap().port();
     let smtp_task = tokio::spawn(async move {
@@ -1139,8 +1370,8 @@ async fn smtp_failure_prevents_saving_account() {
             password: "\r\nbridge-password\r\n".into(),
             mail_protocol: MailProtocol::Imap,
             jmap_url: String::new(),
-            imap_host: "127.0.0.1".into(),
-            imap_port,
+            incoming_host: "127.0.0.1".into(),
+            incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port,
             connection: settings(ConnectionSecurity::Starttls),
@@ -1159,7 +1390,7 @@ async fn imap_mailbox_failure_prevents_saving_account() {
         Core, accounts::credentials::DevelopmentFileCredentialStore, config::Paths,
     };
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let imap_port = listener.local_addr().unwrap().port();
+    let incoming_port = listener.local_addr().unwrap().port();
     let imap_task = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
@@ -1213,8 +1444,8 @@ async fn imap_mailbox_failure_prevents_saving_account() {
             password: "bridge-password".into(),
             mail_protocol: MailProtocol::Imap,
             jmap_url: String::new(),
-            imap_host: "127.0.0.1".into(),
-            imap_port,
+            incoming_host: "127.0.0.1".into(),
+            incoming_port,
             smtp_host: "127.0.0.1".into(),
             smtp_port: 1,
             connection: settings(ConnectionSecurity::Tls),
@@ -1236,19 +1467,16 @@ async fn backup_import_preserves_transport_settings_and_rejects_private_keys() {
     let mut config = PortableAccountConfig {
         email: "user@example.com".into(),
         display_name: None,
-        provider: Provider::Imap,
+        provider: Provider::Generic,
         auth_kind: AuthKind::Password,
         mail_protocol: MailProtocol::Imap,
         username: "bridge-user".into(),
         jmap_url: String::new(),
-        imap_host: "127.0.0.1".into(),
-        imap_port: 1143,
+        incoming_host: "127.0.0.1".into(),
+        incoming_port: 1143,
         smtp_host: "127.0.0.1".into(),
         smtp_port: 1025,
-        settings: AccountSettings {
-            connection: settings(ConnectionSecurity::Starttls),
-            ..Default::default()
-        },
+        settings: AccountSettings::new(settings(ConnectionSecurity::Starttls)),
     };
     core.import_account_configs(vec![config.clone()])
         .await
@@ -1263,4 +1491,59 @@ async fn backup_import_preserves_transport_settings_and_rejects_private_keys() {
     config.settings.connection.trusted_certificate_pem = KEY.into();
     assert!(core.import_account_configs(vec![config]).await.is_err());
     assert_eq!(core.list_accounts().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn another_gmail_spelling_does_not_edit_a_password_account() {
+    let temp = tempfile::tempdir().unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("test-credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
+    core.import_account_configs(vec![PortableAccountConfig {
+        email: "johndoe@gmail.com".into(),
+        display_name: None,
+        provider: Provider::Generic,
+        auth_kind: AuthKind::Password,
+        mail_protocol: MailProtocol::Imap,
+        username: "johndoe@gmail.com".into(),
+        jmap_url: String::new(),
+        incoming_host: "imap.gmail.com".into(),
+        incoming_port: 993,
+        smtp_host: "smtp.gmail.com".into(),
+        smtp_port: 465,
+        settings: AccountSettings::new(settings(ConnectionSecurity::Tls)),
+    }])
+    .await
+    .unwrap();
+
+    // Taking the new spelling would look like another user to the update
+    // and reset the account's mail, so the form names the existing account.
+    let error = core
+        .add_account_password(AddPasswordAccountArgs {
+            email: "John.Doe@gmail.com".into(),
+            display_name: None,
+            username: "john.doe@gmail.com".into(),
+            password: "app-password".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            incoming_host: "imap.gmail.com".into(),
+            incoming_port: 993,
+            smtp_host: "smtp.gmail.com".into(),
+            smtp_port: 465,
+            connection: settings(ConnectionSecurity::Tls),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "auth failed: johndoe@gmail.com is already added"
+    );
+    let configs = core.list_account_configs().await.unwrap();
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].username, "johndoe@gmail.com");
 }

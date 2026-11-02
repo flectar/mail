@@ -18,6 +18,8 @@ export component CalendarEventDialog inherits Rectangle {
     in-out property <string> calendar_event_title: "";
     in-out property <string> calendar_event_date: "";
     in-out property <string> calendar_event_time: "09:00";
+    // A time on the user's clock, shown while the time field is empty.
+    in property <string> time-placeholder: "13:30";
     in-out property <string> calendar_event_duration: "60";
     in-out property <int> calendar_event_color: 0;
     callback calendar-save-event(string, string, string, string, int);
@@ -48,13 +50,13 @@ export component CalendarEventDialog inherits Rectangle {
 
                 event-heading := Text { x: 24px; y: 22px; width: parent.width - 48px; height: max(28px, self.preferred-height); text: root.calendar_event_editing ? @tr("Edit event") : @tr("New event"); color: root.title-color; font-size: TypeScale.title-small; font-weight: 700; }
                 title-label := Text { x: 24px; y: event-heading.y + event-heading.height + 16px; width: parent.width - 48px; height: max(18px, self.preferred-height); text: @tr("TITLE"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; }
-                title-field := LineEdit { x: 24px; y: title-label.y + title-label.height + 4px; width: parent.width - 48px; height: root.compact ? 44px : 38px; text: root.calendar_event_title; placeholder-text: @tr("Event title"); edited(value) => { root.calendar_event_title = value; } }
+                title-field := LineEdit { x: 24px; y: title-label.y + title-label.height + 4px; width: parent.width - 48px; height: root.compact ? 44px : 38px; text <=> root.calendar_event_title; placeholder-text: @tr("Event title"); }
                 date-label := Text { x: 24px; y: title-field.y + 54px; width: (parent.width - 56px) / 2; height: max(18px, max(self.preferred-height, start-label.preferred-height)); wrap: word-wrap; text: @tr("DATE"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; }
                 start-label := Text { x: parent.width / 2 + 4px; y: date-label.y; width: (parent.width - 56px) / 2; height: date-label.height; wrap: word-wrap; text: @tr("START TIME"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; }
-                date-field := LineEdit { x: 24px; y: date-label.y + date-label.height + 4px; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text: root.calendar_event_date; placeholder-text: @tr("YYYY-MM-DD"); edited(value) => { root.calendar_event_date = value; } }
-                LineEdit { x: parent.width / 2 + 4px; y: date-field.y; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text: root.calendar_event_time; placeholder-text: @tr("09:00"); edited(value) => { root.calendar_event_time = value; } }
+                date-field := LineEdit { x: 24px; y: date-label.y + date-label.height + 4px; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text <=> root.calendar_event_date; placeholder-text: @tr("YYYY-MM-DD"); }
+                LineEdit { x: parent.width / 2 + 4px; y: date-field.y; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text <=> root.calendar_event_time; placeholder-text: root.time-placeholder; }
                 duration-label := Text { x: 24px; y: date-field.y + 54px; width: (parent.width - 56px) / 2; height: max(18px, max(self.preferred-height, calendar-label.preferred-height)); wrap: word-wrap; text: @tr("DURATION (MINUTES)"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; }
-                duration-field := LineEdit { x: 24px; y: duration-label.y + duration-label.height + 4px; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text: root.calendar_event_duration; placeholder-text: @tr("60"); input-type: InputType.number; edited(value) => { root.calendar_event_duration = value; } }
+                duration-field := LineEdit { x: 24px; y: duration-label.y + duration-label.height + 4px; width: (parent.width - 56px) / 2; height: root.compact ? 44px : 38px; text <=> root.calendar_event_duration; placeholder-text: @tr("60"); input-type: InputType.number; }
                 calendar-label := Text { x: parent.width / 2 + 4px; y: duration-label.y; width: (parent.width - 56px) / 2; height: duration-label.height; wrap: word-wrap; text: @tr("CALENDAR"); color: root.muted-text; font-size: TypeScale.caption; font-weight: 700; }
                 HorizontalBox {
                     x: parent.width / 2 + 4px;

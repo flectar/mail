@@ -1,11 +1,14 @@
 import { AccountMailPreferencesPanel } from "../components/account-mail-preferences.slint";
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
+import { AppIcon } from "../app-icon.slint";
+import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
-import { MailSecurityFields } from "../components/mail-security-fields.slint";
+import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
 import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
-import { AccountRow, MailProfileRow, StorageUsageRow } from "../models.slint";
+import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
+import { AccountCalendars } from "../components/account-calendars.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
@@ -14,11 +17,16 @@ import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
-import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow } from "../components/settings-components.slint";
+import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
+import { Shortcuts } from "../shortcuts.slint";
+import { TabsUi } from "../components/workspace-navigation.slint";
+import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
+import { LocalMailUi } from "../local-mail.slint";
+import { Numbers } from "../numbers.slint";
 
 // Use the same focusable controls in both account-card layouts.
 component AccountActions inherits HorizontalLayout {
@@ -133,7 +141,7 @@ component WorkspaceLayoutChoice inherits FocusVisibleScope {
             x: 10px; y: 9px; width: parent.width - 20px; height: 34px;
             border-radius: 4px; border-width: 1px; border-color: AppTheme.border;
             background: AppTheme.page-bg; clip: true;
-            Rectangle { x: 0px; width: root.minimal ? 11px : 18px; height: parent.height; background: AppTheme.sidebar-bg; }
+            Rectangle { x: 0px; width: root.minimal ? 11px : 18px; height: parent.height; background: AppTheme.sidebar-tint; }
             Rectangle { x: root.minimal ? 14px : 21px; y: 4px; width: root.minimal ? parent.width - 18px : 25px; height: parent.height - 8px; border-radius: 2px; background: AppTheme.surface; }
             if !root.minimal : Rectangle { x: 49px; y: 4px; width: parent.width - 53px; height: parent.height - 8px; border-radius: 2px; background: AppTheme.surface; }
         }
@@ -145,36 +153,6 @@ component WorkspaceLayoutChoice inherits FocusVisibleScope {
         }
         layout-hit := TouchArea { clicked => { root.pointer-activated(); root.chosen(); } mouse-cursor: pointer; }
     }
-}
-
-component ProfileColorChoice inherits FocusVisibleScope {
-    in property <color> value;
-    in property <bool> selected: false;
-    in property <string> label;
-    callback chosen;
-
-    focus-on-click: true;
-    focus-on-tab-navigation: true;
-    accessible-role: radio-button;
-    accessible-label: root.label;
-    accessible-checked: root.selected;
-    accessible-action-default => { root.chosen(); }
-    key-pressed(event) => {
-        if event.text == Key.Return || event.text == Key.Space {
-            root.chosen();
-            return accept;
-        }
-        reject
-    }
-    Rectangle {
-        width: parent.width;
-        height: parent.height;
-        border-radius: self.width / 2;
-        border-width: root.selected || root.focus-visible ? 3px : 1px;
-        border-color: root.selected || root.focus-visible ? AppTheme.heading : AppTheme.border;
-        background: root.value;
-    }
-    TouchArea { mouse-cursor: pointer; clicked => { root.focus(); root.pointer-activated(); root.chosen(); } }
 }
 
 component StorageUsageCard inherits Rectangle {
@@ -461,6 +439,10 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> compact: false;
     in property <[AccountRow]> connected_accounts: [];
     in property <[MailProfileRow]> mail_profiles: [];
+    // The profile editor's account checklist, from `prepare_profile_members`.
+    in property <[ProfileMemberRow]> profile_members: [];
+    // Set to open the profile editor for a new profile.
+    in-out property <bool> new-profile-requested: false;
     in property <bool> custom_oauth_configured: false;
     in property <bool> google_oauth_available: false;
     in property <bool> microsoft_oauth_available: false;
@@ -500,6 +482,8 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
+    in-out property <string> time_format: "automatic";
+    in property <string> time_format_sample: "13:30";
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
@@ -520,19 +504,22 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> account_protocol: "imap";
     in-out property <string> jmap_url: "";
     in-out property <bool> connect_calendar_on_add: true;
+    // The CalDAV form adds a connection to this account, or changes the
+    // connection with this id when it is positive.
     in-out property <int> caldav_account_id: -1;
+    in-out property <int> caldav_connection_id: -1;
     in-out property <string> caldav_url: "";
     in-out property <string> caldav_username: "";
     in-out property <string> caldav_password: "";
-    in-out property <bool> caldav_manage_existing: false;
     in property <bool> caldav_connecting: false;
+    private property <string> caldav-account-email: "";
     in-out property <int> carddav_account_id: -1;
     in-out property <string> carddav_url: "";
     in-out property <string> carddav_username: "";
     in-out property <string> carddav_password: "";
     in-out property <bool> carddav_manage_existing: false;
-    in-out property <string> imap_security: "auto";
-    in-out property <string> smtp_security: "auto";
+    in-out property <string> incoming_security: "tls";
+    in-out property <string> smtp_security: "tls";
     in-out property <string> trusted_certificate_pem;
     in property <string> oauth_authorization_url;
     in property <bool> oauth_browser_error;
@@ -540,8 +527,8 @@ export component SettingsDialog inherits Rectangle {
     callback copy_oauth_link();
     callback submit_oauth_redirect(string);
     callback import_mail_certificate();
-    in-out property <string> imap_host: "";
-    in-out property <string> imap_port: "993";
+    in-out property <string> incoming_host: "";
+    in-out property <string> incoming_port: "993";
     in-out property <string> smtp_host: "";
     in-out property <string> smtp_port: "465";
     in-out property <string> google_client_id: "";
@@ -553,13 +540,20 @@ export component SettingsDialog inherits Rectangle {
     // through their own document provider and hide the setting.
     in-out property <bool> download_directory_available: false;
     in-out property <bool> custom_oauth_open: false;
-    in-out property <bool> imap_form_open: false;
-    private property <bool> imap_editing: false;
+    in-out property <bool> account_form_open: false;
+    private property <bool> account_editing: false;
     private property <bool> show_account_status: false;
     in-out property <bool> delete_data_confirmation: false;
     in-out property <bool> delete_account_confirmation: false;
     in-out property <int> delete_account_id: -1;
     in-out property <string> delete_account_name: "";
+    // The account being removed keeps its mail only on this device (POP3).
+    private property <bool> delete_account_device_mail: false;
+    private property <bool> delete_local_mail_confirmation: false;
+    // Some account keeps its mail only on this device (POP3).
+    in property <bool> has_device_mail: false;
+    in property <bool> mail_export_running: false;
+    in property <string> mail_export_status: "";
     private property <bool> compact-nav-open: false;
     private property <bool> clear-contact-suggestions-confirming: false;
     private property <string> settings-search-query: "";
@@ -571,13 +565,14 @@ export component SettingsDialog inherits Rectangle {
     private property <bool> delete-profile-confirmation: false;
     private property <string> delete-profile-id: "";
     private property <string> delete-profile-name: "";
+    private property <bool> remove-calendar-confirmation: false;
+    private property <int> remove-calendar-id: -1;
+    private property <string> remove-calendar-name: "";
     private property <bool> account-profile-picker-open: false;
     private property <int> account-profile-picker-id: -1;
-    private property <string> account-profile-picker-name: "";
-    private property <string> account-profile-picker-current-id: "";
-    private property <color> account-profile-picker-color: #3b82f6;
-    private property <bool> account-profile-picker-has-custom-color: false;
-    private property <bool> account-profile-picker-custom-color: false;
+    // The picker shows the account's live row, which changes as choices apply.
+    private property <int> account-profile-picker-index: -1;
+    private property <AccountRow> account-profile-picker-account: root.connected_accounts[root.account-profile-picker-index];
     private property <string> profile-editor-error: "";
     callback save_theme(string);
     callback save_theme_preset(string);
@@ -586,13 +581,19 @@ export component SettingsDialog inherits Rectangle {
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
     callback clear_download_directory();
+    // Save a profile's name and color, and make the checked accounts of
+    // `profile_members` its accounts. Returns the profile's id, or empty.
     callback save_mail_profile(string, string, color) -> string;
+    // Fill `profile_members` for this profile, or a new one, with one
+    // account checked from the start (-1 for none).
+    callback prepare_profile_members(string, int);
     callback assign_account_profile(int, string);
     callback save_account_color(int, color, bool);
     callback delete_mail_profile(string);
     callback save_account_markers_visibility(bool);
     callback save_workspace_layout(string);
     callback save_language(string);
+    callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
     callback save_sync_interval(int);
@@ -616,15 +617,20 @@ export component SettingsDialog inherits Rectangle {
     callback reorder_account(string, int, bool);
     callback save_account_mail_history(int, string);
     callback save_account_sent_copy_policy(int, string);
+    callback save_account_keep_on_server(int, string);
     callback connect_account_calendar(int);
-    callback set_account_calendar_enabled(int, bool);
-    callback connect_caldav(int, string, string, string);
+    // (account, connection or -1 for a new one, url, username, password)
+    callback connect_caldav(int, int, string, string, string);
+    callback set_calendar_connection_enabled(int, bool);
+    callback remove_calendar_connection(int);
     callback connect_carddav(int, string, string, string);
     callback set_account_carddav_enabled(int, bool);
     callback disconnect_carddav(int);
     callback export_account_backup();
     callback import_accounts();
     callback export_database_snapshot();
+    // Export the mail of one account, or of every POP3 account for -1.
+    callback export_device_mail(int);
     callback delete_all_data();
     callback load_storage_usage();
     pure callback settings-search-matches(string, string) -> bool;
@@ -651,6 +657,14 @@ export component SettingsDialog inherits Rectangle {
         @tr("1 year"),
         @tr("All mail"),
     ];
+    private property <[string]> keep-on-server-options: [
+        @tr("Always"),
+        @tr("Until deleted here"),
+        @tr("7 days"),
+        @tr("14 days"),
+        @tr("30 days"),
+        @tr("Until downloaded"),
+    ];
     private property <[string]> language-options: [
         @tr("System language"),
         @tr("English"),
@@ -659,9 +673,10 @@ export component SettingsDialog inherits Rectangle {
         @tr("Simplified Chinese"),
         @tr("Russian"),
     ];
-    private property <[color]> profile-colors: [
-        #3b82f6, #8b5cf6, #0d9488, #ea580c,
-        #db2777, #65a30d, #0891b2, #9333ea,
+    private property <[string]> time-format-options: [
+        @tr("Automatic"),
+        @tr("12-hour"),
+        @tr("24-hour"),
     ];
     private property <int> sync-interval-index: root.sync_interval_minutes <= 1 ? 0
         : root.sync_interval_minutes <= 5 ? 1 : 2;
@@ -672,6 +687,8 @@ export component SettingsDialog inherits Rectangle {
         : root.language_mode == "tr" ? 3
         : root.language_mode == "zh_Hans" ? 4
         : root.language_mode == "ru" ? 5 : 0;
+    private property <int> time-format-index: root.time_format == "12h" ? 1
+        : root.time_format == "24h" ? 2 : 0;
 
     pure function settings-icon-color(section: string) -> color {
         if root.monochrome_sidebar_icons {
@@ -690,15 +707,15 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette language workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save")
             : section == "Accounts"
-            ? @tr("accounts profiles personal work colors providers gmail outlook imap jmap caldav carddav mail history oauth security signatures")
+            ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Notifications"
             ? @tr("notifications alerts sounds desktop new mail")
             : section == "Shortcuts"
-            ? @tr("shortcuts keyboard compose search archive spam trash")
+            ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
             : section == "Services"
@@ -713,14 +730,16 @@ export component SettingsDialog inherits Rectangle {
         || root.settings-section-visible("Shortcuts") || root.settings-section-visible("Data")
         || root.settings-section-visible("Services") || root.settings-section-visible("About");
 
-    changed settings_open => {
-        if !root.settings_open {
-            theme-editor.discard-changes();
-            root.close-caldav-settings();
-            root.profile-editor-open = false;
-            root.close-account-profile-picker();
-            root.imap_form_open = false;
-            root.imap_editing = false;
+    init => {
+        if root.new-profile-requested {
+            root.new-profile-requested = false;
+            root.open-new-profile(-1);
+        }
+    }
+    changed new-profile-requested => {
+        if root.new-profile-requested {
+            root.new-profile-requested = false;
+            root.open-new-profile(-1);
         }
     }
 
@@ -746,6 +765,11 @@ export component SettingsDialog inherits Rectangle {
             : index == 4 ? "zh_Hans"
             : index == 5 ? "ru" : "system";
         root.save_language(root.language_mode);
+    }
+
+    function select-time-format(index: int) {
+        root.time_format = index == 1 ? "12h" : index == 2 ? "24h" : "automatic";
+        root.save_time_format(root.time_format);
     }
 
     function update-settings-search(value: string) {
@@ -779,31 +803,61 @@ export component SettingsDialog inherits Rectangle {
         );
     }
 
-    private property <bool> imap_form_valid: root.account_email != ""
+    pure function keep-on-server-index(value: string) -> int {
+        return value == "untilDeleted" ? 1
+            : value == "sevenDays" ? 2
+            : value == "fourteenDays" ? 3
+            : value == "thirtyDays" ? 4
+            : value == "untilDownloaded" ? 5 : 0;
+    }
+
+    function select-keep-on-server(account-id: int, index: int) {
+        root.save_account_keep_on_server(
+            account-id,
+            index == 1 ? "untilDeleted"
+                : index == 2 ? "sevenDays"
+                : index == 3 ? "fourteenDays"
+                : index == 4 ? "thirtyDays"
+                : index == 5 ? "untilDownloaded" : "always",
+        );
+    }
+
+    // Whether the server removes downloaded mail sooner than the account's
+    // choice keeps it there.
+    pure function server-removes-sooner(account: AccountRow) -> bool {
+        let chosen = account.keep_on_server == "sevenDays" ? 7
+            : account.keep_on_server == "fourteenDays" ? 14
+            : account.keep_on_server == "thirtyDays" ? 30
+            : account.keep_on_server == "untilDownloaded" ? 0 : -1;
+        return account.server_keeps_mail_days >= 0
+            && (chosen < 0 || account.server_keeps_mail_days < chosen);
+    }
+
+    private property <bool> account_form_valid: root.account_email != ""
         && root.account_password != ""
         && (root.account_protocol == "jmap" || (
-            root.imap_host != ""
-            && root.imap_port != ""
+            root.incoming_host != ""
+            && root.incoming_port != ""
             && root.smtp_host != ""
             && root.smtp_port != ""));
 
     function edit-account(account: AccountRow) {
-        if account.provider == "imap" {
+        if account.provider == "generic" {
             root.account_email = account.email;
             root.account_username = account.username;
             root.account_protocol = account.mail_protocol;
             root.jmap_url = account.jmap_url;
-            root.imap_security = account.imap_security;
+            root.incoming_security = account.incoming_security;
             root.smtp_security = account.smtp_security;
             root.trusted_certificate_pem = account.trusted_certificate_pem;
-            root.imap_host = account.imap_host;
-            root.imap_port = account.imap_port;
+            root.incoming_host = account.incoming_host;
+            root.incoming_port = account.incoming_port;
             root.smtp_host = account.smtp_host;
             root.smtp_port = account.smtp_port;
             root.account_password = "";
-            root.imap_editing = true;
+            root.account_editing = true;
             root.show_account_status = false;
-            root.imap_form_open = true;
+            root.account_form_open = true;
         } else {
             root.reauth_account(account.id);
         }
@@ -813,41 +867,61 @@ export component SettingsDialog inherits Rectangle {
     function confirm-account-removal(account: AccountRow) {
         root.delete_account_id = account.id;
         root.delete_account_name = account.email;
+        root.delete_account_device_mail = account.mail_protocol == "pop3";
         root.delete_account_confirmation = true;
     }
 
-    function open_new_imap() {
-        root.imap_editing = false;
+    // Servers are suggested for new accounts only; an edit keeps the
+    // account's own.
+    function suggest-servers(email: string) {
+        if !root.account_editing {
+            root.suggest_account_settings(email);
+        }
+    }
+
+    function choose-protocol(protocol: string) {
+        if MailPorts.is-standard-incoming(root.incoming_port) {
+            root.incoming_port = MailPorts.incoming(protocol, root.incoming_security);
+        }
+        root.account_protocol = protocol;
+    }
+
+    function open_new_mail_account() {
+        root.account_editing = false;
         root.account_email = "";
         root.account_username = "";
         root.account_password = "";
         root.account_protocol = "imap";
         root.jmap_url = "";
-        root.imap_security = "auto";
-        root.smtp_security = "auto";
+        root.incoming_security = "tls";
+        root.smtp_security = "tls";
         root.trusted_certificate_pem = "";
-        root.imap_host = "";
-        root.imap_port = "993";
+        root.incoming_host = "";
+        root.incoming_port = "993";
         root.smtp_host = "";
         root.smtp_port = "465";
         root.show_account_status = false;
-        root.imap_form_open = true;
+        root.account_form_open = true;
     }
 
-    function open-new-profile(name: string, color: color) {
+    // A new profile, starting with `account-id` checked, or none for -1. Each
+    // new profile starts with the next preset color.
+    function open-new-profile(account-id: int) {
+        root.prepare_profile_members("", account-id);
         root.profile-editor-id = "";
-        root.profile-editor-name = name;
-        root.profile-editor-color = color;
+        root.profile-editor-name = "";
+        root.profile-editor-color = ProfilePalette.colors[mod(root.mail_profiles.length, ProfilePalette.colors.length)];
         root.profile-editor-custom-color = false;
         root.profile-editor-error = "";
         root.profile-editor-open = true;
     }
 
     function edit-profile(profile: MailProfileRow) {
+        root.prepare_profile_members(profile.id, -1);
         root.profile-editor-id = profile.id;
         root.profile-editor-name = profile.name;
         root.profile-editor-color = profile.color;
-        root.profile-editor-custom-color = !root.profile-color-is-preset(profile.color);
+        root.profile-editor-custom-color = !ProfilePalette.is-preset(profile.color);
         root.profile-editor-error = "";
         root.profile-editor-open = true;
     }
@@ -866,51 +940,49 @@ export component SettingsDialog inherits Rectangle {
         root.delete-profile-confirmation = true;
     }
 
-    function open-account-profile-picker(account: AccountRow) {
+    function open-account-profile-picker(account: AccountRow, index: int) {
         root.account-profile-picker-id = account.id;
-        root.account-profile-picker-name = account.name;
-        root.account-profile-picker-current-id = account.profile_id;
-        root.account-profile-picker-color = account.profile_color;
-        root.account-profile-picker-has-custom-color = account.has_account_color;
-        root.account-profile-picker-custom-color = false;
+        root.account-profile-picker-index = index;
         root.account-profile-picker-open = true;
-    }
-
-    pure function profile-color-is-preset(value: color) -> bool {
-        return value == #3b82f6 || value == #8b5cf6 || value == #0d9488 || value == #ea580c
-            || value == #db2777 || value == #65a30d || value == #0891b2 || value == #9333ea;
     }
 
     function close-account-profile-picker() {
         root.account-profile-picker-open = false;
         root.account-profile-picker-id = -1;
-        root.account-profile-picker-name = "";
-        root.account-profile-picker-current-id = "";
-        root.account-profile-picker-custom-color = false;
+        root.account-profile-picker-index = -1;
     }
 
-    function choose-account-profile(profile-id: string) {
-        root.assign_account_profile(root.account-profile-picker-id, profile-id);
-        root.close-account-profile-picker();
-    }
-
-    function choose-account-color(color: color, generated: bool) {
-        root.save_account_color(root.account-profile-picker-id, color, generated);
-        root.close-account-profile-picker();
-    }
-
-    function open-caldav-settings(account: AccountRow) {
+    function add-caldav(account: AccountRow) {
         root.caldav_account_id = account.id;
-        root.caldav_url = account.caldav_url;
-        root.caldav_username = account.caldav_username;
+        root.caldav_connection_id = -1;
+        root.caldav-account-email = account.email;
+        root.caldav_url = "";
+        root.caldav_username = account.username != "" ? account.username : account.email;
         root.caldav_password = "";
-        root.caldav_manage_existing = account.calendar_connected;
+    }
+
+    function edit-caldav(account: AccountRow, connection: CalendarConnectionRow) {
+        root.caldav_account_id = account.id;
+        root.caldav_connection_id = connection.id;
+        root.caldav-account-email = account.email;
+        root.caldav_url = connection.base_url;
+        root.caldav_username = connection.username;
+        root.caldav_password = "";
     }
 
     function close-caldav-settings() {
         root.caldav_account_id = -1;
+        root.caldav_connection_id = -1;
         root.caldav_password = "";
-        root.caldav_manage_existing = false;
+    }
+
+    function confirm-calendar-removal(account: AccountRow, connection: CalendarConnectionRow) {
+        root.remove-calendar-id = connection.id;
+        root.remove-calendar-name = connection.kind == "google" ? @tr("Google Calendar")
+            : connection.kind == "microsoft" ? @tr("Outlook calendar")
+            : connection.calendar-count == 1 && connection.calendar-name != "" ? connection.calendar-name
+            : connection.host;
+        root.remove-calendar-confirmation = true;
     }
 
         Rectangle {
@@ -1033,6 +1105,8 @@ export component SettingsDialog inherits Rectangle {
                                 }
                             }
 
+                            if AppIcon.available : AppIconPicker { compact: root.compact; }
+
                             Rectangle {
                                 height: max((root.compact ? 346px : 264px)
                                     + (WindowChrome.available ? (root.compact ? 89px : 59px) : 0px), self.preferred-height);
@@ -1115,7 +1189,7 @@ export component SettingsDialog inherits Rectangle {
                                     padding-bottom: 15px;
                                     padding-left: 20px;
                                     spacing: 5px;
-                                    Text { text: @tr("Language"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
+                                    Text { text: @tr("Language and time"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; wrap: word-wrap; }
                                     SettingsSelectRow {
                                         compact: root.compact;
                                         title: @tr("Display language");
@@ -1125,6 +1199,17 @@ export component SettingsDialog inherits Rectangle {
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-language(index); }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSelectRow {
+                                        compact: root.compact;
+                                        title: @tr("Time format");
+                                        description: root.time_format == "automatic" ? @tr("Follow your region, for example {}.", root.time_format_sample) : @tr("Times appear as {}.", root.time_format_sample);
+                                        choices: root.time-format-options;
+                                        selected-index: root.time-format-index;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-time-format(index); }
                                     }
                                 }
                             }
@@ -1350,7 +1435,7 @@ export component SettingsDialog inherits Rectangle {
                                         padding: 0px;
                                         padding-left: root.compact ? 8px : 16px;
                                         Text {
-                                            text: RendererSettings.error != "" ? RendererSettings.error : RendererSettings.restart-required ? @tr("Restart required. Your current renderer is still active.") : RendererSettings.active == "gpu" ? @tr("Active: GPU — WGPU") : @tr("Active: CPU — Low Memory");
+                                            text: RendererSettings.error != "" ? RendererSettings.error : RendererSettings.gpu-failed && RendererSettings.preferred == "gpu" ? @tr("GPU — WGPU could not start, so CPU — Low Memory is active.") : RendererSettings.restart-required ? @tr("Restart required. Your current renderer is still active.") : RendererSettings.active == "gpu" ? @tr("Active: GPU — WGPU") : @tr("Active: CPU — Low Memory");
                                             color: root.faint-text;
                                             font-size: TypeScale.caption;
                                             overflow: elide;
@@ -1612,7 +1697,7 @@ export component SettingsDialog inherits Rectangle {
                                     icon: @image-url("../icons/lucide/outline/plus.svg");
                                     has-icon: true;
                                     primary: true;
-                                    clicked => { root.open-new-profile("", #3b82f6); }
+                                    clicked => { root.open-new-profile(-1); }
                                 }
                                 profiles-toggle := HorizontalBox {
                                     x: 20px;
@@ -1640,7 +1725,7 @@ export component SettingsDialog inherits Rectangle {
                                         width: max(112px, self.content-width); height: 40px;
                                         text: @tr("Add profile");
                                         primary: true;
-                                        clicked => { root.open-new-profile("", #3b82f6); }
+                                        clicked => { root.open-new-profile(-1); }
                                     }
                                 }
                             }
@@ -1758,7 +1843,7 @@ export component SettingsDialog inherits Rectangle {
                                         surface: root.surface-raised;
                                         hover-surface: root.accent-soft;
                                         button-border: root.border-subtle;
-                                        clicked => { root.open_new_imap(); }
+                                        clicked => { root.open_new_mail_account(); }
                                     }
                                     if root.oauth_in_progress : Button {
                                         height: 52px;
@@ -1771,7 +1856,7 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 8px;
                                     ProviderButton { text: @tr("Add Gmail"); icon: @image-url("../icons/brand/gmail.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.google_oauth_available; tooltip-text: root.google_oauth_available ? "" : @tr("Add app keys in Sign-in settings to enable this provider."); foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("gmail"); } }
                                     ProviderButton { text: @tr("Add Outlook"); icon: @image-url("../icons/brand/outlook.svg"); enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving && root.microsoft_oauth_available; tooltip-text: root.microsoft_oauth_available ? "" : @tr("Add app keys in Sign-in settings to enable this provider."); foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.start_oauth("microsoft"); } }
-                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/lucide/outline/mail.svg"); colorize-icon: true; enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_imap(); } }
+                                    ProviderButton { text: @tr("Add mail account"); icon: @image-url("../icons/lucide/outline/mail.svg"); colorize-icon: true; enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; foreground: root.body-text; muted: root.muted-text; surface: root.surface-raised; hover-surface: root.accent-soft; button-border: root.border-subtle; clicked => { root.open_new_mail_account(); } }
                                     if root.oauth_in_progress : Button { height: 44px; text: @tr("Cancel sign-in"); clicked => { root.cancel_oauth(); } }
                                 }
                             }
@@ -1781,14 +1866,18 @@ export component SettingsDialog inherits Rectangle {
                                 copy-link => { root.copy_oauth_link(); }
                                 submit-redirect(address) => { root.submit_oauth_redirect(address); }
                             }
-                            for account in root.connected_accounts : drop-target := DropArea {
+                            for account[account-index] in root.connected_accounts : drop-target := DropArea {
                                 private property <length> divider-y: account.sync_error != "" ? sync-error.y + sync-error.height + 4px : account-header.height;
                                 private property <bool> has-sent-copy: account.provider != "gmail" && account.mail_protocol == "imap";
+                                private property <bool> has-server-copies: account.mail_protocol == "pop3";
+                                private property <bool> unencrypted: account.incoming_security == "none" || account.smtp_security == "none";
                                 // Preference rows keep their designed gaps below the last select row.
                                 private property <length> profile-y: self.has-sent-copy
                                     ? sent-copy-row.y + sent-copy-row.height + (root.compact ? 10px : 8px)
-                                    : history-row.y + history-row.height + (root.compact ? 9px : 1px);
-                                height: profile-row.y + profile-row.height + (root.compact ? (account.provider == "imap" ? 61px : 7px) : 13px);
+                                    : self.has-server-copies
+                                        ? server-copies-note.y + server-copies-note.height + (root.compact ? 10px : 8px)
+                                        : history-row.y + history-row.height + (root.compact ? 9px : 1px);
+                                height: calendars.y + calendars.height + (root.compact ? 18px : 16px);
                                 can-drop(event) => root.read_account_transfer(event.data) != "" ? DragAction.move : DragAction.none;
                                 dropped(event) => {
                                     let source = root.read_account_transfer(event.data);
@@ -1798,7 +1887,9 @@ export component SettingsDialog inherits Rectangle {
                                     root.reorder_account(source, account.id, event.position.y > self.height / 2);
                                     return DragAction.move;
                                 }
-                                Rectangle {
+                                OnScreenSurface {
+                                    width: parent.width;
+                                    height: parent.height;
                                     background: drop-target.has-drag ? root.accent-soft : root.surface;
                                     border-radius: 10px;
                                     border-width: drop-target.has-drag ? 2px : 1px;
@@ -1836,7 +1927,7 @@ export component SettingsDialog inherits Rectangle {
                                             if !account.has_avatar : Image {
                                                 x: 10px; y: 10px; width: 24px; height: 24px;
                                                 source: account.provider == "gmail" ? @image-url("../icons/brand/gmail.svg") : account.provider == "microsoft" ? @image-url("../icons/brand/outlook.svg") : @image-url("../icons/lucide/outline/mail.svg");
-                                                colorize: account.provider == "imap" ? root.accent : transparent;
+                                                colorize: account.provider == "generic" ? root.accent : transparent;
                                                 image-fit: contain;
                                                 accessible-role: none;
                                             }
@@ -1849,12 +1940,12 @@ export component SettingsDialog inherits Rectangle {
                                             spacing: 2px;
                                             account-name := Text { height: max(19px, self.preferred-height); text: account.name; color: root.heading; font-size: TypeScale.body-large; font-weight: 700; overflow: elide; }
                                             account-email := Text { height: max(16px, self.preferred-height); text: account.email; color: root.secondary-text; font-size: TypeScale.caption; overflow: elide; }
-                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                            account-state := Text { height: max(16px, self.preferred-height); text: account.status == "offline" ? @tr("Offline · retrying automatically") : account.status == "needs_reauth" ? @tr("Sign-in required") : account.status == "syncing" ? @tr("Syncing…") : account.status == "idle" ? (account.mail_protocol == "gmail" ? @tr("Connected · Gmail") : account.mail_protocol == "jmap" ? @tr("Connected · JMAP") : account.mail_protocol == "pop3" ? (drop-target.unencrypted ? @tr("Connected without encryption · POP3 + SMTP") : @tr("Connected · POP3 + SMTP")) : drop-target.unencrypted ? @tr("Connected without encryption · IMAP + SMTP") : @tr("Connected · IMAP + SMTP")) : @tr("Account status: {}", account.status); color: account.status == "needs_reauth" ? #c0392b : account.status == "idle" && drop-target.unencrypted ? AppTheme.destructive : root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                                         }
                                         AccountActions {
-                                            edit-label: account.provider == "imap" ? @tr("Edit") : @tr("Reconnect");
-                                            reconnect: account.provider != "imap";
-                                            edit-enabled: !root.account_setup_in_progress && (account.provider == "imap" || !root.oauth_in_progress) && !root.oauth_settings_saving;
+                                            edit-label: account.provider == "generic" ? @tr("Edit") : @tr("Reconnect");
+                                            reconnect: account.provider != "generic";
+                                            edit-enabled: !root.account_setup_in_progress && (account.provider == "generic" || !root.oauth_in_progress) && !root.oauth_settings_saving;
                                             remove-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
                                             sync-enabled: !root.account_setup_in_progress && !root.sync_in_progress && !root.oauth_settings_saving;
                                             edit => { root.edit-account(account); }
@@ -1862,38 +1953,8 @@ export component SettingsDialog inherits Rectangle {
                                             sync => { root.sync_account(account.id); }
                                             width: 108px;
                                         }
-                                        // The switch rows share the buttons' 30px band and grow
-                                        // to fit their label or button.
-                                        if !root.compact && account.calendar_connected : HorizontalBox {
-                                            width: max(122px, self.preferred-width);
-                                            height: 30px;
-                                            padding-top: 0px;
-                                            padding-bottom: 0px;
-                                            spacing: 8px;
-                                            cross-axis-alignment: center;
-                                            if account.provider == "imap" : Button {
-                                                width: max(64px, self.content-width);
-                                                text: @tr("CalDAV");
-                                                height: 30px;
-                                                clicked => { root.open-caldav-settings(account); }
-                                            }
-                                            if account.provider != "imap" : Text { text: @tr("Calendar"); color: root.body-text; font-size: TypeScale.caption; vertical-alignment: center; }
-                                            Rectangle { horizontal-stretch: 1; }
-                                            Switch { checked: account.calendar_enabled; toggled => { root.set_account_calendar_enabled(account.id, self.checked); } }
-                                        }
-                                        if !root.compact && !account.calendar_connected && account.provider != "imap" : Button {
-                                            width: max(128px, self.content-width);
-                                            height: 30px;
-                                            text: account.calendar_status == "" ? @tr("Add calendar") : @tr("Retry calendar");
-                                            enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
-                                            clicked => { root.connect_account_calendar(account.id); }
-                                        }
-                                        if !root.compact && !account.calendar_connected && account.provider == "imap" : Button {
-                                            width: max(116px, self.content-width);
-                                            height: 30px;
-                                            text: @tr("Set up CalDAV");
-                                            clicked => { root.open-caldav-settings(account); }
-                                        }
+                                        // The switch row shares the buttons' 30px band and grows
+                                        // to fit its label.
                                         if !root.compact && account.carddav_connected : HorizontalBox {
                                             width: max(122px, self.preferred-width);
                                             height: 30px;
@@ -1967,6 +2028,50 @@ export component SettingsDialog inherits Rectangle {
                                             root.save_account_sent_copy_policy(account.id, index == 1 ? "server" : index == 2 ? "client" : "auto");
                                         }
                                     }
+                                    server-copies-row := SettingsSelectRow {
+                                        visible: drop-target.has-server-copies;
+                                        x: root.compact ? 24px : 32px;
+                                        y: history-row.y + history-row.height + (root.compact ? 7px : 5px);
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        compact: root.compact;
+                                        title: @tr("Keep mail on the server");
+                                        compact-description-height: 51px;
+                                        description: account.keep_on_server == "untilDeleted" ? @tr("Mail you delete here is removed from the server too.")
+                                            : account.keep_on_server == "untilDownloaded" ? @tr("Mail is removed from the server once it's on this device.")
+                                            : account.keep_on_server == "always" ? @tr("Flectar Mail never removes mail from the server.")
+                                            : @tr("Mail is removed after this time, or once deleted here.");
+                                        choices: root.keep-on-server-options;
+                                        selected-index: root.keep-on-server-index(account.keep_on_server);
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        selected(index, value) => { root.select-keep-on-server(account.id, index); }
+                                    }
+                                    // The server's own rule wins over the account's choice.
+                                    server-rule := Text {
+                                        visible: drop-target.has-server-copies && root.server-removes-sooner(account);
+                                        // Aligned with the row's own texts.
+                                        x: server-copies-row.x + (root.compact ? 8px : 16px);
+                                        y: server-copies-row.y + server-copies-row.height + (self.visible ? 4px : 0px);
+                                        width: server-copies-row.width - (root.compact ? 16px : 32px);
+                                        height: self.visible ? self.preferred-height : 0px;
+                                        text: account.server_keeps_mail_days == 0
+                                            ? @tr("This server removes mail as soon as it's downloaded.")
+                                            : @tr("This server removes downloaded mail after one day." | "This server removes downloaded mail after {n} days." % account.server_keeps_mail_days);
+                                        color: AppTheme.destructive;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
+                                    server-copies-note := Text {
+                                        visible: drop-target.has-server-copies && (account.keep_on_server != "always" || root.server-removes-sooner(account));
+                                        x: server-rule.x;
+                                        y: server-rule.y + server-rule.height + (self.visible ? 4px : 0px);
+                                        width: server-rule.width;
+                                        height: self.visible ? self.preferred-height : 0px;
+                                        text: @tr("Mail removed from the server is kept only on this device. Database snapshots in Storage include it.");
+                                        color: root.faint-text;
+                                        font-size: TypeScale.caption;
+                                        wrap: word-wrap;
+                                    }
                                     profile-row := Rectangle {
                                         x: root.compact ? 24px : 32px;
                                         y: drop-target.profile-y;
@@ -2001,7 +2106,7 @@ export component SettingsDialog inherits Rectangle {
                                             width: 136px;
                                             height: 34px;
                                             text: account.has_profile ? account.profile_name : @tr("No profile");
-                                            clicked => { root.open-account-profile-picker(account); }
+                                            clicked => { root.open-account-profile-picker(account, account-index); }
                                         }
                                         Rectangle {
                                             x: parent.width - 126px;
@@ -2011,19 +2116,22 @@ export component SettingsDialog inherits Rectangle {
                                             background: account.profile_color;
                                         }
                                     }
-                                    if root.compact && account.provider == "imap" : HorizontalBox {
-                                        x: 24px;
-                                        y: profile-row.y + profile-row.height + 14px;
-                                        width: parent.width - 48px;
-                                        height: 36px;
-                                        spacing: 10px;
-                                        Button {
-                                            width: max(64px, self.content-width);
-                                            text: account.calendar_connected ? @tr("CalDAV settings") : @tr("Set up CalDAV");
-                                            clicked => { root.open-caldav-settings(account); }
-                                        }
-                                        Rectangle { horizontal-stretch: 1; }
-                                        if account.calendar_connected : Switch { checked: account.calendar_enabled; toggled => { root.set_account_calendar_enabled(account.id, self.checked); } }
+                                    calendars := AccountCalendars {
+                                        x: root.compact ? 24px : 32px;
+                                        y: profile-row.y + profile-row.height + (root.compact ? 14px : 12px);
+                                        width: parent.width - (root.compact ? 48px : 64px);
+                                        height: self.preferred-height;
+                                        account: account;
+                                        compact: root.compact;
+                                        provider-actions-enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        line-color: root.border-subtle;
+                                        connect-provider => { root.connect_account_calendar(account.id); }
+                                        add-caldav => { root.add-caldav(account); }
+                                        edit(connection) => { root.edit-caldav(account, connection); }
+                                        remove(connection) => { root.confirm-calendar-removal(account, connection); }
+                                        set-enabled(connection-id, enabled) => { root.set_calendar_connection_enabled(connection-id, enabled); }
                                     }
                                 }
                             }
@@ -2034,9 +2142,9 @@ export component SettingsDialog inherits Rectangle {
                                 Button { x: parent.width - self.width - 20px; y: oauth-card.content-y + 12px; width: 110px; height: 32px; enabled: !root.oauth_settings_saving; text: root.custom_oauth_open ? @tr("Hide") : @tr("Configure"); clicked => { root.custom_oauth_open = !root.custom_oauth_open; } }
                                 oauth-fields := VerticalBox {
                                     x: 20px; y: oauth-card.content-y + 58px; width: parent.width - 40px; height: self.preferred-height; spacing: 8px;
-                                    if root.custom_oauth_open && !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    if root.custom_oauth_open && root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); edited(text) => { root.google_client_id = text; } } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); edited(text) => { root.google_client_secret = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
-                                    if root.custom_oauth_open : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); edited(text) => { root.ms_client_id = text; } } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
+                                    if root.custom_oauth_open && !root.compact : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    if root.custom_oauth_open && root.compact : VerticalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_id; placeholder-text: @tr("Gmail desktop client ID"); } LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.google_client_secret; input-type: password; placeholder-text: @tr("Gmail client secret (optional)"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Gmail settings"); clicked => { root.save_oauth_app("gmail", root.google_client_id, root.google_client_secret); } } }
+                                    if root.custom_oauth_open : HorizontalBox { spacing: 8px; LineEdit { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text <=> root.ms_client_id; placeholder-text: @tr("Microsoft Entra desktop client ID"); } Button { enabled: !root.account_setup_in_progress && !root.oauth_in_progress && !root.oauth_settings_saving; text: @tr("Save Outlook"); clicked => { root.save_oauth_app("microsoft", root.ms_client_id, ""); } } }
                                     if root.custom_oauth_open : Text { text: @tr("Outlook public desktop clients use PKCE and do not need a client secret."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                 }
                             }
@@ -2046,8 +2154,8 @@ export component SettingsDialog inherits Rectangle {
                                 carddav-card := SettingsCard { title: @tr("Connect CardDAV"); description: @tr("Sync contacts with a standards-compliant CardDAV server."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 carddav-fields := VerticalBox {
                                     padding-top: carddav-card.content-y + 12px; padding-right: 20px; padding-bottom: 16px; padding-left: 20px; spacing: 8px;
-                                    LineEdit { text: root.carddav_url; placeholder-text: @tr("https://contacts.example.com/"); edited(value) => { root.carddav_url = value; } }
-                                    HorizontalBox { spacing: 8px; LineEdit { text: root.carddav_username; placeholder-text: @tr("Username"); edited(value) => { root.carddav_username = value; } } LineEdit { text: root.carddav_password; input-type: password; placeholder-text: @tr("App password"); edited(value) => { root.carddav_password = value; } } }
+                                    LineEdit { text <=> root.carddav_url; placeholder-text: @tr("https://contacts.example.com/"); }
+                                    HorizontalBox { spacing: 8px; LineEdit { text <=> root.carddav_username; placeholder-text: @tr("Username"); } LineEdit { text <=> root.carddav_password; input-type: password; placeholder-text: @tr("App password"); } }
                                     HorizontalBox { spacing: 8px; if root.carddav_manage_existing : Button { text: @tr("Disconnect"); clicked => { root.disconnect_carddav(root.carddav_account_id); root.carddav_account_id = -1; root.carddav_password = ""; root.carddav_manage_existing = false; } } Rectangle { horizontal-stretch: 1; } Button { text: @tr("Cancel"); clicked => { root.carddav_account_id = -1; root.carddav_password = ""; root.carddav_manage_existing = false; } } Button { text: root.carddav_manage_existing ? @tr("Reconnect") : @tr("Connect"); primary: true; clicked => { root.connect_carddav(root.carddav_account_id, root.carddav_url, root.carddav_username, root.carddav_password); } } }
                                 }
                             }
@@ -2092,6 +2200,25 @@ export component SettingsDialog inherits Rectangle {
                                 refresh => { root.load_storage_usage(); }
                             }
 
+                            // Mail imported to this device alone.
+                            if LocalMailUi.account-id >= 0 : Rectangle {
+                                height: local-status.y + local-status.height + (root.compact ? 74px : 22px);
+                                vertical-stretch: 0;
+                                local-card := SettingsCard { title: @tr("Mail on this device"); description: @tr("Mail you imported. It is kept only here, so export it to keep a copy elsewhere."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                Image { x: 20px; y: local-note.y + (local-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/file-directory.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
+                                local-note := Text { x: 48px; y: local-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 352px; height: max(42px, self.preferred-height); text: @tr("One message" | "{} messages" % LocalMailUi.messages, Numbers.count(LocalMailUi.messages)) + " · " + LocalMailUi.size; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                local-status := Text { x: 48px; y: local-note.y + local-note.height; width: local-note.width; height: root.mail_export_status == "" ? 0px : max(18px, self.preferred-height); text: root.mail_export_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    x: root.compact ? 20px : parent.width - self.width - 20px;
+                                    y: root.compact ? local-status.y + local-status.height + 25px : local-note.y + (local-note.height - self.height) / 2;
+                                    width: root.compact ? parent.width - 40px : 264px;
+                                    height: 32px;
+                                    spacing: 8px;
+                                    Button { text: @tr("Export mail…"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; enabled: !root.mail_export_running; clicked => { root.export_device_mail(LocalMailUi.account-id); } }
+                                    Button { text: @tr("Delete…"); icon: @image-url("../icons/lucide/outline/trash.svg"); has-icon: true; enabled: !root.account_setup_in_progress; clicked => { root.delete_local_mail_confirmation = true; } }
+                                }
+                            }
+
                             Rectangle {
                                 visible: root.account-transfer-supported;
                                 height: root.account-transfer-supported ? snapshot-note.y + snapshot-note.height + (root.compact ? 74px : 22px) : 0px;
@@ -2106,13 +2233,14 @@ export component SettingsDialog inherits Rectangle {
                                 visible: root.account-transfer-supported;
                                 height: root.account-transfer-supported ? transfer-note.y + transfer-note.height + (root.compact ? 74px : 22px) : 0px;
                                 vertical-stretch: 0;
-                                transfer-card := SettingsCard { title: @tr("Transfer account setup"); description: @tr("Import accounts from Thunderbird, K-9 Mail, or a backup, or export one connected account and your preferences." | "Import accounts from Thunderbird, K-9 Mail, or a backup, or export {n} connected accounts and your preferences." % root.connected_accounts.length); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                transfer-card := SettingsCard { title: @tr("Transfer account setup"); description: @tr("Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a backup, or export one connected account and your preferences." | "Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a backup, or export {n} connected accounts and your preferences." % root.connected_accounts.length); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: transfer-note.y + (transfer-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/check-circle.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
-                                transfer-note := Text { x: 48px; y: transfer-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 360px; height: max(42px, self.preferred-height); text: @tr("Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
-                                HorizontalBox {
-                                    x: root.compact ? 20px : parent.width - 300px;
+                                transfer-note := Text { x: 48px; y: transfer-card.content-y + 14px; width: root.compact ? parent.width - 68px : parent.width - 352px; height: max(42px, self.preferred-height); text: @tr("Passwords and OAuth tokens stay in the system keyring. A restored device asks you to sign in securely."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                // Unpadded, so the buttons line up with the other cards'.
+                                HorizontalLayout {
+                                    x: root.compact ? 20px : parent.width - self.width - 20px;
                                     y: root.compact ? transfer-note.y + transfer-note.height + 25px : transfer-note.y + (transfer-note.height - self.height) / 2;
-                                    width: root.compact ? parent.width - 40px : 280px;
+                                    width: root.compact ? parent.width - 40px : 264px;
                                     height: 32px;
                                     spacing: 8px;
                                     Button { text: @tr("Import"); icon: @image-url("../icons/lucide/outline/download.svg"); has-icon: true; clicked => { root.import_accounts(); } }
@@ -2125,7 +2253,7 @@ export component SettingsDialog inherits Rectangle {
                                 vertical-stretch: 0;
                                 delete-card := SettingsCard { title: @tr("Delete all local data"); description: @tr("Remove accounts, downloaded mail, calendars, contacts, preferences, and credentials from this device."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: delete-note.y + (delete-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/trash.svg"); colorize: #d04a43; image-fit: contain; accessible-role: none; }
-                                delete-note := Text { x: 48px; y: delete-card.content-y + 14px; width: root.compact ? parent.width - 68px : delete-button.x - 70px; height: max(42px, self.preferred-height); text: @tr("This does not delete anything from Gmail, Outlook, or your IMAP server."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                delete-note := Text { x: 48px; y: delete-card.content-y + 14px; width: root.compact ? parent.width - 68px : delete-button.x - 70px; height: max(42px, self.preferred-height); text: LocalMailUi.account-id >= 0 ? @tr("Imported mail and the mail of any POP3 account are stored only on this device. Nothing is deleted from Gmail, Outlook, or IMAP servers.") : root.has_device_mail ? @tr("POP3 mail is stored only on this device. Nothing is deleted from Gmail, Outlook, or IMAP servers.") : @tr("This does not delete anything from Gmail, Outlook, or your IMAP server."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                                 delete-button := Button { x: root.compact ? 20px : parent.width - self.width - 20px; y: root.compact ? delete-note.y + delete-note.height + 25px : delete-note.y + (delete-note.height - self.height) / 2; width: root.compact ? parent.width - 40px : max(170px, self.content-width); text: @tr("Delete everything"); icon: @image-url("../icons/lucide/outline/trash.svg"); has-icon: true; clicked => { root.delete_data_confirmation = true; } }
                             }
 
@@ -2190,14 +2318,35 @@ export component SettingsDialog inherits Rectangle {
                         VerticalBox { x: root.compact ? 16px : max(24px, (shortcuts-scroll.visible-width - 920px) / 2); width: root.compact ? shortcuts-scroll.visible-width - 32px : min(920px, shortcuts-scroll.visible-width - 48px); padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px; padding-bottom: 32px; spacing: 10px;
                             SettingsPageTitle { label: @tr("Keyboard shortcuts"); title-color: root.title-color; }
                             Text { height: max(20px, self.preferred-height); text: @tr("Move through mail without leaving the keyboard."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; wrap: word-wrap; }
-                            Rectangle { height: max(236px, self.preferred-height); vertical-stretch: 0; background: root.surface; border-radius: 8px; border-width: 1px; border-color: root.border-subtle; VerticalBox { padding-top: 12px; padding-right: 18px; padding-bottom: 12px; padding-left: 18px; spacing: 0px;
-                                Text { height: max(20px, self.preferred-height); text: @tr("Mail"); color: root.heading; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                                ShortcutRow { title: @tr("Compose a new message"); shortcut: @tr("C"); title-color: root.body-text; shortcut-color: root.accent; key-background: root.accent-soft; key-border: root.border-subtle; }
-                                ShortcutRow { title: @tr("Search mail"); shortcut: @tr("/"); title-color: root.body-text; shortcut-color: root.accent; key-background: root.accent-soft; key-border: root.border-subtle; }
-                                ShortcutRow { title: @tr("Archive selected message"); shortcut: @tr("E"); title-color: root.body-text; shortcut-color: root.accent; key-background: root.accent-soft; key-border: root.border-subtle; }
-                                ShortcutRow { title: @tr("Mark as spam"); shortcut: @tr("!"); title-color: root.body-text; shortcut-color: root.accent; key-background: root.accent-soft; key-border: root.border-subtle; }
-                                ShortcutRow { title: @tr("Move to trash"); shortcut: @tr("#"); title-color: root.body-text; shortcut-color: root.accent; key-background: root.accent-soft; key-border: root.border-subtle; }
-                            } }
+                            ShortcutSection { vertical-stretch: 0; title: @tr("Mail"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("Compose a new message"); keys: [Shortcuts.compose]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Archive"); keys: [Shortcuts.archive]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Move to spam"); keys: [Shortcuts.spam]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Move to trash"); keys: [Shortcuts.trash]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
+                            ShortcutSection { vertical-stretch: 0; title: @tr("Navigation"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("Move between messages"); keys: [Shortcuts.previous-message, Shortcuts.next-message]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Open message"); keys: [Shortcuts.open-message]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Select message"); keys: [Shortcuts.select-message]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Switch between list and message"); keys: [Shortcuts.switch-pane]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
+                            ShortcutSection { vertical-stretch: 0; title: @tr("Reading"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("Find in message"); keys: [Shortcuts.find]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Zoom in"); keys: [Shortcuts.zoom-in]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Zoom out"); keys: [Shortcuts.zoom-out]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Reset zoom"); keys: [Shortcuts.zoom-reset]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Caret browsing"); keys: [Shortcuts.caret-browsing]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
+                            if TabsUi.enabled : ShortcutSection { vertical-stretch: 0; title: @tr("Tabs"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("New tab"); keys: [Shortcuts.new-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Close tab"); keys: [Shortcuts.close-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Reopen closed tab"); keys: [Shortcuts.reopen-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Next tab"); keys: [Shortcuts.next-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Previous tab"); keys: [Shortcuts.previous-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Go to tab 1–8"); keys: [Shortcuts.first-tab, Shortcuts.eighth-tab]; separator: "–"; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Go to last tab"); keys: [Shortcuts.last-tab]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
                         }
                     }
 
@@ -2317,7 +2466,7 @@ export component SettingsDialog inherits Rectangle {
                                     y: 24px;
                                     width: 62px;
                                     height: 62px;
-                                    source: @image-url("../../resources/app-icon/flectar-mail-masked.svg");
+                                    source: AppIcon.logo(AppIcon.variant);
                                     image-fit: contain;
                                     accessible-label: @tr("Flectar Mail logo");
                                 }
@@ -2511,7 +2660,7 @@ export component SettingsDialog inherits Rectangle {
             background: #00000088;
             z: 900;
             accessible-role: groupbox;
-            accessible-label: root.caldav_manage_existing ? @tr("CalDAV settings") : @tr("Set up CalDAV");
+            accessible-label: root.caldav_connection_id > 0 ? @tr("CalDAV settings") : @tr("Add CalDAV calendar");
 
             TouchArea { clicked => { root.close-caldav-settings(); } }
 
@@ -2519,7 +2668,7 @@ export component SettingsDialog inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 width: min(520px, parent.width - 24px);
-                height: min(root.compact ? 410px : 354px, parent.height - 24px);
+                height: min(root.compact ? 500px : 430px, parent.height - 24px);
                 background: root.surface;
                 border-radius: 12px;
                 border-width: 1px;
@@ -2560,8 +2709,8 @@ export component SettingsDialog inherits Rectangle {
                             VerticalBox {
                                 padding: 0px;
                                 spacing: 2px;
-                                Text { text: root.caldav_manage_existing ? @tr("CalDAV settings") : @tr("Set up CalDAV"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
-                                Text { text: root.caldav_manage_existing ? @tr("Discover new calendars.") : @tr("Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                Text { text: root.caldav_connection_id > 0 ? @tr("CalDAV settings") : @tr("Add CalDAV calendar"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
+                                Text { text: root.caldav_connection_id > 0 ? @tr("Discover new calendars.") : @tr("Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV servers."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
                             IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-caldav-settings(); } }
@@ -2585,31 +2734,42 @@ export component SettingsDialog inherits Rectangle {
 
                                 caldav-url-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
+                                    height: self.preferred-height;
                                     label: @tr("Server address");
-                                    value: root.caldav_url;
+                                    value <=> root.caldav_url;
                                     placeholder: @tr("https://calendar.example.com/");
                                     label-color: root.secondary-text;
-                                    edited(value) => { root.caldav_url = value; }
+                                }
+                                Text {
+                                    height: self.preferred-height;
+                                    text: @tr("To sync one calendar, such as a shared mailbox's, enter that calendar's own address.");
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    wrap: word-wrap;
                                 }
                                 caldav-username-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
+                                    height: self.preferred-height;
                                     label: @tr("Username");
-                                    value: root.caldav_username;
+                                    value <=> root.caldav_username;
                                     placeholder: @tr("Usually your email address");
                                     label-color: root.secondary-text;
-                                    edited(value) => { root.caldav_username = value; }
                                 }
                                 caldav-password-input := FormField {
                                     enabled: !root.caldav_connecting;
-                                    height: 57px;
-                                    label: root.caldav_manage_existing ? @tr("New app password · Optional") : @tr("App password");
-                                    value: root.caldav_password;
-                                    placeholder: root.caldav_manage_existing ? @tr("Leave blank to keep the current password") : @tr("Stored securely in your system keyring");
+                                    height: self.preferred-height;
+                                    label: root.caldav_connection_id > 0 ? @tr("New app password · Optional") : @tr("App password");
+                                    value <=> root.caldav_password;
+                                    placeholder: root.caldav_connection_id > 0 ? @tr("Leave blank to keep the current password") : @tr("Stored securely in your system keyring");
                                     input-type: password;
                                     label-color: root.secondary-text;
-                                    edited(value) => { root.caldav_password = value; }
+                                }
+                                Text {
+                                    height: self.preferred-height;
+                                    text: @tr("Invitations for events you create here are sent from {}.", root.caldav-account-email);
+                                    color: root.faint-text;
+                                    font-size: TypeScale.caption;
+                                    wrap: word-wrap;
                                 }
 
                                 if root.sync_status != "" : Text { text: root.sync_status; color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height; }
@@ -2621,13 +2781,14 @@ export component SettingsDialog inherits Rectangle {
                             height: root.compact ? 44px : 34px;
                             spacing: 8px;
                             Rectangle { horizontal-stretch: 1; }
-                            Button { height: parent.height; text: @tr("Cancel"); clicked => { root.close-caldav-settings(); } }
+                            Button { min-width: self.content-width; height: parent.height; text: @tr("Cancel"); clicked => { root.close-caldav-settings(); } }
                             Button {
+                                min-width: self.content-width;
                                 height: parent.height;
-                                text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_manage_existing ? @tr("Reconnect") : @tr("Connect");
+                                text: root.caldav_connecting ? @tr("Connecting…") : root.caldav_connection_id > 0 ? @tr("Reconnect") : @tr("Connect");
                                 primary: true;
-                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_manage_existing || root.caldav_password != "");
-                                clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_url, root.caldav_username, root.caldav_password); }
+                                enabled: !root.caldav_connecting && root.caldav_url != "" && (root.caldav_connection_id > 0 || root.caldav_password != "");
+                                clicked => { root.connect_caldav(root.caldav_account_id, root.caldav_connection_id, root.caldav_url, root.caldav_username, root.caldav_password); }
                             }
                         }
                     }
@@ -2636,17 +2797,17 @@ export component SettingsDialog inherits Rectangle {
         }
 
         Rectangle {
-            visible: root.settings_open && root.imap_form_open;
+            visible: root.settings_open && root.account_form_open;
             width: parent.width;
             height: parent.height;
             background: #00000088;
             z: 900;
             accessible-role: groupbox;
-            accessible-label: root.imap_editing ? @tr("Edit mail account") : @tr("Connect a mail account");
+            accessible-label: root.account_editing ? @tr("Edit mail account") : @tr("Connect a mail account");
 
-            TouchArea { clicked => { root.imap_form_open = false; } }
+            TouchArea { clicked => { root.account_form_open = false; } }
 
-            imap-panel := Rectangle {
+            account-panel := Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 width: min(640px, parent.width - 24px);
@@ -2659,16 +2820,16 @@ export component SettingsDialog inherits Rectangle {
                 drop-shadow-offset-y: 8px;
                 drop-shadow-color: #00000055;
 
-                imap-focus := FocusScope {
+                account-focus := FocusScope {
                     key-pressed(event) => {
                         if event.text == Key.Escape {
-                            root.imap_form_open = false;
+                            root.account_form_open = false;
                             return accept;
                         }
                         reject
                     }
 
-                    VerticalBox {
+                    account-content := VerticalBox {
                         padding: 0px;
                         padding-top: 22px;
                         padding-right: 22px;
@@ -2690,20 +2851,20 @@ export component SettingsDialog inherits Rectangle {
                             VerticalBox {
                                 padding: 0px;
                                 spacing: 2px;
-                                Text { text: root.imap_editing ? @tr("Edit {}", root.account_email) : @tr("Connect a mail account"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
-                                Text { text: root.account_protocol == "jmap" ? @tr("Uses JMAP for mail sync and sending, with automatic discovery.") : @tr("Uses separate IMAP and SMTP servers for mail sync and sending."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                                Text { text: root.account_editing ? @tr("Edit {}", root.account_email) : @tr("Connect a mail account"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
+                                Text { text: root.account_protocol == "jmap" ? @tr("Uses JMAP for mail sync and sending, with automatic discovery.") : root.account_protocol == "pop3" ? @tr("Downloads mail from a POP3 server to this device and sends through SMTP.") : @tr("Uses separate IMAP and SMTP servers for mail sync and sending."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
                             }
                             Rectangle { horizontal-stretch: 1; }
-                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.imap_form_open = false; } }
+                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; idle-background: transparent; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.account_form_open = false; } }
                         }
 
-                        imap-scroll := ScrollView {
+                        account-scroll := ScrollView {
                             vertical-stretch: 1;
                             content-width: self.visible-width;
                             mouse-drag-pan-enabled: root.compact;
                             VerticalBox {
                                 padding: 0px;
-                                width: max(0px, imap-scroll.visible-width - 16px);
+                                width: max(0px, account-scroll.visible-width - 16px);
                                 height: self.preferred-height;
                                 padding-right: 4px;
                                 spacing: 10px;
@@ -2711,53 +2872,58 @@ export component SettingsDialog inherits Rectangle {
                                     padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; root.suggest_account_settings(value); } }
-                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Email address"); value <=> root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.suggest-servers(value); } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("Username"); value <=> root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; }
                                 }
                                 if root.compact : VerticalBox {
                                     padding: 0px;
                                     height: 124px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value: root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.account_email = value; root.suggest_account_settings(value); } }
-                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value: root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; edited(value) => { root.account_username = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Email address"); value <=> root.account_email; placeholder: @tr("name@example.com"); label-color: root.secondary-text; edited(value) => { root.suggest-servers(value); } }
+                                    FormField { enabled: !root.account_setup_in_progress; height: 57px; label: @tr("Username"); value <=> root.account_username; placeholder: @tr("Usually your email address"); label-color: root.secondary-text; }
                                 }
-                                FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value: root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; edited(value) => { root.account_password = value; } }
-                                HorizontalBox {
+                                FormField { enabled: !root.account_setup_in_progress; height: 57px; label: root.account_protocol == "jmap" ? @tr("Password, app password, or API token") : @tr("Password or app password"); value <=> root.account_password; placeholder: @tr("Stored securely in your system keyring"); input-type: password; label-color: root.secondary-text; }
+                                // POP3 mail exists only on this device, so an account
+                                // never switches to or from POP3.
+                                if !(root.account_editing && root.account_protocol == "pop3") : HorizontalBox {
                                     padding: 0px;
                                     height: 40px;
                                     spacing: 8px;
-                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("IMAP + SMTP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "imap"; clicked => { root.account_protocol = "imap"; } }
-                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("JMAP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "jmap"; clicked => { root.account_protocol = "jmap"; } }
+                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("IMAP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "imap"; clicked => { root.choose-protocol("imap"); } }
+                                    if !root.account_editing : Button { horizontal-stretch: 1; height: 40px; text: @tr("POP3"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "pop3"; clicked => { root.choose-protocol("pop3"); } }
+                                    Button { horizontal-stretch: 1; height: 40px; text: @tr("JMAP"); enabled: !root.account_setup_in_progress; primary: root.account_protocol == "jmap"; clicked => { root.choose-protocol("jmap"); } }
                                 }
                                 if root.account_protocol == "jmap" : FormField { enabled: !root.account_setup_in_progress;
                                     height: 57px;
                                     label: @tr("Server address · Optional");
-                                    value: root.jmap_url;
+                                    value <=> root.jmap_url;
                                     placeholder: @tr("Discovered from your email domain");
                                     label-color: root.secondary-text;
-                                    edited(value) => { root.jmap_url = value; }
                                 }
-                                if root.account_protocol == "imap" : HorizontalBox {
+                                if root.account_protocol != "jmap" : HorizontalBox {
                                     padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("IMAP server"); value: root.imap_host; placeholder: @tr("imap.example.com"); label-color: root.secondary-text; edited(value) => { root.imap_host = value; } }
-                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value: root.imap_port; placeholder: @tr("993"); label-color: root.secondary-text; edited(value) => { root.imap_port = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: root.account_protocol == "pop3" ? @tr("POP3 server") : @tr("IMAP server"); value <=> root.incoming_host; placeholder: root.account_protocol == "pop3" ? @tr("pop.example.com") : @tr("imap.example.com"); label-color: root.secondary-text; }
+                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value <=> root.incoming_port; placeholder: MailPorts.incoming(root.account_protocol, root.incoming_security); label-color: root.secondary-text; }
                                 }
-                                if root.account_protocol == "imap" : HorizontalBox {
+                                if root.account_protocol != "jmap" : HorizontalBox {
                                     padding: 0px;
                                     height: 57px;
                                     spacing: 10px;
-                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("SMTP server"); value: root.smtp_host; placeholder: @tr("smtp.example.com"); label-color: root.secondary-text; edited(value) => { root.smtp_host = value; } }
-                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value: root.smtp_port; placeholder: @tr("465"); label-color: root.secondary-text; edited(value) => { root.smtp_port = value; } }
+                                    FormField { enabled: !root.account_setup_in_progress; horizontal-stretch: 1; label: @tr("SMTP server"); value <=> root.smtp_host; placeholder: @tr("smtp.example.com"); label-color: root.secondary-text; }
+                                    FormField { enabled: !root.account_setup_in_progress; width: 88px; label: @tr("Port"); value <=> root.smtp_port; placeholder: MailPorts.smtp(root.smtp_security); label-color: root.secondary-text; }
                                 }
                                 if root.account_protocol == "imap" : Text {
                                     text: @tr("Proton Bridge: use the local servers, ports and password shown in Bridge, and match its encryption settings.");
                                     color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; height: self.preferred-height;
                                 }
-                                if root.account_protocol == "imap" : MailSecurityFields {
-                                    imap-security <=> root.imap_security;
+                                if root.account_protocol != "jmap" : MailSecurityFields {
+                                    incoming-protocol: root.account_protocol;
+                                    incoming-security <=> root.incoming_security;
                                     smtp-security <=> root.smtp_security;
+                                    incoming-port <=> root.incoming_port;
+                                    smtp-port <=> root.smtp_port;
                                     enabled: !root.account_setup_in_progress;
                                     certificate-pem <=> root.trusted_certificate_pem;
                                     import-certificate => { root.import_mail_certificate(); }
@@ -2782,20 +2948,25 @@ export component SettingsDialog inherits Rectangle {
                             }
                         }
 
-                        HorizontalBox {
-                            padding: 0px;
-                            height: root.compact ? 44px : 34px;
+                        // Phone-width dialogs give the whole row to the buttons
+                        // and stack them when a label does not fit in half of it.
+                        GridLayout {
+                            property <bool> stacked: root.compact && max(cancel-account.content-width, save-account.content-width) * 2 + self.spacing
+                                > account-panel.width - account-content.padding-left - account-content.padding-right;
                             spacing: 8px;
-                            Rectangle { horizontal-stretch: 1; }
-                            Button { height: parent.height; text: @tr("Cancel"); clicked => { root.imap_form_open = false; } }
-                            Button {
-                                height: parent.height;
-                                text: root.account_setup_in_progress ? @tr("Connecting…") : root.imap_editing ? @tr("Save account") : @tr("Connect account");
+                            if !root.compact : Rectangle { row: 0; col: 0; horizontal-stretch: 1; }
+                            cancel-account := Button { row: 0; col: root.compact ? 0 : 1; height: root.compact ? 44px : 34px; label-overflow: elide; text: @tr("Cancel"); clicked => { root.account_form_open = false; } }
+                            save-account := Button {
+                                row: parent.stacked ? 1 : 0;
+                                col: parent.stacked ? 0 : root.compact ? 1 : 2;
+                                height: root.compact ? 44px : 34px;
+                                label-overflow: elide;
+                                text: root.account_setup_in_progress ? @tr("Connecting…") : root.account_editing ? @tr("Save account") : @tr("Connect account");
                                 primary: true;
-                                enabled: root.imap_form_valid && !root.account_setup_in_progress;
+                                enabled: root.account_form_valid && !root.account_setup_in_progress;
                                 clicked => {
                                     root.show_account_status = true;
-                                    root.add_password_account(root.account_protocol, root.account_email, root.account_username, root.account_password, root.jmap_url, root.imap_host, root.imap_port, root.smtp_host, root.smtp_port);
+                                    root.add_password_account(root.account_protocol, root.account_email, root.account_username, root.account_password, root.jmap_url, root.incoming_host, root.incoming_port, root.smtp_host, root.smtp_port);
                                 }
                             }
                         }
@@ -2819,7 +2990,8 @@ export component SettingsDialog inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 width: min(480px, parent.width - 24px);
-                height: min(max(root.profile-editor-custom-color ? 592px : 396px, profile-content.preferred-height), parent.height - 24px);
+                // Up to the content's height; taller content scrolls.
+                height: min(profile-content.preferred-height, parent.height - 24px);
                 background: root.surface;
                 border-radius: 12px;
                 border-width: 1px;
@@ -2827,6 +2999,7 @@ export component SettingsDialog inherits Rectangle {
                 drop-shadow-blur: 24px;
                 drop-shadow-offset-y: 8px;
                 drop-shadow-color: #00000055;
+                clip: true;
 
                 profile-focus := FocusScope {
                     forward-focus: profile-name-field;
@@ -2842,79 +3015,94 @@ export component SettingsDialog inherits Rectangle {
                         height: parent.height;
                         content-width: self.visible-width;
                         mouse-drag-pan-enabled: root.compact;
-                    profile-content := VerticalBox {
+                    profile-content := VerticalLayout {
                         width: profile-panel.width;
-                        padding-top: 22px;
-                        padding-right: 22px;
-                        padding-bottom: 20px;
-                        padding-left: 22px;
+                        padding-top: 20px;
+                        padding-right: 20px;
+                        padding-bottom: 18px;
+                        padding-left: 20px;
                         spacing: 14px;
-                        HorizontalBox {
-                            height: 5px + profile-editor-title.height + profile-editor-subtitle.height;
+                        HorizontalLayout {
                             spacing: 12px;
                             Rectangle {
-                                width: 44px; height: 44px;
-                                border-radius: 12px;
+                                width: 40px;
+                                height: 40px;
+                                border-radius: 11px;
                                 background: root.profile-editor-color.transparentize(0.82);
                                 Rectangle {
-                                    x: 17px; y: 7px; width: 10px; height: 30px;
+                                    x: 15px; y: 7px; width: 10px; height: 26px;
                                     border-radius: 5px;
                                     background: root.profile-editor-color;
                                 }
                             }
-                            VerticalBox {
-                                spacing: 2px;
-                                profile-editor-title := Text { height: max(23px, self.preferred-height); text: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Edit profile"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; }
-                                profile-editor-subtitle := Text { height: max(16px, self.preferred-height); text: @tr("A local group for account colors and mail-list identification."); color: root.faint-text; font-size: TypeScale.caption; overflow: elide; }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 1px;
+                                Text { text: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Edit profile"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; overflow: elide; }
+                                Text { text: @tr("Its color marks its accounts' mail, and choosing it shows only their mail."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                             }
-                            Rectangle { horizontal-stretch: 1; }
-                            IconButton { width: 40px; height: 40px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; ghost: true; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-profile-editor(); } }
+                            IconButton { width: 36px; height: 36px; icon: @image-url("../icons/lucide/outline/x.svg"); icon-color: root.secondary-text; ghost: true; hover-background: root.accent-soft; tooltip-text: @tr("Close"); clicked => { root.close-profile-editor(); } }
                         }
                         profile-name-field := FormField {
                             label: @tr("Profile name");
-                            value: root.profile-editor-name;
+                            value <=> root.profile-editor-name;
                             placeholder: @tr("Personal or Work");
                             label-color: root.secondary-text;
-                            edited(value) => { root.profile-editor-name = value; root.profile-editor-error = ""; }
+                            edited(value) => { root.profile-editor-error = ""; }
                         }
-                        Text { height: max(18px, self.preferred-height); text: @tr("Color"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 600; vertical-alignment: center; }
-                        HorizontalBox {
-                            height: 40px;
-                            spacing: profile-panel.width < 400px ? 4px : 8px;
-                            for swatch[index] in root.profile-colors : ProfileColorChoice {
-                                width: profile-panel.width < 400px ? 28px : 34px;
-                                height: self.width;
-                                value: swatch;
-                                selected: !root.profile-editor-custom-color && root.profile-editor-color == swatch;
-                                label: @tr("Profile color {}", index + 1);
-                                chosen => {
-                                    root.profile-editor-color = swatch;
-                                    root.profile-editor-custom-color = false;
+                        VerticalLayout {
+                            spacing: 8px;
+                            Text { text: @tr("Color"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 600; }
+                            HorizontalLayout {
+                                spacing: profile-panel.width < 400px ? 5px : 8px;
+                                alignment: start;
+                                for swatch[index] in ProfilePalette.colors : ProfileColorChoice {
+                                    width: profile-panel.width < 400px ? 28px : 32px;
+                                    height: self.width;
+                                    value: swatch;
+                                    selected: !root.profile-editor-custom-color && root.profile-editor-color == swatch;
+                                    label: @tr("Profile color {}", index + 1);
+                                    chosen => {
+                                        root.profile-editor-color = swatch;
+                                        root.profile-editor-custom-color = false;
+                                    }
+                                }
+                            }
+                            Button {
+                                height: 34px;
+                                text: @tr("Custom color…");
+                                selected: root.profile-editor-custom-color;
+                                clicked => { root.profile-editor-custom-color = true; }
+                            }
+                            if root.profile-editor-custom-color : RuntimeColorPicker {
+                                height: 222px;
+                                value: root.profile-editor-color;
+                                edited(value) => { root.profile-editor-color = value; }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 6px;
+                            Text { text: @tr("Accounts"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 600; }
+                            VerticalLayout {
+                                spacing: 2px;
+                                accessible-role: list;
+                                accessible-label: @tr("Accounts");
+                                for member in root.profile_members : ProfileMemberChoice {
+                                    member: member;
+                                    toggled => { member.checked = !member.checked; }
                                 }
                             }
                         }
-                        Button {
-                            height: 34px;
-                            text: @tr("Custom color…");
-                            selected: root.profile-editor-custom-color;
-                            clicked => { root.profile-editor-custom-color = true; }
-                        }
-                        if root.profile-editor-custom-color : RuntimeColorPicker {
-                            height: 222px;
-                            value: root.profile-editor-color;
-                            edited(value) => { root.profile-editor-color = value; }
-                        }
-                        if root.profile-editor-error != "" : Text { height: max(20px, self.preferred-height); text: root.profile-editor-error; color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap; }
-                        Rectangle { vertical-stretch: 1; }
-                        HorizontalBox {
-                            height: root.compact ? 44px : 34px;
+                        if root.profile-editor-error != "" : Text { text: root.profile-editor-error; color: AppTheme.destructive; font-size: TypeScale.caption; wrap: word-wrap; }
+                        HorizontalLayout {
                             spacing: 8px;
+                            padding-top: 2px;
                             // A phone gives both actions the whole row, which
                             // their labels need at larger platform fonts.
                             if !root.compact : Rectangle { horizontal-stretch: 1; }
-                            Button { height: parent.height; text: @tr("Cancel"); clicked => { root.close-profile-editor(); } }
+                            Button { height: root.compact ? 44px : 34px; text: @tr("Cancel"); clicked => { root.close-profile-editor(); } }
                             Button {
-                                height: parent.height;
+                                height: root.compact ? 44px : 34px;
                                 text: root.profile-editor-id == "" ? @tr("Create profile") : @tr("Save profile");
                                 primary: true;
                                 enabled: root.profile-editor-name != "";
@@ -2934,95 +3122,36 @@ export component SettingsDialog inherits Rectangle {
             }
         }
 
-        Rectangle {
-            visible: root.settings_open && root.account-profile-picker-open;
+        if root.settings_open && root.account-profile-picker-open
+            && root.account-profile-picker-account.id == root.account-profile-picker-id : Rectangle {
             width: parent.width;
             height: parent.height;
             background: #00000088;
             z: 950;
             accessible-role: groupbox;
-            accessible-label: @tr("Choose a profile for {}", root.account-profile-picker-name);
+            accessible-label: @tr("Choose a profile for {}", root.account-profile-picker-account.name);
 
             TouchArea { clicked => { root.close-account-profile-picker(); } }
-            profile-picker-panel := Rectangle {
+            AccountProfilePicker {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
                 width: min(460px, parent.width - 24px);
-                height: min(
-                    (root.account-profile-picker-custom-color ? 626px : 390px)
-                        + min(root.mail_profiles.length, 4) * 50px
-                        + picker-title.height + picker-account.height - 48px,
-                    parent.height - 24px,
-                );
-                background: root.surface;
-                border-radius: 12px;
-                border-width: 1px;
-                border-color: root.border-subtle;
-                drop-shadow-blur: 24px;
-                drop-shadow-offset-y: 8px;
-                drop-shadow-color: #00000055;
-                picker-title := Text { x: 22px; y: 20px; width: parent.width - 44px; height: max(26px, self.preferred-height); text: @tr("Choose profile"); color: root.title-color; font-size: TypeScale.heading; font-weight: 700; }
-                picker-account := Text { x: 22px; y: picker-title.y + picker-title.height + 2px; width: parent.width - 44px; height: max(22px, self.preferred-height); text: root.account-profile-picker-name; color: root.secondary-text; font-size: TypeScale.secondary; overflow: elide; }
-                ScrollView {
-                    x: 22px; y: picker-account.y + picker-account.height + 10px;
-                    width: parent.width - 44px;
-                    height: parent.height - self.y - 58px;
-                    mouse-drag-pan-enabled: root.compact;
-                        content-width: self.visible-width;
-                    VerticalBox {
-                        spacing: 8px;
-                        Text { height: max(20px, self.preferred-height); text: @tr("Profiles"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                        for profile in root.mail_profiles : Button {
-                            height: 42px;
-                            text: profile.name;
-                            selected: root.account-profile-picker-current-id == profile.id;
-                            clicked => { root.choose-account-profile(profile.id); }
-                        }
-                        Text { height: max(20px, self.preferred-height); text: @tr("No profile · Account color"); color: root.secondary-text; font-size: TypeScale.caption; font-weight: 700; vertical-alignment: center; }
-                        Button {
-                            height: 42px;
-                            text: @tr("Generated color");
-                            selected: root.account-profile-picker-current-id == "" && !root.account-profile-picker-has-custom-color;
-                            clicked => { root.choose-account-color(root.account-profile-picker-color, true); }
-                        }
-                        HorizontalBox {
-                            height: 36px;
-                            spacing: profile-picker-panel.width < 390px ? 4px : 8px;
-                            for swatch[index] in root.profile-colors : ProfileColorChoice {
-                                width: profile-picker-panel.width < 390px ? 24px : 32px;
-                                height: self.width;
-                                value: swatch;
-                                selected: root.account-profile-picker-current-id == ""
-                                    && root.account-profile-picker-has-custom-color
-                                    && !root.account-profile-picker-custom-color
-                                    && root.account-profile-picker-color == swatch;
-                                label: @tr("Account color {}", index + 1);
-                                chosen => { root.choose-account-color(swatch, false); }
-                            }
-                        }
-                        Button {
-                            height: 38px;
-                            text: @tr("Custom color…");
-                            selected: root.account-profile-picker-custom-color
-                                || (root.account-profile-picker-current-id == ""
-                                    && root.account-profile-picker-has-custom-color
-                                    && !root.profile-color-is-preset(root.account-profile-picker-color));
-                            clicked => { root.account-profile-picker-custom-color = true; }
-                        }
-                        if root.account-profile-picker-custom-color : RuntimeColorPicker {
-                            height: 222px;
-                            value: root.account-profile-picker-color;
-                            edited(value) => { root.account-profile-picker-color = value; }
-                        }
-                        if root.account-profile-picker-custom-color : Button {
-                            height: 38px;
-                            text: @tr("Use custom color");
-                            primary: true;
-                            clicked => { root.choose-account-color(root.account-profile-picker-color, false); }
-                        }
-                    }
+                height: min(self.content-height, parent.height - 24px);
+                compact: root.compact;
+                profiles: root.mail_profiles;
+                account: root.account-profile-picker-account;
+                choose-profile(profile-id) => {
+                    root.assign_account_profile(root.account-profile-picker-id, profile-id);
                 }
-                Button { x: parent.width - self.width - 22px; y: parent.height - 46px; height: 34px; text: @tr("Cancel"); clicked => { root.close-account-profile-picker(); } }
+                choose-color(color, generated) => {
+                    root.save_account_color(root.account-profile-picker-id, color, generated);
+                }
+                create-profile => {
+                    let account-id = root.account-profile-picker-id;
+                    root.close-account-profile-picker();
+                    root.open-new-profile(account-id);
+                }
+                close => { root.close-account-profile-picker(); }
             }
         }
 
@@ -3032,7 +3161,15 @@ export component SettingsDialog inherits Rectangle {
             open <=> root.delete_data_confirmation;
             title: @tr("Delete all local data?");
             description: @tr("This removes every account, downloaded message, calendar, contact, preference, and credential stored by Flectar Mail on this device.");
-            detail: @tr("Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.");
+            detail: LocalMailUi.account-id >= 0
+                ? @tr("Imported mail and the mail of any POP3 account are stored only on this device and will be deleted. Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.")
+                : root.has_device_mail
+                ? @tr("POP3 mail is stored only on this device and will be deleted. Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.")
+                : @tr("Mail and events on Gmail, Outlook, and IMAP servers will not be deleted.");
+            action-label: LocalMailUi.account-id >= 0 ? @tr("Export mail…") : root.has_device_mail ? @tr("Export POP3 mail…") : "";
+            action-status: root.mail_export_status;
+            action-enabled: !root.mail_export_running;
+            action => { root.export_device_mail(-1); }
             confirm-label: @tr("Delete everything");
             cancel-label: @tr("Keep my data");
             icon: @image-url("../icons/lucide/outline/trash.svg");
@@ -3047,11 +3184,40 @@ export component SettingsDialog inherits Rectangle {
         ConfirmationDialog {
             width: parent.width;
             height: parent.height;
+            open <=> root.delete_local_mail_confirmation;
+            title: @tr("Delete mail on this device?");
+            subject: @tr("One message" | "{} messages" % LocalMailUi.messages, Numbers.count(LocalMailUi.messages));
+            description: @tr("Delete the mail you imported and its folders from this device.");
+            detail: @tr("It exists only here. Export it first to keep a copy.");
+            action-label: @tr("Export mail…");
+            action-status: root.mail_export_status;
+            action-enabled: !root.mail_export_running;
+            action => { root.export_device_mail(LocalMailUi.account-id); }
+            confirm-label: @tr("Delete mail");
+            cancel-label: @tr("Keep mail");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.delete_account(LocalMailUi.account-id); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
             open <=> root.delete_account_confirmation;
             title: @tr("Remove account?");
             subject: root.delete_account_name;
             description: @tr("Remove this account and its downloaded mail from this device.");
-            detail: @tr("Messages on the mail server will not be deleted.");
+            detail: root.delete_account_device_mail
+                ? @tr("This account's mail is stored only on this device. Export it first to keep a copy.")
+                : @tr("Messages on the mail server will not be deleted.");
+            action-label: root.delete_account_device_mail ? @tr("Export mail…") : "";
+            action-status: root.mail_export_status;
+            action-enabled: !root.mail_export_running;
+            action => { root.export_device_mail(root.delete_account_id); }
             confirm-label: @tr("Remove account");
             cancel-label: @tr("Keep account");
             icon: @image-url("../icons/lucide/outline/trash.svg");
@@ -3080,5 +3246,24 @@ export component SettingsDialog inherits Rectangle {
             body-color: root.body-text;
             muted-color: root.secondary-text;
             confirmed => { root.delete_mail_profile(root.delete-profile-id); }
+        }
+
+        ConfirmationDialog {
+            width: parent.width;
+            height: parent.height;
+            open <=> root.remove-calendar-confirmation;
+            title: @tr("Remove calendar?");
+            subject: root.remove-calendar-name;
+            description: @tr("Stop syncing it and remove its events from this device.");
+            detail: @tr("Events on the server will not be deleted.");
+            confirm-label: @tr("Remove calendar");
+            cancel-label: @tr("Keep calendar");
+            icon: @image-url("../icons/lucide/outline/trash.svg");
+            surface: root.surface;
+            dialog-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-color: root.body-text;
+            muted-color: root.secondary-text;
+            confirmed => { root.remove_calendar_connection(root.remove-calendar-id); }
         }
 }

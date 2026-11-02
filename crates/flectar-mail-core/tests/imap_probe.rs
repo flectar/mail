@@ -100,17 +100,22 @@ async fn probe_smtp_starttls_auth() {
         email: "probeuser@example.com".into(),
         display_name: None,
         avatar_url: None,
-        provider: flectar_mail_core::models::Provider::Imap,
+        provider: flectar_mail_core::models::Provider::Generic,
         auth_kind: flectar_mail_core::models::AuthKind::Password,
         mail_protocol: flectar_mail_core::models::MailProtocol::Imap,
         username: "probeuser".into(),
         jmap_url: String::new(),
         jmap_account_id: None,
-        imap_host: "127.0.0.1".into(),
-        imap_port: 10993,
+        incoming_host: "127.0.0.1".into(),
+        incoming_port: 10993,
         smtp_host: "127.0.0.1".into(),
         smtp_port: 10587,
-        settings: flectar_mail_core::models::AccountSettings::default(),
+        settings: flectar_mail_core::models::AccountSettings::new(
+            flectar_mail_core::models::MailConnectionSettings::new(
+                flectar_mail_core::models::ConnectionSecurity::Tls,
+                flectar_mail_core::models::ConnectionSecurity::Starttls,
+            ),
+        ),
     };
     let auth = flectar_mail_core::smtp::SmtpAuth::Password("pass".into());
     match flectar_mail_core::smtp::test_connection(&cfg, &auth).await {

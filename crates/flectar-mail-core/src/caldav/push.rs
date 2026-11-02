@@ -9,30 +9,29 @@ use crate::db::repo;
 use crate::db::repo::calendar::SyncRow;
 use crate::error::{CoreError, Result};
 use crate::events::{CoreEvent, EventBus};
-use crate::models::now_ms;
+use crate::models::{Calendar, now_ms};
 
 use super::Transport;
+use super::route::PendingPush;
 
-/// Push every dirty/tombstoned row of the account. Individual row failures
-/// are logged and left dirty for the next cycle; only auth errors abort.
-/// Returns true when at least one row synced.
-pub async fn push_dirty(
+/// Push the changes routed to one connection. Individual row failures are
+/// logged and left dirty for the next cycle; only auth errors and a lost
+/// network abort. Returns true when at least one row synced.
+pub async fn push_routed(
     db: &Db,
     bus: &EventBus,
     t: &dyn Transport,
     account_id: i64,
     self_email: &str,
+    pushes: &[PendingPush],
 ) -> Result<bool> {
-    let rows = db
-        .read(move |conn| repo::calendar::dirty_rows(conn, account_id))
-        .await?;
     let mut any = false;
-    for row in rows {
-        match push_row(db, bus, t, account_id, self_email, &row).await {
+    for push in pushes {
+        match push_row(db, bus, t, account_id, self_email, push).await {
             Ok(()) => any = true,
             Err(CoreError::NeedsReauth) => return Err(CoreError::NeedsReauth),
             Err(CoreError::Offline) => return Err(CoreError::Offline),
-            Err(e) => tracing::warn!("caldav push of event {} failed: {e}", row.event.id),
+            Err(e) => tracing::warn!("caldav push of event {} failed: {e}", push.row.event.id),
         }
     }
     Ok(any)
@@ -44,47 +43,28 @@ async fn push_row(
     t: &dyn Transport,
     account_id: i64,
     self_email: &str,
-    row: &SyncRow,
+    push: &PendingPush,
 ) -> Result<()> {
+    let row = &push.row;
+    let calendar = &push.calendar;
     if row.deleted {
-        return push_delete(db, t, row).await;
+        return push_delete(db, t, row, calendar).await;
     }
 
-    // Where does the resource live? Existing href, else a new <uid>.ics
-    // resource in the event's chosen calendar (falling back to the account's
-    // default when none was chosen or it has since vanished/been disabled).
-    let (calendar_id, href_path, if_match): (i64, String, Option<String>) =
-        match (&row.event.calendar_id, &row.caldav_href) {
-            (Some(cal), Some(href)) => (*cal, href.clone(), row.etag.clone()),
-            (chosen, _) => {
-                let mut target = None;
-                if let Some(cal_id) = *chosen {
-                    target = db
-                        .read(move |conn| repo::caldav::get_calendar(conn, cal_id))
-                        .await?
-                        .filter(|c| c.enabled && !c.read_only);
-                }
-                let target = match target {
-                    Some(c) => c,
-                    None => db
-                        .read(move |conn| repo::caldav::default_calendar(conn, account_id))
-                        .await?
-                        .ok_or_else(|| super::err("no calendar collection to write to"))?,
-                };
-                let path = match url::Url::parse(&target.url) {
-                    Ok(u) => format!("{}{}.ics", u.path(), sanitize_uid(&row.ical_uid)),
-                    Err(_) => format!("{}{}.ics", target.url, sanitize_uid(&row.ical_uid)),
-                };
-                (target.id, path, None)
-            }
-        };
-
-    let cal_url = db
-        .read(move |conn| repo::caldav::get_calendar(conn, calendar_id))
-        .await?
-        .ok_or_else(|| super::err("calendar collection missing"))?
-        .url;
-    let abs_url = super::discovery::resolve(&cal_url, &href_path)?;
+    // An event already on the server keeps its resource; a new one becomes a
+    // <uid>.ics resource in the calendar it was routed to.
+    let (href_path, if_match): (String, Option<String>) = match &row.caldav_href {
+        Some(href) => (href.clone(), row.etag.clone()),
+        None => {
+            let path = match url::Url::parse(&calendar.url) {
+                Ok(u) => format!("{}{}.ics", u.path(), sanitize_uid(&row.ical_uid)),
+                Err(_) => format!("{}{}.ics", calendar.url, sanitize_uid(&row.ical_uid)),
+            };
+            (path, None)
+        }
+    };
+    let calendar_id = calendar.id;
+    let abs_url = super::discovery::resolve(&calendar.url, &href_path)?;
 
     let body = build_put_body(row, (!self_email.is_empty()).then_some(self_email));
 
@@ -137,20 +117,15 @@ async fn push_row(
     Ok(())
 }
 
-async fn push_delete(db: &Db, t: &dyn Transport, row: &SyncRow) -> Result<()> {
+async fn push_delete(db: &Db, t: &dyn Transport, row: &SyncRow, calendar: &Calendar) -> Result<()> {
     let event_id = row.event.id;
-    let (Some(calendar_id), Some(href)) = (row.event.calendar_id, row.caldav_href.clone()) else {
+    let Some(href) = row.caldav_href.clone() else {
         // Never synced: nothing to delete remotely.
         db.write(move |conn| repo::calendar::hard_delete(conn, event_id))
             .await?;
         return Ok(());
     };
-    let cal_url = db
-        .read(move |conn| repo::caldav::get_calendar(conn, calendar_id))
-        .await?
-        .ok_or_else(|| super::err("calendar collection missing"))?
-        .url;
-    let abs_url = super::discovery::resolve(&cal_url, &href)?;
+    let abs_url = super::discovery::resolve(&calendar.url, &href)?;
     let headers: Vec<(&str, &str)> = match &row.etag {
         Some(etag) => vec![("If-Match", etag.as_str())],
         None => vec![],
@@ -473,6 +448,21 @@ mod tests {
     use crate::caldav::http::{DavResponse, MockTransport};
     use crate::caldav::sync::tests::seed_db;
     use crate::models::UpdateEventArgs;
+
+    /// Route and push the seeded account's pending changes.
+    async fn push_dirty(
+        db: &Db,
+        bus: &EventBus,
+        t: &dyn Transport,
+        account_id: i64,
+        self_email: &str,
+    ) -> Result<bool> {
+        let routes = db
+            .read(move |c| crate::caldav::route::pending(c, account_id))
+            .await?;
+        let pushes: Vec<PendingPush> = routes.pushes.into_values().flatten().collect();
+        push_routed(db, bus, t, account_id, self_email, &pushes).await
+    }
 
     async fn seed_synced_event(db: &Db) -> i64 {
         db.write(|c| {

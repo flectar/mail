@@ -5,6 +5,7 @@
 //! that backend.
 
 use crate::error::{CoreError, Result};
+use std::borrow::Cow;
 use std::sync::Arc;
 
 #[cfg(desktop)]
@@ -30,25 +31,34 @@ pub enum Slot {
     OAuthBundle,
     /// App-level AI API key (stored under account id 0).
     AiApiKey,
-    /// Generic-CalDAV app password (Google CalDAV reuses the OAuth tokens).
-    CaldavPassword,
+    /// App password of an account's one CalDAV server, from before an
+    /// account could sync several. `caldav::task::move_secret` re-files it
+    /// under its connection.
+    AccountCaldavPassword,
+    /// The app password of the CalDAV connection with this id. Google and
+    /// Microsoft connections ride the account's OAuth tokens instead.
+    CaldavPassword(i64),
     /// CardDAV app password. Kept separate because a user may configure
     /// different DAV providers for calendars and contacts.
     CarddavPassword,
 }
 
 impl Slot {
-    pub fn as_str(&self) -> &'static str {
+    /// The secret's stable name within its account.
+    pub fn key(&self) -> Cow<'static, str> {
         match self {
-            Slot::Password => "password",
-            Slot::RefreshToken => "refresh_token",
-            Slot::AccessToken => "access_token",
-            Slot::OAuthClientId => "oauth_client_id",
-            Slot::OAuthClientSecret => "oauth_client_secret",
-            Slot::OAuthBundle => "oauth_bundle",
-            Slot::AiApiKey => "ai_api_key",
-            Slot::CaldavPassword => "caldav_password",
-            Slot::CarddavPassword => "carddav_password",
+            Slot::Password => "password".into(),
+            Slot::RefreshToken => "refresh_token".into(),
+            Slot::AccessToken => "access_token".into(),
+            Slot::OAuthClientId => "oauth_client_id".into(),
+            Slot::OAuthClientSecret => "oauth_client_secret".into(),
+            Slot::OAuthBundle => "oauth_bundle".into(),
+            Slot::AiApiKey => "ai_api_key".into(),
+            Slot::AccountCaldavPassword => "caldav_password".into(),
+            Slot::CaldavPassword(connection_id) => {
+                format!("caldav_password:{connection_id}").into()
+            }
+            Slot::CarddavPassword => "carddav_password".into(),
         }
     }
 }
@@ -59,6 +69,9 @@ pub trait CredentialStore: Send + Sync {
     fn store(&self, account_id: i64, slot: Slot, secret: &str) -> Result<()>;
     fn load(&self, account_id: i64, slot: Slot) -> Result<String>;
     fn delete(&self, account_id: i64, slot: Slot) -> Result<()>;
+    /// Remove the account's secrets. A backend that cannot enumerate its
+    /// entries removes the fixed slots; callers delete each
+    /// [`Slot::CaldavPassword`] with its connection first.
     fn delete_all(&self, account_id: i64) -> Result<()>;
 
     /// Verify that this backend can complete a write/read/delete cycle before
