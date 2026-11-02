@@ -72,21 +72,29 @@ impl OhosPlatform {
 
         loop {
             let now = Instant::now();
-            let has_animations = self
-                .window
-                .borrow()
-                .as_ref()
-                .is_some_and(|w| w.window().has_active_animations());
+            let visible = self.visible.load(Ordering::Relaxed);
+            let has_animations = visible
+                && self
+                    .window
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|w| w.window().has_active_animations());
+            let redraw_pending = visible
+                && self
+                    .window
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|w| w.has_pending_redraw());
             let mut timeout = if self.quit.load(Ordering::Relaxed) {
                 Duration::ZERO
             } else {
                 self.next_timeout(has_animations)
             };
-            // Throttle redraws to the animation cadence: Slint may request a
-            // redraw for every frame (e.g. through `animation-tick()`), and
-            // without this the loop would spin at unbounded fps.
-            if now < next_frame {
-                timeout = timeout.min(next_frame - now);
+            // Throttle only a frame that is actually pending. Applying the
+            // 16 ms redraw cadence to every timeout kept the loop awake at
+            // ~60 Hz even when no frame had been requested.
+            if redraw_pending {
+                timeout = timeout.min(next_frame.saturating_duration_since(now));
             }
 
             match rx.recv_timeout(timeout) {
