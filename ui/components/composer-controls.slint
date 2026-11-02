@@ -1,3 +1,4 @@
+import { ScrollView } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
 
 export component RecipientRow inherits Rectangle {
@@ -45,38 +46,56 @@ export component RecipientRow inherits Rectangle {
         overflow: elide;
     }
 
-    field := TextInput {
+    // A recipient list longer than the row scrolls inside it, so the caret can
+    // travel the whole list instead of stopping at the field's edge.
+    field-scroll := ScrollView {
         x: row-label.x + row-label.width + 4px;
         width: max(0px, parent.width - self.x - root.right-padding);
         height: parent.height;
-        text <=> root.text;
-        color: root.text-color;
-        selection-background-color: root.focus-color;
-        selection-foreground-color: white;
-        font-size: TypeScale.body;
-        single-line: true;
-        vertical-alignment: center;
-        edited => {
-            root.edited(self.text);
-        }
-        key-pressed(event) => {
-            if (root.suggestions-open && event.text == Key.DownArrow) {
-                root.move-suggestion(1);
-                return accept;
+        content-width: field.width;
+        content-height: self.visible-height;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+
+        field := TextInput {
+            width: max(field-scroll.visible-width, self.preferred-width);
+            height: field-scroll.visible-height;
+            text <=> root.text;
+            color: root.text-color;
+            selection-background-color: root.focus-color;
+            selection-foreground-color: white;
+            font-size: TypeScale.body;
+            single-line: true;
+            vertical-alignment: center;
+            edited => {
+                root.edited(self.text);
             }
-            if (root.suggestions-open && event.text == Key.UpArrow) {
-                root.move-suggestion(-1);
-                return accept;
+            cursor-position-changed(cursor) => {
+                if cursor.x + field-scroll.content-x < 0px {
+                    field-scroll.content-x = -cursor.x;
+                } else if cursor.x + field-scroll.content-x > field-scroll.visible-width {
+                    field-scroll.content-x = min(0px, field-scroll.visible-width - cursor.x);
+                }
             }
-            if (root.suggestions-open && (event.text == Key.Return || event.text == Key.Tab)) {
-                root.accept-suggestion();
-                return accept;
+            key-pressed(event) => {
+                if (root.suggestions-open && event.text == Key.DownArrow) {
+                    root.move-suggestion(1);
+                    return accept;
+                }
+                if (root.suggestions-open && event.text == Key.UpArrow) {
+                    root.move-suggestion(-1);
+                    return accept;
+                }
+                if (root.suggestions-open && (event.text == Key.Return || event.text == Key.Tab)) {
+                    root.accept-suggestion();
+                    return accept;
+                }
+                if (root.suggestions-open && event.text == Key.Escape) {
+                    root.dismiss-suggestions();
+                    return accept;
+                }
+                reject
             }
-            if (root.suggestions-open && event.text == Key.Escape) {
-                root.dismiss-suggestions();
-                return accept;
-            }
-            reject
         }
     }
 }
