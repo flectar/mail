@@ -1445,36 +1445,38 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             if root.download_directory_available : Rectangle {
-                                height: max(root.compact ? 168px : 132px, self.preferred-height);
+                                height: self.preferred-height;
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
                                 border-color: root.border-subtle;
                                 VerticalBox {
                                     padding: 16px;
-                                    spacing: 6px;
-                                    Text {
-                                        height: max(20px, self.preferred-height);
-                                        text: @tr("Download location");
-                                        color: root.heading;
-                                        font-size: TypeScale.subtitle;
-                                        font-weight: 600;
-                                        vertical-alignment: center;
-                                    }
-                                    Text {
-                                        height: max(17px, self.preferred-height);
-                                        text: root.download_directory == ""
-                                            ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
-                                            : root.download_directory;
-                                        color: root.faint-text;
-                                        font-size: TypeScale.caption;
-                                        wrap: word-wrap;
-                                    }
-                                    HorizontalBox {
-                                        height: max(32px, self.preferred-height);
-                                        padding: 0px;
-                                        spacing: 8px;
-                                        alignment: start;
+                                    // Laid out like SettingsSelectRow: texts left of the buttons on
+                                    // desktop, stacked above them in the compact layout.
+                                    if !root.compact : HorizontalBox {
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            Text {
+                                                height: max(18px, self.preferred-height);
+                                                text: @tr("Download location");
+                                                color: root.body-text;
+                                                font-size: TypeScale.body;
+                                                font-weight: 600;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                height: max(17px, self.preferred-height);
+                                                text: root.download_directory == ""
+                                                    ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
+                                                    : root.download_directory;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                overflow: elide;
+                                            }
+                                        }
                                         Button {
                                             width: max(132px, self.content-width);
                                             text: @tr("Choose folder…");
@@ -1485,6 +1487,43 @@ export component SettingsDialog inherits Rectangle {
                                             text: @tr("Reset");
                                             enabled: root.download_directory != "";
                                             clicked => { root.clear_download_directory(); }
+                                        }
+                                    }
+                                    if root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            height: max(20px, self.preferred-height);
+                                            text: @tr("Download location");
+                                            color: root.body-text;
+                                            font-size: TypeScale.body;
+                                            font-weight: 600;
+                                            wrap: word-wrap;
+                                        }
+                                        Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: root.download_directory == ""
+                                                ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
+                                                : root.download_directory;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            // A path has no spaces to break at.
+                                            wrap: root.download_directory == "" ? TextWrap.word-wrap : TextWrap.char-wrap;
+                                        }
+                                        HorizontalBox {
+                                            padding: 0px;
+                                            spacing: 8px;
+                                            Button {
+                                                horizontal-stretch: 1;
+                                                text: @tr("Choose folder…");
+                                                clicked => { root.choose_download_directory(); }
+                                            }
+                                            Button {
+                                                horizontal-stretch: 1;
+                                                text: @tr("Reset");
+                                                enabled: root.download_directory != "";
+                                                clicked => { root.clear_download_directory(); }
+                                            }
                                         }
                                     }
                                 }

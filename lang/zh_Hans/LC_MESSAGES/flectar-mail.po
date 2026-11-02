@@ -1633,8 +1633,8 @@ msgid ""
 "Cancel."
 msgstr "已有另一项浏览器授权正在进行，请完成它或选择“取消”。"
 
-#: ui/app.slint:566 ui/dialogs/settings-dialog.slint:1814
-#: ui/dialogs/settings-dialog.slint:1857 ui/views/onboarding-view.slint:161
+#: ui/app.slint:566 ui/dialogs/settings-dialog.slint:1853
+#: ui/dialogs/settings-dialog.slint:1896 ui/views/onboarding-view.slint:161
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr "请在“登录设置”中添加应用密钥以启用此服务商。"
 
@@ -1843,7 +1843,7 @@ msgid "Invitations for events you create here are sent from {}."
 msgstr ""
 
 #: ui/components/account-calendars.slint:264
-#: ui/dialogs/settings-dialog.slint:2712
+#: ui/dialogs/settings-dialog.slint:2751
 msgid "Add CalDAV calendar"
 msgstr ""
 
@@ -1971,7 +1971,7 @@ msgstr ""
 "显示它是否接受最后一条消息。"
 
 #: ui/components/account-mail-preferences.slint:171
-#: ui/dialogs/settings-dialog.slint:2882 ui/views/onboarding-view.slint:267
+#: ui/dialogs/settings-dialog.slint:2921 ui/views/onboarding-view.slint:267
 msgid "Email address"
 msgstr "电子邮件地址"
 
@@ -2005,7 +2005,7 @@ msgstr "添加发件人地址"
 
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
-#: ui/dialogs/settings-dialog.slint:2159 ui/dialogs/settings-dialog.slint:2958
+#: ui/dialogs/settings-dialog.slint:2198 ui/dialogs/settings-dialog.slint:2997
 #: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
 msgid "Cancel"
 msgstr "取消"
@@ -2205,7 +2205,7 @@ msgid "Export decrypted message"
 msgstr "导出解密后的邮件"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2858 ui/views/files-view.slint:468
+#: ui/dialogs/settings-dialog.slint:2897 ui/views/files-view.slint:468
 #: ui/views/files-view.slint:658 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "关闭"
@@ -2253,6 +2253,7 @@ msgid "Show calendars"
 msgstr "显示日历"
 
 #: ui/components/calendar-agenda.slint:68 ui/components/theme-editor.slint:782
+#: ui/dialogs/settings-dialog.slint:1523
 msgid "Reset"
 msgstr "重置"
 
@@ -3281,7 +3282,7 @@ msgid "Save palette"
 msgstr "保存配色"
 
 #: ui/components/workspace-navigation.slint:106
-#: ui/dialogs/settings-dialog.slint:2321
+#: ui/dialogs/settings-dialog.slint:2360
 msgid "Mail"
 msgstr "邮件"
 
@@ -3290,7 +3291,7 @@ msgid "Files"
 msgstr "文件"
 
 #: ui/components/workspace-navigation.slint:139
-#: ui/dialogs/settings-dialog.slint:1509 ui/dialogs/settings-dialog.slint:2575
+#: ui/dialogs/settings-dialog.slint:1548 ui/dialogs/settings-dialog.slint:2614
 #: ui/views/contacts-view.slint:249
 msgid "Contacts"
 msgstr "联系人"
@@ -3327,7 +3328,7 @@ msgstr ""
 msgid "Tabs"
 msgstr "标签页"
 
-#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:2337
+#: ui/components/zoom-controls.slint:20 ui/dialogs/settings-dialog.slint:2376
 msgid "Zoom out"
 msgstr "缩小"
 
@@ -3339,7 +3340,7 @@ msgstr "重置缩放（{}%）"
 msgid "Zoom percentage"
 msgstr "缩放比例"
 
-#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:2336
+#: ui/components/zoom-controls.slint:39 ui/dialogs/settings-dialog.slint:2375
 msgid "Zoom in"
 msgstr "放大"
 
@@ -3672,11 +3673,11 @@ msgstr "将使用服务商的标准发件服务器代替 {}。"
 msgid "This account syncs with {} instead of downloading mail with POP3."
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:156 ui/dialogs/settings-dialog.slint:2040
+#: ui/dialogs/import-dialog.slint:156 ui/dialogs/settings-dialog.slint:2079
 msgid "Mail is removed from the server once it's on this device."
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:157 ui/dialogs/settings-dialog.slint:2039
+#: ui/dialogs/import-dialog.slint:157 ui/dialogs/settings-dialog.slint:2078
 msgid "Mail you delete here is removed from the server too."
 msgstr ""
 
@@ -3849,7 +3850,7 @@ msgstr ""
 msgid "Back"
 msgstr "返回"
 
-#: ui/dialogs/import-dialog.slint:338 ui/dialogs/settings-dialog.slint:1480
+#: ui/dialogs/import-dialog.slint:338 ui/dialogs/settings-dialog.slint:1482
 msgid "Choose folder…"
 msgstr "选择文件夹…"
 
@@ -3866,7 +3867,7 @@ msgid "Import one account"
 msgid_plural "Import {n} accounts"
 msgstr[0] "导入 {n} 个账户"
 
-#: ui/dialogs/import-dialog.slint:375 ui/dialogs/settings-dialog.slint:2246
+#: ui/dialogs/import-dialog.slint:375 ui/dialogs/settings-dialog.slint:2285
 msgid "Import"
 msgstr "导入"
 
@@ -4202,7 +4203,7 @@ msgstr "复制源码"
 msgid "Report issue"
 msgstr "报告问题"
 
-#: ui/dialogs/settings-dialog.slint:68 ui/dialogs/settings-dialog.slint:2392
+#: ui/dialogs/settings-dialog.slint:68 ui/dialogs/settings-dialog.slint:2431
 msgid "Sync"
 msgstr "同步"
 
@@ -4440,45 +4441,45 @@ msgstr "服务 Flectar 基础账户 登录 付费订阅 设备同步 企业邮�
 msgid "about version credits contributors license flectar"
 msgstr "关于 版本 致谢 贡献者 许可 flectar"
 
-#: ui/dialogs/settings-dialog.slint:1015 ui/dialogs/settings-dialog.slint:2640
+#: ui/dialogs/settings-dialog.slint:1015 ui/dialogs/settings-dialog.slint:2679
 msgid "SETTINGS"
 msgstr "设置"
 
-#: ui/dialogs/settings-dialog.slint:1018 ui/dialogs/settings-dialog.slint:2642
+#: ui/dialogs/settings-dialog.slint:1018 ui/dialogs/settings-dialog.slint:2681
 msgid "No settings found"
 msgstr "未找到设置项"
 
 #: ui/dialogs/settings-dialog.slint:1019 ui/dialogs/settings-dialog.slint:1049
-#: ui/dialogs/settings-dialog.slint:2643
+#: ui/dialogs/settings-dialog.slint:2682
 msgid "General"
 msgstr "常规"
 
-#: ui/dialogs/settings-dialog.slint:1020 ui/dialogs/settings-dialog.slint:1659
-#: ui/dialogs/settings-dialog.slint:2644 ui/dialogs/settings-dialog.slint:3089
+#: ui/dialogs/settings-dialog.slint:1020 ui/dialogs/settings-dialog.slint:1698
+#: ui/dialogs/settings-dialog.slint:2683 ui/dialogs/settings-dialog.slint:3128
 msgid "Accounts"
 msgstr "账户"
 
-#: ui/dialogs/settings-dialog.slint:1022 ui/dialogs/settings-dialog.slint:2270
-#: ui/dialogs/settings-dialog.slint:2646
+#: ui/dialogs/settings-dialog.slint:1022 ui/dialogs/settings-dialog.slint:2309
+#: ui/dialogs/settings-dialog.slint:2685
 msgid "Notifications"
 msgstr "通知"
 
-#: ui/dialogs/settings-dialog.slint:1023 ui/dialogs/settings-dialog.slint:2577
+#: ui/dialogs/settings-dialog.slint:1023 ui/dialogs/settings-dialog.slint:2616
 msgid "Shortcuts"
 msgstr "快捷键"
 
-#: ui/dialogs/settings-dialog.slint:1024 ui/dialogs/settings-dialog.slint:2178
-#: ui/dialogs/settings-dialog.slint:2648
+#: ui/dialogs/settings-dialog.slint:1024 ui/dialogs/settings-dialog.slint:2217
+#: ui/dialogs/settings-dialog.slint:2687
 msgid "Storage"
 msgstr "存储"
 
-#: ui/dialogs/settings-dialog.slint:1025 ui/dialogs/settings-dialog.slint:2367
-#: ui/dialogs/settings-dialog.slint:2649
+#: ui/dialogs/settings-dialog.slint:1025 ui/dialogs/settings-dialog.slint:2406
+#: ui/dialogs/settings-dialog.slint:2688
 msgid "Services"
 msgstr "服务"
 
-#: ui/dialogs/settings-dialog.slint:1026 ui/dialogs/settings-dialog.slint:2454
-#: ui/dialogs/settings-dialog.slint:2650
+#: ui/dialogs/settings-dialog.slint:1026 ui/dialogs/settings-dialog.slint:2493
+#: ui/dialogs/settings-dialog.slint:2689
 msgid "About"
 msgstr "关于"
 
@@ -4650,11 +4651,11 @@ msgstr "检查新邮件"
 msgid "How often to refresh when an instant provider update is unavailable."
 msgstr "服务商不支持即时推送时的刷新频率。"
 
-#: ui/dialogs/settings-dialog.slint:1381 ui/dialogs/settings-dialog.slint:2287
+#: ui/dialogs/settings-dialog.slint:1381 ui/dialogs/settings-dialog.slint:2326
 msgid "Desktop notifications"
 msgstr "桌面通知"
 
-#: ui/dialogs/settings-dialog.slint:1382 ui/dialogs/settings-dialog.slint:2288
+#: ui/dialogs/settings-dialog.slint:1382 ui/dialogs/settings-dialog.slint:2327
 msgid "Choose which incoming messages can alert you."
 msgstr "选择哪些收到的邮件会提醒您。"
 
@@ -4662,7 +4663,7 @@ msgstr "选择哪些收到的邮件会提醒您。"
 msgid "Provider synchronization is ready."
 msgstr "服务商同步已就绪。"
 
-#: ui/dialogs/settings-dialog.slint:1403 ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1403 ui/dialogs/settings-dialog.slint:1982
 msgid "Syncing…"
 msgstr "正在同步…"
 
@@ -4706,38 +4707,38 @@ msgstr "当前：GPU — WGPU"
 msgid "Active: CPU — Low Memory"
 msgstr "当前：CPU — 低内存"
 
-#: ui/dialogs/settings-dialog.slint:1458
+#: ui/dialogs/settings-dialog.slint:1464 ui/dialogs/settings-dialog.slint:1497
 msgid "Download location"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1467
+#: ui/dialogs/settings-dialog.slint:1473 ui/dialogs/settings-dialog.slint:1506
 msgid ""
 "Saving an attachment asks where to put it, starting in the folder your "
 "system suggests."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1512
+#: ui/dialogs/settings-dialog.slint:1551
 msgid ""
 "Keep your address book clean while still making frequent recipients easy to "
 "find."
 msgstr "让通讯录保持整洁，同时仍能快速找到常联系的收件人。"
 
-#: ui/dialogs/settings-dialog.slint:1534
+#: ui/dialogs/settings-dialog.slint:1573
 msgid "Remember people I email"
 msgstr "记住我发过邮件的人"
 
-#: ui/dialogs/settings-dialog.slint:1535
+#: ui/dialogs/settings-dialog.slint:1574
 msgid ""
 "While enabled, remember To, Cc, and Bcc recipients from new sends and synced "
 "Sent mail."
 msgstr ""
 "启用后，将记住新发送邮件以及已同步的“已发送”邮件中的收件人、抄送和密送地址。"
 
-#: ui/dialogs/settings-dialog.slint:1550
+#: ui/dialogs/settings-dialog.slint:1589
 msgid "Remember incoming senders"
 msgstr "记住来信的发件人"
 
-#: ui/dialogs/settings-dialog.slint:1551
+#: ui/dialogs/settings-dialog.slint:1590
 msgid ""
 "Remember human senders from new mail. Automated, spam, trash, and existing "
 "mail are excluded."
@@ -4745,32 +4746,32 @@ msgstr ""
 "记住新邮件中的发件人（不含自动发送的地址）。垃圾邮件、废纸篓中的邮件以及已有"
 "邮件不在其列。"
 
-#: ui/dialogs/settings-dialog.slint:1566
+#: ui/dialogs/settings-dialog.slint:1605
 msgid "Use suggestions from all accounts"
 msgstr "汇总所有账户的推荐"
 
-#: ui/dialogs/settings-dialog.slint:1567
+#: ui/dialogs/settings-dialog.slint:1606
 msgid ""
 "Include people emailed from any connected account. Turn off to keep learned "
 "recipients account-specific."
 msgstr "纳入所有已连接账户中联系过的人。关闭后，已记住的收件人将按账户区分。"
 
-#: ui/dialogs/settings-dialog.slint:1582
+#: ui/dialogs/settings-dialog.slint:1621
 msgid "Use suggestions when composing"
 msgstr "撰写邮件时使用推荐"
 
-#: ui/dialogs/settings-dialog.slint:1583
+#: ui/dialogs/settings-dialog.slint:1622
 msgid ""
 "Include learned people in recipient autocomplete. Saved and CardDAV contacts "
 "are always available."
 msgstr ""
 "在收件人自动补全中纳入已记住的人。已保存的联系人和 CardDAV 联系人始终可用。"
 
-#: ui/dialogs/settings-dialog.slint:1604
+#: ui/dialogs/settings-dialog.slint:1643
 msgid "Suggested people"
 msgstr "推荐联系人"
 
-#: ui/dialogs/settings-dialog.slint:1607
+#: ui/dialogs/settings-dialog.slint:1646
 msgid ""
 "People you email remain available as local suggestions and never sync to "
 "CardDAV. Clear them any time to restart learning."
@@ -4778,314 +4779,314 @@ msgstr ""
 "您联系过的人会作为本地推荐保留，且从不同步到 CardDAV。随时可以清除，清除后将"
 "重新开始积累。"
 
-#: ui/dialogs/settings-dialog.slint:1625
+#: ui/dialogs/settings-dialog.slint:1664
 msgid "Clear now"
 msgstr "立即清除"
 
-#: ui/dialogs/settings-dialog.slint:1625
+#: ui/dialogs/settings-dialog.slint:1664
 msgid "Clear suggested people"
 msgstr "清除推荐联系人"
 
-#: ui/dialogs/settings-dialog.slint:1660
+#: ui/dialogs/settings-dialog.slint:1699
 msgid ""
 "Manage connected mailboxes and add providers. Drag an account to change its "
 "order everywhere."
 msgstr "管理已连接的邮箱并添加服务商。拖动账户可在所有位置调整其顺序。"
 
-#: ui/dialogs/settings-dialog.slint:1687
+#: ui/dialogs/settings-dialog.slint:1726
 msgid ""
 "Group accounts as Personal or Work and identify them by color in the mail "
 "list."
 msgstr "将账户归入“个人”或“工作”，并在邮件列表中用颜色加以区分。"
 
-#: ui/dialogs/settings-dialog.slint:1696 ui/dialogs/settings-dialog.slint:1726
+#: ui/dialogs/settings-dialog.slint:1735 ui/dialogs/settings-dialog.slint:1765
 msgid "Add profile"
 msgstr "添加分组"
 
-#: ui/dialogs/settings-dialog.slint:1710 ui/dialogs/settings-dialog.slint:1718
+#: ui/dialogs/settings-dialog.slint:1749 ui/dialogs/settings-dialog.slint:1757
 msgid "Show account color at the left edge of each message"
 msgstr "在每封邮件左侧显示账户颜色"
 
-#: ui/dialogs/settings-dialog.slint:1740
+#: ui/dialogs/settings-dialog.slint:1779
 msgid ""
 "No profiles yet. Accounts keep their individual or generated colors until "
 "you create one."
 msgstr "暂无分组。创建分组之前，账户将保持各自或自动生成的颜色。"
 
-#: ui/dialogs/settings-dialog.slint:1785 ui/dialogs/settings-dialog.slint:2985
+#: ui/dialogs/settings-dialog.slint:1824 ui/dialogs/settings-dialog.slint:3024
 msgid "Edit profile"
 msgstr "编辑分组"
 
-#: ui/dialogs/settings-dialog.slint:1795 ui/dialogs/settings-dialog.slint:3240
+#: ui/dialogs/settings-dialog.slint:1834 ui/dialogs/settings-dialog.slint:3279
 msgid "Delete profile"
 msgstr "删除分组"
 
-#: ui/dialogs/settings-dialog.slint:1811 ui/dialogs/settings-dialog.slint:1857
+#: ui/dialogs/settings-dialog.slint:1850 ui/dialogs/settings-dialog.slint:1896
 msgid "Add Gmail"
 msgstr "添加 Gmail"
 
-#: ui/dialogs/settings-dialog.slint:1824 ui/dialogs/settings-dialog.slint:1858
+#: ui/dialogs/settings-dialog.slint:1863 ui/dialogs/settings-dialog.slint:1897
 msgid "Add Outlook"
 msgstr "添加 Outlook"
 
-#: ui/dialogs/settings-dialog.slint:1837 ui/dialogs/settings-dialog.slint:1859
+#: ui/dialogs/settings-dialog.slint:1876 ui/dialogs/settings-dialog.slint:1898
 msgid "Add mail account"
 msgstr "添加邮件账户"
 
-#: ui/dialogs/settings-dialog.slint:1850 ui/dialogs/settings-dialog.slint:1860
+#: ui/dialogs/settings-dialog.slint:1889 ui/dialogs/settings-dialog.slint:1899
 msgid "Cancel sign-in"
 msgstr "取消登录"
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected · Gmail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected · JMAP"
 msgstr "已连接 · JMAP"
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected without encryption · POP3 + SMTP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected · POP3 + SMTP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected without encryption · IMAP + SMTP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Connected · IMAP + SMTP"
 msgstr "已连接 · IMAP + SMTP"
 
-#: ui/dialogs/settings-dialog.slint:1943
+#: ui/dialogs/settings-dialog.slint:1982
 msgid "Account status: {}"
 msgstr "账户状态：{}"
 
-#: ui/dialogs/settings-dialog.slint:1946 ui/dialogs/settings-dialog.slint:2159
+#: ui/dialogs/settings-dialog.slint:1985 ui/dialogs/settings-dialog.slint:2198
 msgid "Reconnect"
 msgstr "重新连接"
 
-#: ui/dialogs/settings-dialog.slint:1972 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2011 ui/views/files-view.slint:467
 msgid "Manage"
 msgstr "管理"
 
-#: ui/dialogs/settings-dialog.slint:1972
+#: ui/dialogs/settings-dialog.slint:2011
 msgid "Fix CardDAV"
 msgstr "修复 CardDAV"
 
-#: ui/dialogs/settings-dialog.slint:1972
+#: ui/dialogs/settings-dialog.slint:2011
 msgid "CardDAV"
 msgstr "CardDAV"
 
-#: ui/dialogs/settings-dialog.slint:1987
+#: ui/dialogs/settings-dialog.slint:2026
 msgid "Mail synchronization error: {}"
 msgstr "邮件同步错误：{}"
 
-#: ui/dialogs/settings-dialog.slint:2003
+#: ui/dialogs/settings-dialog.slint:2042
 msgid "Mail history"
 msgstr "邮件同步范围"
 
-#: ui/dialogs/settings-dialog.slint:2006
+#: ui/dialogs/settings-dialog.slint:2045
 msgid ""
 "Download the full mailbox. Large accounts can take considerable time and "
 "storage."
 msgstr "下载完整邮箱。大型账户可能需要较长时间和较多存储空间。"
 
-#: ui/dialogs/settings-dialog.slint:2007
+#: ui/dialogs/settings-dialog.slint:2046
 msgid "How far back to download. Mail already stored on this device is kept."
 msgstr "下载多久以前的邮件。已存储在本设备上的邮件会保留。"
 
-#: ui/dialogs/settings-dialog.slint:2020
+#: ui/dialogs/settings-dialog.slint:2059
 msgid "Sent copies"
 msgstr "已发送邮件副本"
 
-#: ui/dialogs/settings-dialog.slint:2022
+#: ui/dialogs/settings-dialog.slint:2061
 msgid ""
 "Choose who saves sent mail. Use Flectar if your server does not save a copy."
 msgstr "选择由谁保存已发送的邮件。如果服务器不保存副本，请使用 Flectar。"
 
-#: ui/dialogs/settings-dialog.slint:2023
+#: ui/dialogs/settings-dialog.slint:2062
 msgid "Provider default"
 msgstr "服务商默认设置"
 
-#: ui/dialogs/settings-dialog.slint:2023
+#: ui/dialogs/settings-dialog.slint:2062
 msgid "Server saves a copy"
 msgstr "由服务器保存副本"
 
-#: ui/dialogs/settings-dialog.slint:2023
+#: ui/dialogs/settings-dialog.slint:2062
 msgid "Flectar saves a copy"
 msgstr "由 Flectar 保存副本"
 
-#: ui/dialogs/settings-dialog.slint:2037
+#: ui/dialogs/settings-dialog.slint:2076
 msgid "Keep mail on the server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2041
+#: ui/dialogs/settings-dialog.slint:2080
 msgid "Flectar Mail never removes mail from the server."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2042
+#: ui/dialogs/settings-dialog.slint:2081
 msgid "Mail is removed after this time, or once deleted here."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2058
+#: ui/dialogs/settings-dialog.slint:2097
 msgid "This server removes mail as soon as it's downloaded."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2059
+#: ui/dialogs/settings-dialog.slint:2098
 msgid "This server removes downloaded mail after one day."
 msgid_plural "This server removes downloaded mail after {n} days."
 msgstr[0] ""
 
-#: ui/dialogs/settings-dialog.slint:2070
+#: ui/dialogs/settings-dialog.slint:2109
 msgid ""
 "Mail removed from the server is kept only on this device. Database snapshots "
 "in Storage include it."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2094
+#: ui/dialogs/settings-dialog.slint:2133
 msgid "Uses the {} color in the mail list"
 msgstr "在邮件列表中使用 {} 颜色"
 
-#: ui/dialogs/settings-dialog.slint:2096
+#: ui/dialogs/settings-dialog.slint:2135
 msgid "Uses a custom account color"
 msgstr "使用自定义账户颜色"
 
-#: ui/dialogs/settings-dialog.slint:2097
+#: ui/dialogs/settings-dialog.slint:2136
 msgid "Uses a generated account color"
 msgstr "使用自动生成的账户颜色"
 
-#: ui/dialogs/settings-dialog.slint:2141
+#: ui/dialogs/settings-dialog.slint:2180
 msgid "OAuth app credentials"
 msgstr "OAuth 应用凭据"
 
-#: ui/dialogs/settings-dialog.slint:2141
+#: ui/dialogs/settings-dialog.slint:2180
 msgid "Custom desktop app credentials are configured."
 msgstr "已配置自定义桌面应用凭据。"
 
-#: ui/dialogs/settings-dialog.slint:2141
+#: ui/dialogs/settings-dialog.slint:2180
 msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
 msgstr "高级：使用您自己的 Gmail 或 Microsoft 桌面应用注册。"
 
-#: ui/dialogs/settings-dialog.slint:2142
+#: ui/dialogs/settings-dialog.slint:2181
 msgid "Hide"
 msgstr "隐藏"
 
-#: ui/dialogs/settings-dialog.slint:2142
+#: ui/dialogs/settings-dialog.slint:2181
 msgid "Configure"
 msgstr "配置"
 
-#: ui/dialogs/settings-dialog.slint:2145 ui/dialogs/settings-dialog.slint:2146
+#: ui/dialogs/settings-dialog.slint:2184 ui/dialogs/settings-dialog.slint:2185
 msgid "Gmail desktop client ID"
 msgstr "Gmail 桌面客户端 ID"
 
-#: ui/dialogs/settings-dialog.slint:2145 ui/dialogs/settings-dialog.slint:2146
+#: ui/dialogs/settings-dialog.slint:2184 ui/dialogs/settings-dialog.slint:2185
 msgid "Gmail client secret (optional)"
 msgstr "Gmail 客户端密钥（可选）"
 
-#: ui/dialogs/settings-dialog.slint:2145
+#: ui/dialogs/settings-dialog.slint:2184
 msgid "Save Gmail"
 msgstr "保存 Gmail"
 
-#: ui/dialogs/settings-dialog.slint:2146
+#: ui/dialogs/settings-dialog.slint:2185
 msgid "Save Gmail settings"
 msgstr "保存 Gmail 设置"
 
-#: ui/dialogs/settings-dialog.slint:2147
+#: ui/dialogs/settings-dialog.slint:2186
 msgid "Save Outlook"
 msgstr "保存 Outlook"
 
-#: ui/dialogs/settings-dialog.slint:2148
+#: ui/dialogs/settings-dialog.slint:2187
 msgid ""
 "Outlook public desktop clients use PKCE and do not need a client secret."
 msgstr "Outlook 公共桌面客户端使用 PKCE，无需客户端密钥。"
 
-#: ui/dialogs/settings-dialog.slint:2154
+#: ui/dialogs/settings-dialog.slint:2193
 msgid "Connect CardDAV"
 msgstr "连接 CardDAV"
 
-#: ui/dialogs/settings-dialog.slint:2154
+#: ui/dialogs/settings-dialog.slint:2193
 msgid "Sync contacts with a standards-compliant CardDAV server."
 msgstr "与符合标准的 CardDAV 服务器同步联系人。"
 
-#: ui/dialogs/settings-dialog.slint:2157
+#: ui/dialogs/settings-dialog.slint:2196
 msgid "https://contacts.example.com/"
 msgstr "https://contacts.example.com/"
 
-#: ui/dialogs/settings-dialog.slint:2158 ui/dialogs/settings-dialog.slint:2753
-#: ui/dialogs/settings-dialog.slint:2883
+#: ui/dialogs/settings-dialog.slint:2197 ui/dialogs/settings-dialog.slint:2792
+#: ui/dialogs/settings-dialog.slint:2922
 msgid "Username"
 msgstr "用户名"
 
-#: ui/dialogs/settings-dialog.slint:2158 ui/dialogs/settings-dialog.slint:2761
+#: ui/dialogs/settings-dialog.slint:2197 ui/dialogs/settings-dialog.slint:2800
 msgid "App password"
 msgstr "应用专用密码"
 
-#: ui/dialogs/settings-dialog.slint:2159
+#: ui/dialogs/settings-dialog.slint:2198
 msgid "Disconnect"
 msgstr "断开连接"
 
-#: ui/dialogs/settings-dialog.slint:2159 ui/dialogs/settings-dialog.slint:2788
+#: ui/dialogs/settings-dialog.slint:2198 ui/dialogs/settings-dialog.slint:2827
 msgid "Connect"
 msgstr "连接"
 
-#: ui/dialogs/settings-dialog.slint:2181
+#: ui/dialogs/settings-dialog.slint:2220
 msgid ""
 "See what Flectar Mail stores locally and manage the data on this device."
 msgstr "查看 Flectar Mail 在本地存储的内容，并管理本设备上的数据。"
 
-#: ui/dialogs/settings-dialog.slint:2207
+#: ui/dialogs/settings-dialog.slint:2246
 msgid "Mail on this device"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2207
+#: ui/dialogs/settings-dialog.slint:2246
 msgid ""
 "Mail you imported. It is kept only here, so export it to keep a copy "
 "elsewhere."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2209 ui/dialogs/settings-dialog.slint:3189
+#: ui/dialogs/settings-dialog.slint:2248 ui/dialogs/settings-dialog.slint:3228
 msgid "One message"
 msgid_plural "{} messages"
 msgstr[0] ""
 
-#: ui/dialogs/settings-dialog.slint:2217 ui/dialogs/settings-dialog.slint:3169
-#: ui/dialogs/settings-dialog.slint:3217
+#: ui/dialogs/settings-dialog.slint:2256 ui/dialogs/settings-dialog.slint:3208
+#: ui/dialogs/settings-dialog.slint:3256
 msgid "Export mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2218 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2257 ui/views/files-view.slint:563
 msgid "Delete…"
 msgstr "删除…"
 
-#: ui/dialogs/settings-dialog.slint:2226
+#: ui/dialogs/settings-dialog.slint:2265
 msgid "Database snapshot"
 msgstr "数据库快照"
 
-#: ui/dialogs/settings-dialog.slint:2226
+#: ui/dialogs/settings-dialog.slint:2265
 msgid ""
 "Export verified copies of the mail and calendar databases with their schema "
 "versions."
 msgstr "导出邮件和日历数据库的已验证副本及其架构版本。"
 
-#: ui/dialogs/settings-dialog.slint:2228
+#: ui/dialogs/settings-dialog.slint:2267
 msgid ""
 "The snapshot contains private local mail and settings, but not passwords or "
 "OAuth tokens. Store it securely."
 msgstr "快照包含本地私密邮件和设置，但不含密码或 OAuth 令牌。请妥善保管。"
 
-#: ui/dialogs/settings-dialog.slint:2229
+#: ui/dialogs/settings-dialog.slint:2268
 msgid "Export snapshot"
 msgstr "导出快照"
 
-#: ui/dialogs/settings-dialog.slint:2236
+#: ui/dialogs/settings-dialog.slint:2275
 msgid "Transfer account setup"
 msgstr "迁移账户配置"
 
-#: ui/dialogs/settings-dialog.slint:2236
+#: ui/dialogs/settings-dialog.slint:2275
 msgid ""
 "Import accounts and mail from Thunderbird, K-9 Mail, mail files, or a "
 "backup, or export one connected account and your preferences."
@@ -5094,178 +5095,178 @@ msgid_plural ""
 "backup, or export {n} connected accounts and your preferences."
 msgstr[0] ""
 
-#: ui/dialogs/settings-dialog.slint:2238
+#: ui/dialogs/settings-dialog.slint:2277
 msgid ""
 "Passwords and OAuth tokens stay in the system keyring. A restored device "
 "asks you to sign in securely."
 msgstr ""
 "密码和 OAuth 令牌保存在系统密钥环中。在恢复的设备上，系统会要求您安全登录。"
 
-#: ui/dialogs/settings-dialog.slint:2247
+#: ui/dialogs/settings-dialog.slint:2286
 msgid "Export"
 msgstr "导出"
 
-#: ui/dialogs/settings-dialog.slint:2254
+#: ui/dialogs/settings-dialog.slint:2293
 msgid "Delete all local data"
 msgstr "删除全部本地数据"
 
-#: ui/dialogs/settings-dialog.slint:2254
+#: ui/dialogs/settings-dialog.slint:2293
 msgid ""
 "Remove accounts, downloaded mail, calendars, contacts, preferences, and "
 "credentials from this device."
 msgstr "从此设备移除账户、已下载的邮件、日历、联系人、偏好设置和凭据。"
 
-#: ui/dialogs/settings-dialog.slint:2256
+#: ui/dialogs/settings-dialog.slint:2295
 msgid ""
 "Imported mail and the mail of any POP3 account are stored only on this "
 "device. Nothing is deleted from Gmail, Outlook, or IMAP servers."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2256
+#: ui/dialogs/settings-dialog.slint:2295
 msgid ""
 "POP3 mail is stored only on this device. Nothing is deleted from Gmail, "
 "Outlook, or IMAP servers."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2256
+#: ui/dialogs/settings-dialog.slint:2295
 msgid "This does not delete anything from Gmail, Outlook, or your IMAP server."
 msgstr "这不会删除 Gmail、Outlook 或 IMAP 服务器上的任何内容。"
 
-#: ui/dialogs/settings-dialog.slint:2257 ui/dialogs/settings-dialog.slint:3173
+#: ui/dialogs/settings-dialog.slint:2296 ui/dialogs/settings-dialog.slint:3212
 msgid "Delete everything"
 msgstr "全部删除"
 
-#: ui/dialogs/settings-dialog.slint:2271
+#: ui/dialogs/settings-dialog.slint:2310
 msgid "Choose how Flectar Mail gets your attention."
 msgstr "选择 Flectar Mail 提醒您的方式。"
 
-#: ui/dialogs/settings-dialog.slint:2298
+#: ui/dialogs/settings-dialog.slint:2337
 msgid "Notification sounds"
 msgstr "通知提示音"
 
-#: ui/dialogs/settings-dialog.slint:2299
+#: ui/dialogs/settings-dialog.slint:2338
 msgid "Play a sound for new mail and sent messages."
 msgstr "收到新邮件和邮件发送后播放提示音。"
 
-#: ui/dialogs/settings-dialog.slint:2319
+#: ui/dialogs/settings-dialog.slint:2358
 msgid "Keyboard shortcuts"
 msgstr "键盘快捷键"
 
-#: ui/dialogs/settings-dialog.slint:2320
+#: ui/dialogs/settings-dialog.slint:2359
 msgid "Move through mail without leaving the keyboard."
 msgstr "无需离开键盘即可操作邮件。"
 
-#: ui/dialogs/settings-dialog.slint:2322
+#: ui/dialogs/settings-dialog.slint:2361
 msgid "Compose a new message"
 msgstr "撰写新邮件"
 
-#: ui/dialogs/settings-dialog.slint:2323 ui/views/mail-list-pane.slint:643
+#: ui/dialogs/settings-dialog.slint:2362 ui/views/mail-list-pane.slint:643
 msgid "Search mail"
 msgstr "搜索邮件"
 
 #. Local mail has no archive or spam.
-#: ui/dialogs/settings-dialog.slint:2324 ui/views/mail-list-pane.slint:1343
+#: ui/dialogs/settings-dialog.slint:2363 ui/views/mail-list-pane.slint:1343
 #: ui/views/mail-reading-pane.slint:365
 msgid "Archive"
 msgstr "归档"
 
-#: ui/dialogs/settings-dialog.slint:2325 ui/views/mail-list-pane.slint:725
+#: ui/dialogs/settings-dialog.slint:2364 ui/views/mail-list-pane.slint:725
 #: ui/views/mail-reading-pane.slint:349 ui/views/mail-reading-pane.slint:795
 msgid "Move to spam"
 msgstr "移到垃圾邮件"
 
-#: ui/dialogs/settings-dialog.slint:2326 ui/views/mail-list-pane.slint:734
+#: ui/dialogs/settings-dialog.slint:2365 ui/views/mail-list-pane.slint:734
 #: ui/views/mail-reading-pane.slint:332 ui/views/mail-reading-pane.slint:367
 #: ui/views/mail-reading-pane.slint:399
 msgid "Move to trash"
 msgstr "移到废纸篓"
 
-#: ui/dialogs/settings-dialog.slint:2328
+#: ui/dialogs/settings-dialog.slint:2367
 msgid "Navigation"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2329
+#: ui/dialogs/settings-dialog.slint:2368
 msgid "Move between messages"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2330
+#: ui/dialogs/settings-dialog.slint:2369
 msgid "Open message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2331
+#: ui/dialogs/settings-dialog.slint:2370
 msgid "Select message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2332
+#: ui/dialogs/settings-dialog.slint:2371
 msgid "Switch between list and message"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2334
+#: ui/dialogs/settings-dialog.slint:2373
 msgid "Reading"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2335 ui/views/mail-reading-pane.slint:1259
+#: ui/dialogs/settings-dialog.slint:2374 ui/views/mail-reading-pane.slint:1259
 msgid "Find in message"
 msgstr "在邮件中查找"
 
-#: ui/dialogs/settings-dialog.slint:2338
+#: ui/dialogs/settings-dialog.slint:2377
 msgid "Reset zoom"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2339 ui/views/mail-reading-pane.slint:1588
+#: ui/dialogs/settings-dialog.slint:2378 ui/views/mail-reading-pane.slint:1588
 msgid "Caret browsing"
 msgstr "光标浏览"
 
-#: ui/dialogs/settings-dialog.slint:2345
+#: ui/dialogs/settings-dialog.slint:2384
 msgid "Next tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2346
+#: ui/dialogs/settings-dialog.slint:2385
 msgid "Previous tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2347
+#: ui/dialogs/settings-dialog.slint:2386
 msgid "Go to tab 1–8"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2348
+#: ui/dialogs/settings-dialog.slint:2387
 msgid "Go to last tab"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2368
+#: ui/dialogs/settings-dialog.slint:2407
 msgid ""
 "Optional paid services from Flectar. Flectar Mail stays free and works "
 "without them."
 msgstr ""
 "来自 Flectar 的可选付费服务。Flectar Mail 保持免费，无需这些服务即可使用。"
 
-#: ui/dialogs/settings-dialog.slint:2373
+#: ui/dialogs/settings-dialog.slint:2412
 msgid "Flectar account"
 msgstr "Flectar 账户"
 
-#: ui/dialogs/settings-dialog.slint:2373
+#: ui/dialogs/settings-dialog.slint:2412
 msgid "Not signed in"
 msgstr "未登录"
 
-#: ui/dialogs/settings-dialog.slint:2375
+#: ui/dialogs/settings-dialog.slint:2414
 msgid ""
 "A Flectar account is only needed for these optional services. Learn more at "
 "flectar.com/mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2380
+#: ui/dialogs/settings-dialog.slint:2419
 msgid "Sign in with Flectar"
 msgstr "使用 Flectar 登录"
 
-#: ui/dialogs/settings-dialog.slint:2380
+#: ui/dialogs/settings-dialog.slint:2419
 msgid "Sign-in coming soon"
 msgstr "登录功能即将上线"
 
-#: ui/dialogs/settings-dialog.slint:2393
+#: ui/dialogs/settings-dialog.slint:2432
 msgid "Your setup on every device"
 msgstr "您的每台设备上的设置"
 
-#: ui/dialogs/settings-dialog.slint:2394
+#: ui/dialogs/settings-dialog.slint:2433
 msgid ""
 "Sign in on a new phone or computer and your accounts, calendars, contacts, "
 "and preferences are ready without setting them up again."
@@ -5273,268 +5274,268 @@ msgstr ""
 "在新手机或计算机上登录，您的账户、日历、联系人及偏好设置无需再次设置即可准备"
 "就绪。"
 
-#: ui/dialogs/settings-dialog.slint:2396
+#: ui/dialogs/settings-dialog.slint:2435
 msgid "Mail accounts, profiles, and signatures"
 msgstr "邮件账户、个人资料和签名"
 
-#: ui/dialogs/settings-dialog.slint:2397
+#: ui/dialogs/settings-dialog.slint:2436
 msgid "Calendar and contact connections"
 msgstr "日历与联系人连接"
 
-#: ui/dialogs/settings-dialog.slint:2398
+#: ui/dialogs/settings-dialog.slint:2437
 msgid "Themes, layout, and notification preferences"
 msgstr "主题、布局和通知偏好"
 
-#: ui/dialogs/settings-dialog.slint:2399
+#: ui/dialogs/settings-dialog.slint:2438
 msgid "Account credentials, encrypted on this device before upload"
 msgstr "账户凭据，上传前已在此设备上加密"
 
-#: ui/dialogs/settings-dialog.slint:2401
+#: ui/dialogs/settings-dialog.slint:2440
 msgid ""
 "Your messages stay with your mail provider. Sync only carries your Flectar "
 "Mail setup."
 msgstr "您的消息将保留在您的邮件服务商处。同步仅同步您的 Flectar Mail 配置。"
 
-#: ui/dialogs/settings-dialog.slint:2416
+#: ui/dialogs/settings-dialog.slint:2455
 msgid "Business email"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2417
+#: ui/dialogs/settings-dialog.slint:2456
 msgid "Mailboxes on your own domain"
 msgstr "您自有域名上的邮箱"
 
-#: ui/dialogs/settings-dialog.slint:2418
+#: ui/dialogs/settings-dialog.slint:2457
 msgid "Professional addresses such as you@yourcompany.com, hosted by Flectar."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2420
+#: ui/dialogs/settings-dialog.slint:2459
 msgid "Connect a domain you already own"
 msgstr "连接您已拥有的域名"
 
-#: ui/dialogs/settings-dialog.slint:2421
+#: ui/dialogs/settings-dialog.slint:2460
 msgid "Create and manage mailboxes for your team"
 msgstr "为您的团队创建和管理邮箱"
 
-#: ui/dialogs/settings-dialog.slint:2422
+#: ui/dialogs/settings-dialog.slint:2461
 msgid "New mailboxes appear in Flectar Mail automatically"
 msgstr "新邮箱将自动出现在 Flectar Mail 中"
 
-#: ui/dialogs/settings-dialog.slint:2424
+#: ui/dialogs/settings-dialog.slint:2463
 msgid "Billed per mailbox."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2436
+#: ui/dialogs/settings-dialog.slint:2475
 msgid ""
 "These services are in development. Plans and availability will be announced "
 "on flectar.com/mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2455
+#: ui/dialogs/settings-dialog.slint:2494
 msgid "Flectar Mail, its makers, and its community."
 msgstr "Flectar Mail 及其开发者和社区。"
 
-#: ui/dialogs/settings-dialog.slint:2471 ui/views/onboarding-view.slint:121
+#: ui/dialogs/settings-dialog.slint:2510 ui/views/onboarding-view.slint:121
 msgid "Flectar Mail logo"
 msgstr "Flectar Mail 标志"
 
-#: ui/dialogs/settings-dialog.slint:2491
+#: ui/dialogs/settings-dialog.slint:2530
 msgid "A native mail client for a calm, private inbox."
 msgstr "一款原生邮件客户端，带来安静、私密的收件箱。"
 
-#: ui/dialogs/settings-dialog.slint:2503
+#: ui/dialogs/settings-dialog.slint:2542
 msgid "Version {}"
 msgstr "版本 {}"
 
-#: ui/dialogs/settings-dialog.slint:2514
+#: ui/dialogs/settings-dialog.slint:2553
 msgid "Credits"
 msgstr "致谢"
 
-#: ui/dialogs/settings-dialog.slint:2514
+#: ui/dialogs/settings-dialog.slint:2553
 msgid "Built by Flectar with help from the open-source community."
 msgstr "由 Flectar 开发，并得到开源社区的帮助。"
 
-#: ui/dialogs/settings-dialog.slint:2524
+#: ui/dialogs/settings-dialog.slint:2563
 msgid "Flectar"
 msgstr "Flectar"
 
-#: ui/dialogs/settings-dialog.slint:2525
+#: ui/dialogs/settings-dialog.slint:2564
 msgid "Company website"
 msgstr "公司网站"
 
-#: ui/dialogs/settings-dialog.slint:2535
+#: ui/dialogs/settings-dialog.slint:2574
 msgid "Open-source contributors"
 msgstr "开源贡献者"
 
-#: ui/dialogs/settings-dialog.slint:2536
+#: ui/dialogs/settings-dialog.slint:2575
 msgid "Meet the people who have contributed on GitHub"
 msgstr "认识在 GitHub 上做出贡献的人们"
 
-#: ui/dialogs/settings-dialog.slint:2549
+#: ui/dialogs/settings-dialog.slint:2588
 msgid "License"
 msgstr "许可"
 
-#: ui/dialogs/settings-dialog.slint:2549
+#: ui/dialogs/settings-dialog.slint:2588
 msgid "AGPL-3.0-only."
 msgstr "AGPL-3.0-only。"
 
-#: ui/dialogs/settings-dialog.slint:2549
+#: ui/dialogs/settings-dialog.slint:2588
 msgid ""
 "Flectar Mail is released under the GNU Affero General Public License v3.0 "
 "only."
 msgstr ""
 "Flectar Mail 以 GNU Affero 通用公共许可证第 3 版（AGPL-3.0-only）发布。"
 
-#: ui/dialogs/settings-dialog.slint:2555
+#: ui/dialogs/settings-dialog.slint:2594
 msgid "Third-party components retain their own licenses and notices."
 msgstr "第三方组件保留其各自的许可证和声明。"
 
-#: ui/dialogs/settings-dialog.slint:2582
+#: ui/dialogs/settings-dialog.slint:2621
 msgid "Settings sections"
 msgstr "设置分区"
 
-#: ui/dialogs/settings-dialog.slint:2593
+#: ui/dialogs/settings-dialog.slint:2632
 msgid "Close settings"
 msgstr "关闭设置"
 
-#: ui/dialogs/settings-dialog.slint:2615
+#: ui/dialogs/settings-dialog.slint:2654
 msgid "Close settings sections"
 msgstr "关闭设置分区"
 
-#: ui/dialogs/settings-dialog.slint:2663 ui/dialogs/settings-dialog.slint:2712
+#: ui/dialogs/settings-dialog.slint:2702 ui/dialogs/settings-dialog.slint:2751
 msgid "CalDAV settings"
 msgstr "CalDAV 设置"
 
-#: ui/dialogs/settings-dialog.slint:2713
+#: ui/dialogs/settings-dialog.slint:2752
 msgid "Discover new calendars."
 msgstr "发现新日历。"
 
-#: ui/dialogs/settings-dialog.slint:2713
+#: ui/dialogs/settings-dialog.slint:2752
 msgid ""
 "Works with iCloud, Fastmail, Nextcloud, and standards-compliant CalDAV "
 "servers."
 msgstr "支持 iCloud、Fastmail、Nextcloud 以及符合标准的 CalDAV 服务器。"
 
-#: ui/dialogs/settings-dialog.slint:2738
+#: ui/dialogs/settings-dialog.slint:2777
 msgid "Server address"
 msgstr "服务器地址"
 
-#: ui/dialogs/settings-dialog.slint:2740
+#: ui/dialogs/settings-dialog.slint:2779
 msgid "https://calendar.example.com/"
 msgstr "https://calendar.example.com/"
 
-#: ui/dialogs/settings-dialog.slint:2745
+#: ui/dialogs/settings-dialog.slint:2784
 msgid ""
 "To sync one calendar, such as a shared mailbox's, enter that calendar's own "
 "address."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2755 ui/dialogs/settings-dialog.slint:2876
+#: ui/dialogs/settings-dialog.slint:2794 ui/dialogs/settings-dialog.slint:2915
 msgid "Usually your email address"
 msgstr "通常是您的电子邮件地址"
 
-#: ui/dialogs/settings-dialog.slint:2761
+#: ui/dialogs/settings-dialog.slint:2800
 msgid "New app password · Optional"
 msgstr "新应用专用密码 · 可选"
 
-#: ui/dialogs/settings-dialog.slint:2763
+#: ui/dialogs/settings-dialog.slint:2802
 msgid "Leave blank to keep the current password"
 msgstr "留空则保留当前密码"
 
-#: ui/dialogs/settings-dialog.slint:2763 ui/dialogs/settings-dialog.slint:2885
+#: ui/dialogs/settings-dialog.slint:2802 ui/dialogs/settings-dialog.slint:2924
 msgid "Stored securely in your system keyring"
 msgstr "安全保存在系统密钥环中"
 
-#: ui/dialogs/settings-dialog.slint:2788 ui/dialogs/settings-dialog.slint:2964
+#: ui/dialogs/settings-dialog.slint:2827 ui/dialogs/settings-dialog.slint:3003
 msgid "Connecting…"
 msgstr "正在连接…"
 
-#: ui/dialogs/settings-dialog.slint:2806
+#: ui/dialogs/settings-dialog.slint:2845
 msgid "Edit mail account"
 msgstr "编辑邮件账户"
 
-#: ui/dialogs/settings-dialog.slint:2806 ui/dialogs/settings-dialog.slint:2854
+#: ui/dialogs/settings-dialog.slint:2845 ui/dialogs/settings-dialog.slint:2893
 msgid "Connect a mail account"
 msgstr "连接邮件账户"
 
-#: ui/dialogs/settings-dialog.slint:2854
+#: ui/dialogs/settings-dialog.slint:2893
 msgid "Edit {}"
 msgstr "编辑 {}"
 
-#: ui/dialogs/settings-dialog.slint:2855
+#: ui/dialogs/settings-dialog.slint:2894
 msgid "Uses JMAP for mail sync and sending, with automatic discovery."
 msgstr "使用 JMAP 收发和同步邮件，支持自动发现。"
 
-#: ui/dialogs/settings-dialog.slint:2855
+#: ui/dialogs/settings-dialog.slint:2894
 msgid ""
 "Downloads mail from a POP3 server to this device and sends through SMTP."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2855
+#: ui/dialogs/settings-dialog.slint:2894
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
 msgstr "使用独立的 IMAP 和 SMTP 服务器收发和同步邮件。"
 
-#: ui/dialogs/settings-dialog.slint:2875 ui/dialogs/settings-dialog.slint:2882
+#: ui/dialogs/settings-dialog.slint:2914 ui/dialogs/settings-dialog.slint:2921
 msgid "name@example.com"
 msgstr "name@example.com"
 
-#: ui/dialogs/settings-dialog.slint:2885 ui/views/onboarding-view.slint:284
+#: ui/dialogs/settings-dialog.slint:2924 ui/views/onboarding-view.slint:284
 msgid "Password, app password, or API token"
 msgstr "密码、应用专用密码或 API 令牌"
 
-#: ui/dialogs/settings-dialog.slint:2885 ui/views/onboarding-view.slint:284
+#: ui/dialogs/settings-dialog.slint:2924 ui/views/onboarding-view.slint:284
 msgid "Password or app password"
 msgstr "密码或应用专用密码"
 
-#: ui/dialogs/settings-dialog.slint:2892 ui/views/onboarding-view.slint:297
+#: ui/dialogs/settings-dialog.slint:2931 ui/views/onboarding-view.slint:297
 msgid "IMAP"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2893 ui/views/onboarding-view.slint:305
+#: ui/dialogs/settings-dialog.slint:2932 ui/views/onboarding-view.slint:305
 msgid "POP3"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2894 ui/views/onboarding-view.slint:313
+#: ui/dialogs/settings-dialog.slint:2933 ui/views/onboarding-view.slint:313
 msgid "JMAP"
 msgstr "JMAP"
 
-#: ui/dialogs/settings-dialog.slint:2898
+#: ui/dialogs/settings-dialog.slint:2937
 msgid "Server address · Optional"
 msgstr "服务器地址 · 可选"
 
-#: ui/dialogs/settings-dialog.slint:2900
+#: ui/dialogs/settings-dialog.slint:2939
 msgid "Discovered from your email domain"
 msgstr "根据您的邮件域名自动发现"
 
-#: ui/dialogs/settings-dialog.slint:2907 ui/views/onboarding-view.slint:337
+#: ui/dialogs/settings-dialog.slint:2946 ui/views/onboarding-view.slint:337
 msgid "POP3 server"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2907 ui/views/onboarding-view.slint:337
+#: ui/dialogs/settings-dialog.slint:2946 ui/views/onboarding-view.slint:337
 msgid "IMAP server"
 msgstr "IMAP 服务器"
 
-#: ui/dialogs/settings-dialog.slint:2907
+#: ui/dialogs/settings-dialog.slint:2946
 msgid "pop.example.com"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2907
+#: ui/dialogs/settings-dialog.slint:2946
 msgid "imap.example.com"
 msgstr "imap.example.com"
 
-#: ui/dialogs/settings-dialog.slint:2908 ui/dialogs/settings-dialog.slint:2915
+#: ui/dialogs/settings-dialog.slint:2947 ui/dialogs/settings-dialog.slint:2954
 #: ui/views/onboarding-view.slint:367
 msgid "Port"
 msgstr "端口"
 
-#: ui/dialogs/settings-dialog.slint:2914 ui/views/onboarding-view.slint:359
+#: ui/dialogs/settings-dialog.slint:2953 ui/views/onboarding-view.slint:359
 msgid "SMTP server"
 msgstr "SMTP 服务器"
 
-#: ui/dialogs/settings-dialog.slint:2914
+#: ui/dialogs/settings-dialog.slint:2953
 msgid "smtp.example.com"
 msgstr "smtp.example.com"
 
-#: ui/dialogs/settings-dialog.slint:2918 ui/views/onboarding-view.slint:375
+#: ui/dialogs/settings-dialog.slint:2957 ui/views/onboarding-view.slint:375
 msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
@@ -5542,56 +5543,56 @@ msgstr ""
 "Proton Bridge：请使用 Bridge 中显示的本地服务器、端口和密码，并与其加密设置保"
 "持一致。"
 
-#: ui/dialogs/settings-dialog.slint:2964
+#: ui/dialogs/settings-dialog.slint:3003
 msgid "Save account"
 msgstr "保存账户"
 
-#: ui/dialogs/settings-dialog.slint:2964 ui/views/onboarding-view.slint:407
+#: ui/dialogs/settings-dialog.slint:3003 ui/views/onboarding-view.slint:407
 msgid "Connect account"
 msgstr "连接账户"
 
-#: ui/dialogs/settings-dialog.slint:2985 ui/dialogs/settings-dialog.slint:3041
+#: ui/dialogs/settings-dialog.slint:3024 ui/dialogs/settings-dialog.slint:3080
 msgid "Create profile"
 msgstr "创建分组"
 
-#: ui/dialogs/settings-dialog.slint:3042
+#: ui/dialogs/settings-dialog.slint:3081
 msgid ""
 "Its color marks its accounts' mail, and choosing it shows only their mail."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3047
+#: ui/dialogs/settings-dialog.slint:3086
 msgid "Profile name"
 msgstr "分组名称"
 
-#: ui/dialogs/settings-dialog.slint:3049
+#: ui/dialogs/settings-dialog.slint:3088
 msgid "Personal or Work"
 msgstr "个人或工作"
 
-#: ui/dialogs/settings-dialog.slint:3055 ui/views/mail-reading-pane.slint:1991
+#: ui/dialogs/settings-dialog.slint:3094 ui/views/mail-reading-pane.slint:1991
 msgid "Color"
 msgstr "颜色"
 
-#: ui/dialogs/settings-dialog.slint:3064
+#: ui/dialogs/settings-dialog.slint:3103
 msgid "Profile color {}"
 msgstr "分组颜色 {}"
 
-#: ui/dialogs/settings-dialog.slint:3106
+#: ui/dialogs/settings-dialog.slint:3145
 msgid "Save profile"
 msgstr "保存分组"
 
-#: ui/dialogs/settings-dialog.slint:3114
+#: ui/dialogs/settings-dialog.slint:3153
 msgid "Could not save this profile. Check the name and try again."
 msgstr "无法保存此分组。请检查名称后重试。"
 
-#: ui/dialogs/settings-dialog.slint:3132
+#: ui/dialogs/settings-dialog.slint:3171
 msgid "Choose a profile for {}"
 msgstr "为 {} 选择分组"
 
-#: ui/dialogs/settings-dialog.slint:3162
+#: ui/dialogs/settings-dialog.slint:3201
 msgid "Delete all local data?"
 msgstr "删除全部本地数据？"
 
-#: ui/dialogs/settings-dialog.slint:3163
+#: ui/dialogs/settings-dialog.slint:3202
 msgid ""
 "This removes every account, downloaded message, calendar, contact, "
 "preference, and credential stored by Flectar Mail on this device."
@@ -5599,109 +5600,109 @@ msgstr ""
 "这将从此设备移除 Flectar Mail 存储的所有账户、已下载的邮件、日历、联系人、偏"
 "好设置和凭据。"
 
-#: ui/dialogs/settings-dialog.slint:3165
+#: ui/dialogs/settings-dialog.slint:3204
 msgid ""
 "Imported mail and the mail of any POP3 account are stored only on this "
 "device and will be deleted. Mail and events on Gmail, Outlook, and IMAP "
 "servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3167
+#: ui/dialogs/settings-dialog.slint:3206
 msgid ""
 "POP3 mail is stored only on this device and will be deleted. Mail and events "
 "on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3168
+#: ui/dialogs/settings-dialog.slint:3207
 msgid ""
 "Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr "Gmail、Outlook 和 IMAP 服务器上的邮件和日程不会被删除。"
 
-#: ui/dialogs/settings-dialog.slint:3169
+#: ui/dialogs/settings-dialog.slint:3208
 msgid "Export POP3 mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3174
+#: ui/dialogs/settings-dialog.slint:3213
 msgid "Keep my data"
 msgstr "保留我的数据"
 
-#: ui/dialogs/settings-dialog.slint:3188
+#: ui/dialogs/settings-dialog.slint:3227
 msgid "Delete mail on this device?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3190
+#: ui/dialogs/settings-dialog.slint:3229
 msgid "Delete the mail you imported and its folders from this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3191
+#: ui/dialogs/settings-dialog.slint:3230
 msgid "It exists only here. Export it first to keep a copy."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3196
+#: ui/dialogs/settings-dialog.slint:3235
 msgid "Delete mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3197
+#: ui/dialogs/settings-dialog.slint:3236
 msgid "Keep mail"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3211
+#: ui/dialogs/settings-dialog.slint:3250
 msgid "Remove account?"
 msgstr "移除账户？"
 
-#: ui/dialogs/settings-dialog.slint:3213
+#: ui/dialogs/settings-dialog.slint:3252
 msgid "Remove this account and its downloaded mail from this device."
 msgstr "从此设备移除此账户及其已下载的邮件。"
 
-#: ui/dialogs/settings-dialog.slint:3215
+#: ui/dialogs/settings-dialog.slint:3254
 msgid ""
 "This account's mail is stored only on this device. Export it first to keep a "
 "copy."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3216
+#: ui/dialogs/settings-dialog.slint:3255
 msgid "Messages on the mail server will not be deleted."
 msgstr "邮件服务器上的邮件不会被删除。"
 
-#: ui/dialogs/settings-dialog.slint:3221
+#: ui/dialogs/settings-dialog.slint:3260
 msgid "Remove account"
 msgstr "移除账户"
 
-#: ui/dialogs/settings-dialog.slint:3222
+#: ui/dialogs/settings-dialog.slint:3261
 msgid "Keep account"
 msgstr "保留账户"
 
-#: ui/dialogs/settings-dialog.slint:3236
+#: ui/dialogs/settings-dialog.slint:3275
 msgid "Delete profile?"
 msgstr "删除分组？"
 
-#: ui/dialogs/settings-dialog.slint:3238
+#: ui/dialogs/settings-dialog.slint:3277
 msgid ""
 "Accounts assigned to this profile will return to their individual or "
 "generated account colors."
 msgstr "归入此分组的账户将恢复为各自或自动生成的颜色。"
 
-#: ui/dialogs/settings-dialog.slint:3239
+#: ui/dialogs/settings-dialog.slint:3278
 msgid "Accounts and provider data are not changed."
 msgstr "账户和服务商数据不会改变。"
 
-#: ui/dialogs/settings-dialog.slint:3241
+#: ui/dialogs/settings-dialog.slint:3280
 msgid "Keep profile"
 msgstr "保留分组"
 
-#: ui/dialogs/settings-dialog.slint:3255
+#: ui/dialogs/settings-dialog.slint:3294
 msgid "Remove calendar?"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3257
+#: ui/dialogs/settings-dialog.slint:3296
 msgid "Stop syncing it and remove its events from this device."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3258
+#: ui/dialogs/settings-dialog.slint:3297
 msgid "Events on the server will not be deleted."
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:3260
+#: ui/dialogs/settings-dialog.slint:3299
 msgid "Keep calendar"
 msgstr ""
 
