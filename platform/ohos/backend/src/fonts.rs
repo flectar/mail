@@ -24,6 +24,7 @@ const HAN_FONT_FILES: [&str; 2] = [
 /// Registers the platform fonts into Slint's shared fontique collection and
 /// appends a Han fallback. Returns the number of Han fallback families.
 pub fn register_system_fonts() -> usize {
+    let started = std::time::Instant::now();
     let dir = Path::new(SYSTEM_FONT_DIR);
     if !dir.is_dir() {
         return 0;
@@ -128,6 +129,10 @@ pub fn register_system_fonts() -> usize {
 
     if han_families.is_empty() {
         crate::log::info("fonts: no Han fallback family found");
+        crate::log::info(&format!(
+            "fonts: system registration completed in {:?} (0 Han families)",
+            started.elapsed()
+        ));
         return 0;
     }
 
@@ -141,5 +146,10 @@ pub fn register_system_fonts() -> usize {
     // non-Han family.
     collection.append_generic_families(GenericFamily::SansSerif, han_families.iter().copied());
 
+    crate::log::info(&format!(
+        "fonts: system registration completed in {:?} ({} Han families)",
+        started.elapsed(),
+        han_families.len()
+    ));
     han_families.len()
 }
