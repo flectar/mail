@@ -324,37 +324,58 @@ export component ComposerRecipients inherits Rectangle {
         }
     }
 
-            height: to-row.height + (root.show-cc ? cc-row.height : 0px) + (root.show-bcc ? bcc-row.height : 0px);
+            height: recipient-rows.preferred-height;
             background: root.background-color;
 
-            to-row := RecipientRow {
-                x: 0px;
-                y: 0px;
-                width: parent.width;
-                label: @tr("To");
-                placeholder-text: @tr("name@example.com · separate with commas");
-                right-padding: parent.width - recipient-modes.x + 8px;
-                text <=> root.to;
-                background-color: root.background-color;
-                label-color: root.muted-color;
-                text-color: root.body-color;
-                placeholder-color: root.muted-color;
-                focus-color: root.accent-color;
-                suggestions-open: root.contact-menu-open;
-                edited(value) => {
-                    root.suggestions-dismissed = false;
-                    root.highlighted-contact = 0;
-                    root.search-contacts(value);
-                    if (root.contacts.length > 0) {
-                        contact-popup.show();
-                        to-row.focus();
-                    } else {
-                        contact-popup.close();
+            recipient-rows := VerticalLayout {
+                to-row := RecipientRow {
+                    label: @tr("To");
+                    placeholder-text: @tr("name@example.com · separate with commas");
+                    right-padding: parent.width - recipient-modes.x + 8px;
+                    text <=> root.to;
+                    background-color: root.background-color;
+                    label-color: root.muted-color;
+                    text-color: root.body-color;
+                    placeholder-color: root.muted-color;
+                    focus-color: root.accent-color;
+                    suggestions-open: root.contact-menu-open;
+                    edited(value) => {
+                        root.suggestions-dismissed = false;
+                        root.highlighted-contact = 0;
+                        root.search-contacts(value);
+                        if (root.contacts.length > 0) {
+                            contact-popup.show();
+                            to-row.focus();
+                        } else {
+                            contact-popup.close();
+                        }
                     }
+                    move-suggestion(delta) => { root.move-contact-highlight(delta); }
+                    accept-suggestion => { root.choose-highlighted-contact(); }
+                    dismiss-suggestions => { root.suggestions-dismissed = true; }
                 }
-                move-suggestion(delta) => { root.move-contact-highlight(delta); }
-                accept-suggestion => { root.choose-highlighted-contact(); }
-                dismiss-suggestions => { root.suggestions-dismissed = true; }
+
+                if root.show-cc : RecipientRow {
+                    label: @tr("Cc");
+                    placeholder-text: @tr("Carbon copy");
+                    text <=> root.cc;
+                    background-color: root.background-color;
+                    label-color: root.muted-color;
+                    text-color: root.body-color;
+                    placeholder-color: root.muted-color;
+                    focus-color: root.accent-color;
+                }
+
+                if root.show-bcc : RecipientRow {
+                    label: @tr("Bcc");
+                    placeholder-text: @tr("Blind carbon copy");
+                    text <=> root.bcc;
+                    background-color: root.background-color;
+                    label-color: root.muted-color;
+                    text-color: root.body-color;
+                    placeholder-color: root.muted-color;
+                    focus-color: root.accent-color;
+                }
             }
 
             recipient-modes := HorizontalBox {
@@ -384,36 +405,6 @@ export component ComposerRecipients inherits Rectangle {
                     selected-background: root.accent-background;
                     clicked => { root.show-bcc = !root.show-bcc; }
                 }
-            }
-
-            cc-row := RecipientRow {
-                visible: root.show-cc;
-                x: 0px;
-                y: to-row.height;
-                width: parent.width;
-                label: @tr("Cc");
-                placeholder-text: @tr("Carbon copy");
-                text <=> root.cc;
-                background-color: root.background-color;
-                label-color: root.muted-color;
-                text-color: root.body-color;
-                placeholder-color: root.muted-color;
-                focus-color: root.accent-color;
-            }
-
-            bcc-row := RecipientRow {
-                visible: root.show-bcc;
-                x: 0px;
-                y: to-row.height + (root.show-cc ? cc-row.height : 0px);
-                width: parent.width;
-                label: @tr("Bcc");
-                placeholder-text: @tr("Blind carbon copy");
-                text <=> root.bcc;
-                background-color: root.background-color;
-                label-color: root.muted-color;
-                text-color: root.body-color;
-                placeholder-color: root.muted-color;
-                focus-color: root.accent-color;
             }
 
             suggestion-name-probe := Text { visible: false; text: "Ag"; font-size: TypeScale.secondary; font-weight: 600; }

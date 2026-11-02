@@ -3105,42 +3105,42 @@ msgstr "Nouveau message"
 msgid "Account"
 msgstr "Compte"
 
-#: ui/components/composer-fields.slint:334
+#: ui/components/composer-fields.slint:332
 #, fuzzy
 msgid "To"
 msgstr "À"
 
-#: ui/components/composer-fields.slint:335
+#: ui/components/composer-fields.slint:333
 #, fuzzy
 msgid "name@example.com · separate with commas"
 msgstr "nom@example.com · séparer par des virgules"
 
-#: ui/components/composer-fields.slint:369
+#: ui/components/composer-fields.slint:359
 #, fuzzy
 msgid "Cc"
 msgstr "Cc"
 
-#: ui/components/composer-fields.slint:379
-#, fuzzy
-msgid "Bcc"
-msgstr "Cci"
-
-#: ui/components/composer-fields.slint:394
+#: ui/components/composer-fields.slint:360
 #, fuzzy
 msgid "Carbon copy"
 msgstr "Copie carbone"
 
-#: ui/components/composer-fields.slint:408
+#: ui/components/composer-fields.slint:370
+#, fuzzy
+msgid "Bcc"
+msgstr "Cci"
+
+#: ui/components/composer-fields.slint:371
 #, fuzzy
 msgid "Blind carbon copy"
 msgstr "Copie carbone invisible"
 
-#: ui/components/composer-fields.slint:466
+#: ui/components/composer-fields.slint:459
 #, fuzzy
 msgid "Subject"
 msgstr "Objet"
 
-#: ui/components/composer-fields.slint:478
+#: ui/components/composer-fields.slint:471
 #, fuzzy
 msgid "What is this email about?"
 msgstr "Quel est l’objet de cet e-mail ?"
