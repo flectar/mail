@@ -13,15 +13,19 @@
 //! - mobile home screens switch to icons bundled with the app, through the
 //!   platform layer.
 //!
-//! Flatpak can neither show a tray nor write to the host's icon theme, so the
-//! choice is not offered there.
+//! Flatpak can neither show a tray nor write to the host's icon theme, and
+//! some mobile platforms reserve switching the home screen icon for system
+//! apps, so the choice is not offered there.
 
 use crate::{AppIconVariant, AppWindow, tray_ui::FlectarTray};
 use flectar_mail_core::models;
 use slint::ComponentHandle;
 use std::cell::RefCell;
 
+#[cfg(desktop)]
 pub(crate) const AVAILABLE: bool = cfg!(not(feature = "flatpak"));
+#[cfg(mobile)]
+pub(crate) const AVAILABLE: bool = crate::platform::SWITCHES_APP_ICON;
 
 /// Lets Settings describe where this platform shows the icon.
 #[cfg(desktop)]

@@ -5,7 +5,7 @@ fn main() {
     // operating system. A new platform joins these groups here (and in the
     // core's build.rs) instead of editing call sites. See platform/README.md.
     cfg_aliases! {
-        mobile: { any(target_os = "android", target_os = "ios") },
+        mobile: { any(target_os = "android", target_os = "ios", target_env = "ohos") },
         desktop: { not(mobile) },
         // OpenHarmony reports target_os = "linux" without a desktop session,
         // portals, X11 or a Secret Service.

@@ -174,13 +174,20 @@ fn chosen_files_and_archives_are_recognized_by_their_content() {
     let text = folder.path().join("notes");
     write(&text, "Subject line without a header\r\n");
 
-    let source = scan_files(&[single.clone(), mbox_path.clone()]).unwrap();
+    let source = scan_files(&[
+        ChosenFile::at(single.clone()),
+        ChosenFile::at(mbox_path.clone()),
+    ])
+    .unwrap();
     assert_eq!(paths(&source), ["", "export"]);
     assert!(matches!(
         crate::migration::open(&single).unwrap(),
         Source::Mail(mail) if mail.folders.len() == 1 && mail.folders[0].path.is_empty()
     ));
-    assert_eq!(scan_files(&[text]), Err(SourceError::UnknownFormat));
+    assert_eq!(
+        scan_files(&[ChosenFile::at(text)]),
+        Err(SourceError::UnknownFormat)
+    );
 
     let archive_path = folder.path().join("takeout.zip");
     let mut archive = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
@@ -212,6 +219,25 @@ fn chosen_files_and_archives_are_recognized_by_their_content() {
 
     let empty = tempfile::tempdir().unwrap();
     assert_eq!(scan_folder(empty.path()), Err(SourceError::NoMail));
+}
+
+#[test]
+fn chosen_files_are_named_as_picked() {
+    let folder = tempfile::tempdir().unwrap();
+    // A phone stores its copy under a generated name.
+    let stored = folder.path().join("import-0b7c");
+    write(&stored, mbox(&[message("a", "One", "")]));
+    let chosen = ChosenFile {
+        path: stored,
+        name: "Work.mbox".into(),
+    };
+
+    let source = scan_files(std::slice::from_ref(&chosen)).unwrap();
+    assert_eq!(paths(&source), ["Work"]);
+    assert!(matches!(
+        crate::migration::open_chosen(&chosen).unwrap(),
+        Source::Mail(mail) if paths(&mail) == ["Work"]
+    ));
 }
 
 async fn core() -> (tempfile::TempDir, crate::Core) {
@@ -490,7 +516,7 @@ async fn mail_can_go_into_a_folder_of_its_own() {
     let mut source = scan_folder(&root).unwrap();
     source
         .folders
-        .extend(crate::mail_import::scan_files(&[loose]).unwrap().folders);
+        .extend(scan_files(&[ChosenFile::at(loose)]).unwrap().folders);
     let (progress, receiver) = watch::channel(MailImportProgress::default());
     let report = core
         .import_mail(

@@ -6,23 +6,51 @@ pub type DocumentFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Se
 /// request or an unread channel result must release the copy as well.
 pub struct ImportedDocument {
     path: PathBuf,
+    /// The name the user picked the document by, when the host stores the
+    /// copy under a generated name. The path stays the only filesystem input.
+    picked_name: Option<String>,
     cleanup: Option<Box<dyn FnOnce(PathBuf) + Send>>,
 }
 impl ImportedDocument {
     pub fn source(path: PathBuf) -> Self {
         Self {
             path,
+            picked_name: None,
             cleanup: None,
         }
     }
     pub fn temporary(path: PathBuf, cleanup: impl FnOnce(PathBuf) + Send + 'static) -> Self {
         Self {
             path,
+            picked_name: None,
             cleanup: Some(Box::new(cleanup)),
         }
     }
+    /// Records the name the user picked the document by. Hosts store picked
+    /// copies under names they generate instead of trusting the provider's,
+    /// and pass the picker's name here. Slashes, backslashes and control
+    /// characters, which some cloud providers allow in names, become
+    /// underscores; a name that is still not a valid file name is ignored.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        let name = name
+            .into()
+            .replace(|c: char| c.is_control() || matches!(c, '/' | '\\'), "_");
+        if flectar_mail_core::files::validate_name(&name).is_ok() {
+            self.picked_name = Some(name);
+        }
+        self
+    }
     pub fn path(&self) -> &std::path::Path {
         &self.path
+    }
+    /// The document's name for the user, attachments, uploads and imports:
+    /// the picked name, or the stored file's own name.
+    pub fn name(&self) -> Option<String> {
+        self.picked_name.clone().or_else(|| {
+            self.path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
     }
 }
 impl Drop for ImportedDocument {
@@ -46,12 +74,15 @@ pub struct DocumentDialog {
     pub title: String,
     /// Filter name and the extensions it offers.
     pub filter: Option<(String, &'static [&'static str])>,
+    /// Directory the picker opens in. `None` follows the platform default.
+    pub directory: Option<PathBuf>,
 }
 impl DocumentDialog {
     pub fn titled(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             filter: None,
+            directory: None,
         }
     }
 }
@@ -124,12 +155,52 @@ pub(crate) fn safe_name(name: &str) -> String {
     }
 }
 
+/// Builds the dialog for a download, starting in the directory the user
+/// configured in Settings.
+pub(crate) fn download_dialog(title: impl Into<String>, setting: &str) -> DocumentDialog {
+    DocumentDialog {
+        title: title.into(),
+        filter: None,
+        directory: resolve_download_directory(setting),
+    }
+}
+
+/// Builds the download dialog from the stored settings. Every download goes
+/// through here, so a new download site picks up the configured location
+/// without repeating the lookup. An unreadable settings row falls back to the
+/// platform default rather than blocking the download.
+pub(crate) async fn download_dialog_for(core: &flectar_mail_core::Core) -> DocumentDialog {
+    let setting = core
+        .get_settings()
+        .await
+        .map(|settings| settings.download_directory)
+        .unwrap_or_default();
+    download_dialog("Download file", &setting)
+}
+
+/// Resolves the configured download directory for desktop save dialogs. An
+/// empty setting, a path that no longer exists, or a path that is not a
+/// directory all fall back to the platform default, so a download never fails
+/// because a saved location went away, such as an unmounted network share.
+pub(crate) fn resolve_download_directory(setting: &str) -> Option<PathBuf> {
+    let trimmed = setting.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    path.is_dir().then_some(path)
+}
+
 #[cfg(desktop)]
 struct DesktopDocuments;
 #[cfg(desktop)]
 impl DocumentDialog {
     fn file_dialog(&self) -> rfd::AsyncFileDialog {
         let dialog = rfd::AsyncFileDialog::new().set_title(&self.title);
+        let dialog = match &self.directory {
+            Some(directory) => dialog.set_directory(directory),
+            None => dialog,
+        };
         match &self.filter {
             Some((name, extensions)) => dialog.add_filter(name, extensions),
             None => dialog,
@@ -195,11 +266,83 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
+    #[test]
+    fn download_dialog_starts_in_the_configured_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let dialog = download_dialog("Download file", &dir.path().to_string_lossy());
+        assert_eq!(dialog.title, "Download file");
+        assert_eq!(dialog.directory, Some(dir.path().to_owned()));
+    }
+
+    #[test]
+    fn download_dialog_without_a_configured_directory_uses_the_platform_default() {
+        assert_eq!(download_dialog("Download file", "").directory, None);
+    }
+
+    #[test]
+    fn configured_directory_is_used_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_download_directory(&dir.path().to_string_lossy()),
+            Some(dir.path().to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_setting_uses_the_platform_default() {
+        assert_eq!(resolve_download_directory(""), None);
+        assert_eq!(resolve_download_directory("   "), None);
+    }
+
+    #[test]
+    fn missing_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        assert_eq!(resolve_download_directory(&missing.to_string_lossy()), None);
+    }
+
+    #[test]
+    fn file_path_instead_of_a_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lieferschein.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        assert_eq!(resolve_download_directory(&file.to_string_lossy()), None);
+    }
+
     fn imported(path: PathBuf, drops: Arc<AtomicUsize>) -> ImportedDocument {
         ImportedDocument::temporary(path, move |path| {
             std::fs::remove_file(path).unwrap();
             drops.fetch_add(1, Ordering::SeqCst);
         })
+    }
+
+    #[test]
+    fn picked_names_replace_the_stored_name() {
+        let path = PathBuf::from("/private/cache/import-random.pdf");
+        let document = ImportedDocument::source(path.clone()).with_name("Report 2026.pdf");
+        assert_eq!(document.path(), path);
+        assert_eq!(document.name().as_deref(), Some("Report 2026.pdf"));
+        assert_eq!(
+            ImportedDocument::source(path.clone()).name().as_deref(),
+            Some("import-random.pdf")
+        );
+        for (picked, kept) in [
+            ("Invoice 10/2026.pdf", "Invoice 10_2026.pdf"),
+            ("a\\b", "a_b"),
+            ("line\nbreak", "line_break"),
+        ] {
+            let document = ImportedDocument::source(path.clone()).with_name(picked);
+            assert_eq!(document.name().as_deref(), Some(kept), "{picked:?}");
+        }
+        let long = "x".repeat(256);
+        for invalid in ["", ".", "..", long.as_str()] {
+            let document = ImportedDocument::source(path.clone()).with_name(invalid);
+            assert_eq!(
+                document.name().as_deref(),
+                Some("import-random.pdf"),
+                "{invalid:?}"
+            );
+        }
     }
 
     #[tokio::test]

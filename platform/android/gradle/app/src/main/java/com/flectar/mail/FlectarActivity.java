@@ -74,8 +74,10 @@ public final class FlectarActivity extends NativeActivity {
     private String pendingDocumentExport = "";
     // Above zero, the request takes up to this many documents.
     private int pendingDocumentLimit = 0;
-    private static native void nativeDocumentResult(long requestId, String path, String error);
-    private static native void nativeDocumentsResult(long requestId, String[] paths, String error);
+    // Imported copies take generated names. Each result carries the name the
+    // provider reports alongside, which Rust validates before using it.
+    private static native void nativeDocumentResult(long requestId, String path, String name, String error);
+    private static native void nativeDocumentsResult(long requestId, String[] paths, String[] names, String error);
     private static native boolean nativeDocumentRequestActive(long requestId);
 
     public void cancelDocumentRequest(long requestId) {
@@ -92,16 +94,13 @@ public final class FlectarActivity extends NativeActivity {
         try {
             File root=new File(getCacheDir(),"file-imports").getCanonicalFile();
             File file=new File(path).getCanonicalFile();
-            File folder=file.getParentFile();
-            if(folder!=null && root.equals(folder.getParentFile()) && file.isFile()) {
-                if(file.delete())folder.delete();
-            }
+            if(root.equals(file.getParentFile()) && file.isFile())file.delete();
         } catch(java.io.IOException ignored) { }
     }
     public void chooseDocument(long requestId, String exportPath, String name) {
         runOnUiThread(() -> {
             if (!nativeDocumentRequestActive(requestId)) return;
-            if (pendingDocumentRequest >= 0) {nativeDocumentResult(requestId, "", "Another document picker is open."); return;}
+            if (pendingDocumentRequest >= 0) {nativeDocumentResult(requestId, "", "", "Another document picker is open."); return;}
             pendingDocumentRequest = requestId;
             pendingDocumentExport = exportPath;
             pendingDocumentLimit = 0;
@@ -110,7 +109,7 @@ public final class FlectarActivity extends NativeActivity {
             intent.setType(exportPath.isEmpty() ? "*/*" : "application/octet-stream");
             if (!exportPath.isEmpty()) intent.putExtra(Intent.EXTRA_TITLE, name);
             try {startActivityForResult(intent, FILE_DOCUMENT_REQUEST);}
-            catch (RuntimeException error) {pendingDocumentRequest=-1;pendingDocumentExport="";nativeDocumentResult(requestId,"","Could not open the system document picker.");}
+            catch (RuntimeException error) {pendingDocumentRequest=-1;pendingDocumentExport="";nativeDocumentResult(requestId,"","","Could not open the system document picker.");}
         });
     }
 
@@ -118,7 +117,7 @@ public final class FlectarActivity extends NativeActivity {
     public void chooseDocuments(long requestId, int limit) {
         runOnUiThread(() -> {
             if (!nativeDocumentRequestActive(requestId)) return;
-            if (pendingDocumentRequest >= 0) {nativeDocumentsResult(requestId, new String[0], "Another document picker is open."); return;}
+            if (pendingDocumentRequest >= 0) {nativeDocumentsResult(requestId, new String[0], new String[0], "Another document picker is open."); return;}
             pendingDocumentRequest = requestId;
             pendingDocumentExport = "";
             pendingDocumentLimit = Math.max(1, limit);
@@ -127,13 +126,16 @@ public final class FlectarActivity extends NativeActivity {
             intent.setType("*/*");
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             try {startActivityForResult(intent, FILE_DOCUMENT_REQUEST);}
-            catch (RuntimeException error) {pendingDocumentRequest=-1;pendingDocumentLimit=0;nativeDocumentsResult(requestId,new String[0],"Could not open the system document picker.");}
+            catch (RuntimeException error) {pendingDocumentRequest=-1;pendingDocumentLimit=0;nativeDocumentsResult(requestId,new String[0],new String[0],"Could not open the system document picker.");}
         });
     }
 
-    private static void deliverDocuments(long id,int limit,List<String> paths,String error) {
-        if(limit>0)nativeDocumentsResult(id,paths.toArray(new String[0]),error);
-        else nativeDocumentResult(id,paths.isEmpty()?"":paths.get(0),error);
+    private static void deliverDocuments(long id,int limit,List<String> paths,List<String> names,String error) {
+        if(limit>0)nativeDocumentsResult(id,paths.toArray(new String[0]),names.toArray(new String[0]),error);
+        else nativeDocumentResult(id,paths.isEmpty()?"":paths.get(0),names.isEmpty()?"":names.get(0),error);
+    }
+    private static void deliverDocuments(long id,int limit,String error) {
+        deliverDocuments(id,limit,new ArrayList<>(),new ArrayList<>(),error);
     }
 
     private void finishDocument(int resultCode, Intent data) {
@@ -148,8 +150,8 @@ public final class FlectarActivity extends NativeActivity {
             if(clip!=null){for(int i=0;i<clip.getItemCount();i++){Uri uri=clip.getItemAt(i).getUri();if(uri!=null)uris.add(uri);}}
             else if(data.getData()!=null)uris.add(data.getData());
         }
-        if(uris.isEmpty()){deliverDocuments(id,limit,new ArrayList<>(),"");return;}
-        if(uris.size()>Math.max(1,limit)){deliverDocuments(id,limit,new ArrayList<>(),"Choose at most "+Math.max(1,limit)+" files.");return;}
+        if(uris.isEmpty()){deliverDocuments(id,limit,"");return;}
+        if(uris.size()>Math.max(1,limit)){deliverDocuments(id,limit,"Choose at most "+Math.max(1,limit)+" files.");return;}
         if(!exportPath.isEmpty()){exportDocument(id,exportPath,uris.get(0));return;}
         new Thread(() -> {
             List<java.io.File> copies=new ArrayList<>();
@@ -159,20 +161,24 @@ public final class FlectarActivity extends NativeActivity {
                 for(Uri uri:uris)known+=Math.max(0,documentSize(uri));
                 if(known>maxBytes)throw new java.io.IOException("File exceeds the transfer limit");
                 if(known+FREE_SPACE_RESERVE>getCacheDir().getUsableSpace())throw new java.io.IOException("There is not enough free space on this device.");
+                java.io.File dir=new java.io.File(getCacheDir(),"file-imports");
+                if(!dir.mkdirs()&&!dir.isDirectory())throw new java.io.IOException("Cannot create import directory");
                 List<String> paths=new ArrayList<>();
+                List<String> names=new ArrayList<>();
                 for(Uri uri:uris) {
                     if(!nativeDocumentRequestActive(id))throw new java.io.IOException("Document transfer cancelled");
-                    java.io.File dir=new java.io.File(getCacheDir(),"file-imports/"+java.util.UUID.randomUUID());
-                    if(!dir.mkdirs())throw new java.io.IOException("Cannot create import directory");
-                    java.io.File imported=new java.io.File(dir,documentName(uri));
+                    // The provider's name never names a file here.
+                    java.io.File imported=new java.io.File(dir,java.util.UUID.randomUUID().toString());
                     copies.add(imported);
+                    String name=documentName(uri);
                     try(java.io.InputStream in=getContentResolver().openInputStream(uri);java.io.OutputStream out=new java.io.FileOutputStream(imported)) {copyDocument(id,in,out,maxBytes,true);}
                     paths.add(imported.getAbsolutePath());
+                    names.add(name);
                 }
-                deliverDocuments(id,limit,paths,"");
+                deliverDocuments(id,limit,paths,names,"");
             } catch(Exception error) {
-                for(java.io.File copy:copies){copy.delete();java.io.File folder=copy.getParentFile();if(folder!=null)folder.delete();}
-                deliverDocuments(id,limit,new ArrayList<>(),"The document could not be transferred: "+error.getMessage());
+                for(java.io.File copy:copies)copy.delete();
+                deliverDocuments(id,limit,"The document could not be transferred: "+error.getMessage());
             }
         },"flectar-documents").start();
     }
@@ -184,20 +190,19 @@ public final class FlectarActivity extends NativeActivity {
                 // Only private application paths supplied by our Rust host.
                 if(!source.toPath().startsWith(getCacheDir().getCanonicalFile().toPath()) && !source.toPath().startsWith(getFilesDir().getCanonicalFile().toPath()))throw new java.io.IOException("Invalid export source");
                 try(java.io.InputStream in=new java.io.FileInputStream(source);java.io.OutputStream out=getContentResolver().openOutputStream(uri,"w")){copyDocument(id,in,out,Long.MAX_VALUE,false);}
-                nativeDocumentResult(id,exportPath,"");
+                nativeDocumentResult(id,exportPath,"","");
             } catch(Exception error) {
                 try {android.provider.DocumentsContract.deleteDocument(getContentResolver(),uri);} catch(Exception ignored) {}
-                nativeDocumentResult(id,"","The document could not be transferred: "+error.getMessage());
+                nativeDocumentResult(id,"","","The document could not be transferred: "+error.getMessage());
             }
         },"flectar-documents").start();
     }
+    /** The name the provider reports, or an empty one when it reports none. */
     private String documentName(Uri uri) {
-        String name="upload";
         try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME},null,null,null)) {
-            if(cursor!=null&&cursor.moveToFirst())name=cursor.getString(0);
-        }
-        if(name==null||name.isEmpty()||name.equals(".")||name.equals("..")||name.contains("/")||name.contains("\\"))name="upload";
-        return name;
+            if(cursor!=null&&cursor.moveToFirst()&&!cursor.isNull(0))return cursor.getString(0);
+        } catch(RuntimeException ignored) { }
+        return "";
     }
     /** The size the provider reports, or -1 when it reports none. */
     private long documentSize(Uri uri) {

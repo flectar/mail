@@ -1,0 +1,30 @@
+[package]
+name = "slint-ohos-backend"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "AGPL-3.0-only"
+description = "Minimal Slint platform backend for OpenHarmony (XComponent + software renderer)"
+publish = false
+
+[lib]
+name = "slint_ohos_backend"
+path = "src/lib.rs"
+
+[dependencies]
+slint.workspace = true
+# The slint-ohos backend replaces the winit/linuxkms/skia backends, each of
+# which enables i-slint-core's `image-decoders` + `svg` features. The
+# Slint-generated code that loads embedded images (PNG/SVG) does not compile
+# without them, so the backend crate carries the same features.
+i-slint-core = { version = "=1.18.1", default-features = false, features = [
+    "image-decoders",
+    "svg",
+] }
+# Experimental GPU path: femtovg on wgpu via EGL/GLES. `unstable-wgpu-30`
+# (which implies `wgpu`) exposes `i-slint-core`'s `wgpu_30::api` module so the
+# backend can request the GL backend explicitly.
+i-slint-renderer-femtovg = { version = "=1.18.1", default-features = false, features = [
+    "unstable-wgpu-30",
+] }
+raw-window-handle = "0.6"

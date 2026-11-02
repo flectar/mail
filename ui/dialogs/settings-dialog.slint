@@ -25,6 +25,7 @@ import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slin
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
+import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Numbers } from "../numbers.slint";
 
@@ -478,6 +479,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> settings_tab: "General";
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    in-out property <bool> show_tabs: true;
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
@@ -534,6 +536,11 @@ export component SettingsDialog inherits Rectangle {
     in-out property <string> google_client_id: "";
     in-out property <string> google_client_secret: "";
     in-out property <string> ms_client_id: "";
+    // Where desktop save dialogs open. Empty follows the platform default.
+    in-out property <string> download_directory: "";
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting.
+    in-out property <bool> download_directory_available: false;
     in-out property <bool> custom_oauth_open: false;
     in-out property <bool> account_form_open: false;
     private property <bool> account_editing: false;
@@ -573,7 +580,10 @@ export component SettingsDialog inherits Rectangle {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_show_tabs(bool);
     callback save_group_mail_by_date(bool);
+    callback choose_download_directory();
+    callback clear_download_directory();
     // Save a profile's name and color, and make the checked accounts of
     // `profile_members` its accounts. Returns the profile's id, or empty.
     callback save_mail_profile(string, string, color) -> string;
@@ -700,7 +710,7 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
@@ -1101,7 +1111,7 @@ export component SettingsDialog inherits Rectangle {
                             if AppIcon.available : AppIconPicker { compact: root.compact; }
 
                             Rectangle {
-                                height: max((root.compact ? 346px : 264px)
+                                height: max((root.compact ? 435px : 323px)
                                     + (WindowChrome.available ? (root.compact ? 89px : 59px) : 0px), self.preferred-height);
                                 background: root.surface;
                                 border-radius: 8px;
@@ -1137,6 +1147,19 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.show_avatars = !checked;
                                             root.save_avatar_visibility(root.show_avatars);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Tabs");
+                                        description: @tr("Keep several mailboxes, conversations and other places open in tabs.");
+                                        checked: root.show_tabs;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.show_tabs = checked;
+                                            root.save_show_tabs(checked);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
@@ -1432,6 +1455,91 @@ export component SettingsDialog inherits Rectangle {
                                             color: root.faint-text;
                                             font-size: TypeScale.caption;
                                             overflow: elide;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.download_directory_available : Rectangle {
+                                height: self.preferred-height;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                VerticalBox {
+                                    padding: 16px;
+                                    // Laid out like SettingsSelectRow: texts left of the buttons on
+                                    // desktop, stacked above them in the compact layout.
+                                    if !root.compact : HorizontalBox {
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 2px;
+                                            Text {
+                                                height: max(18px, self.preferred-height);
+                                                text: @tr("Download location");
+                                                color: root.body-text;
+                                                font-size: TypeScale.body;
+                                                font-weight: 600;
+                                                overflow: elide;
+                                            }
+                                            Text {
+                                                height: max(17px, self.preferred-height);
+                                                text: root.download_directory == ""
+                                                    ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
+                                                    : root.download_directory;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                overflow: elide;
+                                            }
+                                        }
+                                        Button {
+                                            width: max(132px, self.content-width);
+                                            text: @tr("Choose folder…");
+                                            clicked => { root.choose_download_directory(); }
+                                        }
+                                        Button {
+                                            width: max(96px, self.content-width);
+                                            text: @tr("Reset");
+                                            enabled: root.download_directory != "";
+                                            clicked => { root.clear_download_directory(); }
+                                        }
+                                    }
+                                    if root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            height: max(20px, self.preferred-height);
+                                            text: @tr("Download location");
+                                            color: root.body-text;
+                                            font-size: TypeScale.body;
+                                            font-weight: 600;
+                                            wrap: word-wrap;
+                                        }
+                                        Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: root.download_directory == ""
+                                                ? @tr("Saving an attachment asks where to put it, starting in the folder your system suggests.")
+                                                : root.download_directory;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            // A path has no spaces to break at.
+                                            wrap: root.download_directory == "" ? TextWrap.word-wrap : TextWrap.char-wrap;
+                                        }
+                                        HorizontalBox {
+                                            padding: 0px;
+                                            spacing: 8px;
+                                            Button {
+                                                horizontal-stretch: 1;
+                                                text: @tr("Choose folder…");
+                                                clicked => { root.choose_download_directory(); }
+                                            }
+                                            Button {
+                                                horizontal-stretch: 1;
+                                                text: @tr("Reset");
+                                                enabled: root.download_directory != "";
+                                                clicked => { root.clear_download_directory(); }
+                                            }
                                         }
                                     }
                                 }
@@ -2530,6 +2638,7 @@ export component SettingsDialog inherits Rectangle {
                 leading-accessible-id: "settings-menu-button";
                 background-color: root.sidebar-bg;
                 leading-clicked => { root.compact-nav-open = true; }
+                if TabsUi.enabled && TabsUi.compact : TabSwitcherButton { compact: true; }
                 IconButton {
                     width: LayoutMetrics.touch-target;
                     height: LayoutMetrics.touch-target;
