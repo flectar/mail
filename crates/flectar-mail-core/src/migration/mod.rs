@@ -30,6 +30,7 @@ pub use plan::{
     SignatureDraft, plan,
 };
 
+use crate::mail_import::ChosenFile;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
@@ -121,6 +122,13 @@ pub fn detect(bytes: &[u8]) -> Option<DetectedFormat> {
 /// folder or ZIP archive of them. Only settings files are read into memory,
 /// so a profile export or mail may be far larger than [`MAX_SOURCE_BYTES`].
 pub fn open(path: &Path) -> Result<Source, SourceError> {
+    open_chosen(&ChosenFile::at(path.to_owned()))
+}
+
+/// [`open`] for a picked file that a host stores under a generated name: mail
+/// in it is named after the name the user picked.
+pub fn open_chosen(chosen: &ChosenFile) -> Result<Source, SourceError> {
+    let path = chosen.path.as_path();
     if path.is_dir() {
         if path.join("prefs.js").is_file() || path.join("profiles.ini").is_file() {
             return accounts(thunderbird::read_profile_dir(path)?);
@@ -149,7 +157,7 @@ pub fn open(path: &Path) -> Result<Source, SourceError> {
     // Settings never start like mail: with `From ` or a header field.
     if crate::mail_import::scan::is_mbox(head) || crate::mail_import::scan::is_message(head) {
         drop(file);
-        return crate::mail_import::scan_files(&[path.to_owned()]).map(Source::Mail);
+        return crate::mail_import::scan_files(std::slice::from_ref(chosen)).map(Source::Mail);
     }
     file.seek(SeekFrom::Start(0))
         .map_err(|error| SourceError::Unreadable(error.to_string()))?;

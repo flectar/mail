@@ -44,6 +44,7 @@ mod tests {
         assert_eq!(d.app_icon, crate::models::AppIcon::Orange);
         assert!(d.show_avatars);
         assert!(d.group_mail_by_date);
+        assert!(d.show_tabs);
         assert!(d.collect_outgoing_contacts);
         assert!(!d.collect_incoming_contacts);
         assert!(!d.contact_suggest_all_accounts);
@@ -59,6 +60,7 @@ mod tests {
         assert!(d.mail_profiles.is_empty());
         assert!(d.active_mail_profile.is_none());
         assert!(!d.show_account_badges);
+        assert!(d.download_directory.is_empty());
 
         let mut s = d.clone();
         s.theme = "carbon".into();
@@ -69,9 +71,11 @@ mod tests {
         s.app_icon = crate::models::AppIcon::Graphite;
         s.show_avatars = false;
         s.group_mail_by_date = false;
+        s.show_tabs = false;
         s.workspace_layout = "minimal".into();
         s.contact_suggest_all_accounts = true;
         s.theme_preset = "teal".into();
+        s.download_directory = "/srv/downloads".into();
         s.custom_theme.light_primary = "#006B7A".into();
         s.signature_list.push(crate::models::Signature {
             id: "a".into(),
@@ -118,9 +122,11 @@ mod tests {
         assert_eq!(back.app_icon, crate::models::AppIcon::Graphite);
         assert!(!back.show_avatars);
         assert!(!back.group_mail_by_date);
+        assert!(!back.show_tabs);
         assert!(back.contact_suggest_all_accounts);
         assert_eq!(back.workspace_layout, "minimal");
         assert_eq!(back.theme_preset, "teal");
+        assert_eq!(back.download_directory, "/srv/downloads");
         assert_eq!(back.custom_theme.light_primary, "#006B7A");
         assert_eq!(back.signature_list.len(), 1);
         assert_eq!(back.signature_list[0].html, "<b>Dean</b>");
@@ -154,6 +160,7 @@ mod tests {
         assert_eq!(s.app_icon, crate::models::AppIcon::Orange);
         assert!(s.show_avatars);
         assert!(s.group_mail_by_date);
+        assert!(s.show_tabs);
         assert!(s.collect_outgoing_contacts);
         assert!(!s.collect_incoming_contacts);
         assert!(!s.contact_suggest_all_accounts);
@@ -170,6 +177,7 @@ mod tests {
         assert!(s.mail_profiles.is_empty());
         assert!(s.active_mail_profile.is_none());
         assert!(!s.show_account_badges);
+        assert!(s.download_directory.is_empty());
         assert!(!s.ai_model_instant.is_empty());
         assert!(!s.ai_model_cheap.is_empty());
         assert!(!s.ai_model_intelligent.is_empty());

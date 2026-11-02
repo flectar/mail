@@ -377,17 +377,17 @@ async fn stalwart_durable_sync_and_offline_queue() {
         ..Default::default()
     };
     service
-        .execute(&core, "load", "", "", -1, None)
+        .execute(&core, "load", "", "", -1, None, None)
         .await
         .unwrap();
     service
-        .execute(&core, "account", "1", "", -1, None)
+        .execute(&core, "account", "1", "", -1, None, None)
         .await
         .unwrap();
     // The primary Connect storage action is available from attachment scope.
     assert!(service.attachments);
     service
-        .execute(&core, "connect", &base, "jmap", -1, None)
+        .execute(&core, "connect", &base, "jmap", -1, None, None)
         .await
         .unwrap();
     assert!(!service.attachments);
@@ -397,7 +397,7 @@ async fn stalwart_durable_sync_and_offline_queue() {
         .position(|n| matches!(n,Entry::Remote(n) if n.id==folder))
         .unwrap() as i32;
     service
-        .execute(&core, "enter", "", "", index, None)
+        .execute(&core, "enter", "", "", index, None, None)
         .await
         .unwrap();
     // Simulate discovery being unavailable without changing the saved endpoint.
@@ -406,7 +406,7 @@ async fn stalwart_durable_sync_and_offline_queue() {
     drop(closed);
     service.client = None;
     service
-        .execute(&core, "refresh", "", "", -1, None)
+        .execute(&core, "refresh", "", "", -1, None, None)
         .await
         .unwrap();
     assert!(service.offline);
@@ -418,14 +418,22 @@ async fn stalwart_durable_sync_and_offline_queue() {
     );
     service.settings.endpoint = base.clone();
     service
-        .execute(&core, "upload", "", "", -1, Some(source))
+        .execute(&core, "upload", "", "", -1, Some(source), None)
         .await
         .unwrap();
     let jobs = files::store::operations(&core.files_db, 1).await.unwrap();
     let job = &jobs[0];
     assert_eq!(job.state, "queued");
     service
-        .execute(&core, "retry-operation", &job.id.to_string(), "", -1, None)
+        .execute(
+            &core,
+            "retry-operation",
+            &job.id.to_string(),
+            "",
+            -1,
+            None,
+            None,
+        )
         .await
         .unwrap();
     assert_eq!(

@@ -6420,8 +6420,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     skipped += 1;
                     continue;
                 }
-                let Some(filename) = path.file_name().map(|name| name.to_string_lossy().into_owned())
-                else {
+                let Some(filename) = document.name() else {
                     skipped += 1;
                     continue;
                 };
@@ -6926,7 +6925,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         platform.oauth_redirects.clone(),
         platform.external_urls.clone(),
     );
-    mail_setup::register(&app, &runtime);
+    mail_setup::register(&app, &runtime, &platform.documents);
 
     let suggestion_app = app.as_weak();
     let suggestion_state = Rc::clone(&state);

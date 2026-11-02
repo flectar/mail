@@ -26,5 +26,7 @@
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Flectar Mail connects to mail servers on your local network.</string>
 </dict>
 </plist>

@@ -1720,6 +1720,10 @@ pub struct Settings {
     /// Group the mail list into collapsible local-date sections.
     #[serde(default = "default_true")]
     pub group_mail_by_date: bool,
+    /// Show browser-style tabs: the strip in the desktop top bar, and the tab
+    /// switcher in compact layouts. Saved tabs are kept while they are hidden.
+    #[serde(default = "default_true")]
+    pub show_tabs: bool,
     /// Workspace presentation: "default" keeps lists and details side by
     /// side, while "minimal" navigates between those shared surfaces.
     /// `mailLayout` was the short-lived original key before Contacts shared
@@ -1754,6 +1758,13 @@ pub struct Settings {
     /// Mark unread conversations as read when the user opens them.
     #[serde(default = "default_true")]
     pub mark_read_on_open: bool,
+    /// Directory desktop save dialogs open in. An empty value follows the
+    /// platform default. The path is deliberately not validated when stored:
+    /// a saved location can be unavailable later, such as an unmounted network
+    /// share, so downloads fall back to the platform default at save time
+    /// rather than failing.
+    #[serde(default)]
+    pub download_directory: String,
     #[serde(default = "default_ai_base_url")]
     pub ai_base_url: String,
     /// Per-tier model ids, all sharing `ai_base_url` and the stored API key.
@@ -2031,6 +2042,7 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             group_mail_by_date: true,
+            show_tabs: true,
             workspace_layout: default_workspace_layout(),
             workspace_list_pane_width: default_workspace_list_pane_width(),
             window_frame: default_window_frame(),
@@ -2042,6 +2054,7 @@ impl Default for Settings {
             undo_send_seconds: 10,
             load_remote_images: false,
             mark_read_on_open: true,
+            download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
             ai_model_cheap: default_ai_model(),
@@ -2403,6 +2416,7 @@ mod tests {
         assert_eq!(s.message_appearance, MessageAppearance::System);
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
+        assert!(s.show_tabs);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
         assert_eq!(s.time_format, TimeFormat::Automatic);
@@ -2455,6 +2469,7 @@ mod tests {
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
         assert_eq!(serialized["groupMailByDate"], true);
+        assert_eq!(serialized["showTabs"], true);
         assert_eq!(
             serialized["workspaceListPaneWidth"],
             MIN_WORKSPACE_LIST_PANE_WIDTH

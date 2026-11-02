@@ -1,0 +1,82 @@
+export struct TabRow {
+    id: int,
+    // "mail" | "calendar" | "contacts" | "files" | "settings"
+    workspace: string,
+    // Saved title for inactive tabs; empty uses the workspace name.
+    title: string,
+    active: bool,
+}
+
+// Browser-style tabs. Rust owns the tab list; each tab is a saved location
+// that is restored through the app's normal navigation when activated.
+export global TabsUi {
+    in property <[TabRow]> rows;
+    // Tabs are turned on and there is mail to show. The desktop top bar
+    // shows them as a strip; compact layouts show a tab switcher.
+    in property <bool> enabled;
+    // The window uses the compact layout, which shows a tab switcher in the
+    // toolbars instead of the strip.
+    in property <bool> compact;
+    // The compact tab overview is open.
+    in-out property <bool> overview-open;
+    // Counts the tabs shown, for single-pane layouts to show the right page;
+    // `shown-conversation` tells whether the tab shown last has a
+    // conversation open.
+    in property <int> shown;
+    in property <bool> shown-conversation;
+    // A closed tab can be reopened.
+    in property <bool> can-reopen;
+    callback select(int);
+    callback close(int);
+    // Close every tab except this one, or the tabs to its right.
+    callback close-others(int);
+    callback close-to-right(int);
+    callback create();
+    // Reopen the most recently closed tab.
+    callback reopen();
+    // Move the tab with this id to a new index.
+    callback move(int, int);
+    // Open a conversation from the current list in a new tab; the flag
+    // activates the tab, otherwise it opens in the background.
+    callback open-conversation(int, bool);
+    // Open the checked conversations of the mail list in background tabs.
+    callback open-checked();
+    // Keyboard commands: "new", "close", "reopen", "next", "previous",
+    // "last", or a zero-based index.
+    callback command(string);
+    // The active tab's place changed through ordinary navigation.
+    callback navigated();
+    // The mail list's scroll offset from the top, kept current by the mail
+    // view, and the offset a shown tab scrolls back to. Each request makes
+    // the list scroll to `list-restore` once its rows are laid out; a
+    // negative value means nothing is pending. `list-restore-view` names the
+    // mailbox, search and filter it belongs to, one per line.
+    in-out property <length> list-offset;
+    in-out property <length> list-restore: -1px;
+    in-out property <string> list-restore-view;
+    in-out property <int> list-restore-request;
+    // Re-apply the active tab once local mail storage is ready.
+    callback restore-active();
+    // Forget every tab and its saved state, leaving one Inbox tab.
+    callback reset();
+    // An account was removed: tabs forget its mailboxes and conversations.
+    callback account-removed(string);
+    // Save every tab now, before the application exits.
+    callback flush();
+}
+
+export component WorkspaceIcon inherits Image {
+    in property <string> workspace;
+    in property <bool> filled;
+    source: root.workspace == "calendar"
+            ? (root.filled ? @image-url("../icons/lucide/filled/calendar.svg") : @image-url("../icons/lucide/outline/calendar.svg"))
+        : root.workspace == "files"
+            ? (root.filled ? @image-url("../icons/lucide/filled/files.svg") : @image-url("../icons/lucide/outline/files.svg"))
+        : root.workspace == "contacts"
+            ? (root.filled ? @image-url("../icons/lucide/filled/contacts.svg") : @image-url("../icons/lucide/outline/contacts.svg"))
+        : root.workspace == "settings"
+            ? (root.filled ? @image-url("../icons/lucide/filled/gear.svg") : @image-url("../icons/lucide/outline/gear.svg"))
+        : (root.filled ? @image-url("../icons/lucide/filled/mail.svg") : @image-url("../icons/lucide/outline/mail.svg"));
+    image-fit: contain;
+    accessible-role: none;
+}

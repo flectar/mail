@@ -12,10 +12,13 @@ fn main() {
     // Keep `mobile` identical to the application's build.rs; see
     // platform/README.md.
     cfg_aliases! {
-        mobile: { any(target_os = "android", target_os = "ios") },
+        mobile: { any(target_os = "android", target_os = "ios", target_env = "ohos") },
         desktop: { not(mobile) },
         // rustix exposes renameat2/renameatx_np with RENAME_NOREPLACE here.
         rename_noreplace: { any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "ios") },
+        // keyring stores secrets through the freedesktop Secret Service.
+        // OpenHarmony reports target_os = "linux" but has no Secret Service.
+        secret_service: { all(desktop, any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")) },
     }
 
     let workspace_env = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.env");
