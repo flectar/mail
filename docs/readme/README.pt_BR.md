@@ -95,7 +95,7 @@ Você também pode substituir a cor de uma conta individual e mostrar a cor resu
 
 ### 🧵 Conversas
 
-As respostas ficam agrupadas em ordem cronológica, com a mensagem ativa expandida no painel de leitura.
+As respostas ficam agrupadas em ordem cronológica, com a mensagem ativa expandida no painel de leitura. Para listar, abrir e tratar cada mensagem separadamente, desative **Visualização de conversa** em Configurações → Geral.
 
 Use **Cima/Baixo** para navegar pelas mensagens, **Home/End** para ir à primeira ou à última mensagem carregada e **Page Up/Page Down** para avançar uma página por vez. **Enter** abre a mensagem atual e leva o foco ao conteúdo; **Espaço** marca ou desmarca a mensagem para ações em lote. **Tab/Shift+Tab** alternam entre controles. No espaço completo, **F6** move o foco entre a lista e o leitor. No layout minimalista, as setas destacam mensagens e **Enter** as abre; **Escape** ou **F6** retorna à lista.
 

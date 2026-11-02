@@ -171,14 +171,14 @@ async fn offline_actions_queue_locally_and_survive_restart() {
     // Triage while offline: local mutation is immediate, intent is queued.
     core.perform_action(PerformActionArgs {
         kind: ActionKind::MarkRead,
-        thread_ids: vec![thread_id],
+        target: ActionTarget::Threads(vec![thread_id]),
         params: None,
     })
     .await
     .expect("mark read offline");
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Archive,
-        thread_ids: vec![thread_id],
+        target: ActionTarget::Threads(vec![thread_id]),
         params: None,
     })
     .await

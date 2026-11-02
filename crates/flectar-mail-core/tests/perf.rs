@@ -176,7 +176,12 @@ async fn hundred_k_messages_stay_instant() {
     // All native sidebar badges are refreshed together after mutations.
     let t0 = Instant::now();
     let badges = db
-        .read(|conn| repo::counts::mailbox_badge_counts(conn))
+        .read(|conn| {
+            repo::counts::mailbox_badge_counts(
+                conn,
+                flectar_mail_core::models::MailGrouping::Conversations,
+            )
+        })
         .await
         .unwrap();
     let badge_ms = t0.elapsed().as_millis();

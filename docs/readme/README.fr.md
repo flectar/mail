@@ -95,7 +95,7 @@ Vous pouvez aussi remplacer la couleur d’un compte particulier et afficher la 
 
 ### 🧵 Fils de discussion
 
-Les réponses restent regroupées par ordre chronologique, avec le message actif déplié dans le volet de lecture.
+Les réponses restent regroupées par ordre chronologique, avec le message actif déplié dans le volet de lecture. Pour afficher, ouvrir et traiter chaque message séparément, désactivez **Vue conversation** dans Paramètres → Général.
 
 Utilisez **Haut/Bas** pour parcourir les messages, **Début/Fin** pour atteindre le premier ou le dernier message chargé, et **Page précédente/Page suivante** pour avancer d’une page. **Entrée** ouvre le message courant et place le focus sur son contenu ; **Espace** le coche ou le décoche pour les actions groupées. **Tab/Maj+Tab** passent d’un contrôle à l’autre. Dans l’espace complet, **F6** déplace le focus entre la liste et le lecteur. Dans la disposition minimaliste, les flèches mettent les messages en surbrillance et **Entrée** les ouvre ; **Échap** ou **F6** revient à la liste.
 

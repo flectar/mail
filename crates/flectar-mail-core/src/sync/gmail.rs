@@ -3516,6 +3516,7 @@ async fn apply_action(
         // its id. Other local-only messages have no remote intent to replay.
         return Ok(());
     };
+    let provider_thread_id = conversation_scope(provider_thread_id, &action.payload);
 
     let mut add = Vec::<String>::new();
     let mut remove = Vec::<String>::new();
@@ -3630,6 +3631,16 @@ async fn apply_action(
         api.modify_message(&provider_message_id, &add, &remove)
             .await
     }
+}
+
+/// The Gmail conversation an action may change as a whole. An action on one
+/// message, made where mail lists do not group conversations, must not reach
+/// the rest of its conversation, so it changes only its message.
+fn conversation_scope(
+    provider_thread_id: Option<String>,
+    payload: &serde_json::Value,
+) -> Option<String> {
+    provider_thread_id.filter(|_| payload["messageOnly"].as_bool() != Some(true))
 }
 
 async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, api: &GmailApi) -> Result<bool> {
@@ -4009,6 +4020,23 @@ async fn fetch_attachment(ctx: &SyncCtx, api: &GmailApi, attachment_id: i64) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_message_actions_leave_the_rest_of_the_conversation() {
+        let thread = || Some("thread-1".to_owned());
+        assert_eq!(
+            conversation_scope(thread(), &json!({})).as_deref(),
+            Some("thread-1")
+        );
+        assert_eq!(
+            conversation_scope(thread(), &json!({ "messageOnly": true })),
+            None
+        );
+        assert_eq!(
+            conversation_scope(thread(), &json!({ "messageOnly": false })).as_deref(),
+            Some("thread-1")
+        );
+    }
 
     #[test]
     fn history_deduplicates_threads_and_advances_only_on_final_page() {

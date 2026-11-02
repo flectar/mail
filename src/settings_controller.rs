@@ -521,6 +521,42 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_grouping = Rc::clone(state);
+    let runtime_for_grouping = Rc::clone(runtime);
+    app.on_save_conversation_view(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let grouping = if enabled {
+            MailGrouping::Conversations
+        } else {
+            MailGrouping::Messages
+        };
+        apply_mail_grouping(&app, &state_for_grouping, &runtime_for_grouping, grouping);
+        let Some(core) = state_for_grouping.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Conversation view updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_grouping.block_on(core.set_conversation_view(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Conversation view preference saved.")),
+            Err(error) => {
+                let previous = if enabled {
+                    MailGrouping::Messages
+                } else {
+                    MailGrouping::Conversations
+                };
+                apply_mail_grouping(&app, &state_for_grouping, &runtime_for_grouping, previous);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save conversation view preference: {}",
+                    error,
+                ));
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_date_groups = Rc::clone(state);
     let runtime_for_date_groups = Rc::clone(runtime);
     app.on_save_group_mail_by_date(move |enabled| {

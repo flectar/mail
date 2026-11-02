@@ -420,6 +420,12 @@ pub(super) fn restore_account_backup(
             {
                 settings.show_tabs = enabled;
             }
+            if let Some(enabled) = preferences
+                .get("conversationView")
+                .and_then(|value| value.as_bool())
+            {
+                settings.conversation_view = enabled;
+            }
             if let Some(frame) = preferences
                 .get("windowFrame")
                 .and_then(|value| value.as_str())
@@ -638,6 +644,7 @@ pub(super) fn restore_account_backup(
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
     app.set_show_tabs(settings.show_tabs);
+    apply_mail_grouping(app, state, runtime, settings.mail_grouping());
     app.set_show_account_markers(settings.show_account_badges);
     crate::window_chrome::apply_preference(
         app,
@@ -1308,6 +1315,7 @@ pub(super) fn register_data_management_callbacks(
                     "messageAppearance": settings.message_appearance,
                     "showAvatars": settings.show_avatars,
                     "showTabs": settings.show_tabs,
+                    "conversationView": settings.conversation_view,
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
@@ -1626,6 +1634,12 @@ pub(super) fn register_data_management_callbacks(
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
                     app.set_show_tabs(true);
+                    apply_mail_grouping(
+                        &app,
+                        &data_reset_state,
+                        &data_reset_runtime,
+                        MailGrouping::Conversations,
+                    );
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
                     app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);

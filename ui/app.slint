@@ -275,6 +275,9 @@ export global I18n {
         if (key == "Mail grouping is active for this session.") { return @tr("Mail grouping is active for this session."); }
         if (key == "Mail grouping preference saved.") { return @tr("Mail grouping preference saved."); }
         if (key == "Could not save mail grouping preference: {}") { return @tr("Could not save mail grouping preference: {}", argument); }
+        if (key == "Conversation view updated for this session.") { return @tr("Conversation view updated for this session."); }
+        if (key == "Conversation view preference saved.") { return @tr("Conversation view preference saved."); }
+        if (key == "Could not save conversation view preference: {}") { return @tr("Could not save conversation view preference: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
         if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
@@ -638,6 +641,7 @@ export component AppWindow inherits Window {
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
     callback save_show_tabs(bool);
+    callback save_conversation_view(bool);
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
     callback clear_download_directory();
@@ -989,6 +993,8 @@ export component AppWindow inherits Window {
     // Show tabs: the desktop tab strip, or the compact tab switcher.
     in-out property <bool> show_tabs: true;
     in-out property <bool> group_mail_by_date: true;
+    // Group replies into conversations; off lists each message on its own.
+    in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
@@ -1931,6 +1937,7 @@ export component AppWindow inherits Window {
             show_avatars <=> root.show_avatars;
             show_tabs <=> root.show_tabs;
             group_mail_by_date <=> root.group_mail_by_date;
+            conversation_view <=> root.conversation_view;
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
@@ -2043,6 +2050,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
+            save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
                 root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
             }

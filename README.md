@@ -152,7 +152,8 @@ for Work and orange for Support.
 ### 🧵 Conversation threads
 
 Replies stay grouped in chronological order, with the active message expanded
-inside the reading pane.
+inside the reading pane. To list, open and act on every message on its own, turn
+off **Conversation view** in Settings → General.
 
 Use **Up/Down** to navigate messages, **Home/End** to jump to the first or last
 loaded message, and **Page Up/Page Down** to move a page at a time. **Enter**

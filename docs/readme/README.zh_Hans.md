@@ -93,7 +93,7 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 ### 🧵 会话线程
 
-回复按时间顺序归组显示，当前邮件在阅读窗格中展开。
+回复按时间顺序归组显示，当前邮件在阅读窗格中展开。如需逐封列出、打开和处理邮件，可在“设置 → 通用”中关闭 **Conversation view**（会话视图）。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">

@@ -412,7 +412,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let started = Instant::now();
         let badges = db
-            .read(|conn| repo::counts::mailbox_badge_counts(conn))
+            .read(|conn| {
+                repo::counts::mailbox_badge_counts(
+                    conn,
+                    flectar_mail_core::models::MailGrouping::Conversations,
+                )
+            })
             .await?;
         let badge_elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
         let process_after_badge = process_memory()?;

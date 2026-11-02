@@ -680,6 +680,8 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
         }
     });
     let owner = Rc::clone(&tabs);
+    global.on_regroup(move || owner.regroup());
+    let owner = Rc::clone(&tabs);
     global.on_navigated(move || {
         if owner.restored.get() {
             owner.schedule_save();
@@ -1441,6 +1443,39 @@ impl Tabs {
             }
         }
         self.changed();
+    }
+
+    /// Mail is grouped differently: an open conversation's id, a message's
+    /// in lists without conversations, and the rows and positions tabs kept
+    /// all belong to the old grouping. Tabs keep their mailboxes and searches,
+    /// and are written at once, so no old id is ever read in the new grouping.
+    fn regroup(&self) {
+        fn forget_open(place: &mut Place, title: &mut String) {
+            if let Location::Mail { conversation, .. } = &mut place.location
+                && conversation.take().is_some()
+            {
+                title.clear();
+            }
+            place.thread_message = None;
+            place.account = None;
+            place.scroll = Scroll::default();
+            place.unseen = false;
+        }
+        self.reader_timer.stop();
+        self.reader_restore.set(None);
+        {
+            let mut strip = self.strip.borrow_mut();
+            for tab in &mut strip.tabs {
+                forget_open(&mut tab.place, &mut tab.title);
+                tab.rows = None;
+            }
+            for closed in &mut strip.closed {
+                forget_open(&mut closed.place, &mut closed.title);
+            }
+        }
+        self.publish();
+        self.save_timer.stop();
+        self.save(true);
     }
 
     /// Publish rows, then save once the tab strip has been quiet briefly.
@@ -2441,6 +2476,58 @@ mod tests {
             state.borrow().checked_ids.is_empty(),
             "the selection is cleared"
         );
+    }
+
+    /// Ids of open conversations and of single messages are different ids:
+    /// after mail is grouped differently, no tab may reopen one by the other.
+    #[test]
+    fn regrouping_mail_forgets_what_tabs_had_open_and_saves_at_once() {
+        let (app, context, _dir, _) = headless();
+        let path = context.path.clone();
+        let tabs = Tabs::new(&app, context);
+        tabs.strip.borrow_mut().open(
+            Place {
+                location: Location::Mail {
+                    scope: Scope::UNIFIED_INBOX,
+                    query: "plans".into(),
+                    filter: default_filter(),
+                    conversation: Some(42),
+                },
+                thread_message: Some(420),
+                account: Some(1),
+                scroll: Scroll {
+                    list: 300.0,
+                    reader: 80.0,
+                },
+                unseen: true,
+                ..Place::default()
+            },
+            "Plans".into(),
+            None,
+        );
+
+        tabs.regroup();
+
+        let strip = tabs.strip.borrow();
+        let place = &strip.tabs[1].place;
+        assert_eq!(place.conversation(), None);
+        assert_eq!(place.thread_message, None);
+        assert_eq!(place.account, None);
+        assert_eq!(place.scroll, Scroll::default());
+        assert!(!place.unseen);
+        assert!(strip.tabs[1].title.is_empty());
+        assert!(
+            matches!(&place.location, Location::Mail { query, .. } if query == "plans"),
+            "the tab keeps its search"
+        );
+        let saved = read_file(&path).expect("written at once");
+        assert!(saved.tabs.iter().all(|tab| !matches!(
+            tab.location,
+            Location::Mail {
+                conversation: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

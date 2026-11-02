@@ -95,7 +95,7 @@ Du kannst auch die Farbe eines einzelnen Kontos überschreiben und die wirksame 
 
 ### 🧵 Unterhaltungen
 
-Antworten bleiben chronologisch gruppiert, wobei die aktive Nachricht im Lesebereich aufgeklappt ist.
+Antworten bleiben chronologisch gruppiert, wobei die aktive Nachricht im Lesebereich aufgeklappt ist. Um jede Nachricht einzeln aufzulisten, zu öffnen und zu bearbeiten, schalte **Unterhaltungsansicht** unter Einstellungen → Allgemein aus.
 
 Mit **Pfeil hoch/runter** navigierst du durch Nachrichten, mit **Pos1/Ende** zur ersten oder letzten geladenen Nachricht und mit **Bild auf/Bild ab** seitenweise. **Enter** öffnet die aktuelle Nachricht und fokussiert ihren Inhalt; die **Leertaste** markiert sie für Sammelaktionen oder hebt die Markierung auf. **Tab/Umschalt+Tab** wechseln zwischen Bedienelementen. In der vollständigen Ansicht verschiebt **F6** den Fokus zwischen Liste und Lesebereich. Im minimalistischen Layout heben Pfeiltasten Nachrichten hervor und **Enter** öffnet sie; **Escape** oder **F6** kehrt zur Liste zurück.
 

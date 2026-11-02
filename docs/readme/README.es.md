@@ -161,7 +161,8 @@ usa morado para Trabajo y naranja para Soporte.
 ### 🧵 Conversaciones
 
 Las respuestas se agrupan en orden cronológico, con el mensaje activo desplegado
-en el panel de lectura.
+en el panel de lectura. Para ver, abrir y gestionar cada mensaje por separado,
+desactiva **Vista de conversación** en Ajustes → General.
 
 Usa **Arriba/Abajo** para recorrer los mensajes, **Inicio/Fin** para ir al
 primer o último mensaje cargado y **Re Pág/Av Pág** para avanzar una página.
