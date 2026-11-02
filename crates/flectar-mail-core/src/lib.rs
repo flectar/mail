@@ -340,30 +340,33 @@ fn local_mail_has_no_server() -> CoreError {
     CoreError::Auth("mail kept on this device has no server to sign in to".into())
 }
 
-/// Apple answers a wrong password, a regular Apple password, or an alias
-/// username with a bare AUTHENTICATIONFAILED, which reads as a broken app.
-/// Point those users at the app-specific password and full-address username
-/// they actually need instead of the raw protocol rejection.
+/// Apple answers a wrong password, a regular Apple Account password, or an
+/// alias username with a bare AUTHENTICATIONFAILED, which reads as a broken
+/// app. Lead with the app-specific password and full-address username iCloud
+/// needs, keeping the server's response for reference.
 fn explain_imap_sign_in(args: &AddPasswordAccountArgs, error: CoreError) -> CoreError {
-    let rejected = matches!(error, CoreError::Auth(_));
-    if !rejected || !is_apple_mailbox(&args.email, &args.incoming_host) {
-        return error;
+    match error {
+        CoreError::Auth(detail) if is_apple_mailbox(&args.email, &args.incoming_host) => {
+            CoreError::Auth(format!(
+                "iCloud needs an app-specific password from your Apple Account settings, not your Apple Account password, and your full iCloud email address as the username ({detail})"
+            ))
+        }
+        error => error,
     }
-    CoreError::Auth(format!(
-        "sign-in was rejected ({error}). iCloud needs an app-specific password from your Apple Account settings, not your Apple password, with your full iCloud email address as the username."
-    ))
 }
 
-/// iCloud addresses (@icloud.com/@me.com/@mac.com) or Apple mail hosts.
+/// An iCloud address (@icloud.com, @me.com, @mac.com) or Apple's mail
+/// server, which also hosts custom-domain iCloud addresses.
 fn is_apple_mailbox(email: &str, host: &str) -> bool {
-    let domain = email
-        .rsplit_once('@')
-        .map(|(_, domain)| domain.to_ascii_lowercase());
-    if matches!(domain.as_deref(), Some("icloud.com" | "me.com" | "mac.com")) {
+    let domain = email.rsplit_once('@').map_or("", |(_, domain)| domain);
+    if ["icloud.com", "me.com", "mac.com"]
+        .iter()
+        .any(|apple| domain.eq_ignore_ascii_case(apple))
+    {
         return true;
     }
-    let host = host.to_ascii_lowercase();
-    host.contains("apple") || host.ends_with("mail.me.com")
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "mail.me.com" || host.ends_with(".mail.me.com")
 }
 
 /// Whether an account stored as `stored` takes the address `signed_in` that
@@ -485,9 +488,21 @@ mod apple_sign_in_guidance_tests {
         assert!(is_apple_mailbox("user@mac.com", "imap.example.com"));
         assert!(is_apple_mailbox("User@ICLOUD.COM", "imap.mail.me.com"));
         assert!(is_apple_mailbox("user@example.com", "imap.mail.me.com"));
-        assert!(is_apple_mailbox("user@example.com", "apple-imap.example.com"));
+        assert!(is_apple_mailbox(
+            "user@example.com",
+            "P03-IMAP.MAIL.ME.COM."
+        ));
         assert!(!is_apple_mailbox("user@example.com", "imap.example.com"));
         assert!(!is_apple_mailbox("user@noticloud.com", "imap.example.com"));
+        assert!(!is_apple_mailbox(
+            "user@icloud.com.example",
+            "imap.example.com"
+        ));
+        assert!(!is_apple_mailbox(
+            "user@example.com",
+            "imap.pineapple.example"
+        ));
+        assert!(!is_apple_mailbox("user@example.com", "gmail.me.com"));
     }
 
     #[test]
@@ -497,9 +512,10 @@ mod apple_sign_in_guidance_tests {
             CoreError::Auth("imap login: no response".into()),
         )
         .to_string();
-        assert!(message.contains("app-specific password"), "{message}");
-        assert!(message.contains("full iCloud email address"), "{message}");
-        assert!(message.contains("imap login: no response"), "{message}");
+        assert_eq!(
+            message,
+            "auth failed: iCloud needs an app-specific password from your Apple Account settings, not your Apple Account password, and your full iCloud email address as the username (imap login: no response)"
+        );
     }
 
     #[test]
