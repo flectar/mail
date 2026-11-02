@@ -1,0 +1,7 @@
+{
+  modelVersion: '6.0.2',
+  dependencies: {},
+  execution: { analyze: 'normal', daemon: false, incremental: false, parallel: true, typeCheck: false },
+  logging: { level: 'info' },
+  debugging: { stacktrace: false },
+}
