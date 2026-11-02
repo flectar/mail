@@ -750,6 +750,11 @@ export component MailListPane inherits FocusScope {
                                 }
 
                                 Menu {
+                                    if TabsUi.enabled : MenuItem {
+                                        title: root.selection-count > 1 ? @tr("Open in new tabs") : @tr("Open in new tab");
+                                        activated => { TabsUi.open-checked(); }
+                                    }
+                                    if TabsUi.enabled : MenuSeparator {}
                                     MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
                                     MenuItem { title: @tr("Mark as unread"); activated => { root.bulk_message_action("mark_unread"); } }
                                     MenuItem { title: @tr("Star message"); activated => { root.bulk_message_action("star"); } }

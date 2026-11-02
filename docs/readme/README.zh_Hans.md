@@ -107,6 +107,8 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 **Ctrl/⌘+T** 新建标签页，**Ctrl/⌘+W** 关闭当前标签页，**Ctrl/⌘+Shift+T** 重新打开最近关闭的标签页。**Ctrl+Tab** 与 **Ctrl+Shift+Tab** 在标签页之间循环切换，**Ctrl/⌘+1–8** 跳转到对应标签页，**Ctrl/⌘+9** 跳转到最后一个标签页。
 
+在手机和较窄的窗口中，工具栏末尾的按钮会显示打开的标签页数量，并以卡片形式列出所有标签页。点按卡片即可切换过去，点按 × 或将卡片滑到一侧即可关闭，点按 **+** 可新建标签页。选中邮件后，在选择菜单中选择 **Open in new tabs**（在新标签页中打开）即可在后台打开它们。如果不想使用标签页，可在“设置 → 通用”中关闭 **Tabs**（标签页）。
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">

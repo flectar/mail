@@ -111,6 +111,8 @@ Halte mehrere Bereiche gleichzeitig in Tabs offen, wie in einem Browser. Jeder T
 
 **Ctrl/⌘+T** öffnet einen Tab, **Ctrl/⌘+W** schließt den aktuellen und **Ctrl/⌘+Umschalt+T** öffnet den zuletzt geschlossenen erneut. **Ctrl+Tab** und **Ctrl+Umschalt+Tab** wechseln zwischen Tabs, **Ctrl/⌘+1–8** springen zu einem bestimmten Tab und **Ctrl/⌘+9** zum letzten.
 
+Auf dem Smartphone und in schmalen Fenstern zeigt die Schaltfläche am Ende der Werkzeugleiste, wie viele Tabs offen sind, und legt sie als Karten aus. Tippe auf eine Karte, um zu ihr zu wechseln, tippe auf × oder wische sie zur Seite, um sie zu schließen, und öffne mit **+** einen neuen Tab. Markiere Nachrichten und wähle im Auswahlmenü **In neuen Tabs öffnen**, um sie im Hintergrund zu öffnen. Wenn du lieber ohne Tabs arbeitest, schalte **Tabs** unter Einstellungen → Allgemein aus.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">

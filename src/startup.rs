@@ -770,6 +770,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     crate::app_icon::apply(app, settings.app_icon);
     app.set_show_avatars(settings.show_avatars);
     app.set_group_mail_by_date(settings.group_mail_by_date);
+    app.set_show_tabs(settings.show_tabs);
     app.set_show_account_markers(settings.show_account_badges);
     app.set_workspace_layout(
         match settings.workspace_layout.as_str() {
