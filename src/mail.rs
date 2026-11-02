@@ -1114,6 +1114,7 @@ impl CoreMailSource {
     /// checked here: a location can be unavailable later, such as an unmounted
     /// network share, and downloads fall back to the platform default instead
     /// of failing.
+    #[cfg(desktop)]
     pub async fn set_download_directory(&self, directory: &str) -> Result<(), String> {
         let mut settings = self.load_settings().await?;
         settings.download_directory = directory.trim().to_owned();
