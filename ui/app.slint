@@ -1099,7 +1099,7 @@ export component AppWindow inherits Window {
     in-out property <string> google_client_id: "";
     in-out property <string> google_client_secret: "";
     in-out property <string> ms_client_id: "";
-    // Where desktop save dialogs open. Empty follows the platform default.
+    // The download folder as shown: its host path inside Flatpak. Empty is the default.
     in-out property <string> download_directory: "";
     // Only desktop hosts pick a filesystem directory; mobile hosts export
     // through their own document provider and hide the setting.

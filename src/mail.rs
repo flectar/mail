@@ -2125,7 +2125,9 @@ fn append_mailboxes(
             role_folder_ids.contains(&folder.id) || (!gmail && !is_standard_folder(folder))
         })
         .collect::<Vec<_>>();
-    tree_folders.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
+    // Lowercase once per folder: `sort_by_key` would re-allocate the key on
+    // every comparison (O(n log n) allocations for n folders).
+    tree_folders.sort_by_cached_key(|folder| (folder.display_name.to_lowercase(), folder.id));
 
     // Fresh discovery provides explicit local parent ids. Path inference
     // preserves an upgraded database's existing hierarchy until its first
@@ -2165,15 +2167,13 @@ fn append_mailboxes(
             )
         })
         .collect::<std::collections::HashMap<_, _>>();
+    // Children inherit `tree_folders`' name order, so they need no sort.
     let mut children = std::collections::HashMap::<i64, Vec<&FolderInfo>>::new();
     for folder in &tree_folders {
         let parent_id = parent_ids.get(&folder.id).copied().unwrap_or(-1);
         if parent_id >= 0 {
             children.entry(parent_id).or_default().push(folder);
         }
-    }
-    for descendants in children.values_mut() {
-        descendants.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
     }
 
     let mut visited = std::collections::HashSet::new();
@@ -3261,6 +3261,39 @@ mod tests {
     fn recipient_addresses_reject_embedded_control_characters() {
         assert!(super::parse_recipients("ok@example.com").is_ok());
         assert!(super::parse_recipients("a@example.com\rb@example.com").is_err());
+    }
+
+    #[test]
+    fn mailbox_entries_sort_folders_and_subfolders_by_name() {
+        let folder = |id: i64, parent_id: Option<i64>, display_name: &str, path: &str| FolderInfo {
+            id,
+            account_id: 1,
+            parent_id,
+            display_name: display_name.into(),
+            is_jmap: false,
+            path: path.into(),
+            delimiter: Some("/".into()),
+            role: None,
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        };
+        let folders = vec![
+            folder(30, None, "Zeta", "Zeta"),
+            folder(23, Some(20), "beta", "Projects/beta"),
+            folder(20, None, "Projects", "Projects"),
+            folder(24, Some(20), "gamma", "Projects/gamma"),
+            folder(22, Some(20), "alpha", "Projects/alpha"),
+            folder(21, Some(20), "Alpha", "Projects/Alpha"),
+        ];
+
+        let order = mailbox_entries(&[test_account()], &folders, None)
+            .into_iter()
+            .filter(|entry| entry.folder_id >= 20)
+            .map(|entry| entry.folder_id)
+            .collect::<Vec<_>>();
+        assert_eq!(order, [20, 21, 22, 23, 24, 30]);
     }
 
     #[test]
