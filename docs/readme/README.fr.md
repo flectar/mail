@@ -329,6 +329,8 @@ Le RPM cible Fedora 43 et 44 sur x86_64. Les compilations de publication prennen
 
 L’ancien RPM `0.1.0-alpha.7` a été compilé sur Fedora 44 et ne peut pas être installé sur Fedora 43, car il exige glibc 2.43. Son paquet Flatpak constitue une alternative en attendant un RPM construit avec les contrôles de compatibilité ci-dessus.
 
+Sur Linux, les mots de passe, jetons OAuth et clés d’API sont conservés dans le trousseau du système via freedesktop Secret Service, jamais dans la base de données de Flectar Mail. Tout fournisseur Secret Service convient, sous n’importe quel bureau ou gestionnaire de fenêtres, sway compris : GNOME Keyring, KWallet ou KeePassXC avec son intégration Secret Service activée. Le Flatpak utilise le même trousseau que le reste de votre session. Si la session n’a pas encore de trousseau par défaut, l’ajout du premier compte demande au fournisseur d’en créer un, et celui-ci vous invite à choisir son mot de passe. Sans fournisseur, l’ajout d’un compte s’arrête sur une erreur qui indique ce qui manque, car Flectar Mail ne stocke jamais de secrets dans un endroit moins sûr.
+
 Chaque publication GitHub inclut `SHA256SUMS` et des attestations signées de provenance de compilation. Avec GitHub CLI installé, vérifiez un téléchargement avec `gh attestation verify <download> --repo flectar/mail`.
 
 Depuis alpha 8, les versions alpha, bêta, candidates et stables d’Android utilisent un seul paquet (`com.flectar.mail`) et une identité de signature persistante. Les versions suivantes peuvent mettre à jour l’application en conservant les données locales. Alpha 6 et alpha 7 utilisaient des clés différentes et ne peuvent pas être mises à jour vers cette identité de signature.
@@ -345,7 +347,7 @@ Vous pouvez aussi compiler Flectar Mail à partir des sources avec la [chaîne d
 cargo run --bin flectar-mail
 ```
 
-Sur Linux, OAuth utilise le navigateur système via le portail du bureau et stocke les identifiants de renouvellement avec freedesktop Secret Service. Une session normale nécessite donc un composant `xdg-desktop-portal` et un fournisseur Secret Service tel que GNOME Keyring. Si le stockage sécurisé est indisponible, les compilations de publication s’arrêtent avant d’ouvrir la page OAuth, afin qu’une autorisation ne soit jamais terminée sans emplacement sûr où la conserver.
+Sur Linux, OAuth ouvre aussi le navigateur système via le portail du bureau ; la session nécessite donc un composant `xdg-desktop-portal` en plus du trousseau décrit plus haut. Si le stockage sécurisé est indisponible, les compilations de publication s’arrêtent avant d’ouvrir la page OAuth, afin qu’une autorisation ne soit jamais terminée sans emplacement sûr où la conserver.
 
 Les environnements de développement Podman et Docker n’ont généralement accès ni au D-Bus de la session hôte ni au réseau de boucle locale du navigateur hôte. Les compilations de débogage prennent en charge cette configuration avec un fichier d’identifiants de développement clairement identifié, accessible uniquement à son propriétaire, et un panneau dépliable pour coller l’URL finale de retour en boucle locale. Le stockage par fichier est exclu des compilations de publication.
 
