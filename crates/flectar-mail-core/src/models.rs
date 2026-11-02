@@ -1720,6 +1720,10 @@ pub struct Settings {
     /// Group the mail list into collapsible local-date sections.
     #[serde(default = "default_true")]
     pub group_mail_by_date: bool,
+    /// Show browser-style tabs: the strip in the desktop top bar, and the tab
+    /// switcher in compact layouts. Saved tabs are kept while they are hidden.
+    #[serde(default = "default_true")]
+    pub show_tabs: bool,
     /// Workspace presentation: "default" keeps lists and details side by
     /// side, while "minimal" navigates between those shared surfaces.
     /// `mailLayout` was the short-lived original key before Contacts shared
@@ -2038,6 +2042,7 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             group_mail_by_date: true,
+            show_tabs: true,
             workspace_layout: default_workspace_layout(),
             workspace_list_pane_width: default_workspace_list_pane_width(),
             window_frame: default_window_frame(),
@@ -2411,6 +2416,7 @@ mod tests {
         assert_eq!(s.message_appearance, MessageAppearance::System);
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
+        assert!(s.show_tabs);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
         assert_eq!(s.time_format, TimeFormat::Automatic);
@@ -2463,6 +2469,7 @@ mod tests {
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
         assert_eq!(serialized["groupMailByDate"], true);
+        assert_eq!(serialized["showTabs"], true);
         assert_eq!(
             serialized["workspaceListPaneWidth"],
             MIN_WORKSPACE_LIST_PANE_WIDTH

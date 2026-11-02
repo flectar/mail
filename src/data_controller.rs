@@ -414,6 +414,12 @@ pub(super) fn restore_account_backup(
             {
                 settings.show_avatars = enabled;
             }
+            if let Some(enabled) = preferences
+                .get("showTabs")
+                .and_then(|value| value.as_bool())
+            {
+                settings.show_tabs = enabled;
+            }
             if let Some(frame) = preferences
                 .get("windowFrame")
                 .and_then(|value| value.as_str())
@@ -631,6 +637,7 @@ pub(super) fn restore_account_backup(
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
+    app.set_show_tabs(settings.show_tabs);
     app.set_show_account_markers(settings.show_account_badges);
     crate::window_chrome::apply_preference(
         app,
@@ -1300,6 +1307,7 @@ pub(super) fn register_data_management_callbacks(
                     "theme": settings.theme,
                     "messageAppearance": settings.message_appearance,
                     "showAvatars": settings.show_avatars,
+                    "showTabs": settings.show_tabs,
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
@@ -1617,6 +1625,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
+                    app.set_show_tabs(true);
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
                     app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);

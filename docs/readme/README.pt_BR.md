@@ -111,6 +111,8 @@ Mantenha vários espaços abertos ao mesmo tempo com abas como as de um navegado
 
 **Ctrl/⌘+T** abre uma nova aba, **Ctrl/⌘+W** fecha a atual e **Ctrl/⌘+Shift+T** reabre a última aba fechada. **Ctrl+Tab** e **Ctrl+Shift+Tab** alternam entre abas, **Ctrl/⌘+1–8** vão para uma aba específica e **Ctrl/⌘+9** vai para a última.
 
+No celular e em janelas estreitas, o botão no fim da barra de ferramentas mostra quantas abas estão abertas e as exibe como cartões. Toque em um cartão para mudar para ele, toque em × ou deslize-o para o lado para fechá-lo e use **+** para abrir uma nova aba. Selecione mensagens e escolha **Abrir em novas abas** no menu da seleção para abri-las em segundo plano. Se preferir trabalhar sem abas, desative **Abas** em Configurações → Geral.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">

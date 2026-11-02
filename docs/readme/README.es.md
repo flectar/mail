@@ -195,6 +195,14 @@ donde lo dejaste.
 **Ctrl+Mayús+Tab** recorren las pestañas, **Ctrl/⌘+1–8** van a una pestaña
 concreta y **Ctrl/⌘+9** va a la última.
 
+En el móvil y en ventanas estrechas, el botón al final de la barra de
+herramientas muestra cuántas pestañas hay abiertas y las presenta como
+tarjetas. Toca una tarjeta para cambiar a ella, toca × o deslízala a un lado
+para cerrarla y usa **+** para abrir una nueva. Selecciona mensajes y elige
+**Abrir en pestañas nuevas** en el menú de la selección para abrirlos en
+segundo plano. Si prefieres trabajar sin pestañas, desactiva **Pestañas** en
+Ajustes → General.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">

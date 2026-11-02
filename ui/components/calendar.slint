@@ -12,6 +12,8 @@ import { CalendarAgenda, CalendarAgendaFilter } from "calendar-agenda.slint";
 import { CalendarAgendaRow, CalendarAgendaFilterRow } from "../models.slint";
 import { ScrollFade } from "scroll-fade.slint";
 import { WindowControlsClearance } from "../window-chrome.slint";
+import { TabSwitcherButton } from "tab-overview.slint";
+import { TabsUi } from "tabs-ui.slint";
 
 export component CalendarEvent inherits Rectangle {
     in property <string> title;
@@ -745,12 +747,15 @@ export component FunctionalCalendarView inherits Rectangle {
             y: 0px;
             width: parent.width;
             title: root.month-title;
-            // Line the month up with the view switcher below.
+            // Line the month up with the view switcher below. Narrow phones
+            // also fit the tab switcher by setting the month a size smaller.
             leading-inset: 16px;
+            title-font-size: TabsUi.enabled && root.width < 390px ? TypeScale.heading : TypeScale.title-small;
             background-color: root.surface-color;
             IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-left.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Previous month"); accessible-id: "calendar-previous-month"; clicked => { root.navigate(root.view-mode == "agenda" ? "period" : "month", -1); } }
             IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/outline/chevron-right.svg"); icon-color: root.secondary-color; idle-background: root.control-color; hover-background: root.control-hover-color; tooltip-text: @tr("Next month"); accessible-id: "calendar-next-month"; clicked => { root.navigate(root.view-mode == "agenda" ? "period" : "month", 1); } }
             IconButton { width: LayoutMetrics.touch-target; height: LayoutMetrics.touch-target; icon: @image-url("../icons/lucide/filled/calendar-add.svg"); primary: true; tooltip-text: @tr("New event"); accessible-id: "calendar-new-event"; clicked => { root.new-event(); } }
+            if TabsUi.enabled && TabsUi.compact : TabSwitcherButton {}
         }
 
         HorizontalBox {
