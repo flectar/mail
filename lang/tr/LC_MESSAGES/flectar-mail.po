@@ -2643,35 +2643,35 @@ msgstr "Yeni ileti"
 msgid "Account"
 msgstr "Hesap"
 
-#: ui/components/composer-fields.slint:334
+#: ui/components/composer-fields.slint:332
 msgid "To"
 msgstr "Kime"
 
-#: ui/components/composer-fields.slint:335
+#: ui/components/composer-fields.slint:333
 msgid "name@example.com · separate with commas"
 msgstr "ad@ornek.com · virgülle ayırın"
 
-#: ui/components/composer-fields.slint:369
+#: ui/components/composer-fields.slint:359
 msgid "Cc"
 msgstr "Cc"
 
-#: ui/components/composer-fields.slint:379
-msgid "Bcc"
-msgstr "Bcc"
-
-#: ui/components/composer-fields.slint:394
+#: ui/components/composer-fields.slint:360
 msgid "Carbon copy"
 msgstr "Karbon kopya"
 
-#: ui/components/composer-fields.slint:408
+#: ui/components/composer-fields.slint:370
+msgid "Bcc"
+msgstr "Bcc"
+
+#: ui/components/composer-fields.slint:371
 msgid "Blind carbon copy"
 msgstr "Gizli karbon kopya"
 
-#: ui/components/composer-fields.slint:466
+#: ui/components/composer-fields.slint:459
 msgid "Subject"
 msgstr "Konu"
 
-#: ui/components/composer-fields.slint:478
+#: ui/components/composer-fields.slint:471
 msgid "What is this email about?"
 msgstr "Bu e-posta ne hakkında?"
 

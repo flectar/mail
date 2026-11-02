@@ -2622,35 +2622,35 @@ msgstr "新建邮件"
 msgid "Account"
 msgstr "账户"
 
-#: ui/components/composer-fields.slint:334
+#: ui/components/composer-fields.slint:332
 msgid "To"
 msgstr "收件人"
 
-#: ui/components/composer-fields.slint:335
+#: ui/components/composer-fields.slint:333
 msgid "name@example.com · separate with commas"
 msgstr "name@example.com · 用逗号分隔"
 
-#: ui/components/composer-fields.slint:369
+#: ui/components/composer-fields.slint:359
 msgid "Cc"
 msgstr "抄送"
 
-#: ui/components/composer-fields.slint:379
-msgid "Bcc"
-msgstr "密送"
-
-#: ui/components/composer-fields.slint:394
+#: ui/components/composer-fields.slint:360
 msgid "Carbon copy"
 msgstr "抄送"
 
-#: ui/components/composer-fields.slint:408
+#: ui/components/composer-fields.slint:370
+msgid "Bcc"
+msgstr "密送"
+
+#: ui/components/composer-fields.slint:371
 msgid "Blind carbon copy"
 msgstr "密送"
 
-#: ui/components/composer-fields.slint:466
+#: ui/components/composer-fields.slint:459
 msgid "Subject"
 msgstr "主题"
 
-#: ui/components/composer-fields.slint:478
+#: ui/components/composer-fields.slint:471
 msgid "What is this email about?"
 msgstr "这封邮件是关于什么的？"
 

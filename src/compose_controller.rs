@@ -497,7 +497,7 @@ pub(super) fn contact_initials(contact: &flectar_mail_core::models::Address) -> 
 }
 
 pub(super) fn compose_recipient_query(recipients: &str) -> String {
-    let token_start = recipients.rfind([',', ';']).map_or(0, |index| index + 1);
+    let token_start = recipients.rfind([',', ';', '\n']).map_or(0, |index| index + 1);
     recipients[token_start..].trim().to_owned()
 }
 
@@ -511,7 +511,7 @@ pub(super) fn complete_compose_recipient(
     {
         return recipients.to_owned();
     }
-    let token_start = recipients.rfind([',', ';']).map_or(0, |index| index + 1);
+    let token_start = recipients.rfind([',', ';', '\n']).map_or(0, |index| index + 1);
     let prefix = recipients[..token_start].trim_end();
     let clean_name = contact
         .name
@@ -528,8 +528,12 @@ pub(super) fn complete_compose_recipient(
         };
     if prefix.is_empty() {
         format!("{recipient}, ")
-    } else {
+    } else if prefix.ends_with([',', ';']) {
         format!("{prefix} {recipient}, ")
+    } else {
+        // A newline-separated prefix normalizes to a comma separator so the
+        // completed address never glues onto the previous line.
+        format!("{prefix}, {recipient}, ")
     }
 }
 
@@ -764,6 +768,25 @@ mod tests {
                 .unwrap()
                 .subject,
             "FW: Launch plan"
+        );
+    }
+
+    #[test]
+    fn recipient_query_uses_text_after_last_separator_including_newlines() {
+        assert_eq!(compose_recipient_query("ada@example.com, gr"), "gr");
+        assert_eq!(compose_recipient_query("ada@example.com; gr"), "gr");
+        assert_eq!(compose_recipient_query("ada@example.com\ngr"), "gr");
+    }
+
+    #[test]
+    fn complete_recipient_keeps_newline_separated_prefix_usable() {
+        let completed = complete_compose_recipient(
+            "ada@example.com\ngr",
+            &address("Grace", "grace@example.com"),
+        );
+        assert_eq!(
+            completed,
+            "ada@example.com, Grace <grace@example.com>, "
         );
     }
 }
