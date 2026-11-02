@@ -1785,6 +1785,7 @@ mod tests {
         MailMessage {
             id,
             thread_id: Some(i64::from(id)),
+            message_id: None,
             account_id: 1,
             account: String::new(),
             folder: String::new(),

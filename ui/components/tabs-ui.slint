@@ -61,6 +61,9 @@ export global TabsUi {
     callback reset();
     // An account was removed: tabs forget its mailboxes and conversations.
     callback account-removed(string);
+    // Mail is grouped differently now: tabs forget the conversations or
+    // messages they had open, whose ids belong to the old grouping.
+    callback regroup();
     // Save every tab now, before the application exits.
     callback flush();
 }

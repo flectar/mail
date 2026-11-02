@@ -1,5 +1,8 @@
 use crate::error::Result;
-use crate::models::{SearchCursor, SearchPage, ThreadSummary, roles};
+use crate::models::{
+    MessageCursor, MessageSearchCursor, MessageSearchPage, SearchCursor, SearchPage, ThreadSummary,
+    roles,
+};
 use crate::search::ParsedQuery;
 use rusqlite::{Connection, params};
 use std::collections::HashMap;
@@ -631,6 +634,106 @@ fn chronological_page_for_query(
     })
 }
 
+/// One page of chronological matches as single messages, for mail lists that
+/// do not group conversations. Matching is the same as `chronological_page`,
+/// including falling back to any-term matching when every term matched none.
+pub fn chronological_message_page(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cursor: Option<MessageSearchCursor>,
+    limit: i64,
+) -> Result<MessageSearchPage> {
+    if limit <= 0 {
+        return Ok(MessageSearchPage {
+            messages: Vec::new(),
+            next_cursor: None,
+        });
+    }
+    let relaxed = cursor.is_some_and(|cursor| cursor.relaxed);
+    let mut query = q.clone();
+    if relaxed {
+        query.fts = query.fts_or.clone();
+    }
+    let position = cursor.map(|cursor| cursor.position);
+    let mut page = chronological_message_page_for_query(conn, &query, position, limit, relaxed)?;
+    if page.messages.is_empty() && cursor.is_none() && !q.fts.is_empty() && q.fts_or != q.fts {
+        query.fts = query.fts_or.clone();
+        page = chronological_message_page_for_query(conn, &query, None, limit, true)?;
+    }
+    Ok(page)
+}
+
+/// Messages page with a keyset cursor in SQL: unlike conversations, no match
+/// can hide behind an earlier one, so nothing has to be scanned twice.
+fn chronological_message_page_for_query(
+    conn: &Connection,
+    q: &ParsedQuery,
+    cursor: Option<MessageCursor>,
+    limit: i64,
+    relaxed: bool,
+) -> Result<MessageSearchPage> {
+    let mut where_clauses = vec!["m.thread_id IS NOT NULL".to_owned()];
+    let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let fts_join = if q.fts.is_empty() {
+        ""
+    } else {
+        bind.push(Box::new(q.fts.clone()));
+        where_clauses.push(format!("messages_fts MATCH ?{}", bind.len()));
+        "JOIN messages_fts ON messages_fts.rowid = m.id"
+    };
+    append_operator_clauses(q, &mut where_clauses, &mut bind);
+    if where_clauses.len() == 1 {
+        return Ok(MessageSearchPage {
+            messages: Vec::new(),
+            next_cursor: None,
+        });
+    }
+    append_account_clauses(q, &mut where_clauses, &mut bind);
+    if let Some(cursor) = cursor {
+        bind.push(Box::new(cursor.date));
+        let date_parameter = bind.len();
+        bind.push(Box::new(cursor.message_id));
+        where_clauses.push(format!(
+            "(m.date, m.id) < (?{date_parameter}, ?{})",
+            bind.len()
+        ));
+    }
+    let sql = format!(
+        "SELECT m.id, m.date FROM messages m {fts_join}
+         WHERE {} ORDER BY m.date DESC, m.id DESC LIMIT {}",
+        where_clauses.join(" AND "),
+        limit + 1,
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+        bind.iter().map(|value| value.as_ref()).collect();
+    let mut matches = stmt
+        .query_map(params_ref.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let page_size = usize::try_from(limit).unwrap_or(usize::MAX);
+    let next_cursor = if matches.len() > page_size {
+        matches.truncate(page_size);
+        matches
+            .last()
+            .map(|(message_id, date)| MessageSearchCursor {
+                position: MessageCursor {
+                    date: *date,
+                    message_id: *message_id,
+                },
+                relaxed,
+            })
+    } else {
+        None
+    };
+    let message_ids = matches.into_iter().map(|(id, _)| id).collect::<Vec<_>>();
+    Ok(MessageSearchPage {
+        messages: super::threads::get_message_summaries(conn, &message_ids)?,
+        next_cursor,
+    })
+}
+
 /// Hybrid search: fuse the lexical (bm25) and semantic (vector KNN) branches
 /// with RRF, preserving operator filters, and hydrate to thread summaries.
 /// `vec_hits` are (message_id, score) from the in-memory index, score-sorted;
@@ -897,5 +1000,45 @@ mod tests {
         };
         assert_eq!(matches("obsoleteuniqueterm"), 0);
         assert_eq!(matches("replacementuniqueterm"), 1);
+    }
+
+    #[test]
+    fn message_search_lists_every_matching_message_and_pages() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (thread_id, first) = testutil::seed_message(&c, "a@b.dev", "rosterplan draft", false);
+        let (own_thread, reply) = testutil::seed_message(&c, "a@b.dev", "re: rosterplan", false);
+        c.execute(
+            "UPDATE messages SET thread_id = ?1, date = 2000, uid = 10000 + id WHERE id = ?2",
+            params![thread_id, reply],
+        )
+        .unwrap();
+        c.execute("DELETE FROM threads WHERE id = ?1", [own_thread])
+            .unwrap();
+        let (_, unrelated) = testutil::seed_message(&c, "a@b.dev", "lunch", false);
+        for id in [first, reply, unrelated] {
+            index_message(&c, id).unwrap();
+        }
+        let query = crate::search::parse("rosterplan");
+
+        // The conversation matches once; its messages match one by one.
+        assert_eq!(
+            chronological_page(&c, &query, None, 10)
+                .unwrap()
+                .threads
+                .len(),
+            1
+        );
+        let page = chronological_message_page(&c, &query, None, 1).unwrap();
+        assert_eq!(
+            page.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [reply]
+        );
+        let rest = chronological_message_page(&c, &query, page.next_cursor, 1).unwrap();
+        assert_eq!(
+            rest.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [first]
+        );
+        assert!(rest.next_cursor.is_none());
     }
 }

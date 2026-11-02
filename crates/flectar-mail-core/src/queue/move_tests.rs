@@ -1,6 +1,8 @@
 use super::*;
 use crate::accounts::credentials::DevelopmentFileCredentialStore;
-use crate::models::{ActionKind, ConnectionSecurity, MailConnectionSettings, PerformActionArgs};
+use crate::models::{
+    ActionKind, ActionTarget, ConnectionSecurity, MailConnectionSettings, PerformActionArgs,
+};
 use crate::{Core, config::Paths, db::testutil};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -215,7 +217,7 @@ async fn undo_and_star_find_a_moved_message_before_its_mailbox_syncs() {
     let perform = |kind| {
         core.perform_action(PerformActionArgs {
             kind,
-            thread_ids: vec![thread_id],
+            target: ActionTarget::Threads(vec![thread_id]),
             params: None,
         })
     };

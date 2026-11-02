@@ -481,6 +481,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> show_avatars: true;
     in-out property <bool> show_tabs: true;
     in-out property <bool> group_mail_by_date: true;
+    in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <string> language_mode: "system";
@@ -582,6 +583,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_avatar_visibility(bool);
     callback save_show_tabs(bool);
     callback save_group_mail_by_date(bool);
+    callback save_conversation_view(bool);
     callback choose_download_directory();
     callback clear_download_directory();
     // Save a profile's name and color, and make the checked accounts of
@@ -710,7 +712,7 @@ export component SettingsDialog inherits Rectangle {
     pure function settings-section-visible(section: string) -> bool {
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
-            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs")
+            ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
             : section == "Accounts"
             ? @tr("accounts profiles personal work colors providers gmail outlook imap pop3 jmap caldav carddav mail history server oauth security signatures")
             : section == "Contacts"
@@ -1231,7 +1233,7 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             Rectangle {
-                                height: max(root.compact ? 324px : 262px, self.preferred-height);
+                                height: max(root.compact ? 413px : 321px, self.preferred-height);
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -1260,6 +1262,19 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.group_mail_by_date = checked;
                                             root.save_group_mail_by_date(checked);
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Conversation view");
+                                        description: @tr("Group replies with the messages they answer. Turn this off to list, open and act on each message on its own.");
+                                        checked: root.conversation_view;
+                                        title-color: root.body-text;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.conversation_view = checked;
+                                            root.save_conversation_view(checked);
                                         }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }

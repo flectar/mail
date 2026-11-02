@@ -299,15 +299,32 @@ const AUTO_BUCKET: &str = "(SELECT m.is_automated FROM messages m
         WHERE m.thread_id = t.id AND m.is_draft = 0 AND m.is_outgoing = 0
         ORDER BY m.date DESC, m.id DESC LIMIT 1) = 1";
 
+/// The WHERE clause for one mail-list scope. Conversations match when any of
+/// their messages does; messages match on their own folders, flags and labels.
+/// Snooze and tab routing belong to the conversation in both groupings, so a
+/// message list joins each message's thread as `t`.
 fn build_filter(
     args: &ListArgs,
+    grouping: MailGrouping,
     include_cursor: bool,
 ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
     let mut where_clauses: Vec<String> = Vec::new();
     let mut bind: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+    let messages = grouping == MailGrouping::Messages;
 
     let role_exists = |role: &str, bind: &mut Vec<Box<dyn rusqlite::types::ToSql>>| {
         bind.push(Box::new(role.to_string()));
+        if messages {
+            return format!(
+                "(EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{0})
+                  OR (a.provider = 'gmail' AND EXISTS (
+                        SELECT 1 FROM message_folders mf
+                        JOIN folders f ON f.id = mf.folder_id
+                        WHERE mf.message_id = m.id AND f.role = ?{0}
+                  )))",
+                bind.len(),
+            );
+        }
         format!(
             "(EXISTS (SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
                       WHERE m.thread_id = t.id AND f.role = ?{0})
@@ -328,11 +345,16 @@ fn build_filter(
             where_clauses.push(c);
             where_clauses.push("s.thread_id IS NULL".into());
         }
+        View::Starred if messages => where_clauses.push("m.is_starred = 1".into()),
         View::Starred => where_clauses.push("t.starred_count > 0".into()),
         View::Snoozed => where_clauses.push("s.thread_id IS NOT NULL".into()),
         View::Sent => {
             let c = role_exists(roles::SENT, &mut bind);
             where_clauses.push(c);
+        }
+        View::Drafts if messages => {
+            let c = role_exists(roles::DRAFTS, &mut bind);
+            where_clauses.push(format!("m.is_draft = 1 AND {c}"));
         }
         View::Drafts => {
             bind.push(Box::new(roles::DRAFTS.to_string()));
@@ -366,13 +388,18 @@ fn build_filter(
         View::All => {}
     }
 
+    let account_column = if messages {
+        "m.account_id"
+    } else {
+        "t.account_id"
+    };
     if let Some(acc) = args.account_id {
         bind.push(Box::new(acc));
-        where_clauses.push(format!("t.account_id = ?{}", bind.len()));
+        where_clauses.push(format!("{account_column} = ?{}", bind.len()));
     }
     if let Some(account_ids) = &args.account_ids {
         where_clauses.push(super::search::account_set_clause(
-            "t.account_id",
+            account_column,
             account_ids,
             &mut bind,
         ));
@@ -394,6 +421,14 @@ fn build_filter(
             bind.push(Box::new(format!("label:{id}")));
             where_clauses.push(format!("t.routed_tab = ?{}", bind.len()));
         }
+        Some(TabFilter::ManualLabel(id)) if messages => {
+            bind.push(Box::new(*id));
+            where_clauses.push(format!(
+                "EXISTS (SELECT 1 FROM message_labels ml
+                         WHERE ml.message_id = m.id AND ml.label_id = ?{})",
+                bind.len()
+            ));
+        }
         Some(TabFilter::ManualLabel(id)) => {
             bind.push(Box::new(*id));
             where_clauses.push(format!(
@@ -404,7 +439,19 @@ fn build_filter(
         }
         None => {}
     }
-    if let Some(folder_id) = args.folder_id {
+    if let Some(folder_id) = args.folder_id
+        && messages
+    {
+        bind.push(Box::new(folder_id));
+        where_clauses.push(format!(
+            "(m.folder_id = ?{0}
+              OR (a.provider = 'gmail' AND EXISTS (
+                    SELECT 1 FROM message_folders mf
+                    WHERE mf.message_id = m.id AND mf.folder_id = ?{0}
+              )))",
+            bind.len()
+        ));
+    } else if let Some(folder_id) = args.folder_id {
         bind.push(Box::new(folder_id));
         where_clauses.push(format!(
             "EXISTS (SELECT 1 FROM messages m
@@ -420,7 +467,10 @@ fn build_filter(
             bind.len()
         ));
     }
-    if include_cursor && let Some(cur) = args.cursor {
+    if include_cursor
+        && !messages
+        && let Some(cur) = args.cursor
+    {
         bind.push(Box::new(cur.last_message_at));
         let timestamp_parameter = bind.len();
         bind.push(Box::new(cur.thread_id));
@@ -463,7 +513,7 @@ pub fn list(conn: &Connection, args: &ListArgs) -> Result<ThreadPage> {
 }
 
 fn list_sql(args: &ListArgs) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
-    let (where_sql, bind) = build_filter(args, true);
+    let (where_sql, bind) = build_filter(args, MailGrouping::Conversations, true);
     (
         format!(
             "{SUMMARY_SELECT} {where_sql}
@@ -488,7 +538,7 @@ pub fn list_query_plan(conn: &Connection, args: &ListArgs) -> Result<Vec<String>
 /// thread summaries or walking cursor pages. Keeping this on the same filter
 /// builder as `list` prevents sidebar totals from drifting from list contents.
 pub fn count(conn: &Connection, args: &ListArgs) -> Result<usize> {
-    let (where_sql, bind) = build_filter(args, false);
+    let (where_sql, bind) = build_filter(args, MailGrouping::Conversations, false);
     let sql = format!(
         "SELECT COUNT(*)
          FROM threads t
@@ -500,6 +550,186 @@ pub fn count(conn: &Connection, args: &ListArgs) -> Result<usize> {
         bind.iter().map(|value| value.as_ref()).collect();
     let count = conn.query_row(&sql, params_ref.as_slice(), |row| row.get::<_, i64>(0))?;
     Ok(count.max(0) as usize)
+}
+
+fn message_summary_from_row(row: &Row) -> rusqlite::Result<MessageSummary> {
+    Ok(MessageSummary {
+        id: row.get("id")?,
+        thread_id: row.get("thread_id")?,
+        account_id: row.get("account_id")?,
+        account_email: row.get("account_email")?,
+        account_addresses: parse_json_column(&row.get::<_, String>("account_addresses")?, 4)?,
+        subject: row.get("subject")?,
+        snippet: row.get("snippet")?,
+        from: Address {
+            name: row.get("from_name")?,
+            email: row
+                .get::<_, Option<String>>("from_addr")?
+                .unwrap_or_default(),
+        },
+        to: parse_addrs(&row.get::<_, String>("to_json")?, 9)?,
+        date: row.get("date")?,
+        is_read: row.get::<_, i64>("is_read")? != 0,
+        is_starred: row.get::<_, i64>("is_starred")? != 0,
+        is_draft: row.get::<_, i64>("is_draft")? != 0,
+        is_outgoing: row.get::<_, i64>("is_outgoing")? != 0,
+        has_attachments: row.get::<_, i64>("has_attachments")? != 0,
+        has_replied: row.get::<_, i64>("has_replied")? != 0,
+        snoozed_until: row.get("snoozed_until")?,
+        labels: parse_id_list(
+            &row.get::<_, Option<String>>("label_ids")?
+                .unwrap_or_default(),
+        ),
+        verification_code: row.get("verification_code")?,
+        first_attachment: row
+            .get::<_, Option<String>>("first_attachment")?
+            .map(|json| {
+                parse_json_column::<(i64, Option<String>, Option<String>, Option<i64>)>(&json, 20)
+            })
+            .transpose()?
+            .map(|(id, filename, mime_type, size)| AttachmentMeta {
+                id,
+                filename,
+                mime_type,
+                size,
+                is_inline: false,
+            }),
+        attachment_total: row.get("attachment_total")?,
+    })
+}
+
+/// A message as a list row, with its conversation joined as `t` for the
+/// conversation-level filters `build_filter` shares between groupings.
+const MESSAGE_SUMMARY_SELECT: &str = "
+    SELECT m.id, m.thread_id, m.account_id, a.email AS account_email,
+           COALESCE((SELECT json_group_array(si.email)
+                     FROM sender_identities si
+                     WHERE si.account_id = m.account_id
+                       AND (si.is_primary = 1 OR si.verification_status = 'accepted')), '[]')
+             AS account_addresses,
+           COALESCE(m.local_subject_prefix, '') || m.subject AS subject,
+           m.snippet, m.from_name, m.from_addr, m.to_json, m.date,
+           m.is_read, m.is_starred, m.is_draft, m.is_outgoing, m.has_attachments,
+           (m.message_id IS NOT NULL AND EXISTS (
+               SELECT 1 FROM message_refs mr
+               JOIN messages reply ON reply.id = mr.message_id
+               WHERE mr.ref_message_id = m.message_id
+                 AND reply.account_id = m.account_id
+                 AND reply.is_outgoing = 1
+                 AND reply.is_draft = 0
+           )) AS has_replied,
+           s.wake_at AS snoozed_until,
+           (SELECT group_concat(ml.label_id) FROM message_labels ml
+              WHERE ml.message_id = m.id) AS label_ids,
+           m.verification_code,
+           (SELECT json_array(f.id, f.filename, f.mime_type, f.size)
+              FROM attachments f
+              WHERE f.message_id = m.id AND f.is_inline = 0
+              ORDER BY f.id LIMIT 1) AS first_attachment,
+           (SELECT COUNT(*) FROM attachments f
+              WHERE f.message_id = m.id AND f.is_inline = 0) AS attachment_total
+    FROM messages m
+    JOIN threads t ON t.id = m.thread_id
+    JOIN accounts a ON a.id = m.account_id
+    LEFT JOIN snoozes s ON s.thread_id = m.thread_id";
+
+/// One page of the message timeline for the scope in `args`, newest first.
+/// `args.cursor` is ignored; messages page by `cursor`.
+pub fn list_messages(
+    conn: &Connection,
+    args: &ListArgs,
+    cursor: Option<MessageCursor>,
+) -> Result<MessagePage> {
+    let (sql, bind) = list_messages_sql(args, cursor);
+    let mut stmt = conn.prepare(&sql)?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
+    let mut messages = stmt
+        .query_map(params_ref.as_slice(), message_summary_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let next_cursor = if messages.len() as i64 > args.limit {
+        messages.truncate(args.limit as usize);
+        messages.last().map(|message| MessageCursor {
+            date: message.date,
+            message_id: message.id,
+        })
+    } else {
+        None
+    };
+    Ok(MessagePage {
+        messages,
+        next_cursor,
+    })
+}
+
+fn list_messages_sql(
+    args: &ListArgs,
+    cursor: Option<MessageCursor>,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let (mut where_sql, mut bind) = build_filter(args, MailGrouping::Messages, false);
+    if let Some(cursor) = cursor {
+        bind.push(Box::new(cursor.date));
+        let date_parameter = bind.len();
+        bind.push(Box::new(cursor.message_id));
+        let id_parameter = bind.len();
+        let clause = format!("(m.date, m.id) < (?{date_parameter}, ?{id_parameter})");
+        where_sql = if where_sql.is_empty() {
+            format!("WHERE {clause}")
+        } else {
+            format!("{where_sql} AND {clause}")
+        };
+    }
+    (
+        format!(
+            "{MESSAGE_SUMMARY_SELECT} {where_sql}
+             ORDER BY m.date DESC, m.id DESC LIMIT {}",
+            args.limit + 1
+        ),
+        bind,
+    )
+}
+
+/// Query-plan details for the message list, including its cursor and filter.
+pub fn list_messages_query_plan(
+    conn: &Connection,
+    args: &ListArgs,
+    cursor: Option<MessageCursor>,
+) -> Result<Vec<String>> {
+    let (sql, bind) = list_messages_sql(args, cursor);
+    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+    let params_ref: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
+    Ok(stmt
+        .query_map(params_ref.as_slice(), |row| row.get(3))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Summaries for many messages in one query, returned in `message_ids` order.
+/// Ids that no longer exist, or have no conversation yet, are skipped.
+pub fn get_message_summaries(
+    conn: &Connection,
+    message_ids: &[i64],
+) -> Result<Vec<MessageSummary>> {
+    if message_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = message_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("{MESSAGE_SUMMARY_SELECT} WHERE m.id IN ({placeholders})");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params_from_iter(message_ids.iter()),
+            message_summary_from_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut by_id: std::collections::HashMap<i64, MessageSummary> =
+        rows.into_iter().map(|m| (m.id, m)).collect();
+    Ok(message_ids
+        .iter()
+        .filter_map(|id| by_id.remove(id))
+        .collect())
 }
 
 #[cfg(test)]
@@ -802,6 +1032,180 @@ mod tests {
                 line.contains("idx_threads_recent") && line.contains("last_message_at<?")
             }),
             "keyset cursor must seek by account and timestamp: {plan:?}"
+        );
+    }
+
+    /// A conversation whose first message is in the inbox and whose reply was
+    /// archived. Returns (thread, inbox message, archived reply).
+    fn conversation_across_folders(conn: &Connection) -> (i64, i64, i64) {
+        crate::db::testutil::seed_account(conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive')",
+            [],
+        )
+        .unwrap();
+        let (thread_id, inbox) =
+            crate::db::testutil::seed_message(conn, "sender@example.com", "Plans", false);
+        let (own_thread, reply) =
+            crate::db::testutil::seed_message(conn, "sender@example.com", "Re: Plans", false);
+        conn.execute(
+            "UPDATE messages SET thread_id = ?1, folder_id = 2, date = 2000, is_starred = 1,
+                                 uid = 10000 + id
+             WHERE id = ?2",
+            params![thread_id, reply],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM threads WHERE id = ?1", [own_thread])
+            .unwrap();
+        recompute(conn, thread_id).unwrap();
+        (thread_id, inbox, reply)
+    }
+
+    fn scope(view: View) -> ListArgs {
+        ListArgs {
+            view,
+            tab: None,
+            account_id: None,
+            account_ids: None,
+            folder_id: None,
+            cursor: None,
+            limit: 50,
+        }
+    }
+
+    fn message_ids(conn: &Connection, args: &ListArgs) -> Vec<i64> {
+        list_messages(conn, args, None)
+            .unwrap()
+            .messages
+            .iter()
+            .map(|message| message.id)
+            .collect()
+    }
+
+    #[test]
+    fn messages_list_on_their_own_folders_and_flags() {
+        let conn = crate::db::testutil::conn();
+        let (thread_id, inbox, reply) = conversation_across_folders(&conn);
+
+        // The conversation is in the inbox and starred as a whole; each
+        // message is only where it is itself.
+        assert_eq!(list(&conn, &scope(View::Inbox)).unwrap().threads.len(), 1);
+        assert_eq!(message_ids(&conn, &scope(View::Inbox)), [inbox]);
+        assert_eq!(message_ids(&conn, &scope(View::Done)), [reply]);
+        assert_eq!(message_ids(&conn, &scope(View::Starred)), [reply]);
+        assert_eq!(message_ids(&conn, &scope(View::All)), [reply, inbox]);
+        let archive = ListArgs {
+            folder_id: Some(2),
+            ..scope(View::All)
+        };
+        assert_eq!(message_ids(&conn, &archive), [reply]);
+
+        let row = list_messages(&conn, &scope(View::Inbox), None)
+            .unwrap()
+            .messages
+            .remove(0);
+        assert_eq!(row.thread_id, thread_id);
+        assert_eq!(row.subject, "Plans");
+        assert_eq!(row.from.email, "sender@example.com");
+        assert!(!row.is_read);
+        assert!(!row.is_starred);
+    }
+
+    #[test]
+    fn messages_follow_their_conversation_snooze_and_routing() {
+        let conn = crate::db::testutil::conn();
+        let (thread_id, inbox, _) = conversation_across_folders(&conn);
+        conn.execute(
+            "UPDATE threads SET routed_tab = 'other' WHERE id = ?1",
+            [thread_id],
+        )
+        .unwrap();
+        let other = ListArgs {
+            tab: Some(TabFilter::Other),
+            ..scope(View::Inbox)
+        };
+        assert_eq!(message_ids(&conn, &other), [inbox]);
+        let important = ListArgs {
+            tab: Some(TabFilter::Important),
+            ..scope(View::Inbox)
+        };
+        assert!(message_ids(&conn, &important).is_empty());
+
+        crate::db::repo::snoozes::set(&conn, thread_id, 1, i64::MAX, Some(1)).unwrap();
+        assert!(message_ids(&conn, &scope(View::Inbox)).is_empty());
+        assert_eq!(message_ids(&conn, &scope(View::Snoozed)).len(), 2);
+    }
+
+    #[test]
+    fn manual_labels_list_only_the_labelled_message() {
+        let conn = crate::db::testutil::conn();
+        let (_, inbox, _) = conversation_across_folders(&conn);
+        conn.execute(
+            "INSERT INTO labels (id, name, color, keyword, position, is_auto, scope, owner_account_id, origin)
+             VALUES (7, 'Work', '#000000', 'work', 0, 0, 'account', 1, 'user')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message_labels (message_id, label_id) VALUES (?1, 7)",
+            [inbox],
+        )
+        .unwrap();
+        let labelled = ListArgs {
+            tab: Some(TabFilter::ManualLabel(7)),
+            ..scope(View::All)
+        };
+        assert_eq!(message_ids(&conn, &labelled), [inbox]);
+        assert_eq!(list(&conn, &labelled).unwrap().threads.len(), 1);
+        let row = list_messages(&conn, &labelled, None)
+            .unwrap()
+            .messages
+            .remove(0);
+        assert_eq!(row.labels, [7]);
+    }
+
+    #[test]
+    fn message_pages_continue_after_their_cursor() {
+        let conn = crate::db::testutil::conn();
+        crate::db::testutil::seed_account(&conn);
+        let mut ids = Vec::new();
+        for (index, subject) in ["one", "two", "three"].into_iter().enumerate() {
+            let (_, id) = crate::db::testutil::seed_message(&conn, "a@b.dev", subject, false);
+            // Two messages share a date; the id breaks the tie.
+            conn.execute(
+                "UPDATE messages SET date = ?1 WHERE id = ?2",
+                params![1000 + (index as i64).min(1), id],
+            )
+            .unwrap();
+            ids.push(id);
+        }
+        let args = ListArgs {
+            limit: 2,
+            ..scope(View::Inbox)
+        };
+        let first = list_messages(&conn, &args, None).unwrap();
+        let first_ids = first.messages.iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(first_ids, [ids[2], ids[1]]);
+        let second = list_messages(&conn, &args, first.next_cursor).unwrap();
+        assert_eq!(
+            second.messages.iter().map(|m| m.id).collect::<Vec<_>>(),
+            [ids[0]]
+        );
+        assert!(second.next_cursor.is_none());
+
+        let plan = list_messages_query_plan(
+            &conn,
+            &ListArgs {
+                account_id: Some(1),
+                ..args
+            },
+            first.next_cursor,
+        )
+        .unwrap();
+        assert!(
+            plan.iter()
+                .any(|line| line.contains("idx_messages_account_recent")),
+            "account pages seek the message timeline index: {plan:?}"
         );
     }
 }

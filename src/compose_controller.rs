@@ -265,14 +265,14 @@ pub(super) fn perform_selected_action(
     _runtime: &tokio::runtime::Runtime,
     action: &str,
 ) -> Result<(), String> {
-    let (selected_id, thread_id, core, using_core) = {
+    let (selected_id, target, core, using_core) = {
         let state = state.borrow();
         let selected = state
             .selected_id
             .and_then(|id| state.messages.iter().find(|message| message.id == id));
         (
             state.selected_id,
-            selected.and_then(|message| message.thread_id),
+            selected.and_then(MailTarget::of),
             state.core.clone(),
             state.using_core,
         )
@@ -281,13 +281,13 @@ pub(super) fn perform_selected_action(
         return Err("mail account is not ready".to_owned());
     }
     let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
-    let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
+    let target = target.ok_or_else(|| "no message is selected".to_owned())?;
     mail_work::enqueue(
         state,
         core,
         vec![(
             selected_id.unwrap(),
-            thread_id,
+            target,
             mail_work::Operation::Action(action.to_owned()),
         )],
     )
