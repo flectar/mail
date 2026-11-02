@@ -217,21 +217,54 @@ pub(super) fn register_settings_preference_callbacks(
         let state_for_download = Rc::clone(state);
         let runtime_for_download = Rc::clone(runtime);
         let app_weak_for_download = app_weak.clone();
+        let picking_download = Rc::new(Cell::new(false));
         app.on_choose_download_directory(move || {
             let Some(app) = app_weak_for_download.upgrade() else {
                 return;
             };
-            let title =
-                translated(&app, &UiMessage::plain("Choose download location")).to_string();
-            let Some(directory) = rfd::FileDialog::new().set_title(title).pick_folder() else {
+            if picking_download.replace(true) {
                 return;
-            };
-            save_download_directory(
-                &app,
-                &state_for_download,
-                &runtime_for_download,
-                directory.to_string_lossy().into_owned(),
-            );
+            }
+            let title = translated(&app, &UiMessage::plain("Choose download location")).to_string();
+            let current =
+                crate::documents::resolve_download_directory(&app.get_download_directory());
+            // The portal picker needs the runtime: rfd's blocking dialog
+            // panics on the UI thread, which has no Tokio context.
+            let request: crate::documents::DocumentFuture<Option<std::path::PathBuf>> =
+                Box::pin(async move {
+                    let dialog = rfd::AsyncFileDialog::new().set_title(title);
+                    let dialog = match current {
+                        Some(directory) => dialog.set_directory(directory),
+                        None => dialog,
+                    };
+                    Ok(dialog
+                        .pick_folder()
+                        .await
+                        .map(|folder| folder.path().to_owned()))
+                });
+            let state = Rc::clone(&state_for_download);
+            let runtime = Rc::clone(&runtime_for_download);
+            let picking = Rc::clone(&picking_download);
+            let app_weak = app.as_weak();
+            crate::documents::run_request(&runtime_for_download, request, move |picked| {
+                picking.set(false);
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                match picked {
+                    Ok(Some(directory)) => save_download_directory(
+                        &app,
+                        &state,
+                        &runtime,
+                        directory.to_string_lossy().into_owned(),
+                    ),
+                    Ok(None) => {}
+                    Err(error) => app.set_sync_status(UiMessage::detail(
+                        "Could not save the download location: {}",
+                        error,
+                    )),
+                }
+            });
         });
         let state_for_clear = Rc::clone(state);
         let runtime_for_clear = Rc::clone(runtime);
