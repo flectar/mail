@@ -62,6 +62,13 @@ struct Index {
   private pendingImePassword: boolean | undefined = undefined;
   private windowOffsetX: number = 0;
   private windowOffsetY: number = 0;
+  private observedWindow: window.Window | undefined = undefined;
+  private windowRectHandler = (_options: window.RectChangeOptions): void => {
+    this.updateWindowOffset();
+  };
+  private windowStatusHandler = (_status: window.WindowStatusType): void => {
+    this.updateWindowOffset();
+  };
   private appBackgroundHandler: () => void = (): void => {
     this.nativeModule?.suspendPreview?.();
   };
@@ -127,6 +134,7 @@ struct Index {
         (error as BusinessError).message);
     }
     this.systemPasteboard = undefined;
+    this.releaseWindowObserver();
     this.imeAttached = false;
     this.imeAttachPending = false;
     this.imePassword = undefined;
@@ -584,18 +592,54 @@ struct Index {
   }
 
   // CursorInfo is in absolute physical screen coordinates. The Slint caret
-  // rectangle is relative to the XComponent, so add the window origin.
+  // rectangle is relative to the XComponent, so add the window origin. The
+  // origin must be refreshed when a 2-in-1 window is maximized, restored or
+  // moved: windowRect keeps the old floating position until then, which would
+  // place the IME candidate over the previous window location.
   private async updateWindowOffset(): Promise<void> {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const appWindow = await window.getLastWindow(context);
-      const rect = appWindow.getWindowProperties().windowRect;
-      this.windowOffsetX = rect.left;
-      this.windowOffsetY = rect.top;
+      this.observeWindow(appWindow);
+      const properties = appWindow.getWindowProperties();
+      const status: window.WindowStatusType = appWindow.getWindowStatus();
+      if (status === window.WindowStatusType.FULL_SCREEN ||
+        status === window.WindowStatusType.MAXIMIZE) {
+        this.windowOffsetX = 0;
+        this.windowOffsetY = 0;
+      } else {
+        this.windowOffsetX = properties.windowRect.left;
+        this.windowOffsetY = properties.windowRect.top;
+      }
+      // Re-apply the cached caret against the new origin.
+      this.lastImeCursor = '';
+      this.applyImeCursor();
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'could not read the window origin: %{public}s',
         (error as BusinessError).message);
     }
+  }
+
+  private observeWindow(appWindow: window.Window): void {
+    if (this.observedWindow === appWindow) {
+      return;
+    }
+    if (this.observedWindow !== undefined) {
+      this.observedWindow.off('windowRectChange', this.windowRectHandler);
+      this.observedWindow.off('windowStatusChange', this.windowStatusHandler);
+    }
+    this.observedWindow = appWindow;
+    appWindow.on('windowRectChange', this.windowRectHandler);
+    appWindow.on('windowStatusChange', this.windowStatusHandler);
+  }
+
+  private releaseWindowObserver(): void {
+    if (this.observedWindow === undefined) {
+      return;
+    }
+    this.observedWindow.off('windowRectChange', this.windowRectHandler);
+    this.observedWindow.off('windowStatusChange', this.windowStatusHandler);
+    this.observedWindow = undefined;
   }
 
   private applySystemColorScheme(mode: number): void {
