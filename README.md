@@ -184,6 +184,13 @@ you left off the next time you open Flectar Mail.
 **Ctrl+Shift+Tab** cycle through tabs, **Ctrl/⌘+1–8** jump to a tab, and
 **Ctrl/⌘+9** jumps to the last.
 
+On phones and in narrow windows, the button at the end of the toolbar shows
+how many tabs are open and lays them out as cards. Tap a card to switch to it,
+tap × or swipe it aside to close it, and use **+** for a new tab. Select
+messages and choose **Open in new tabs** from the selection menu to open them
+in the background. If you'd rather work without tabs, turn off **Tabs** in
+Settings → General.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-tabs-light.png">

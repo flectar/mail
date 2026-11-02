@@ -29,6 +29,7 @@ import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail, WindowTopBar } from "components/workspace-navigation.slint";
 export { TabsUi, TabRow } from "components/workspace-navigation.slint";
 import { TabsUi } from "components/workspace-navigation.slint";
+import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
@@ -949,6 +950,13 @@ export component AppWindow inherits Window {
     private property <string> mail-compact-page: "list";
     private property <bool> mail-folders-open: false;
     private property <bool> contacts-detail-visible: false;
+    // A tab shown in a single-pane layout opens on its list or its reader.
+    private property <int> tab-shown: TabsUi.shown;
+    changed tab-shown => {
+        root.mail-compact-page = TabsUi.shown-conversation ? "message" : "list";
+        root.mail-folders-open = false;
+        root.contacts-detail-visible = false;
+    }
     changed active_view => {
         if root.active_view != "mail" { MailAttachments.command("close", ""); }
         root.product-changed(root.active_view);
@@ -1291,6 +1299,10 @@ export component AppWindow inherits Window {
         if (!root.compact-layout) {
             return false;
         }
+        if TabsUi.overview-open {
+            TabsUi.overview-open = false;
+            return true;
+        }
         if (root.compose_open) {
             root.compose-back-request += 1;
             return true;
@@ -1348,6 +1360,10 @@ export component AppWindow inherits Window {
         WindowChrome.top-bar = root.top-bar;
         AppTheme.top-bar = root.top-bar;
         TabsUi.enabled = root.tabs-on;
+        TabsUi.compact = root.compact-layout;
+        if !root.compact-layout || !root.tabs-on {
+            TabsUi.overview-open = false;
+        }
     }
 
     // Seeds WindowChrome once; the handlers above keep it current. A child
@@ -1815,6 +1831,18 @@ export component AppWindow inherits Window {
                 root.settings_open = false;
 
             }
+        }
+
+        // Over the compact layout and its navigation, below the dialogs.
+        if TabsUi.enabled && TabsUi.compact && TabsUi.overview-open : TabOverview {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            live-workspace: root.settings_open ? "settings" : root.active_view;
+            live-title: root.settings_open || root.active_view != "mail" ? ""
+                : root.has_selected && root.selected_subject != "" ? root.selected_subject
+                : root.selected_scope_title;
         }
 
         if root.calendar_editor_open : CalendarEventDialog {

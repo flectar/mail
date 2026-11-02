@@ -25,6 +25,7 @@ import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slin
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, SettingsIconPalette, ServiceIconPalette } from "../design-system.slint";
 import { CompactPageHeader, WorkspaceSidebarSurface } from "../components/workspace-layout.slint";
+import { TabSwitcherButton } from "../components/tab-overview.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { Numbers } from "../numbers.slint";
 
@@ -2637,6 +2638,7 @@ export component SettingsDialog inherits Rectangle {
                 leading-accessible-id: "settings-menu-button";
                 background-color: root.sidebar-bg;
                 leading-clicked => { root.compact-nav-open = true; }
+                if TabsUi.enabled && TabsUi.compact : TabSwitcherButton { compact: true; }
                 IconButton {
                     width: LayoutMetrics.touch-target;
                     height: LayoutMetrics.touch-target;

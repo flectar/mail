@@ -111,6 +111,8 @@ Gardez plusieurs espaces ouverts avec des onglets comme dans un navigateur. Chaq
 
 **Ctrl/⌘+T** ouvre un onglet, **Ctrl/⌘+W** ferme l’onglet courant et **Ctrl/⌘+Maj+T** rouvre le dernier onglet fermé. **Ctrl+Tab** et **Ctrl+Maj+Tab** parcourent les onglets, **Ctrl/⌘+1–8** accèdent à un onglet précis et **Ctrl/⌘+9** au dernier.
 
+Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’outils indique combien d’onglets sont ouverts et les présente sous forme de cartes. Touchez une carte pour y passer, touchez × ou faites-la glisser sur le côté pour la fermer, et utilisez **+** pour ouvrir un nouvel onglet. Sélectionnez des messages et choisissez **Ouvrir dans de nouveaux onglets** dans le menu de la sélection pour les ouvrir en arrière-plan. Si vous préférez travailler sans onglets, désactivez **Onglets** dans Paramètres → Général.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">

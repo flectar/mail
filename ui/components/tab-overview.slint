@@ -1,0 +1,316 @@
+// Tabs in compact layouts, which have no room for a strip: a toolbar button
+// showing how many tabs are open, and an overview of every tab as a card.
+
+import { TypeScale } from "../typography.slint";
+import { AppTheme, LayoutMetrics, MotionSettings } from "../design-system.slint";
+import { IconButton, ToolbarIconButton } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
+import { TabRow, TabsUi, WorkspaceIcon } from "tabs-ui.slint";
+
+// Opens the tab overview. The number of open tabs sits in a rounded square,
+// as in mobile browsers.
+export component TabSwitcherButton inherits ToolbarIconButton {
+    private property <int> count: TabsUi.rows.length;
+
+    icon-color: AppTheme.secondary;
+    hover-background: AppTheme.muted-control-bg;
+    active-background: AppTheme.accent-soft;
+    tooltip-text: @tr("Show tabs");
+    accessible-description: @tr("{n} tab open" | "{n} tabs open" % root.count);
+    accessible-id: "tab-switcher-button";
+    clicked => { TabsUi.overview-open = true; }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 19px;
+        height: 19px;
+        border-radius: 5px;
+        border-width: 2px;
+        border-color: root.icon-color;
+
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.count;
+            color: root.icon-color;
+            font-size: root.count > 9 ? 9px : 11px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+}
+
+global TabCardMetrics {
+    out property <length> gap: 12px;
+    out property <length> height: 156px;
+    out property <length> header: 44px;
+    out property <length> radius: 14px;
+    // Cards are at least this wide; wider windows fit more columns.
+    out property <length> min-width: 150px;
+}
+
+// One tab: where it is, its title, and a button that closes it. Swiping the
+// card aside closes it too.
+component TabCard inherits Rectangle {
+    in property <TabRow> entry;
+    in property <int> index;
+    // Where the active tab is now; the saved row only describes inactive tabs.
+    in property <string> live-workspace;
+    in property <string> live-title;
+    callback chosen();
+
+    private property <string> workspace: root.entry.active && root.live-workspace != ""
+        ? root.live-workspace : root.entry.workspace;
+    private property <string> workspace-name: root.workspace == "calendar" ? @tr("Calendar")
+        : root.workspace == "files" ? @tr("Files")
+        : root.workspace == "contacts" ? @tr("Contacts")
+        : root.workspace == "settings" ? @tr("Settings")
+        : @tr("Mail");
+    private property <string> title: root.entry.active ? root.live-title : root.entry.title;
+    // How far the card has been swiped, and how far it must go to close.
+    private property <length> travel: swipe.swiping ? swipe.current-position.x - swipe.pressed-position.x : 0px;
+    private property <length> threshold: root.width * 0.35;
+
+    height: TabCardMetrics.height;
+
+    card := Rectangle {
+        x: root.travel;
+        width: parent.width;
+        height: parent.height;
+        opacity: 1 - min(0.7, abs(root.travel) / root.width);
+        border-radius: TabCardMetrics.radius;
+        background: AppTheme.surface;
+        border-width: root.entry.active ? 2px : 1px;
+        border-color: root.entry.active ? AppTheme.accent : AppTheme.border;
+        clip: true;
+
+        swipe := SwipeGestureHandler {
+            handle-swipe-left: true;
+            handle-swipe-right: true;
+            swiped => {
+                if abs(self.current-position.x - self.pressed-position.x) > root.threshold {
+                    TabsUi.close(root.entry.id);
+                }
+            }
+
+            hit := TouchArea {
+                accessible-role: tab;
+                accessible-label: root.title != "" ? root.title : root.workspace-name;
+                accessible-description: root.workspace-name;
+                accessible-item-selectable: true;
+                accessible-item-selected: root.entry.active;
+                accessible-item-index: root.index;
+                accessible-action-default => { root.chosen(); }
+                clicked => { root.chosen(); }
+            }
+
+            WorkspaceIcon {
+                x: 14px;
+                y: (TabCardMetrics.header - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                workspace: root.workspace;
+                filled: root.entry.active;
+                colorize: root.entry.active ? AppTheme.accent : AppTheme.secondary;
+            }
+            Text {
+                x: 38px;
+                y: 0px;
+                width: close-button.x - self.x - 4px;
+                height: TabCardMetrics.header;
+                text: root.workspace-name;
+                color: root.entry.active ? AppTheme.accent : AppTheme.secondary;
+                font-size: TypeScale.caption;
+                font-weight: 600;
+                vertical-alignment: center;
+                overflow: elide;
+                accessible-role: none;
+            }
+            close-button := IconButton {
+                x: parent.width - self.width - 4px;
+                y: (TabCardMetrics.header - self.height) / 2;
+                width: 40px;
+                height: 40px;
+                icon: @image-url("../icons/lucide/outline/x.svg");
+                icon-size: 14px;
+                icon-color: AppTheme.secondary;
+                ghost: true;
+                hover-background: AppTheme.muted-control-bg;
+                active-background: AppTheme.accent-soft;
+                tooltip-text: @tr("Close tab");
+                clicked => { TabsUi.close(root.entry.id); }
+            }
+            Rectangle {
+                y: TabCardMetrics.header;
+                height: 1px;
+                background: AppTheme.border-subtle;
+            }
+            // A mailbox or conversation shows its name; other places, which
+            // have no title of their own, their workspace's icon.
+            if root.title != "" : Text {
+                x: 14px;
+                y: TabCardMetrics.header + 12px;
+                width: parent.width - 28px;
+                height: parent.height - self.y - 12px;
+                text: root.title;
+                color: AppTheme.title;
+                font-size: TypeScale.body;
+                font-weight: 600;
+                wrap: word-wrap;
+                overflow: elide;
+                vertical-alignment: top;
+                accessible-role: none;
+            }
+            if root.title == "" : WorkspaceIcon {
+                x: (parent.width - self.width) / 2;
+                y: TabCardMetrics.header + (parent.height - TabCardMetrics.header - self.height) / 2;
+                width: 40px;
+                height: 40px;
+                workspace: root.workspace;
+                filled: false;
+                colorize: AppTheme.muted.with-alpha(0.6);
+            }
+        }
+    }
+}
+
+// Every tab as a card, over the whole compact layout. Choosing a card shows
+// its tab; the toolbar opens a new tab or reopens the one closed last.
+export component TabOverview inherits Rectangle {
+    // The active tab's live place: "settings" or a workspace, and its title.
+    in property <string> live-workspace;
+    in property <string> live-title;
+
+    private property <int> count: TabsUi.rows.length;
+    private property <int> columns: max(2, floor((root.width - TabCardMetrics.gap) / (TabCardMetrics.min-width + TabCardMetrics.gap)));
+    private property <length> card-width: (root.width - (root.columns + 1) * TabCardMetrics.gap) / root.columns;
+    private property <length> row-height: TabCardMetrics.height + TabCardMetrics.gap;
+
+    function close() {
+        TabsUi.overview-open = false;
+    }
+
+    background: AppTheme.page-bg;
+    accessible-role: groupbox;
+    accessible-label: @tr("Tabs");
+
+    // Nothing below the overview takes input while it is open.
+    TouchArea {}
+
+    keys := FocusVisibleScope {
+        focus-on-tab-navigation: false;
+        accessible-role: none;
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    grid := Flickable {
+        y: header.height;
+        width: parent.width;
+        height: parent.height - self.y;
+        content-height: TabCardMetrics.gap + ceil(root.count / root.columns) * root.row-height;
+        accessible-role: tab-list;
+        accessible-label: @tr("Tabs");
+        accessible-item-count: root.count;
+
+        for entry[index] in TabsUi.rows : TabCard {
+            x: TabCardMetrics.gap + mod(index, root.columns) * (root.card-width + TabCardMetrics.gap);
+            y: TabCardMetrics.gap + floor(index / root.columns) * root.row-height;
+            width: root.card-width;
+            entry: entry;
+            index: index;
+            live-workspace: root.live-workspace;
+            live-title: root.live-title;
+            // The active tab's card is in view on opening.
+            init => {
+                if entry.active {
+                    grid.content-y = -max(0px, min(self.y - TabCardMetrics.gap, grid.content-height - grid.height));
+                }
+            }
+            chosen => {
+                TabsUi.select(entry.id);
+                root.close();
+            }
+        }
+    }
+
+    header := Rectangle {
+        y: 0px;
+        height: LayoutMetrics.compact-header-height;
+        background: AppTheme.surface;
+
+        IconButton {
+            x: LayoutMetrics.compact-inset;
+            y: (parent.height - self.height) / 2;
+            width: LayoutMetrics.touch-target;
+            height: LayoutMetrics.touch-target;
+            icon: @image-url("../icons/lucide/outline/arrow-left.svg");
+            icon-color: AppTheme.secondary;
+            ghost: true;
+            hover-background: AppTheme.muted-control-bg;
+            active-background: AppTheme.accent-soft;
+            tooltip-text: @tr("Back");
+            tooltip-align-left: true;
+            accessible-id: "tab-overview-back";
+            clicked => { root.close(); }
+        }
+        Text {
+            x: LayoutMetrics.compact-inset + LayoutMetrics.touch-target + 8px;
+            y: 0px;
+            width: actions.x - self.x - 8px;
+            height: parent.height;
+            text: @tr("{n} tab" | "{n} tabs" % root.count);
+            color: AppTheme.title;
+            font-size: TypeScale.heading-small;
+            font-weight: 700;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        actions := HorizontalLayout {
+            x: parent.width - self.width - LayoutMetrics.compact-inset;
+            y: (parent.height - self.height) / 2;
+            width: self.preferred-width;
+            height: LayoutMetrics.touch-target;
+            spacing: 8px;
+
+            if TabsUi.can-reopen : IconButton {
+                width: LayoutMetrics.touch-target;
+                height: LayoutMetrics.touch-target;
+                icon: @image-url("../icons/lucide/outline/history.svg");
+                icon-color: AppTheme.secondary;
+                ghost: true;
+                hover-background: AppTheme.muted-control-bg;
+                active-background: AppTheme.accent-soft;
+                tooltip-text: @tr("Reopen closed tab");
+                accessible-id: "tab-overview-reopen";
+                clicked => { TabsUi.reopen(); }
+            }
+            IconButton {
+                width: LayoutMetrics.touch-target;
+                height: LayoutMetrics.touch-target;
+                icon: @image-url("../icons/lucide/outline/plus.svg");
+                primary: true;
+                tooltip-text: @tr("New tab");
+                accessible-id: "tab-overview-new";
+                clicked => {
+                    TabsUi.create();
+                    root.close();
+                }
+            }
+        }
+        Rectangle {
+            y: parent.height - LayoutMetrics.divider-width;
+            height: LayoutMetrics.divider-width;
+            background: AppTheme.border;
+        }
+    }
+}
