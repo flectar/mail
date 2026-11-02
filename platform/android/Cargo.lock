@@ -1821,6 +1821,7 @@ dependencies = [
  "base64 0.23.1",
  "cfg_aliases",
  "chrono",
+ "dbus-secret-service",
  "deunicode",
  "dirs",
  "encoding_rs",
