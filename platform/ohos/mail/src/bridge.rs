@@ -243,7 +243,7 @@ pub(super) async fn pick_open_many(limit: usize) -> Result<Vec<PickedFile>, Stri
         "pickOpenMany",
         OpenManyRequest {
             id,
-            limit: limit.clamp(1, 64) as i64,
+            limit: limit.clamp(1, 1000) as i64,
         },
     )?;
     let (json, _name) = await_result(receiver).await?;
@@ -309,7 +309,7 @@ struct SaveRequest {
 }
 
 async fn await_result(receiver: oneshot::Receiver<PickerReply>) -> PickerReply {
-    match tokio::time::timeout(Duration::from_secs(600), receiver).await {
+    match tokio::time::timeout(Duration::from_secs(3600), receiver).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("the file picker was closed".to_owned()),
         Err(_) => Err("the file picker timed out".to_owned()),
