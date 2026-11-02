@@ -2140,15 +2140,13 @@ fn append_mailboxes(
             )
         })
         .collect::<std::collections::HashMap<_, _>>();
+    // Children inherit `tree_folders`' name order, so they need no sort.
     let mut children = std::collections::HashMap::<i64, Vec<&FolderInfo>>::new();
     for folder in &tree_folders {
         let parent_id = parent_ids.get(&folder.id).copied().unwrap_or(-1);
         if parent_id >= 0 {
             children.entry(parent_id).or_default().push(folder);
         }
-    }
-    for descendants in children.values_mut() {
-        descendants.sort_by_key(|folder| (folder.display_name.to_lowercase(), folder.id));
     }
 
     let mut visited = std::collections::HashSet::new();
@@ -3216,6 +3214,39 @@ mod tests {
         assert_eq!(duplicate_leaf.scope, Some(Scope::Folder(12)));
         assert_eq!(custom_inbox.scope, Some(Scope::Folder(13)));
         assert!(custom_inbox.count.is_empty());
+    }
+
+    #[test]
+    fn mailbox_entries_sort_folders_and_subfolders_by_name() {
+        let folder = |id: i64, parent_id: Option<i64>, display_name: &str, path: &str| FolderInfo {
+            id,
+            account_id: 1,
+            parent_id,
+            display_name: display_name.into(),
+            is_jmap: false,
+            path: path.into(),
+            delimiter: Some("/".into()),
+            role: None,
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        };
+        let folders = vec![
+            folder(30, None, "Zeta", "Zeta"),
+            folder(23, Some(20), "beta", "Projects/beta"),
+            folder(20, None, "Projects", "Projects"),
+            folder(24, Some(20), "gamma", "Projects/gamma"),
+            folder(22, Some(20), "alpha", "Projects/alpha"),
+            folder(21, Some(20), "Alpha", "Projects/Alpha"),
+        ];
+
+        let order = mailbox_entries(&[test_account()], &folders, None)
+            .into_iter()
+            .filter(|entry| entry.folder_id >= 20)
+            .map(|entry| entry.folder_id)
+            .collect::<Vec<_>>();
+        assert_eq!(order, [20, 21, 22, 23, 24, 30]);
     }
 
     #[test]
