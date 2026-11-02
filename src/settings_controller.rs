@@ -38,7 +38,9 @@ fn save_download_directory(
     };
     match runtime.block_on(core.set_download_directory(&directory)) {
         Ok(()) => {
-            app.set_download_directory(directory.into());
+            app.set_download_directory(
+                crate::documents::download_directory_label(&directory).into(),
+            );
             app.set_sync_status(UiMessage::plain("Download location saved."));
         }
         Err(error) => app.set_sync_status(UiMessage::detail(
@@ -226,15 +228,27 @@ pub(super) fn register_settings_preference_callbacks(
                 return;
             }
             let title = translated(&app, &UiMessage::plain("Choose download location")).to_string();
-            let current =
-                crate::documents::resolve_download_directory(&app.get_download_directory());
+            let core = state_for_download.borrow().core.clone();
             // The portal picker needs the runtime: rfd's blocking dialog
             // panics on the UI thread, which has no Tokio context.
             let request: crate::documents::DocumentFuture<Option<std::path::PathBuf>> =
                 Box::pin(async move {
+                    // Starts in the saved folder as stored, not as Settings
+                    // shows it: inside Flatpak the shown host path may be
+                    // outside the sandbox.
+                    let current = match core {
+                        Some(core) => core.load_settings().await.ok().and_then(|settings| {
+                            crate::documents::resolve_download_directory(
+                                &settings.download_directory,
+                            )
+                        }),
+                        None => None,
+                    };
                     let dialog = rfd::AsyncFileDialog::new().set_title(title);
                     let dialog = match current {
-                        Some(directory) => dialog.set_directory(directory),
+                        Some(directory) => {
+                            dialog.set_directory(crate::documents::picker_directory(&directory))
+                        }
                         None => dialog,
                     };
                     Ok(dialog
