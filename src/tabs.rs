@@ -725,8 +725,8 @@ impl Tabs {
         let Some(app) = self.app() else {
             return;
         };
-        // Tabs live in the desktop top bar; the composer and the calendar
-        // editor keep their keys.
+        // Tabs can be turned off; the composer and the calendar editor keep
+        // their keys.
         if !app.global::<TabsUi>().get_enabled()
             || app.get_compose_open()
             || app.get_calendar_editor_open()
@@ -1999,7 +1999,7 @@ mod tests {
         ui.invoke_create();
         ui.invoke_create();
         draw();
-        assert!(ui.get_enabled(), "the desktop top bar shows the tabs");
+        assert!(ui.get_enabled(), "tabs are on once there is mail");
         let ids = || ui.get_rows().iter().map(|row| row.id).collect::<Vec<_>>();
         let active = || ui.get_rows().iter().position(|row| row.active).unwrap();
         let [a, b, c] = ids()[..] else {
@@ -2273,6 +2273,50 @@ mod tests {
         tabs.activate(1);
         assert_eq!(tabs.context.state.borrow().scope, Scope::UNIFIED_INBOX);
         assert_eq!(app.global::<TabsUi>().get_list_restore(), 0.0);
+    }
+
+    /// A window with one account, its tabs registered and shown, and a way
+    /// to draw it, which also runs the window's change handlers.
+    fn shown_window(width: u32, height: u32) -> (AppWindow, Rc<RefCell<InboxState>>, impl Fn()) {
+        let (app, context, dir, window) = headless();
+        window.set_size(slint::PhysicalSize::new(width, height));
+        app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
+            id: 1,
+            ..Default::default()
+        }])));
+        let state = Rc::clone(&context.state);
+        register(&app, context);
+        app.global::<TabsUi>().invoke_restore_active();
+        let draw = move || {
+            let _dir = &dir;
+            slint::platform::update_timers_and_animations();
+            window.draw_if_needed(|renderer| {
+                let mut buffer = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                renderer.render(&mut buffer, width as usize);
+            });
+        };
+        draw();
+        (app, state, draw)
+    }
+
+    #[test]
+    fn tabs_turned_off_are_hidden_and_kept() {
+        let (app, _state, draw) = shown_window(1320, 800);
+        let ui = app.global::<TabsUi>();
+        ui.invoke_create();
+        draw();
+        assert!(ui.get_enabled());
+
+        app.set_show_tabs(false);
+        draw();
+        assert!(!ui.get_enabled());
+        ui.invoke_command("new".into());
+        assert_eq!(ui.get_rows().row_count(), 2, "tab shortcuts do nothing");
+
+        app.set_show_tabs(true);
+        draw();
+        assert!(ui.get_enabled());
+        assert_eq!(ui.get_rows().row_count(), 2, "the tabs come back");
     }
 
     #[test]

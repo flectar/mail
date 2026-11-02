@@ -346,7 +346,8 @@ export struct TabRow {
 // that is restored through the app's normal navigation when activated.
 export global TabsUi {
     in property <[TabRow]> rows;
-    // True while the desktop top bar shows the tabs.
+    // Tabs are turned on and there is mail to show. The desktop top bar
+    // shows them as a strip.
     in property <bool> enabled;
     // A closed tab can be reopened.
     in property <bool> can-reopen;
@@ -918,7 +919,10 @@ export component WindowTopBar inherits Rectangle {
         manage-profiles => { root.manage-profiles(); }
     }
 
+    // With tabs turned off the bar keeps the profile pill and, in the
+    // integrated frame, the window controls.
     strip := TouchArea {
+        visible: TabsUi.enabled;
         x: root.tabs-x;
         width: max(root.count * root.slot-width, min(root.held-strip-width, root.tabs-room));
         height: parent.height;
@@ -979,6 +983,7 @@ export component WindowTopBar inherits Rectangle {
     }
 
     new-tab := NewTabButton {
+        visible: TabsUi.enabled;
         x: root.tabs-x + strip.width + TabMetrics.foot;
         y: TabMetrics.middle(parent.height) - self.height / 2;
         hover-background: root.hover-background;

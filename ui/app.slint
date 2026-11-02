@@ -267,6 +267,9 @@ export global I18n {
         if (key == "Window frame updated for this session.") { return @tr("Window frame updated for this session."); }
         if (key == "Window frame preference saved.") { return @tr("Window frame preference saved."); }
         if (key == "Could not save window frame preference: {}") { return @tr("Could not save window frame preference: {}", argument); }
+        if (key == "Tabs preference updated for this session.") { return @tr("Tabs preference updated for this session."); }
+        if (key == "Tabs preference saved.") { return @tr("Tabs preference saved."); }
+        if (key == "Could not save tabs preference: {}") { return @tr("Could not save tabs preference: {}", argument); }
         if (key == "At most {} tabs can be open. Close a tab to open another.") { return @tr("At most {} tabs can be open. Close a tab to open another.", argument); }
         if (key == "Mail grouping is active for this session.") { return @tr("Mail grouping is active for this session."); }
         if (key == "Mail grouping preference saved.") { return @tr("Mail grouping preference saved."); }
@@ -633,6 +636,7 @@ export component AppWindow inherits Window {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_show_tabs(bool);
     callback save_group_mail_by_date(bool);
     callback choose_download_directory();
     callback clear_download_directory();
@@ -974,6 +978,8 @@ export component AppWindow inherits Window {
     in property <[StorageUsageRow]> storage_usage: [];
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    // Show tabs: the desktop tab strip, or the compact tab switcher.
+    in-out property <bool> show_tabs: true;
     in-out property <bool> group_mail_by_date: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
@@ -1137,10 +1143,12 @@ export component AppWindow inherits Window {
     private property <bool> compact-layout: root.width - root.safe-area-insets.left - root.safe-area-insets.right < 980px;
     // In the integrated frame the window controls sit over the top corners
     // and toolbars reserve room for them, so content keeps the full window.
-    // Desktop windows with accounts show the tabs in a top bar above the
-    // product rail; in the integrated frame it also holds the window
-    // controls. Compact layouts navigate from the bottom bar.
+    // Desktop windows with accounts show a top bar above the product rail,
+    // holding the tabs when they are on; in the integrated frame it also
+    // holds the window controls. Compact layouts navigate from the bottom bar.
     private property <bool> top-bar: !root.compact-layout && root.has-mail;
+    private property <bool> tabs-on: root.show_tabs && root.has-mail;
+    changed tabs-on => { root.sync-window-chrome(); }
     // A tone apart from the workspace, so the active tab can open into it.
     private property <color> tab-strip-bg: AppTheme.sidebar-tint.mix(AppTheme.title, 0.94);
     changed top-bar => { root.sync-window-chrome(); }
@@ -1339,7 +1347,7 @@ export component AppWindow inherits Window {
         WindowChrome.compact = root.compact-layout;
         WindowChrome.top-bar = root.top-bar;
         AppTheme.top-bar = root.top-bar;
-        TabsUi.enabled = root.top-bar;
+        TabsUi.enabled = root.tabs-on;
     }
 
     // Seeds WindowChrome once; the handlers above keep it current. A child
@@ -1893,6 +1901,7 @@ export component AppWindow inherits Window {
             settings_tab <=> root.settings_tab;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
+            show_tabs <=> root.show_tabs;
             group_mail_by_date <=> root.group_mail_by_date;
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
@@ -1979,6 +1988,7 @@ export component AppWindow inherits Window {
                 );
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
+            save_show_tabs(enabled) => { root.save_show_tabs(enabled); }
             prepare_profile_members(profile-id, account-id) => {
                 root.prepare_profile_members(profile-id, account-id);
             }

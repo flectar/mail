@@ -485,6 +485,28 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_tabs = Rc::clone(state);
+    let runtime_for_tabs = Rc::clone(runtime);
+    app.on_save_show_tabs(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_tabs.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Tabs preference updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_tabs.block_on(core.set_show_tabs(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Tabs preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save tabs preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_date_groups = Rc::clone(state);
     let runtime_for_date_groups = Rc::clone(runtime);
     app.on_save_group_mail_by_date(move |enabled| {
