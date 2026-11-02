@@ -72,6 +72,24 @@ build provenance under `pdfium-licenses` beside the private desktop library,
 Android assets at `licenses/PDFium`, and iOS bundle resources at `Licenses/PDFium`.
 PDFium's third-party components retain their respective licenses.
 
+The OpenHarmony package prefers a source build from the pinned
+`OpenHarmonyPCDeveloper/pdfium` revision in
+[`platform/ohos/scripts/build-pdfium-source.sh`](platform/ohos/scripts/build-pdfium-source.sh).
+The fallback arm64 `ohos_pdfium` 7947 port has its archive URL and SHA-256
+digest pinned in
+[`platform/ohos/scripts/fetch-pdfium.sh`](platform/ohos/scripts/fetch-pdfium.sh).
+The build stages and strips the library and packages this notice plus
+[`LICENSES/PDFium-BSD-3-Clause.txt`](LICENSES/PDFium-BSD-3-Clause.txt) under
+`resources/rawfile/` in the hap. The port is documented in
+[`platform/ohos/prebuilt/README.md`](platform/ohos/prebuilt/README.md).
+
+The source-built OpenHarmony PDFium component links the OHOS SDK's
+`libc++_shared.so` C++ runtime. LLVM libc++ is Apache-2.0 with the LLVM
+exception; the license and exception are retained in
+[`LICENSES/LLVM-exception.txt`](LICENSES/LLVM-exception.txt). The pinned OHOS
+source compatibility patch is
+[`platform/ohos/patches/pdfium-ohos-compat.patch`](platform/ohos/patches/pdfium-ohos-compat.patch).
+
 The Rust interface is [pdfium-render](https://github.com/ajrcarey/pdfium-render)
 0.9.4, used under its Apache-2.0 option. Linux process restrictions use
 [Landlock](https://github.com/landlock-lsm/rust-landlock) and

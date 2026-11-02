@@ -490,6 +490,17 @@ en Fedora 43 porque requiere glibc 2.43. Su paquete Flatpak es una alternativa
 mientras llega una versión RPM creada con las comprobaciones de compatibilidad
 anteriores.
 
+En Linux, las contraseñas, los tokens OAuth y las claves de API se guardan en el
+llavero del sistema mediante freedesktop Secret Service, nunca en la base de
+datos de Flectar Mail. Sirve cualquier proveedor de Secret Service, en cualquier
+escritorio o gestor de ventanas, sway incluido: GNOME Keyring, KWallet o
+KeePassXC con su integración de Secret Service activada. El Flatpak usa el mismo
+llavero que el resto de tu sesión. Si la sesión aún no tiene un llavero
+predeterminado, al añadir la primera cuenta Flectar Mail pide al proveedor que
+cree uno, y el proveedor te pide que elijas su contraseña. Si no hay ningún
+proveedor, la cuenta no se añade y un error indica qué falta, porque Flectar
+Mail nunca guarda secretos en un lugar menos seguro.
+
 Cada publicación de GitHub incluye `SHA256SUMS` y certificaciones firmadas de
 procedencia de la compilación. Con GitHub CLI instalado, verifica una descarga
 con `gh attestation verify <download> --repo flectar/mail`.
@@ -524,13 +535,12 @@ También puedes compilar Flectar Mail desde el código fuente con las
 cargo run --bin flectar-mail
 ```
 
-OAuth en el escritorio Linux usa el navegador del sistema a través del portal
-del escritorio y guarda las credenciales de renovación mediante freedesktop
-Secret Service. Por tanto, una sesión de escritorio normal necesita un
-componente `xdg-desktop-portal` y un proveedor de Secret Service como GNOME
-Keyring. Las compilaciones de publicación se detienen antes de abrir la página
-OAuth cuando no hay almacenamiento seguro de credenciales, para que una
-autorización nunca se complete sin un lugar seguro donde guardarla.
+OAuth en el escritorio Linux también abre el navegador del sistema a través del
+portal del escritorio, así que la sesión necesita un componente
+`xdg-desktop-portal` además del llavero descrito arriba. Las compilaciones de
+publicación se detienen antes de abrir la página OAuth cuando no hay
+almacenamiento seguro de credenciales, para que una autorización nunca se
+complete sin un lugar seguro donde guardarla.
 
 Los entornos de desarrollo de Podman y Docker normalmente no tienen acceso al
 D-Bus de la sesión anfitriona ni a la red de bucle local del navegador anfitrión.

@@ -1,0 +1,101 @@
+// ArkTS lint configuration for oxk (https://github.com/ohos-rs/oxc-ark).
+// Run from this directory:
+//   oxk lint entry/src/main/ets --config .oxlintrc.jsonc --threads 1
+//
+// The built-in `arkts` plugin only makes the rules available; each rule is
+// enabled explicitly below. `minApiVersion` follows the minAPIVersion the
+// build declares (HarmonyOS 6.1, API 23).
+{
+  "plugins": ["arkts"],
+  "rules": {
+    "arkts/as-casts": "error",
+    "arkts/extends-only-class": "error",
+    "arkts/identifiers-as-prop-names": "error",
+    "arkts/implements-only-iface": "error",
+    "arkts/instanceof-ref-types": "error",
+    "arkts/limited-esobj": "error",
+    "arkts/limited-stdlib": "error",
+    "arkts/limited-throw": "error",
+    "arkts/no-aliases-by-index": "error",
+    "arkts/no-ambient-decls": "error",
+    "arkts/no-any-unknown": "error",
+    "arkts/no-as-const": "error",
+    "arkts/no-call-signatures": "error",
+    "arkts/no-class-literals": "error",
+    "arkts/no-classes-as-obj": "error",
+    "arkts/no-comma-outside-loops": "error",
+    "arkts/no-conditional-types": "error",
+    "arkts/no-ctor-prop-decls": "error",
+    "arkts/no-ctor-signatures-funcs": "error",
+    "arkts/no-ctor-signatures-iface": "error",
+    "arkts/no-ctor-signatures-type": "error",
+    "arkts/no-decl-merging": "error",
+    "arkts/no-definite-assignment": "error",
+    "arkts/no-delete": "error",
+    "arkts/no-destruct-assignment": "error",
+    "arkts/no-destruct-decls": "error",
+    "arkts/no-destruct-params": "error",
+    "arkts/no-enum-merging": "error",
+    "arkts/no-enum-mixed-types": "error",
+    "arkts/no-export-assignment": "error",
+    "arkts/no-extend-same-prop": "error",
+    "arkts/no-for-in": "error",
+    "arkts/no-func-apply-call": "error",
+    "arkts/no-func-bind": "error",
+    "arkts/no-func-expressions": "error",
+    "arkts/no-func-props": "error",
+    "arkts/no-generators": "error",
+    "arkts/no-globalthis": "error",
+    "arkts/no-implicit-return-types": "error",
+    "arkts/no-import-assertions": "error",
+    "arkts/no-in": "error",
+    "arkts/no-indexed-signatures": "error",
+    "arkts/no-inferred-generic-params": "error",
+    "arkts/no-intersection-types": "error",
+    "arkts/no-is": "error",
+    "arkts/no-jsx": "error",
+    "arkts/no-mapped-types": "error",
+    "arkts/no-method-reassignment": "error",
+    "arkts/no-misplaced-imports": "error",
+    "arkts/no-module-wildcards": "error",
+    "arkts/no-multiple-static-blocks": "error",
+    "arkts/no-nested-funcs": "error",
+    "arkts/no-new-target": "error",
+    "arkts/no-noninferrable-arr-literals": "error",
+    "arkts/no-ns-as-obj": "error",
+    "arkts/no-ns-statements": "error",
+    "arkts/no-obj-literals-as-types": "error",
+    "arkts/no-polymorphic-unops": "error",
+    "arkts/no-private-identifiers": "error",
+    "arkts/no-props-by-index": "error",
+    "arkts/no-prototype-assignment": "error",
+    "arkts/no-require": "error",
+    "arkts/no-spread": "error",
+    "arkts/no-standalone-this": "error",
+    "arkts/no-structural-typing": "error",
+    "arkts/no-symbol": "error",
+    "arkts/no-ts-deps": "error",
+    "arkts/no-type-query": "error",
+    "arkts/no-types-in-catch": "error",
+    "arkts/no-typing-with-this": "error",
+    "arkts/no-umd": "error",
+    "arkts/no-untyped-obj-literals": "error",
+    "arkts/no-utility-types": "error",
+    "arkts/no-var": "error",
+    "arkts/no-with": "error",
+    "arkts/strict-typing-required": "error",
+    "arkts/unique-names": "error",
+    "arkts/system-api-version": [
+      "error",
+      {
+        "minApiVersion": 23,
+        // The generated table folds the deprecated no-argument overload of
+        // requestEnableNotification (removed at 12) into the context
+        // overload this application uses, so keep the current signature.
+        "apis": {
+          "@kit.NotificationKit.notificationManager.requestEnableNotification": { "since": 12 }
+        }
+      }
+    ]
+  }
+}

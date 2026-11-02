@@ -388,7 +388,14 @@ pub(crate) fn register(
                     Ok(ServiceOutput::Status("File selection cancelled.".into()))
                 }
                 Ok(_) if action == "pdf-page" => Ok(ServiceOutput::Status(String::new())),
-                Ok(path) => files::progress::track(progress,dir.execute(&core, &action, &a, &b, selected, path.as_ref().map(|v| v.path().to_owned()))).await,
+                Ok(document) => {
+                    let name = document
+                        .as_ref()
+                        .filter(|_| matches!(action.as_str(), "upload" | "replace"))
+                        .and_then(|document| document.name());
+                    let path = document.as_ref().map(|document| document.path().to_owned());
+                    files::progress::track(progress, dir.execute(&core, &action, &a, &b, selected, path, name.as_deref())).await
+                }
             };
             if action == "download" && result.is_ok()
                 && let Some(path) = export_path {
@@ -399,7 +406,8 @@ pub(crate) fn register(
                             Entry::Remote(n) => n.name,
                         })
                         .unwrap_or_else(|_| "download".into());
-                    result = documents.export(path, safe_name(&name)).await.map(|saved| {
+                    let dialog = crate::documents::download_dialog_for(&core).await;
+                    result = documents.export_with(path, safe_name(&name), dialog).await.map(|saved| {
                         ServiceOutput::Status(
                             if saved {
                                 "File downloaded."

@@ -123,6 +123,13 @@ impl Default for CosmicComposeEditor {
         font_system
             .db_mut()
             .load_font_source(Source::Binary(Arc::new(UI_FONT_DATA)));
+        // OpenHarmony ships no Fontconfig, so fontdb's system scan finds
+        // nothing; load the platform font directory explicitly. Without it
+        // the composer falls back to the bundled UI font alone, which has no
+        // CJK coverage (typed Chinese renders as missing glyphs).
+        if let Some(directory) = crate::platform::email_font_dir() {
+            font_system.db_mut().load_fonts_dir(directory);
+        }
         let buffer = Buffer::new(
             &mut font_system,
             Metrics::new(FONT_SIZE_LOGICAL, LINE_HEIGHT_LOGICAL),

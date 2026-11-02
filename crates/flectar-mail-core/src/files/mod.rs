@@ -329,7 +329,7 @@ pub enum FileClient {
 }
 
 /// Save via a private sibling temporary file. A failed/cancelled transfer cannot
-/// truncate an existing destination; persist_noclobber also closes the TOCTOU race.
+/// truncate an existing destination, and persist_new never replaces one.
 pub async fn save_bytes(destination: &Path, bytes: &[u8]) -> Result<()> {
     let parent = destination
         .parent()
@@ -337,9 +337,7 @@ pub async fn save_bytes(destination: &Path, bytes: &[u8]) -> Result<()> {
     let temp = tempfile::NamedTempFile::new_in(parent)?;
     tokio::fs::write(temp.path(), bytes).await?;
     tokio::fs::File::open(temp.path()).await?.sync_all().await?;
-    temp.persist_noclobber(destination)
-        .map_err(|e| err(format!("Could not save file: {}", e.error)))?;
-    Ok(())
+    persist_new(temp, destination)
 }
 
 /// Stream a selected file with a fixed byte length. The opened handle pins the
@@ -415,9 +413,7 @@ pub(crate) async fn save_response(
     }
     file.sync_all().await?;
     drop(file);
-    temp.persist_noclobber(destination)
-        .map_err(|e| err(format!("Could not save file: {}", e.error)))?;
-    Ok(())
+    persist_new(temp, destination)
 }
 /// Attachment downloads use the existing single-flight cache, then copy via a
 /// sibling temporary file so cancellation cannot leave a partial destination.
@@ -456,9 +452,35 @@ pub async fn save_cached_file(source: &Path, destination: &Path) -> Result<()> {
     file.flush().await?;
     file.sync_all().await?;
     drop(file);
-    temp.persist_noclobber(destination)
-        .map_err(|e| err(format!("Could not save file: {}", e.error)))?;
-    Ok(())
+    persist_new(temp, destination)
+}
+
+/// Moves a finished temporary file into place without replacing an existing
+/// file; persist_noclobber closes the TOCTOU race where the filesystem can.
+fn persist_new(temp: tempfile::NamedTempFile, destination: &Path) -> Result<()> {
+    persist_or_rename(temp.persist_noclobber(destination), destination)
+}
+
+/// A no-clobber move needs RENAME_NOREPLACE or a hard link. Flatpak's document
+/// portal refuses hard links, and eCryptfs, NFS or ntfs-3g underneath reject
+/// the flag, so a plain rename finishes the save while the name is still free.
+fn persist_or_rename(
+    attempt: std::result::Result<std::fs::File, tempfile::PersistError>,
+    destination: &Path,
+) -> Result<()> {
+    let failed = match attempt {
+        Ok(_) => return Ok(()),
+        Err(failed) => failed,
+    };
+    let free = failed.error.kind() != std::io::ErrorKind::AlreadyExists
+        && std::fs::symlink_metadata(destination)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+    let result = if free {
+        failed.file.persist(destination).map(drop)
+    } else {
+        Err(failed)
+    };
+    result.map_err(|e| err(format!("Could not save file: {}", e.error)))
 }
 
 #[cfg(test)]
@@ -478,5 +500,32 @@ mod tests {
         save_bytes(&path, b"original").await.unwrap();
         assert!(save_bytes(&path, b"replacement").await.is_err());
         assert_eq!(std::fs::read(path).unwrap(), b"original");
+    }
+    // A finished temporary file whose no-clobber move failed the way a hard
+    // link does through Flatpak's document portal.
+    fn refused_move(dir: &Path) -> std::result::Result<std::fs::File, tempfile::PersistError> {
+        let mut temp = tempfile::NamedTempFile::new_in(dir).unwrap();
+        std::io::Write::write_all(&mut temp, b"saved").unwrap();
+        Err(tempfile::PersistError {
+            error: std::io::ErrorKind::PermissionDenied.into(),
+            file: temp,
+        })
+    }
+    #[test]
+    fn save_renames_when_noclobber_is_unsupported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        persist_or_rename(refused_move(dir.path()), &path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"saved");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn rename_fallback_does_not_clobber() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, b"original").unwrap();
+        assert!(persist_or_rename(refused_move(dir.path()), &path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }

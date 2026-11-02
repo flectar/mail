@@ -32,12 +32,18 @@ unsafe extern "C" {
     fn flectar_choose_document(
         id: i64,
         path: *const c_char,
-        callback: extern "C" fn(i64, *const c_char, *const c_char),
+        callback: extern "C" fn(i64, *const c_char, *const c_char, *const c_char),
     );
     fn flectar_choose_documents(
         id: i64,
         limit: c_ulong,
-        callback: extern "C" fn(i64, *const *const c_char, c_ulong, *const c_char),
+        callback: extern "C" fn(
+            i64,
+            *const *const c_char,
+            *const *const c_char,
+            c_ulong,
+            *const c_char,
+        ),
     );
 }
 /// A UTF-8 string the native bridge keeps alive for the callback.
@@ -57,15 +63,26 @@ fn take(id: i64) -> Option<Pending> {
         .unwrap()
         .remove(&id)
 }
-extern "C" fn result(id: i64, path: *const c_char, error: *const c_char) {
+/// `count` UTF-8 strings the native bridge keeps alive for the callback.
+fn strings(array: *const *const c_char, count: c_ulong) -> Vec<String> {
+    if array.is_null() {
+        return Vec::new();
+    }
+    unsafe { std::slice::from_raw_parts(array, usize::try_from(count).unwrap_or(0)) }
+        .iter()
+        .map(|value| string(*value))
+        .collect()
+}
+extern "C" fn result(id: i64, path: *const c_char, name: *const c_char, error: *const c_char) {
     let path = string(path);
+    let name = string(name);
     let error = string(error);
     let pending = take(id);
     let importing = !matches!(pending, Some(Pending::One(_, false)));
     let response = if error.is_empty() {
         Ok((!path.is_empty()).then(|| {
             if importing {
-                ImportedDocument::temporary(PathBuf::from(path), release_import)
+                ImportedDocument::temporary(PathBuf::from(path), release_import).with_name(name)
             } else {
                 ImportedDocument::source(PathBuf::from(path))
             }
@@ -77,19 +94,22 @@ extern "C" fn result(id: i64, path: *const c_char, error: *const c_char) {
         let _ = sender.send(response);
     }
 }
-extern "C" fn results(id: i64, paths: *const *const c_char, count: c_ulong, error: *const c_char) {
-    let paths = if paths.is_null() {
-        &[][..]
-    } else {
-        // The native bridge keeps the array alive for this callback too.
-        unsafe { std::slice::from_raw_parts(paths, usize::try_from(count).unwrap_or(0)) }
-    };
+extern "C" fn results(
+    id: i64,
+    paths: *const *const c_char,
+    names: *const *const c_char,
+    count: c_ulong,
+    error: *const c_char,
+) {
+    let mut names = strings(names, count).into_iter();
     // The copies are Rust's from here; dropping them releases them.
-    let documents = paths
-        .iter()
-        .map(|path| string(*path))
-        .filter(|path| !path.is_empty())
-        .map(|path| ImportedDocument::temporary(PathBuf::from(path), release_import))
+    let documents = strings(paths, count)
+        .into_iter()
+        .map(|path| (path, names.next().unwrap_or_default()))
+        .filter(|(path, _)| !path.is_empty())
+        .map(|(path, name)| {
+            ImportedDocument::temporary(PathBuf::from(path), release_import).with_name(name)
+        })
         .collect::<Vec<_>>();
     let error = string(error);
     let response = if error.is_empty() {
@@ -112,11 +132,8 @@ fn release_import(path: PathBuf) {
     let Ok(file) = std::fs::canonicalize(path) else {
         return;
     };
-    if file.parent().and_then(|p| p.parent()) == Some(root.as_path()) && file.is_file() {
-        // Remove only this copy and its now-empty unique directory.
-        if std::fs::remove_file(&file).is_ok() {
-            let _ = std::fs::remove_dir(file.parent().unwrap());
-        }
+    if file.parent() == Some(root.as_path()) && file.is_file() {
+        let _ = std::fs::remove_file(&file);
     }
 }
 

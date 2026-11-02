@@ -329,6 +329,8 @@ O RPM é destinado ao Fedora 43 e 44 em x86_64. As compilações de lançamento 
 
 O RPM anterior, `0.1.0-alpha.7`, foi compilado no Fedora 44 e não pode ser instalado no Fedora 43 porque exige glibc 2.43. Seu pacote Flatpak é uma alternativa enquanto se aguarda uma versão RPM criada com as verificações de compatibilidade acima.
 
+No Linux, senhas, tokens OAuth e chaves de API ficam no chaveiro do sistema por meio do freedesktop Secret Service, nunca no banco de dados do Flectar Mail. Qualquer provedor de Secret Service funciona, em qualquer ambiente de desktop ou gerenciador de janelas, inclusive o sway: GNOME Keyring, KWallet ou KeePassXC com a integração ao Secret Service ativada. O Flatpak usa o mesmo chaveiro que o restante da sua sessão. Se a sessão ainda não tiver um chaveiro padrão, ao adicionar a primeira conta o Flectar Mail pede ao provedor que crie um, e o provedor pede que você escolha a senha dele. Sem um provedor, a adição de uma conta é interrompida com um erro que informa o que está faltando, porque o Flectar Mail nunca armazena segredos em um lugar menos seguro.
+
 Cada lançamento no GitHub inclui `SHA256SUMS` e atestados assinados de procedência da compilação. Com o GitHub CLI instalado, verifique um download com `gh attestation verify <download> --repo flectar/mail`.
 
 A partir da alpha 8, as versões alpha, beta, candidatas a lançamento e estáveis do Android usam um único pacote (`com.flectar.mail`) e uma identidade de assinatura persistente. Versões posteriores podem atualizar o aplicativo e preservar os dados locais. Alpha 6 e alpha 7 usavam chaves diferentes e não podem atualizar para essa identidade de assinatura.
@@ -345,7 +347,7 @@ Você também pode compilar o Flectar Mail a partir do código-fonte com as [fer
 cargo run --bin flectar-mail
 ```
 
-O OAuth no desktop Linux usa o navegador do sistema por meio do portal do desktop e armazena as credenciais de renovação pelo freedesktop Secret Service. Uma sessão normal precisa, portanto, de um componente `xdg-desktop-portal` e de um provedor de Secret Service como o GNOME Keyring. Compilações de lançamento interrompem o processo antes de abrir a página OAuth quando o armazenamento seguro de credenciais não está disponível, para que a autorização nunca seja concluída sem um local seguro para persistir os dados.
+O OAuth no desktop Linux também abre o navegador do sistema por meio do portal do desktop, então a sessão precisa de um componente `xdg-desktop-portal` além do chaveiro descrito acima. Compilações de lançamento interrompem o processo antes de abrir a página OAuth quando o armazenamento seguro de credenciais não está disponível, para que a autorização nunca seja concluída sem um local seguro para persistir os dados.
 
 Ambientes de desenvolvimento Podman e Docker geralmente não têm acesso ao D-Bus da sessão do host nem à rede de loopback do navegador do host. Compilações de depuração suportam esse cenário com um arquivo de credenciais de desenvolvimento claramente identificado, acessível somente pelo proprietário, e um painel expansível para colar a URL final de retorno de loopback. O armazenamento em arquivo é excluído das compilações de lançamento.
 
