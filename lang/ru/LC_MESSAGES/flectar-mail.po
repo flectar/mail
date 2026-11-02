@@ -530,19 +530,19 @@ msgstr "Пользовательская тема сохранена."
 
 #: ui/app.slint:247
 msgid "Download location saved."
-msgstr ""
+msgstr "Папка для загрузок сохранена."
 
 #: ui/app.slint:248
 msgid "Download location is saved once an account is set up."
-msgstr ""
+msgstr "Папка для загрузок будет сохранена после настройки учётной записи."
 
 #: ui/app.slint:249
 msgid "Could not save the download location: {}"
-msgstr ""
+msgstr "Не удалось сохранить папку для загрузок: {}"
 
 #: ui/app.slint:250
 msgid "Choose download location"
-msgstr ""
+msgstr "Выберите папку для загрузок"
 
 #: ui/app.slint:251
 msgid "Could not save custom theme: {}"
@@ -4579,6 +4579,12 @@ msgid ""
 "renderer privacy remote images sync group messages date inbox tray "
 "background startup sign in login download location folder attachments save"
 msgstr ""
+"общие тема оформление палитра значок приложения dock панель задач меню "
+"приложений язык время часы 12-часовой 24-часовой рабочая область "
+"расположение окно без рамки заголовок отрисовка конфиденциальность внешние "
+"изображения синхронизация группировка письма дата входящие трей фоновый "
+"режим автозапуск автозагрузка вход в систему загрузка скачивание папка "
+"вложения сохранение"
 
 #: ui/dialogs/settings-dialog.slint:712
 msgid ""
@@ -4907,13 +4913,15 @@ msgstr "Активен: CPU — экономия памяти"
 
 #: ui/dialogs/settings-dialog.slint:1458
 msgid "Download location"
-msgstr ""
+msgstr "Папка для загрузок"
 
 #: ui/dialogs/settings-dialog.slint:1467
 msgid ""
 "Saving an attachment asks where to put it, starting in the folder your "
 "system suggests."
 msgstr ""
+"При сохранении вложения приложение спрашивает, куда его поместить, и "
+"открывает папку, предложенную системой."
 
 #: ui/dialogs/settings-dialog.slint:1512
 msgid ""

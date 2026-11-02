@@ -533,19 +533,19 @@ msgstr "Tema personalizado guardado."
 
 #: ui/app.slint:247
 msgid "Download location saved."
-msgstr ""
+msgstr "Ubicación de descarga guardada."
 
 #: ui/app.slint:248
 msgid "Download location is saved once an account is set up."
-msgstr ""
+msgstr "La ubicación de descarga se guardará cuando configures una cuenta."
 
 #: ui/app.slint:249
 msgid "Could not save the download location: {}"
-msgstr ""
+msgstr "No se pudo guardar la ubicación de descarga: {}"
 
 #: ui/app.slint:250
 msgid "Choose download location"
-msgstr ""
+msgstr "Elige la ubicación de descarga"
 
 #: ui/app.slint:251
 msgid "Could not save custom theme: {}"
@@ -4591,6 +4591,12 @@ msgid ""
 "renderer privacy remote images sync group messages date inbox tray "
 "background startup sign in login download location folder attachments save"
 msgstr ""
+"general tema apariencia paleta icono de la aplicación dock barra de tareas "
+"lanzador idioma hora reloj 12 horas 24 horas espacio de trabajo disposición "
+"ventana sin marco barra de título renderizador privacidad imágenes remotas "
+"sincronización agrupar mensajes fecha bandeja de entrada bandeja del sistema "
+"segundo plano inicio iniciar sesión descarga ubicación carpeta adjuntos "
+"guardar"
 
 #: ui/dialogs/settings-dialog.slint:712
 msgid ""
@@ -4926,13 +4932,15 @@ msgstr "Activo: CPU — Bajo consumo de memoria"
 
 #: ui/dialogs/settings-dialog.slint:1458
 msgid "Download location"
-msgstr ""
+msgstr "Ubicación de descarga"
 
 #: ui/dialogs/settings-dialog.slint:1467
 msgid ""
 "Saving an attachment asks where to put it, starting in the folder your "
 "system suggests."
 msgstr ""
+"Al guardar un adjunto se pregunta dónde guardarlo, empezando por la carpeta "
+"que sugiere el sistema."
 
 #: ui/dialogs/settings-dialog.slint:1512
 msgid ""
