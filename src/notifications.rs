@@ -13,7 +13,8 @@ use tokio::sync::broadcast::{self, error::RecvError};
 
 pub use flectar_mail_core::NewMailNotification;
 
-type PublishHandler = Arc<dyn Fn(&NewMailNotification) + Send + Sync + 'static>;
+type PublishHandler =
+    Arc<dyn Fn(&NewMailNotification) -> Result<(), String> + Send + Sync + 'static>;
 
 /// Host publisher for system notifications. The default does nothing, so a
 /// host without a notification service can leave it untouched.
@@ -23,9 +24,12 @@ pub struct NotificationPublisher {
 }
 
 impl NotificationPublisher {
-    /// Publish a notification; the host marshals the call onto whatever
-    /// thread its native API requires and returns promptly.
-    pub fn new(publish: impl Fn(&NewMailNotification) + Send + Sync + 'static) -> Self {
+    /// Publish a notification, or say why the host couldn't so core tries
+    /// again shortly. The host marshals the call onto whatever thread its
+    /// native API requires and returns promptly.
+    pub fn new(
+        publish: impl Fn(&NewMailNotification) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
         Self {
             handler: Some(Arc::new(publish)),
         }

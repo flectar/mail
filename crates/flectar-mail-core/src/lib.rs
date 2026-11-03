@@ -69,6 +69,8 @@ const MAX_CACHED_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
 /// Notification rows one database write settles; a dispatch keeps going until
 /// nothing more is due.
 const NOTIFICATION_BATCH: usize = 32;
+/// How long a notification the host couldn't raise waits for another try.
+const NOTIFICATION_RETRY_MS: i64 = 60_000;
 /// Originals written durably before the transaction that refers to them
 /// commits. One nothing refers to was left by an interrupted write.
 const DURABLE_ORIGINAL_SUFFIXES: [&str; 2] =
@@ -8690,15 +8692,15 @@ impl Core {
     }
 
     /// Hand every due new-mail notification to `publish`, which raises it on
-    /// the host, and suppress or postpone the rest (see
+    /// the host or says why it couldn't, and suppress or postpone the rest (see
     /// [`repo::notifications::settle_due`]). Each row is claimed before
     /// `publish` and marked delivered after it, so a crash in between delivers
-    /// it again once [`Self::recover_notification_deliveries`] runs. Returns
-    /// when the next postponed notification falls due, for the caller to
-    /// dispatch again then.
+    /// it again once [`Self::recover_notification_deliveries`] runs; a row the
+    /// host couldn't raise is tried again a minute later. Returns when the next
+    /// postponed notification falls due, for the caller to dispatch again then.
     pub async fn dispatch_notifications(
         &self,
-        publish: impl Fn(&NewMailNotification),
+        publish: impl Fn(&NewMailNotification) -> std::result::Result<(), String>,
     ) -> Result<Option<i64>> {
         let settings = Arc::new(self.get_settings().await?);
         loop {
@@ -8718,12 +8720,18 @@ impl Core {
                     Ok(settled)
                 })
                 .await?;
-            // Every claimed row goes out even if recording one fails; the
-            // failed ones are delivered again after recovery.
+            // Every claimed row goes to the host even if recording one fails;
+            // the failed ones are delivered again after recovery.
             let mut failure = None;
             for (id, notification) in &settled.claimed {
-                publish(notification);
-                if let Err(error) = self.mark_notification_delivered(*id).await {
+                let recorded = match publish(notification) {
+                    Ok(()) => self.mark_notification_delivered(*id).await,
+                    Err(error) => {
+                        self.retry_notification_delivery(*id, NOTIFICATION_RETRY_MS, error)
+                            .await
+                    }
+                };
+                if let Err(error) = recorded {
                     failure.get_or_insert(error);
                 }
             }
@@ -9542,6 +9550,7 @@ mod notification_dispatch_tests {
         let next = core
             .dispatch_notifications(|notification| {
                 published.lock().unwrap().push(notification.subject.clone());
+                Ok(())
             })
             .await
             .unwrap();
@@ -9554,6 +9563,36 @@ mod notification_dispatch_tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_retries_what_the_host_could_not_raise() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "a@test.dev", "Later", false);
+                repo::notifications::enqueue(conn, id)
+            })
+            .await
+            .unwrap();
+
+        let next = core
+            .dispatch_notifications(|_| Err("bridge not ready".into()))
+            .await
+            .unwrap();
+        let row = core
+            .db
+            .read(move |conn| repo::notifications::get(conn, id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, "pending");
+        assert_eq!(row.last_error.as_deref(), Some("bridge not ready"));
+        assert!(next.is_some());
+        assert_eq!(next, row.not_before);
     }
 }
 

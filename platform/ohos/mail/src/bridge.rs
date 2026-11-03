@@ -305,8 +305,9 @@ pub(super) async fn pick_save(
 }
 
 /// Publish a new-mail notification through the ArkTS NotificationKit hook.
-pub(super) fn notify(notification: &flectar_mail::NewMailNotification) {
-    let _ = call_closure(
+/// Fails while the page hasn't installed the hook, so core tries again later.
+pub(super) fn notify(notification: &flectar_mail::NewMailNotification) -> Result<(), String> {
+    call_closure(
         &NOTIFY,
         "notify",
         NotifyRequest {
@@ -315,7 +316,7 @@ pub(super) fn notify(notification: &flectar_mail::NewMailNotification) {
             thread_id: notification.thread_id,
             message_id: notification.message_id,
         },
-    );
+    )
 }
 
 /// Arguments of one `imeUpdateCursor` call.
