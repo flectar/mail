@@ -60,7 +60,7 @@ Flectar Mail ist eine schlanke, native Anwendung für E-Mails, Kalender und Kont
 | Einschließlich Code und Bibliotheken (PSS) | **~85 MB** | ~435 MB |
 | Browser-Engine | Keine | Gecko |
 
-Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Posteingang und angezeigtem HTML-Newsletter, 60 Sekunden nach dem Start und mit dem voreingestellten CPU-Renderer. Privater Speicher entspricht dem Wert, den der Windows-Task-Manager als **Arbeitsspeicher** anzeigt. Erfahre, [wie wir messen und wie du selbst nachmessen kannst](../performance.md).
+Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Posteingang und angezeigtem HTML-Newsletter, 60 Sekunden nach dem Start und mit dem voreingestellten CPU-Renderer. Privater Speicher entspricht dem Wert, den der Windows-Task-Manager als **Arbeitsspeicher** anzeigt. Unter Windows mit 7 echten Konten und etwa 69.000 ungelesenen Nachrichten zeigt der Task-Manager etwa 40 MB bei geöffnetem Fenster und etwa 4 MB, sobald es in den Infobereich geschlossen ist. Erfahre, [wie wir messen und wie du selbst nachmessen kannst](../performance.md).
 
 ### Im Vergleich
 

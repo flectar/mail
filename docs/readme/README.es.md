@@ -66,7 +66,9 @@ Mediciones realizadas en Linux con una cuenta IMAP (860 mensajes), la bandeja de
 entrada abierta y un boletín HTML en pantalla, 60 segundos después de abrir la
 aplicación y con el renderizador por CPU, que es el predeterminado. La memoria
 privada es lo que el Administrador de tareas de Windows muestra como **Memoria**.
-Consulta [cómo lo medimos y cómo comprobarlo por tu cuenta](../performance.md).
+En Windows, con 7 cuentas reales y unos 69.000 mensajes sin leer, el
+Administrador de tareas muestra unos 40 MB con la ventana abierta y unos 4 MB
+al cerrarla a la bandeja del sistema. Consulta [cómo lo medimos y cómo comprobarlo por tu cuenta](../performance.md).
 
 ### Comparación con otros clientes
 

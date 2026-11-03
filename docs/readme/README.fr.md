@@ -60,7 +60,7 @@ Flectar Mail est une application native et légère pour vos e-mails, calendrier
 | Y compris le code et les bibliothèques (PSS) | **~85 Mo** | ~435 Mo |
 | Moteur de navigateur | Aucun | Gecko |
 
-Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
+Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Sous Windows, avec 7 comptes réels et environ 69 000 messages non lus, le Gestionnaire des tâches affiche environ 40 Mo avec la fenêtre ouverte et environ 4 Mo une fois celle-ci fermée dans la zone de notification. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
 
 ### Comparatif
 

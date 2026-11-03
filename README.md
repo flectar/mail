@@ -64,8 +64,10 @@ fraction of the memory of a typical web-based mail client.
 
 Measured on Linux with one IMAP account (860 messages), the inbox open and an
 HTML newsletter displayed, 60 seconds after launch, with the default CPU
-renderer. Private memory is what Windows Task Manager lists as **Memory**. See
-[how we measure and how to check it yourself](docs/performance.md).
+renderer. Private memory is what Windows Task Manager lists as **Memory**. On
+Windows, with 7 real accounts and about 69,000 unread messages, Task Manager
+shows about 40 MB with the window open and about 4 MB once it's closed to the
+tray. See [how we measure and how to check it yourself](docs/performance.md).
 
 ### How it compares
 

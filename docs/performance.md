@@ -30,21 +30,47 @@ The same Flectar Mail build in other states:
 | After reading two messages | 25.8 | 93.0 | 100.0 |
 | Then minimized for 25 seconds | 24.4 | 91.8 | 98.9 |
 
+On Windows 11, with 7 real accounts and about 69,000 unread messages, Task
+Manager's **Details** tab showed:
+
+| Flectar Mail (MiB) | Private working set | Working set | Commit size |
+| --- | ---: | ---: | ---: |
+| Window open, idle | 37.8 | 64.5 | 53.7 |
+| Closed to the tray | 4.2 | 8.3 | 49.4 |
+
 The README rounds these to megabytes (1 MiB = 1.049 MB). It quotes about 20 MB
-of private memory and about 85 MB PSS for Flectar Mail, and about 250 MB and
-435 MB for Thunderbird.
+of private memory and about 85 MB PSS for Flectar Mail, about 250 MB and 435 MB
+for Thunderbird, and about 40 MB and 4 MB for the large Windows mailbox.
 
 ## What the numbers mean
 
 | Metric | Counts | Where you see it |
 | --- | --- | --- |
-| Private memory | Memory that belongs to the app alone and isn't backed by a file: heap, caches, stacks. Adds up correctly across processes. | Windows Task Manager's **Memory** column (private working set); `RssAnon` on Linux |
-| PSS | Private memory plus the app's code and libraries mapped from disk, with shared pages split between the processes that use them | `smem`, `/proc/<pid>/smaps_rollup` |
+| Private memory | Memory that belongs to the app alone and isn't backed by a file: heap, caches, stacks. Adds up correctly across processes. | Windows Task Manager's **Memory** column (private working set); GNOME System Monitor's **Memory** column (RSS minus shared); `RssAnon` on Linux |
+| PSS | Private memory plus the app's code and libraries mapped from disk, with shared pages split between the processes that use them | Plasma System Monitor's **Memory** column, `smem`, `/proc/<pid>/smaps_rollup` |
 | RSS | Every resident page, shared libraries in full. Summed over several processes, it counts shared pages more than once. | `top`, `htop` (RES) |
 
 Most of Flectar Mail's RSS is its own executable: about 59 MiB of code and
 read-only data mapped from disk. Those pages are clean, so the system can drop
 them under memory pressure and read them back later.
+
+### Why Windows shows less than Linux
+
+- **Different columns.** Task Manager's **Memory** leaves out program code,
+  while `htop` (RSS) and Plasma System Monitor (PSS) count the 59 MiB
+  executable. Compared like for like, the large Windows mailbox uses more
+  private memory (37.8 MiB) than the one-account Linux test (19–20 MiB).
+- **More of the program file counts on Linux.** Linux maps a file 64 KiB at a
+  time around each page that's touched, so RSS includes code that may never
+  run. That's one reason the Windows working set (64.5 MiB) is lower than the
+  Linux RSS (87 MiB) despite the much larger mailbox.
+- **The tray trim.** When the window closes to the tray, or stays minimized for
+  10 seconds, Flectar Mail releases its rendering buffers and, on Windows,
+  empties its working set. Windows moves those pages to its standby list, so the
+  working set drops to a few MiB while commit size, the memory still allocated,
+  barely moves. When the window reopens, the pages usually come straight back
+  from RAM. Linux has no equivalent: closing to the tray frees the window's
+  memory, but the program's code stays resident, and minimizing changes little.
 
 ## How to measure
 
@@ -97,3 +123,6 @@ screens. `footprint <pid>` or `vmmap --summary <pid>` gives the breakdown.
 - **Connections:** Flectar Mail used IMAP over TLS; Thunderbird used plain IMAP.
   Thunderbird lists only subscribed folders, Inbox and Trash here, so it synced
   fewer folders than Flectar Mail.
+- **Windows:** Windows 11 with 7 real accounts and about 69,000 unread
+  messages, read from Task Manager's Details tab with the window open and again
+  after closing it to the tray.
