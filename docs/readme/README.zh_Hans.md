@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>邮件，重归迅捷</h3>
-    <p>从底层开始，为速度而构建。Flectar Mail 提供原生性能、瞬时启动，内存占用可低至 80 MB。</p>
+    <p>从底层开始，为速度而构建。Flectar Mail 提供原生性能、瞬时启动，空闲时私有内存占用约 20 MB。</p>
   </div>
   <p>
     <a href="https://flectar.com">官网</a> ·
@@ -39,81 +39,54 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 ## ❓ 为什么选择 Flectar Mail？
 
-- **从第一次点击起就快。** 原生界面与本地优先的数据通路，让你无需等待浏览器运行时即可进入收件箱。
-- **内存占用可低至 80 MB。** Flectar Mail 刻意把内存占用控制在较低水平，即使全功能收件箱就在手边也是如此。
-- **所有内容集中一处。** 在邮件、日历和联系人之间切换，无需拼凑多个相互独立的应用。
-- **生来支持离线。** 邮箱和日历都存储在本地，因此已同步的数据在没有网络连接时依然可用。
-- **兼容你的各类账户。** 可连接 Gmail、Outlook 和 Microsoft 365，也可连接基于标准的 IMAP、POP3、SMTP、JMAP、CalDAV 与 CardDAV 服务。
-- **注重隐私的默认设置。** 远程图片在你允许之前会被拦截，有助于防止跟踪像素上报你阅读邮件的时间。
-- **以架构保障安全。** 邮件内容从不在 WebView 中打开。Flectar Mail 通过自有的 Rust 原生管线渲染 HTML 与 CSS，不执行邮件中的脚本，并默认拦截远程图片，由此在设计上规避了内嵌浏览器的攻击面。
-- **实验性的 Rust 渲染器。** 不借助浏览器引擎来构建邮件渲染器，是一片全新的领域。渲染问题在所难免，复杂邮件尤其如此，兼容性仍在持续改进。
-- **适配各种屏幕。** 宽裕的桌面布局和极简桌面布局，与触控友好的紧凑界面提供一致的体验。
-- **原生且开源。** 完全以 Rust 从底层构建，不是套在窗口里的浏览器，并按 AGPLv3 发布。
+| 优势 | 说明 |
+| --- | --- |
+| **从第一次点击起就快** | 原生界面与本地优先的数据通路，让你无需等待浏览器运行时即可进入收件箱。 |
+| **空闲时私有内存约 20 MB** | 计入代码和库约为 85 MB；处理同一邮箱时，私有内存约为 Thunderbird 的十二分之一。详见[性能](#-性能)。 |
+| **所有内容集中一处** | 在邮件、日历和联系人之间切换，无需拼凑多个相互独立的应用。 |
+| **生来支持离线** | 邮箱和日历都存储在本地，因此已同步的数据在没有网络连接时依然可用。 |
+| **兼容你的各类账户** | 可连接 Gmail、Outlook 和 Microsoft 365，也可连接基于标准的 IMAP、POP3、SMTP、JMAP、CalDAV 与 CardDAV 服务。 |
+| **注重隐私的默认设置** | 远程图片在你允许之前会被拦截，因此跟踪像素无法上报你阅读邮件的时间。 |
+| **以架构保障安全** | 邮件内容从不在 WebView 中打开。邮件的 HTML 与 CSS 由 Rust 原生管线渲染，不执行邮件中的脚本，由此规避了内嵌浏览器的攻击面。 |
+| **实验性的 Rust 渲染器** | 不借助浏览器引擎来渲染邮件，是一片全新的领域。兼容性仍在持续改进，复杂邮件目前可能无法正确渲染。 |
+| **适配各种屏幕** | 宽裕的桌面布局和极简桌面布局，与触控友好的紧凑界面提供一致的体验。 |
+| **原生且开源** | 完全以 Rust 从底层构建，不是套在窗口里的浏览器，并按 AGPLv3 发布。 |
 
-## 📁 文件与附件
+## ⚡ 性能
 
-浏览 JMAP/WebDAV 存储、搜索邮件附件、将文件保存为离线副本，并预览 PDF、图像和文本。
+| 空闲时（同一邮箱） | Flectar Mail | Thunderbird 159 |
+| --- | ---: | ---: |
+| 私有内存 | **~20 MB** | ~250 MB |
+| 含代码与库（PSS） | **~85 MB** | ~435 MB |
+| 浏览器引擎 | 无 | Gecko |
 
-## ✍🏻 账户签名与 OpenPGP
+以上数据在 Linux 上测得：一个 IMAP 账户（860 封邮件），打开收件箱并显示一封 HTML 新闻简报，采用默认的 CPU 渲染器，在启动 60 秒后采样。私有内存即 Windows 任务管理器中 **内存** 一栏显示的数值。在 Windows 上，使用 7 个真实账户、约 69,000 封未读邮件时，任务管理器在窗口打开时显示约 40 MB，关闭到系统托盘后约 4 MB。详见[我们的测量方法及自行验证方式](../performance.md)。
 
-在「设置 → 账户 → 签名与 OpenPGP」中，你可以创建具名签名、分别为新建邮件和回复设置默认签名，并在邮件编辑器中选择要插入的签名。桌面端的 OpenPGP/MIME 签名与加密使用本机安装的 GnuPG 2.x，私钥口令通过 pinentry 输入。当要求加密而收件人密钥缺失或无效时，会阻止发送；受保护的草稿在发送前仅保存在本地。
+### 与其他客户端对比
 
-目前不支持 S/MIME 与移动端 OpenPGP。
+| 邮件客户端 | 界面 | 邮件渲染方式 | 平台 |
+| --- | --- | --- | --- |
+| **Flectar Mail** | 原生 Rust 应用 | Blitz（Rust HTML/CSS 渲染器），不使用 WebView | Windows、macOS、Linux、Android；iOS 即将推出 |
+| Thunderbird | 基于 Gecko 的桌面应用 | Gecko | Windows、macOS、Linux、Android |
+| Outlook for Windows | 带网页界面的 Windows 应用 | Microsoft Edge WebView2 | Windows |
+| Spark | Electron 应用 | Chromium | macOS、Windows、iOS、Android |
+| Aerion | 采用 Wails 网页界面的 Go 应用 | 系统 WebView | Linux、macOS、Windows |
+| 浏览器标签页中的 Gmail | 网页应用 | Chrome 或其他浏览器 | 网页端 |
 
-## 🧪 实验性的 HTML 渲染
+## ✨ 功能
 
-> [!WARNING]
-> HTML 邮件渲染目前是 Flectar Mail 中最具实验性的部分。部分邮件，尤其是标记与 CSS 复杂或特殊的邮件，可能仍无法正确渲染。
-
-为了保持客户端完全原生、把内存占用维持在 80 MB 左右，Flectar Mail 使用 [Blitz](https://github.com/DioxusLabs/blitz)——Dioxus 团队开发的 Rust HTML/CSS 渲染器——来渲染邮件 HTML，而不是内嵌浏览器或 WebView。
-
-桌面版在「设置 → 常规 → 渲染器」下提供 **CPU — 低内存** 与 **GPU — WGPU** 两个选项。初始选择 CPU，且不会初始化 WGPU。GPU 选项在共享的 WGPU 30 设备上使用 Slint 与 Vello；更改设置后需重启应用才会生效。GPU 启动失败时会自动回退到 CPU。
-
-据我们所知，Flectar Mail 是最早把 Blitz 用于真实场景中任意邮件 HTML 的项目之一。邮件标记中含有大量非常规的 HTML 与 CSS，这会把渲染器推向要求极高的领域。目前我们在 Blitz 之上维护了若干补丁，并希望随时间推移尽可能多地把这些工作回流上游。
-
-如果你发现某封邮件渲染有误，请[提交问题](https://github.com/flectar/mail/issues)。这一方案仍处于实验阶段，但它也是 Flectar Mail 相比基于 Tauri、Wails 等框架构建的 WebView 客户端能够如此轻量的重要原因。
-
-## 🎨 随心定制
-
-选择适合你处理邮件方式的工作区：保留信息详尽的三栏布局，或切换到更简洁的极简视图；选择浅色或深色主题；使用内置配色或创建自定义配色；还可以显示或隐藏发件人头像。你还可以为应用图标换一种颜色：任务栏或程序坞、系统托盘、Linux 应用启动器，以及 Android 和 iOS 主屏幕上的图标都会随之改变。
-
-完整工作区将文件夹、邮件列表和所选邮件同时显示在一起。极简布局减少视觉干扰，在你需要时为收件箱的每个部分留出更大空间。
-
-### 👥 分组与账户颜色
-
-把相关账户归入具名分组，例如「工作」或「个人」，再为每个分组指定颜色。你可以在标签栏最前面的分组菜单中，或在「设置 → 账户 → 分组」中新建分组，并勾选属于它的账户。在该菜单中选择一个分组，邮件视图就只显示这些账户：统一收件箱、搜索、计数和侧边栏都只包含它们的邮件，标签页则保持不变。选择 **全部账户** 即可再次查看所有邮件。
-
-你还可以覆盖单个账户的颜色，并在每封邮件的左边缘显示最终生效的颜色。在统一收件箱中处理邮件时，这些色标让账户易于区分；下例中「工作」使用紫色，「支持」使用橙色。
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-profiles-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-profiles-light.png">
-  <img src="../../resources/screenshots/desktop-profiles-light.png" alt="Flectar Mail 统一收件箱，带有紫色与橙色分组色标">
-</picture>
-
-### 🧵 会话线程
-
-回复按时间顺序归组显示，当前邮件在阅读窗格中展开。如需逐封列出、打开和处理邮件，可在“设置 → 通用”中关闭 **Conversation view**（会话视图）。
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-thread-light.png">
-  <img src="../../resources/screenshots/desktop-thread-light.png" alt="Flectar Mail 会话，包含收到的邮件与回复">
-</picture>
-
-### 🗂️ 标签页
-
-借助浏览器式标签页，同时打开多个位置。每个标签页都会记住自己的位置：邮箱、搜索或打开的会话，日历、联系人、文件或设置，以及列表滚动到的位置和正在阅读的邮件。用鼠标中键或 Ctrl/⌘ 点击邮件，即可在后台标签页中打开（同时按住 Shift 则切换过去），也可以在邮件菜单中选择 **Open in new tab**（在新标签页中打开）。拖动标签页可调整顺序，用鼠标中键点击标签页即可关闭，右键点击标签页可关闭其他标签页或其右侧的标签页，下次打开 Flectar Mail 时也能从上次离开的地方继续。
-
-**Ctrl/⌘+T** 新建标签页，**Ctrl/⌘+W** 关闭当前标签页，**Ctrl/⌘+Shift+T** 重新打开最近关闭的标签页。**Ctrl+Tab** 与 **Ctrl+Shift+Tab** 在标签页之间循环切换，**Ctrl/⌘+1–8** 跳转到对应标签页，**Ctrl/⌘+9** 跳转到最后一个标签页。
-
-在手机和较窄的窗口中，工具栏末尾的按钮会显示打开的标签页数量，并以卡片形式列出所有标签页。点按卡片即可切换过去，点按 × 或将卡片滑到一侧即可关闭，点按 **+** 可新建标签页。选中邮件后，在选择菜单中选择 **Open in new tabs**（在新标签页中打开）即可在后台打开它们。如果不想使用标签页，可在“设置 → 通用”中关闭 **Tabs**（标签页）。
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">
-  <img src="../../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail 打开了多个会话、日历、联系人与文件标签页">
-</picture>
+| 功能 | 说明 |
+| --- | --- |
+| [会话线程](../features.md#conversation-threads) | 按时间顺序归组显示回复，并支持完整的键盘导航。此功能可以关闭。 |
+| [标签页](../features.md#tabs) | 浏览器式标签页，会记住各自的位置；桌面端支持快捷键，手机上提供标签页切换器。 |
+| [分组与账户颜色](../features.md#profiles-and-account-colors) | 把账户归入「工作」「个人」等分组，并为每封邮件标上颜色。 |
+| [外观](../features.md#appearance) | 完整或极简布局、浅色或深色主题、配色、发件人头像以及应用图标颜色。 |
+| [无边框窗口](../features.md#frameless-window) | 窗口控制按钮位于工具栏中，并保留各平台的原生行为。 |
+| [日历、联系人与文件](../features.md#calendar-contacts-and-files) | CalDAV 与 CardDAV 同步、JMAP 与 WebDAV 文件、附件搜索、离线文件与文件预览。 |
+| [签名与 OpenPGP](../features.md#signatures-and-openpgp) | 具名签名，以及桌面端通过 GnuPG 实现的 OpenPGP/MIME 签名与加密。 |
+| [存储与备份](../features.md#storage-and-backups) | 按类型显示的空间占用、数据库快照、账户备份以及 POP3 服务器保留规则。 |
+| [导入账户与邮件](../features.md#importing-accounts-and-mail) | 支持 Thunderbird、K-9 Mail、mbox、`.eml`、maildir、Apple Mail 以及 ZIP 归档。 |
+| [HTML 渲染](../features.md#html-rendering) | 使用以 Rust 编写的 Blitz 渲染邮件 HTML，可在 CPU 或 GPU 上运行。 |
 
 ### 完整与极简工作区
 
@@ -138,6 +111,43 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
           <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-minimal-dark.png">
           <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-minimal-light.png">
           <img src="../../resources/screenshots/desktop-minimal-light.png" alt="Flectar Mail 极简桌面工作区" width="100%">
+        </picture>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+### 标签页、会话与分组
+
+<table>
+  <thead>
+    <tr>
+      <th width="33.33%">标签页</th>
+      <th width="33.33%">会话</th>
+      <th width="33.33%">分组颜色</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">
+          <img src="../../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail 打开了多个会话、日历、联系人与文件标签页" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-thread-light.png">
+          <img src="../../resources/screenshots/desktop-thread-light.png" alt="Flectar Mail 会话，包含收到的邮件与回复" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-profiles-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-profiles-light.png">
+          <img src="../../resources/screenshots/desktop-profiles-light.png" alt="Flectar Mail 统一收件箱，带有紫色与橙色分组色标" width="100%">
         </picture>
       </td>
     </tr>
@@ -189,9 +199,7 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
   </tbody>
 </table>
 
-### 🪟 无边框窗口
-
-Flectar Mail 默认用工具栏中的窗口控制按钮替代系统标题栏；如需恢复系统标题栏，可在「设置 → 常规 → 界面」中关闭 **无边框窗口**。各平台保留各自的原生行为：macOS 保留原生红绿灯按钮，Windows 保留贴靠布局和系统菜单，Linux 则遵循 GNOME 或 KDE 中配置的按钮顺序与标题栏操作。
+### 无边框窗口
 
 <table>
   <tbody>
@@ -238,7 +246,7 @@ Flectar Mail 默认用工具栏中的窗口控制按钮替代系统标题栏；�
   </tbody>
 </table>
 
-### 📅 日历、联系人与文件
+### 日历、联系人与文件
 
 <table>
   <thead>
@@ -275,103 +283,47 @@ Flectar Mail 默认用工具栏中的窗口控制按钮替代系统标题栏；�
   </tbody>
 </table>
 
-### 💾 存储与备份
+### 为小屏幕而设计
 
-「设置 → 存储」会显示邮件、附件、离线文件和数据库在本机占用的空间。在同一页面中，你可以导出经过校验的数据库快照，也可以通过备份迁移已连接账户的配置与偏好设置。密码和 OAuth 令牌保存在系统密钥环中，因此恢复后的设备会要求你重新登录。
-
-POP3 账户会把邮件下载到本机，默认保留在服务器上；你也可以为每个账户选择在 7、14 或 30 天后、在本机删除后，或在下载后立即从服务器移除邮件，但邮件在存入本机之前绝不会被移除。它们的文件夹只存在于本机，因此数据库快照会包含这些邮件；移除 POP3 账户或删除全部数据时，你可以先将邮件导出为 mbox 文件（每个文件夹一个），供其他邮件应用导入。
-
-同一导入功能还可以从 Thunderbird（配置文件夹、「工具 › 导出」生成的归档或 `prefs.js`）以及 Android 版 Thunderbird 或 K-9 Mail（`.k9s` 设置导出）迁移账户。添加之前你会逐一检查每个账户：Flectar Mail 无法沿用的设置（例如 Exchange 服务器）会说明原因，而不会被悄悄更改；POP3 账户会沿用从服务器移除邮件的规则。现有账户不会被修改，密码也永远不会被导入。
-
-已保存的邮件也可以用同样的方式导入：Thunderbird 的本地文件夹及其 POP3 账户下载的邮件、mbox 文件（例如 Google Takeout 导出或 Flectar Mail 自己导出的文件）、`.eml` 邮件、maildir 文件夹、Apple Mail 邮箱，以及包含它们的 ZIP 归档。你可以选择文件（可一次选择多个），再选择要导入的文件夹（除非勾选，否则会跳过废纸篓和垃圾邮件），文件夹结构以及已读、星标状态都会保留。目标位置中已有的邮件会被跳过，因此中途停止的导入可以直接重新运行，耗时较长的导入也可以在后台继续。不属于任何账户的邮件会放入 **在此设备上**：这些文件夹只存在于本机，可在「设置 → 存储」中导出或删除。邮件也可以导入到 POP3 账户的文件夹中，或上传到 IMAP、JMAP 或 Gmail 账户的服务器，放在单独的文件夹里。
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail 存储设置，包含本地用量、此设备上的邮件、数据库快照与账户备份控件">
-</picture>
-
-### 📱 为小屏幕而设计
-
-紧凑界面让重要操作触手可及，同时在需要时为邮件、日程和联系人提供完整的屏幕空间。
-
-| 浅色                                                                             | 深色                                                                            |
-|----------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| 浅色 | 深色 |
+| --- | --- |
 | ![Flectar Mail 浅色模式下的移动端收件箱](../../resources/screenshots/mobile-light.png) | ![Flectar Mail 深色模式下的移动端收件箱](../../resources/screenshots/mobile-dark.png) |
+
+## 🧪 实验性的 HTML 渲染
+
+> [!WARNING]
+> HTML 邮件渲染目前是 Flectar Mail 中最具实验性的部分。部分邮件，尤其是标记与 CSS 复杂或特殊的邮件，可能仍无法正确渲染。
+
+Flectar Mail 使用 [Blitz](https://github.com/DioxusLabs/blitz)——Dioxus 团队开发的 Rust HTML/CSS 渲染器——来渲染邮件，而不是内嵌浏览器或 WebView。如果某封邮件渲染有误，请[提交问题](https://github.com/flectar/mail/issues)。详细了解[渲染器以及 CPU 与 GPU 选项](../features.md#html-rendering)。
 
 ## 📥 获取 Flectar Mail
 
-Flectar Mail 目前仍在开发中，尚未稳定。
+Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHub Releases](https://github.com/flectar/mail/releases) 上，带有 **Pre-release** 标记。
 
 > [!WARNING]
 > **Google OAuth 验证需要每年进行一次 CASA 安全评估。** Flectar 是社区开源项目，因此能否完成该项评估取决于赞助支持。在所需的验证获得资金并完成之前，无法推出默认配置 Gmail OAuth 的稳定版本。如果你希望帮助实现内置的 Gmail 登录，请[赞助 Flectar](https://github.com/sponsors/flectar)。
->
-> Google 与 Microsoft 的 OAuth 验证仍在进行中。此前的 GitHub 预发布版本面向自行提供 OAuth 注册信息、或使用 IMAP、POP3、JMAP 账户的测试者。
 
-未内置 OAuth 应用密钥的构建版本会禁用 Gmail 和 Outlook 登录。可使用欢迎界面上的**登录设置**齿轮，保存你自己的 Google 或 Microsoft 应用注册信息，或连接 IMAP、POP3 或 JMAP 账户。自定义密钥与「设置」共用，并优先于内置密钥；清除自定义客户端 ID 后，在可用的情况下会恢复默认值。保存配置后，各服务商会分别启用。
+| 平台 | 下载 | 说明 |
+| --- | --- | --- |
+| Linux x64 | AppImage、Debian/Ubuntu `.deb`、Fedora 43/44 `.rpm` 或 Flatpak 包 | 需要支持 Secret Service 的密钥环。Flatpak 为侧载预览版，尚未上架 Flathub。 |
+| Windows x64 | 安装程序 `.exe` 或便携版 ZIP | 预览版未签名 |
+| macOS 14+（Apple 芯片或 Intel） | DMG 或应用程序 ZIP | 临时签名（ad-hoc），未经公证 |
+| Android 8.0+（arm64） | 已签名的 APK | 预览版与稳定版共用同一个应用身份。 |
+| HarmonyOS 与 OpenHarmony | 由 [springmin](https://github.com/springmin) 维护的[社区移植版](../../platform/ohos/README.md) | 不包含在 GitHub 发布版本中，需从源码构建。 |
 
-预览构建发布后，请从 [GitHub Releases](https://github.com/flectar/mail/releases) 下载，并留意 **Pre-release** 标记：
+未内置 OAuth 应用密钥的构建版本会禁用 Gmail 和 Outlook 登录。可使用欢迎界面上的**登录设置**齿轮，添加你自己的 Google 或 Microsoft 应用注册信息，或连接 IMAP、POP3 或 JMAP 账户。
 
-- **Linux x64：** AppImage、Debian/Ubuntu `.deb`、Fedora 43/44 `.rpm`，或手动侧载（sideload）的 Flatpak 预览包
-- **Windows x64：** 安装程序 `.exe` 或便携版 ZIP
-- **macOS Apple 芯片或 Intel（macOS 14+）：** DMG 或应用程序 ZIP
-- **Android arm64（Android 8.0+）：** 预发布版本中的实验性测试 APK
+[安装指南](../install.md)介绍了安装命令、Linux 密钥环与桌面门户、Flatpak 与 RPM 注意事项、下载校验、Android 签名，以及如何使用 `cargo run --bin flectar-mail` 从源码构建。
 
-Windows 预览版未签名；macOS 预览版采用临时签名（ad-hoc）且未经过公证，因此出现操作系统安全提示属于正常现象。更新需要手动安装。
+## 🤝 参与项目
 
-Flatpak 预览版以独立测试包的形式提供。它目前还不是 Flathub 软件包，因此不会获得 Flathub 的自动更新。在托盘后端能够使用沙箱安全的 D-Bus 名称之前，其「关闭到托盘」选项处于禁用状态。登录时自动启动通过桌面的后台门户实现，由于没有托盘可用，会直接打开窗口。由于沙箱无法更改主机上的启动器图标，应用图标在 Flatpak 中保持橙色。
-
-使用 `sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` 或 `flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak` 安装下载的 Linux 软件包。用 `flatpak run com.flectar.mail` 启动 Flatpak 版本。
-
-RPM 支持 x86_64 架构的 Fedora 43 和 44。发布构建以 Fedora 43 为兼容性基线；同一个 RPM 必须在这两个版本的干净容器中通过安装、PDF 渲染、X11 和 Wayland 启动及卸载检查后才能发布。其他基于 RPM 的发行版尚未经过测试。如果 Discover 只提示软件包冲突，请运行上面的 `dnf install` 命令，并在问题报告中附上具体的依赖错误。
-
-旧版 `0.1.0-alpha.7` RPM 在 Fedora 44 上构建，依赖 glibc 2.43，因此无法在 Fedora 43 上安装。在等待通过上述兼容性检查的新 RPM 发布期间，可以使用该版本的 Flatpak 包。
-
-在 Linux 上，密码、OAuth 令牌和 API 密钥通过 freedesktop Secret Service 保存在系统密钥环中，绝不会存入 Flectar Mail 的数据库。任何 Secret Service 提供程序都可以使用，适用于任何桌面环境或窗口管理器，包括 sway：GNOME Keyring、KWallet，或已开启 Secret Service 集成的 KeePassXC。Flatpak 版本与会话中的其他程序使用同一个密钥环。如果当前会话还没有默认密钥环，添加第一个账户时 Flectar Mail 会请提供程序创建一个，提供程序会让你为它设置密码。如果没有提供程序，添加账户会停止并显示错误，说明缺少什么，因为 Flectar Mail 绝不会把机密存放在不够安全的地方。
-
-每个 GitHub 发布版本都包含 `SHA256SUMS` 和已签名的构建来源证明。安装 GitHub CLI 后，可用 `gh attestation verify <download> --repo flectar/mail` 校验下载内容。
-
-Android APK 更新需要使用相同的签名密钥；未使用固定测试密钥的构建版本可能需要先卸载旧版应用，而卸载会删除本地应用数据。
-
-你也可以使用 [Rust 工具链](https://rustup.rs/) 从源码构建 Flectar Mail：
-
-```bash
-cargo run --bin flectar-mail
-```
-
-Linux 桌面端的 OAuth 还会通过桌面门户（desktop portal）调用系统浏览器，因此除了上文所述的密钥环，会话还需要 `xdg-desktop-portal` 后端。当无法安全存储凭证时，发布版本会在打开 OAuth 页面之前中止；没有安全的持久化位置，授权流程就不可能完成。
-
-Podman 和 Docker 开发环境通常既没有宿主会话的 D-Bus，也无法访问宿主浏览器的回环网络。调试构建支持这种环境：它提供标记明确、仅限所有者访问的开发凭证文件，以及用于粘贴最终回环回调 URL 的折叠面板。该文件后端不会包含在发布版本中。
-
-## 🌍 帮助翻译 Flectar Mail
-
-Flectar Mail 为所有人而构建，我们期待你帮助它支持更多语言！
-
-我们使用 [Weblate](https://translate.flectar.com/) 管理社区翻译。无论你是想把 Flectar Mail 翻译成自己的母语、改进现有译文，还是参与审校，我们都欢迎每一份贡献。
-
-**[开始翻译 Flectar Mail →](https://translate.flectar.com/)**
-
-开始上手很简单：
-
-1. 在我们的翻译平台上创建一个账户。
-2. 选择你的语言；如果该语言尚不存在，就发起一项新的翻译。
-3. 直接在 Weblate 中翻译文本，无需编程或 GitHub 使用经验。
-
-译文会与我们的 GitHub 仓库同步，并以拉取请求的形式提交审阅。贡献者还可以为自己的工作在 GitHub 上获得署名。
-
-README 译文在本仓库中维护。新增或更新译文的方法请参阅[翻译贡献指南](../../CONTRIBUTING.md#translations)。
-
-## ♿ 无障碍
-
-Flectar Mail 提供键盘导航、浅色和深色主题以及灵活的布局。无障碍支持仍在持续改进。有关现有功能、测试局限以及如何报告使用障碍，请参阅 [ACCESSIBILITY.md](../../ACCESSIBILITY.md)。
-
-## 🔒 安全
-
-如需私下报告安全漏洞，请遵循 [SECURITY.md](../../SECURITY.md)。请勿在公开的问题报告中披露漏洞细节。
-
-## 🌐 面向所有人的开源
-
-Flectar Mail 只有一个开源版本，没有单独划分的社区版。客户端采用 [GNU Affero 通用公共许可证 v3](../../LICENSE) 授权。实际细节请阅读[许可说明](../../LICENSING.md)；如需参与项目建设，请参阅 [CONTRIBUTING.md](../../CONTRIBUTING.md)。
+| 主题 | 说明 |
+| --- | --- |
+| 🌍 **翻译** | 在 [Weblate](https://translate.flectar.com/) 上翻译应用、改进现有译文或参与审校，无需编程或 GitHub 使用经验。译文会以拉取请求的形式提交到本仓库，贡献者可在 GitHub 上获得署名。README 译文在本仓库中维护，详见[翻译贡献指南](../../CONTRIBUTING.md#translations)。 |
+| ♿ **无障碍** | 提供键盘导航、浅色和深色主题以及灵活的布局，无障碍支持仍在持续改进。有关现有功能、测试局限以及如何报告使用障碍，请参阅 [ACCESSIBILITY.md](../../ACCESSIBILITY.md)。 |
+| 🔒 **安全** | 如需私下报告安全漏洞，请遵循 [SECURITY.md](../../SECURITY.md)。请勿在公开的问题报告中披露漏洞细节。 |
+| 🌐 **开源** | Flectar Mail 只有一个开源版本，没有单独划分的社区版，采用 [GNU Affero 通用公共许可证 v3](../../LICENSE) 授权。实际细节请阅读[许可说明](../../LICENSING.md)。 |
+| 🛠️ **参与贡献** | 如需参与项目建设，请参阅 [CONTRIBUTING.md](../../CONTRIBUTING.md)。 |
 
 ## 🫡 致谢
 
