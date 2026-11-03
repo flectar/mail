@@ -328,18 +328,6 @@ pub enum FileClient {
     Dav(dav::DavClient),
 }
 
-/// Save via a private sibling temporary file. A failed/cancelled transfer cannot
-/// truncate an existing destination, and persist_new never replaces one.
-pub async fn save_bytes(destination: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = destination
-        .parent()
-        .ok_or_else(|| err("Invalid destination."))?;
-    let temp = tempfile::NamedTempFile::new_in(parent)?;
-    tokio::fs::write(temp.path(), bytes).await?;
-    tokio::fs::File::open(temp.path()).await?.sync_all().await?;
-    persist_new(temp, destination)
-}
-
 /// Stream a selected file with a fixed byte length. The opened handle pins the
 /// source; a file growing during upload cannot exceed the advertised boundary.
 pub(crate) async fn upload_body(path: &Path, limit: usize) -> Result<(reqwest::Body, u64)> {
@@ -496,9 +484,13 @@ mod tests {
     #[tokio::test]
     async fn save_does_not_clobber() {
         let dir = tempfile::tempdir().unwrap();
+        let original = dir.path().join("original");
+        let replacement = dir.path().join("replacement");
+        std::fs::write(&original, b"original").unwrap();
+        std::fs::write(&replacement, b"replacement").unwrap();
         let path = dir.path().join("file");
-        save_bytes(&path, b"original").await.unwrap();
-        assert!(save_bytes(&path, b"replacement").await.is_err());
+        save_cached_file(&original, &path).await.unwrap();
+        assert!(save_cached_file(&replacement, &path).await.is_err());
         assert_eq!(std::fs::read(path).unwrap(), b"original");
     }
     // A finished temporary file whose no-clobber move failed the way a hard
