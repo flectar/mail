@@ -624,7 +624,8 @@ struct Index {
 
   // Publish one new-mail notification. Rust sends raw sender/subject fields;
   // fixed fallback text comes from resources so the notification follows the
-  // application language. A wantAgent opens the app (and thread, when known).
+  // application language. Tapping it opens the app; the want carries the
+  // thread id for opening the thread once the app handles it.
   private async notify(
     sender: string, subject: string, threadId: number, messageId: number): Promise<void> {
     try {
@@ -639,8 +640,8 @@ struct Index {
       const id = Math.abs(threadId > 0 ? threadId : messageId) % 2147483647;
       const agent = await wantAgent.getWantAgent({
         wants: [{
-          bundleName: 'com.flectar.mail',
-          abilityName: 'EntryAbility',
+          bundleName: context.abilityInfo.bundleName,
+          abilityName: context.abilityInfo.name,
           parameters: { threadId: threadId },
         }],
         actionType: wantAgent.OperationType.START_ABILITY,
