@@ -1652,7 +1652,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_close_to_tray(false);
                     crate::window_chrome::apply_preference(
                         &app,
-                        crate::window_chrome::WindowFrame::System,
+                        crate::window_chrome::WindowFrame::default(),
                     );
                     app.global::<TabsUi>().invoke_reset();
                     app.invoke_cancel_storage_usage();

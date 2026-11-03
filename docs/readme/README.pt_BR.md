@@ -195,7 +195,7 @@ No celular e em janelas estreitas, o botão no fim da barra de ferramentas mostr
 
 ### 🪟 Janela sem moldura
 
-Ative **Janela sem moldura** em Configurações → Geral → Interface para substituir a barra de título do sistema por controles na barra de ferramentas. Cada plataforma mantém seu comportamento: macOS preserva os botões coloridos nativos, Windows mantém Snap Layouts e o menu do sistema, e Linux segue a ordem dos botões e as ações da barra de título configuradas no GNOME ou KDE.
+Por padrão, o Flectar Mail substitui a barra de título do sistema por controles na barra de ferramentas; desative **Janela sem moldura** em Configurações → Geral → Interface para voltar à barra de título do sistema. Cada plataforma mantém seu comportamento: macOS preserva os botões coloridos nativos, Windows mantém Snap Layouts e o menu do sistema, e Linux segue a ordem dos botões e as ações da barra de título configuradas no GNOME ou KDE.
 
 <table>
   <tbody>

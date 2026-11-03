@@ -2102,8 +2102,9 @@ pub fn normalized_workspace_list_pane_width(width: i64) -> i64 {
     width.clamp(MIN_WORKSPACE_LIST_PANE_WIDTH, MAX_WORKSPACE_LIST_PANE_WIDTH)
 }
 
+/// New installs draw the window frame themselves; a saved choice is kept.
 fn default_window_frame() -> String {
-    "system".into()
+    "integrated".into()
 }
 
 /// Unknown values, including those written by newer versions, fall back to
@@ -2518,6 +2519,13 @@ mod tests {
         assert!(s.group_mail_by_date);
         assert!(s.show_tabs);
         assert!(s.conversation_view);
+        // New installs draw their own frame; a saved choice stays.
+        assert_eq!(s.window_frame, "integrated");
+        let saved: Settings = serde_json::from_str(
+            r#"{"theme":"system","undoSendSeconds":10,"windowFrame":"system"}"#,
+        )
+        .unwrap();
+        assert_eq!(saved.window_frame, "system");
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
         assert_eq!(s.time_format, TimeFormat::Automatic);

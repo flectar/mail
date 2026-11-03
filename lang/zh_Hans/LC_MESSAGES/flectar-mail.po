@@ -1452,7 +1452,7 @@ msgstr "无法打开邮件编辑器：{}"
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
@@ -1732,68 +1732,68 @@ msgstr "正在加载邮件…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 msgid "Global Labels (local only)"
 msgstr "全局标签（仅本地）"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 msgid "Empty Trash?"
 msgstr "清空回收站？"
 
-#: ui/app.slint:2216 ui/views/files-view.slint:541
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "永久删除？"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr "永久删除每个已连接帐户的回收站中的所有邮件？"
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "是否永久删除此帐户的回收站中的所有邮件？"
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "是否从回收站中永久删除选定的对话？"
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 msgid "Permanently delete this conversation from Trash?"
 msgstr "是否从回收站中永久删除此对话？"
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr "此操作无法撤销。"
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 msgid "Empty Trash"
 msgstr "清空回收站"
 
-#: ui/app.slint:2226 ui/views/files-view.slint:623
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "永久删除"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 msgid "Mailbox startup failed"
 msgstr "邮箱启动失败"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail 无法打开本地存储"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 msgid "Diagnostic ID: {}"
 msgstr "诊断 ID：{}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 msgid "Diagnostic ID {}"
 msgstr "诊断 ID {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 msgid "Retry"
 msgstr "重试"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "复制诊断信息"
 
@@ -2030,7 +2030,7 @@ msgstr "添加发件人地址"
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
-#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
+#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 msgid "Cancel"
 msgstr "取消"
 
@@ -2229,8 +2229,8 @@ msgid "Export decrypted message"
 msgstr "导出解密后的邮件"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:468
-#: ui/views/files-view.slint:658 ui/window-chrome.slint:201
+#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:505
+#: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "关闭"
 
@@ -2328,7 +2328,7 @@ msgstr "显示更多日历以查看其中的活动。"
 msgid "Create an event to start planning your month."
 msgstr "创建活动，开始规划本月日程。"
 
-#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:549
+#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:586
 msgid "Reset filters"
 msgstr "重置筛选条件"
 
@@ -2630,7 +2630,7 @@ msgstr "编辑草稿"
 msgid "New message"
 msgstr "新建邮件"
 
-#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:664
+#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:701
 msgid "Account"
 msgstr "账户"
 
@@ -3008,15 +3008,15 @@ msgstr "使用自定义颜色"
 msgid "Done"
 msgstr ""
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 msgid "All accounts"
 msgstr "全部账户"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 msgid "Profile"
 msgstr "分组"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr ""
 
@@ -3080,77 +3080,77 @@ msgstr "删除全局标签"
 msgid "Delete label from {}"
 msgstr "删除 {} 中的标签"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 msgid "New email"
 msgstr "新建邮件"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 msgid "Find folder or label"
 msgstr "查找文件夹或标签"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 msgid "Clear folder filter"
 msgstr "清除文件夹筛选"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 msgid "Add account"
 msgstr "添加账户"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 msgid "ALL ACCOUNTS"
 msgstr "全部账户"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 msgid "All Inboxes"
 msgstr "所有收件箱"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 msgid "Inbox"
 msgstr "收件箱"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 msgid "Categories"
 msgstr "分类"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "重要"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 msgid "Other"
 msgstr "其他"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 msgid "Labels"
 msgstr "标签"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 msgid "Global label {}"
 msgstr "全局标签 {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr "账户"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 msgid "{} label, {} account"
 msgstr "{} 标签，{} 账户"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:345
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
+#: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr "新建文件夹"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr "新建标签"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 msgid "No folders found"
 msgstr "未找到文件夹"
 
@@ -3163,7 +3163,7 @@ msgid "{n} tab open"
 msgid_plural "{n} tabs open"
 msgstr[0] ""
 
-#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:390
+#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 msgid "Files"
 msgstr "文件"
 
@@ -3390,11 +3390,11 @@ msgstr "放大"
 msgid "Fit to width"
 msgstr "适应宽度"
 
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:502
 msgid "Download"
 msgstr "下载"
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 msgid "Loading preview…"
 msgstr "正在加载预览…"
 
@@ -4103,7 +4103,7 @@ msgstr ""
 msgid "Show"
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:696
+#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:733
 msgid "Dismiss"
 msgstr "忽略"
 
@@ -4265,7 +4265,7 @@ msgstr "本地存储"
 msgid "Calculating…"
 msgstr "正在计算…"
 
-#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:306
+#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:313
 msgid "Refresh"
 msgstr "刷新"
 
@@ -4922,7 +4922,7 @@ msgstr "账户状态：{}"
 msgid "Reconnect"
 msgstr "重新连接"
 
-#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 msgid "Manage"
 msgstr "管理"
 
@@ -5111,7 +5111,7 @@ msgstr[0] ""
 msgid "Export mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:600
 msgid "Delete…"
 msgstr "删除…"
 
@@ -6046,7 +6046,7 @@ msgstr "在此处查看和编辑联系人详情。"
 msgid "Email attachments"
 msgstr "邮件附件"
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:657
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:694
 msgid "Connect storage"
 msgstr "连接存储"
 
@@ -6058,7 +6058,7 @@ msgstr "服务器存储"
 msgid "STORAGE SPACE"
 msgstr "存储空间"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:496
 msgid "Sharing activity"
 msgstr "共享活动"
 
@@ -6066,205 +6066,209 @@ msgstr "共享活动"
 msgid "Transfers"
 msgstr "传输"
 
-#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:308 ui/views/files-view.slint:558
 msgid "File sources"
 msgstr "文件来源"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "Search files"
 msgstr "搜索文件"
 
-#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
+#: ui/views/files-view.slint:314 ui/views/files-view.slint:321
 msgid "Filter and sort files"
 msgstr "筛选和排序文件"
 
-#: ui/views/files-view.slint:310
+#: ui/views/files-view.slint:317
 msgid "Synchronized mail"
 msgstr "已同步的邮件"
 
-#: ui/views/files-view.slint:311
+#: ui/views/files-view.slint:318
 msgid "All mail on server (JMAP)"
 msgstr "服务器上的全部邮件（JMAP）"
 
-#: ui/views/files-view.slint:312
+#: ui/views/files-view.slint:319
 msgid "Index cached text"
 msgstr "为缓存文本建立索引"
 
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:347 ui/views/files-view.slint:459
 msgid "Upload"
 msgstr "上传"
 
-#: ui/views/files-view.slint:376
+#: ui/views/files-view.slint:385
 msgid "No files to show"
 msgstr "没有可显示的文件"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Attachments from synchronized messages will appear here."
 msgstr "已同步邮件中的附件将显示在这里。"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Upload a file or create a folder to get started."
 msgstr "请上传文件或创建文件夹以开始使用。"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Select an account and connect its storage."
 msgstr "请选择账户并连接其存储。"
 
-#: ui/views/files-view.slint:436
+#: ui/views/files-view.slint:451
+msgid "Upload or create a folder"
+msgstr ""
+
+#: ui/views/files-view.slint:473
 msgid "Load more"
 msgstr "加载更多"
 
-#: ui/views/files-view.slint:445
+#: ui/views/files-view.slint:482
 msgid "File list width"
 msgstr "文件列表宽度"
 
-#: ui/views/files-view.slint:462
+#: ui/views/files-view.slint:499
 msgid "Back to files"
 msgstr "返回文件"
 
-#: ui/views/files-view.slint:464
+#: ui/views/files-view.slint:501
 msgid "Open folder"
 msgstr "打开文件夹"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Preview"
 msgstr "预览"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Details"
 msgstr "详情"
 
-#: ui/views/files-view.slint:474
+#: ui/views/files-view.slint:511
 msgid "Select a file to preview"
 msgstr "选择要预览的文件"
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr "PDF、图片和文本可在此处预览，其他格式可以下载。"
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr "图片和文本可在此处预览，其他格式可以下载。"
 
-#: ui/views/files-view.slint:478
+#: ui/views/files-view.slint:515
 msgid "Clear displayed activity"
 msgstr "清除已显示的活动"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Share file or folder"
 msgstr "共享文件或文件夹"
 
-#: ui/views/files-view.slint:541 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:578 ui/views/files-view.slint:592
 msgid "Rename"
 msgstr "重命名"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Move to folder"
 msgstr "移动到文件夹"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Copy to folder"
 msgstr "复制到文件夹"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "File properties"
 msgstr "文件属性"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Lock file or folder"
 msgstr "锁定文件或文件夹"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Manage file"
 msgstr "管理文件"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Files and folders"
 msgstr "文件和文件夹"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Folders"
 msgstr "文件夹"
 
-#: ui/views/files-view.slint:545 ui/views/files-view.slint:566
+#: ui/views/files-view.slint:582 ui/views/files-view.slint:603
 msgid "Name"
 msgstr "名称"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Size"
 msgstr "大小"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Kind"
 msgstr "类型"
 
-#: ui/views/files-view.slint:546
+#: ui/views/files-view.slint:583
 msgid "Descending order"
 msgstr "降序"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes"
 msgstr "最小字节数"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes (optional)"
 msgstr "最小字节数（可选）"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes"
 msgstr "最大字节数"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes (optional)"
 msgstr "最大字节数（可选）"
 
-#: ui/views/files-view.slint:553
+#: ui/views/files-view.slint:590
 msgid "Keep offline"
 msgstr "保留离线副本"
 
-#: ui/views/files-view.slint:554
+#: ui/views/files-view.slint:591
 msgid "Release offline copy"
 msgstr "释放离线副本"
 
-#: ui/views/files-view.slint:556
+#: ui/views/files-view.slint:593
 msgid "Move…"
 msgstr "移动…"
 
-#: ui/views/files-view.slint:557
+#: ui/views/files-view.slint:594
 msgid "Copy…"
 msgstr "复制…"
 
-#: ui/views/files-view.slint:558
+#: ui/views/files-view.slint:595
 msgid "Replace content…"
 msgstr "替换内容…"
 
-#: ui/views/files-view.slint:559
+#: ui/views/files-view.slint:596
 msgid "Properties…"
 msgstr "属性…"
 
-#: ui/views/files-view.slint:560
+#: ui/views/files-view.slint:597
 msgid "Sharing…"
 msgstr "共享…"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Release lock"
 msgstr "释放锁定"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Lock…"
 msgstr "锁定…"
 
-#: ui/views/files-view.slint:562
+#: ui/views/files-view.slint:599
 msgid "Renew lock for 5 minutes"
 msgstr "将锁定续期 5 分钟"
 
-#: ui/views/files-view.slint:565
+#: ui/views/files-view.slint:602
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
 "cannot be undone."
 msgstr "这将从存储中永久删除“{}”及其全部内容，此操作无法撤销。"
 
-#: ui/views/files-view.slint:570
+#: ui/views/files-view.slint:607
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
@@ -6272,153 +6276,153 @@ msgstr ""
 "目标文件夹路径（例如 /Documents）。留空表示当前文件夹，或其他存储空间的根目"
 "录。"
 
-#: ui/views/files-view.slint:571
+#: ui/views/files-view.slint:608
 msgid "Destination folder"
 msgstr "目标文件夹"
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s principal URL on this server."
 msgstr "请输入共享对象在此服务器上的 principal URL。"
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr "请输入共享对象在此服务器上的电子邮件地址或 principal ID。"
 
-#: ui/views/files-view.slint:576
+#: ui/views/files-view.slint:613
 msgid "Recipient"
 msgstr "共享对象"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Allow editing"
 msgstr "允许编辑"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Modify content"
 msgstr "修改内容"
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:617
 msgid "Modify properties"
 msgstr "修改属性"
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:618
 msgid "Add children"
 msgstr "添加子项"
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:619
 msgid "Rename and move"
 msgstr "重命名和移动"
 
-#: ui/views/files-view.slint:584
+#: ui/views/files-view.slint:621
 msgid "Manage sharing"
 msgstr "管理共享"
 
-#: ui/views/files-view.slint:586
+#: ui/views/files-view.slint:623
 msgid "Remove recipient’s access"
 msgstr "移除共享对象的访问权限"
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:627
 msgid "Shared lock"
 msgstr "共享锁定"
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:628
 msgid "Include folder contents"
 msgstr "包含文件夹内容"
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:629
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr "锁定将在 5 分钟后过期，除非续期。"
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:633
 msgid "If a name already exists"
 msgstr "如果名称已存在"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Stop and report conflict"
 msgstr "停止并报告冲突"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep both with a new name"
 msgstr "保留两者并使用新名称"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Replace existing"
 msgstr "替换现有项"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep newest"
 msgstr "保留最新"
 
-#: ui/views/files-view.slint:598
+#: ui/views/files-view.slint:635
 msgid "This can replace existing content at the destination."
 msgstr "这可能会替换目标位置的现有内容。"
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:636
 msgid "Compare names without case"
 msgstr "比较名称时忽略大小写"
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:642
 msgid "Property namespace"
 msgstr "属性命名空间"
 
-#: ui/views/files-view.slint:606
+#: ui/views/files-view.slint:643
 msgid "Property name"
 msgstr "属性名称"
 
-#: ui/views/files-view.slint:607
+#: ui/views/files-view.slint:644
 msgid "Value"
 msgstr "值"
 
-#: ui/views/files-view.slint:608
+#: ui/views/files-view.slint:645
 msgid "Remove property"
 msgstr "移除属性"
 
-#: ui/views/files-view.slint:612
+#: ui/views/files-view.slint:649
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr "日期使用 UTC，例如 2026-09-09T12:00:00Z。"
 
-#: ui/views/files-view.slint:613
+#: ui/views/files-view.slint:650
 msgid "Created"
 msgstr "创建时间"
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:651
 msgid "Modified"
 msgstr "修改时间"
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:652
 msgid "Accessed"
 msgstr "访问时间"
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:653
 msgid "Executable"
 msgstr "可执行"
 
-#: ui/views/files-view.slint:617
+#: ui/views/files-view.slint:654
 msgid "Subscription changes are unavailable on this server version."
 msgstr "此服务器版本不支持变更订阅。"
 
-#: ui/views/files-view.slint:669
+#: ui/views/files-view.slint:706
 msgid "Uses the selected account’s saved credentials."
 msgstr "使用所选账户已保存的凭据。"
 
-#: ui/views/files-view.slint:673
+#: ui/views/files-view.slint:710
 msgid "Storage URL"
 msgstr "存储 URL"
 
-#: ui/views/files-view.slint:687
+#: ui/views/files-view.slint:724
 msgid "Transfers and operations"
 msgstr "传输与操作"
 
-#: ui/views/files-view.slint:688
+#: ui/views/files-view.slint:725
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
 "the destination first."
 msgstr "被中断的更改需要先复核才能重试。请先刷新存储并检查目标位置。"
 
-#: ui/views/files-view.slint:695
+#: ui/views/files-view.slint:732
 msgid "Resume"
 msgstr "继续"
 
-#: ui/views/files-view.slint:697
+#: ui/views/files-view.slint:734
 msgid "Reviewed as completed"
 msgstr "确认为已完成"
 
@@ -6842,11 +6846,11 @@ msgstr "石板色"
 msgid "Use across all accounts (local only)"
 msgstr "在所有账户中使用（仅本地）"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 msgid "Message list width"
 msgstr "邮件列表宽度"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 msgid "Close folders"
 msgstr "关闭文件夹"
 

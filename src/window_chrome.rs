@@ -32,10 +32,12 @@ mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
+/// The integrated frame is the default; unknown saved values fall back to the
+/// system frame so a window can never start without any controls.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum WindowFrame {
-    #[default]
     System,
+    #[default]
     Integrated,
 }
 

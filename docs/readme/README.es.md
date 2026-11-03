@@ -286,8 +286,9 @@ Ajustes → General.
 
 ### 🪟 Ventana sin marco
 
-Activa **Ventana sin marco** en Ajustes → General → Interfaz para sustituir la
-barra de título del sistema por controles de ventana en la barra de herramientas.
+Por defecto, Flectar Mail sustituye la barra de título del sistema por controles
+de ventana en la barra de herramientas; desactiva **Ventana sin marco** en
+Ajustes → General → Interfaz para recuperar la barra de título del sistema.
 Cada plataforma conserva su comportamiento: macOS mantiene sus botones nativos
 de colores, Windows conserva Snap Layouts y el menú del sistema, y Linux respeta
 el orden de los botones y las acciones de la barra de título configurados en

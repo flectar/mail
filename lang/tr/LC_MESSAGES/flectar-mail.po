@@ -1457,7 +1457,7 @@ msgstr "Oluşturucu açılamadı: {}"
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
@@ -1743,68 +1743,68 @@ msgstr "İleti yükleniyor…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 msgid "Global Labels (local only)"
 msgstr "Genel Etiketler (yalnızca yerel)"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2216 ui/views/files-view.slint:541
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "Kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr "Bu işlem geri alınamaz."
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2226 ui/views/files-view.slint:623
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "Kalıcı olarak sil"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 msgid "Mailbox startup failed"
 msgstr "Posta kutusu başlatılamadı"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail yerel depolamayı açamadı"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 msgid "Diagnostic ID: {}"
 msgstr "Tanılama kimliği: {}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 msgid "Diagnostic ID {}"
 msgstr "Tanılama kimliği {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 msgid "Retry"
 msgstr "Yeniden dene"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Tanılama bilgilerini kopyala"
 
@@ -2039,7 +2039,7 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
-#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
+#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 msgid "Cancel"
 msgstr "İptal"
 
@@ -2249,8 +2249,8 @@ msgid "Export decrypted message"
 msgstr "Şifresi çözülmüş iletiyi dışa aktar"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:468
-#: ui/views/files-view.slint:658 ui/window-chrome.slint:201
+#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:505
+#: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "Kapat"
 
@@ -2349,7 +2349,7 @@ msgstr "Etkinliklerini görmek için daha fazla takvim göster."
 msgid "Create an event to start planning your month."
 msgstr "Ayını planlamaya başlamak için bir etkinlik oluştur."
 
-#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:549
+#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:586
 msgid "Reset filters"
 msgstr "Filtreleri sıfırla"
 
@@ -2651,7 +2651,7 @@ msgstr "Taslağı düzenle"
 msgid "New message"
 msgstr "Yeni ileti"
 
-#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:664
+#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:701
 msgid "Account"
 msgstr "Hesap"
 
@@ -3033,15 +3033,15 @@ msgstr "Özel renk kullan"
 msgid "Done"
 msgstr ""
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 msgid "All accounts"
 msgstr "Tüm hesaplar"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 msgid "Profile"
 msgstr "Profil"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr ""
 
@@ -3105,77 +3105,77 @@ msgstr "Genel etiketi sil"
 msgid "Delete label from {}"
 msgstr "{} içindeki etiketi sil"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 msgid "New email"
 msgstr "Yeni e-posta"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 msgid "Find folder or label"
 msgstr "Klasör veya etiket bul"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 msgid "Clear folder filter"
 msgstr "Klasör filtresini temizle"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 msgid "Add account"
 msgstr "Hesap ekle"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 msgid "ALL ACCOUNTS"
 msgstr "TÜM HESAPLAR"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 msgid "All Inboxes"
 msgstr "Tüm Gelen Kutuları"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 msgid "Inbox"
 msgstr "Gelen Kutusu"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 msgid "Categories"
 msgstr "Kategoriler"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "Önemli"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 msgid "Other"
 msgstr "Diğer"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 msgid "Labels"
 msgstr "Etiketler"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 msgid "Global label {}"
 msgstr "Genel etiket {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr "HESAPLAR"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 msgid "{} label, {} account"
 msgstr "{} etiket, {} hesap"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:345
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
+#: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr "Yeni klasör"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr "Yeni etiket"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 msgid "No folders found"
 msgstr "Klasör bulunamadı"
 
@@ -3189,7 +3189,7 @@ msgid_plural "{n} tabs open"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:390
+#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 msgid "Files"
 msgstr "Dosyalar"
 
@@ -3419,11 +3419,11 @@ msgstr "Yakınlaştır"
 msgid "Fit to width"
 msgstr "Genişliğe sığdır"
 
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:502
 msgid "Download"
 msgstr "İndir"
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 msgid "Loading preview…"
 msgstr "Önizleme yükleniyor…"
 
@@ -4179,7 +4179,7 @@ msgstr ""
 msgid "Show"
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:696
+#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:733
 msgid "Dismiss"
 msgstr "Yoksay"
 
@@ -4349,7 +4349,7 @@ msgstr "Yerel depolama"
 msgid "Calculating…"
 msgstr "Hesaplanıyor…"
 
-#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:306
+#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:313
 msgid "Refresh"
 msgstr "Yenile"
 
@@ -5031,7 +5031,7 @@ msgstr "Hesap durumu: {}"
 msgid "Reconnect"
 msgstr "Yeniden bağlan"
 
-#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 msgid "Manage"
 msgstr "Yönet"
 
@@ -5232,7 +5232,7 @@ msgstr[1] ""
 msgid "Export mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:600
 msgid "Delete…"
 msgstr "Sil…"
 
@@ -6184,7 +6184,7 @@ msgstr "Kişi ayrıntılarını burada görüntüleyin ve düzenleyin."
 msgid "Email attachments"
 msgstr "E-posta ekleri"
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:657
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:694
 msgid "Connect storage"
 msgstr "Depolama bağla"
 
@@ -6196,7 +6196,7 @@ msgstr "Sunucu depolaması"
 msgid "STORAGE SPACE"
 msgstr "DEPOLAMA ALANI"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:496
 msgid "Sharing activity"
 msgstr "Paylaşım etkinliği"
 
@@ -6204,200 +6204,204 @@ msgstr "Paylaşım etkinliği"
 msgid "Transfers"
 msgstr "Aktarımlar"
 
-#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:308 ui/views/files-view.slint:558
 msgid "File sources"
 msgstr "Dosya kaynakları"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "Search files"
 msgstr "Dosyalarda ara"
 
-#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
+#: ui/views/files-view.slint:314 ui/views/files-view.slint:321
 msgid "Filter and sort files"
 msgstr "Dosyaları filtrele ve sırala"
 
-#: ui/views/files-view.slint:310
+#: ui/views/files-view.slint:317
 msgid "Synchronized mail"
 msgstr "Eşitlenmiş e-postalar"
 
-#: ui/views/files-view.slint:311
+#: ui/views/files-view.slint:318
 msgid "All mail on server (JMAP)"
 msgstr "Sunucudaki tüm e-postalar (JMAP)"
 
-#: ui/views/files-view.slint:312
+#: ui/views/files-view.slint:319
 msgid "Index cached text"
 msgstr "Dizinde önbelleğe alınmış metin"
 
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:347 ui/views/files-view.slint:459
 msgid "Upload"
 msgstr "Karşıya yükle"
 
-#: ui/views/files-view.slint:376
+#: ui/views/files-view.slint:385
 msgid "No files to show"
 msgstr "Gösterilecek dosya yok"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Attachments from synchronized messages will appear here."
 msgstr "Eşitlenmiş iletilerin ekleri burada görünecek."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Upload a file or create a folder to get started."
 msgstr "Başlamak için bir dosya karşıya yükleyin veya bir klasör oluşturun."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Select an account and connect its storage."
 msgstr "Bir hesap seçin ve depolamasını bağlayın."
 
-#: ui/views/files-view.slint:436
+#: ui/views/files-view.slint:451
+msgid "Upload or create a folder"
+msgstr ""
+
+#: ui/views/files-view.slint:473
 msgid "Load more"
 msgstr "Daha fazla yükle"
 
-#: ui/views/files-view.slint:445
+#: ui/views/files-view.slint:482
 msgid "File list width"
 msgstr "Dosya listesi genişliği"
 
-#: ui/views/files-view.slint:462
+#: ui/views/files-view.slint:499
 msgid "Back to files"
 msgstr "Dosyalara dön"
 
-#: ui/views/files-view.slint:464
+#: ui/views/files-view.slint:501
 msgid "Open folder"
 msgstr "Klasörü aç"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Preview"
 msgstr "Önizleme"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Details"
 msgstr "Ayrıntılar"
 
-#: ui/views/files-view.slint:474
+#: ui/views/files-view.slint:511
 msgid "Select a file to preview"
 msgstr "Önizlemek için bir dosya seçin"
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr ""
 "PDF'ler, görseller ve metinler burada görünür. Diğer biçimler indirilebilir."
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr "Görseller ve metinler burada görünür. Diğer biçimler indirilebilir."
 
-#: ui/views/files-view.slint:478
+#: ui/views/files-view.slint:515
 msgid "Clear displayed activity"
 msgstr "Gösterilen etkinliği temizle"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Share file or folder"
 msgstr "Dosya veya klasörü paylaş"
 
-#: ui/views/files-view.slint:541 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:578 ui/views/files-view.slint:592
 msgid "Rename"
 msgstr "Yeniden adlandır"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Move to folder"
 msgstr "Klasöre taşı"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Copy to folder"
 msgstr "Klasöre kopyala"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "File properties"
 msgstr "Dosya özellikleri"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Lock file or folder"
 msgstr "Dosyayı veya klasörü kilitle"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Manage file"
 msgstr "Dosyayı yönet"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Files and folders"
 msgstr "Dosyalar ve klasörler"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Folders"
 msgstr "Klasörler"
 
-#: ui/views/files-view.slint:545 ui/views/files-view.slint:566
+#: ui/views/files-view.slint:582 ui/views/files-view.slint:603
 msgid "Name"
 msgstr "Ad"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Size"
 msgstr "Boyut"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Kind"
 msgstr "Tür"
 
-#: ui/views/files-view.slint:546
+#: ui/views/files-view.slint:583
 msgid "Descending order"
 msgstr "Azalan sıralama"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes"
 msgstr "En az bayt"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes (optional)"
 msgstr "En az bayt (isteğe bağlı)"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes"
 msgstr "En çok bayt"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes (optional)"
 msgstr "En çok bayt (isteğe bağlı)"
 
-#: ui/views/files-view.slint:553
+#: ui/views/files-view.slint:590
 msgid "Keep offline"
 msgstr "Çevrimdışı tut"
 
-#: ui/views/files-view.slint:554
+#: ui/views/files-view.slint:591
 msgid "Release offline copy"
 msgstr "Çevrimdışı kopyayı bırak"
 
-#: ui/views/files-view.slint:556
+#: ui/views/files-view.slint:593
 msgid "Move…"
 msgstr "Taşı…"
 
-#: ui/views/files-view.slint:557
+#: ui/views/files-view.slint:594
 msgid "Copy…"
 msgstr "Kopyala…"
 
-#: ui/views/files-view.slint:558
+#: ui/views/files-view.slint:595
 msgid "Replace content…"
 msgstr "İçeriği değiştir…"
 
-#: ui/views/files-view.slint:559
+#: ui/views/files-view.slint:596
 msgid "Properties…"
 msgstr "Özellikler…"
 
-#: ui/views/files-view.slint:560
+#: ui/views/files-view.slint:597
 msgid "Sharing…"
 msgstr "Paylaşım…"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Release lock"
 msgstr "Kilidi bırak"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Lock…"
 msgstr "Kilitle…"
 
-#: ui/views/files-view.slint:562
+#: ui/views/files-view.slint:599
 msgid "Renew lock for 5 minutes"
 msgstr "Kilidi 5 dakika daha uzat"
 
-#: ui/views/files-view.slint:565
+#: ui/views/files-view.slint:602
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
 "cannot be undone."
@@ -6405,7 +6409,7 @@ msgstr ""
 "Bu işlem “{}” ögesini ve tüm içeriğini depolamadan kalıcı olarak siler. Bu "
 "geri alınamaz."
 
-#: ui/views/files-view.slint:570
+#: ui/views/files-view.slint:607
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
@@ -6413,143 +6417,143 @@ msgstr ""
 "Hedef klasör yolu (örneğin /Belgeler). Geçerli klasör veya başka bir "
 "depolama alanının kökü için boş bırakın."
 
-#: ui/views/files-view.slint:571
+#: ui/views/files-view.slint:608
 msgid "Destination folder"
 msgstr "Hedef klasör"
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s principal URL on this server."
 msgstr "Alıcının bu sunucudaki asıl URL'sini girin."
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr "Alıcının bu sunucudaki e-posta adresini veya asıl kimliğini girin."
 
-#: ui/views/files-view.slint:576
+#: ui/views/files-view.slint:613
 msgid "Recipient"
 msgstr "Alıcı"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Allow editing"
 msgstr "Düzenlemeye izin ver"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Modify content"
 msgstr "İçeriği değiştir"
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:617
 msgid "Modify properties"
 msgstr "Özellikleri değiştir"
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:618
 msgid "Add children"
 msgstr "Alt öge ekle"
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:619
 msgid "Rename and move"
 msgstr "Yeniden adlandır ve taşı"
 
-#: ui/views/files-view.slint:584
+#: ui/views/files-view.slint:621
 msgid "Manage sharing"
 msgstr "Paylaşımı yönet"
 
-#: ui/views/files-view.slint:586
+#: ui/views/files-view.slint:623
 msgid "Remove recipient’s access"
 msgstr "Alıcının erişimini kaldır"
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:627
 msgid "Shared lock"
 msgstr "Paylaşılan kilit"
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:628
 msgid "Include folder contents"
 msgstr "Klasör içeriğini dahil et"
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:629
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr "Kilitler yenilenmedikleri takdirde 5 dakika sonra sona erer."
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:633
 msgid "If a name already exists"
 msgstr "Bir ad zaten varsa"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Stop and report conflict"
 msgstr "Dur ve çakışmayı bildir"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep both with a new name"
 msgstr "İkisini de yeni bir adla koru"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Replace existing"
 msgstr "Mevcut olanı değiştir"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep newest"
 msgstr "En yeni olanı koru"
 
-#: ui/views/files-view.slint:598
+#: ui/views/files-view.slint:635
 msgid "This can replace existing content at the destination."
 msgstr "Bu, hedefteki mevcut içeriği değiştirebilir."
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:636
 msgid "Compare names without case"
 msgstr "Adları büyük/küçük harf duyarlı olmadan karşılaştır"
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:642
 msgid "Property namespace"
 msgstr "Özellik ad alanı"
 
-#: ui/views/files-view.slint:606
+#: ui/views/files-view.slint:643
 msgid "Property name"
 msgstr "Özellik adı"
 
-#: ui/views/files-view.slint:607
+#: ui/views/files-view.slint:644
 msgid "Value"
 msgstr "Değer"
 
-#: ui/views/files-view.slint:608
+#: ui/views/files-view.slint:645
 msgid "Remove property"
 msgstr "Özelliği kaldır"
 
-#: ui/views/files-view.slint:612
+#: ui/views/files-view.slint:649
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr "Tarihler UTC kullanır, örneğin 2026-09-09T12:00:00Z."
 
-#: ui/views/files-view.slint:613
+#: ui/views/files-view.slint:650
 msgid "Created"
 msgstr "Oluşturulma"
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:651
 msgid "Modified"
 msgstr "Değiştirilme"
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:652
 msgid "Accessed"
 msgstr "Erişilme"
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:653
 msgid "Executable"
 msgstr "Çalıştırılabilir"
 
-#: ui/views/files-view.slint:617
+#: ui/views/files-view.slint:654
 msgid "Subscription changes are unavailable on this server version."
 msgstr "Abonelik değişiklikleri bu sunucu sürümünde kullanılamıyor."
 
-#: ui/views/files-view.slint:669
+#: ui/views/files-view.slint:706
 msgid "Uses the selected account’s saved credentials."
 msgstr "Seçili hesabın kayıtlı kimlik bilgilerini kullanır."
 
-#: ui/views/files-view.slint:673
+#: ui/views/files-view.slint:710
 msgid "Storage URL"
 msgstr "Depolama URL'si"
 
-#: ui/views/files-view.slint:687
+#: ui/views/files-view.slint:724
 msgid "Transfers and operations"
 msgstr "Aktarımlar ve işlemler"
 
-#: ui/views/files-view.slint:688
+#: ui/views/files-view.slint:725
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
 "the destination first."
@@ -6557,11 +6561,11 @@ msgstr ""
 "Kesintiye uğrayan değişikliklerin yeniden denenmeden önce incelenmesi "
 "gerekir. Önce depolamayı yenileyin ve hedefi inceleyin."
 
-#: ui/views/files-view.slint:695
+#: ui/views/files-view.slint:732
 msgid "Resume"
 msgstr "Sürdür"
 
-#: ui/views/files-view.slint:697
+#: ui/views/files-view.slint:734
 msgid "Reviewed as completed"
 msgstr "Tamamlandı olarak incelendi"
 
@@ -6987,11 +6991,11 @@ msgstr "Kurşuni"
 msgid "Use across all accounts (local only)"
 msgstr "Tüm hesaplarda kullan (yalnızca yerel)"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 msgid "Message list width"
 msgstr "İleti listesi genişliği"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 msgid "Close folders"
 msgstr "Klasörleri kapat"
 
