@@ -61,11 +61,18 @@ void flectar_start_web_authentication(long long requestId, const char *url, cons
             callback(requestId, NULL, message.UTF8String, cancelled);
         };
         ASWebAuthenticationSession *session;
-        if (@available(iOS 17.4, *)) {
+        // Callbacks arrived in iOS 17.4. `@available` would need compiler-rt's
+        // __isPlatformVersionAtLeast, which rustc doesn't link, so look the
+        // class up instead.
+        Class callbacks = NSClassFromString(@"ASWebAuthenticationSessionCallback");
+        if (callbacks) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
             session = [[ASWebAuthenticationSession alloc]
                       initWithURL:address
-                         callback:[ASWebAuthenticationSessionCallback callbackWithCustomScheme:callbackScheme]
+                         callback:[callbacks callbackWithCustomScheme:callbackScheme]
                 completionHandler:completion];
+#pragma clang diagnostic pop
         } else {
             session = [[ASWebAuthenticationSession alloc] initWithURL:address
                                                     callbackURLScheme:callbackScheme
