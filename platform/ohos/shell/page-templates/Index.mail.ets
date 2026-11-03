@@ -7,6 +7,8 @@ import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
+// The XComponent, as both its native id and its component id.
+const SURFACE_ID = 'flectar_mail_surface';
 // Keep picker imports bounded: a mail attachment is copied into the app
 // cache, so a mis-picked multi-GB file must not fill the sandbox.
 // Per-file cache guard for the picker; the shared compose/draft limit is
@@ -60,14 +62,10 @@ struct Index {
   private imeAttachPending: boolean = false;
   private imePassword: boolean | undefined = undefined;
   private pendingImePassword: boolean | undefined = undefined;
-  private windowOffsetX: number = 0;
-  private windowOffsetY: number = 0;
   private observedWindow: window.Window | undefined = undefined;
+  // Moving the window moves the surface on the screen without a layout pass.
   private windowRectHandler = (_options: window.RectChangeOptions): void => {
-    this.updateWindowOffset();
-  };
-  private windowStatusHandler = (_status: window.WindowStatusType): void => {
-    this.updateWindowOffset();
+    this.applyImeCursor();
   };
   private appBackgroundHandler: () => void = (): void => {
     this.nativeModule?.suspendPreview?.();
@@ -99,7 +97,7 @@ struct Index {
 
   onPageShow(): void {
     this.applySystemColorScheme(this.colorMode);
-    this.updateWindowOffset();
+    this.observeWindow();
     this.refreshClipboard();
   }
 
@@ -145,12 +143,17 @@ struct Index {
   build(): void {
     Column() {
       XComponent({
-        id: 'flectar_mail_surface',
+        id: SURFACE_ID,
         type: XComponentType.SURFACE,
         libraryname: 'flectar_mail_ohos',
       })
+        .id(SURFACE_ID)
         .width('100%')
         .height('100%')
+        // Maximizing, restoring and split screen lay the surface out again.
+        .onAreaChange((): void => {
+          this.applyImeCursor();
+        })
         .focusable(true)
         .defaultFocus(true)
         .onLoad((context?: object): void => {
@@ -220,7 +223,7 @@ struct Index {
       },
     });
     this.applySystemColorScheme(this.colorMode);
-    this.updateWindowOffset();
+    this.observeWindow();
     this.installClipboardListener();
   }
 
@@ -526,15 +529,20 @@ struct Index {
       return;
     }
     const cursor = this.pendingImeCursor;
-    const key = this.imeCursorKey(cursor);
-    if (key === this.lastImeCursor) {
-      return;
-    }
+    const rect = this.imeCursorKey(cursor);
     try {
+      // CursorInfo is in px on the screen, while Slint reports the caret in vp
+      // relative to the surface. Offset it by where the surface is on the
+      // screen now, which follows window moves, maximizing and split screen.
       const ui = this.getUIContext();
+      const origin = ui.getComponentUtils().getRectangleById(SURFACE_ID).screenOffset;
+      const key = `${origin.x},${origin.y},${rect}`;
+      if (key === this.lastImeCursor) {
+        return;
+      }
       const px: inputMethod.CursorInfo = {
-        left: this.windowOffsetX + ui.vp2px(cursor.left),
-        top: this.windowOffsetY + ui.vp2px(cursor.top),
+        left: origin.x + ui.vp2px(cursor.left),
+        top: origin.y + ui.vp2px(cursor.top),
         width: ui.vp2px(cursor.width),
         height: ui.vp2px(cursor.height),
       };
@@ -542,7 +550,7 @@ struct Index {
         // Only remember a rectangle that is still the latest one. An older
         // request completing late must not overwrite a newer caret.
         const current = this.pendingImeCursor;
-        if (current !== undefined && this.imeCursorKey(current) === key) {
+        if (current !== undefined && this.imeCursorKey(current) === rect) {
           this.lastImeCursor = key;
           this.imeCursorRetries = 0;
         } else {
@@ -555,7 +563,7 @@ struct Index {
         // as applied; retry the current one shortly, otherwise identical
         // updates would be deduplicated forever.
         const current = this.pendingImeCursor;
-        if (current === undefined || this.imeCursorKey(current) !== key) {
+        if (current === undefined || this.imeCursorKey(current) !== rect) {
           this.applyImeCursor();
           return;
         }
@@ -591,46 +599,23 @@ struct Index {
     }
   }
 
-  // CursorInfo is in absolute physical screen coordinates. The Slint caret
-  // rectangle is relative to the XComponent, so add the window origin. The
-  // origin must be refreshed when a 2-in-1 window is maximized, restored or
-  // moved: windowRect keeps the old floating position until then, which would
-  // place the IME candidate over the previous window location.
-  private async updateWindowOffset(): Promise<void> {
+  // Follow the app window once, so moving it re-places the IME candidate.
+  private async observeWindow(): Promise<void> {
+    if (this.observedWindow !== undefined) {
+      return;
+    }
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const appWindow = await window.getLastWindow(context);
-      this.observeWindow(appWindow);
-      const properties = appWindow.getWindowProperties();
-      const status: window.WindowStatusType = appWindow.getWindowStatus();
-      if (status === window.WindowStatusType.FULL_SCREEN ||
-        status === window.WindowStatusType.MAXIMIZE) {
-        this.windowOffsetX = 0;
-        this.windowOffsetY = 0;
-      } else {
-        this.windowOffsetX = properties.windowRect.left;
-        this.windowOffsetY = properties.windowRect.top;
+      if (this.observedWindow !== undefined) {
+        return;
       }
-      // Re-apply the cached caret against the new origin.
-      this.lastImeCursor = '';
-      this.applyImeCursor();
+      this.observedWindow = appWindow;
+      appWindow.on('windowRectChange', this.windowRectHandler);
     } catch (error) {
-      hilog.error(0x0000, LOG_TAG, 'could not read the window origin: %{public}s',
+      hilog.error(0x0000, LOG_TAG, 'could not observe the window: %{public}s',
         (error as BusinessError).message);
     }
-  }
-
-  private observeWindow(appWindow: window.Window): void {
-    if (this.observedWindow === appWindow) {
-      return;
-    }
-    if (this.observedWindow !== undefined) {
-      this.observedWindow.off('windowRectChange', this.windowRectHandler);
-      this.observedWindow.off('windowStatusChange', this.windowStatusHandler);
-    }
-    this.observedWindow = appWindow;
-    appWindow.on('windowRectChange', this.windowRectHandler);
-    appWindow.on('windowStatusChange', this.windowStatusHandler);
   }
 
   private releaseWindowObserver(): void {
@@ -638,7 +623,6 @@ struct Index {
       return;
     }
     this.observedWindow.off('windowRectChange', this.windowRectHandler);
-    this.observedWindow.off('windowStatusChange', this.windowStatusHandler);
     this.observedWindow = undefined;
   }
 
