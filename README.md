@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>Email, made fast again</h3>
-    <p>Built from the ground up for speed. Flectar Mail delivers native performance, instant startup, and about 20 MB of RAM at idle.</p>
+    <p>Built from the ground up for speed. Flectar Mail delivers native performance, instant startup, and about 20 MB of private memory at idle.</p>
   </div>
   <p>
     <a href="https://flectar.com">Website</a> ·
@@ -44,7 +44,7 @@ fraction of the memory of a typical web-based mail client.
 | Benefit | Details |
 | --- | --- |
 | **Fast from the first click** | A native interface and local-first data path get you to your inbox without waiting on a browser runtime. |
-| **About 20 MB of RAM at idle** | A twelfth of Thunderbird's private memory with the same mailbox. See [Performance](#-performance). |
+| **About 20 MB of private memory at idle** | About 85 MB counting its code and libraries, and a twelfth of Thunderbird's private memory with the same mailbox. See [Performance](#-performance). |
 | **Everything in one place** | Move between mail, calendars, and contacts without stitching together separate apps. |
 | **Offline by design** | Your mailbox and calendar are stored locally, so your synced data stays useful without a connection. |
 | **Works with your accounts** | Gmail, Outlook and Microsoft 365, or standards-based IMAP, POP3, SMTP, JMAP, CalDAV, and CardDAV services. |

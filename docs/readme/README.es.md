@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>El correo vuelve a ser rápido</h3>
-    <p>Diseñado desde cero para la velocidad. Flectar Mail ofrece rendimiento nativo, inicio instantáneo y un consumo de RAM de unos 20 MB en reposo.</p>
+    <p>Diseñado desde cero para la velocidad. Flectar Mail ofrece rendimiento nativo, inicio instantáneo y unos 20 MB de memoria privada en reposo.</p>
   </div>
   <p>
     <a href="https://flectar.com">Sitio web</a> ·
@@ -44,7 +44,7 @@ una fracción de la memoria de un cliente de correo típico basado en tecnologí
 | Ventaja | Detalles |
 | --- | --- |
 | **Rápido desde el primer clic** | Una interfaz nativa y un acceso a los datos que prioriza el almacenamiento local te llevan a tu bandeja de entrada sin esperar a que se cargue un entorno de navegador. |
-| **Unos 20 MB de RAM en reposo** | La doceava parte de la memoria privada que usa Thunderbird con el mismo buzón. Consulta [Rendimiento](#-rendimiento). |
+| **Unos 20 MB de memoria privada en reposo** | Unos 85 MB contando su código y bibliotecas, y la doceava parte de la memoria privada que usa Thunderbird con el mismo buzón. Consulta [Rendimiento](#-rendimiento). |
 | **Todo en un mismo lugar** | Pasa del correo a los calendarios y contactos sin tener que combinar varias aplicaciones independientes. |
 | **Sin conexión por diseño** | Tu buzón y tu calendario se guardan localmente, así que los datos sincronizados siguen siendo útiles sin conexión. |
 | **Compatible con tus cuentas** | Conecta Gmail, Outlook y Microsoft 365, o servicios basados en los estándares IMAP, POP3, SMTP, JMAP, CalDAV y CardDAV. |

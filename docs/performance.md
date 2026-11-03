@@ -25,10 +25,14 @@ The same Flectar Mail build in other states:
 
 | Flectar Mail (MiB) | Private | PSS | RSS |
 | --- | ---: | ---: | ---: |
-| Welcome screen, no account | 8.2 | 55.1 | 61.1 |
+| Welcome screen, no account | 7.6–7.7 | 53.0–53.1 | 58.4–58.5 |
+| Welcome screen at display scale 2 | 7.7 | 59.2–59.3 | 70.8 |
 | Inbox idle after the first sync | 20.2 | 79.9 | 86.6 |
 | After reading two messages | 25.8 | 93.0 | 100.0 |
 | Then minimized for 25 seconds | 24.4 | 91.8 | 98.9 |
+
+Display scale changes the totals but not private memory: at scale 2 the
+window's framebuffer grows from 4 MiB to 16 MiB of shared memory.
 
 On Windows 11, with 7 real accounts and about 69,000 unread messages, Task
 Manager's **Details** tab showed:

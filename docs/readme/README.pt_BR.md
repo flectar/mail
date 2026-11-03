@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>E-mail rápido de novo</h3>
-    <p>Criado do zero para ser rápido. O Flectar Mail oferece desempenho nativo, início instantâneo e consumo de RAM de cerca de 20 MB em repouso.</p>
+    <p>Criado do zero para ser rápido. O Flectar Mail oferece desempenho nativo, início instantâneo e cerca de 20 MB de memória privada em repouso.</p>
   </div>
   <p>
     <a href="https://flectar.com">Site</a> ·
@@ -42,7 +42,7 @@ O Flectar Mail é um aplicativo nativo e leve para seus e-mails, calendários e 
 | Benefício | Detalhes |
 | --- | --- |
 | **Rápido desde o primeiro clique** | A interface nativa e o acesso a dados que prioriza o armazenamento local levam você à caixa de entrada sem esperar por um ambiente de navegador. |
-| **Cerca de 20 MB de RAM em repouso** | Doze vezes menos memória privada que o Thunderbird com a mesma caixa de e-mail. Consulte [Desempenho](#-desempenho). |
+| **Cerca de 20 MB de memória privada em repouso** | Cerca de 85 MB contando o código e as bibliotecas, e doze vezes menos memória privada que o Thunderbird com a mesma caixa de e-mail. Consulte [Desempenho](#-desempenho). |
 | **Tudo em um só lugar** | Alterne entre e-mails, calendários e contatos sem precisar combinar aplicativos separados. |
 | **Feito para funcionar offline** | A caixa de e-mail e o calendário ficam armazenados localmente, então os dados sincronizados continuam úteis sem conexão. |
 | **Compatível com suas contas** | Conecte Gmail, Outlook e Microsoft 365 ou serviços baseados nos padrões IMAP, POP3, SMTP, JMAP, CalDAV e CardDAV. |

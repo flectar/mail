@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>E-Mail wird wieder schnell</h3>
-    <p>Von Grund auf für Geschwindigkeit entwickelt. Flectar Mail bietet native Leistung, sofortigen Start und einen RAM-Verbrauch von etwa 20 MB im Leerlauf.</p>
+    <p>Von Grund auf für Geschwindigkeit entwickelt. Flectar Mail bietet native Leistung, startet sofort und belegt im Leerlauf nur etwa 20 MB privaten Speicher.</p>
   </div>
   <p>
     <a href="https://flectar.com">Website</a> ·
@@ -42,7 +42,7 @@ Flectar Mail ist eine schlanke, native Anwendung für E-Mails, Kalender und Kont
 | Vorteil | Details |
 | --- | --- |
 | **Schnell vom ersten Klick an** | Eine native Oberfläche und der bevorzugte Zugriff auf lokale Daten bringen dich zum Posteingang, ohne auf eine Browserlaufzeit warten zu müssen. |
-| **Etwa 20 MB RAM im Leerlauf** | Ein Zwölftel des privaten Speichers, den Thunderbird mit demselben Postfach belegt. Siehe [Leistung](#-leistung). |
+| **Etwa 20 MB privater Speicher im Leerlauf** | Etwa 85 MB samt Programmcode und Bibliotheken, und ein Zwölftel des privaten Speichers, den Thunderbird mit demselben Postfach belegt. Siehe [Leistung](#-leistung). |
 | **Alles an einem Ort** | Wechsle zwischen E-Mails, Kalendern und Kontakten, ohne verschiedene Anwendungen zusammenstellen zu müssen. |
 | **Für die Offline-Nutzung entwickelt** | Postfach und Kalender werden lokal gespeichert. Synchronisierte Daten bleiben so auch ohne Verbindung nutzbar. |
 | **Für deine Konten** | Gmail, Outlook und Microsoft 365 oder Dienste auf Basis von IMAP, POP3, SMTP, JMAP, CalDAV und CardDAV. |
