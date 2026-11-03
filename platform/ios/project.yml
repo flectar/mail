@@ -18,6 +18,7 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Flectar Mail
+        NSLocalNetworkUsageDescription: Flectar Mail connects to mail servers on your local network.
         UILaunchScreen: {}
         UIRequiresFullScreen: false
     sources:
