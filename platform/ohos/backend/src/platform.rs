@@ -20,10 +20,8 @@ use crate::window::OhosWindow;
 
 /// Lower bound of the wake-up cadence while animations are running (~60 Hz).
 const ANIMATION_TICK: Duration = Duration::from_millis(16);
-/// Fallback wake-up when there is neither an animation nor a Slint timer.
-/// Timers wake the loop at their own deadline; this only bounds the idle sleep
-/// for hosts that need a periodic tick (and keeps the loop responsive if a
-/// timer is scheduled from another thread).
+/// Longest idle sleep. Timers wake the loop at their own deadline and events
+/// arrive on the channel, so this is only a safety net.
 const IDLE_FALLBACK: Duration = Duration::from_secs(1);
 
 /// Backend platform state. Lives on the application thread inside Slint's
@@ -88,7 +86,7 @@ impl OhosPlatform {
             let mut timeout = if self.quit.load(Ordering::Relaxed) {
                 Duration::ZERO
             } else {
-                self.next_timeout(has_animations)
+                Self::next_timeout(has_animations)
             };
             // Throttle only a frame that is actually pending. Applying the
             // 16 ms redraw cadence to every timeout kept the loop awake at
@@ -134,21 +132,13 @@ impl OhosPlatform {
     }
 
     /// Sleep until the next animation frame or Slint timer, whichever is
-    /// sooner. Without an animation/timer the loop uses a one-second fallback
-    /// instead of polling every 100 ms.
-    fn next_timeout(&self, has_animations: bool) -> Duration {
+    /// sooner, and no longer than [`IDLE_FALLBACK`].
+    fn next_timeout(has_animations: bool) -> Duration {
         if has_animations {
             return ANIMATION_TICK;
         }
-        let window = self.window.borrow();
-        let Some(window) = window.as_ref() else {
-            return IDLE_FALLBACK;
-        };
-        let context = i_slint_core::window::WindowInner::from_pub(window.window()).context();
-        context
-            .duration_until_next_timer_update()
-            .unwrap_or(IDLE_FALLBACK)
-            .min(IDLE_FALLBACK)
+        slint::platform::duration_until_next_timer_update()
+            .map_or(IDLE_FALLBACK, |timer| timer.min(IDLE_FALLBACK))
     }
 
     fn handle_event(
