@@ -31,10 +31,10 @@ mod mail_render_projection;
 mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
-mod notifications;
-pub use notifications::{NewMailNotification, NotificationPublisher};
 mod mail_work;
 mod message_appearance;
+mod notifications;
+pub use notifications::{NewMailNotification, NotificationPublisher};
 mod number_format;
 mod oauth_browser;
 #[cfg(test)]
@@ -4356,6 +4356,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         core.clone(),
                         Arc::clone(&startup_pending_core_updates),
                         startup_core_wake.clone(),
+                    );
+                    notifications::spawn_dispatcher(
+                        &startup_runtime,
+                        core.file_core(),
                         startup_notification_publisher.clone(),
                     );
                     if !startup_benchmark_disable_background {
