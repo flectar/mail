@@ -536,6 +536,154 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             with self.subTest(version=version, tag=tag), self.assertRaises(ValueError):
                 metadata(version, tag)
 
+    def test_store_versions_order_like_android_version_codes(self):
+        versions = (
+            "0.1.0-alpha.8", "0.1.0-alpha.999", "0.1.0-beta.1", "0.1.0-beta.999",
+            "0.1.0-rc.1", "0.1.0-rc.999", "0.1.0", "0.1.1-alpha.1", "0.1.1",
+            "0.2.0-alpha.1", "0.99.99", "1.0.0-alpha.1", "20.99.99",
+        )
+        store = [tuple(map(int, metadata(version)["msix_version"].split("."))) for version in versions]
+        self.assertEqual(store, sorted(set(store)))
+        self.assertEqual(
+            sorted(versions, key=android_version_code),
+            sorted(versions, key=lambda version: tuple(map(int, metadata(version)["msix_version"].split(".")))),
+        )
+        # The Store reserves the last part and rejects a zero first part.
+        for parts in store:
+            self.assertEqual(len(parts), 4)
+            self.assertGreater(parts[0], 0)
+            self.assertEqual(parts[3], 0)
+            self.assertTrue(all(part <= 65535 for part in parts))
+        self.assertEqual(metadata("0.1.0-alpha.8")["msix_version"], "1.100.8.0")
+        self.assertEqual(metadata("0.1.0")["msix_version"], "1.100.9999.0")
+        for version in ("21.0.0", "0.100.0", "0.0.100", "0.1.0-alpha.1000"):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                metadata(version)
+
+    def test_store_package_layout_and_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            layout = root / "package/windows"
+            (layout / "LICENSES").mkdir(parents=True)
+            for name in ("flectar-mail.exe", "pdfium.dll", "LICENSE", "LICENSES/MIT.txt"):
+                (layout / name).write_text(name)
+            # Stand-ins for the Windows SDK tools record their arguments and
+            # keep what they would have packaged.
+            tools = root / "tools"
+            tools.mkdir()
+            calls = root / "calls.jsonl"
+            for name, body in (
+                ("makepri", """
+if sys.argv[1] == "createconfig":
+    path = Path(sys.argv[sys.argv.index("/cf") + 1])
+    path.write_text('<resources targetOsVersion="10.0.0" majorVersion="1"><index root="\\\\" startIndexAt="\\\\"/>'
+                    '<packaging><autoResourcePackage qualifier="Scale"/></packaging></resources>')
+else:
+    indexed = Path(sys.argv[sys.argv.index("/pr") + 1])
+    config = Path(sys.argv[sys.argv.index("/cf") + 1]).read_text()
+    Path(sys.argv[sys.argv.index("/of") + 1]).write_text(json.dumps({
+        "indexed": sorted(str(path.relative_to(indexed)) for path in indexed.rglob("*") if path.is_file()),
+        "config": config,
+    }))
+"""),
+                ("makeappx", """
+if sys.argv[1] == "pack":
+    source = Path(sys.argv[sys.argv.index("/d") + 1])
+    keep = Path(os.environ["KEEP"]) / Path(sys.argv[sys.argv.index("/p") + 1]).name
+    shutil.copytree(source, keep)
+    Path(sys.argv[sys.argv.index("/p") + 1]).write_text("msix")
+else:
+    source = Path(sys.argv[sys.argv.index("/d") + 1])
+    Path(sys.argv[sys.argv.index("/p") + 1]).write_text(json.dumps(sorted(path.name for path in source.iterdir())))
+"""),
+            ):
+                tool = tools / name
+                tool.write_text(
+                    "#!/usr/bin/env python3\n"
+                    "import json, os, shutil, sys\nfrom pathlib import Path\n"
+                    f"with open({str(calls)!r}, 'a') as output:\n"
+                    f"    output.write(json.dumps([{name!r}, *sys.argv[1:]]) + '\\n')\n" + body
+                )
+                tool.chmod(0o755)
+            keep = root / "kept"
+            keep.mkdir()
+            environment = {**os.environ, "MAKEAPPX": str(tools / "makeappx"),
+                           "MAKEPRI": str(tools / "makepri"), "KEEP": str(keep), "GITHUB_ACTIONS": ""}
+            build = [sys.executable, str(SCRIPTS / "build-msix.py")]
+            for arch in ("x64", "arm64"):
+                result = subprocess.run(
+                    [*build, "pack", "--arch", arch, "--version", "1.100.8.0", str(layout),
+                     str(root / f"out/flectar-mail-{arch}.msix")],
+                    env=environment, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("placeholder identity", result.stdout)
+                packaged = keep / f"flectar-mail-{arch}.msix"
+                self.assertEqual((packaged / "flectar-mail.exe").read_text(), "flectar-mail.exe")
+                self.assertTrue((packaged / "LICENSES/MIT.txt").is_file())
+                manifest = ET.parse(packaged / "AppxManifest.xml").getroot()
+                ns = {
+                    "m": "http://schemas.microsoft.com/appx/manifest/foundation/windows10",
+                    "uap": "http://schemas.microsoft.com/appx/manifest/uap/windows10",
+                    "uap5": "http://schemas.microsoft.com/appx/manifest/uap/windows10/5",
+                }
+                identity = manifest.find("m:Identity", ns)
+                self.assertEqual(identity.get("Version"), "1.100.8.0")
+                self.assertEqual(identity.get("ProcessorArchitecture"), arch)
+                # Every logo the manifest names resolves to packaged variants.
+                visuals = manifest.find("m:Applications/m:Application/uap:VisualElements", ns)
+                logos = [manifest.find("m:Properties/m:Logo", ns).text,
+                         visuals.get("Square150x150Logo"), visuals.get("Square44x44Logo")]
+                for logo in logos:
+                    stem = Path(logo.replace("\\", "/"))
+                    variants = list((packaged / stem.parent).glob(f"{stem.stem}.*.png"))
+                    self.assertTrue(variants, logo)
+                # resources.pri indexes only the logos, without split resource packages.
+                pri = json.loads((packaged / "resources.pri").read_text())
+                self.assertTrue(pri["indexed"])
+                self.assertTrue(all(name.startswith("Assets/") for name in pri["indexed"]))
+                self.assertNotIn("packaging", pri["config"])
+            # The startup task is the one the app enables, and its launch
+            # starts in the background like the other sign-in entries.
+            autostart = (SCRIPTS.parent / "src/autostart.rs").read_text()
+            extension = manifest.find("m:Applications/m:Application/m:Extensions/uap5:Extension", ns)
+            self.assertEqual(extension.get("Category"), "windows.startupTask")
+            self.assertEqual(extension.get("Executable"), "flectar-mail.exe")
+            task = extension.find("uap5:StartupTask", ns).get("TaskId")
+            self.assertIn(f'h!("{task}")', autostart)
+            parameters = extension.get("{http://schemas.microsoft.com/appx/manifest/uap/windows10/10}Parameters")
+            self.assertIn(f'BACKGROUND_ARGUMENT: &str = "{parameters}"', autostart)
+
+            result = subprocess.run(
+                [*build, "bundle", "--version", "1.100.8.0", str(root / "out/flectar-mail.msixbundle"),
+                 str(root / "out/flectar-mail-x64.msix"), str(root / "out/flectar-mail-arm64.msix")],
+                env=environment, capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads((root / "out/flectar-mail.msixbundle").read_text()),
+                             ["flectar-mail-arm64.msix", "flectar-mail-x64.msix"])
+            bundled = [json.loads(line) for line in calls.read_text().splitlines()][-1]
+            self.assertEqual(bundled[:5], ["makeappx", "bundle", "/o", "/bv", "1.100.8.0"])
+
+            # The Store rejects a zero first part, a nonzero last part and parts over 65535.
+            for version in ("0.100.8.0", "1.100.8.1", "1.70000.8.0", "1.100.8"):
+                with self.subTest(version=version):
+                    result = subprocess.run(
+                        [*build, "pack", "--arch", "x64", "--version", version, str(layout),
+                         str(root / "out/rejected.msix")],
+                        env=environment, capture_output=True, text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Major.Minor.Build.0", result.stderr)
+            (layout / "pdfium.dll").unlink()
+            result = subprocess.run(
+                [*build, "pack", "--arch", "x64", "--version", "1.100.8.0", str(layout),
+                 str(root / "out/incomplete.msix")],
+                env=environment, capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("pdfium.dll is missing", result.stderr)
+
     def test_staging_and_checksums(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -30,7 +30,9 @@ notarized, so operating-system security prompts are expected. Install updates
 manually.
 
 Windows downloads come in x64 and arm64 builds. A Windows on Arm PC can run
-the x64 build through emulation, but the arm64 build runs natively.
+the x64 build through emulation, but the arm64 build runs natively. The
+[Microsoft Store package](microsoft-store.md) is built with every release and
+is not published in the Store yet.
 
 ## Linux
 

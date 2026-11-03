@@ -63,6 +63,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       native_version: ${{ steps.version.outputs.native_version }}
+      msix_version: ${{ steps.version.outputs.msix_version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       source_date_epoch: ${{ steps.source.outputs.source_date_epoch }}
     steps:
@@ -473,12 +474,71 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
           if (Test-Path "$destination/flectar-mail.exe") { throw 'Uninstall left the executable behind' }
 
+      - name: Build Microsoft Store package
+        shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
+          MSIX_VERSION: ${{ needs.metadata.outputs.msix_version }}
+        run: |
+          python scripts/build-msix.py pack --arch $env:ARCH --version $env:MSIX_VERSION target/package/windows "target/msix/flectar-mail-$env:ARCH.msix"
+          if ($LASTEXITCODE -ne 0) { throw "Store packaging failed" }
+
+      - name: Install, start and remove the Store package
+        shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-msix.ps1 -Package "target/msix/flectar-mail-$env:ARCH.msix"
+          if ($LASTEXITCODE -ne 0) { throw "Store package test failed" }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: msix-${{ matrix.arch }}
+          path: target/msix/flectar-mail-${{ matrix.arch }}.msix
+          if-no-files-found: error
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: flectar-mail-windows-${{ matrix.arch }}
           path: |
             target/flectar-mail-windows-${{ matrix.arch }}.zip
             target/flectar-mail-windows-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+
+  microsoft-store:
+    needs: [metadata, windows]
+    name: Microsoft Store bundle
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: msix-*
+          path: target/msix
+          merge-multiple: true
+
+      # Partner Center takes this one file and serves each device its architecture.
+      - name: Bundle the Store packages
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.metadata.outputs.version }}
+          MSIX_VERSION: ${{ needs.metadata.outputs.msix_version }}
+        run: |
+          python scripts/build-msix.py bundle --version $env:MSIX_VERSION "target/flectar-mail-$env:APP_VERSION.msixbundle" target/msix/flectar-mail-x64.msix target/msix/flectar-mail-arm64.msix
+          if ($LASTEXITCODE -ne 0) { throw "Store bundling failed" }
+
+      - name: Install, start and remove the Store bundle
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-msix.ps1 -Package "target/flectar-mail-$env:APP_VERSION.msixbundle"
+          if ($LASTEXITCODE -ne 0) { throw "Store bundle test failed" }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: microsoft-store-package
+          path: target/flectar-mail-${{ needs.metadata.outputs.version }}.msixbundle
           if-no-files-found: error
 
   macos:
@@ -704,8 +764,9 @@ jobs:
       needs.linux.result == 'success' && needs.rpm.result == 'success' &&
       needs.rpm-test.result == 'success' &&
       needs.flatpak.result == 'success' && needs.windows.result == 'success' &&
+      needs.microsoft-store.result == 'success' &&
       needs.macos.result == 'success' && needs.android.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, macos, android]
+    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, microsoft-store, macos, android]
     runs-on: ubuntu-24.04
     permissions:
       actions: read

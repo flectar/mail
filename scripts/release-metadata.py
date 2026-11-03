@@ -8,6 +8,23 @@ import tomllib
 from pathlib import Path
 
 
+def msix_version(match: re.Match) -> str:
+    """Microsoft Store package version, ordered like the Android version codes.
+
+    The Store requires Major.Minor.Build.0 with a nonzero first part and parts
+    up to 65535, so a 0.x version cannot keep its own numbers. Major is offset
+    by one, Minor holds minor and patch, and Build orders the channels like
+    scripts/android-version-code.py: alpha.N < beta.N < rc.N < the release.
+    0.1.0-alpha.8 becomes 1.100.8.0 and 0.1.0 becomes 1.100.9999.0.
+    """
+    major, minor, patch = map(int, match.group(1, 2, 3))
+    stage, number = match.group(4, 5)
+    if major > 20 or minor > 99 or patch > 99 or (number and int(number) > 999):
+        raise ValueError("Store versions support major 0–20, minor/patch 0–99, and prerelease 1–999")
+    build = {"alpha": 0, "beta": 1000, "rc": 2000}.get(stage, 9999) + int(number or 0)
+    return f"{major + 1}.{minor * 100 + patch}.{build}.0"
+
+
 def metadata(version: str, tag: str | None = None) -> dict[str, str]:
     # Keep native package versions predictable; add more channels deliberately.
     match = re.fullmatch(
@@ -22,6 +39,7 @@ def metadata(version: str, tag: str | None = None) -> dict[str, str]:
     return {
         "version": version,
         "native_version": ".".join(match.group(1, 2, 3)),
+        "msix_version": msix_version(match),
         "prerelease": str(match.group(4) is not None).lower(),
     }
 
