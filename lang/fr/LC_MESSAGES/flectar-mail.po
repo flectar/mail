@@ -1677,7 +1677,7 @@ msgstr "Impossible d’ouvrir l’éditeur de message : {}"
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
@@ -2017,22 +2017,22 @@ msgstr "Chargement du message…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 #, fuzzy
 msgid "Global Labels (local only)"
 msgstr "Étiquettes globales (locales uniquement)"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 #, fuzzy
 msgid "Empty Trash?"
 msgstr "Vider la corbeille ?"
 
-#: ui/app.slint:2216 ui/views/files-view.slint:578
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 #, fuzzy
 msgid "Delete permanently?"
 msgstr "Supprimer définitivement ?"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 #, fuzzy
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
@@ -2040,64 +2040,64 @@ msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de tous les "
 "comptes connectés ?"
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 #, fuzzy
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de ce compte ?"
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 #, fuzzy
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 "Supprimer définitivement les conversations sélectionnées dans la corbeille ?"
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 #, fuzzy
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Supprimer définitivement cette conversation de la corbeille ?"
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 #, fuzzy
 msgid "This action cannot be undone."
 msgstr "Cette action est irréversible."
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 #, fuzzy
 msgid "Empty Trash"
 msgstr "Vider la corbeille"
 
-#: ui/app.slint:2226 ui/views/files-view.slint:660
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 #, fuzzy
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 #, fuzzy
 msgid "Mailbox startup failed"
 msgstr "Échec de l’initialisation de la boîte aux lettres"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 #, fuzzy
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail n’a pas pu ouvrir le stockage local"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 #, fuzzy
 msgid "Diagnostic ID: {}"
 msgstr "Identifiant de diagnostic : {}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 #, fuzzy
 msgid "Diagnostic ID {}"
 msgstr "Identifiant de diagnostic {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 #, fuzzy
 msgid "Retry"
 msgstr "Réessayer"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 #, fuzzy
 msgid "Copy diagnostics"
 msgstr "Copier le diagnostic"
@@ -3576,17 +3576,17 @@ msgstr "Utiliser une couleur personnalisée"
 msgid "Done"
 msgstr ""
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 #, fuzzy
 msgid "All accounts"
 msgstr "Tous les comptes"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 #, fuzzy
 msgid "Profile"
 msgstr "Profil"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr ""
 
@@ -3664,92 +3664,92 @@ msgstr "Supprimer l’étiquette globale"
 msgid "Delete label from {}"
 msgstr "Supprimer l’étiquette de {}"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 #, fuzzy
 msgid "New email"
 msgstr "Nouvel e-mail"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 #, fuzzy
 msgid "Find folder or label"
 msgstr "Rechercher un dossier ou une étiquette"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 #, fuzzy
 msgid "Clear folder filter"
 msgstr "Effacer le filtre des dossiers"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 #, fuzzy
 msgid "Add account"
 msgstr "Ajouter un compte"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 #, fuzzy
 msgid "ALL ACCOUNTS"
 msgstr "TOUS LES COMPTES"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 #, fuzzy
 msgid "All Inboxes"
 msgstr "Toutes les boîtes de réception"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 #, fuzzy
 msgid "Inbox"
 msgstr "Boîte de réception"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 #, fuzzy
 msgid "Categories"
 msgstr "Catégories"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "Important"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 #, fuzzy
 msgid "Other"
 msgstr "Autre"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 #, fuzzy
 msgid "Labels"
 msgstr "Étiquettes"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 #, fuzzy
 msgid "Global label {}"
 msgstr "Étiquette globale {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 #, fuzzy
 msgid "ACCOUNTS"
 msgstr "COMPTES"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 #, fuzzy
 msgid "{} label, {} account"
 msgstr "{} étiquette, {} compte"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
 #: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 #, fuzzy
 msgid "New folder"
 msgstr "Nouveau dossier"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 #, fuzzy
 msgid "New label"
 msgstr "Nouvelle étiquette"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 #, fuzzy
 msgid "No folders found"
 msgstr "Aucun dossier trouvé"
@@ -8211,12 +8211,12 @@ msgstr "Gris ardoise"
 msgid "Use across all accounts (local only)"
 msgstr "Utiliser pour tous les comptes (local uniquement)"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 #, fuzzy
 msgid "Message list width"
 msgstr "Largeur de la liste des messages"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 #, fuzzy
 msgid "Close folders"
 msgstr "Fermer le panneau des dossiers"

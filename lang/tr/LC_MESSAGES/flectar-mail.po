@@ -1457,7 +1457,7 @@ msgstr "Oluşturucu açılamadı: {}"
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
@@ -1743,68 +1743,68 @@ msgstr "İleti yükleniyor…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 msgid "Global Labels (local only)"
 msgstr "Genel Etiketler (yalnızca yerel)"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2216 ui/views/files-view.slint:578
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "Kalıcı olarak silinsin mi?"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr "Bu işlem geri alınamaz."
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2226 ui/views/files-view.slint:660
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "Kalıcı olarak sil"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 msgid "Mailbox startup failed"
 msgstr "Posta kutusu başlatılamadı"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail yerel depolamayı açamadı"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 msgid "Diagnostic ID: {}"
 msgstr "Tanılama kimliği: {}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 msgid "Diagnostic ID {}"
 msgstr "Tanılama kimliği {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 msgid "Retry"
 msgstr "Yeniden dene"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Tanılama bilgilerini kopyala"
 
@@ -3033,15 +3033,15 @@ msgstr "Özel renk kullan"
 msgid "Done"
 msgstr ""
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 msgid "All accounts"
 msgstr "Tüm hesaplar"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 msgid "Profile"
 msgstr "Profil"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr ""
 
@@ -3105,77 +3105,77 @@ msgstr "Genel etiketi sil"
 msgid "Delete label from {}"
 msgstr "{} içindeki etiketi sil"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 msgid "New email"
 msgstr "Yeni e-posta"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 msgid "Find folder or label"
 msgstr "Klasör veya etiket bul"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 msgid "Clear folder filter"
 msgstr "Klasör filtresini temizle"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 msgid "Add account"
 msgstr "Hesap ekle"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 msgid "ALL ACCOUNTS"
 msgstr "TÜM HESAPLAR"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 msgid "All Inboxes"
 msgstr "Tüm Gelen Kutuları"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 msgid "Inbox"
 msgstr "Gelen Kutusu"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 msgid "Categories"
 msgstr "Kategoriler"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "Önemli"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 msgid "Other"
 msgstr "Diğer"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 msgid "Labels"
 msgstr "Etiketler"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 msgid "Global label {}"
 msgstr "Genel etiket {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr "HESAPLAR"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 msgid "{} label, {} account"
 msgstr "{} etiket, {} hesap"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
 #: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr "Yeni klasör"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr "Yeni etiket"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 msgid "No folders found"
 msgstr "Klasör bulunamadı"
 
@@ -6991,11 +6991,11 @@ msgstr "Kurşuni"
 msgid "Use across all accounts (local only)"
 msgstr "Tüm hesaplarda kullan (yalnızca yerel)"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 msgid "Message list width"
 msgstr "İleti listesi genişliği"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 msgid "Close folders"
 msgstr "Klasörleri kapat"
 

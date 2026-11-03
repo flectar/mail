@@ -1474,7 +1474,7 @@ msgstr "Не удалось открыть редактор письма: {}"
 msgid "Add an account to send mail."
 msgstr "Добавьте учётную запись, чтобы отправлять почту."
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr "На этом устройстве"
 
@@ -1762,70 +1762,70 @@ msgstr "Загрузка сообщения…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 msgid "Global Labels (local only)"
 msgstr "Глобальные метки (только локально)"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 msgid "Empty Trash?"
 msgstr "Очистить корзину?"
 
-#: ui/app.slint:2216 ui/views/files-view.slint:578
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "Удалить безвозвратно?"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 "Безвозвратно удалить все письма из корзины во всех подключённых учётных "
 "записях?"
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "Безвозвратно удалить все письма из корзины этой учётной записи?"
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "Безвозвратно удалить выбранные переписки из корзины?"
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Безвозвратно удалить эту переписку из корзины?"
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr "Это действие нельзя отменить."
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 msgid "Empty Trash"
 msgstr "Очистить корзину"
 
-#: ui/app.slint:2226 ui/views/files-view.slint:660
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "Удалить безвозвратно"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 msgid "Mailbox startup failed"
 msgstr "Запуск почтового ящика не удался"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail не смог открыть локальное хранилище"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 msgid "Diagnostic ID: {}"
 msgstr "Идентификатор диагностики: {}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 msgid "Diagnostic ID {}"
 msgstr "Идентификатор диагностики {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 msgid "Retry"
 msgstr "Повторить"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "Копировать диагностику"
 
@@ -3075,15 +3075,15 @@ msgstr "Использовать свой цвет"
 msgid "Done"
 msgstr "Готово"
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 msgid "All accounts"
 msgstr "Все учётные записи"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 msgid "Profile"
 msgstr "Профиль"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr "Редактировать профили…"
 
@@ -3147,77 +3147,77 @@ msgstr "Удалить глобальную метку"
 msgid "Delete label from {}"
 msgstr "Удалить метку из {}"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 msgid "New email"
 msgstr "Новое письмо"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr "Добавить учётную запись"
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 msgid "Find folder or label"
 msgstr "Найти папку или метку"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 msgid "Clear folder filter"
 msgstr "Очистить фильтр папок"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 msgid "Add account"
 msgstr "Добавить учётную запись"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 msgid "ALL ACCOUNTS"
 msgstr "ВСЕ УЧЁТНЫЕ ЗАПИСИ"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 msgid "All Inboxes"
 msgstr "Все входящие"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 msgid "Inbox"
 msgstr "Входящие"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 msgid "Categories"
 msgstr "Категории"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "Важное"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 msgid "Other"
 msgstr "Прочее"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 msgid "Labels"
 msgstr "Метки"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 msgid "Global label {}"
 msgstr "Глобальная метка {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr "УЧЁТНЫЕ ЗАПИСИ"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 msgid "{} label, {} account"
 msgstr "Меток: {}, учётных записей: {}"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
 #: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr "Новая папка"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr "Новая метка"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 msgid "No folders found"
 msgstr "Папки не найдены"
 
@@ -7170,11 +7170,11 @@ msgstr "Серо-синий"
 msgid "Use across all accounts (local only)"
 msgstr "Использовать во всех учётных записях (только локально)"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 msgid "Message list width"
 msgstr "Ширина списка писем"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 msgid "Close folders"
 msgstr "Закрыть список папок"
 

@@ -1158,10 +1158,14 @@ export component AppWindow inherits Window {
     // In the integrated frame the window controls sit over the top corners
     // and toolbars reserve room for them, so content keeps the full window.
     // Desktop windows with accounts show a top bar above the product rail,
-    // holding the tabs when they are on; in the integrated frame it also
+    // holding the profile pill and the tabs; in the integrated frame it also
     // holds the window controls. Compact layouts navigate from the bottom bar.
-    private property <bool> top-bar: !root.compact-layout && root.has-mail;
+    // With tabs turned off, only the integrated frame keeps the bar, for its
+    // window controls; the system frame drops it and the mail sidebar takes
+    // the profile switcher.
     private property <bool> tabs-on: root.show_tabs && root.has-mail;
+    private property <bool> top-bar: !root.compact-layout && root.has-mail
+        && (root.tabs-on || WindowChrome.controls-visible);
     changed tabs-on => { root.sync-window-chrome(); }
     // A tone apart from the workspace, so the active tab can open into it.
     private property <color> tab-strip-bg: AppTheme.sidebar-tint.mix(AppTheme.title, 0.94);
@@ -1490,6 +1494,7 @@ export component AppWindow inherits Window {
             selected_thread_index: root.selected_thread_index;
             sidebar_rows: root.sidebar_rows;
             mail_profiles: root.mail_profiles;
+            profiles-in-sidebar: !root.top-bar && !root.compact-layout;
             active_mail_profile: root.active_mail_profile;
             account_count: root.connected_accounts.length;
             select_mail_profile(id) => { root.select_mail_profile(id); }
