@@ -5,6 +5,10 @@ settings:
   base:
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     PRODUCT_BUNDLE_IDENTIFIER: com.flectar.mail
+    # scripts/package-ios.sh sets both from Cargo.toml; these values only
+    # apply to builds started from Xcode.
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
     ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     # Alternate icons chosen in Settings; resources/app-icon/generate.py
     # writes their icon sets and checks this list.
@@ -18,6 +22,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Flectar Mail
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSLocalNetworkUsageDescription: Flectar Mail connects to mail servers on your local network.
         UILaunchScreen: {}
         UIRequiresFullScreen: false

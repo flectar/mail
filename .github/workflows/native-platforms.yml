@@ -24,9 +24,9 @@ on:
         type: boolean
         default: true
       include_ios:
-        description: Also build an experimental unsigned iOS archive
+        description: Build the unsigned iOS app
         type: boolean
-        default: false
+        default: true
   pull_request:
     paths:
       - ".github/workflows/native-platforms.yml"
@@ -708,15 +708,17 @@ jobs:
 
   ios:
     needs: metadata
-    if: github.event_name == 'workflow_dispatch' && inputs.include_ios
-    name: iOS unsigned archive (arm64)
+    if: github.event_name == 'push' || inputs.include_ios
+    name: iOS app (arm64, unsigned)
     runs-on: macos-15
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
@@ -725,34 +727,18 @@ jobs:
       - name: Install Xcode project generator
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        working-directory: platform/ios
-        run: xcodegen generate
-
-      - name: Build unsigned device archive
+      # Unsigned, so people can sideload it with their own Apple ID.
+      - name: Build the IPA
         # iOS bundles its own OAuth registrations (platform/ios/README.md).
         env:
           FLECTAR_GOOGLE_IOS_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_IOS_CLIENT_ID }}
           FLECTAR_MICROSOFT_IOS_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_IOS_CLIENT_ID }}
-        run: |
-          mkdir -p target/ios
-          xcodebuild \
-            -project platform/ios/FlectarMail.xcodeproj \
-            -scheme FlectarMail \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$PWD/target/ios/FlectarMail.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO \
-            archive
-          ditto -c -k --sequesterRsrc --keepParent \
-            target/ios/FlectarMail.xcarchive \
-            target/ios/flectar-mail-ios-unsigned-xcarchive.zip
+        run: bash scripts/package-ios.sh target/ios
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-ios-arm64-unsigned
-          path: target/ios/flectar-mail-ios-unsigned-xcarchive.zip
+          name: flectar-mail-ios-arm64
+          path: target/ios/flectar-mail-ios-arm64.ipa
           if-no-files-found: error
 
   release:
@@ -765,8 +751,9 @@ jobs:
       needs.rpm-test.result == 'success' &&
       needs.flatpak.result == 'success' && needs.windows.result == 'success' &&
       needs.microsoft-store.result == 'success' &&
-      needs.macos.result == 'success' && needs.android.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, microsoft-store, macos, android]
+      needs.macos.result == 'success' && needs.android.result == 'success' &&
+      needs.ios.result == 'success'
+    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, microsoft-store, macos, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       actions: read

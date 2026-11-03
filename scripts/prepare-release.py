@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage desktop and Android downloads with checksums."""
+"""Stage desktop and mobile downloads with checksums."""
 
 import hashlib
 import os
@@ -31,6 +31,7 @@ def prepare(source: Path, destination: Path, version: str) -> None:
         ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.dmg", f"flectar-mail-{version}-macos-arm64.dmg"),
         ("flectar-mail-macos-x64", "flectar-mail-macos-x64.zip", f"flectar-mail-{version}-macos-x64.zip"),
         ("flectar-mail-macos-x64", "flectar-mail-macos-x64.dmg", f"flectar-mail-{version}-macos-x64.dmg"),
+        ("flectar-mail-ios-arm64", "flectar-mail-ios-arm64.ipa", f"flectar-mail-{version}-ios-arm64.ipa"),
         ("flectar-mail-android-signed-arm64", "flectar-mail.apk", f"flectar-mail-{version}-android-arm64.apk"),
     )
     # Validate every input before copying anything; unrelated benchmark files
@@ -81,8 +82,10 @@ def release_notes(version: str) -> str:
         "installation. The preview Flatpak is a sideloaded bundle and does not "
         "receive Flathub updates yet; close-to-tray is disabled in that package. "
         "SHA256SUMS covers every download, and GitHub "
-        "records signed build-provenance attestations. iOS archives are "
-        "experimental and available through manual workflow runs only.\n\n"
+        "records signed build-provenance attestations.\n\n"
+        "The iOS app (iOS 17 or later) is unsigned. Sideload it with AltStore, "
+        "SideStore, or Sideloadly, which sign it with your Apple ID; see "
+        "https://github.com/flectar/mail/blob/main/docs/install.md#ios.\n\n"
         + android
     )
 

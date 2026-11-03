@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ import tempfile
 import tomllib
 import unittest
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +36,7 @@ android_signing = load_script("verify-android-signing")
 verify_android_signing = android_signing.verify
 android_version_code = load_script("android-version-code").version_code
 linux_metadata = load_script("stage-linux-metadata")
+ios_release = load_script("ios-release")
 stage_linux_metadata = linux_metadata.stage
 
 
@@ -684,6 +687,158 @@ else:
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("pdfium.dll is missing", result.stderr)
 
+    def test_ios_app_packages_into_an_unsigned_ipa(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = root / "FlectarMail.app"
+            (app / "Frameworks/PDFium.framework").mkdir(parents=True)
+            (app / "Licenses/Flectar Mail").mkdir(parents=True)
+            info = {
+                "CFBundleExecutable": "FlectarMail",
+                "CFBundleIdentifier": "com.flectar.mail",
+                "CFBundleShortVersionString": "0.1.0",
+                "CFBundleVersion": "1000008",
+                "MinimumOSVersion": "17.0",
+            }
+            # Xcode writes the built Info.plist in binary form.
+            (app / "Info.plist").write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+            for name, mode in (
+                ("FlectarMail", 0o755),
+                ("Frameworks/PDFium.framework/PDFium", 0o755),
+                ("Licenses/Flectar Mail/LICENSE", 0o644),
+            ):
+                (app / name).write_bytes(name.encode())
+                (app / name).chmod(mode)
+            ipa = root / "app.ipa"
+            with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
+                ios_release.write_ipa(app, ipa, "0.1.0", "1000008")
+                first = ipa.read_bytes()
+                (app / "FlectarMail").touch()
+                ios_release.write_ipa(app, ipa, "0.1.0", "1000008")
+            # The same app always packages into the same IPA.
+            self.assertEqual(ipa.read_bytes(), first)
+            self.assertEqual(list(root.glob("*.partial")), [])
+            with zipfile.ZipFile(ipa) as archive:
+                entries = {entry.filename: entry for entry in archive.infolist()}
+                self.assertEqual(plistlib.loads(archive.read("Payload/FlectarMail.app/Info.plist")), info)
+            self.assertEqual(sorted(entries), [
+                "Payload/",
+                "Payload/FlectarMail.app/",
+                "Payload/FlectarMail.app/FlectarMail",
+                "Payload/FlectarMail.app/Frameworks/",
+                "Payload/FlectarMail.app/Frameworks/PDFium.framework/",
+                "Payload/FlectarMail.app/Frameworks/PDFium.framework/PDFium",
+                "Payload/FlectarMail.app/Info.plist",
+                "Payload/FlectarMail.app/Licenses/",
+                "Payload/FlectarMail.app/Licenses/Flectar Mail/",
+                "Payload/FlectarMail.app/Licenses/Flectar Mail/LICENSE",
+            ])
+            # Executables stay executable.
+            for name, mode in (
+                ("FlectarMail", 0o755),
+                ("Frameworks/PDFium.framework/PDFium", 0o755),
+                ("Licenses/Flectar Mail/LICENSE", 0o644),
+            ):
+                self.assertEqual(entries[f"Payload/FlectarMail.app/{name}"].external_attr >> 16 & 0o777, mode)
+            self.assertEqual({entry.date_time for entry in entries.values()}, {(2026, 1, 1, 0, 0, 0)})
+
+            # Another identity or version, or a missing executable, is refused.
+            for key, value in (
+                ("CFBundleIdentifier", "com.example.mail"),
+                ("CFBundleShortVersionString", "1.0"),
+                ("CFBundleVersion", "1"),
+                ("MinimumOSVersion", None),
+                ("CFBundleExecutable", "Missing"),
+                ("CFBundleExecutable", None),
+            ):
+                with self.subTest(key=key, value=value):
+                    changed = {**info, key: value}
+                    (app / "Info.plist").write_bytes(plistlib.dumps({k: v for k, v in changed.items() if v is not None}))
+                    with self.assertRaises(ValueError):
+                        ios_release.write_ipa(app, root / "refused.ipa", "0.1.0", "1000008")
+            (app / "Info.plist").write_bytes(plistlib.dumps(info))
+            (app / "FlectarMail").chmod(0o644)
+            with self.assertRaises(ValueError):
+                ios_release.write_ipa(app, root / "refused.ipa", "0.1.0", "1000008")
+            (app / "FlectarMail").chmod(0o755)
+            # Sideloading tools sign the app; signing material and symbolic
+            # links would not survive that.
+            for name in ("_CodeSignature", "Frameworks/PDFium.framework/_CodeSignature", "embedded.mobileprovision"):
+                with self.subTest(name=name):
+                    (app / name).mkdir()
+                    with self.assertRaisesRegex(ValueError, "unsigned"):
+                        ios_release.write_ipa(app, root / "refused.ipa", "0.1.0", "1000008")
+                    (app / name).rmdir()
+            (app / "Frameworks/link").symlink_to("../FlectarMail")
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                ios_release.write_ipa(app, root / "refused.ipa", "0.1.0", "1000008")
+            (app / "Frameworks/link").unlink()
+            self.assertFalse((root / "refused.ipa").exists())
+            ios_release.write_ipa(app, root / "accepted.ipa", "0.1.0", "1000008")
+
+    def test_ios_packaging_stamps_the_release_version(self):
+        # Run the real script with stand-ins for the Xcode tools, which only
+        # exist on macOS.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "scripts").mkdir()
+            for name in ("package-ios.sh", "ios-release.py", "android-version-code.py"):
+                shutil.copyfile(SCRIPTS / name, root / "scripts" / name)
+            (root / "Cargo.toml").write_text('[package]\nname = "flectar-mail"\nversion = "0.1.0-alpha.8"\n')
+            tools = root / "bin"
+            tools.mkdir()
+            calls = root / "calls.log"
+            (tools / "xcodegen").write_text(f'#!/bin/sh\necho "xcodegen $*" >> "{calls}"\n')
+            # Build an app the way Xcode would with the given settings.
+            (tools / "xcodebuild").write_text(f"""#!/usr/bin/env python3
+import os, plistlib, sys
+from pathlib import Path
+with open({str(calls)!r}, "a") as log:
+    log.write("xcodebuild " + " ".join(sys.argv[1:]) + "\\n")
+arguments = sys.argv[1:]
+settings = dict(argument.split("=", 1) for argument in arguments if "=" in argument)
+app = Path(arguments[arguments.index("-archivePath") + 1], "Products/Applications/FlectarMail.app")
+(app / "Frameworks/PDFium.framework").mkdir(parents=True)
+for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
+    (app / name).write_bytes(b"binary")
+    (app / name).chmod(0o755)
+(app / "Info.plist").write_bytes(plistlib.dumps({{
+    "CFBundleExecutable": "FlectarMail",
+    "CFBundleIdentifier": "com.flectar.mail",
+    "CFBundleShortVersionString": settings["MARKETING_VERSION"],
+    "CFBundleVersion": settings["CURRENT_PROJECT_VERSION"],
+    "MinimumOSVersion": "17.0",
+}}, fmt=plistlib.FMT_BINARY))
+""")
+            # `codesign --display` fails for unsigned code.
+            (tools / "codesign").write_text('#!/bin/sh\n[ "${FAKE_SIGNED:-}" = 1 ]\n')
+            for tool in tools.iterdir():
+                tool.chmod(0o755)
+            environment = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}"}
+            environment.pop("SOURCE_DATE_EPOCH", None)
+            result = subprocess.run(
+                ["bash", "scripts/package-ios.sh", "out"], cwd=root, env=environment,
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with zipfile.ZipFile(root / "out/flectar-mail-ios-arm64.ipa") as archive:
+                info = plistlib.loads(archive.read("Payload/FlectarMail.app/Info.plist"))
+            # Prereleases share the numeric version; the build number orders them.
+            self.assertEqual(info["CFBundleShortVersionString"], "0.1.0")
+            self.assertEqual(info["CFBundleVersion"], str(android_version_code("0.1.0-alpha.8")))
+            log = calls.read_text()
+            self.assertIn(f"xcodegen generate --spec {root}/platform/ios/project.yml", log)
+            self.assertIn("CODE_SIGNING_ALLOWED=NO", log)
+            self.assertIn(f"-archivePath {root}/out/FlectarMail.xcarchive", log)
+
+            result = subprocess.run(
+                ["bash", "scripts/package-ios.sh", "signed"], cwd=root,
+                env={**environment, "FAKE_SIGNED": "1"}, capture_output=True, text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must be unsigned", result.stderr)
+            self.assertFalse((root / "signed/flectar-mail-ios-arm64.ipa").exists())
+
     def test_staging_and_checksums(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -707,6 +862,7 @@ else:
                 "flectar-mail-macos-arm64/flectar-mail-macos-arm64.dmg",
                 "flectar-mail-macos-x64/flectar-mail-macos-x64.zip",
                 "flectar-mail-macos-x64/flectar-mail-macos-x64.dmg",
+                "flectar-mail-ios-arm64/flectar-mail-ios-arm64.ipa",
                 "flectar-mail-android-signed-arm64/flectar-mail.apk",
             )
             for name in names:
@@ -717,8 +873,9 @@ else:
             (source / "flectar-mail-linux-x64/startup-benchmark/benchmark.json").write_text("{}")
             dist = root / "dist"
             prepare(source, dist, "0.1.0-beta.1")
-            self.assertEqual(len(list(dist.iterdir())), 18)
+            self.assertEqual(len(list(dist.iterdir())), 19)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64.apk").is_file())
+            self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-ios-arm64.ipa").is_file())
             # Each download comes from its own architecture's artifact.
             for download, name in (
                 ("flectar-mail-0.1.0-beta.1-linux-x64.AppImage", names[0]),
@@ -769,7 +926,7 @@ else:
                 (folder / f"flectar-mail_0.1.0~beta.1_{arch}.deb").rename(folder / f"flectar-mail_0.1.0_{arch}.deb")
             stable_dist = root / "stable"
             prepare(source, stable_dist, "0.1.0")
-            self.assertEqual(len(list(stable_dist.iterdir())), 18)
+            self.assertEqual(len(list(stable_dist.iterdir())), 19)
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_amd64.deb").is_file())
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_arm64.deb").is_file())
             self.assertTrue((stable_dist / "flectar-mail-0.1.0-android-arm64.apk").is_file())
@@ -785,6 +942,7 @@ else:
         self.assertIn("Apple silicon and Intel", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("Linux and Windows on x64 and arm64", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("-linux-arm64.rpm", release_assets.release_notes("0.1.0-beta.1"))
+        self.assertIn("Sideload it with AltStore", release_assets.release_notes("0.1.0-beta.1"))
 
     def test_metadata_rejects_stale_android_lockfile(self):
         with tempfile.TemporaryDirectory() as directory:
