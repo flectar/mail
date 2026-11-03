@@ -839,6 +839,139 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             self.assertIn("must be unsigned", result.stderr)
             self.assertFalse((root / "signed/flectar-mail-ios-arm64.ipa").exists())
 
+    def test_ios_source_offers_the_newest_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            local_network = "Flectar Mail connects to mail servers on your local network."
+
+            def ipa_for(version, **changes):
+                info = {
+                    "CFBundleExecutable": "FlectarMail",
+                    "CFBundleIdentifier": "com.flectar.mail",
+                    "CFBundleShortVersionString": version.split("-")[0],
+                    "CFBundleVersion": str(android_version_code(version)),
+                    "MinimumOSVersion": "17.0",
+                    "NSLocalNetworkUsageDescription": local_network,
+                    "UILaunchScreen": {},
+                    **changes,
+                }
+                path = downloads / ios_release.ipa_name(version)
+                with zipfile.ZipFile(path, "w") as archive:
+                    archive.writestr("Payload/FlectarMail.app/Info.plist", plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+                    # A framework's Info.plist is not the app's.
+                    archive.writestr(
+                        "Payload/FlectarMail.app/Frameworks/PDFium.framework/Info.plist",
+                        plistlib.dumps({"CFBundleIdentifier": "org.pdfium"}),
+                    )
+                return path
+
+            def release(version, published, draft=False, ipa=True, digest=True):
+                assets = [{"name": f"flectar-mail-{version}-android-arm64.apk", "size": 3, "state": "uploaded"}]
+                if ipa:
+                    data = ipa_for(version).read_bytes()
+                    asset = {
+                        "name": ios_release.ipa_name(version),
+                        "size": len(data),
+                        "state": "uploaded",
+                        "browser_download_url": f"https://github.com/flectar/mail/releases/download/v{version}/{ios_release.ipa_name(version)}",
+                    }
+                    if digest:
+                        asset["digest"] = "sha256:" + hashlib.sha256(data).hexdigest()
+                    assets.append(asset)
+                return {
+                    "tag_name": f"v{version}",
+                    "draft": draft,
+                    "published_at": published,
+                    "html_url": f"https://github.com/flectar/mail/releases/tag/v{version}",
+                    "assets": assets,
+                }
+
+            releases = [
+                # Drafts are not published yet.
+                release("0.2.0-alpha.1", None, draft=True),
+                # Published last, but an older version.
+                release("0.1.0-alpha.9", "2026-12-01T10:00:00Z"),
+                release("0.1.0-beta.1", "2026-11-20T10:00:00Z"),
+                # Newer, but without an iOS app.
+                release("0.1.0-beta.2", "2026-11-25T10:00:00Z", ipa=False),
+                # GitHub has not always reported digests.
+                release("0.1.0-alpha.8", "2026-11-10T10:00:00Z", digest=False),
+            ]
+            listing = root / "releases.json"
+            listing.write_text(json.dumps(releases))
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "ios-release.py"), "latest", str(listing)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "tag=v0.1.0-beta.1\nasset=flectar-mail-0.1.0-beta.1-ios-arm64.ipa\n")
+
+            site = root / "site"
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "ios-release.py"), "site", str(listing), str(downloads),
+                 "--url", "https://flectar.github.io/mail/", "--output", str(site)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads((site / "source.json").read_text(encoding="utf-8"))
+            app = document["apps"][0]
+            ipa = downloads / "flectar-mail-0.1.0-beta.1-ios-arm64.ipa"
+            self.assertEqual(app["versions"], [{
+                "version": "0.1.0",
+                "buildVersion": str(android_version_code("0.1.0-beta.1")),
+                "marketingVersion": "0.1.0-beta.1",
+                "date": "2026-11-20T10:00:00Z",
+                "localizedDescription": "Release notes: https://github.com/flectar/mail/releases/tag/v0.1.0-beta.1",
+                "downloadURL": f"https://github.com/flectar/mail/releases/download/v0.1.0-beta.1/{ipa.name}",
+                "size": ipa.stat().st_size,
+                "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest(),
+                "minOSVersion": "17.0",
+            }])
+            self.assertEqual(app["bundleIdentifier"], "com.flectar.mail")
+            self.assertEqual(document["sourceURL"], "https://flectar.github.io/mail/source.json")
+            # AltStore and SideStore refuse apps that ask for a permission
+            # their source does not list.
+            self.assertEqual(app["appPermissions"], {
+                "entitlements": [],
+                "privacy": {"NSLocalNetworkUsageDescription": local_network},
+            })
+            # Releases that predate version lists read the newest version here.
+            latest = app["versions"][0]
+            for key, field in (("version", "version"), ("versionDate", "date"), ("downloadURL", "downloadURL"), ("size", "size")):
+                self.assertEqual(app[key], latest[field])
+            # Every image the source shows is published with it.
+            shots = [shot for device in app["screenshots"].values() for shot in device]
+            for address in (document["iconURL"], app["iconURL"], *(shot["imageURL"] for shot in shots), *app["screenshotURLs"]):
+                self.assertTrue(address.startswith("https://flectar.github.io/mail/"), address)
+                self.assertTrue((site / address.removeprefix("https://flectar.github.io/mail/")).is_file(), address)
+            self.assertTrue(app["screenshots"]["ipad"])
+            for shot in shots:
+                self.assertGreater(shot["width"], 0)
+                self.assertGreater(shot["height"], 0)
+
+            # The source must describe exactly the file GitHub serves, from the
+            # release it belongs to.
+            original = ipa.read_bytes()
+            ipa.write_bytes(original + b"changed")
+            with self.assertRaisesRegex(ValueError, "differs from the release download"):
+                ios_release.write_site(releases, downloads, "https://example.com", root / "resized")
+            ipa.write_bytes(original)
+            beta = releases[2]["assets"][1]
+            beta["digest"] = "sha256:" + "0" * 64
+            with self.assertRaisesRegex(ValueError, "differs from the release download"):
+                ios_release.write_site(releases, downloads, "https://example.com", root / "tampered")
+            for change in ({"CFBundleVersion": "1"}, {"CFBundleShortVersionString": "0.2.0"}, {"CFBundleIdentifier": "com.example"}):
+                with self.subTest(change=change):
+                    data = ipa_for("0.1.0-beta.1", **change).read_bytes()
+                    beta.update(size=len(data), digest="sha256:" + hashlib.sha256(data).hexdigest())
+                    with self.assertRaises(ValueError):
+                        ios_release.write_site(releases, downloads, "https://example.com", root / "mismatched")
+            self.assertFalse(any((root / name).exists() for name in ("resized", "tampered", "mismatched")))
+            with self.assertRaisesRegex(ValueError, "No published release"):
+                ios_release.newest([release("0.1.0", "2026-12-24T10:00:00Z", ipa=False), releases[0]])
+
     def test_staging_and_checksums(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -875,7 +1008,7 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             prepare(source, dist, "0.1.0-beta.1")
             self.assertEqual(len(list(dist.iterdir())), 19)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64.apk").is_file())
-            self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-ios-arm64.ipa").is_file())
+            self.assertTrue((dist / ios_release.ipa_name("0.1.0-beta.1")).is_file())
             # Each download comes from its own architecture's artifact.
             for download, name in (
                 ("flectar-mail-0.1.0-beta.1-linux-x64.AppImage", names[0]),
