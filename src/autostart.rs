@@ -25,9 +25,10 @@ pub(crate) fn supported() -> bool {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Applied {
     Done,
-    /// macOS registered the item, but the user must allow it under Login
-    /// Items in System Settings, which has been opened for them.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    /// Only the user can allow the entry, in the settings page that has been
+    /// opened for them: Login Items on macOS, or Startup apps on Windows when
+    /// they turned off the Microsoft Store build's startup task.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     NeedsApproval,
 }
 
@@ -350,7 +351,135 @@ mod xdg {
 }
 
 #[cfg(target_os = "windows")]
-use registry as imp;
+use windows_startup as imp;
+
+/// Windows keeps a packaged app's registry writes private to its package, so
+/// the Microsoft Store build uses the startup task that its manifest
+/// declares. The installer and portable builds use the `Run` key.
+#[cfg(target_os = "windows")]
+mod windows_startup {
+    use super::{Applied, Entry, registry, startup_task};
+    use std::{io, path::Path};
+
+    pub(super) fn supported() -> bool {
+        true
+    }
+
+    pub(super) fn read() -> io::Result<Option<Entry>> {
+        if packaged() {
+            startup_task::read().map(Some)
+        } else {
+            registry::read()
+        }
+    }
+
+    pub(super) fn write(executable: &Path) -> io::Result<Applied> {
+        if packaged() {
+            startup_task::enable()
+        } else {
+            registry::write(executable)
+        }
+    }
+
+    pub(super) fn remove() -> io::Result<()> {
+        if packaged() {
+            startup_task::disable()
+        } else {
+            registry::remove()
+        }
+    }
+
+    /// Whether the process has package identity, as the Store build does.
+    fn packaged() -> bool {
+        use windows_sys::Win32::{
+            Foundation::ERROR_INSUFFICIENT_BUFFER,
+            Storage::Packaging::Appx::GetCurrentPackageFullName,
+        };
+        let mut length = 0;
+        // SAFETY: a zero length with no buffer only asks for the name's size,
+        // which an unpackaged process does not have.
+        let status = unsafe { GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) };
+        status == ERROR_INSUFFICIENT_BUFFER
+    }
+}
+
+/// The Microsoft Store package's startup task. Windows lists it under
+/// Startup apps in Settings and Task Manager, and launches the packaged
+/// executable with the task's `--background` parameter.
+#[cfg(target_os = "windows")]
+mod startup_task {
+    use super::{Applied, Entry};
+    use std::io;
+    use windows::{
+        ApplicationModel::{StartupTask, StartupTaskState},
+        core::h,
+    };
+
+    fn task() -> io::Result<StartupTask> {
+        // The TaskId that the Store package manifest declares.
+        Ok(StartupTask::GetAsync(h!("FlectarMailStartup"))?.join()?)
+    }
+
+    pub(super) fn read() -> io::Result<Entry> {
+        let state = task()?.State()?;
+        Ok(Entry {
+            // The package always launches its own executable.
+            executable: None,
+            enabled: matches!(
+                state,
+                StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy
+            ),
+        })
+    }
+
+    pub(super) fn enable() -> io::Result<Applied> {
+        let task = task()?;
+        let mut state = task.State()?;
+        if state == StartupTaskState::Disabled {
+            // Packaged desktop apps enable their task without a prompt.
+            state = task.RequestEnableAsync()?.join()?;
+        }
+        match state {
+            StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy => Ok(Applied::Done),
+            // Apps cannot override a user who turned the task off; take them
+            // to the switch instead.
+            StartupTaskState::DisabledByUser => {
+                open_startup_settings()?;
+                Ok(Applied::NeedsApproval)
+            }
+            _ => Err(io::Error::other(
+                "an administrator has turned off startup apps",
+            )),
+        }
+    }
+
+    pub(super) fn disable() -> io::Result<()> {
+        Ok(task()?.Disable()?)
+    }
+
+    fn open_startup_settings() -> io::Result<()> {
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+        let page: Vec<u16> = "ms-settings:startupapps\0".encode_utf16().collect();
+        // SAFETY: `page` is a live, NUL-terminated UTF-16 string, and every
+        // other pointer argument may be null.
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                page.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        // Values above 32 report success.
+        if result as usize > 32 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
 
 /// The per-user `Run` key, which Task Manager's Startup apps page lists and
 /// can disable through the adjacent `StartupApproved` key.
@@ -376,10 +505,6 @@ mod registry {
     const APPROVED_KEY: &str =
         r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
     const VALUE_NAME: &str = "Flectar Mail";
-
-    pub(super) fn supported() -> bool {
-        true
-    }
 
     pub(super) fn read() -> io::Result<Option<Entry>> {
         let Some(command) = get_value(RUN_KEY, RRF_RT_REG_SZ)? else {
