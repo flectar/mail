@@ -1736,7 +1736,7 @@ msgstr ""
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2216 ui/views/files-view.slint:541
+#: ui/app.slint:2216 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
@@ -1765,7 +1765,7 @@ msgstr ""
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2226 ui/views/files-view.slint:623
+#: ui/app.slint:2226 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
@@ -2022,7 +2022,7 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
-#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
+#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 msgid "Cancel"
 msgstr ""
 
@@ -2207,8 +2207,8 @@ msgid "Export decrypted message"
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:468
-#: ui/views/files-view.slint:658 ui/window-chrome.slint:201
+#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:505
+#: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr ""
 
@@ -2307,7 +2307,7 @@ msgstr ""
 msgid "Create an event to start planning your month."
 msgstr ""
 
-#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:549
+#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:586
 msgid "Reset filters"
 msgstr ""
 
@@ -2609,7 +2609,7 @@ msgstr ""
 msgid "New message"
 msgstr ""
 
-#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:664
+#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:701
 msgid "Account"
 msgstr ""
 
@@ -3116,7 +3116,7 @@ msgid "{} label, {} account"
 msgstr ""
 
 #: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:345
+#: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr ""
 
@@ -3138,7 +3138,7 @@ msgid_plural "{n} tabs open"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:390
+#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 msgid "Files"
 msgstr ""
 
@@ -3366,11 +3366,11 @@ msgstr ""
 msgid "Fit to width"
 msgstr ""
 
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:502
 msgid "Download"
 msgstr ""
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 msgid "Loading preview…"
 msgstr ""
 
@@ -4089,7 +4089,7 @@ msgstr ""
 msgid "Show"
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:696
+#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:733
 msgid "Dismiss"
 msgstr ""
 
@@ -4247,7 +4247,7 @@ msgstr ""
 msgid "Calculating…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:306
+#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:313
 msgid "Refresh"
 msgstr ""
 
@@ -4898,7 +4898,7 @@ msgstr ""
 msgid "Reconnect"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 msgid "Manage"
 msgstr ""
 
@@ -5089,7 +5089,7 @@ msgstr[1] ""
 msgid "Export mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:600
 msgid "Delete…"
 msgstr ""
 
@@ -6016,7 +6016,7 @@ msgstr ""
 msgid "Email attachments"
 msgstr ""
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:657
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:694
 msgid "Connect storage"
 msgstr ""
 
@@ -6028,7 +6028,7 @@ msgstr ""
 msgid "STORAGE SPACE"
 msgstr ""
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:496
 msgid "Sharing activity"
 msgstr ""
 
@@ -6036,357 +6036,361 @@ msgstr ""
 msgid "Transfers"
 msgstr ""
 
-#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:308 ui/views/files-view.slint:558
 msgid "File sources"
 msgstr ""
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "Search files"
 msgstr ""
 
-#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
+#: ui/views/files-view.slint:314 ui/views/files-view.slint:321
 msgid "Filter and sort files"
 msgstr ""
 
-#: ui/views/files-view.slint:310
+#: ui/views/files-view.slint:317
 msgid "Synchronized mail"
 msgstr ""
 
-#: ui/views/files-view.slint:311
+#: ui/views/files-view.slint:318
 msgid "All mail on server (JMAP)"
 msgstr ""
 
-#: ui/views/files-view.slint:312
+#: ui/views/files-view.slint:319
 msgid "Index cached text"
 msgstr ""
 
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:347 ui/views/files-view.slint:459
 msgid "Upload"
 msgstr ""
 
-#: ui/views/files-view.slint:376
+#: ui/views/files-view.slint:385
 msgid "No files to show"
 msgstr ""
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Attachments from synchronized messages will appear here."
 msgstr ""
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Upload a file or create a folder to get started."
 msgstr ""
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Select an account and connect its storage."
 msgstr ""
 
-#: ui/views/files-view.slint:436
+#: ui/views/files-view.slint:451
+msgid "Upload or create a folder"
+msgstr ""
+
+#: ui/views/files-view.slint:473
 msgid "Load more"
 msgstr ""
 
-#: ui/views/files-view.slint:445
+#: ui/views/files-view.slint:482
 msgid "File list width"
 msgstr ""
 
-#: ui/views/files-view.slint:462
+#: ui/views/files-view.slint:499
 msgid "Back to files"
 msgstr ""
 
-#: ui/views/files-view.slint:464
+#: ui/views/files-view.slint:501
 msgid "Open folder"
 msgstr ""
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Preview"
 msgstr ""
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Details"
 msgstr ""
 
-#: ui/views/files-view.slint:474
+#: ui/views/files-view.slint:511
 msgid "Select a file to preview"
 msgstr ""
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr ""
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr ""
 
-#: ui/views/files-view.slint:478
+#: ui/views/files-view.slint:515
 msgid "Clear displayed activity"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Share file or folder"
 msgstr ""
 
-#: ui/views/files-view.slint:541 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:578 ui/views/files-view.slint:592
 msgid "Rename"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Move to folder"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Copy to folder"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "File properties"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Lock file or folder"
 msgstr ""
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Manage file"
 msgstr ""
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Files and folders"
 msgstr ""
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Folders"
 msgstr ""
 
-#: ui/views/files-view.slint:545 ui/views/files-view.slint:566
+#: ui/views/files-view.slint:582 ui/views/files-view.slint:603
 msgid "Name"
 msgstr ""
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Size"
 msgstr ""
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Kind"
 msgstr ""
 
-#: ui/views/files-view.slint:546
+#: ui/views/files-view.slint:583
 msgid "Descending order"
 msgstr ""
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes"
 msgstr ""
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes (optional)"
 msgstr ""
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes"
 msgstr ""
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes (optional)"
 msgstr ""
 
-#: ui/views/files-view.slint:553
+#: ui/views/files-view.slint:590
 msgid "Keep offline"
 msgstr ""
 
-#: ui/views/files-view.slint:554
+#: ui/views/files-view.slint:591
 msgid "Release offline copy"
 msgstr ""
 
-#: ui/views/files-view.slint:556
+#: ui/views/files-view.slint:593
 msgid "Move…"
 msgstr ""
 
-#: ui/views/files-view.slint:557
+#: ui/views/files-view.slint:594
 msgid "Copy…"
 msgstr ""
 
-#: ui/views/files-view.slint:558
+#: ui/views/files-view.slint:595
 msgid "Replace content…"
 msgstr ""
 
-#: ui/views/files-view.slint:559
+#: ui/views/files-view.slint:596
 msgid "Properties…"
 msgstr ""
 
-#: ui/views/files-view.slint:560
+#: ui/views/files-view.slint:597
 msgid "Sharing…"
 msgstr ""
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Release lock"
 msgstr ""
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Lock…"
 msgstr ""
 
-#: ui/views/files-view.slint:562
+#: ui/views/files-view.slint:599
 msgid "Renew lock for 5 minutes"
 msgstr ""
 
-#: ui/views/files-view.slint:565
+#: ui/views/files-view.slint:602
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
 "cannot be undone."
 msgstr ""
 
-#: ui/views/files-view.slint:570
+#: ui/views/files-view.slint:607
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
 msgstr ""
 
-#: ui/views/files-view.slint:571
+#: ui/views/files-view.slint:608
 msgid "Destination folder"
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s principal URL on this server."
 msgstr ""
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr ""
 
-#: ui/views/files-view.slint:576
+#: ui/views/files-view.slint:613
 msgid "Recipient"
 msgstr ""
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Allow editing"
 msgstr ""
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Modify content"
 msgstr ""
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:617
 msgid "Modify properties"
 msgstr ""
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:618
 msgid "Add children"
 msgstr ""
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:619
 msgid "Rename and move"
 msgstr ""
 
-#: ui/views/files-view.slint:584
+#: ui/views/files-view.slint:621
 msgid "Manage sharing"
 msgstr ""
 
-#: ui/views/files-view.slint:586
+#: ui/views/files-view.slint:623
 msgid "Remove recipient’s access"
 msgstr ""
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:627
 msgid "Shared lock"
 msgstr ""
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:628
 msgid "Include folder contents"
 msgstr ""
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:629
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr ""
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:633
 msgid "If a name already exists"
 msgstr ""
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Stop and report conflict"
 msgstr ""
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep both with a new name"
 msgstr ""
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Replace existing"
 msgstr ""
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep newest"
 msgstr ""
 
-#: ui/views/files-view.slint:598
+#: ui/views/files-view.slint:635
 msgid "This can replace existing content at the destination."
 msgstr ""
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:636
 msgid "Compare names without case"
 msgstr ""
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:642
 msgid "Property namespace"
 msgstr ""
 
-#: ui/views/files-view.slint:606
+#: ui/views/files-view.slint:643
 msgid "Property name"
 msgstr ""
 
-#: ui/views/files-view.slint:607
+#: ui/views/files-view.slint:644
 msgid "Value"
 msgstr ""
 
-#: ui/views/files-view.slint:608
+#: ui/views/files-view.slint:645
 msgid "Remove property"
 msgstr ""
 
-#: ui/views/files-view.slint:612
+#: ui/views/files-view.slint:649
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr ""
 
-#: ui/views/files-view.slint:613
+#: ui/views/files-view.slint:650
 msgid "Created"
 msgstr ""
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:651
 msgid "Modified"
 msgstr ""
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:652
 msgid "Accessed"
 msgstr ""
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:653
 msgid "Executable"
 msgstr ""
 
-#: ui/views/files-view.slint:617
+#: ui/views/files-view.slint:654
 msgid "Subscription changes are unavailable on this server version."
 msgstr ""
 
-#: ui/views/files-view.slint:669
+#: ui/views/files-view.slint:706
 msgid "Uses the selected account’s saved credentials."
 msgstr ""
 
-#: ui/views/files-view.slint:673
+#: ui/views/files-view.slint:710
 msgid "Storage URL"
 msgstr ""
 
-#: ui/views/files-view.slint:687
+#: ui/views/files-view.slint:724
 msgid "Transfers and operations"
 msgstr ""
 
-#: ui/views/files-view.slint:688
+#: ui/views/files-view.slint:725
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
 "the destination first."
 msgstr ""
 
-#: ui/views/files-view.slint:695
+#: ui/views/files-view.slint:732
 msgid "Resume"
 msgstr ""
 
-#: ui/views/files-view.slint:697
+#: ui/views/files-view.slint:734
 msgid "Reviewed as completed"
 msgstr ""
 

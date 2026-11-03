@@ -1770,7 +1770,7 @@ msgstr "Глобальные метки (только локально)"
 msgid "Empty Trash?"
 msgstr "Очистить корзину?"
 
-#: ui/app.slint:2216 ui/views/files-view.slint:541
+#: ui/app.slint:2216 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "Удалить безвозвратно?"
 
@@ -1801,7 +1801,7 @@ msgstr "Это действие нельзя отменить."
 msgid "Empty Trash"
 msgstr "Очистить корзину"
 
-#: ui/app.slint:2226 ui/views/files-view.slint:623
+#: ui/app.slint:2226 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "Удалить безвозвратно"
 
@@ -2070,7 +2070,7 @@ msgstr "Добавить адрес отправителя"
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
-#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
+#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 msgid "Cancel"
 msgstr "Отмена"
 
@@ -2280,8 +2280,8 @@ msgid "Export decrypted message"
 msgstr "Экспортировать расшифрованное сообщение"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:468
-#: ui/views/files-view.slint:658 ui/window-chrome.slint:201
+#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:505
+#: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 msgid "Close"
 msgstr "Закрыть"
 
@@ -2385,7 +2385,7 @@ msgstr "Включите отображение других календаре�
 msgid "Create an event to start planning your month."
 msgstr "Создайте событие, чтобы начать планировать этот месяц."
 
-#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:549
+#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:586
 msgid "Reset filters"
 msgstr "Сбросить фильтры"
 
@@ -2689,7 +2689,7 @@ msgstr "Редактировать черновик"
 msgid "New message"
 msgstr "Новое сообщение"
 
-#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:664
+#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:701
 msgid "Account"
 msgstr "Учётная запись"
 
@@ -3209,7 +3209,7 @@ msgid "{} label, {} account"
 msgstr "Меток: {}, учётных записей: {}"
 
 #: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:345
+#: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr "Новая папка"
 
@@ -3232,7 +3232,7 @@ msgstr[0] "{n} вкладка открыта"
 msgstr[1] "{n} вкладки открыты"
 msgstr[2] "{n} вкладок открыто"
 
-#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:390
+#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 msgid "Files"
 msgstr "Файлы"
 
@@ -3463,11 +3463,11 @@ msgstr "Увеличить"
 msgid "Fit to width"
 msgstr "По ширине"
 
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:502
 msgid "Download"
 msgstr "Скачать"
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 msgid "Loading preview…"
 msgstr "Загрузка предпросмотра…"
 
@@ -4277,7 +4277,7 @@ msgstr "Импорт почты… {}%"
 msgid "Show"
 msgstr "Показать"
 
-#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:696
+#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:733
 msgid "Dismiss"
 msgstr "Убрать"
 
@@ -4447,7 +4447,7 @@ msgstr "Локальное хранилище"
 msgid "Calculating…"
 msgstr "Вычисление…"
 
-#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:306
+#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:313
 msgid "Refresh"
 msgstr "Обновить"
 
@@ -5149,7 +5149,7 @@ msgstr "Состояние учётной записи: {}"
 msgid "Reconnect"
 msgstr "Переподключить"
 
-#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 msgid "Manage"
 msgstr "Управлять"
 
@@ -5359,7 +5359,7 @@ msgstr[2] "{} писем"
 msgid "Export mail…"
 msgstr "Экспортировать почту…"
 
-#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:600
 msgid "Delete…"
 msgstr "Удалить…"
 
@@ -6357,7 +6357,7 @@ msgstr "Здесь можно просматривать и изменять с�
 msgid "Email attachments"
 msgstr "Вложения писем"
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:657
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:694
 msgid "Connect storage"
 msgstr "Подключить хранилище"
 
@@ -6369,7 +6369,7 @@ msgstr "Серверное хранилище"
 msgid "STORAGE SPACE"
 msgstr "ПРОСТРАНСТВО ХРАНИЛИЩА"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:496
 msgid "Sharing activity"
 msgstr "Действия с общим доступом"
 
@@ -6377,202 +6377,206 @@ msgstr "Действия с общим доступом"
 msgid "Transfers"
 msgstr "Передачи"
 
-#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:308 ui/views/files-view.slint:558
 msgid "File sources"
 msgstr "Источники файлов"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 msgid "Search files"
 msgstr "Поиск файлов"
 
-#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
+#: ui/views/files-view.slint:314 ui/views/files-view.slint:321
 msgid "Filter and sort files"
 msgstr "Фильтрация и сортировка файлов"
 
-#: ui/views/files-view.slint:310
+#: ui/views/files-view.slint:317
 msgid "Synchronized mail"
 msgstr "Синхронизированная почта"
 
-#: ui/views/files-view.slint:311
+#: ui/views/files-view.slint:318
 msgid "All mail on server (JMAP)"
 msgstr "Вся почта на сервере (JMAP)"
 
-#: ui/views/files-view.slint:312
+#: ui/views/files-view.slint:319
 msgid "Index cached text"
 msgstr "Индексировать кешированный текст"
 
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:347 ui/views/files-view.slint:459
 msgid "Upload"
 msgstr "Загрузить на сервер"
 
-#: ui/views/files-view.slint:376
+#: ui/views/files-view.slint:385
 msgid "No files to show"
 msgstr "Нет файлов для отображения"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Attachments from synchronized messages will appear here."
 msgstr "Здесь появятся вложения из синхронизированных писем."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Upload a file or create a folder to get started."
 msgstr "Загрузите файл или создайте папку, чтобы начать работу."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 msgid "Select an account and connect its storage."
 msgstr "Выберите учётную запись и подключите её хранилище."
 
-#: ui/views/files-view.slint:436
+#: ui/views/files-view.slint:451
+msgid "Upload or create a folder"
+msgstr "Загрузить или создать папку"
+
+#: ui/views/files-view.slint:473
 msgid "Load more"
 msgstr "Загрузить ещё"
 
-#: ui/views/files-view.slint:445
+#: ui/views/files-view.slint:482
 msgid "File list width"
 msgstr "Ширина списка файлов"
 
-#: ui/views/files-view.slint:462
+#: ui/views/files-view.slint:499
 msgid "Back to files"
 msgstr "Вернуться к файлам"
 
-#: ui/views/files-view.slint:464
+#: ui/views/files-view.slint:501
 msgid "Open folder"
 msgstr "Открыть папку"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Preview"
 msgstr "Предпросмотр"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 msgid "Details"
 msgstr "Сведения"
 
-#: ui/views/files-view.slint:474
+#: ui/views/files-view.slint:511
 msgid "Select a file to preview"
 msgstr "Выберите файл для предпросмотра"
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr ""
 "Здесь отображаются PDF, изображения и текст. Файлы других форматов можно "
 "скачать."
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr ""
 "Здесь отображаются изображения и текст. Файлы других форматов можно скачать."
 
-#: ui/views/files-view.slint:478
+#: ui/views/files-view.slint:515
 msgid "Clear displayed activity"
 msgstr "Очистить список действий"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Share file or folder"
 msgstr "Открыть общий доступ к файлу или папке"
 
-#: ui/views/files-view.slint:541 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:578 ui/views/files-view.slint:592
 msgid "Rename"
 msgstr "Переименовать"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Move to folder"
 msgstr "Переместить в папку"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Copy to folder"
 msgstr "Копировать в папку"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "File properties"
 msgstr "Свойства файла"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Lock file or folder"
 msgstr "Заблокировать файл или папку"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 msgid "Manage file"
 msgstr "Управление файлом"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Files and folders"
 msgstr "Файлы и папки"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 msgid "Folders"
 msgstr "Папки"
 
-#: ui/views/files-view.slint:545 ui/views/files-view.slint:566
+#: ui/views/files-view.slint:582 ui/views/files-view.slint:603
 msgid "Name"
 msgstr "Имя"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Size"
 msgstr "Размер"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 msgid "Kind"
 msgstr "Тип"
 
-#: ui/views/files-view.slint:546
+#: ui/views/files-view.slint:583
 msgid "Descending order"
 msgstr "По убыванию"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes"
 msgstr "Минимальный размер в байтах"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 msgid "Minimum bytes (optional)"
 msgstr "Минимальный размер в байтах (необязательно)"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes"
 msgstr "Максимальный размер в байтах"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 msgid "Maximum bytes (optional)"
 msgstr "Максимальный размер в байтах (необязательно)"
 
-#: ui/views/files-view.slint:553
+#: ui/views/files-view.slint:590
 msgid "Keep offline"
 msgstr "Хранить локальную копию"
 
-#: ui/views/files-view.slint:554
+#: ui/views/files-view.slint:591
 msgid "Release offline copy"
 msgstr "Удалить локальную копию"
 
-#: ui/views/files-view.slint:556
+#: ui/views/files-view.slint:593
 msgid "Move…"
 msgstr "Переместить…"
 
-#: ui/views/files-view.slint:557
+#: ui/views/files-view.slint:594
 msgid "Copy…"
 msgstr "Копировать…"
 
-#: ui/views/files-view.slint:558
+#: ui/views/files-view.slint:595
 msgid "Replace content…"
 msgstr "Заменить содержимое…"
 
-#: ui/views/files-view.slint:559
+#: ui/views/files-view.slint:596
 msgid "Properties…"
 msgstr "Свойства…"
 
-#: ui/views/files-view.slint:560
+#: ui/views/files-view.slint:597
 msgid "Sharing…"
 msgstr "Общий доступ…"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Release lock"
 msgstr "Снять блокировку"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 msgid "Lock…"
 msgstr "Заблокировать…"
 
-#: ui/views/files-view.slint:562
+#: ui/views/files-view.slint:599
 msgid "Renew lock for 5 minutes"
 msgstr "Продлить блокировку на 5 минут"
 
-#: ui/views/files-view.slint:565
+#: ui/views/files-view.slint:602
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
 "cannot be undone."
@@ -6580,7 +6584,7 @@ msgstr ""
 "Объект «{}» и всё его содержимое будут безвозвратно удалены из хранилища. "
 "Это действие нельзя отменить."
 
-#: ui/views/files-view.slint:570
+#: ui/views/files-view.slint:607
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
@@ -6588,145 +6592,145 @@ msgstr ""
 "Путь к папке назначения (например, /Documents). Оставьте пустым для текущей "
 "папки или корневой папки другого пространства хранилища."
 
-#: ui/views/files-view.slint:571
+#: ui/views/files-view.slint:608
 msgid "Destination folder"
 msgstr "Папка назначения"
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s principal URL on this server."
 msgstr "Введите URL субъекта доступа (principal) получателя на этом сервере."
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr ""
 "Введите адрес электронной почты или идентификатор субъекта доступа "
 "(principal) получателя на этом сервере."
 
-#: ui/views/files-view.slint:576
+#: ui/views/files-view.slint:613
 msgid "Recipient"
 msgstr "Получатель"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Allow editing"
 msgstr "Разрешить редактирование"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 msgid "Modify content"
 msgstr "Изменять содержимое"
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:617
 msgid "Modify properties"
 msgstr "Изменять свойства"
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:618
 msgid "Add children"
 msgstr "Добавлять вложенные объекты"
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:619
 msgid "Rename and move"
 msgstr "Переименовывать и перемещать"
 
-#: ui/views/files-view.slint:584
+#: ui/views/files-view.slint:621
 msgid "Manage sharing"
 msgstr "Управлять общим доступом"
 
-#: ui/views/files-view.slint:586
+#: ui/views/files-view.slint:623
 msgid "Remove recipient’s access"
 msgstr "Отозвать доступ получателя"
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:627
 msgid "Shared lock"
 msgstr "Совместная блокировка"
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:628
 msgid "Include folder contents"
 msgstr "Включить содержимое папки"
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:629
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr "Блокировки истекают через 5 минут, если их не продлить."
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:633
 msgid "If a name already exists"
 msgstr "Если имя уже существует"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Stop and report conflict"
 msgstr "Остановить и сообщить о конфликте"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep both with a new name"
 msgstr "Сохранить оба под разными именами"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Replace existing"
 msgstr "Заменить существующий объект"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 msgid "Keep newest"
 msgstr "Сохранить более новый"
 
-#: ui/views/files-view.slint:598
+#: ui/views/files-view.slint:635
 msgid "This can replace existing content at the destination."
 msgstr "Это может заменить существующее содержимое в папке назначения."
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:636
 msgid "Compare names without case"
 msgstr "Сравнивать имена без учёта регистра"
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:642
 msgid "Property namespace"
 msgstr "Пространство имён свойства"
 
-#: ui/views/files-view.slint:606
+#: ui/views/files-view.slint:643
 msgid "Property name"
 msgstr "Имя свойства"
 
-#: ui/views/files-view.slint:607
+#: ui/views/files-view.slint:644
 msgid "Value"
 msgstr "Значение"
 
-#: ui/views/files-view.slint:608
+#: ui/views/files-view.slint:645
 msgid "Remove property"
 msgstr "Удалить свойство"
 
-#: ui/views/files-view.slint:612
+#: ui/views/files-view.slint:649
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr "Даты указываются в UTC, например 2026-09-09T12:00:00Z."
 
-#: ui/views/files-view.slint:613
+#: ui/views/files-view.slint:650
 msgid "Created"
 msgstr "Создан"
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:651
 msgid "Modified"
 msgstr "Изменён"
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:652
 msgid "Accessed"
 msgstr "Последний доступ"
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:653
 msgid "Executable"
 msgstr "Исполняемый"
 
-#: ui/views/files-view.slint:617
+#: ui/views/files-view.slint:654
 msgid "Subscription changes are unavailable on this server version."
 msgstr "Изменение подписок недоступно в этой версии сервера."
 
-#: ui/views/files-view.slint:669
+#: ui/views/files-view.slint:706
 msgid "Uses the selected account’s saved credentials."
 msgstr "Использует сохранённые учётные данные выбранной учётной записи."
 
-#: ui/views/files-view.slint:673
+#: ui/views/files-view.slint:710
 msgid "Storage URL"
 msgstr "URL хранилища"
 
-#: ui/views/files-view.slint:687
+#: ui/views/files-view.slint:724
 msgid "Transfers and operations"
 msgstr "Передачи и операции"
 
-#: ui/views/files-view.slint:688
+#: ui/views/files-view.slint:725
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
 "the destination first."
@@ -6734,11 +6738,11 @@ msgstr ""
 "Прерванные изменения нужно проверить перед повторной попыткой. Сначала "
 "обновите хранилище и проверьте папку назначения."
 
-#: ui/views/files-view.slint:695
+#: ui/views/files-view.slint:732
 msgid "Resume"
 msgstr "Продолжить"
 
-#: ui/views/files-view.slint:697
+#: ui/views/files-view.slint:734
 msgid "Reviewed as completed"
 msgstr "Проверено: завершено"
 
