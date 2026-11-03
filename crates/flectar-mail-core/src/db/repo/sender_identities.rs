@@ -227,7 +227,7 @@ pub fn record_delivery(
 
 /// Every address that belongs to the account, for telling outgoing mail and
 /// the user's own addresses apart from correspondents.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct OwnAddresses {
     exact: HashSet<String>,
     domains: HashSet<String>,
@@ -268,6 +268,20 @@ pub fn own_addresses(conn: &Connection, account_id: i64) -> Result<OwnAddresses>
         if identity.is_verified() {
             own.insert(identity.email);
         }
+    }
+    Ok(own)
+}
+
+/// The addresses of every account, for mail that may have been sent from
+/// any of them.
+pub fn own_addresses_of_all(conn: &Connection) -> Result<OwnAddresses> {
+    let mut own = OwnAddresses::default();
+    let mut statement = conn.prepare(
+        "SELECT email FROM sender_identities
+         WHERE is_primary = 1 OR verification_status = 'accepted'",
+    )?;
+    for email in statement.query_map([], |row| row.get::<_, String>(0))? {
+        own.insert(email?);
     }
     Ok(own)
 }

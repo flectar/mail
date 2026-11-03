@@ -978,6 +978,7 @@ mod tests {
                 source: SourceKind::K9Settings,
                 source_version: None,
                 accounts,
+                mail: Vec::new(),
                 other_entries: Vec::new(),
             },
             existing,

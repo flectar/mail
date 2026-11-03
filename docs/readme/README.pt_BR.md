@@ -95,7 +95,7 @@ Você também pode substituir a cor de uma conta individual e mostrar a cor resu
 
 ### 🧵 Conversas
 
-As respostas ficam agrupadas em ordem cronológica, com a mensagem ativa expandida no painel de leitura.
+As respostas ficam agrupadas em ordem cronológica, com a mensagem ativa expandida no painel de leitura. Para listar, abrir e tratar cada mensagem separadamente, desative **Visualização de conversa** em Configurações → Geral.
 
 Use **Cima/Baixo** para navegar pelas mensagens, **Home/End** para ir à primeira ou à última mensagem carregada e **Page Up/Page Down** para avançar uma página por vez. **Enter** abre a mensagem atual e leva o foco ao conteúdo; **Espaço** marca ou desmarca a mensagem para ações em lote. **Tab/Shift+Tab** alternam entre controles. No espaço completo, **F6** move o foco entre a lista e o leitor. No layout minimalista, as setas destacam mensagens e **Enter** as abre; **Escape** ou **F6** retorna à lista.
 
@@ -110,6 +110,8 @@ Use **Cima/Baixo** para navegar pelas mensagens, **Home/End** para ir à primeir
 Mantenha vários espaços abertos ao mesmo tempo com abas como as de um navegador. Cada aba lembra sua localização: uma caixa de e-mail, busca ou conversa aberta, o calendário, os contatos, os arquivos ou as configurações, além da posição da rolagem e da mensagem que você estava lendo. Clique com o botão do meio ou com Ctrl/⌘ em uma mensagem para abri-la em uma aba em segundo plano (adicione Shift para mudar para ela), ou escolha **Abrir em nova aba** no menu. Arraste abas para reordená-las, feche com o botão do meio e use o botão direito para fechar as demais ou as que estão à direita. Continue de onde parou na próxima vez que abrir o Flectar Mail.
 
 **Ctrl/⌘+T** abre uma nova aba, **Ctrl/⌘+W** fecha a atual e **Ctrl/⌘+Shift+T** reabre a última aba fechada. **Ctrl+Tab** e **Ctrl+Shift+Tab** alternam entre abas, **Ctrl/⌘+1–8** vão para uma aba específica e **Ctrl/⌘+9** vai para a última.
+
+No celular e em janelas estreitas, o botão no fim da barra de ferramentas mostra quantas abas estão abertas e as exibe como cartões. Toque em um cartão para mudar para ele, toque em × ou deslize-o para o lado para fechá-lo e use **+** para abrir uma nova aba. Selecione mensagens e escolha **Abrir em novas abas** no menu da seleção para abri-las em segundo plano. Se preferir trabalhar sem abas, desative **Abas** em Configurações → Geral.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
@@ -285,10 +287,12 @@ Contas POP3 baixam e-mails para este dispositivo e os deixam no servidor, a meno
 
 A mesma importação também traz contas do Thunderbird (uma pasta de perfil, seu arquivo de Ferramentas › Exportar ou `prefs.js`), do Thunderbird para Android ou do K-9 Mail (exportações de configurações `.k9s`). Você revisa cada conta antes de qualquer adição: configurações que o Flectar Mail não pode reproduzir, como um servidor Exchange, são explicadas em vez de alteradas silenciosamente, e as contas POP3 mantêm sua regra de remoção de e-mails do servidor. Contas existentes nunca são modificadas e senhas nunca são importadas.
 
+E-mails salvos também podem ser importados: as Pastas locais do Thunderbird e os e-mails que suas contas POP3 baixaram, arquivos mbox como uma exportação do Google Takeout ou os do próprio Flectar Mail, mensagens `.eml`, pastas maildir, caixas de correio do Apple Mail e arquivos ZIP que os contenham. Você escolhe os arquivos, vários de uma vez se quiser, e depois as pastas (Lixeira e Spam ficam de fora, a menos que você as marque), e a estrutura de pastas e os estados de lido e com estrela são mantidos. E-mails que já estão lá são ignorados, então uma importação interrompida pode simplesmente ser executada de novo, e uma importação longa pode continuar em segundo plano. E-mails que não pertencem a nenhuma conta vão para **Neste dispositivo**: pastas que existem só aqui e que Configurações → Armazenamento pode exportar ou excluir. Eles também podem ir para as pastas de uma conta POP3 ou ser enviados ao servidor de uma conta IMAP, JMAP ou Gmail, em uma pasta própria.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Configurações de armazenamento do Flectar Mail com uso local, instantâneos dos bancos de dados e backups das contas">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Configurações de armazenamento do Flectar Mail com uso local, e-mails neste dispositivo, instantâneos dos bancos de dados e backups das contas">
 </picture>
 
 ### 📱 Feito para telas menores
@@ -327,6 +331,8 @@ O RPM é destinado ao Fedora 43 e 44 em x86_64. As compilações de lançamento 
 
 O RPM anterior, `0.1.0-alpha.7`, foi compilado no Fedora 44 e não pode ser instalado no Fedora 43 porque exige glibc 2.43. Seu pacote Flatpak é uma alternativa enquanto se aguarda uma versão RPM criada com as verificações de compatibilidade acima.
 
+No Linux, senhas, tokens OAuth e chaves de API ficam no chaveiro do sistema por meio do freedesktop Secret Service, nunca no banco de dados do Flectar Mail. Qualquer provedor de Secret Service funciona, em qualquer ambiente de desktop ou gerenciador de janelas, inclusive o sway: GNOME Keyring, KWallet ou KeePassXC com a integração ao Secret Service ativada. O Flatpak usa o mesmo chaveiro que o restante da sua sessão. Se a sessão ainda não tiver um chaveiro padrão, ao adicionar a primeira conta o Flectar Mail pede ao provedor que crie um, e o provedor pede que você escolha a senha dele. Sem um provedor, a adição de uma conta é interrompida com um erro que informa o que está faltando, porque o Flectar Mail nunca armazena segredos em um lugar menos seguro.
+
 Cada lançamento no GitHub inclui `SHA256SUMS` e atestados assinados de procedência da compilação. Com o GitHub CLI instalado, verifique um download com `gh attestation verify <download> --repo flectar/mail`.
 
 A partir da alpha 8, as versões alpha, beta, candidatas a lançamento e estáveis do Android usam um único pacote (`com.flectar.mail`) e uma identidade de assinatura persistente. Versões posteriores podem atualizar o aplicativo e preservar os dados locais. Alpha 6 e alpha 7 usavam chaves diferentes e não podem atualizar para essa identidade de assinatura.
@@ -343,7 +349,7 @@ Você também pode compilar o Flectar Mail a partir do código-fonte com as [fer
 cargo run --bin flectar-mail
 ```
 
-O OAuth no desktop Linux usa o navegador do sistema por meio do portal do desktop e armazena as credenciais de renovação pelo freedesktop Secret Service. Uma sessão normal precisa, portanto, de um componente `xdg-desktop-portal` e de um provedor de Secret Service como o GNOME Keyring. Compilações de lançamento interrompem o processo antes de abrir a página OAuth quando o armazenamento seguro de credenciais não está disponível, para que a autorização nunca seja concluída sem um local seguro para persistir os dados.
+O OAuth no desktop Linux também abre o navegador do sistema por meio do portal do desktop, então a sessão precisa de um componente `xdg-desktop-portal` além do chaveiro descrito acima. Compilações de lançamento interrompem o processo antes de abrir a página OAuth quando o armazenamento seguro de credenciais não está disponível, para que a autorização nunca seja concluída sem um local seguro para persistir os dados.
 
 Ambientes de desenvolvimento Podman e Docker geralmente não têm acesso ao D-Bus da sessão do host nem à rede de loopback do navegador do host. Compilações de depuração suportam esse cenário com um arquivo de credenciais de desenvolvimento claramente identificado, acessível somente pelo proprietário, e um painel expansível para colar a URL final de retorno de loopback. O armazenamento em arquivo é excluído das compilações de lançamento.
 

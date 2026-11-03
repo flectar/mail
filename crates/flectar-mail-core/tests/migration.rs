@@ -22,7 +22,7 @@ fn fixture(name: &str) -> PathBuf {
 fn accounts(source: Source) -> ImportInventory {
     match source {
         Source::Accounts(inventory) => inventory,
-        Source::FlectarBackup(_) => panic!("expected accounts"),
+        Source::FlectarBackup(_) | Source::Mail(_) => panic!("expected accounts"),
     }
 }
 
@@ -200,12 +200,10 @@ fn thunderbird_profile_reads_accounts_identities_signatures_and_colors() {
             .iter()
             .map(|entry| entry.kind)
             .collect::<Vec<_>>(),
-        [
-            OtherEntryKind::Newsgroups,
-            OtherEntryKind::Feeds,
-            OtherEntryKind::LocalFolders
-        ]
+        // Its Local Folders hold no mail, so nothing of them is left out.
+        [OtherEntryKind::Newsgroups, OtherEntryKind::Feeds]
     );
+    assert!(inventory.mail.is_empty());
     let plans = migration::plan(&inventory, &[]);
     assert_eq!(plans.len(), 2);
 
@@ -307,7 +305,7 @@ fn thunderbird_profile_export_archives_are_read_in_place() {
             .write_all(&std::fs::read(profile.path().join(name)).unwrap())
             .unwrap();
     }
-    // Mail stores in the archive are never opened.
+    // IMAP mail stores in the archive are never opened.
     archive
         .start_file("ImapMail/imap.example.org/INBOX", options)
         .unwrap();
@@ -840,10 +838,8 @@ fn thunderbird_outgoing_servers_follow_thunderbird() {
 #[test]
 fn folders_that_are_not_readable_profiles_say_why() {
     let folder = tempfile::tempdir().unwrap();
-    assert_eq!(
-        migration::open(folder.path()),
-        Err(SourceError::NotAProfile)
-    );
+    // A folder holds a profile or saved mail.
+    assert_eq!(migration::open(folder.path()), Err(SourceError::NoMail));
     let prefs = std::fs::File::create(folder.path().join("prefs.js")).unwrap();
     prefs.set_len(migration::MAX_SOURCE_BYTES + 1).unwrap();
     assert_eq!(migration::open(folder.path()), Err(SourceError::TooLarge));
@@ -957,4 +953,177 @@ async fn import_keeps_an_account_whose_color_is_unusable() {
     let report = core.import_accounts(vec![draft]).await.unwrap();
     assert_eq!(report.imported.len(), 1);
     assert!(core.get_settings().await.unwrap().account_colors.is_empty());
+}
+
+/// An mbox file with one message, the way Thunderbird stores it.
+fn thunderbird_mbox(subject: &str) -> String {
+    format!(
+        "From - Mon Jan  1 10:00:00 2001\r\nX-Mozilla-Status: 0001\r\n\
+         From: Ana <ana@example.org>\r\nSubject: {subject}\r\n\
+         Message-ID: <{subject}@example.org>\r\n\r\nHello.\r\n\r\n"
+    )
+}
+
+/// The fixture profile with a POP3 account, and mail in its Local Folders
+/// and the POP3 account's folder.
+fn thunderbird_profile_with_mail() -> tempfile::TempDir {
+    let profile = thunderbird_profile();
+    let mut prefs = std::fs::read_to_string(profile.path().join("prefs.js")).unwrap();
+    prefs = prefs.replace(
+        "\"mail.accountmanager.accounts\", \"account2,",
+        "\"mail.accountmanager.accounts\", \"account6,account2,",
+    );
+    prefs.push_str(
+        "user_pref(\"mail.account.account6.identities\", \"id6\");\n\
+         user_pref(\"mail.account.account6.server\", \"server6\");\n\
+         user_pref(\"mail.identity.id6.useremail\", \"pat@example.net\");\n\
+         user_pref(\"mail.identity.id6.smtpServer\", \"smtp1\");\n\
+         user_pref(\"mail.server.server6.directory-rel\", \"[ProfD]Mail/pop.example.net\");\n\
+         user_pref(\"mail.server.server6.hostname\", \"pop.example.net\");\n\
+         user_pref(\"mail.server.server6.name\", \"pat@example.net\");\n\
+         user_pref(\"mail.server.server6.type\", \"pop3\");\n\
+         user_pref(\"mail.server.server6.userName\", \"pat\");\n",
+    );
+    std::fs::write(profile.path().join("prefs.js"), prefs).unwrap();
+    let local = profile.path().join("Mail/Local Folders");
+    std::fs::create_dir_all(local.join("Archives.sbd")).unwrap();
+    std::fs::write(local.join("Archives"), "").unwrap();
+    std::fs::write(local.join("Archives.sbd/2019"), thunderbird_mbox("old")).unwrap();
+    std::fs::write(local.join("Trash"), "").unwrap();
+    let pop = profile.path().join("Mail/pop.example.net");
+    std::fs::create_dir_all(&pop).unwrap();
+    std::fs::write(pop.join("Inbox"), thunderbird_mbox("welcome")).unwrap();
+    std::fs::write(pop.join("popstate.dat"), "# POP3 State File").unwrap();
+    // IMAP mail is still on its server.
+    let imap = profile.path().join("ImapMail/imap.example.org");
+    std::fs::create_dir_all(&imap).unwrap();
+    std::fs::write(imap.join("INBOX"), thunderbird_mbox("cached")).unwrap();
+    profile
+}
+
+fn store_paths(inventory: &ImportInventory) -> Vec<(Option<String>, String, Vec<String>)> {
+    inventory
+        .mail
+        .iter()
+        .map(|store| {
+            (
+                store.account.clone(),
+                store.label.clone(),
+                store
+                    .mail
+                    .folders
+                    .iter()
+                    .map(|folder| folder.path.join("/"))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn thunderbird_local_folders_and_pop3_mail_are_found_in_profiles_and_exports() {
+    let profile = thunderbird_profile_with_mail();
+    let expected = vec![
+        (
+            Some("account6".to_owned()),
+            "pat@example.net".to_owned(),
+            vec!["Inbox".to_owned()],
+        ),
+        (
+            None,
+            "Local Folders".to_owned(),
+            vec!["Archives".to_owned(), "Archives/2019".to_owned()],
+        ),
+    ];
+    let inventory = accounts(migration::open(profile.path()).unwrap());
+    assert_eq!(store_paths(&inventory), expected);
+    assert!(
+        !inventory
+            .other_entries
+            .iter()
+            .any(|entry| entry.kind == OtherEntryKind::LocalFolders)
+    );
+
+    // Tools › Export puts the profile in one folder of a ZIP archive.
+    let directory = tempfile::tempdir().unwrap();
+    let archive_path = directory.path().join("export.zip");
+    let mut archive = zip::ZipWriter::new(std::fs::File::create(&archive_path).unwrap());
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for name in [
+        "prefs.js",
+        "Mail/Local Folders/Archives",
+        "Mail/Local Folders/Archives.sbd/2019",
+        "Mail/Local Folders/Trash",
+        "Mail/pop.example.net/Inbox",
+        "Mail/pop.example.net/popstate.dat",
+        "ImapMail/imap.example.org/INBOX",
+    ] {
+        archive
+            .start_file(format!("x7k2.default/{name}"), options)
+            .unwrap();
+        archive
+            .write_all(&std::fs::read(profile.path().join(name)).unwrap())
+            .unwrap();
+    }
+    archive.finish().unwrap();
+    let inventory = accounts(migration::open(&archive_path).unwrap());
+    assert_eq!(store_paths(&inventory), expected);
+}
+
+#[test]
+fn thunderbird_mail_without_accounts_or_outside_the_profile() {
+    let profile = tempfile::tempdir().unwrap();
+    std::fs::write(
+        profile.path().join("prefs.js"),
+        "user_pref(\"mail.accountmanager.accounts\", \"account1\");\n\
+         user_pref(\"mail.account.account1.server\", \"server1\");\n\
+         user_pref(\"mail.server.server1.directory-rel\", \"[ProfD]Mail/Local Folders\");\n\
+         user_pref(\"mail.server.server1.name\", \"Local Folders\");\n\
+         user_pref(\"mail.server.server1.type\", \"none\");\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(profile.path().join("Mail/Local Folders")).unwrap();
+    std::fs::write(
+        profile.path().join("Mail/Local Folders/Saved"),
+        thunderbird_mbox("kept"),
+    )
+    .unwrap();
+    // A profile with only Local Folders still has something to import.
+    let inventory = accounts(migration::open(profile.path()).unwrap());
+    assert!(inventory.accounts.is_empty());
+    assert_eq!(
+        store_paths(&inventory),
+        [(None, "Local Folders".to_owned(), vec!["Saved".to_owned()])]
+    );
+
+    // Folders kept elsewhere, such as on another drive, aren't read.
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::fs::write(elsewhere.path().join("Saved"), thunderbird_mbox("far")).unwrap();
+    std::fs::write(
+        profile.path().join("prefs.js"),
+        format!(
+            "user_pref(\"mail.accountmanager.accounts\", \"account1\");\n\
+             user_pref(\"mail.account.account1.server\", \"server1\");\n\
+             user_pref(\"mail.server.server1.directory\", {:?});\n\
+             user_pref(\"mail.server.server1.name\", \"Local Folders\");\n\
+             user_pref(\"mail.server.server1.type\", \"none\");\n",
+            elsewhere.path().display().to_string()
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        migration::open(profile.path()),
+        Err(SourceError::NoAccounts)
+    );
+    let inventory = migration::thunderbird::read_profile_dir(profile.path()).unwrap();
+    assert!(inventory.mail.is_empty());
+    assert_eq!(
+        inventory
+            .other_entries
+            .iter()
+            .map(|entry| entry.kind)
+            .collect::<Vec<_>>(),
+        [OtherEntryKind::LocalFolders]
+    );
 }

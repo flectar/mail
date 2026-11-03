@@ -291,7 +291,7 @@ async fn full_sync_triage_and_search() {
         .expect("bob thread");
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Archive,
-        thread_ids: vec![bob.id],
+        target: ActionTarget::Threads(vec![bob.id]),
         params: None,
     })
     .await
@@ -321,7 +321,7 @@ async fn full_sync_triage_and_search() {
     // 8. Snooze hides a thread from inbox; unsnooze restores it.
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Snooze,
-        thread_ids: vec![alice_id],
+        target: ActionTarget::Threads(vec![alice_id]),
         params: Some(ActionParams {
             wake_at: Some(now_ms() + 3_600_000),
             target_folder_id: None,
@@ -342,7 +342,7 @@ async fn full_sync_triage_and_search() {
     assert!(snoozed.threads.iter().any(|t| t.id == alice_id));
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Unsnooze,
-        thread_ids: vec![alice_id],
+        target: ActionTarget::Threads(vec![alice_id]),
         params: None,
     })
     .await
@@ -412,7 +412,7 @@ async fn full_sync_triage_and_search() {
     let bob_id = bob.id;
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Archive,
-        thread_ids: vec![bob_id],
+        target: ActionTarget::Threads(vec![bob_id]),
         params: None,
     })
     .await

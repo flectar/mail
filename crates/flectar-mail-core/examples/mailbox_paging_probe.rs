@@ -84,7 +84,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     assert_eq!(initial.threads.last().unwrap().id, old_anchor.thread_id);
     assert_eq!(old_second.threads[0].id, old_anchor.thread_id - 1);
     let initial_badges = db
-        .read(|conn| repo::counts::mailbox_badge_counts(conn))
+        .read(|conn| {
+            repo::counts::mailbox_badge_counts(
+                conn,
+                flectar_mail_core::models::MailGrouping::Conversations,
+            )
+        })
         .await?;
     assert_eq!(initial_badges.len(), 1);
     assert_eq!(initial_badges[0].inbox, 50_000);
@@ -175,7 +180,12 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     .await?;
 
     let after_badges = db
-        .read(|conn| repo::counts::mailbox_badge_counts(conn))
+        .read(|conn| {
+            repo::counts::mailbox_badge_counts(
+                conn,
+                flectar_mail_core::models::MailGrouping::Conversations,
+            )
+        })
         .await?;
     assert_eq!(after_badges.len(), 2);
     assert_eq!(after_badges[0].account_id, 1);

@@ -16,6 +16,7 @@ REQUIRED_EXPORTS = {
         "nativeGoogleAuthorizationResult",
         "nativeMicrosoftRedirect",
         "nativeDocumentResult",
+        "nativeDocumentsResult",
         "nativeDocumentRequestActive",
         "nativeSuspendPdfPreview",
     )),

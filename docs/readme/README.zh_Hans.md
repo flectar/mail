@@ -93,7 +93,7 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 ### 🧵 会话线程
 
-回复按时间顺序归组显示，当前邮件在阅读窗格中展开。
+回复按时间顺序归组显示，当前邮件在阅读窗格中展开。如需逐封列出、打开和处理邮件，可在“设置 → 通用”中关闭 **Conversation view**（会话视图）。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">
@@ -106,6 +106,8 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 借助浏览器式标签页，同时打开多个位置。每个标签页都会记住自己的位置：邮箱、搜索或打开的会话，日历、联系人、文件或设置，以及列表滚动到的位置和正在阅读的邮件。用鼠标中键或 Ctrl/⌘ 点击邮件，即可在后台标签页中打开（同时按住 Shift 则切换过去），也可以在邮件菜单中选择 **Open in new tab**（在新标签页中打开）。拖动标签页可调整顺序，用鼠标中键点击标签页即可关闭，右键点击标签页可关闭其他标签页或其右侧的标签页，下次打开 Flectar Mail 时也能从上次离开的地方继续。
 
 **Ctrl/⌘+T** 新建标签页，**Ctrl/⌘+W** 关闭当前标签页，**Ctrl/⌘+Shift+T** 重新打开最近关闭的标签页。**Ctrl+Tab** 与 **Ctrl+Shift+Tab** 在标签页之间循环切换，**Ctrl/⌘+1–8** 跳转到对应标签页，**Ctrl/⌘+9** 跳转到最后一个标签页。
+
+在手机和较窄的窗口中，工具栏末尾的按钮会显示打开的标签页数量，并以卡片形式列出所有标签页。点按卡片即可切换过去，点按 × 或将卡片滑到一侧即可关闭，点按 **+** 可新建标签页。选中邮件后，在选择菜单中选择 **Open in new tabs**（在新标签页中打开）即可在后台打开它们。如果不想使用标签页，可在“设置 → 通用”中关闭 **Tabs**（标签页）。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
@@ -281,10 +283,12 @@ POP3 账户会把邮件下载到本机，默认保留在服务器上；你也可
 
 同一导入功能还可以从 Thunderbird（配置文件夹、「工具 › 导出」生成的归档或 `prefs.js`）以及 Android 版 Thunderbird 或 K-9 Mail（`.k9s` 设置导出）迁移账户。添加之前你会逐一检查每个账户：Flectar Mail 无法沿用的设置（例如 Exchange 服务器）会说明原因，而不会被悄悄更改；POP3 账户会沿用从服务器移除邮件的规则。现有账户不会被修改，密码也永远不会被导入。
 
+已保存的邮件也可以用同样的方式导入：Thunderbird 的本地文件夹及其 POP3 账户下载的邮件、mbox 文件（例如 Google Takeout 导出或 Flectar Mail 自己导出的文件）、`.eml` 邮件、maildir 文件夹、Apple Mail 邮箱，以及包含它们的 ZIP 归档。你可以选择文件（可一次选择多个），再选择要导入的文件夹（除非勾选，否则会跳过废纸篓和垃圾邮件），文件夹结构以及已读、星标状态都会保留。目标位置中已有的邮件会被跳过，因此中途停止的导入可以直接重新运行，耗时较长的导入也可以在后台继续。不属于任何账户的邮件会放入 **在此设备上**：这些文件夹只存在于本机，可在「设置 → 存储」中导出或删除。邮件也可以导入到 POP3 账户的文件夹中，或上传到 IMAP、JMAP 或 Gmail 账户的服务器，放在单独的文件夹里。
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail 存储设置，包含本地用量、数据库快照与账户备份控件">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail 存储设置，包含本地用量、此设备上的邮件、数据库快照与账户备份控件">
 </picture>
 
 ### 📱 为小屏幕而设计
@@ -323,6 +327,8 @@ RPM 支持 x86_64 架构的 Fedora 43 和 44。发布构建以 Fedora 43 为兼�
 
 旧版 `0.1.0-alpha.7` RPM 在 Fedora 44 上构建，依赖 glibc 2.43，因此无法在 Fedora 43 上安装。在等待通过上述兼容性检查的新 RPM 发布期间，可以使用该版本的 Flatpak 包。
 
+在 Linux 上，密码、OAuth 令牌和 API 密钥通过 freedesktop Secret Service 保存在系统密钥环中，绝不会存入 Flectar Mail 的数据库。任何 Secret Service 提供程序都可以使用，适用于任何桌面环境或窗口管理器，包括 sway：GNOME Keyring、KWallet，或已开启 Secret Service 集成的 KeePassXC。Flatpak 版本与会话中的其他程序使用同一个密钥环。如果当前会话还没有默认密钥环，添加第一个账户时 Flectar Mail 会请提供程序创建一个，提供程序会让你为它设置密码。如果没有提供程序，添加账户会停止并显示错误，说明缺少什么，因为 Flectar Mail 绝不会把机密存放在不够安全的地方。
+
 每个 GitHub 发布版本都包含 `SHA256SUMS` 和已签名的构建来源证明。安装 GitHub CLI 后，可用 `gh attestation verify <download> --repo flectar/mail` 校验下载内容。
 
 Android APK 更新需要使用相同的签名密钥；未使用固定测试密钥的构建版本可能需要先卸载旧版应用，而卸载会删除本地应用数据。
@@ -333,7 +339,7 @@ Android APK 更新需要使用相同的签名密钥；未使用固定测试密�
 cargo run --bin flectar-mail
 ```
 
-Linux 桌面端的 OAuth 通过桌面门户（desktop portal）调用系统浏览器，并借助 freedesktop Secret Service 保存刷新凭证。因此，常规桌面会话需要 `xdg-desktop-portal` 后端，以及 GNOME Keyring 之类的 Secret Service 提供程序。当无法安全存储凭证时，发布版本会在打开 OAuth 页面之前中止；没有安全的持久化位置，授权流程就不可能完成。
+Linux 桌面端的 OAuth 还会通过桌面门户（desktop portal）调用系统浏览器，因此除了上文所述的密钥环，会话还需要 `xdg-desktop-portal` 后端。当无法安全存储凭证时，发布版本会在打开 OAuth 页面之前中止；没有安全的持久化位置，授权流程就不可能完成。
 
 Podman 和 Docker 开发环境通常既没有宿主会话的 D-Bus，也无法访问宿主浏览器的回环网络。调试构建支持这种环境：它提供标记明确、仅限所有者访问的开发凭证文件，以及用于粘贴最终回环回调 URL 的折叠面板。该文件后端不会包含在发布版本中。
 

@@ -11,6 +11,7 @@ import {
     WorkspaceMiniHeading,
 } from "workspace-layout.slint";
 import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
+import { LocalMailUi } from "../local-mail.slint";
 import { TypeScale } from "../typography.slint";
 
 export component MailSidebar inherits CollapsibleWorkspaceSidebar {
@@ -85,14 +86,22 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
             }
         }
 
+        // With only local mail, nothing could send; adding an account comes
+        // first.
         Button {
             height: LayoutMetrics.sidebar-action-height;
             horizontal-stretch: 1;
-            text: @tr("New email");
-            icon: @image-url("../icons/lucide/filled/compose.svg");
+            text: LocalMailUi.can-send ? @tr("New email") : @tr("Add an account");
+            icon: LocalMailUi.can-send ? @image-url("../icons/lucide/filled/compose.svg") : @image-url("../icons/lucide/filled/person-add.svg");
             has-icon: true;
             primary: true;
-            clicked => { root.compose(); }
+            clicked => {
+                if LocalMailUi.can-send {
+                    root.compose();
+                } else {
+                    root.manage-accounts();
+                }
+            }
         }
 
 
@@ -459,22 +468,26 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         vertical-alignment: bottom;
                     }
 
+                    // Local mail is listed like an account, under its own
+                    // name and a folders icon.
                     if entry.kind == SidebarRowKind.account: SidebarSectionHeader {
+                        private property <bool> local: entry.mailbox.account_id == LocalMailUi.account-id;
                         x: 0px;
                         interactive: entry.show_row;
                         y: 0px;
                         width: parent.width;
-                        label: entry.mailbox.label;
+                        label: self.local ? @tr("On this device") : entry.mailbox.label;
                         detail: entry.mailbox.detail;
                         avatar: entry.mailbox.avatar;
                         avatar-image: entry.mailbox.avatar_image;
                         has-avatar-image: entry.mailbox.has_avatar;
-                        has-avatar: true;
+                        has-avatar: !self.local;
+                        icon: @image-url("../icons/lucide/filled/folders.svg");
                         sidebar-background: root.background-color;
                         hover-background: root.hover-background;
                         body-color: root.title-color;
                         muted-color: root.muted-color;
-                        icon-color: root.body-color;
+                        icon-color: self.local && !root.monochrome-icons ? MailIconPalette.folders : root.body-color;
                         open: entry.open;
                         toggled(open) => { root.toggle-section(entry.key, open); }
                     }

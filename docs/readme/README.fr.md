@@ -95,7 +95,7 @@ Vous pouvez aussi remplacer la couleur d’un compte particulier et afficher la 
 
 ### 🧵 Fils de discussion
 
-Les réponses restent regroupées par ordre chronologique, avec le message actif déplié dans le volet de lecture.
+Les réponses restent regroupées par ordre chronologique, avec le message actif déplié dans le volet de lecture. Pour afficher, ouvrir et traiter chaque message séparément, désactivez **Vue conversation** dans Paramètres → Général.
 
 Utilisez **Haut/Bas** pour parcourir les messages, **Début/Fin** pour atteindre le premier ou le dernier message chargé, et **Page précédente/Page suivante** pour avancer d’une page. **Entrée** ouvre le message courant et place le focus sur son contenu ; **Espace** le coche ou le décoche pour les actions groupées. **Tab/Maj+Tab** passent d’un contrôle à l’autre. Dans l’espace complet, **F6** déplace le focus entre la liste et le lecteur. Dans la disposition minimaliste, les flèches mettent les messages en surbrillance et **Entrée** les ouvre ; **Échap** ou **F6** revient à la liste.
 
@@ -110,6 +110,8 @@ Utilisez **Haut/Bas** pour parcourir les messages, **Début/Fin** pour atteindre
 Gardez plusieurs espaces ouverts avec des onglets comme dans un navigateur. Chaque onglet mémorise son emplacement : une boîte, une recherche ou une conversation ouverte, le calendrier, les contacts, les fichiers ou les paramètres, ainsi que la position de défilement et le message en cours de lecture. Un clic du milieu ou Ctrl/⌘+clic ouvre un message dans un onglet en arrière-plan (ajoutez Maj pour y accéder), ou choisissez **Ouvrir dans un nouvel onglet** dans son menu. Faites glisser les onglets pour les réorganiser, fermez-les avec le bouton du milieu et utilisez le clic droit pour fermer les autres ou ceux à droite. Au prochain lancement de Flectar Mail, reprenez là où vous en étiez.
 
 **Ctrl/⌘+T** ouvre un onglet, **Ctrl/⌘+W** ferme l’onglet courant et **Ctrl/⌘+Maj+T** rouvre le dernier onglet fermé. **Ctrl+Tab** et **Ctrl+Maj+Tab** parcourent les onglets, **Ctrl/⌘+1–8** accèdent à un onglet précis et **Ctrl/⌘+9** au dernier.
+
+Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’outils indique combien d’onglets sont ouverts et les présente sous forme de cartes. Touchez une carte pour y passer, touchez × ou faites-la glisser sur le côté pour la fermer, et utilisez **+** pour ouvrir un nouvel onglet. Sélectionnez des messages et choisissez **Ouvrir dans de nouveaux onglets** dans le menu de la sélection pour les ouvrir en arrière-plan. Si vous préférez travailler sans onglets, désactivez **Onglets** dans Paramètres → Général.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
@@ -285,10 +287,12 @@ Les comptes POP3 téléchargent les e-mails sur cet appareil et les laissent sur
 
 La même fonction importe les comptes de Thunderbird (dossier de profil, archive Outils › Exporter ou `prefs.js`), de Thunderbird pour Android ou de K-9 Mail (exports de paramètres `.k9s`). Vous vérifiez chaque compte avant tout ajout : les réglages que Flectar Mail ne peut pas reproduire, comme un serveur Exchange, sont expliqués plutôt que modifiés sans avertissement, et les comptes POP3 conservent leur règle de suppression des messages du serveur. Les comptes existants ne sont jamais modifiés et les mots de passe ne sont jamais importés.
 
+Le courrier enregistré s’importe de la même façon : les Dossiers locaux de Thunderbird et les messages téléchargés par ses comptes POP3, les fichiers mbox comme un export Google Takeout ou ceux de Flectar Mail, les messages `.eml`, les dossiers maildir, les boîtes aux lettres d’Apple Mail et les archives ZIP qui les contiennent. Vous choisissez les fichiers, plusieurs à la fois si vous le souhaitez, puis les dossiers (la Corbeille et les Indésirables sont exclus sauf si vous les cochez), et l’arborescence ainsi que les états lu et suivi sont conservés. Les messages déjà présents sont ignorés : une importation interrompue peut simplement être relancée, et une longue importation peut se poursuivre en arrière-plan. Le courrier qui n’appartient à aucun compte va dans **Sur cet appareil** : des dossiers qui n’existent qu’ici, que Paramètres → Stockage permet d’exporter ou de supprimer. Il peut aussi rejoindre les dossiers d’un compte POP3, ou être envoyé sur le serveur d’un compte IMAP, JMAP ou Gmail, dans un dossier à part.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Paramètres de stockage de Flectar Mail avec l’utilisation locale, les instantanés de bases de données et les sauvegardes des comptes">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Paramètres de stockage de Flectar Mail avec l’utilisation locale, le courrier sur cet appareil, les instantanés de bases de données et les sauvegardes des comptes">
 </picture>
 
 ### 📱 Pour les petits écrans
@@ -327,6 +331,8 @@ Le RPM cible Fedora 43 et 44 sur x86_64. Les compilations de publication prennen
 
 L’ancien RPM `0.1.0-alpha.7` a été compilé sur Fedora 44 et ne peut pas être installé sur Fedora 43, car il exige glibc 2.43. Son paquet Flatpak constitue une alternative en attendant un RPM construit avec les contrôles de compatibilité ci-dessus.
 
+Sur Linux, les mots de passe, jetons OAuth et clés d’API sont conservés dans le trousseau du système via freedesktop Secret Service, jamais dans la base de données de Flectar Mail. Tout fournisseur Secret Service convient, sous n’importe quel bureau ou gestionnaire de fenêtres, sway compris : GNOME Keyring, KWallet ou KeePassXC avec son intégration Secret Service activée. Le Flatpak utilise le même trousseau que le reste de votre session. Si la session n’a pas encore de trousseau par défaut, l’ajout du premier compte demande au fournisseur d’en créer un, et celui-ci vous invite à choisir son mot de passe. Sans fournisseur, l’ajout d’un compte s’arrête sur une erreur qui indique ce qui manque, car Flectar Mail ne stocke jamais de secrets dans un endroit moins sûr.
+
 Chaque publication GitHub inclut `SHA256SUMS` et des attestations signées de provenance de compilation. Avec GitHub CLI installé, vérifiez un téléchargement avec `gh attestation verify <download> --repo flectar/mail`.
 
 Depuis alpha 8, les versions alpha, bêta, candidates et stables d’Android utilisent un seul paquet (`com.flectar.mail`) et une identité de signature persistante. Les versions suivantes peuvent mettre à jour l’application en conservant les données locales. Alpha 6 et alpha 7 utilisaient des clés différentes et ne peuvent pas être mises à jour vers cette identité de signature.
@@ -343,7 +349,7 @@ Vous pouvez aussi compiler Flectar Mail à partir des sources avec la [chaîne d
 cargo run --bin flectar-mail
 ```
 
-Sur Linux, OAuth utilise le navigateur système via le portail du bureau et stocke les identifiants de renouvellement avec freedesktop Secret Service. Une session normale nécessite donc un composant `xdg-desktop-portal` et un fournisseur Secret Service tel que GNOME Keyring. Si le stockage sécurisé est indisponible, les compilations de publication s’arrêtent avant d’ouvrir la page OAuth, afin qu’une autorisation ne soit jamais terminée sans emplacement sûr où la conserver.
+Sur Linux, OAuth ouvre aussi le navigateur système via le portail du bureau ; la session nécessite donc un composant `xdg-desktop-portal` en plus du trousseau décrit plus haut. Si le stockage sécurisé est indisponible, les compilations de publication s’arrêtent avant d’ouvrir la page OAuth, afin qu’une autorisation ne soit jamais terminée sans emplacement sûr où la conserver.
 
 Les environnements de développement Podman et Docker n’ont généralement accès ni au D-Bus de la session hôte ni au réseau de boucle locale du navigateur hôte. Les compilations de débogage prennent en charge cette configuration avec un fichier d’identifiants de développement clairement identifié, accessible uniquement à son propriétaire, et un panneau dépliable pour coller l’URL finale de retour en boucle locale. Le stockage par fichier est exclu des compilations de publication.
 

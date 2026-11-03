@@ -7,6 +7,7 @@ import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { LocalMailUi } from "../local-mail.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -218,6 +219,7 @@ export component MailView inherits FocusScope {
 
     KeyBinding {
         keys: Shortcuts.compose;
+        enabled: LocalMailUi.can-send;
         activated => { root.open_compose(); }
     }
     KeyBinding {

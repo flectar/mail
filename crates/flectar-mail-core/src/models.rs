@@ -56,6 +56,10 @@ pub enum MailProtocol {
     /// POP3 download into folders that exist only on this device, with SMTP
     /// submission.
     Pop3,
+    /// No server at all: mail the user imported, kept in folders that exist
+    /// only on this device. There is at most one such account, and it has no
+    /// address, sign-in, or settings, so it never sends.
+    Local,
 }
 
 impl MailProtocol {
@@ -65,6 +69,7 @@ impl MailProtocol {
             Self::Imap => "imap",
             Self::Jmap => "jmap",
             Self::Pop3 => "pop3",
+            Self::Local => "local",
         }
     }
 
@@ -74,6 +79,7 @@ impl MailProtocol {
             "imap" => Some(Self::Imap),
             "jmap" => Some(Self::Jmap),
             "pop3" => Some(Self::Pop3),
+            "local" => Some(Self::Local),
             _ => None,
         }
     }
@@ -84,7 +90,7 @@ impl MailProtocol {
     pub const fn has_multi_mailbox_messages(self) -> bool {
         match self {
             Self::Gmail | Self::Jmap => true,
-            Self::Imap | Self::Pop3 => false,
+            Self::Imap | Self::Pop3 | Self::Local => false,
         }
     }
 }
@@ -536,6 +542,17 @@ pub struct Account {
     pub server_keeps_mail_days: Option<u32>,
 }
 
+/// Mail imported into folders that exist only on this device. It belongs to
+/// an account of protocol [`MailProtocol::Local`], which account lists leave
+/// out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMail {
+    pub account_id: i64,
+    pub messages: u64,
+    pub bytes: u64,
+}
+
 /// Full account row including server config; internal to the native application.
 #[derive(Debug, Clone)]
 pub struct AccountConfig {
@@ -929,7 +946,8 @@ pub enum View {
 pub struct ThreadSummary {
     pub id: i64,
     pub account_id: i64,
-    pub account_email: String,
+    /// `None` for local mail, which has no address.
+    pub account_email: Option<String>,
     /// Verified addresses owned by this account, including send-as aliases.
     pub account_addresses: Vec<String>,
     pub subject: String,
@@ -950,6 +968,49 @@ pub struct ThreadSummary {
     /// Inline images are not files.
     pub first_attachment: Option<AttachmentMeta>,
     /// How many files the thread holds.
+    pub attachment_total: i64,
+}
+
+/// Whether mail lists show conversations or each message on its own, like
+/// JMAP's `Email/query` with and without `collapseThreads`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MailGrouping {
+    #[default]
+    Conversations,
+    Messages,
+}
+
+/// One message as a mail-list row, for lists that do not group messages into
+/// conversations. Snooze and tab routing belong to the message's conversation.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSummary {
+    pub id: i64,
+    pub thread_id: i64,
+    pub account_id: i64,
+    /// `None` for local mail, which has no address.
+    pub account_email: Option<String>,
+    /// Verified addresses owned by this account, including send-as aliases.
+    pub account_addresses: Vec<String>,
+    pub subject: String,
+    pub snippet: String,
+    pub from: Address,
+    pub to: Vec<Address>,
+    pub date: i64,
+    pub is_read: bool,
+    pub is_starred: bool,
+    pub is_draft: bool,
+    pub is_outgoing: bool,
+    pub has_attachments: bool,
+    /// A sent reply refers to this message.
+    pub has_replied: bool,
+    /// When the message's conversation is snoozed until.
+    pub snoozed_until: Option<i64>,
+    pub labels: Vec<i64>,
+    pub verification_code: Option<String>,
+    /// The message's first file. Inline images are not files.
+    pub first_attachment: Option<AttachmentMeta>,
     pub attachment_total: i64,
 }
 
@@ -1081,6 +1142,36 @@ pub struct SearchPage {
     pub next_cursor: Option<SearchCursor>,
 }
 
+/// Stable keyset cursor for the descending message timeline; the message id
+/// breaks ties between messages with the same date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageCursor {
+    pub date: i64,
+    pub message_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    pub messages: Vec<MessageSummary>,
+    pub next_cursor: Option<MessageCursor>,
+}
+
+/// Position in a chronological message search. Keep the relaxed-query choice
+/// so every page uses the same match semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MessageSearchCursor {
+    pub position: MessageCursor,
+    pub relaxed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MessageSearchPage {
+    pub messages: Vec<MessageSummary>,
+    pub next_cursor: Option<MessageSearchCursor>,
+}
+
 // Deliberately no `Debug`: it would print the account password.
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1138,6 +1229,16 @@ pub enum ActionKind {
     Send,
 }
 
+impl Settings {
+    pub fn mail_grouping(&self) -> MailGrouping {
+        if self.conversation_view {
+            MailGrouping::Conversations
+        } else {
+            MailGrouping::Messages
+        }
+    }
+}
+
 impl ActionKind {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -1190,11 +1291,20 @@ pub struct ActionParams {
     pub label_id: Option<i64>,
 }
 
+/// What an action applies to: whole conversations, or single messages, as a
+/// mail list without conversations shows them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ActionTarget {
+    Threads(Vec<i64>),
+    Messages(Vec<i64>),
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PerformActionArgs {
     pub kind: ActionKind,
-    pub thread_ids: Vec<i64>,
+    pub target: ActionTarget,
     #[serde(default)]
     pub params: Option<ActionParams>,
 }
@@ -1702,6 +1812,14 @@ pub struct Settings {
     /// Group the mail list into collapsible local-date sections.
     #[serde(default = "default_true")]
     pub group_mail_by_date: bool,
+    /// Show browser-style tabs: the strip in the desktop top bar, and the tab
+    /// switcher in compact layouts. Saved tabs are kept while they are hidden.
+    #[serde(default = "default_true")]
+    pub show_tabs: bool,
+    /// Group replies with the messages they answer into conversations. Off
+    /// lists, opens and acts on every message on its own.
+    #[serde(default = "default_true")]
+    pub conversation_view: bool,
     /// Workspace presentation: "default" keeps lists and details side by
     /// side, while "minimal" navigates between those shared surfaces.
     /// `mailLayout` was the short-lived original key before Contacts shared
@@ -1736,6 +1854,13 @@ pub struct Settings {
     /// Mark unread conversations as read when the user opens them.
     #[serde(default = "default_true")]
     pub mark_read_on_open: bool,
+    /// Directory desktop save dialogs open in. An empty value follows the
+    /// platform default. The path is deliberately not validated when stored:
+    /// a saved location can be unavailable later, such as an unmounted network
+    /// share, so downloads fall back to the platform default at save time
+    /// rather than failing.
+    #[serde(default)]
+    pub download_directory: String,
     #[serde(default = "default_ai_base_url")]
     pub ai_base_url: String,
     /// Per-tier model ids, all sharing `ai_base_url` and the stored API key.
@@ -1999,6 +2124,9 @@ pub struct StartupPresentation {
     /// first showing the window.
     pub close_to_tray: bool,
     pub app_icon: AppIcon,
+    /// Whether the first mail list, and the cached one shown before it,
+    /// group conversations.
+    pub grouping: MailGrouping,
 }
 fn default_theme_preset() -> String {
     "default".into()
@@ -2013,6 +2141,8 @@ impl Default for Settings {
             custom_theme: CustomTheme::default(),
             show_avatars: true,
             group_mail_by_date: true,
+            show_tabs: true,
+            conversation_view: true,
             workspace_layout: default_workspace_layout(),
             workspace_list_pane_width: default_workspace_list_pane_width(),
             window_frame: default_window_frame(),
@@ -2024,6 +2154,7 @@ impl Default for Settings {
             undo_send_seconds: 10,
             load_remote_images: false,
             mark_read_on_open: true,
+            download_directory: String::new(),
             ai_base_url: default_ai_base_url(),
             ai_model_instant: default_ai_model(),
             ai_model_cheap: default_ai_model(),
@@ -2354,6 +2485,7 @@ mod tests {
             MailProtocol::Imap,
             MailProtocol::Jmap,
             MailProtocol::Pop3,
+            MailProtocol::Local,
         ] {
             assert_eq!(MailProtocol::parse(protocol.as_str()), Some(protocol));
         }
@@ -2384,6 +2516,8 @@ mod tests {
         assert_eq!(s.message_appearance, MessageAppearance::System);
         assert_eq!(s.app_icon, AppIcon::Orange);
         assert!(s.group_mail_by_date);
+        assert!(s.show_tabs);
+        assert!(s.conversation_view);
         assert_eq!(s.workspace_layout, "default");
         assert_eq!(s.workspace_list_pane_width, MIN_WORKSPACE_LIST_PANE_WIDTH);
         assert_eq!(s.time_format, TimeFormat::Automatic);
@@ -2436,6 +2570,8 @@ mod tests {
         let serialized = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(serialized["workspaceLayout"], "default");
         assert_eq!(serialized["groupMailByDate"], true);
+        assert_eq!(serialized["showTabs"], true);
+        assert_eq!(serialized["conversationView"], true);
         assert_eq!(
             serialized["workspaceListPaneWidth"],
             MIN_WORKSPACE_LIST_PANE_WIDTH

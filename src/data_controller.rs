@@ -276,7 +276,7 @@ fn scan_storage(paths: &Paths, generation: &AtomicU64, ticket: u64) -> Option<St
     Some(scan)
 }
 
-fn format_storage_size(bytes: u64) -> String {
+pub(super) fn format_storage_size(bytes: u64) -> String {
     const KB: f64 = 1024.0;
     const MB: f64 = KB * 1024.0;
     const GB: f64 = MB * 1024.0;
@@ -413,6 +413,18 @@ pub(super) fn restore_account_backup(
                 .and_then(|value| value.as_bool())
             {
                 settings.show_avatars = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("showTabs")
+                .and_then(|value| value.as_bool())
+            {
+                settings.show_tabs = enabled;
+            }
+            if let Some(enabled) = preferences
+                .get("conversationView")
+                .and_then(|value| value.as_bool())
+            {
+                settings.conversation_view = enabled;
             }
             if let Some(frame) = preferences
                 .get("windowFrame")
@@ -631,6 +643,8 @@ pub(super) fn restore_account_backup(
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
     app.set_show_avatars(settings.show_avatars);
+    app.set_show_tabs(settings.show_tabs);
+    apply_mail_grouping(app, state, runtime, settings.mail_grouping());
     app.set_show_account_markers(settings.show_account_badges);
     crate::window_chrome::apply_preference(
         app,
@@ -688,16 +702,18 @@ fn backup_dialog(app: &AppWindow, title: UiMessage) -> documents::DocumentDialog
             translated(app, &UiMessage::plain("Flectar Mail backup")).to_string(),
             &["json"],
         )),
+        directory: None,
     }
 }
 
 #[cfg(desktop)]
-fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
-    rfd::FileDialog::new()
+async fn pick_database_snapshot_path(title: String) -> Option<PathBuf> {
+    rfd::AsyncFileDialog::new()
         .set_title(title)
         .pick_folder()
+        .await
         .map(|directory| {
-            directory.join(format!(
+            directory.path().join(format!(
                 "flectar-mail-snapshot-{}",
                 Local::now().format("%Y-%m-%d-%H%M%S")
             ))
@@ -966,8 +982,8 @@ fn mail_export_message(exported: &MailExport, location: &str) -> UiMessage {
     }
 }
 
-/// Mail of POP3 accounts exists only on this device, so it can be exported as
-/// mbox files before its account, or all local data, is removed.
+/// Mail of POP3 accounts, and local mail, exist only on this device, so they
+/// can be exported as mbox files before they, or all local data, are removed.
 fn register_mail_export(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -998,7 +1014,7 @@ fn register_mail_export(
         }
         let (core, accounts) = {
             let state = state.borrow();
-            let accounts = state
+            let mut accounts = state
                 .account_configs
                 .iter()
                 .filter(|config| {
@@ -1007,6 +1023,16 @@ fn register_mail_export(
                 })
                 .map(|config| (config.id, config.email.clone()))
                 .collect::<Vec<_>>();
+            // Local mail's folder is named like its section of the sidebar.
+            if let Some(local) = state
+                .local_mail
+                .filter(|local| account_id < 0 || local.account_id == i64::from(account_id))
+            {
+                accounts.push((
+                    local.account_id,
+                    translated(&app, &UiMessage::plain("On this device")).to_string(),
+                ));
+            }
             (state.core.clone(), accounts)
         };
         let Some(core) = core else {
@@ -1024,72 +1050,123 @@ fn register_mail_export(
             ),
             _ => format!("flectar-mail-{}", Local::now().format("%Y-%m-%d-%H%M%S")),
         };
-        #[cfg(desktop)]
-        let Some(destination) = rfd::FileDialog::new()
-            .set_title(
-                translated(&app, &UiMessage::plain("Choose where to export the mail")).to_string(),
-            )
-            .pick_folder()
-            .map(|folder| folder.join(&name))
-        else {
-            return;
-        };
-        running.set(true);
-        app.set_mail_export_running(true);
-        app.set_mail_export_status(UiMessage::plain("Exporting mail…"));
-        #[cfg(desktop)]
-        let task = runtime.spawn(export_device_mail(core, destination.clone(), accounts));
-        #[cfg(mobile)]
-        let task = runtime.spawn(stage_mail_export(
-            core,
-            paths.clone(),
-            Arc::clone(&staging),
-            name,
-            accounts,
-        ));
-        let app_weak = app.as_weak();
-        let finished = Rc::clone(&running);
-        #[cfg(mobile)]
-        let documents = documents.clone();
-        #[cfg(mobile)]
-        let runtime = Rc::clone(&runtime);
-        let finish = move |message: UiMessage| {
-            finished.set(false);
-            if let Some(app) = app_weak.upgrade() {
-                app.set_mail_export_running(false);
-                app.set_mail_export_status(message);
-            }
-        };
-        let spawned = slint::spawn_local(async move {
-            let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
-            #[cfg(desktop)]
-            finish(match result {
-                Ok(exported) => mail_export_message(&exported, &destination.display().to_string()),
-                Err(error) => UiMessage::detail("Could not export mail: {}", error),
-            });
+        // Everything after the picker; the desktop picker hands it the folder.
+        let start = {
+            let app_weak = app.as_weak();
+            let running = Rc::clone(&running);
+            let runtime = Rc::clone(&runtime);
             #[cfg(mobile)]
-            match result {
-                Ok((staged, exported)) => {
-                    let request = documents.export(staged.archive.clone(), staged.name.clone());
-                    let cleanup = runtime.handle().clone();
-                    documents::run_request(&runtime, request, move |saved| {
-                        let name = staged.name.clone();
-                        cleanup.spawn(staged.remove());
-                        finish(match saved {
-                            Ok(true) => mail_export_message(&exported, &name),
-                            Ok(false) => UiMessage::EMPTY,
-                            Err(error) => UiMessage::detail("Could not export mail: {}", error),
-                        });
+            let documents = documents.clone();
+            #[cfg(mobile)]
+            let paths = paths.clone();
+            #[cfg(mobile)]
+            let staging = Arc::clone(&staging);
+            move |#[cfg(desktop)] destination: PathBuf| {
+                let Some(app) = app_weak.upgrade() else {
+                    running.set(false);
+                    return;
+                };
+                running.set(true);
+                app.set_mail_export_running(true);
+                app.set_mail_export_status(UiMessage::plain("Exporting mail…"));
+                #[cfg(desktop)]
+                let task = runtime.spawn(export_device_mail(core, destination.clone(), accounts));
+                #[cfg(mobile)]
+                let task = runtime.spawn(stage_mail_export(
+                    core,
+                    paths.clone(),
+                    Arc::clone(&staging),
+                    name,
+                    accounts,
+                ));
+                let app_weak = app.as_weak();
+                let finished = Rc::clone(&running);
+                #[cfg(mobile)]
+                let documents = documents.clone();
+                #[cfg(mobile)]
+                let runtime = Rc::clone(&runtime);
+                let finish = move |message: UiMessage| {
+                    finished.set(false);
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_mail_export_running(false);
+                        app.set_mail_export_status(message);
+                    }
+                };
+                let spawned = slint::spawn_local(async move {
+                    let result = task.await.unwrap_or_else(|error| Err(error.to_string()));
+                    #[cfg(desktop)]
+                    finish(match result {
+                        Ok(exported) => {
+                            mail_export_message(&exported, &destination.display().to_string())
+                        }
+                        Err(error) => UiMessage::detail("Could not export mail: {}", error),
                     });
+                    #[cfg(mobile)]
+                    match result {
+                        Ok((staged, exported)) => {
+                            let request =
+                                documents.export(staged.archive.clone(), staged.name.clone());
+                            let cleanup = runtime.handle().clone();
+                            documents::run_request(&runtime, request, move |saved| {
+                                let name = staged.name.clone();
+                                cleanup.spawn(staged.remove());
+                                finish(match saved {
+                                    Ok(true) => mail_export_message(&exported, &name),
+                                    Ok(false) => UiMessage::EMPTY,
+                                    Err(error) => {
+                                        UiMessage::detail("Could not export mail: {}", error)
+                                    }
+                                });
+                            });
+                        }
+                        Err(error) => finish(UiMessage::detail("Could not export mail: {}", error)),
+                    }
+                });
+                if let Err(error) = spawned {
+                    running.set(false);
+                    app.set_mail_export_running(false);
+                    app.set_mail_export_status(UiMessage::detail(
+                        "Could not export mail: {}",
+                        error,
+                    ));
                 }
-                Err(error) => finish(UiMessage::detail("Could not export mail: {}", error)),
             }
-        });
-        if let Err(error) = spawned {
-            running.set(false);
-            app.set_mail_export_running(false);
-            app.set_mail_export_status(UiMessage::detail("Could not export mail: {}", error));
+        };
+        #[cfg(desktop)]
+        {
+            // The portal picker needs the runtime: rfd's blocking dialog
+            // panics on the UI thread, which has no Tokio context.
+            let title =
+                translated(&app, &UiMessage::plain("Choose where to export the mail")).to_string();
+            let request: documents::DocumentFuture<Option<PathBuf>> = Box::pin(async move {
+                Ok(rfd::AsyncFileDialog::new()
+                    .set_title(title)
+                    .pick_folder()
+                    .await
+                    .map(|folder| folder.path().join(name)))
+            });
+            // Blocks a second picker until this one closes.
+            running.set(true);
+            let picking = Rc::clone(&running);
+            let app_weak = app.as_weak();
+            documents::run_request(&runtime, request, move |picked| {
+                picking.set(false);
+                match picked {
+                    Ok(Some(destination)) => start(destination),
+                    Ok(None) => {}
+                    Err(error) => {
+                        if let Some(app) = app_weak.upgrade() {
+                            app.set_mail_export_status(UiMessage::detail(
+                                "Could not export mail: {}",
+                                error,
+                            ));
+                        }
+                    }
+                }
+            });
         }
+        #[cfg(mobile)]
+        start();
     });
 }
 
@@ -1133,6 +1210,8 @@ pub(super) fn register_data_management_callbacks(
     let load_generation = Arc::clone(&storage_generation);
     let storage_paths = paths.clone();
     let storage_app = app.as_weak();
+    let storage_state = Rc::clone(state);
+    let storage_runtime = Rc::clone(runtime);
     app.on_load_storage_usage(move || {
         let Some(app) = storage_app.upgrade() else {
             return;
@@ -1141,6 +1220,8 @@ pub(super) fn register_data_management_callbacks(
         {
             return;
         }
+        // Deleted and moved mail changes what local mail holds.
+        refresh_local_mail(&app, &storage_state, &storage_runtime);
         let ticket = load_generation.fetch_add(1, Ordering::AcqRel) + 1;
         app.set_storage_loading(true);
         app.set_storage_error("".into());
@@ -1233,6 +1314,8 @@ pub(super) fn register_data_management_callbacks(
                     "theme": settings.theme,
                     "messageAppearance": settings.message_appearance,
                     "showAvatars": settings.show_avatars,
+                    "showTabs": settings.show_tabs,
+                    "conversationView": settings.conversation_view,
                     "workspaceLayout": settings.workspace_layout,
                     "workspaceListPaneWidth": settings.workspace_list_pane_width,
                     "monochromeSidebarIcons": settings.monochrome_sidebar_icons,
@@ -1335,6 +1418,8 @@ pub(super) fn register_data_management_callbacks(
     #[cfg(mobile)]
     let snapshot_staging = Arc::clone(&export_staging);
     let database_snapshot_running = Arc::new(AtomicBool::new(false));
+    #[cfg(desktop)]
+    let picking_database_snapshot = Rc::new(Cell::new(false));
     app.on_export_database_snapshot(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -1349,52 +1434,79 @@ pub(super) fn register_data_management_callbacks(
             app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
             return;
         }
+        // The portal picker needs the runtime: rfd's blocking dialog panics on
+        // the UI thread, which has no Tokio context.
         #[cfg(desktop)]
-        let Some(path) = pick_database_snapshot_path(
-            translated(
+        {
+            if picking_database_snapshot.replace(true) {
+                return;
+            }
+            let title = translated(
                 &app,
                 &UiMessage::plain("Choose where to export the database snapshot"),
             )
-            .to_string(),
-        ) else {
-            return;
-        };
-
-        database_snapshot_running.store(true, Ordering::Release);
-        app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
-        let running = SnapshotRunning(Arc::clone(&database_snapshot_running));
-        #[cfg(desktop)]
-        {
+            .to_string();
+            let request: documents::DocumentFuture<Option<PathBuf>> =
+                Box::pin(async move { Ok(pick_database_snapshot_path(title).await) });
+            let picking = Rc::clone(&picking_database_snapshot);
+            let snapshot_running = Arc::clone(&database_snapshot_running);
+            let runtime = Rc::clone(&runtime_for_database_snapshot);
             let updates = updates_for_database_snapshot.clone();
-            runtime_for_database_snapshot.spawn(async move {
-                let display_path = path.display().to_string();
-                let message = match core.create_database_snapshot(path).await {
-                    Ok(_) => UiMessage::detail("Database snapshot exported to {}.", display_path),
+            let app_weak = app.as_weak();
+            documents::run_request(&runtime_for_database_snapshot, request, move |picked| {
+                picking.set(false);
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                let path = match picked {
+                    Ok(Some(path)) => path,
+                    Ok(None) => return,
                     Err(error) => {
-                        UiMessage::detail("Could not export database snapshot: {}", error)
+                        app.set_sync_status(UiMessage::detail(
+                            "Could not export database snapshot: {}",
+                            error,
+                        ));
+                        return;
                     }
                 };
-                drop(running);
-                let _ = updates
-                    .send(UiTaskUpdate {
-                        message,
-                        accounts: None,
-                        calendar_connections: None,
-                        carddav_connections: None,
-                        calendar_error: None,
-                        account_removal: None,
-                        clear_account_form: false,
-                        finishes_account_setup: false,
-                        finishes_oauth: false,
-                        close_to_tray: None,
-                    })
-                    .await;
+                snapshot_running.store(true, Ordering::Release);
+                app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
+                let running = SnapshotRunning(snapshot_running);
+                runtime.spawn(async move {
+                    let display_path = path.display().to_string();
+                    let message = match core.create_database_snapshot(path).await {
+                        Ok(_) => {
+                            UiMessage::detail("Database snapshot exported to {}.", display_path)
+                        }
+                        Err(error) => {
+                            UiMessage::detail("Could not export database snapshot: {}", error)
+                        }
+                    };
+                    drop(running);
+                    let _ = updates
+                        .send(UiTaskUpdate {
+                            message,
+                            accounts: None,
+                            calendar_connections: None,
+                            carddav_connections: None,
+                            calendar_error: None,
+                            account_removal: None,
+                            clear_account_form: false,
+                            finishes_account_setup: false,
+                            finishes_oauth: false,
+                            close_to_tray: None,
+                        })
+                        .await;
+                });
             });
         }
         // Staging runs on the runtime; only the export picker goes through
         // the shared document request path.
         #[cfg(mobile)]
         {
+            database_snapshot_running.store(true, Ordering::Release);
+            app.set_sync_status(UiMessage::plain("Creating verified database snapshot…"));
+            let running = SnapshotRunning(Arc::clone(&database_snapshot_running));
             let staged = runtime_for_database_snapshot.spawn(stage_database_snapshot(
                 core,
                 paths_for_database_snapshot.clone(),
@@ -1521,6 +1633,13 @@ pub(super) fn register_data_management_callbacks(
                     app.set_monochrome_sidebar_icons(false);
                     crate::app_icon::apply(&app, Default::default());
                     app.set_show_avatars(true);
+                    app.set_show_tabs(true);
+                    apply_mail_grouping(
+                        &app,
+                        &data_reset_state,
+                        &data_reset_runtime,
+                        MailGrouping::Conversations,
+                    );
                     app.set_show_account_markers(false);
                     app.set_workspace_layout("default".into());
                     app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);

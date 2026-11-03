@@ -280,7 +280,11 @@ fn finish_waiters(
     }
 }
 
-async fn persist_session(ctx: &SyncCtx, id: i64, connected: &ConnectedClient) -> Result<()> {
+pub(crate) async fn persist_session(
+    ctx: &SyncCtx,
+    id: i64,
+    connected: &ConnectedClient,
+) -> Result<()> {
     let url = connected.base_url.clone();
     let remote = connected.account_id.clone();
     let can_create_top_level_mailbox = connected.may_create_top_level_mailbox;
@@ -309,7 +313,11 @@ fn role(value: Role) -> Option<&'static str> {
     }
 }
 
-async fn sync_mailboxes(ctx: &SyncCtx, local_account: i64, c: &ConnectedClient) -> Result<()> {
+pub(crate) async fn sync_mailboxes(
+    ctx: &SyncCtx,
+    local_account: i64,
+    c: &ConnectedClient,
+) -> Result<()> {
     let (state, mailboxes) = fetch_mailboxes(c).await?;
     let hierarchy = mailboxes
         .iter()

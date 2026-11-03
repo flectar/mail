@@ -1,8 +1,10 @@
-import { ScrollView } from "std-widgets.slint";
+import { ComboBox, ScrollView } from "std-widgets.slint";
 import { AppTheme } from "../design-system.slint";
 import { Button } from "../components/button.slint";
 import { SelectionCheckBox } from "../components/controls.slint";
 import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
+import { ToolbarIconButton } from "../components/controls.slint";
+import { Numbers } from "../numbers.slint";
 import { TypeScale } from "../typography.slint";
 
 export struct ImportFindingRow {
@@ -36,11 +38,31 @@ export struct ImportFailureRow {
     error: string,
 }
 
+// A store of mail the source keeps, followed by its folders.
+export struct ImportMailRow {
+    is-store: bool,
+    name: string,
+    depth: int,
+    size: string,
+    selected: bool,
+    // Some of the folders it covers are chosen, not all.
+    partial: bool,
+    // Stores: where the mail goes, an index into the destinations, the
+    // folder it goes in on this device, if any, and the folder it goes in on
+    // the server of the account it is uploaded to, if it is.
+    destination: int,
+    folder: string,
+    upload-folder: string,
+}
+
 // State of the account import flow. Rust owns the source, plan, and results;
 // the dialog only presents them and reports the user's choices.
 export global AccountImport {
     in-out property <bool> open: false;
-    // choose | reading | review | importing | done | error
+    // The import goes on with the dialog hidden; a row above the mail list
+    // shows how far it is, and then how it ended.
+    in-out property <bool> in-background: false;
+    // choose | reading | review | mail | importing | done | error
     in-out property <string> stage: "choose";
     // k9 | thunderbird
     in property <string> source;
@@ -51,9 +73,25 @@ export global AccountImport {
     in property <int> local-folders;
     in property <int> feeds;
     in property <int> newsgroups;
+    // The source has mail, chosen after its accounts.
+    in property <bool> has-mail;
+    in property <[ImportMailRow]> mail-rows;
+    // On this device, then the accounts mail can go into.
+    in property <[string]> destinations;
+    in property <int> mail-selected-count;
+    in property <string> mail-selected-size;
+    // How much of the mail is imported, from 0 to 1; below 0 while accounts
+    // are imported.
+    in property <float> mail-progress: -1;
+    // The folder being imported.
+    in property <string> mail-progress-folder;
+    in property <string> mail-progress-done;
+    in property <string> mail-progress-total;
+    in property <int> mail-progress-count;
+    in property <bool> stopping;
     // unreadable | too-large | unknown-format | malformed | unsupported-version
-    // | no-accounts | multiple-profiles | not-a-profile | network-profile
-    // | restore-failed | failed
+    // | no-accounts | no-mail | multiple-profiles | not-a-profile
+    // | network-profile | restore-failed | failed | mail-failed
     in property <string> error-code;
     in property <string> error-detail;
     in property <int> imported;
@@ -61,11 +99,27 @@ export global AccountImport {
     // A restored backup also applied its theme, language, and preferences.
     in property <bool> restored-preferences;
     in property <[ImportFailureRow]> failures;
+    // What the import covered: accounts, mail, or both.
+    in property <bool> account-results: true;
+    in property <bool> mail-results: false;
+    in property <int> mail-imported;
+    in property <int> mail-already-present;
+    in property <int> mail-too-large;
+    // Messages a server refused, and why it refused the first.
+    in property <int> mail-refused;
+    in property <string> mail-refusal;
+    in property <bool> mail-stopped;
+    in property <[ImportFailureRow]> mail-failures;
     callback choose-file();
     callback choose-folder();
     callback choose-profile(int);
     callback toggle(int, bool);
+    callback next();
+    callback toggle-mail(int, bool);
+    callback choose-destination(int, int);
     callback confirm();
+    callback stop();
+    callback show-mail();
     callback back();
     callback close();
 }
@@ -113,21 +167,35 @@ global ImportText {
     public pure function error(code: string, detail: string) -> string {
         if code == "unreadable" { return @tr("The file could not be read: {}", detail); }
         if code == "too-large" { return @tr("The settings file is too large."); }
-        if code == "unknown-format" { return @tr("This file is not a supported settings export. Choose a .k9s file, a Thunderbird profile export or prefs.js, or a Flectar Mail backup."); }
-        if code == "malformed" { return @tr("The settings file is damaged: {}", detail); }
+        if code == "unknown-format" { return @tr("This is not a supported settings export or mail file. Choose a .k9s file, a Thunderbird profile export or prefs.js, a Flectar Mail backup, or mail saved as .mbox or .eml files."); }
+        if code == "malformed" { return @tr("The file is damaged: {}", detail); }
         if code == "unsupported-version" { return @tr("This settings format (version {}) is not supported.", detail); }
         if code == "no-accounts" { return @tr("The settings contain no mail accounts."); }
+        if code == "no-mail" { return @tr("No mail was found in this folder."); }
         if code == "multiple-profiles" { return @tr("This folder contains several Thunderbird profiles. Choose the profile folder inside it that you want to import."); }
         if code == "not-a-profile" { return @tr("This folder is not a Thunderbird profile. Choose the folder that contains prefs.js."); }
         if code == "network-profile" { return @tr("This Thunderbird profile is on a network location. Choose the profile folder itself to import it."); }
         if code == "restore-failed" { return @tr("The backup could not be restored: {}", detail); }
+        if code == "mail-failed" { return @tr("The import stopped: {}. The mail imported until then was kept, and importing the same mail again adds the rest.", detail); }
         return @tr("Import failed: {}", detail);
     }
 
     // Read problems concern the chosen source; others happen while writing.
     public pure function error-title(code: string) -> string {
         if code == "restore-failed" || code == "failed" { return @tr("Could not import accounts"); }
-        return @tr("Could not read the settings");
+        if code == "mail-failed" { return @tr("Could not import all the mail"); }
+        if code == "no-mail" { return @tr("No mail found"); }
+        return @tr("Could not read your selection");
+    }
+
+    // Where a store's mail goes, beyond what its destination menu shows.
+    public pure function destination(row: ImportMailRow) -> string {
+        if row.upload-folder != "" { return @tr("Uploaded to the account’s server, into the folder “{}”", row.upload-folder); }
+        if AccountImport.destinations.length > 1 {
+            return row.destination == 0 && row.folder != "" ? @tr("In the folder “{}”", row.folder) : "";
+        }
+        if row.folder != "" { return @tr("Kept on this device, in the folder “{}”", row.folder); }
+        return @tr("Kept on this device");
     }
 }
 
@@ -153,17 +221,114 @@ component FindingLine inherits HorizontalLayout {
     }
 }
 
+// What the source has that isn't imported.
+component SourceNotes inherits VerticalLayout {
+    spacing: 4px;
+    if AccountImport.local-folders > 0 : Text {
+        text: AccountImport.folder-supported
+            ? @tr("Local Folders kept outside the profile were not found. Choose their folder to import them.")
+            : @tr("Local Folders kept outside the profile were not found.");
+        color: AppTheme.faint;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+    if AccountImport.feeds + AccountImport.newsgroups > 0 : Text {
+        text: @tr("Feeds and newsgroups are not imported.");
+        color: AppTheme.faint;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+    }
+}
+
+component MailRow inherits Rectangle {
+    in property <ImportMailRow> entry;
+    in property <int> position;
+    in property <bool> compact;
+
+    // Stores open with a gap above all but the first.
+    height: layout.preferred-height;
+    layout := VerticalLayout {
+        padding-top: root.entry.is-store && root.position > 0 ? 10px : 0px;
+        HorizontalLayout {
+            padding-left: root.entry.is-store ? 0px : 18px * (root.entry.depth + 1);
+            spacing: 6px;
+            SelectionCheckBox {
+                width: 32px;
+                height: 32px;
+                checked: root.entry.selected;
+                indeterminate: root.entry.partial;
+                accessible-label: @tr("Import {}", root.entry.name);
+                toggled(checked) => { AccountImport.toggle-mail(root.position, checked); }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.entry.name;
+                    color: AppTheme.title;
+                    font-size: TypeScale.body;
+                    font-weight: root.entry.is-store ? 600 : 400;
+                    overflow: elide;
+                }
+                if root.entry.is-store && ImportText.destination(root.entry) != "" : Text {
+                    text: ImportText.destination(root.entry);
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+            Text {
+                text: root.entry.size;
+                color: AppTheme.faint;
+                font-size: TypeScale.caption;
+                vertical-alignment: center;
+            }
+        }
+        // Mail can go into an account instead.
+        if root.entry.is-store && AccountImport.destinations.length > 1 : HorizontalLayout {
+            padding-left: 38px;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            // Long addresses must not widen the list past the dialog.
+            ComboBox {
+                horizontal-stretch: 1;
+                min-width: 120px;
+                max-width: root.compact ? 100000px : 280px;
+                height: 32px;
+                model: AccountImport.destinations;
+                current-index: root.entry.destination;
+                accessible-label: @tr("Where to import {}", root.entry.name);
+                selected => { AccountImport.choose-destination(root.position, self.current-index); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+    }
+}
+
 component SecondaryActions inherits HorizontalLayout {
     callback close();
     spacing: 8px;
 
-    // Reading can be abandoned; its result is then ignored. Writing cannot.
+    // Reading can be abandoned; its result is then ignored. Writing goes on
+    // with the dialog hidden, and mail stops after the messages being stored.
     if AccountImport.stage != "importing" : Button {
         min-width: max(64px, self.content-width);
         text: AccountImport.stage == "done" ? @tr("Close") : @tr("Cancel");
         clicked => { root.close(); }
     }
-    if AccountImport.stage == "review" || AccountImport.stage == "error" : Button {
+    if AccountImport.stage == "importing" && AccountImport.mail-progress >= 0 : Button {
+        min-width: max(64px, self.content-width);
+        text: AccountImport.stopping ? @tr("Stopping…") : @tr("Stop");
+        enabled: !AccountImport.stopping;
+        clicked => { AccountImport.stop(); }
+    }
+    if AccountImport.stage == "importing" : Button {
+        min-width: max(64px, self.content-width);
+        text: @tr("Continue in background");
+        clicked => { root.close(); }
+    }
+    if AccountImport.stage == "review" || AccountImport.stage == "mail" || AccountImport.stage == "error" : Button {
         min-width: max(64px, self.content-width);
         text: @tr("Back");
         clicked => { AccountImport.back(); }
@@ -179,6 +344,7 @@ component SecondaryActions inherits HorizontalLayout {
 
 component PrimaryAction inherits HorizontalLayout {
     callback open-accounts();
+    callback show-mail();
 
     if AccountImport.stage == "choose" : Button {
         min-width: max(64px, self.content-width);
@@ -188,11 +354,27 @@ component PrimaryAction inherits HorizontalLayout {
         primary: true;
         clicked => { AccountImport.choose-file(); }
     }
-    if AccountImport.stage == "review" : Button {
+    if AccountImport.stage == "review" && AccountImport.has-mail : Button {
+        min-width: max(64px, self.content-width);
+        text: @tr("Next");
+        primary: true;
+        clicked => { AccountImport.next(); }
+    }
+    if AccountImport.stage == "review" && !AccountImport.has-mail : Button {
         min-width: max(64px, self.content-width);
         text: @tr("Import one account" | "Import {n} accounts" % AccountImport.selected-count);
         primary: true;
         enabled: AccountImport.selected-count > 0;
+        clicked => { AccountImport.confirm(); }
+    }
+    // With no folder chosen, the accounts chosen before are imported alone.
+    if AccountImport.stage == "mail" : Button {
+        min-width: max(64px, self.content-width);
+        text: AccountImport.mail-selected-count == 0 && AccountImport.selected-count > 0
+            ? @tr("Import one account" | "Import {n} accounts" % AccountImport.selected-count)
+            : @tr("Import");
+        primary: true;
+        enabled: AccountImport.mail-selected-count > 0 || AccountImport.selected-count > 0;
         clicked => { AccountImport.confirm(); }
     }
     if AccountImport.stage == "done" && AccountImport.imported > 0 : Button {
@@ -204,21 +386,35 @@ component PrimaryAction inherits HorizontalLayout {
             AccountImport.close();
         }
     }
+    if AccountImport.stage == "done" && AccountImport.imported == 0 && AccountImport.mail-results && AccountImport.mail-imported + AccountImport.mail-already-present > 0 : Button {
+        min-width: max(64px, self.content-width);
+        text: @tr("Show mail");
+        primary: true;
+        clicked => {
+            root.show-mail();
+            AccountImport.show-mail();
+        }
+    }
 }
 
 export component ImportDialog inherits Rectangle {
     in property <bool> compact: false;
     callback open-accounts();
+    callback show-mail();
 
     background: #00000066;
     accessible-role: groupbox;
-    accessible-label: @tr("Import accounts");
+    accessible-label: @tr("Import accounts and mail");
 
     // The scrim does not dismiss: an in-progress choice ends explicitly.
     TouchArea { }
 
+    // An import that is writing goes on in the background instead.
     function close() {
-        if AccountImport.stage != "importing" {
+        if AccountImport.stage == "importing" {
+            AccountImport.in-background = true;
+            AccountImport.open = false;
+        } else {
             AccountImport.close();
         }
     }
@@ -276,9 +472,11 @@ export component ImportDialog inherits Rectangle {
 
                 Text {
                     text: AccountImport.stage == "review" ? @tr("Choose accounts to import")
+                        : AccountImport.stage == "mail" ? @tr("Choose mail to import")
+                        : AccountImport.stage == "done" && AccountImport.mail-stopped ? @tr("Import stopped")
                         : AccountImport.stage == "done" ? @tr("Import complete")
                         : AccountImport.stage == "error" ? ImportText.error-title(AccountImport.error-code)
-                        : @tr("Import accounts");
+                        : @tr("Import accounts and mail");
                     color: AppTheme.title;
                     font-size: TypeScale.heading;
                     font-weight: 700;
@@ -291,7 +489,7 @@ export component ImportDialog inherits Rectangle {
                     spacing: 12px;
                     vertical-stretch: 1;
                     Text {
-                        text: @tr("Bring your account settings from Thunderbird, Thunderbird for Android, K-9 Mail, or a Flectar Mail backup. Passwords are never imported: you sign in to each account afterward.");
+                        text: @tr("Bring your accounts from Thunderbird, Thunderbird for Android, K-9 Mail, or a Flectar Mail backup, and mail from Thunderbird or saved mail files. Passwords are never imported: you sign in to each account afterward.");
                         color: AppTheme.secondary;
                         font-size: TypeScale.secondary;
                         wrap: word-wrap;
@@ -374,8 +572,8 @@ export component ImportDialog inherits Rectangle {
                     Text {
                         // Only desktops can choose a profile folder.
                         text: AccountImport.folder-supported
-                            ? @tr("Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip), profile folders and prefs.js, and Flectar Mail backups (.json).")
-                            : @tr("Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip) and prefs.js, and Flectar Mail backups (.json).");
+                            ? @tr("Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip), profile folders and prefs.js, Flectar Mail backups (.json), and mail saved as .mbox or .eml files, in maildir folders, or in ZIP archives of them.")
+                            : @tr("Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird profile exports (.zip) and prefs.js, Flectar Mail backups (.json), and mail saved as .mbox or .eml files or in ZIP archives of them.");
                         color: AppTheme.faint;
                         font-size: TypeScale.caption;
                         wrap: word-wrap;
@@ -385,14 +583,47 @@ export component ImportDialog inherits Rectangle {
                 // Spacers center the progress message in the dialog body.
                 if AccountImport.stage == "reading" || AccountImport.stage == "importing" : VerticalLayout {
                     vertical-stretch: 1;
+                    spacing: 10px;
                     Rectangle { vertical-stretch: 1; }
                     Text {
-                        text: AccountImport.stage == "reading" ? @tr("Reading settings…") : @tr("Importing accounts…");
+                        text: AccountImport.stage == "reading" ? @tr("Looking for accounts and mail…")
+                            : AccountImport.mail-progress < 0 ? @tr("Importing accounts…")
+                            : @tr("Importing mail…");
                         color: AppTheme.secondary;
                         font-size: TypeScale.body;
                         horizontal-alignment: center;
                         wrap: word-wrap;
                         accessible-role: text;
+                    }
+                    if AccountImport.stage == "importing" && AccountImport.mail-progress >= 0 && AccountImport.mail-progress-folder != "" : Text {
+                        text: AccountImport.mail-progress-folder;
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.caption;
+                        horizontal-alignment: center;
+                        overflow: elide;
+                    }
+                    if AccountImport.stage == "importing" && AccountImport.mail-progress >= 0 : Rectangle {
+                        height: 6px;
+                        border-radius: 3px;
+                        background: AppTheme.border-subtle;
+                        accessible-role: progress-indicator;
+                        accessible-label: @tr("Importing mail…");
+                        accessible-value: Math.round(AccountImport.mail-progress * 100) + "%";
+                        accessible-value-minimum: 0;
+                        accessible-value-maximum: 100;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(AccountImport.mail-progress, 0, 1);
+                            border-radius: parent.border-radius;
+                            background: AppTheme.accent;
+                        }
+                    }
+                    if AccountImport.stage == "importing" && AccountImport.mail-progress >= 0 : Text {
+                        text: @tr("One message · {1} of {2}" | "{0} messages · {1} of {2}" % AccountImport.mail-progress-count, Numbers.count(AccountImport.mail-progress-count), AccountImport.mail-progress-done, AccountImport.mail-progress-total);
+                        color: AppTheme.faint;
+                        font-size: TypeScale.caption;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
                     }
                     Rectangle { vertical-stretch: 1; }
                 }
@@ -473,32 +704,61 @@ export component ImportDialog inherits Rectangle {
                                     }
                                 }
                             }
-                            if AccountImport.local-folders + AccountImport.feeds + AccountImport.newsgroups > 0 : Text {
-                                text: @tr("Local folders, feeds, and newsgroups are not imported.");
-                                color: AppTheme.faint;
-                                font-size: TypeScale.caption;
-                                wrap: word-wrap;
-                            }
+                            if !AccountImport.has-mail : SourceNotes { }
                         }
+                    }
+                }
+
+                // Mail: each store with its folders, and where it goes.
+                if AccountImport.stage == "mail" : VerticalLayout {
+                    spacing: 10px;
+                    vertical-stretch: 1;
+                    Text {
+                        text: AccountImport.destinations.length > 1
+                            ? @tr("Mail stays on this device unless you choose an account for it. Messages already there are skipped, so an import can be repeated.")
+                            : @tr("Imported mail is kept only on this device. Messages already here are skipped, so an import can be repeated.");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    ScrollView {
+                        vertical-stretch: 1;
+                        mouse-drag-pan-enabled: root.compact;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 2px;
+                            for row[index] in AccountImport.mail-rows : MailRow {
+                                entry: row;
+                                position: index;
+                                compact: root.compact;
+                            }
+                            SourceNotes { }
+                        }
+                    }
+                    Text {
+                        text: AccountImport.mail-selected-count == 0 ? @tr("No folders chosen") : @tr("One folder chosen, {}" | "{n} folders chosen, {}" % AccountImport.mail-selected-count, AccountImport.mail-selected-size);
+                        color: AppTheme.faint;
+                        font-size: TypeScale.caption;
+                        wrap: word-wrap;
                     }
                 }
 
                 if AccountImport.stage == "done" : VerticalLayout {
                     spacing: 10px;
                     vertical-stretch: 1;
-                    if AccountImport.imported > 0 : Text {
+                    if AccountImport.account-results && AccountImport.imported > 0 : Text {
                         text: @tr("Imported one account. Sign in to it to start syncing." | "Imported {n} accounts. Sign in to each one to start syncing." % AccountImport.imported);
                         color: AppTheme.body;
                         font-size: TypeScale.body;
                         wrap: word-wrap;
                     }
-                    if AccountImport.imported == 0 : Text {
+                    if AccountImport.account-results && AccountImport.imported == 0 : Text {
                         text: @tr("No accounts were imported.");
                         color: AppTheme.body;
                         font-size: TypeScale.body;
                         wrap: word-wrap;
                     }
-                    if AccountImport.already-present > 0 : Text {
+                    if AccountImport.account-results && AccountImport.already-present > 0 : Text {
                         text: @tr("One account was already in Flectar Mail and was left unchanged." | "{n} accounts were already in Flectar Mail and were left unchanged." % AccountImport.already-present);
                         color: AppTheme.secondary;
                         font-size: TypeScale.secondary;
@@ -506,6 +766,38 @@ export component ImportDialog inherits Rectangle {
                     }
                     if AccountImport.restored-preferences : Text {
                         text: @tr("The theme, language, and other preferences from the backup were applied.");
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    if AccountImport.mail-results : Text {
+                        text: AccountImport.mail-imported > 0
+                            ? @tr("Imported one message." | "Imported {} messages." % AccountImport.mail-imported, Numbers.count(AccountImport.mail-imported))
+                            : @tr("No new messages were imported.");
+                        color: AppTheme.body;
+                        font-size: TypeScale.body;
+                        wrap: word-wrap;
+                    }
+                    if AccountImport.mail-results && AccountImport.mail-already-present > 0 : Text {
+                        text: @tr("One message was already here and was skipped." | "{} messages were already here and were skipped." % AccountImport.mail-already-present, Numbers.count(AccountImport.mail-already-present));
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    if AccountImport.mail-results && AccountImport.mail-too-large > 0 : Text {
+                        text: @tr("One message larger than 128 MB was skipped." | "{} messages larger than 128 MB were skipped." % AccountImport.mail-too-large, Numbers.count(AccountImport.mail-too-large));
+                        color: AppTheme.secondary;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    if AccountImport.mail-results && AccountImport.mail-refused > 0 : Text {
+                        text: @tr("The server refused one message: {1}" | "The server refused {0} messages: {1}" % AccountImport.mail-refused, Numbers.count(AccountImport.mail-refused), AccountImport.mail-refusal);
+                        color: AppTheme.destructive;
+                        font-size: TypeScale.secondary;
+                        wrap: word-wrap;
+                    }
+                    if AccountImport.mail-stopped : Text {
+                        text: @tr("The import was stopped. Importing the same mail again adds the rest.");
                         color: AppTheme.secondary;
                         font-size: TypeScale.secondary;
                         wrap: word-wrap;
@@ -518,6 +810,12 @@ export component ImportDialog inherits Rectangle {
                             spacing: 6px;
                             for failure in AccountImport.failures : Text {
                                 text: @tr("{} could not be imported: {}", failure.email, failure.error);
+                                color: AppTheme.destructive;
+                                font-size: TypeScale.secondary;
+                                wrap: word-wrap;
+                            }
+                            for failure in AccountImport.mail-failures : Text {
+                                text: @tr("Some mail in {} could not be read: {}", failure.email, failure.error);
                                 color: AppTheme.destructive;
                                 font-size: TypeScale.secondary;
                                 wrap: word-wrap;
@@ -538,6 +836,7 @@ export component ImportDialog inherits Rectangle {
                     PrimaryAction {
                         horizontal-stretch: 1;
                         open-accounts => { root.open-accounts(); }
+                        show-mail => { root.show-mail(); }
                     }
                 }
                 if root.compact : VerticalLayout {
@@ -545,6 +844,7 @@ export component ImportDialog inherits Rectangle {
                     vertical-stretch: 0;
                     PrimaryAction {
                         open-accounts => { root.open-accounts(); }
+                        show-mail => { root.show-mail(); }
                     }
                     SecondaryActions {
                         close => { root.close(); }
@@ -570,6 +870,88 @@ export component ImportDialog inherits Rectangle {
         focus-gained(reason) => {
             if reason == FocusReason.tab-navigation {
                 key-scope.focus();
+            }
+        }
+    }
+}
+
+// The import that goes on with its dialog hidden, and then how it ended,
+// shown above the mail list until the dialog is opened again or dismissed.
+export component ImportActivity inherits Rectangle {
+    in property <bool> compact: false;
+    private property <bool> running: AccountImport.stage == "importing";
+    private property <bool> shown: AccountImport.in-background && !AccountImport.open;
+    private property <string> title: root.running
+        ? (AccountImport.mail-progress < 0 ? @tr("Importing accounts…") : @tr("Importing mail… {}%", Math.round(AccountImport.mail-progress * 100)))
+        : AccountImport.stage == "error" ? ImportText.error-title(AccountImport.error-code)
+        : AccountImport.mail-stopped ? @tr("Import stopped")
+        : @tr("Import complete");
+
+    height: root.shown ? 44px : 0px;
+    visible: root.shown;
+    background: AppTheme.accent-pale;
+    accessible-role: text;
+    accessible-label: root.title;
+
+    Rectangle {
+        y: parent.height - self.height;
+        height: 1px;
+        background: AppTheme.border-subtle;
+    }
+
+    HorizontalLayout {
+        padding-left: root.compact ? 16px : 20px;
+        padding-right: root.compact ? 8px : 12px;
+        spacing: 10px;
+        Image {
+            width: 16px;
+            source: root.running ? @image-url("../icons/lucide/outline/download.svg")
+                : AccountImport.stage == "error" ? @image-url("../icons/lucide/outline/alert.svg")
+                : @image-url("../icons/lucide/outline/check-circle.svg");
+            colorize: AccountImport.stage == "error" ? AppTheme.destructive : AppTheme.accent;
+            image-fit: contain;
+            accessible-role: none;
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 4px;
+            Text {
+                text: root.title;
+                color: AppTheme.body;
+                font-size: TypeScale.secondary;
+                overflow: elide;
+            }
+            if root.running && AccountImport.mail-progress >= 0 : Rectangle {
+                height: 3px;
+                border-radius: 1.5px;
+                background: AppTheme.border-subtle;
+                Rectangle {
+                    x: 0;
+                    width: parent.width * clamp(AccountImport.mail-progress, 0, 1);
+                    border-radius: parent.border-radius;
+                    background: AppTheme.accent;
+                }
+            }
+        }
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            Button {
+                height: 28px;
+                width: max(64px, self.content-width);
+                text: @tr("Show");
+                clicked => { AccountImport.open = true; }
+            }
+        }
+        if !root.running : VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+            ToolbarIconButton {
+                icon: @image-url("../icons/lucide/outline/x.svg");
+                icon-color: AppTheme.secondary;
+                tooltip-text: @tr("Dismiss");
+                clicked => { AccountImport.close(); }
             }
         }
     }

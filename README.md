@@ -152,7 +152,8 @@ for Work and orange for Support.
 ### 🧵 Conversation threads
 
 Replies stay grouped in chronological order, with the active message expanded
-inside the reading pane.
+inside the reading pane. To list, open and act on every message on its own, turn
+off **Conversation view** in Settings → General.
 
 Use **Up/Down** to navigate messages, **Home/End** to jump to the first or last
 loaded message, and **Page Up/Page Down** to move a page at a time. **Enter**
@@ -183,6 +184,13 @@ you left off the next time you open Flectar Mail.
 **Ctrl/⌘+Shift+T** reopens the last tab you closed. **Ctrl+Tab** and
 **Ctrl+Shift+Tab** cycle through tabs, **Ctrl/⌘+1–8** jump to a tab, and
 **Ctrl/⌘+9** jumps to the last.
+
+On phones and in narrow windows, the button at the end of the toolbar shows
+how many tabs are open and lays them out as cards. Tap a card to switch to it,
+tap × or swipe it aside to close it, and use **+** for a new tab. Select
+messages and choose **Open in new tabs** from the selection menu to open them
+in the background. If you'd rather work without tabs, turn off **Tabs** in
+Settings → General.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-tabs-dark.png">
@@ -378,10 +386,22 @@ explained instead of changed silently, and POP3 accounts keep their rule for
 removing mail from the server. Existing accounts are never modified, and
 passwords are never imported.
 
+Saved mail comes over the same way: Thunderbird's Local Folders and the mail
+its POP3 accounts downloaded, mbox files such as a Google Takeout export or
+Flectar Mail's own, `.eml` messages, maildir folders, Apple Mail mailboxes, and
+ZIP archives of them. You pick the files, several at once if you like, then the
+folders, with Trash and Junk left out unless you check them, and the folder
+structure and read and starred states come along. Mail that's already there is
+skipped, so a stopped import can simply run again, and a long one can carry on
+in the background. Mail that belongs to no account goes to **On this device**:
+folders kept only here, which Settings → Storage can export or delete. It can
+also go into a POP3 account's folders, or up to the server of an IMAP, JMAP or
+Gmail account, into a folder of its own there.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="resources/screenshots/desktop-storage-light.png">
-  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, database snapshot, and account backup controls">
+  <img src="resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
 </picture>
 
 ### 📱 Made for smaller screens
@@ -426,6 +446,10 @@ When preview builds are published, download them from
 - **macOS Apple silicon or Intel (macOS 14+):** DMG or application ZIP
 - **Android arm64 (Android 8.0+):** Signed APK; previews and stable releases share one app identity
 
+HarmonyOS and OpenHarmony have a community port maintained by
+[springmin](https://github.com/springmin). It isn't part of GitHub releases;
+see [platform/ohos](platform/ohos/README.md) to build it.
+
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.
@@ -453,6 +477,16 @@ above and include its dependency error in your bug report.
 The older `0.1.0-alpha.7` RPM was built on Fedora 44 and cannot install on
 Fedora 43 because it requires glibc 2.43. Its Flatpak bundle is an alternative
 while waiting for an RPM release built with the compatibility checks above.
+
+On Linux, passwords, OAuth tokens, and API keys are kept in the system keyring
+through the freedesktop Secret Service, never in Flectar Mail's database. Any
+Secret Service provider works, on any desktop or window manager, sway included:
+GNOME Keyring, KWallet, or KeePassXC with its Secret Service integration turned
+on. The Flatpak uses the same keyring as the rest of your session. If the
+session has no default keyring yet, adding the first account asks the provider
+to create one, and the provider asks you to choose its password. Without a
+provider, adding an account stops with an error that says what is missing,
+because Flectar Mail never stores secrets anywhere less safe.
 
 Each GitHub release includes `SHA256SUMS` and signed build-provenance
 attestations. With GitHub CLI installed, verify a download with
@@ -484,12 +518,11 @@ You can also build Flectar Mail from source with the
 cargo run --bin flectar-mail
 ```
 
-Linux desktop OAuth uses the system browser through the desktop portal and
-stores refresh credentials through the freedesktop Secret Service. A normal
-desktop session therefore needs an `xdg-desktop-portal` backend and a Secret
-Service provider such as GNOME Keyring. Release builds stop before opening the
-OAuth page when secure credential storage is unavailable, so an authorization
-grant can never be completed without a safe place to persist it.
+Linux desktop OAuth also opens the system browser through the desktop portal,
+so the session needs an `xdg-desktop-portal` backend as well as the keyring
+described above. Release builds stop before opening the OAuth page when secure
+credential storage is unavailable, so an authorization grant can never be
+completed without a safe place to persist it.
 
 Podman and Docker development shells commonly have neither the host session
 D-Bus nor the host browser's loopback network. Debug builds support that setup

@@ -620,6 +620,11 @@
       "provider_calendar_connected": true
     }
   ],
+  "LocalMailUi": {
+    "account-id": 9,
+    "messages": 4812,
+    "size": "1.31 GB"
+  },
   "FilesUi": {
     "accounts": ["All accounts", "Flectar", "Flectar Support"],
     "account": 1,

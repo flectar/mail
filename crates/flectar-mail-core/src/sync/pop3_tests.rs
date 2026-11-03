@@ -710,7 +710,7 @@ async fn deleting_mail_here_completes_at_once_and_never_downloads_it_again() {
         })
         .await
         .unwrap();
-    complete_actions(&fixture.ctx, &fixture.config)
+    super::super::complete_device_actions(&fixture.ctx, fixture.config.id)
         .await
         .unwrap();
     assert!(fixture.inbox().await.is_empty());

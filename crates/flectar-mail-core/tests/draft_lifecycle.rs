@@ -1,7 +1,7 @@
 use flectar_mail_core::Core;
 use flectar_mail_core::config::Paths;
 use flectar_mail_core::models::{
-    ActionKind, Address, DraftAttachmentIn, PerformActionArgs, SaveDraftArgs, View,
+    ActionKind, ActionTarget, Address, DraftAttachmentIn, PerformActionArgs, SaveDraftArgs, View,
 };
 
 async fn setup() -> (tempfile::TempDir, Core) {
@@ -149,7 +149,7 @@ async fn archive_and_trash_remove_local_drafts_from_the_drafts_view() {
 
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Archive,
-        thread_ids: vec![thread_id],
+        target: ActionTarget::Threads(vec![thread_id]),
         params: None,
     })
     .await
@@ -184,7 +184,7 @@ async fn archive_and_trash_remove_local_drafts_from_the_drafts_view() {
         .unwrap();
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Trash,
-        thread_ids: vec![trashed_thread],
+        target: ActionTarget::Threads(vec![trashed_thread]),
         params: None,
     })
     .await

@@ -95,7 +95,7 @@ Du kannst auch die Farbe eines einzelnen Kontos überschreiben und die wirksame 
 
 ### 🧵 Unterhaltungen
 
-Antworten bleiben chronologisch gruppiert, wobei die aktive Nachricht im Lesebereich aufgeklappt ist.
+Antworten bleiben chronologisch gruppiert, wobei die aktive Nachricht im Lesebereich aufgeklappt ist. Um jede Nachricht einzeln aufzulisten, zu öffnen und zu bearbeiten, schalte **Unterhaltungsansicht** unter Einstellungen → Allgemein aus.
 
 Mit **Pfeil hoch/runter** navigierst du durch Nachrichten, mit **Pos1/Ende** zur ersten oder letzten geladenen Nachricht und mit **Bild auf/Bild ab** seitenweise. **Enter** öffnet die aktuelle Nachricht und fokussiert ihren Inhalt; die **Leertaste** markiert sie für Sammelaktionen oder hebt die Markierung auf. **Tab/Umschalt+Tab** wechseln zwischen Bedienelementen. In der vollständigen Ansicht verschiebt **F6** den Fokus zwischen Liste und Lesebereich. Im minimalistischen Layout heben Pfeiltasten Nachrichten hervor und **Enter** öffnet sie; **Escape** oder **F6** kehrt zur Liste zurück.
 
@@ -110,6 +110,8 @@ Mit **Pfeil hoch/runter** navigierst du durch Nachrichten, mit **Pos1/Ende** zur
 Halte mehrere Bereiche gleichzeitig in Tabs offen, wie in einem Browser. Jeder Tab merkt sich seinen Ort: ein Postfach, eine Suche, eine geöffnete Unterhaltung, Kalender, Kontakte, Dateien oder Einstellungen, einschließlich Scrollposition und zuletzt gelesener Nachricht. Ein Mittelklick oder Ctrl/⌘-Klick auf eine Nachricht öffnet sie im Hintergrund (mit Umschalt wechselst du direkt dorthin); alternativ wähle **In neuem Tab öffnen** im Menü. Ziehe Tabs zum Umsortieren, schließe sie per Mittelklick und nutze den Rechtsklick, um andere Tabs oder alle rechts davon zu schließen. Beim nächsten Start von Flectar Mail machst du dort weiter, wo du aufgehört hast.
 
 **Ctrl/⌘+T** öffnet einen Tab, **Ctrl/⌘+W** schließt den aktuellen und **Ctrl/⌘+Umschalt+T** öffnet den zuletzt geschlossenen erneut. **Ctrl+Tab** und **Ctrl+Umschalt+Tab** wechseln zwischen Tabs, **Ctrl/⌘+1–8** springen zu einem bestimmten Tab und **Ctrl/⌘+9** zum letzten.
+
+Auf dem Smartphone und in schmalen Fenstern zeigt die Schaltfläche am Ende der Werkzeugleiste, wie viele Tabs offen sind, und legt sie als Karten aus. Tippe auf eine Karte, um zu ihr zu wechseln, tippe auf × oder wische sie zur Seite, um sie zu schließen, und öffne mit **+** einen neuen Tab. Markiere Nachrichten und wähle im Auswahlmenü **In neuen Tabs öffnen**, um sie im Hintergrund zu öffnen. Wenn du lieber ohne Tabs arbeitest, schalte **Tabs** unter Einstellungen → Allgemein aus.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
@@ -285,10 +287,12 @@ POP3-Konten laden E-Mails auf dieses Gerät und lassen sie auf dem Server, sofer
 
 Die gleiche Importfunktion übernimmt Konten aus Thunderbird (Profilordner, Archiv aus Extras › Exportieren oder `prefs.js`) sowie aus Thunderbird für Android oder K-9 Mail (`.k9s`-Einstellungsexporte). Du prüfst jedes Konto, bevor etwas hinzugefügt wird: Einstellungen, die Flectar Mail nicht abbilden kann, etwa einen Exchange-Server, werden erklärt statt stillschweigend geändert. POP3-Konten behalten ihre Regel zum Löschen von Nachrichten auf dem Server. Bestehende Konten werden nie verändert, Passwörter nie importiert.
 
+Gespeicherte E-Mails lassen sich genauso übernehmen: die Lokalen Ordner von Thunderbird und die Nachrichten, die seine POP3-Konten heruntergeladen haben, mbox-Dateien wie ein Google-Takeout-Export oder die von Flectar Mail selbst, `.eml`-Nachrichten, Maildir-Ordner, Postfächer von Apple Mail sowie ZIP-Archive davon. Du wählst die Dateien aus, auch mehrere auf einmal, und dann die Ordner – Papierkorb und Junk bleiben außen vor, sofern du sie nicht ankreuzt –, und Ordnerstruktur sowie Gelesen- und Markiert-Status werden übernommen. Bereits vorhandene Nachrichten werden übersprungen, sodass ein abgebrochener Import einfach erneut laufen kann, und ein langer Import kann im Hintergrund weiterlaufen. E-Mails ohne Konto landen unter **Auf diesem Gerät**: Ordner, die nur hier existieren und sich unter Einstellungen → Speicher exportieren oder löschen lassen. Sie können auch in die Ordner eines POP3-Kontos gehen oder auf den Server eines IMAP-, JMAP- oder Gmail-Kontos, dort in einen eigenen Ordner.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Speichereinstellungen von Flectar Mail mit lokaler Belegung, Datenbank-Snapshots und Kontosicherungen">
+  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Speichereinstellungen von Flectar Mail mit lokaler Belegung, E-Mails auf diesem Gerät, Datenbank-Snapshots und Kontosicherungen">
 </picture>
 
 ### 📱 Für kleinere Bildschirme
@@ -327,6 +331,8 @@ Das RPM richtet sich an Fedora 43 und 44 auf x86_64. Veröffentlichungs-Builds n
 
 Das ältere RPM `0.1.0-alpha.7` wurde auf Fedora 44 gebaut und lässt sich wegen seiner Anforderung an glibc 2.43 nicht auf Fedora 43 installieren. Das zugehörige Flatpak-Paket ist eine Alternative, bis ein RPM mit den genannten Kompatibilitätsprüfungen veröffentlicht wird.
 
+Unter Linux speichert Flectar Mail Passwörter, OAuth-Tokens und API-Schlüssel über freedesktop Secret Service im Schlüsselbund des Systems, nie in seiner Datenbank. Jeder Secret-Service-Anbieter funktioniert, unter jedem Desktop und jedem Fenstermanager, auch unter sway: GNOME Keyring, KWallet oder KeePassXC mit eingeschalteter Secret-Service-Integration. Das Flatpak nutzt denselben Schlüsselbund wie der Rest deiner Sitzung. Hat die Sitzung noch keinen Standard-Schlüsselbund, bittet Flectar Mail beim Hinzufügen des ersten Kontos den Anbieter, einen anzulegen, und der Anbieter lässt dich ein Passwort dafür festlegen. Ohne Anbieter bricht das Hinzufügen eines Kontos mit einer Fehlermeldung ab, die nennt, was fehlt, denn Flectar Mail legt Zugangsdaten nie an einem weniger sicheren Ort ab.
+
 Jede GitHub-Veröffentlichung enthält `SHA256SUMS` und signierte Nachweise zur Build-Herkunft. Mit installiertem GitHub CLI prüfst du einen Download über `gh attestation verify <download> --repo flectar/mail`.
 
 Ab alpha 8 verwenden Android-Alpha-, Beta-, Release-Candidate- und stabile Builds ein Paket (`com.flectar.mail`) und eine dauerhafte Signaturidentität. Spätere Versionen können die Anwendung aktualisieren und lokale Daten erhalten. Alpha 6 und alpha 7 nutzten andere Schlüssel und können nicht auf diese Signaturidentität aktualisiert werden.
@@ -343,7 +349,7 @@ Du kannst Flectar Mail auch mit der [Rust-Toolchain](https://rustup.rs/) aus dem
 cargo run --bin flectar-mail
 ```
 
-OAuth auf dem Linux-Desktop verwendet den Systembrowser über das Desktop-Portal und speichert Zugangsdaten zur Token-Erneuerung über freedesktop Secret Service. Eine normale Sitzung benötigt daher ein `xdg-desktop-portal`-Backend und einen Secret-Service-Anbieter wie GNOME Keyring. Ist kein sicherer Zugangsdaten-Speicher verfügbar, stoppen Veröffentlichungs-Builds vor dem Öffnen der OAuth-Seite, damit keine Autorisierung ohne sicheren Speicherort abgeschlossen wird.
+OAuth auf dem Linux-Desktop öffnet außerdem den Systembrowser über das Desktop-Portal, daher braucht die Sitzung neben dem oben beschriebenen Schlüsselbund ein `xdg-desktop-portal`-Backend. Ist kein sicherer Zugangsdaten-Speicher verfügbar, stoppen Veröffentlichungs-Builds vor dem Öffnen der OAuth-Seite, damit keine Autorisierung ohne sicheren Speicherort abgeschlossen wird.
 
 Podman- und Docker-Entwicklungsumgebungen haben häufig weder Zugriff auf den D-Bus der Host-Sitzung noch auf das Loopback-Netz des Host-Browsers. Debug-Builds unterstützen dies durch eine klar gekennzeichnete, nur für den Eigentümer zugängliche Entwicklungs-Zugangsdaten-Datei und einen aufklappbaren Bereich zum Einfügen der endgültigen Loopback-Rückruf-URL. Der dateibasierte Speicher ist aus Veröffentlichungs-Builds ausgeschlossen.
 

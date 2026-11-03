@@ -119,7 +119,8 @@ pub struct AccountHandle {
     /// Set for accounts whose mail exists only on this device (POP3), where a
     /// message's original file can only be downloaded again from the server.
     restore_tx: Option<mpsc::Sender<RestoreRequest>>,
-    settings_tx: watch::Sender<crate::models::AccountSettings>,
+    /// Unset for local mail, which has no settings.
+    settings_tx: Option<watch::Sender<crate::models::AccountSettings>>,
     tasks: Vec<tokio::task::AbortHandle>,
 }
 
@@ -202,8 +203,10 @@ impl AccountHandle {
     }
 
     pub fn update_settings(&self, settings: crate::models::AccountSettings) {
-        self.settings_tx.send_replace(settings);
-        self.send(SyncCmd::SyncNow { complete: None });
+        if let Some(settings_tx) = &self.settings_tx {
+            settings_tx.send_replace(settings);
+            self.send(SyncCmd::SyncNow { complete: None });
+        }
     }
 
     /// Download a stored message's original again; see [`RestoreRequest`].
@@ -265,7 +268,7 @@ mod account_handle_tests {
             body_tx,
             send_tx: Some(send_tx),
             restore_tx: None,
-            settings_tx,
+            settings_tx: Some(settings_tx),
             tasks: Vec::new(),
         };
 
@@ -364,6 +367,13 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
             ];
             (joins, Some(send_tx), Some(restore_tx))
         }
+        MailProtocol::Local => (
+            vec![tokio::spawn(crate::sync::local::run(
+                ctx, account_id, rx, body_rx,
+            ))],
+            None,
+            None,
+        ),
     };
     AccountHandle {
         account_id,
@@ -371,11 +381,27 @@ pub fn spawn_account(ctx: SyncCtx, config: AccountConfig) -> AccountHandle {
         body_tx,
         send_tx,
         restore_tx,
-        settings_tx,
+        settings_tx: Some(settings_tx),
         tasks: joins
             .iter()
             .map(tokio::task::JoinHandle::abort_handle)
             .collect(),
+    }
+}
+
+/// The worker for local mail, which has no [`AccountConfig`].
+pub fn spawn_local(ctx: SyncCtx, account_id: i64) -> AccountHandle {
+    let (tx, rx) = mpsc::channel(SYNC_COMMAND_QUEUE_CAPACITY);
+    let (body_tx, body_rx) = mpsc::channel(PRIORITY_FETCH_QUEUE_CAPACITY);
+    let join = tokio::spawn(crate::sync::local::run(ctx, account_id, rx, body_rx));
+    AccountHandle {
+        account_id,
+        tx,
+        body_tx,
+        send_tx: None,
+        restore_tx: None,
+        settings_tx: None,
+        tasks: vec![join.abort_handle()],
     }
 }
 
@@ -1245,8 +1271,9 @@ pub async fn status_for_account(db: &Db, account_id: i64) -> Result<SyncStatus> 
                 rusqlite::params![account_id, account.mail_protocol == MailProtocol::Jmap],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?,
-            // POP3 downloads whole messages in its foreground sync.
-            MailProtocol::Pop3 => (0, 0),
+            // POP3 downloads whole messages in its foreground sync, and
+            // imported mail has nothing to download.
+            MailProtocol::Pop3 | MailProtocol::Local => (0, 0),
         };
         let header_failed: i64 = conn.query_row(
             "SELECT COUNT(*)
@@ -1320,7 +1347,7 @@ pub(super) async fn emit_sync_status(ctx: &SyncCtx, account_id: i64) {
     }
 }
 
-async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
+pub(crate) async fn connect(ctx: &SyncCtx, config: &AccountConfig) -> Result<Session> {
     crate::events::sync_diagnostic("imap_credentials", Some(config.id), "loading");
     let creds = imap_credentials(ctx, config).await?;
     crate::events::sync_diagnostic("imap_connect", Some(config.id), "connecting");
@@ -1458,7 +1485,7 @@ async fn run_cycle(
     Ok(false)
 }
 
-async fn discover_folders(
+pub(crate) async fn discover_folders(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,

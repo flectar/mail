@@ -60,6 +60,17 @@ pub(crate) struct Importer {
 
 impl Importer {
     pub(crate) fn new(conn: &Connection, account_id: i64) -> Result<Self> {
+        let own_addresses = repo::sender_identities::own_addresses(conn, account_id)?;
+        Self::with_own_addresses(conn, account_id, own_addresses)
+    }
+
+    /// For mail sent from addresses other than the account's own, such as
+    /// mail imported from another app.
+    pub(crate) fn with_own_addresses(
+        conn: &Connection,
+        account_id: i64,
+        own_addresses: OwnAddresses,
+    ) -> Result<Self> {
         let settings = repo::settings::get(conn)?;
         let (outgoing_learning_since, incoming_learning_since) =
             repo::contacts::learning_boundaries(conn, account_id, now_ms())?;
@@ -68,7 +79,7 @@ impl Importer {
             settings,
             outgoing_learning_since,
             incoming_learning_since,
-            own_addresses: repo::sender_identities::own_addresses(conn, account_id)?,
+            own_addresses,
             thread_ids: Vec::new(),
             notified_threads: Vec::new(),
             fresh_thread_ids: Vec::new(),
@@ -224,6 +235,12 @@ impl Importer {
         Ok(())
     }
 
+    /// The touched threads, without sorting them into the inbox's tabs: mail
+    /// kept on this device never reaches an inbox.
+    pub(crate) fn finish_unrouted(self) -> Vec<i64> {
+        self.thread_ids
+    }
+
     /// Resolve each touched thread to a tab now that all of its messages are
     /// in place (see crate::route). Returns every touched thread and the
     /// threads that gained chime-worthy mail.
@@ -263,6 +280,20 @@ fn arrival_eligible(
 /// newsletter or monitoring flood never rings the bell every minute.
 fn chime_worthy(is_automated: bool, from_email: &str) -> bool {
     !is_automated && !crate::mime::robot_sender(from_email)
+}
+
+/// Every message is kept: one that can't be parsed is stored whole and shown
+/// as text.
+pub(crate) fn parse_or_text(raw: &[u8]) -> ParsedBody {
+    crate::mime::parse_message(raw).unwrap_or_else(|error| {
+        tracing::warn!(%error, "storing an unparseable message as text");
+        let text = String::from_utf8_lossy(raw).into_owned();
+        ParsedBody {
+            snippet: crate::mime::make_body_snippet(Some(&text), None),
+            text: Some(text),
+            ..ParsedBody::default()
+        }
+    })
 }
 
 /// Store a parsed full message: its text and sanitized HTML, the raw file,
