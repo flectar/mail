@@ -730,10 +730,10 @@ jobs:
         run: xcodegen generate
 
       - name: Build unsigned device archive
+        # iOS bundles its own OAuth registrations (platform/ios/README.md).
         env:
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
-          FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
+          FLECTAR_GOOGLE_IOS_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_IOS_CLIENT_ID }}
+          FLECTAR_MICROSOFT_IOS_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_IOS_CLIENT_ID }}
         run: |
           mkdir -p target/ios
           xcodebuild \

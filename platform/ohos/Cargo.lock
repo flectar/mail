@@ -1788,6 +1788,7 @@ dependencies = [
  "anyrender_vello_cpu",
  "arboard",
  "ashpd",
+ "async-trait",
  "base64 0.22.1",
  "blitz-dom",
  "blitz-html",

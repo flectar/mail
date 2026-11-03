@@ -8,10 +8,12 @@ type OpenUrl = dyn Fn(&str) -> Result<(), String> + Send + Sync;
 ///
 /// The default uses the system browser, preferring Linux's desktop portal for
 /// authorization. Hosts without desktop launchers supply a callback with
-/// [`Self::new`]. Clones share that callback's state.
+/// [`Self::new`], and hosts with a dedicated sign-in session add it with
+/// [`Self::with_authorization`]. Clones share the callbacks' state.
 #[derive(Clone, Default)]
 pub struct ExternalUrlOpener {
     handler: Option<Arc<OpenUrl>>,
+    authorization: Option<Arc<OpenUrl>>,
 }
 
 impl ExternalUrlOpener {
@@ -25,7 +27,22 @@ impl ExternalUrlOpener {
     pub fn new(opener: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static) -> Self {
         Self {
             handler: Some(Arc::new(opener)),
+            authorization: None,
         }
+    }
+
+    /// Open browser authorization in a host session instead, such as iOS's
+    /// ASWebAuthenticationSession, which returns the provider's redirect to
+    /// the app. Mail links keep the other handler.
+    ///
+    /// The callback runs on a worker thread with the provider's HTTPS address
+    /// and must return once the session has been handed to the host.
+    pub fn with_authorization(
+        mut self,
+        authorize: impl Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.authorization = Some(Arc::new(authorize));
+        self
     }
 
     pub(super) fn open_external(&self, url: &str) -> Result<(), String> {
@@ -40,7 +57,7 @@ impl ExternalUrlOpener {
         if address.scheme() != "https" || address.host_str().is_none() {
             return Err("Sign-in requires an HTTPS address".into());
         }
-        match &self.handler {
+        match self.authorization.as_ref().or(self.handler.as_ref()) {
             Some(opener) => opener(address.as_str()),
             None => open_system_authorization(&address),
         }
@@ -182,6 +199,32 @@ mod dispatch_tests {
                 assert!(opener.open_authorization(url).is_err(), "{url}");
             }
         }
+    }
+
+    #[test]
+    fn a_sign_in_session_takes_authorization_but_not_mail_links() {
+        let links = Arc::new(Mutex::new(Vec::new()));
+        let sessions = Arc::new(Mutex::new(Vec::new()));
+        let (recorded_link, recorded_session) = (links.clone(), sessions.clone());
+        let opener = ExternalUrlOpener::new(move |url| {
+            recorded_link.lock().unwrap().push(url.to_owned());
+            Ok(())
+        })
+        .with_authorization(move |url| {
+            recorded_session.lock().unwrap().push(url.to_owned());
+            Ok(())
+        });
+        open_email_link(&opener, "https://example.com/mail").unwrap();
+        opener
+            .open_authorization("https://example.com/sign-in?state=s")
+            .unwrap();
+        // Addresses are still checked before the session sees them.
+        assert!(opener.open_authorization("http://example.com/").is_err());
+        assert_eq!(*links.lock().unwrap(), ["https://example.com/mail"]);
+        assert_eq!(
+            *sessions.lock().unwrap(),
+            ["https://example.com/sign-in?state=s"]
+        );
     }
 
     #[test]

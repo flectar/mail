@@ -177,8 +177,10 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 
-# Account secrets live in the iOS Keychain (src/platform/ios/security.rs).
+# Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and
+# sign-in uses the core's async OAuth broker trait (src/platform/web_authentication.rs).
 [target.'cfg(target_os = "ios")'.dependencies]
+async-trait = "0.1"
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFData", "CFDictionary", "CFNumber", "CFString"] }
 objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem"] }
 
@@ -216,6 +218,8 @@ ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
 i-slint-core = { version = "=1.18.1", default-features = false }
+# src/platform/web_authentication.rs, which only iOS builds otherwise.
+async-trait = "0.1"
 
 [build-dependencies]
 cc = "1"

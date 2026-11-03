@@ -18,6 +18,9 @@ pub use ios::*;
 /// The iOS Keychain credential store, whose rules every platform tests.
 #[cfg(any(test, target_os = "ios"))]
 mod keychain;
+/// The iOS sign-in session broker, whose rules every platform tests.
+#[cfg(any(test, target_os = "ios"))]
+mod web_authentication;
 
 #[cfg(target_env = "ohos")]
 mod ohos;
