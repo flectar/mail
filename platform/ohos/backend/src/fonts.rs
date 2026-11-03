@@ -12,7 +12,22 @@ use std::sync::Arc;
 use slint::fontique_011::fontique::{Blob, FallbackKey, GenericFamily, Script};
 
 /// The platform font directory as seen from inside an app process.
-const SYSTEM_FONT_DIR: &str = "/system/fonts";
+pub const SYSTEM_FONT_DIR: &str = "/system/fonts";
+
+/// Family-name fragments of the Chinese (Han) faces, most preferred first.
+pub const HAN_FAMILIES: [&str; 4] = ["FZHeiT", "HYQiHei", "Source Han", "Noto Sans CJK"];
+
+/// Scripts, as ISO 15924 tags, that fall back to every system family.
+/// Fontconfig is unavailable on OHOS, so fontique starts with an empty
+/// fallback table; without these only Han text would fall back, and Arabic,
+/// Hebrew, Thai, Indic, Cyrillic, Greek, Armenian, Georgian, Hangul and
+/// Japanese would render as tofu. The mail renderer applies the same policy,
+/// which the host hands it with `configure_email_fonts`.
+pub const FALLBACK_SCRIPTS: [[u8; 4]; 25] = [
+    *b"Arab", *b"Hebr", *b"Thai", *b"Laoo", *b"Khmr", *b"Mymr", *b"Tibt", *b"Deva", *b"Beng",
+    *b"Guru", *b"Gujr", *b"Orya", *b"Taml", *b"Telu", *b"Knda", *b"Mlym", *b"Sinh", *b"Ethi",
+    *b"Armn", *b"Geor", *b"Cyrl", *b"Grek", *b"Hang", *b"Hira", *b"Kana",
+];
 
 /// Chinese faces used for the Han fallback when the family-name scan cannot
 /// find them (Simplified first, Traditional second).
@@ -24,6 +39,7 @@ const HAN_FONT_FILES: [&str; 2] = [
 /// Registers the platform fonts into Slint's shared fontique collection and
 /// appends a Han fallback. Returns the number of Han fallback families.
 pub fn register_system_fonts() -> usize {
+    let started = std::time::Instant::now();
     let dir = Path::new(SYSTEM_FONT_DIR);
     if !dir.is_dir() {
         return 0;
@@ -40,7 +56,7 @@ pub fn register_system_fonts() -> usize {
         .family_names()
         .map(|name| name.to_string())
         .collect();
-    for fragment in ["FZHeiT", "HYQiHei", "Source Han", "Noto Sans CJK"] {
+    for fragment in HAN_FAMILIES {
         for name in &names {
             if name.contains(fragment)
                 && let Some(id) = collection.family_id(name)
@@ -66,16 +82,7 @@ pub fn register_system_fonts() -> usize {
         }
     }
 
-    // Fontconfig is unavailable on OHOS, so fontique starts with an empty
-    // fallback table. Every script that is not Latin must be given the system
-    // families explicitly; otherwise only Han text would fall back and Arabic,
-    // Hebrew, Thai, Indic, Cyrillic, Greek, Armenian, Georgian, Hangul and
-    // Japanese would render as tofu.
-    const FALLBACK_SCRIPTS: [&[u8; 4]; 25] = [
-        b"Arab", b"Hebr", b"Thai", b"Laoo", b"Khmr", b"Mymr", b"Tibt", b"Deva", b"Beng", b"Guru",
-        b"Gujr", b"Orya", b"Taml", b"Telu", b"Knda", b"Mlym", b"Sinh", b"Ethi", b"Armn", b"Geor",
-        b"Cyrl", b"Grek", b"Hang", b"Hira", b"Kana",
-    ];
+    // Every script that is not Latin falls back to the system families.
     let all_names: Vec<String> = collection
         .family_names()
         .map(|name| name.to_string())
@@ -87,7 +94,7 @@ pub fn register_system_fonts() -> usize {
     if !all_families.is_empty() {
         for script in FALLBACK_SCRIPTS {
             collection.append_fallbacks(
-                FallbackKey::new(Script::from_bytes(*script), None),
+                FallbackKey::new(Script::from_bytes(script), None),
                 all_families.iter().copied(),
             );
         }
@@ -128,6 +135,10 @@ pub fn register_system_fonts() -> usize {
 
     if han_families.is_empty() {
         crate::log::info("fonts: no Han fallback family found");
+        crate::log::info(&format!(
+            "fonts: system registration completed in {:?} (0 Han families)",
+            started.elapsed()
+        ));
         return 0;
     }
 
@@ -141,5 +152,10 @@ pub fn register_system_fonts() -> usize {
     // non-Han family.
     collection.append_generic_families(GenericFamily::SansSerif, han_families.iter().copied());
 
+    crate::log::info(&format!(
+        "fonts: system registration completed in {:?} ({} Han families)",
+        started.elapsed(),
+        han_families.len()
+    ));
     han_families.len()
 }

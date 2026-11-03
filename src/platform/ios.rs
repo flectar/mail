@@ -29,6 +29,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
     })?;
     Ok(crate::PlatformContext {
         external_urls: crate::ExternalUrlOpener::default(),
+        notification_publisher: crate::NotificationPublisher::default(),
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),
@@ -92,6 +93,6 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
 }
 
 /// iOS reaches system fonts through the fontique system backend.
-pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }

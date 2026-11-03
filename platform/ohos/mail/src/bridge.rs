@@ -31,6 +31,7 @@ static SHOW_IME: AtomicUsize = AtomicUsize::new(0);
 static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static IME_UPDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
+static NOTIFY: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -42,6 +43,15 @@ type PickerReply = Result<(String, String), String>;
 const PICKER_TIMEOUT: Duration = Duration::from_secs(600);
 /// Several documents can be gigabytes of mail to copy.
 const SEVERAL_TIMEOUT: Duration = Duration::from_secs(3600);
+
+/// Arguments of one `notify` call. The host publisher translates/formats the
+/// raw sender and subject; this bridge only marshals them to ArkTS.
+struct NotifyRequest {
+    sender: String,
+    subject: String,
+    thread_id: i64,
+    message_id: i64,
+}
 
 /// One open picker: where its result goes, and the hold that keeps the Slint
 /// thread from presenting while the picker window covers the app. The page
@@ -118,6 +128,7 @@ pub(super) unsafe extern "C" fn set_bridge(
             &REQUEST_PASTEBOARD,
             call_zero_arg,
         );
+        install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
         undefined(env)
     }
 }
@@ -332,6 +343,21 @@ pub(super) async fn pick_save(
     let (path, _name) = await_result(receiver, PICKER_TIMEOUT).await?;
     drop(guard);
     Ok((!path.is_empty()).then_some(path))
+}
+
+/// Publish a new-mail notification through the ArkTS NotificationKit hook.
+/// Fails while the page hasn't installed the hook, so core tries again later.
+pub(super) fn notify(notification: &flectar_mail::NewMailNotification) -> Result<(), String> {
+    call_closure(
+        &NOTIFY,
+        "notify",
+        NotifyRequest {
+            sender: notification.sender.clone(),
+            subject: notification.subject.clone(),
+            thread_id: notification.thread_id,
+            message_id: notification.message_id,
+        },
+    )
 }
 
 /// Arguments of one `imeUpdateCursor` call.
@@ -742,6 +768,33 @@ unsafe extern "C" fn call_cursor_update(
     }
     // SAFETY: NAPI call on the JS thread with live handles.
     unsafe { call_with_args(env, js_callback, &args, "imeUpdateCursor") };
+}
+
+/// JS-thread half of [`notify`] (sender, subject, thread id, message id).
+unsafe extern "C" fn call_notify(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `NotifyRequest` boxed by `call_closure`.
+    let request = unsafe { Box::from_raw(data.cast::<NotifyRequest>()) };
+    unsafe {
+        let (Some(sender), Some(subject), Some(thread), Some(message)) = (
+            string_value(env, request.sender.as_bytes()),
+            string_value(env, request.subject.as_bytes()),
+            int_value(env, request.thread_id),
+            int_value(env, request.message_id),
+        ) else {
+            return;
+        };
+        call_with_args(
+            env,
+            js_callback,
+            &[sender, subject, thread, message],
+            "notify",
+        );
+    }
 }
 
 /// JS-thread half of [`hide_ime`] and [`request_pasteboard`] (zero arguments).

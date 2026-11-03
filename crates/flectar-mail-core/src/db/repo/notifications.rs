@@ -1,5 +1,6 @@
 use crate::error::{CoreError, Result};
-use crate::models::now_ms;
+use crate::models::{Settings, now_ms, roles};
+use crate::sync::ingest::CHIME_RECENT_MS;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +210,151 @@ pub fn recover_delivering(conn: &Connection, retry_at: i64) -> Result<usize> {
     )?)
 }
 
+/// How long a notification waits for its thread's AI route before another look.
+pub const ROUTE_WAIT_MS: i64 = 60_000;
+
+/// One new-mail notification for the host to raise. The fields are raw
+/// database values, so the host builds the translated title and body itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewMailNotification {
+    pub account_id: i64,
+    pub message_id: i64,
+    pub thread_id: i64,
+    /// The sender's display name, or the address when there is none.
+    pub sender: String,
+    pub subject: String,
+}
+
+impl NewMailNotification {
+    fn new(item: &NotificationOutboxItem, thread_id: i64) -> Self {
+        let sender = item
+            .sender_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .or_else(|| item.sender_addr.clone())
+            .unwrap_or_default();
+        Self {
+            account_id: item.account_id,
+            message_id: item.message_id,
+            thread_id,
+            sender,
+            subject: item.subject.clone(),
+        }
+    }
+}
+
+/// The due rows one [`settle_due`] step read, and the ones it claimed, with
+/// their outbox ids.
+#[derive(Debug)]
+pub struct Settled {
+    pub read: usize,
+    pub claimed: Vec<(i64, NewMailNotification)>,
+}
+
+enum Decision {
+    Publish(i64),
+    Wait,
+    Suppress(&'static str),
+}
+
+/// Settle up to `limit` due notifications: claim the ones to publish, and
+/// suppress or postpone the rest.
+pub fn settle_due(conn: &Connection, settings: &Settings, now: i64, limit: i64) -> Result<Settled> {
+    let due = list_due(conn, now, limit)?;
+    let mut claimed = Vec::new();
+    for item in &due {
+        match decide(conn, settings, now, item)? {
+            Decision::Publish(thread_id) => {
+                if try_claim(conn, item.id, now)? {
+                    claimed.push((item.id, NewMailNotification::new(item, thread_id)));
+                }
+            }
+            Decision::Wait => {
+                defer(conn, item.id, now + ROUTE_WAIT_MS)?;
+            }
+            Decision::Suppress(reason) => {
+                mark_suppressed(conn, item.id, now, reason)?;
+            }
+        }
+    }
+    Ok(Settled {
+        read: due.len(),
+        claimed,
+    })
+}
+
+/// Whether a due notification goes out. Nothing does while notifications are
+/// off, so turning them on later doesn't replay old mail. Mail stops counting
+/// as new after the window sync uses to queue it, or once it is read or moved
+/// to Trash or Spam. A thread whose AI route is still pending waits.
+fn decide(
+    conn: &Connection,
+    settings: &Settings,
+    now: i64,
+    item: &NotificationOutboxItem,
+) -> Result<Decision> {
+    if !settings.notifications_enabled {
+        return Ok(Decision::Suppress("notifications are off"));
+    }
+    if now - item.created_at >= CHIME_RECENT_MS {
+        return Ok(Decision::Suppress("no longer new"));
+    }
+    if !unread_in_mailbox(conn, item.message_id)? {
+        return Ok(Decision::Suppress("read or moved"));
+    }
+    let Some(thread_id) = item.thread_id else {
+        return Ok(Decision::Suppress("thread was deleted"));
+    };
+    Ok(match resolve_tab(conn, thread_id)? {
+        None => Decision::Suppress("thread was deleted"),
+        Some(RoutedTab::Pending) => Decision::Wait,
+        Some(RoutedTab::Resolved(tab)) if scope_allows(settings, &tab) => {
+            Decision::Publish(thread_id)
+        }
+        Some(RoutedTab::Resolved(_)) => Decision::Suppress("outside notification scope"),
+    })
+}
+
+/// Whether the message is still unread and outside Trash and Spam.
+fn unread_in_mailbox(conn: &Connection, message_id: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT m.is_read = 0 AND COALESCE(f.role, '') NOT IN (?2, ?3)
+             FROM messages m LEFT JOIN folders f ON f.id = m.folder_id
+             WHERE m.id = ?1",
+            params![message_id, roles::TRASH, roles::SPAM],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// Apply the user's notification scope to a resolved tab key.
+fn scope_allows(settings: &Settings, tab: &str) -> bool {
+    match settings.notification_scope.as_str() {
+        "all" => true,
+        "tabs" => settings
+            .notification_tabs
+            .iter()
+            .any(|selected| selected == tab),
+        // "important" and any future or unknown value keep the historical
+        // Important-only behaviour rather than notifying for every message.
+        _ => tab == "important",
+    }
+}
+
+/// When the next postponed notification falls due, if any.
+pub fn next_due_at(conn: &Connection, now: i64) -> Result<Option<i64>> {
+    Ok(conn.query_row(
+        "SELECT MIN(not_before) FROM notification_outbox
+         WHERE state = 'pending' AND not_before > ?1",
+        params![now],
+        |row| row.get(0),
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,5 +489,158 @@ mod tests {
         c.execute("DELETE FROM messages WHERE id = ?1", params![message_id])
             .unwrap();
         assert!(get(&c, id).unwrap().is_none());
+    }
+
+    fn suppression(c: &Connection, id: i64) -> Option<String> {
+        let row = get(c, id).unwrap().unwrap();
+        assert_eq!(row.state, "suppressed");
+        row.suppression_reason
+    }
+
+    #[test]
+    fn settle_claims_new_mail_in_scope_and_settles_the_rest() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Trash', 'trash')",
+            [],
+        )
+        .unwrap();
+        let now = 10 * CHIME_RECENT_MS;
+        let settings = Settings::default();
+
+        let (thread, fresh) = testutil::seed_message(&c, "alice@test.dev", "Fresh", false);
+        c.execute(
+            "UPDATE messages SET from_name = ' Alice ' WHERE id = ?1",
+            params![fresh],
+        )
+        .unwrap();
+        let (_, read) = testutil::seed_message(&c, "bob@test.dev", "Read", false);
+        c.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = ?1",
+            params![read],
+        )
+        .unwrap();
+        let (_, trashed) = testutil::seed_message(&c, "carol@test.dev", "Trashed", false);
+        c.execute(
+            "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+            params![trashed],
+        )
+        .unwrap();
+        let (_, bulk) = testutil::seed_message(&c, "news@test.dev", "Digest", true);
+        let (routing_thread, routing) =
+            testutil::seed_message(&c, "dave@test.dev", "Routing", false);
+        c.execute(
+            "UPDATE threads SET routed_tab = 'pending' WHERE id = ?1",
+            params![routing_thread],
+        )
+        .unwrap();
+        let (_, old) = testutil::seed_message(&c, "erin@test.dev", "Old", false);
+
+        let [fresh_id, read_id, trashed_id, bulk_id, routing_id] =
+            [fresh, read, trashed, bulk, routing]
+                .map(|id| enqueue_at(&c, id, now - 1_000).unwrap());
+        let old_id = enqueue_at(&c, old, now - CHIME_RECENT_MS).unwrap();
+
+        let settled = settle_due(&c, &settings, now, 10).unwrap();
+        assert_eq!(settled.read, 6);
+        assert_eq!(
+            settled.claimed,
+            vec![(
+                fresh_id,
+                NewMailNotification {
+                    account_id: 1,
+                    message_id: fresh,
+                    thread_id: thread,
+                    sender: "Alice".into(),
+                    subject: "Fresh".into(),
+                }
+            )]
+        );
+        assert_eq!(get(&c, fresh_id).unwrap().unwrap().state, "delivering");
+        assert_eq!(suppression(&c, read_id).as_deref(), Some("read or moved"));
+        assert_eq!(
+            suppression(&c, trashed_id).as_deref(),
+            Some("read or moved")
+        );
+        assert_eq!(
+            suppression(&c, bulk_id).as_deref(),
+            Some("outside notification scope")
+        );
+        assert_eq!(suppression(&c, old_id).as_deref(), Some("no longer new"));
+
+        // A pending AI route waits without using up a delivery attempt...
+        let waiting = get(&c, routing_id).unwrap().unwrap();
+        assert_eq!(waiting.state, "pending");
+        assert_eq!(waiting.attempts, 0);
+        assert_eq!(next_due_at(&c, now).unwrap(), Some(now + ROUTE_WAIT_MS));
+        assert!(
+            settle_due(&c, &settings, now, 10)
+                .unwrap()
+                .claimed
+                .is_empty()
+        );
+
+        // ...and goes out once the route resolves.
+        c.execute(
+            "UPDATE threads SET routed_tab = 'important' WHERE id = ?1",
+            params![routing_thread],
+        )
+        .unwrap();
+        let later = settle_due(&c, &settings, now + ROUTE_WAIT_MS, 10).unwrap();
+        assert_eq!(later.claimed.len(), 1);
+        assert_eq!(later.claimed[0].0, routing_id);
+        assert_eq!(next_due_at(&c, now + ROUTE_WAIT_MS).unwrap(), None);
+    }
+
+    #[test]
+    fn settle_suppresses_mail_while_notifications_are_off() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "Quiet", false);
+        let id = enqueue_at(&c, message_id, 1_000).unwrap();
+        let settings = Settings {
+            notifications_enabled: false,
+            ..Settings::default()
+        };
+
+        let settled = settle_due(&c, &settings, 2_000, 10).unwrap();
+        assert!(settled.claimed.is_empty());
+        assert_eq!(
+            suppression(&c, id).as_deref(),
+            Some("notifications are off")
+        );
+    }
+
+    #[test]
+    fn important_scope_only_notifies_important() {
+        let settings = Settings::default();
+        assert!(scope_allows(&settings, "important"));
+        assert!(!scope_allows(&settings, "other"));
+        assert!(!scope_allows(&settings, "split:1"));
+    }
+
+    #[test]
+    fn all_scope_notifies_every_tab() {
+        let settings = Settings {
+            notification_scope: "all".into(),
+            ..Settings::default()
+        };
+        assert!(scope_allows(&settings, "important"));
+        assert!(scope_allows(&settings, "other"));
+        assert!(scope_allows(&settings, "label:7"));
+    }
+
+    #[test]
+    fn tabs_scope_honours_the_selected_tabs() {
+        let settings = Settings {
+            notification_scope: "tabs".into(),
+            notification_tabs: vec!["other".into(), "label:7".into()],
+            ..Settings::default()
+        };
+        assert!(!scope_allows(&settings, "important"));
+        assert!(scope_allows(&settings, "other"));
+        assert!(scope_allows(&settings, "label:7"));
+        assert!(!scope_allows(&settings, "split:1"));
     }
 }

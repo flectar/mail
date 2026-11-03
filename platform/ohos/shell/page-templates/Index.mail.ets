@@ -1,7 +1,8 @@
-import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want, wantAgent } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
 import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
@@ -24,6 +25,7 @@ interface FlectarBridge {
   imeUpdateCursor: (left: number, top: number, width: number, height: number) => void;
   hideIme: () => void;
   requestPasteboard: () => void;
+  notify: (sender: string, subject: string, threadId: number, messageId: number) => void;
 }
 
 interface ImeCursor {
@@ -210,6 +212,9 @@ struct Index {
       },
       requestPasteboard: (): void => {
         this.requestPasteboardPermission();
+      },
+      notify: (sender: string, subject: string, threadId: number, messageId: number): void => {
+        this.notify(sender, subject, threadId, messageId);
       },
     });
     this.applySystemColorScheme(this.colorMode);
@@ -619,6 +624,49 @@ struct Index {
         colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK);
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'could not apply the system color mode: %{public}s',
+        (error as BusinessError).message);
+    }
+  }
+
+  // Publish one new-mail notification. Rust sends raw sender/subject fields;
+  // fixed fallback text comes from resources so the notification follows the
+  // application language. Tapping it opens the app; the want carries the
+  // thread id for opening the thread once the app handles it.
+  private async notify(
+    sender: string, subject: string, threadId: number, messageId: number): Promise<void> {
+    try {
+      const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const manager = context.resourceManager;
+      const title = sender.trim().length > 0
+        ? sender
+        : manager.getStringSync($r('app.string.notification_new_mail').id);
+      const text = subject.trim().length > 0
+        ? subject
+        : manager.getStringSync($r('app.string.notification_no_subject').id);
+      const id = Math.abs(threadId > 0 ? threadId : messageId) % 2147483647;
+      const agent = await wantAgent.getWantAgent({
+        wants: [{
+          bundleName: context.abilityInfo.bundleName,
+          abilityName: context.abilityInfo.name,
+          parameters: { threadId: threadId },
+        }],
+        actionType: wantAgent.OperationType.START_ABILITY,
+        requestCode: id,
+      });
+      const request: notificationManager.NotificationRequest = {
+        id,
+        notificationSlotType: notificationManager.SlotType.SOCIAL_COMMUNICATION,
+        content: {
+          notificationContentType:
+            notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+          normal: { title, text },
+        },
+        wantAgent: agent,
+      };
+      await notificationManager.publish(request);
+      hilog.info(0x0000, LOG_TAG, 'notification published');
+    } catch (error) {
+      hilog.error(0x0000, LOG_TAG, 'notification failed: %{public}s',
         (error as BusinessError).message);
     }
   }
