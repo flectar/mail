@@ -304,6 +304,7 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     let mut platform =
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
+    platform.notification_publisher = flectar_mail::NotificationPublisher::new(bridge::notify);
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())
