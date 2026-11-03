@@ -1612,8 +1612,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // when the window is created. This is the same zero-wait lookup used for
     // the rest of the first frame's presentation state.
     let startup_presentation = flectar_mail_core::startup_presentation(&platform.paths);
-    let window_frame = window_chrome::WindowFrame::parse(
-        startup_presentation.window_frame.as_deref().unwrap_or_default(),
+    let window_frame = startup_presentation.window_frame.as_deref().map_or_else(
+        window_chrome::WindowFrame::default,
+        window_chrome::WindowFrame::parse,
     );
     #[cfg(desktop)]
     let (use_wgpu, cpu_renderer) = (

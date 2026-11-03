@@ -195,7 +195,7 @@ Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’ou
 
 ### 🪟 Fenêtre sans bordure
 
-Activez **Fenêtre sans bordure** dans Paramètres → Général → Interface pour remplacer la barre de titre du système par des contrôles dans la barre d’outils. Chaque plateforme conserve son comportement : macOS garde ses boutons colorés natifs, Windows conserve Snap Layouts et le menu système, et Linux suit l’ordre des boutons et les actions de la barre de titre configurés dans GNOME ou KDE.
+Par défaut, Flectar Mail remplace la barre de titre du système par des contrôles dans la barre d’outils ; désactivez **Fenêtre sans bordure** dans Paramètres → Général → Interface pour retrouver la barre de titre du système. Chaque plateforme conserve son comportement : macOS garde ses boutons colorés natifs, Windows conserve Snap Layouts et le menu système, et Linux suit l’ordre des boutons et les actions de la barre de titre configurés dans GNOME ou KDE.
 
 <table>
   <tbody>

@@ -274,8 +274,9 @@ Settings → General.
 
 ### 🪟 Frameless window
 
-Turn on **Frameless window** in Settings → General → Interface to replace the
-system title bar with window controls in the toolbar. Each platform keeps its
+Flectar Mail replaces the system title bar with window controls in the toolbar
+by default; turn off **Frameless window** in Settings → General → Interface to
+bring the system title bar back. Each platform keeps its
 own behavior: macOS keeps the native traffic lights, Windows keeps Snap Layouts
 and the system menu, and Linux follows the button order and title-bar actions
 configured for GNOME or KDE.

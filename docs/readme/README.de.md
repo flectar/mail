@@ -195,7 +195,7 @@ Auf dem Smartphone und in schmalen Fenstern zeigt die Schaltfläche am Ende der 
 
 ### 🪟 Rahmenloses Fenster
 
-Aktiviere **Rahmenloses Fenster** unter Einstellungen → Allgemein → Oberfläche, um die Systemtitelleiste durch Fenstersteuerelemente in der Werkzeugleiste zu ersetzen. Jede Plattform behält ihr Verhalten: macOS die nativen farbigen Fensterknöpfe, Windows Snap Layouts und das Systemmenü, Linux die in GNOME oder KDE konfigurierte Reihenfolge der Schaltflächen und Titelleistenaktionen.
+Flectar Mail ersetzt die Systemtitelleiste standardmäßig durch Fenstersteuerelemente in der Werkzeugleiste; schalte **Rahmenloses Fenster** unter Einstellungen → Allgemein → Oberfläche aus, um die Systemtitelleiste zurückzuholen. Jede Plattform behält ihr Verhalten: macOS die nativen farbigen Fensterknöpfe, Windows Snap Layouts und das Systemmenü, Linux die in GNOME oder KDE konfigurierte Reihenfolge der Schaltflächen und Titelleistenaktionen.
 
 <table>
   <tbody>
