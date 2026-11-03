@@ -127,8 +127,8 @@ impl Default for CosmicComposeEditor {
         // nothing; load the platform font directory explicitly. Without it
         // the composer falls back to the bundled UI font alone, which has no
         // CJK coverage (typed Chinese renders as missing glyphs).
-        if let Some(directory) = crate::platform::email_font_dir() {
-            font_system.db_mut().load_fonts_dir(directory);
+        if let Some(fonts) = crate::platform::email_fonts() {
+            font_system.db_mut().load_fonts_dir(fonts.dir);
         }
         let buffer = Buffer::new(
             &mut font_system,
