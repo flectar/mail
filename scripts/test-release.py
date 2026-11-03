@@ -541,31 +541,47 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             root = Path(directory)
             source = root / "assets"
             source.mkdir()
+            # Workflow artifacts unpack into folders named after the artifact.
             names = (
-                "linux/appimage/flectar-mail.AppImage",
-                "linux/deb/flectar-mail_0.1.0~beta.1_amd64.deb",
-                "linux/rpm/flectar-mail.rpm",
-                "linux/flatpak/flectar-mail.flatpak",
-                "windows/flectar-mail-windows-x64.zip",
-                "windows/flectar-mail-windows-x64-setup.exe",
-                "macos/flectar-mail-macos-arm64.zip",
-                "macos/flectar-mail-macos-arm64.dmg",
-                "macos/flectar-mail-macos-x64.zip",
-                "macos/flectar-mail-macos-x64.dmg",
-                "android/flectar-mail.apk",
+                "flectar-mail-linux-x64/appimage/flectar-mail.AppImage",
+                "flectar-mail-linux-x64/deb/flectar-mail_0.1.0~beta.1_amd64.deb",
+                "flectar-mail-linux-arm64/appimage/flectar-mail.AppImage",
+                "flectar-mail-linux-arm64/deb/flectar-mail_0.1.0~beta.1_arm64.deb",
+                "flectar-mail-rpm-x64/flectar-mail.rpm",
+                "flectar-mail-rpm-arm64/flectar-mail.rpm",
+                "flectar-mail-flatpak-x64/flectar-mail.flatpak",
+                "flectar-mail-flatpak-arm64/flectar-mail.flatpak",
+                "flectar-mail-windows-x64/flectar-mail-windows-x64.zip",
+                "flectar-mail-windows-x64/flectar-mail-windows-x64-setup.exe",
+                "flectar-mail-macos-arm64/flectar-mail-macos-arm64.zip",
+                "flectar-mail-macos-arm64/flectar-mail-macos-arm64.dmg",
+                "flectar-mail-macos-x64/flectar-mail-macos-x64.zip",
+                "flectar-mail-macos-x64/flectar-mail-macos-x64.dmg",
+                "flectar-mail-android-signed-arm64/flectar-mail.apk",
             )
             for name in names:
                 path = source / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(name.encode())
-            (source / "benchmark.json").write_text("{}")
+            (source / "flectar-mail-linux-x64/startup-benchmark/benchmark.json").parent.mkdir()
+            (source / "flectar-mail-linux-x64/startup-benchmark/benchmark.json").write_text("{}")
             dist = root / "dist"
             prepare(source, dist, "0.1.0-beta.1")
-            self.assertEqual(len(list(dist.iterdir())), 12)
+            self.assertEqual(len(list(dist.iterdir())), 16)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64.apk").is_file())
-            # GitHub must not rewrite a download name after we checksum it.
-            deb = dist / "flectar-mail_0.1.0.beta.1_amd64.deb"
-            self.assertEqual(deb.read_bytes(), (source / names[1]).read_bytes())
+            # Each download comes from its own architecture's artifact.
+            for download, name in (
+                ("flectar-mail-0.1.0-beta.1-linux-x64.AppImage", names[0]),
+                ("flectar-mail-0.1.0-beta.1-linux-arm64.AppImage", names[2]),
+                ("flectar-mail-0.1.0-beta.1-linux-x64.rpm", names[4]),
+                ("flectar-mail-0.1.0-beta.1-linux-arm64.rpm", names[5]),
+                ("flectar-mail-0.1.0-beta.1-linux-x64.flatpak", names[6]),
+                ("flectar-mail-0.1.0-beta.1-linux-arm64.flatpak", names[7]),
+                # GitHub must not rewrite a download name after we checksum it.
+                ("flectar-mail_0.1.0.beta.1_amd64.deb", names[1]),
+                ("flectar-mail_0.1.0.beta.1_arm64.deb", names[3]),
+            ):
+                self.assertEqual((dist / download).read_bytes(), name.encode())
             for path in dist.iterdir():
                 self.assertRegex(path.name, r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
             result = subprocess.run(
@@ -581,20 +597,29 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             missing.write_bytes(b"")
             with self.assertRaises(ValueError):
                 prepare(source, root / "empty", "0.1.0-beta.1")
-            missing.write_bytes(b"dmg")
-            (source / missing.name).write_bytes(b"duplicate")
+            missing.write_bytes(b"apk")
+            (missing.parent / "copy").mkdir()
+            (missing.parent / "copy" / missing.name).write_bytes(b"duplicate")
             with self.assertRaises(ValueError):
                 prepare(source, root / "duplicate", "0.1.0-beta.1")
+            shutil.rmtree(missing.parent / "copy")
+
+            # A package in another architecture's artifact does not count.
+            arm_rpm = source / "flectar-mail-rpm-arm64/flectar-mail.rpm"
+            arm_rpm.rename(source / "flectar-mail-rpm-x64/arm64.rpm")
+            with self.assertRaisesRegex(ValueError, "flectar-mail-rpm-arm64/flectar-mail.rpm"):
+                prepare(source, root / "wrong-artifact", "0.1.0-beta.1")
+            (source / "flectar-mail-rpm-x64/arm64.rpm").rename(arm_rpm)
 
             # Stable releases also require exactly one signed Android APK.
-            (source / missing.name).unlink()
-            (source / "linux/deb/flectar-mail_0.1.0~beta.1_amd64.deb").rename(
-                source / "linux/deb/flectar-mail_0.1.0_amd64.deb"
-            )
+            for artifact, arch in (("flectar-mail-linux-x64", "amd64"), ("flectar-mail-linux-arm64", "arm64")):
+                folder = source / artifact / "deb"
+                (folder / f"flectar-mail_0.1.0~beta.1_{arch}.deb").rename(folder / f"flectar-mail_0.1.0_{arch}.deb")
             stable_dist = root / "stable"
             prepare(source, stable_dist, "0.1.0")
-            self.assertEqual(len(list(stable_dist.iterdir())), 12)
+            self.assertEqual(len(list(stable_dist.iterdir())), 16)
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_amd64.deb").is_file())
+            self.assertTrue((stable_dist / "flectar-mail_0.1.0_arm64.deb").is_file())
             self.assertTrue((stable_dist / "flectar-mail-0.1.0-android-arm64.apk").is_file())
             missing.unlink()
             with self.assertRaises(ValueError):
@@ -606,6 +631,8 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
         self.assertIn("does not receive Flathub updates", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("build-provenance attestations", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("Apple silicon and Intel", release_assets.release_notes("0.1.0-beta.1"))
+        self.assertIn("Linux x64 and arm64", release_assets.release_notes("0.1.0-beta.1"))
+        self.assertIn("-linux-arm64.rpm", release_assets.release_notes("0.1.0-beta.1"))
 
     def test_metadata_rejects_stale_android_lockfile(self):
         with tempfile.TemporaryDirectory() as directory:
