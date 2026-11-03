@@ -160,8 +160,9 @@ unsafe extern "C" fn module_init(env: napi_env, exports: napi_value) -> napi_val
 
 /// Expose the bridge entry points on the module object. The ArkTS page calls
 /// `setBridge({ ... })` from the XComponent `onLoad` callback with the closures
-/// native code needs, and `submitBridgeResult(...)` when a callback-based flow
-/// (the file picker) finishes.
+/// native code needs, `pickerClosed(...)` once a picker window closes, and
+/// `submitBridgeResult(...)` when a callback-based flow (the file picker)
+/// finishes.
 ///
 /// SAFETY: `env` and `exports` must be the live NAPI module-init arguments.
 unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
@@ -175,6 +176,10 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
             (
                 &b"submitBridgeResult\0"[..],
                 bridge::submit_bridge_result as ffi::napi_callback,
+            ),
+            (
+                &b"pickerClosed\0"[..],
+                bridge::picker_closed as ffi::napi_callback,
             ),
             (
                 &b"imeCommit\0"[..],

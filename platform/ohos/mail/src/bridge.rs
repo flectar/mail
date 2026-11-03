@@ -38,11 +38,17 @@ static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
 /// A picker's reported path and picked name, or why it failed.
 type PickerReply = Result<(String, String), String>;
 
+/// How long one picked or saved document may take, picker included.
+const PICKER_TIMEOUT: Duration = Duration::from_secs(600);
+/// Several documents can be gigabytes of mail to copy.
+const SEVERAL_TIMEOUT: Duration = Duration::from_secs(3600);
+
 /// One open picker: where its result goes, and the hold that keeps the Slint
-/// thread from presenting while the picker covers the window.
+/// thread from presenting while the picker window covers the app. The page
+/// releases the hold when that window closes, before it copies the files.
 struct Pending {
     sender: oneshot::Sender<PickerReply>,
-    _hold: PresentationHold,
+    hold: Option<PresentationHold>,
 }
 
 fn pending() -> &'static Mutex<HashMap<i64, Pending>> {
@@ -112,6 +118,41 @@ pub(super) unsafe extern "C" fn set_bridge(
             &REQUEST_PASTEBOARD,
             call_zero_arg,
         );
+        undefined(env)
+    }
+}
+
+/// `pickerClosed(requestId)` implementation: the picker window has closed, so
+/// the app may present again while the page copies the picked files.
+pub(super) unsafe extern "C" fn picker_closed(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live `env`/`info` from the NAPI runtime; `argv` holds the one
+    // expected argument.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut(); 1];
+        let rc = ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        );
+        if rc != ffi::NAPI_OK || argc < 1 {
+            slint_ohos_backend::ohos_error!("mail: pickerClosed: bad arguments (rc={rc})");
+            return undefined(env);
+        }
+        let id = read_int64(env, argv[0]).unwrap_or(0);
+        // Released outside the registry lock, since the last hold wakes the
+        // Slint thread.
+        let hold = pending()
+            .lock()
+            .ok()
+            .and_then(|mut map| map.get_mut(&id).and_then(|request| request.hold.take()));
+        drop(hold);
         undefined(env)
     }
 }
@@ -201,7 +242,7 @@ fn register_picker() -> Result<(i64, oneshot::Receiver<PickerReply>), String> {
     let (sender, receiver) = oneshot::channel();
     let request = Pending {
         sender,
-        _hold: PresentationHold::acquire(),
+        hold: Some(PresentationHold::acquire()),
     };
     pending()
         .lock()
@@ -221,7 +262,7 @@ pub(super) async fn pick_open() -> Result<Option<PickedFile>, String> {
     let (id, receiver) = register_picker()?;
     let guard = PendingGuard(id);
     call_closure(&PICK_OPEN, "pickOpen", id)?;
-    let (path, name) = await_result(receiver).await?;
+    let (path, name) = await_result(receiver, PICKER_TIMEOUT).await?;
     drop(guard);
     Ok((!path.is_empty()).then_some(PickedFile { path, name }))
 }
@@ -243,10 +284,10 @@ pub(super) async fn pick_open_many(limit: usize) -> Result<Vec<PickedFile>, Stri
         "pickOpenMany",
         OpenManyRequest {
             id,
-            limit: limit.clamp(1, 1000) as i64,
+            limit: i64::try_from(limit.max(1)).unwrap_or(i64::MAX),
         },
     )?;
-    let (json, _name) = await_result(receiver).await?;
+    let (json, _name) = await_result(receiver, SEVERAL_TIMEOUT).await?;
     drop(guard);
     if json.is_empty() {
         return Ok(Vec::new());
@@ -288,7 +329,7 @@ pub(super) async fn pick_save(
         name: suggested_name,
     };
     call_closure(&PICK_SAVE, "pickSave", request)?;
-    let (path, _name) = await_result(receiver).await?;
+    let (path, _name) = await_result(receiver, PICKER_TIMEOUT).await?;
     drop(guard);
     Ok((!path.is_empty()).then_some(path))
 }
@@ -308,8 +349,8 @@ struct SaveRequest {
     name: String,
 }
 
-async fn await_result(receiver: oneshot::Receiver<PickerReply>) -> PickerReply {
-    match tokio::time::timeout(Duration::from_secs(3600), receiver).await {
+async fn await_result(receiver: oneshot::Receiver<PickerReply>, timeout: Duration) -> PickerReply {
+    match tokio::time::timeout(timeout, receiver).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("the file picker was closed".to_owned()),
         Err(_) => Err("the file picker timed out".to_owned()),

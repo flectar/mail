@@ -1,22 +1,17 @@
 import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
-import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
-// Keep picker imports bounded: a mail attachment is copied into the app
-// cache, so a mis-picked multi-GB file must not fill the sandbox.
-// Per-file cache guard for the picker; the shared compose/draft limit is
-// 25 MiB total across attachments on every platform.
-const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
-// Mail import (mbox and similar archives) is deliberately separate from the
-// compose attachment picker: the shared import limit is 1000 files, so a
-// 50 MiB per-file cap would reject most exported mailboxes.
-const MAX_MAIL_IMPORT_BYTES = 512 * 1024 * 1024;
-const MAIL_IMPORT_FILES = 1000;
+// One document is copied for the Files pane, whose transfers stop here.
+// Several are bounded by the free space alone, which a copy never takes
+// below the reserve. The same limits apply on Android and iOS.
+const SINGLE_DOCUMENT_LIMIT = 512 * 1024 * 1024;
+const FREE_SPACE_RESERVE = 64 * 1024 * 1024;
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
 // request/response: the page reports the outcome through `submitBridgeResult`.
@@ -47,6 +42,7 @@ interface StagedFile {
 interface FlectarNativeModule {
   setBridge?: (bridge: FlectarBridge) => void;
   submitBridgeResult?: (requestId: number, path: string, name: string, error: string) => boolean;
+  pickerClosed?: (requestId: number) => void;
   imeCommit?: (text: string) => void;
   imeDelete?: (count: number) => void;
   imeFunction?: (key: number) => void;
@@ -293,10 +289,12 @@ struct Index {
       const options = new picker.DocumentSelectOptions();
       options.maxSelectNumber = 1;
       const uris = await viewPicker.select(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
         this.reportBridgeResult(requestId, '', '', '');
         return;
       }
+      await this.checkSpace(context, uris, SINGLE_DOCUMENT_LIMIT);
       const staged = await this.stageCopy(context, uris[0]);
       hilog.info(0x0000, LOG_TAG, 'picker imported a document (%{public}d picked)', uris.length);
       if (!this.reportBridgeResult(requestId, staged.path, staged.name, '')) {
@@ -323,15 +321,16 @@ struct Index {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const viewPicker = new picker.DocumentViewPicker(context);
       const options = new picker.DocumentSelectOptions();
-      options.maxSelectNumber = Math.max(1, Math.min(limit, MAIL_IMPORT_FILES));
-      const maxBytes = limit >= MAIL_IMPORT_FILES ? MAX_MAIL_IMPORT_BYTES : MAX_IMPORT_BYTES;
+      options.maxSelectNumber = Math.max(1, limit);
       const uris = await viewPicker.select(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
         this.reportBridgeResult(requestId, '', '', '');
         return;
       }
+      await this.checkSpace(context, uris, Number.MAX_SAFE_INTEGER);
       for (const uri of uris) {
-        staged.push(await this.stageCopy(context, uri, maxBytes));
+        staged.push(await this.stageCopy(context, uri));
       }
       const result = this.reportBridgeResult(requestId, JSON.stringify(staged), '', '');
       if (!result) {
@@ -363,6 +362,7 @@ struct Index {
       const options = new picker.DocumentSaveOptions();
       options.newFileNames = [suggestedName];
       const uris = await viewPicker.save(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
         this.reportBridgeResult(requestId, '', '', '');
         return;
@@ -692,8 +692,29 @@ struct Index {
     return raw;
   }
 
-  private async stageCopy(
-    context: common.UIAbilityContext, uri: string, maxBytes: number = MAX_IMPORT_BYTES): Promise<StagedFile> {
+  // Check the picked documents' sizes before anything is copied: their total
+  // against `maxBytes`, and against the free space, which a copy never takes
+  // below the reserve.
+  private async checkSpace(
+    context: common.UIAbilityContext, uris: string[], maxBytes: number): Promise<void> {
+    let total = 0;
+    for (const uri of uris) {
+      const file = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        total += (await fileIo.stat(file.fd)).size;
+      } finally {
+        await fileIo.close(file);
+      }
+    }
+    if (total > maxBytes) {
+      throw new Error('File exceeds the transfer limit.');
+    }
+    if (total + FREE_SPACE_RESERVE > await statfs.getFreeSize(context.cacheDir)) {
+      throw new Error('There is not enough free space on this device.');
+    }
+  }
+
+  private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<StagedFile> {
     const directory = `${context.cacheDir}/imports`;
     try {
       await fileIo.mkdir(directory, true);
@@ -706,10 +727,6 @@ struct Index {
     }
     const source = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
     try {
-      const size = (await fileIo.stat(source.fd)).size;
-      if (size > maxBytes) {
-        throw new Error(`the selected file is too large (${size} bytes; limit ${maxBytes})`);
-      }
       // Never reuse the picked file name (or a predictable timestamp) in the
       // cache: it can leak the user's document name and collide with another
       // staged import. Keep only a short extension for content detection.
