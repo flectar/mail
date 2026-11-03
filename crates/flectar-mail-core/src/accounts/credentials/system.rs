@@ -5,6 +5,9 @@
 use super::{CredentialStore, Slot};
 use crate::error::{CoreError, Result};
 
+#[cfg(secret_service)]
+mod secret_service;
+
 const SERVICE: &str = "flectar-mail";
 #[cfg(any(test, debug_assertions))]
 const MAX_INSECURE_CREDENTIAL_FILE_BYTES: u64 = 1024 * 1024;
@@ -28,9 +31,59 @@ impl DevelopmentFileCredentialStore {
     }
 }
 
+impl From<keyring::Error> for CoreError {
+    fn from(error: keyring::Error) -> Self {
+        let (cause, fallback) = match &error {
+            keyring::Error::PlatformFailure(cause) => (
+                cause,
+                "the system keyring could not be reached; start or unlock it and try again",
+            ),
+            keyring::Error::NoStorageAccess(cause) => (
+                cause,
+                "the system keyring is locked or denied access; unlock it and try again",
+            ),
+            _ => return CoreError::Keyring(error.to_string()),
+        };
+        tracing::warn!(%error, "platform credential service is unavailable");
+        #[cfg(secret_service)]
+        if let Some(reason) = secret_service::unavailable_reason(cause.as_ref()) {
+            return CoreError::CredentialStoreUnavailable(reason);
+        }
+        CoreError::CredentialStoreUnavailable(format!("{fallback} ({cause})"))
+    }
+}
+
 fn entry(account_id: i64, slot: &Slot) -> Result<keyring::Entry> {
     let user = format!("{account_id}:{}", slot.key());
     keyring::Entry::new(SERVICE, &user).map_err(Into::into)
+}
+
+/// Store `secret` in `entry`. A Secret Service session without a default
+/// collection gets one first, as libsecret does.
+fn set_password(entry: &keyring::Entry, secret: &str) -> Result<()> {
+    let result = entry.set_password(secret);
+    #[cfg(secret_service)]
+    if result
+        .as_ref()
+        .is_err_and(secret_service::missing_default_collection)
+    {
+        secret_service::create_default_collection()?;
+        return entry.set_password(secret).map_err(Into::into);
+    }
+    result.map_err(Into::into)
+}
+
+/// Whether `error` means nothing is stored. When no item matches, keyring also
+/// searches the default collection for entries an older keyring wrote, and that
+/// fails in a session without one; libsecret reports a missing item there. Like
+/// libsecret, this trusts the provider's search, so a provider that hides its
+/// items while it has no default collection reads as empty.
+fn is_absent(error: &keyring::Error) -> bool {
+    #[cfg(secret_service)]
+    if secret_service::missing_default_collection(error) {
+        return true;
+    }
+    matches!(error, keyring::Error::NoEntry)
 }
 
 // Windows Credential Manager caps a credential blob at 2560 bytes
@@ -112,7 +165,7 @@ fn delete_chunks_from(account_id: i64, slot: &Slot, start: usize) -> Result<()> 
     for index in start..start + MAX_CHUNKS {
         match chunk_entry(account_id, slot, index)?.delete_credential() {
             Ok(()) => {}
-            Err(keyring::Error::NoEntry) => break,
+            Err(error) if is_absent(&error) => break,
             Err(error) => return Err(error.into()),
         }
     }
@@ -269,9 +322,7 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
     if chunks.len() <= 1 {
         // Replacing the primary entry commits the new value before stale
         // Windows chunks are cleaned up.
-        let result = entry(account_id, &slot)?
-            .set_password(secret)
-            .map_err(Into::into);
+        let result = set_password(&entry(account_id, &slot)?, secret);
         #[cfg(target_os = "windows")]
         if result.is_ok() {
             for cleanup in [
@@ -332,14 +383,13 @@ fn system_store(account_id: i64, slot: Slot, secret: &str) -> Result<()> {
         // MAX_SECRET_UTF16 is unlimited on this platform, so this is only
         // a defensive fallback for an impossible oversized branch.
         for (index, part) in chunks.iter().enumerate() {
-            chunk_entry(account_id, &slot, index)?
-                .set_password(part)
-                .map_err(CoreError::from)?;
+            set_password(&chunk_entry(account_id, &slot, index)?, part)?;
         }
         delete_chunks_from(account_id, &slot, chunks.len())?;
-        entry(account_id, &slot)?
-            .set_password(&format!("{CHUNK_MARKER}{}", chunks.len()))
-            .map_err(Into::into)
+        set_password(
+            &entry(account_id, &slot)?,
+            &format!("{CHUNK_MARKER}{}", chunks.len()),
+        )
     }
 }
 
@@ -360,7 +410,7 @@ fn system_load(account_id: i64, slot: Slot) -> Result<String> {
 fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
     let head = match entry(account_id, slot)?.get_password() {
         Ok(secret) => secret,
-        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(error) if is_absent(&error) => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     if let Some((generation, count)) = parse_generation_chunk_header(&head)? {
@@ -401,7 +451,7 @@ fn load_current_secret(account_id: i64, slot: &Slot) -> Result<Option<String>> {
         let chunk = chunk_entry(account_id, slot, index)?;
         match chunk.get_password() {
             Ok(s) => out.push_str(&s),
-            Err(keyring::Error::NoEntry) => {
+            Err(e) if is_absent(&e) => {
                 return Err(CoreError::Auth("no stored credential".into()));
             }
             Err(e) => return Err(e.into()),
@@ -449,7 +499,8 @@ fn system_delete(account_id: i64, slot: Slot) -> Result<()> {
         return file_save(&path, &map);
     }
     match entry(account_id, &slot)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => {}
+        Ok(()) => {}
+        Err(error) if is_absent(&error) => {}
         Err(error) => return Err(error.into()),
     }
     #[cfg(target_os = "windows")]
@@ -482,6 +533,115 @@ impl CredentialStore for SystemCredentialStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unusable_platform_storage_keeps_the_platform_error() {
+        let failure = keyring::Error::PlatformFailure(Box::new(std::io::Error::other("offline")));
+        assert_eq!(
+            CoreError::from(failure).to_string(),
+            "secure credential storage is unavailable: the system keyring could not be reached; \
+             start or unlock it and try again (offline)"
+        );
+        let denied = keyring::Error::NoStorageAccess(Box::new(std::io::Error::other("denied")));
+        assert_eq!(
+            CoreError::from(denied).to_string(),
+            "secure credential storage is unavailable: the system keyring is locked or denied \
+             access; unlock it and try again (denied)"
+        );
+        assert!(matches!(
+            CoreError::from(keyring::Error::NoEntry),
+            CoreError::Keyring(_)
+        ));
+    }
+
+    #[cfg(secret_service)]
+    #[test]
+    fn secret_service_failures_say_what_to_fix() {
+        use dbus_secret_service::Error;
+        let reason = |error: keyring::Error| match CoreError::from(error) {
+            CoreError::CredentialStoreUnavailable(reason) => reason,
+            other => panic!("unexpected error: {other:?}"),
+        };
+        let bus = |name: &str, message: &str| {
+            keyring::Error::PlatformFailure(Box::new(Error::Dbus(dbus::Error::new_custom(
+                name, message,
+            ))))
+        };
+        let access = |error: Error| keyring::Error::NoStorageAccess(Box::new(error));
+
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.ServiceUnknown",
+                "The name org.freedesktop.secrets was not provided by any .service files"
+            )),
+            "no keyring service is running; install or start one that provides the Secret \
+             Service, such as GNOME Keyring, KWallet or KeePassXC, and try again \
+             (org.freedesktop.DBus.Error.ServiceUnknown: The name org.freedesktop.secrets was \
+             not provided by any .service files)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.Spawn.ChildExited",
+                "Process org.freedesktop.secrets exited with status 1"
+            )),
+            "the keyring service failed to start (org.freedesktop.DBus.Error.Spawn.ChildExited: \
+             Process org.freedesktop.secrets exited with status 1)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.NameHasNoOwner",
+                "Could not activate remote peer 'org.freedesktop.secrets': unit failed"
+            )),
+            "the keyring service failed to start (org.freedesktop.DBus.Error.NameHasNoOwner: \
+             Could not activate remote peer 'org.freedesktop.secrets': unit failed)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.Secret.Error.IsLocked",
+                "Cannot create an item in a locked collection"
+            )),
+            "the keyring is locked; unlock it and try again \
+             (org.freedesktop.Secret.Error.IsLocked: Cannot create an item in a locked collection)"
+        );
+        assert_eq!(
+            reason(bus(
+                "org.freedesktop.DBus.Error.NoReply",
+                "Did not receive a reply"
+            )),
+            "the keyring service failed (org.freedesktop.DBus.Error.NoReply: Did not receive a \
+             reply)"
+        );
+        assert_eq!(
+            reason(access(Error::Prompt)),
+            "the keyring prompt was dismissed or could not be shown; try again and unlock or \
+             create the keyring when asked"
+        );
+        assert_eq!(
+            reason(access(Error::NoResult)),
+            "the keyring service has no default keyring; choose one as the default in your \
+             keyring manager and try again"
+        );
+        assert_eq!(
+            reason(access(Error::Locked)),
+            "the keyring is locked; unlock it and try again"
+        );
+    }
+
+    #[cfg(secret_service)]
+    #[test]
+    fn a_session_without_a_default_collection_stores_nothing() {
+        use dbus_secret_service::Error;
+        assert!(is_absent(&keyring::Error::NoEntry));
+        assert!(is_absent(&keyring::Error::NoStorageAccess(Box::new(
+            Error::NoResult
+        ))));
+        assert!(!is_absent(&keyring::Error::NoStorageAccess(Box::new(
+            Error::Prompt
+        ))));
+        assert!(!is_absent(&keyring::Error::PlatformFailure(Box::new(
+            Error::NoResult
+        ))));
+    }
 
     #[test]
     fn short_secret_is_one_chunk() {

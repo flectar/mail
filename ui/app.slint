@@ -29,6 +29,7 @@ import { FunctionalCalendarView } from "components/calendar.slint";
 import { CompactProductNav, ProductRail, WindowTopBar } from "components/workspace-navigation.slint";
 export { TabsUi, TabRow } from "components/workspace-navigation.slint";
 import { TabsUi } from "components/workspace-navigation.slint";
+import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
@@ -244,6 +245,10 @@ export global I18n {
         if (key == "Could not save theme palette: {}") { return @tr("Could not save theme palette: {}", argument); }
         if (key == "Custom theme updated for this session.") { return @tr("Custom theme updated for this session."); }
         if (key == "Custom theme saved.") { return @tr("Custom theme saved."); }
+        if (key == "Download location saved.") { return @tr("Download location saved."); }
+        if (key == "Download location is saved once an account is set up.") { return @tr("Download location is saved once an account is set up."); }
+        if (key == "Could not save the download location: {}") { return @tr("Could not save the download location: {}", argument); }
+        if (key == "Choose download location") { return @tr("Choose download location"); }
         if (key == "Could not save custom theme: {}") { return @tr("Could not save custom theme: {}", argument); }
         if (key == "Language updated for this session.") { return @tr("Language updated for this session."); }
         if (key == "Language preference saved.") { return @tr("Language preference saved."); }
@@ -263,10 +268,16 @@ export global I18n {
         if (key == "Window frame updated for this session.") { return @tr("Window frame updated for this session."); }
         if (key == "Window frame preference saved.") { return @tr("Window frame preference saved."); }
         if (key == "Could not save window frame preference: {}") { return @tr("Could not save window frame preference: {}", argument); }
+        if (key == "Tabs preference updated for this session.") { return @tr("Tabs preference updated for this session."); }
+        if (key == "Tabs preference saved.") { return @tr("Tabs preference saved."); }
+        if (key == "Could not save tabs preference: {}") { return @tr("Could not save tabs preference: {}", argument); }
         if (key == "At most {} tabs can be open. Close a tab to open another.") { return @tr("At most {} tabs can be open. Close a tab to open another.", argument); }
         if (key == "Mail grouping is active for this session.") { return @tr("Mail grouping is active for this session."); }
         if (key == "Mail grouping preference saved.") { return @tr("Mail grouping preference saved."); }
         if (key == "Could not save mail grouping preference: {}") { return @tr("Could not save mail grouping preference: {}", argument); }
+        if (key == "Conversation view updated for this session.") { return @tr("Conversation view updated for this session."); }
+        if (key == "Conversation view preference saved.") { return @tr("Conversation view preference saved."); }
+        if (key == "Could not save conversation view preference: {}") { return @tr("Could not save conversation view preference: {}", argument); }
         if (key == "Profile changes require local mail data.") { return @tr("Profile changes require local mail data."); }
         if (key == "Profile saved.") { return @tr("Profile saved."); }
         if (key == "Could not save profile: {}") { return @tr("Could not save profile: {}", argument); }
@@ -629,7 +640,11 @@ export component AppWindow inherits Window {
     callback save_theme_preset(string);
     callback save_custom_theme(color, color, color, color, color, color, color, color, color, color) -> bool;
     callback save_avatar_visibility(bool);
+    callback save_show_tabs(bool);
+    callback save_conversation_view(bool);
     callback save_group_mail_by_date(bool);
+    callback choose_download_directory();
+    callback clear_download_directory();
     // Save a profile's name and color, with the checked `profile_members`
     // as its accounts.
     callback save_mail_profile(string, string, color) -> string;
@@ -939,6 +954,13 @@ export component AppWindow inherits Window {
     private property <string> mail-compact-page: "list";
     private property <bool> mail-folders-open: false;
     private property <bool> contacts-detail-visible: false;
+    // A tab shown in a single-pane layout opens on its list or its reader.
+    private property <int> tab-shown: TabsUi.shown;
+    changed tab-shown => {
+        root.mail-compact-page = TabsUi.shown-conversation ? "message" : "list";
+        root.mail-folders-open = false;
+        root.contacts-detail-visible = false;
+    }
     changed active_view => {
         if root.active_view != "mail" { MailAttachments.command("close", ""); }
         root.product-changed(root.active_view);
@@ -968,7 +990,11 @@ export component AppWindow inherits Window {
     in property <[StorageUsageRow]> storage_usage: [];
     in-out property <string> theme_mode: "system";
     in-out property <bool> show_avatars: true;
+    // Show tabs: the desktop tab strip, or the compact tab switcher.
+    in-out property <bool> show_tabs: true;
     in-out property <bool> group_mail_by_date: true;
+    // Group replies into conversations; off lists each message on its own.
+    in-out property <bool> conversation_view: true;
     in-out property <bool> show_account_markers: false;
     in-out property <string> workspace_layout: "default";
     in-out property <length> workspace_list_pane_width: LayoutMetrics.list-pane-width;
@@ -1079,6 +1105,11 @@ export component AppWindow inherits Window {
     in-out property <string> google_client_id: "";
     in-out property <string> google_client_secret: "";
     in-out property <string> ms_client_id: "";
+    // The download folder as shown: its host path inside Flatpak. Empty is the default.
+    in-out property <string> download_directory: "";
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting.
+    in-out property <bool> download_directory_available: false;
     in-out property <bool> custom_oauth_open: false;
     in property <bool> custom_oauth_configured: false;
     in property <bool> google_oauth_available: false;
@@ -1126,10 +1157,16 @@ export component AppWindow inherits Window {
     private property <bool> compact-layout: root.width - root.safe-area-insets.left - root.safe-area-insets.right < 980px;
     // In the integrated frame the window controls sit over the top corners
     // and toolbars reserve room for them, so content keeps the full window.
-    // Desktop windows with accounts show the tabs in a top bar above the
-    // product rail; in the integrated frame it also holds the window
-    // controls. Compact layouts navigate from the bottom bar.
-    private property <bool> top-bar: !root.compact-layout && root.has-mail;
+    // Desktop windows with accounts show a top bar above the product rail,
+    // holding the profile pill and the tabs; in the integrated frame it also
+    // holds the window controls. Compact layouts navigate from the bottom bar.
+    // With tabs turned off, only the integrated frame keeps the bar, for its
+    // window controls; the system frame drops it and the mail sidebar takes
+    // the profile switcher.
+    private property <bool> tabs-on: root.show_tabs && root.has-mail;
+    private property <bool> top-bar: !root.compact-layout && root.has-mail
+        && (root.tabs-on || WindowChrome.controls-visible);
+    changed tabs-on => { root.sync-window-chrome(); }
     // A tone apart from the workspace, so the active tab can open into it.
     private property <color> tab-strip-bg: AppTheme.sidebar-tint.mix(AppTheme.title, 0.94);
     changed top-bar => { root.sync-window-chrome(); }
@@ -1272,6 +1309,10 @@ export component AppWindow inherits Window {
         if (!root.compact-layout) {
             return false;
         }
+        if TabsUi.overview-open {
+            TabsUi.overview-open = false;
+            return true;
+        }
         if (root.compose_open) {
             root.compose-back-request += 1;
             return true;
@@ -1328,7 +1369,11 @@ export component AppWindow inherits Window {
         WindowChrome.compact = root.compact-layout;
         WindowChrome.top-bar = root.top-bar;
         AppTheme.top-bar = root.top-bar;
-        TabsUi.enabled = root.top-bar;
+        TabsUi.enabled = root.tabs-on;
+        TabsUi.compact = root.compact-layout;
+        if !root.compact-layout || !root.tabs-on {
+            TabsUi.overview-open = false;
+        }
     }
 
     // Seeds WindowChrome once; the handlers above keep it current. A child
@@ -1449,6 +1494,7 @@ export component AppWindow inherits Window {
             selected_thread_index: root.selected_thread_index;
             sidebar_rows: root.sidebar_rows;
             mail_profiles: root.mail_profiles;
+            profiles-in-sidebar: !root.top-bar && !root.compact-layout;
             active_mail_profile: root.active_mail_profile;
             account_count: root.connected_accounts.length;
             select_mail_profile(id) => { root.select_mail_profile(id); }
@@ -1798,6 +1844,18 @@ export component AppWindow inherits Window {
             }
         }
 
+        // Over the compact layout and its navigation, below the dialogs.
+        if TabsUi.enabled && TabsUi.compact && TabsUi.overview-open : TabOverview {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            live-workspace: root.settings_open ? "settings" : root.active_view;
+            live-title: root.settings_open || root.active_view != "mail" ? ""
+                : root.has_selected && root.selected_subject != "" ? root.selected_subject
+                : root.selected_scope_title;
+        }
+
         if root.calendar_editor_open : CalendarEventDialog {
             compact: root.compact-layout;
             x: 0px;
@@ -1882,7 +1940,9 @@ export component AppWindow inherits Window {
             settings_tab <=> root.settings_tab;
             theme_mode <=> root.theme_mode;
             show_avatars <=> root.show_avatars;
+            show_tabs <=> root.show_tabs;
             group_mail_by_date <=> root.group_mail_by_date;
+            conversation_view <=> root.conversation_view;
             show_account_markers <=> root.show_account_markers;
             workspace_layout <=> root.workspace_layout;
             language_mode <=> root.language_mode;
@@ -1938,6 +1998,10 @@ export component AppWindow inherits Window {
             custom_oauth_open <=> root.custom_oauth_open;
             save_theme(mode) => { root.save_theme(mode); }
             save_theme_preset(preset) => { root.save_theme_preset(preset); }
+            download_directory <=> root.download_directory;
+            download_directory_available <=> root.download_directory_available;
+            choose_download_directory => { root.choose_download_directory(); }
+            clear_download_directory => { root.clear_download_directory(); }
             save_custom_theme(
                 light-primary,
                 light-page,
@@ -1964,6 +2028,7 @@ export component AppWindow inherits Window {
                 );
             }
             save_avatar_visibility(enabled) => { root.save_avatar_visibility(enabled); }
+            save_show_tabs(enabled) => { root.save_show_tabs(enabled); }
             prepare_profile_members(profile-id, account-id) => {
                 root.prepare_profile_members(profile-id, account-id);
             }
@@ -1990,6 +2055,7 @@ export component AppWindow inherits Window {
             save_sync_interval(minutes) => { root.save_sync_interval(minutes); }
             save_mark_read_on_open(enabled) => { root.save_mark_read_on_open(enabled); }
             save_group_mail_by_date(enabled) => { root.save_group_mail_by_date(enabled); }
+            save_conversation_view(enabled) => { root.save_conversation_view(enabled); }
             save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest) => {
                 root.save_contact_discovery_settings(outgoing, incoming, all-accounts, suggest);
             }

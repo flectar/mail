@@ -32,6 +32,8 @@ export component MailView inherits FocusScope {
     in property <[SidebarRow]> sidebar_rows: [];
     // Compact layouts choose the profile from the sidebar.
     in property <[MailProfileRow]> mail_profiles: [];
+    // The desktop sidebar shows the profile switcher when no top bar does.
+    in property <bool> profiles-in-sidebar: false;
     in property <MailProfileRow> active_mail_profile;
     in property <int> account_count;
     callback select_mail_profile(string);
@@ -294,6 +296,16 @@ export component MailView inherits FocusScope {
             spacing: 0px;
 
             if root.active_view == "mail" && !root.single-pane : MailSidebar {
+                show-profiles: root.profiles-in-sidebar;
+                profiles: root.mail_profiles;
+                active-profile: root.active_mail_profile;
+                account-count: root.account_count;
+                choose-profile(id) => { root.select_mail_profile(id); }
+                create-profile => { root.create_mail_profile(); }
+                manage-profiles => {
+                    root.settings_tab = "Accounts";
+                    root.settings_open = true;
+                }
                 height: parent.height;
                 touch-mode: false;
                 rows: root.sidebar_rows;
@@ -499,6 +511,16 @@ export component MailView inherits FocusScope {
             // navigation. The Default collapsible sidebar remains, with the
             // list/reader stack consuming its animated remainder.
             if root.active_view == "mail" && root.single-pane && !root.compact : MailSidebar {
+                show-profiles: root.profiles-in-sidebar;
+                profiles: root.mail_profiles;
+                active-profile: root.active_mail_profile;
+                account-count: root.account_count;
+                choose-profile(id) => { root.select_mail_profile(id); }
+                create-profile => { root.create_mail_profile(); }
+                manage-profiles => {
+                    root.settings_tab = "Accounts";
+                    root.settings_open = true;
+                }
                 x: 0px;
                 y: 0px;
                 height: parent.height;

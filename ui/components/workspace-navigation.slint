@@ -5,6 +5,9 @@ import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 import { MailProfileRow } from "../models.slint";
 import { ProfileSwitcher } from "profile-switcher.slint";
 import { PaneDivider } from "workspace-layout.slint";
+import { TabRow, TabsUi, WorkspaceIcon } from "tabs-ui.slint";
+
+export { TabRow, TabsUi }
 
 
 component ProductRailItem inherits Rectangle {
@@ -331,76 +334,6 @@ export component CompactProductNav inherits Rectangle {
             clicked => { root.open-settings(); }
         }
     }
-}
-
-export struct TabRow {
-    id: int,
-    // "mail" | "calendar" | "contacts" | "files" | "settings"
-    workspace: string,
-    // Saved title for inactive tabs; empty uses the workspace name.
-    title: string,
-    active: bool,
-}
-
-// Browser-style tabs. Rust owns the tab list; each tab is a saved location
-// that is restored through the app's normal navigation when activated.
-export global TabsUi {
-    in property <[TabRow]> rows;
-    // True while the desktop top bar shows the tabs.
-    in property <bool> enabled;
-    // A closed tab can be reopened.
-    in property <bool> can-reopen;
-    callback select(int);
-    callback close(int);
-    // Close every tab except this one, or the tabs to its right.
-    callback close-others(int);
-    callback close-to-right(int);
-    callback create();
-    // Reopen the most recently closed tab.
-    callback reopen();
-    // Move the tab with this id to a new index.
-    callback move(int, int);
-    // Open a conversation from the current list in a new tab; the flag
-    // activates the tab, otherwise it opens in the background.
-    callback open-conversation(int, bool);
-    // Keyboard commands: "new", "close", "reopen", "next", "previous",
-    // "last", or a zero-based index.
-    callback command(string);
-    // The active tab's place changed through ordinary navigation.
-    callback navigated();
-    // The mail list's scroll offset from the top, kept current by the mail
-    // view, and the offset a shown tab scrolls back to. Each request makes
-    // the list scroll to `list-restore` once its rows are laid out; a
-    // negative value means nothing is pending. `list-restore-view` names the
-    // mailbox, search and filter it belongs to, one per line.
-    in-out property <length> list-offset;
-    in-out property <length> list-restore: -1px;
-    in-out property <string> list-restore-view;
-    in-out property <int> list-restore-request;
-    // Re-apply the active tab once local mail storage is ready.
-    callback restore-active();
-    // Forget every tab and its saved state, leaving one Inbox tab.
-    callback reset();
-    // An account was removed: tabs forget its mailboxes and conversations.
-    callback account-removed(string);
-    // Save every tab now, before the application exits.
-    callback flush();
-}
-
-component WorkspaceIcon inherits Image {
-    in property <string> workspace;
-    in property <bool> filled;
-    source: root.workspace == "calendar"
-            ? (root.filled ? @image-url("../icons/lucide/filled/calendar.svg") : @image-url("../icons/lucide/outline/calendar.svg"))
-        : root.workspace == "files"
-            ? (root.filled ? @image-url("../icons/lucide/filled/files.svg") : @image-url("../icons/lucide/outline/files.svg"))
-        : root.workspace == "contacts"
-            ? (root.filled ? @image-url("../icons/lucide/filled/contacts.svg") : @image-url("../icons/lucide/outline/contacts.svg"))
-        : root.workspace == "settings"
-            ? (root.filled ? @image-url("../icons/lucide/filled/gear.svg") : @image-url("../icons/lucide/outline/gear.svg"))
-        : (root.filled ? @image-url("../icons/lucide/filled/mail.svg") : @image-url("../icons/lucide/outline/mail.svg"));
-    image-fit: contain;
-    accessible-role: none;
 }
 
 // Tabs share the strip's height below a small top margin.
@@ -918,7 +851,10 @@ export component WindowTopBar inherits Rectangle {
         manage-profiles => { root.manage-profiles(); }
     }
 
+    // With tabs turned off the bar keeps the profile pill and, in the
+    // integrated frame, the window controls.
     strip := TouchArea {
+        visible: TabsUi.enabled;
         x: root.tabs-x;
         width: max(root.count * root.slot-width, min(root.held-strip-width, root.tabs-room));
         height: parent.height;
@@ -979,6 +915,7 @@ export component WindowTopBar inherits Rectangle {
     }
 
     new-tab := NewTabButton {
+        visible: TabsUi.enabled;
         x: root.tabs-x + strip.width + TabMetrics.foot;
         y: TabMetrics.middle(parent.height) - self.height / 2;
         hover-background: root.hover-background;

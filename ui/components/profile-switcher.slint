@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { TypeScale } from "../typography.slint";
-import { AppTheme, MotionSettings, ThemeUtilities } from "../design-system.slint";
+import { AppTheme, LayoutMetrics, MotionSettings, ThemeUtilities } from "../design-system.slint";
 import { MailProfileRow } from "../models.slint";
 import { ProfilePalette } from "profile-controls.slint";
 
@@ -108,6 +108,8 @@ export component ProfileSwitcher inherits Rectangle {
     in property <MailProfileRow> active;
     in property <int> account-count;
     in property <length> widest: 168px;
+    // Span `widest`, as a sidebar control does, instead of fitting the label.
+    in property <bool> fill-width: false;
     callback choose(string);
     callback create-profile();
     callback manage-profiles();
@@ -149,9 +151,11 @@ export component ProfileSwitcher inherits Rectangle {
     // A profile's name follows its color dot.
     private property <length> label-x: root.all ? 11px : 28px;
 
-    width: min(root.widest, root.label-x + label-text.preferred-width + 23px);
+    width: root.fill-width ? root.widest
+        : min(root.widest, root.label-x + label-text.preferred-width + 23px);
     height: 28px;
-    border-radius: 7px;
+    // Beside the sidebar's buttons it takes their corners.
+    border-radius: root.fill-width ? LayoutMetrics.corner-radius - 2px : 7px;
     background: root.menu-open || hit.pressed ? root.fill.mix(root.foreground, 0.86)
         : hit.has-hover ? root.fill.mix(root.foreground, 0.92) : root.fill;
     animate background { duration: MotionSettings.enabled ? 120ms : 0ms; easing: ease-out; }

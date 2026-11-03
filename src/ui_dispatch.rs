@@ -83,10 +83,10 @@ impl<T> UiSender<T> {
 
 /// Enqueue UI-triggered work without blocking, deduplicating outstanding IDs.
 /// The caller removes IDs when completions arrive; rejection releases them here.
-pub(crate) fn enqueue_once<T>(
+pub(crate) fn enqueue_once<T, K: std::hash::Hash + Eq + Copy>(
     sender: &mpsc::Sender<T>,
-    pending: &std::cell::RefCell<std::collections::HashSet<i64>>,
-    id: i64,
+    pending: &std::cell::RefCell<std::collections::HashSet<K>>,
+    id: K,
     request: T,
 ) -> Result<(), ()> {
     if !pending.borrow_mut().insert(id) {
