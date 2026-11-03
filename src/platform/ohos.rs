@@ -61,9 +61,15 @@ pub(crate) const SWITCHES_APP_ICON: bool = false;
 /// Only the default icon reaches here; see [`SWITCHES_APP_ICON`].
 pub(crate) fn show_app_icon(_icon: AppIcon) {}
 
-/// Directory the email (Blitz/Parley) renderer loads fonts from. OpenHarmony
-/// ships no Fontconfig, so the fontique system backend is disabled and the
-/// platform fonts must be scanned explicitly.
-pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
-    Some(std::path::Path::new("/system/fonts"))
+static EMAIL_FONTS: OnceLock<super::EmailFonts> = OnceLock::new();
+
+/// Supply the platform fonts and the fallback policy the backend applies to
+/// the Slint UI, before the application starts. OpenHarmony ships no
+/// Fontconfig, so the email renderer and the composer load them explicitly.
+pub fn configure_email_fonts(fonts: super::EmailFonts) {
+    let _ = EMAIL_FONTS.set(fonts);
+}
+
+pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
+    EMAIL_FONTS.get()
 }

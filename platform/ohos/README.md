@@ -223,5 +223,5 @@ HarmonyOS 7.0.0.111 (API 26), 2-in-1 (HUAWEI MateBook Pro):
 The backend has no automated device-side harness: `cargo test` covers the
 shared crates at the repository root, and `APP=demo` (installed with
 `scripts/run-device.sh`) is the manual smoke target for backend changes.
-The duplicated non-Latin fallback lists in the Slint UI and the mail renderer
-are checked by `platform/ohos/scripts/check-font-fallbacks.py`.
+The non-Latin font fallback policy lives in `backend/src/fonts.rs`; the host
+hands it to the mail renderer and the composer with `configure_email_fonts`.

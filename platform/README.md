@@ -89,7 +89,7 @@ provides these crate-internal items, which shared code calls without a `cfg`:
 | `NAME` | The platform's name, which Settings uses to describe where the app icon appears. |
 | `SWITCHES_APP_ICON` | Whether apps may switch their home screen icon. Settings offers the choice only where they may. |
 | `show_app_icon(icon)` | Show the app icon chosen in Settings on the home screen. Android forwards it to the bridge its host registers with `configure_launcher_icon`; iOS switches to the alternate icon sets declared in `platform/ios/project.yml`. |
-| `email_font_dir()` | Platform font directory for the email (Blitz/Parley) renderer on hosts without Fontconfig; `None` when the fontique system backend provides the fonts. |
+| `email_fonts()` | Platform font directory and fallback policy for the email (Blitz/Parley) renderer and the composer on hosts without Fontconfig; `None` when the fontique system backend provides the fonts. The OpenHarmony host supplies its backend's policy with `configure_email_fonts`. |
 
 Hosts that launch through `src/desktop.rs` (desktop and iOS) also provide
 `platform::launch_context()`.

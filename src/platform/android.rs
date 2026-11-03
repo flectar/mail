@@ -71,6 +71,6 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
 }
 
 /// Android and iOS reach system fonts through the fontique system backend.
-pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }

@@ -83,8 +83,6 @@ jobs:
           python3 resources/app-icon/generate.py --check
       - name: Keep operating-system names in the platform layer
         run: python3 scripts/check-platform-gates.py
-      - name: Verify the OHOS font fallback lists
-        run: python3 platform/ohos/scripts/check-font-fallbacks.py
       - name: Verify the Blitz patch queue
         run: bash scripts/blitz-patches.sh verify
       - name: Verify and test the Parley backport
