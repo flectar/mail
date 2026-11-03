@@ -10,7 +10,7 @@ import { AccountRow } from "../models.slint";
 import { SidebarItem, SidebarSectionHeader } from "../components/sidebar-controls.slint";
 import { CollapsibleWorkspaceSidebar, WorkspaceMiniHeading, WorkspacePaneResizeHandle, WorkspaceTitleRow, WorkspaceSearchToolbar, WorkspaceSearchFilter } from "../components/workspace-layout.slint";
 import { WorkspaceListLoadingRow, WorkspaceListTransition } from "../components/workspace-list.slint";
-import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
+import { FloatingActionButton, LineEdit, ToolbarIconButton } from "../components/controls.slint";
 import { WindowChrome, WindowDragArea } from "../window-chrome.slint";
 
 export struct FileRow {
@@ -190,6 +190,13 @@ export component FilesView inherits Rectangle {
         if root.navigation-open { root.navigation-open = false; return true; }
         return false;
     }
+    function new-folder() {
+        root.value = "";
+        FilesUi.collision = 0;
+        FilesUi.case-insensitive = false;
+        FilesUi.dialog = "folder";
+    }
+
     function navigate(action: string, value: string, scope: string) {
         if !FilesUi.busy {
             root.navigation-open = false;
@@ -332,19 +339,21 @@ export component FilesView inherits Rectangle {
                             interactive: !FilesUi.busy;
                             clicked => { root.navigate("up", "", ""); }
                         }
-                        if !FilesUi.attachments : ToolbarIconButton {
+                        // Phones keep both actions behind the floating "+" below,
+                        // which leaves the search field room.
+                        if !FilesUi.attachments && !root.compact : ToolbarIconButton {
                             icon-color: AppTheme.secondary;
                             icon: @image-url("../icons/lucide/outline/upload.svg");
                             tooltip-text: @tr("Upload");
                             interactive: FilesUi.can-create && !FilesUi.busy;
                             clicked => { root.navigate("upload", "", ""); }
                         }
-                        if !FilesUi.attachments : ToolbarIconButton {
+                        if !FilesUi.attachments && !root.compact : ToolbarIconButton {
                             icon-color: AppTheme.secondary;
                             icon: @image-url("../icons/lucide/outline/folder-add.svg");
                             tooltip-text: @tr("New folder");
                             interactive: FilesUi.can-create && !FilesUi.busy;
-                            clicked => { root.value = ""; FilesUi.collision = 0; FilesUi.case-insensitive = false; FilesUi.dialog = "folder"; }
+                            clicked => { root.new-folder(); }
                         }
                     }
                 }
@@ -427,6 +436,34 @@ export component FilesView inherits Rectangle {
                     x: file-list.x; y: file-list.y; width: file-list.visible-width; height: file-list.visible-height;
                     surface-color: AppTheme.surface; content-y: file-list.content-y;
                     content-height: file-list.content-height; visible-height: file-list.visible-height;
+                }
+                // On phones, Upload and New folder leave the toolbar for one
+                // floating "+", like the mail and contacts create actions.
+                if root.compact && !FilesUi.attachments : new-menu := ContextMenuArea {
+                    x: parent.width - self.width - 16px;
+                    y: parent.height - self.height - 16px;
+                    width: new-button.width;
+                    height: new-button.height;
+                    z: 100;
+
+                    new-button := FloatingActionButton {
+                        icon: @image-url("../icons/lucide/outline/plus.svg");
+                        tooltip-text: @tr("Upload or create a folder");
+                        accessible-id: "files-new-button";
+                        interactive: FilesUi.can-create && !FilesUi.busy;
+                        clicked => { new-menu.show({ x: 0px, y: 0px }); }
+                    }
+
+                    Menu {
+                        MenuItem {
+                            title: @tr("Upload");
+                            activated => { root.navigate("upload", "", ""); }
+                        }
+                        MenuItem {
+                            title: @tr("New folder");
+                            activated => { root.new-folder(); }
+                        }
+                    }
                 }
             }
             HorizontalBox {

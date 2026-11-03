@@ -12,7 +12,8 @@ pub mod snapshot;
 use crate::{
     error::{CoreError, Result},
     models::{
-        AppIcon, StartupPresentation, normalized_window_frame, normalized_workspace_list_pane_width,
+        AppIcon, MailGrouping, StartupPresentation, normalized_window_frame,
+        normalized_workspace_list_pane_width,
     },
 };
 use rusqlite::config::DbConfig;
@@ -224,6 +225,13 @@ pub(crate) fn startup_presentation(path: &Path) -> StartupPresentation {
             .and_then(serde_json::Value::as_str)
             .and_then(AppIcon::parse)
             .unwrap_or_default(),
+        grouping: match value
+            .get("conversationView")
+            .and_then(serde_json::Value::as_bool)
+        {
+            Some(false) => MailGrouping::Messages,
+            _ => MailGrouping::Conversations,
+        },
     }
 }
 
@@ -801,6 +809,26 @@ mod startup_preference_tests {
         assert_eq!(
             startup_presentation(&path).workspace_list_pane_width,
             Some(672)
+        );
+    }
+
+    #[test]
+    fn startup_grouping_follows_the_conversation_view_setting() {
+        use crate::models::MailGrouping;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("mail.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value)
+             VALUES ('settings', '{\"conversationView\": false}');",
+        )
+        .unwrap();
+        drop(conn);
+        assert_eq!(startup_presentation(&path).grouping, MailGrouping::Messages);
+        assert_eq!(
+            startup_presentation(&temp.path().join("missing.db")).grouping,
+            MailGrouping::Conversations
         );
     }
 

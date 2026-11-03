@@ -660,6 +660,12 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
         }
     });
     let owner = Rc::clone(&tabs);
+    global.on_open_checked(move || {
+        if owner.restored.get() {
+            owner.open_checked();
+        }
+    });
+    let owner = Rc::clone(&tabs);
     global.on_command(move |command| {
         if let Some(command) = Command::parse(&command)
             && owner.restored.get()
@@ -673,6 +679,8 @@ pub(crate) fn register(app: &AppWindow, context: TabContext) {
             owner.account_removed(account);
         }
     });
+    let owner = Rc::clone(&tabs);
+    global.on_regroup(move || owner.regroup());
     let owner = Rc::clone(&tabs);
     global.on_navigated(move || {
         if owner.restored.get() {
@@ -725,8 +733,8 @@ impl Tabs {
         let Some(app) = self.app() else {
             return;
         };
-        // Tabs live in the desktop top bar; the composer and the calendar
-        // editor keep their keys.
+        // Tabs can be turned off; the composer and the calendar editor keep
+        // their keys.
         if !app.global::<TabsUi>().get_enabled()
             || app.get_compose_open()
             || app.get_calendar_editor_open()
@@ -792,33 +800,8 @@ impl Tabs {
         let Some(app) = self.app() else {
             return;
         };
-        let (place, title, rows) = {
-            let state = self.context.state.borrow();
-            let Some(row) = state.messages.iter().find(|row| row.id == id) else {
-                return;
-            };
-            let place = Place {
-                location: Location::Mail {
-                    scope: state.scope,
-                    query: state.query.clone(),
-                    filter: state.search_filter.clone(),
-                    conversation: Some(id),
-                },
-                account: Some(row.account_id),
-                // The new tab's list starts where this one is.
-                scroll: Scroll {
-                    list: app.global::<TabsUi>().get_list_offset().max(0.0),
-                    reader: 0.0,
-                },
-                unseen: true,
-                ..Place::default()
-            };
-            let title = if row.subject.is_empty() {
-                app.get_selected_scope_title().to_string()
-            } else {
-                row.subject.clone()
-            };
-            (place, title, cached_rows(&state))
+        let Some((place, title, rows)) = self.conversation_place(&app, id) else {
+            return;
         };
         let opened = self.strip.borrow_mut().open(place, title, Some(rows));
         match opened {
@@ -826,6 +809,68 @@ impl Tabs {
             Some(_) => self.changed(),
             None => self.refuse(),
         }
+    }
+
+    /// Open the checked conversations of the mail list in background tabs,
+    /// in list order, and clear the selection.
+    fn open_checked(&self) {
+        let Some(app) = self.app() else {
+            return;
+        };
+        let ids = {
+            let state = self.context.state.borrow();
+            state
+                .messages
+                .iter()
+                .filter(|row| state.checked_ids.contains(&row.id))
+                .map(|row| row.id)
+                .collect::<Vec<_>>()
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let room = MAX_TABS.saturating_sub(self.strip.borrow().tabs.len());
+        // Each tab opens beside the active one, so the last opens first.
+        for &id in ids[..ids.len().min(room)].iter().rev() {
+            if let Some((place, title, rows)) = self.conversation_place(&app, id) {
+                self.strip.borrow_mut().open(place, title, Some(rows));
+            }
+        }
+        self.context.state.borrow_mut().checked_ids.clear();
+        refresh_rows_only(&app, &self.context.state, &self.context.runtime);
+        self.changed();
+        if ids.len() > room {
+            self.refuse();
+        }
+    }
+
+    /// A conversation of the current mail list as a new tab opens it: its
+    /// place, its title, and a copy of the list rows.
+    fn conversation_place(&self, app: &AppWindow, id: i32) -> Option<(Place, String, CachedRows)> {
+        let state = self.context.state.borrow();
+        let row = state.messages.iter().find(|row| row.id == id)?;
+        let place = Place {
+            location: Location::Mail {
+                scope: state.scope,
+                query: state.query.clone(),
+                filter: state.search_filter.clone(),
+                conversation: Some(id),
+            },
+            account: Some(row.account_id),
+            // The new tab's list starts where this one is.
+            scroll: Scroll {
+                list: app.global::<TabsUi>().get_list_offset().max(0.0),
+                reader: 0.0,
+            },
+            unseen: true,
+            ..Place::default()
+        };
+        let title = if row.subject.is_empty() {
+            app.get_selected_scope_title().to_string()
+        } else {
+            row.subject.clone()
+        };
+        Some((place, title, cached_rows(&state)))
     }
 
     fn close(&self, id: i32) {
@@ -1019,6 +1064,8 @@ impl Tabs {
         self.reader_timer.stop();
         self.reader_restore.set(None);
         let ui = app.global::<TabsUi>();
+        // Single-pane layouts show the reader page for a conversation.
+        let shows_conversation = place.conversation().is_some();
         let Place {
             location,
             settings,
@@ -1065,6 +1112,8 @@ impl Tabs {
             app.set_settings_tab(page.as_str().into());
         }
         app.set_settings_open(settings.is_some());
+        ui.set_shown_conversation(shows_conversation);
+        ui.set_shown(ui.get_shown().wrapping_add(1));
     }
 
     fn restore_calendar(&self, app: &AppWindow, date: NaiveDate, mode: String) {
@@ -1394,6 +1443,39 @@ impl Tabs {
             }
         }
         self.changed();
+    }
+
+    /// Mail is grouped differently: an open conversation's id, a message's
+    /// in lists without conversations, and the rows and positions tabs kept
+    /// all belong to the old grouping. Tabs keep their mailboxes and searches,
+    /// and are written at once, so no old id is ever read in the new grouping.
+    fn regroup(&self) {
+        fn forget_open(place: &mut Place, title: &mut String) {
+            if let Location::Mail { conversation, .. } = &mut place.location
+                && conversation.take().is_some()
+            {
+                title.clear();
+            }
+            place.thread_message = None;
+            place.account = None;
+            place.scroll = Scroll::default();
+            place.unseen = false;
+        }
+        self.reader_timer.stop();
+        self.reader_restore.set(None);
+        {
+            let mut strip = self.strip.borrow_mut();
+            for tab in &mut strip.tabs {
+                forget_open(&mut tab.place, &mut tab.title);
+                tab.rows = None;
+            }
+            for closed in &mut strip.closed {
+                forget_open(&mut closed.place, &mut closed.title);
+            }
+        }
+        self.publish();
+        self.save_timer.stop();
+        self.save(true);
     }
 
     /// Publish rows, then save once the tab strip has been quiet briefly.
@@ -1999,7 +2081,7 @@ mod tests {
         ui.invoke_create();
         ui.invoke_create();
         draw();
-        assert!(ui.get_enabled(), "the desktop top bar shows the tabs");
+        assert!(ui.get_enabled(), "tabs are on once there is mail");
         let ids = || ui.get_rows().iter().map(|row| row.id).collect::<Vec<_>>();
         let active = || ui.get_rows().iter().position(|row| row.active).unwrap();
         let [a, b, c] = ids()[..] else {
@@ -2273,6 +2355,179 @@ mod tests {
         tabs.activate(1);
         assert_eq!(tabs.context.state.borrow().scope, Scope::UNIFIED_INBOX);
         assert_eq!(app.global::<TabsUi>().get_list_restore(), 0.0);
+    }
+
+    /// A window with one account, its tabs registered and shown, and a way
+    /// to draw it, which also runs the window's change handlers.
+    fn shown_window(width: u32, height: u32) -> (AppWindow, Rc<RefCell<InboxState>>, impl Fn()) {
+        let (app, context, dir, window) = headless();
+        window.set_size(slint::PhysicalSize::new(width, height));
+        app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
+            id: 1,
+            ..Default::default()
+        }])));
+        let state = Rc::clone(&context.state);
+        register(&app, context);
+        app.global::<TabsUi>().invoke_restore_active();
+        let draw = move || {
+            let _dir = &dir;
+            slint::platform::update_timers_and_animations();
+            window.draw_if_needed(|renderer| {
+                let mut buffer = vec![slint::Rgb8Pixel::default(); (width * height) as usize];
+                renderer.render(&mut buffer, width as usize);
+            });
+        };
+        draw();
+        (app, state, draw)
+    }
+
+    fn click(app: &AppWindow, x: f32, y: f32) {
+        use slint::platform::{PointerEventButton, WindowEvent};
+        let position = slint::LogicalPosition::new(x, y);
+        let button = PointerEventButton::Left;
+        app.window()
+            .dispatch_event(WindowEvent::PointerMoved { position });
+        app.window()
+            .dispatch_event(WindowEvent::PointerPressed { position, button });
+        app.window()
+            .dispatch_event(WindowEvent::PointerReleased { position, button });
+    }
+
+    #[test]
+    fn tabs_turned_off_are_hidden_and_kept() {
+        let (app, _state, draw) = shown_window(1320, 800);
+        let ui = app.global::<TabsUi>();
+        ui.invoke_create();
+        draw();
+        assert!(ui.get_enabled());
+
+        app.set_show_tabs(false);
+        draw();
+        assert!(!ui.get_enabled());
+        ui.invoke_command("new".into());
+        assert_eq!(ui.get_rows().row_count(), 2, "tab shortcuts do nothing");
+
+        app.set_show_tabs(true);
+        draw();
+        assert!(ui.get_enabled());
+        assert_eq!(ui.get_rows().row_count(), 2, "the tabs come back");
+    }
+
+    /// Compact layouts have a tab switcher in the toolbar; its overview shows
+    /// a card per tab, and a tab with a conversation opens on the reader.
+    #[test]
+    fn compact_layouts_switch_tabs_from_the_overview() {
+        let (app, state, draw) = shown_window(390, 844);
+        let ui = app.global::<TabsUi>();
+        assert!(ui.get_enabled() && ui.get_compact());
+        state.borrow_mut().messages = mail::fixture_messages();
+        let first = state.borrow().messages[0].id;
+        ui.invoke_open_conversation(first, false);
+        assert_eq!(ui.get_rows().row_count(), 2);
+        draw();
+
+        // The switcher ends the mail toolbar, inside its 10px inset.
+        click(&app, 390.0 - 10.0 - 20.0, 30.0);
+        draw();
+        assert!(ui.get_overview_open());
+
+        // Two cards a row below the overview's toolbar; the second is the
+        // conversation opened in the background.
+        let shown = ui.get_shown();
+        click(&app, 290.0, 160.0);
+        draw();
+        assert!(
+            !ui.get_overview_open(),
+            "choosing a card closes the overview"
+        );
+        assert!(ui.get_rows().row_data(1).unwrap().active);
+        assert_eq!(ui.get_shown(), shown + 1);
+        assert!(ui.get_shown_conversation());
+
+        app.set_show_tabs(false);
+        ui.set_overview_open(true);
+        draw();
+        assert!(!ui.get_overview_open(), "the overview closes with the tabs");
+    }
+
+    #[test]
+    fn checked_conversations_open_in_background_tabs_in_list_order() {
+        let (app, state, _draw) = shown_window(390, 844);
+        let ui = app.global::<TabsUi>();
+        {
+            let mut state = state.borrow_mut();
+            state.messages = mail::fixture_messages().into_iter().take(3).collect();
+            let ids = state.messages.iter().map(|row| row.id).collect::<Vec<_>>();
+            state.checked_ids.extend([ids[2], ids[0]]);
+        }
+        ui.invoke_open_checked();
+        let rows = ui.get_rows();
+        let titles = rows
+            .iter()
+            .map(|row| row.title.to_string())
+            .collect::<Vec<_>>();
+        let subject = |index: usize| state.borrow().messages[index].subject.clone();
+        assert_eq!(titles, ["".to_owned(), subject(0), subject(2)]);
+        assert!(
+            rows.row_data(0).unwrap().active,
+            "the tabs open in the background"
+        );
+        assert!(
+            state.borrow().checked_ids.is_empty(),
+            "the selection is cleared"
+        );
+    }
+
+    /// Ids of open conversations and of single messages are different ids:
+    /// after mail is grouped differently, no tab may reopen one by the other.
+    #[test]
+    fn regrouping_mail_forgets_what_tabs_had_open_and_saves_at_once() {
+        let (app, context, _dir, _) = headless();
+        let path = context.path.clone();
+        let tabs = Tabs::new(&app, context);
+        tabs.strip.borrow_mut().open(
+            Place {
+                location: Location::Mail {
+                    scope: Scope::UNIFIED_INBOX,
+                    query: "plans".into(),
+                    filter: default_filter(),
+                    conversation: Some(42),
+                },
+                thread_message: Some(420),
+                account: Some(1),
+                scroll: Scroll {
+                    list: 300.0,
+                    reader: 80.0,
+                },
+                unseen: true,
+                ..Place::default()
+            },
+            "Plans".into(),
+            None,
+        );
+
+        tabs.regroup();
+
+        let strip = tabs.strip.borrow();
+        let place = &strip.tabs[1].place;
+        assert_eq!(place.conversation(), None);
+        assert_eq!(place.thread_message, None);
+        assert_eq!(place.account, None);
+        assert_eq!(place.scroll, Scroll::default());
+        assert!(!place.unseen);
+        assert!(strip.tabs[1].title.is_empty());
+        assert!(
+            matches!(&place.location, Location::Mail { query, .. } if query == "plans"),
+            "the tab keeps its search"
+        );
+        let saved = read_file(&path).expect("written at once");
+        assert!(saved.tabs.iter().all(|tab| !matches!(
+            tab.location,
+            Location::Mail {
+                conversation: Some(_),
+                ..
+            }
+        )));
     }
 
     #[test]

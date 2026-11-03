@@ -1,6 +1,10 @@
 //! Native document access boundary. Providers import into private staging and
 //! export completed files; content-provider URIs never reach filesystem APIs.
-use std::{future::Future, path::PathBuf, pin::Pin};
+use std::{
+    future::Future,
+    path::{Path, PathBuf},
+    pin::Pin,
+};
 pub type DocumentFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send>>;
 /// Owns a native import copy until Core has staged it. Dropping a cancelled
 /// request or an unread channel result must release the copy as well.
@@ -74,12 +78,15 @@ pub struct DocumentDialog {
     pub title: String,
     /// Filter name and the extensions it offers.
     pub filter: Option<(String, &'static [&'static str])>,
+    /// Directory the picker opens in. `None` follows the platform default.
+    pub directory: Option<PathBuf>,
 }
 impl DocumentDialog {
     pub fn titled(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             filter: None,
+            directory: None,
         }
     }
 }
@@ -152,12 +159,112 @@ pub(crate) fn safe_name(name: &str) -> String {
     }
 }
 
+/// Builds the dialog for a download, starting in the directory the user
+/// configured in Settings.
+pub(crate) fn download_dialog(title: impl Into<String>, setting: &str) -> DocumentDialog {
+    DocumentDialog {
+        title: title.into(),
+        filter: None,
+        directory: resolve_download_directory(setting),
+    }
+}
+
+/// Builds the download dialog from the stored settings. Every download goes
+/// through here, so a new download site picks up the configured location
+/// without repeating the lookup. An unreadable settings row falls back to the
+/// platform default rather than blocking the download.
+pub(crate) async fn download_dialog_for(core: &flectar_mail_core::Core) -> DocumentDialog {
+    let setting = core
+        .get_settings()
+        .await
+        .map(|settings| settings.download_directory)
+        .unwrap_or_default();
+    download_dialog("Download file", &setting)
+}
+
+/// Resolves the configured download directory for desktop save dialogs. An
+/// empty setting, a path that no longer exists, or a path that is not a
+/// directory all fall back to the platform default, so a download never fails
+/// because a saved location went away, such as an unmounted network share.
+pub(crate) fn resolve_download_directory(setting: &str) -> Option<PathBuf> {
+    let trimmed = setting.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(trimmed);
+    path.is_dir().then_some(path)
+}
+
+/// How Settings shows the download folder. Inside Flatpak the picker returns a
+/// document portal path such as `/run/user/1000/doc/1a2b3c/Downloads`, which
+/// keeps working for downloads but means nothing to the user, so the folder's
+/// host path is shown when the portal records it.
+pub(crate) fn download_directory_label(setting: &str) -> String {
+    let trimmed = setting.trim();
+    document_portal_host_path(Path::new(trimmed))
+        .map(|host| host.to_string_lossy().into_owned())
+        .unwrap_or_else(|| trimmed.to_owned())
+}
+
+/// The host path the document portal records on a file or folder it exported
+/// into the sandbox. `None` for ordinary paths and on portals that predate the
+/// attribute.
+#[cfg(linux_desktop)]
+fn document_portal_host_path(path: &Path) -> Option<PathBuf> {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut value = vec![0_u8; libc::PATH_MAX as usize];
+    // SAFETY: both names are NUL-terminated, and `value` is writable for the
+    // length passed.
+    let length = unsafe {
+        libc::getxattr(
+            path.as_ptr(),
+            c"user.document-portal.host-path".as_ptr(),
+            value.as_mut_ptr().cast(),
+            value.len(),
+        )
+    };
+    value.truncate(usize::try_from(length).ok()?);
+    if value.last() == Some(&0) {
+        value.pop();
+    }
+    (!value.is_empty()).then(|| PathBuf::from(std::ffi::OsString::from_vec(value)))
+}
+
+#[cfg(not(linux_desktop))]
+fn document_portal_host_path(_path: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// The starting folder handed to a picker. xdg-desktop-portal resolves a
+/// document portal path to its host path and then drops the last component,
+/// which suits a file but opens a folder's parent; a trailing separator leaves
+/// it nothing to drop. Host paths mean the same folder either way.
+#[cfg(linux_desktop)]
+pub(crate) fn picker_directory(directory: &Path) -> PathBuf {
+    let mut path = directory.as_os_str().to_owned();
+    if !path.as_encoded_bytes().ends_with(b"/") {
+        path.push("/");
+    }
+    PathBuf::from(path)
+}
+
+#[cfg(all(desktop, not(linux_desktop)))]
+pub(crate) fn picker_directory(directory: &Path) -> PathBuf {
+    directory.to_owned()
+}
+
 #[cfg(desktop)]
 struct DesktopDocuments;
 #[cfg(desktop)]
 impl DocumentDialog {
     fn file_dialog(&self) -> rfd::AsyncFileDialog {
         let dialog = rfd::AsyncFileDialog::new().set_title(&self.title);
+        let dialog = match &self.directory {
+            Some(directory) => dialog.set_directory(picker_directory(directory)),
+            None => dialog,
+        };
         match &self.filter {
             Some((name, extensions)) => dialog.add_filter(name, extensions),
             None => dialog,
@@ -222,6 +329,103 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+
+    #[test]
+    fn download_dialog_starts_in_the_configured_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let dialog = download_dialog("Download file", &dir.path().to_string_lossy());
+        assert_eq!(dialog.title, "Download file");
+        assert_eq!(dialog.directory, Some(dir.path().to_owned()));
+    }
+
+    #[test]
+    fn download_dialog_without_a_configured_directory_uses_the_platform_default() {
+        assert_eq!(download_dialog("Download file", "").directory, None);
+    }
+
+    #[test]
+    fn configured_directory_is_used_when_it_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(
+            resolve_download_directory(&dir.path().to_string_lossy()),
+            Some(dir.path().to_owned())
+        );
+    }
+
+    #[test]
+    fn empty_setting_uses_the_platform_default() {
+        assert_eq!(resolve_download_directory(""), None);
+        assert_eq!(resolve_download_directory("   "), None);
+    }
+
+    #[test]
+    fn missing_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone");
+        assert_eq!(resolve_download_directory(&missing.to_string_lossy()), None);
+    }
+
+    #[test]
+    fn file_path_instead_of_a_directory_uses_the_platform_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lieferschein.pdf");
+        std::fs::write(&file, b"%PDF-1.7").unwrap();
+        assert_eq!(resolve_download_directory(&file.to_string_lossy()), None);
+    }
+
+    #[cfg(linux_desktop)]
+    #[test]
+    fn picker_directory_ends_in_one_separator() {
+        assert_eq!(
+            picker_directory(Path::new("/run/user/1000/doc/1a2b3c/Downloads")).as_os_str(),
+            "/run/user/1000/doc/1a2b3c/Downloads/"
+        );
+        assert_eq!(
+            picker_directory(Path::new("/home/ana/Downloads/")).as_os_str(),
+            "/home/ana/Downloads/"
+        );
+    }
+
+    #[test]
+    fn ordinary_download_directory_is_shown_as_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_string_lossy().into_owned();
+        assert_eq!(download_directory_label(&path), path);
+        assert_eq!(download_directory_label(""), "");
+    }
+
+    /// Stands in for a folder the document portal exported into the sandbox.
+    #[cfg(linux_desktop)]
+    fn exported_folder(host_path: &[u8]) -> tempfile::TempDir {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::ffi::CString::new(dir.path().as_os_str().as_bytes()).unwrap();
+        // SAFETY: both names are NUL-terminated, and `host_path` is readable
+        // for the length passed.
+        let set = unsafe {
+            libc::setxattr(
+                path.as_ptr(),
+                c"user.document-portal.host-path".as_ptr(),
+                host_path.as_ptr().cast(),
+                host_path.len(),
+                0,
+            )
+        };
+        assert_eq!(set, 0, "{}", std::io::Error::last_os_error());
+        dir
+    }
+
+    #[cfg(linux_desktop)]
+    #[test]
+    fn exported_download_directory_is_shown_by_its_host_path() {
+        for host_path in [&b"/home/ana/Downloads"[..], b"/home/ana/Downloads\0"] {
+            let dir = exported_folder(host_path);
+            assert_eq!(
+                download_directory_label(&dir.path().to_string_lossy()),
+                "/home/ana/Downloads"
+            );
+        }
+    }
 
     fn imported(path: PathBuf, drops: Arc<AtomicUsize>) -> ImportedDocument {
         ImportedDocument::temporary(path, move |path| {

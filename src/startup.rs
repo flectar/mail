@@ -20,8 +20,8 @@ use flectar_mail_core::{
     config::Paths,
     events::CoreEvent,
     models::{
-        Account, AccountConfig, CalendarConnection, CardDavConnection, Settings, ThreadCursor,
-        normalized_workspace_list_pane_width,
+        Account, AccountConfig, CalendarConnection, CardDavConnection, MailGrouping, MessageCursor,
+        Settings, ThreadCursor, normalized_workspace_list_pane_width,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,8 @@ use tokio::io::AsyncReadExt;
 // Version 4 keys account mailboxes by id instead of display name. Version 5
 // stores the provider and mail protocol names of the current account model.
 // Version 6 keeps message dates as timestamps instead of English text.
-const WARM_START_FORMAT_VERSION: u32 = 6;
+// Version 7 records whether the rows are conversations or single messages.
+const WARM_START_FORMAT_VERSION: u32 = 7;
 const MAX_WARM_START_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WARM_START_ACCOUNTS: usize = 64;
 const MAX_WARM_START_MESSAGES: usize = 25;
@@ -48,6 +49,8 @@ const MAX_WARM_START_MAILBOXES: usize = 512;
 pub(crate) struct WarmStartMessage {
     pub(crate) id: i32,
     pub(crate) thread_id: Option<i64>,
+    #[serde(default)]
+    pub(crate) message_id: Option<i64>,
     #[serde(default = "missing_folder_id")]
     pub(crate) account_id: i64,
     pub(crate) account: String,
@@ -82,6 +85,7 @@ impl From<&mail::MailMessage> for WarmStartMessage {
         Self {
             id: message.id,
             thread_id: message.thread_id,
+            message_id: message.message_id,
             account_id: message.account_id,
             account: message.account.clone(),
             folder: message.folder.clone(),
@@ -110,6 +114,7 @@ impl From<WarmStartMessage> for mail::MailMessage {
         Self {
             id: message.id,
             thread_id: message.thread_id,
+            message_id: message.message_id,
             account_id: message.account_id,
             account: message.account,
             folder: message.folder,
@@ -234,13 +239,42 @@ impl From<WarmStartMailbox> for mail::MailboxEntry {
     }
 }
 
+/// Where the saved rows' mailbox continues: after a conversation, or after a
+/// message in lists without conversations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum WarmStartCursor {
+    Thread(ThreadCursor),
+    Message(MessageCursor),
+}
+
+impl WarmStartCursor {
+    /// Search results are not saved, so neither is a search cursor.
+    pub(crate) fn of(cursor: MailCursor) -> Option<Self> {
+        match cursor {
+            MailCursor::Thread(cursor) => Some(Self::Thread(cursor)),
+            MailCursor::Message(cursor) => Some(Self::Message(cursor)),
+            MailCursor::Search(_) | MailCursor::MessageSearch(_) => None,
+        }
+    }
+
+    fn mail_cursor(self) -> MailCursor {
+        match self {
+            Self::Thread(cursor) => MailCursor::Thread(cursor),
+            Self::Message(cursor) => MailCursor::Message(cursor),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WarmStartSnapshot {
     format_version: u32,
     pub(crate) saved_at_ms: i64,
     pub(crate) scope: Scope,
     pub(crate) inbox_count: usize,
-    pub(crate) next_cursor: Option<ThreadCursor>,
+    /// Whether the saved rows are conversations or single messages.
+    pub(crate) grouping: MailGrouping,
+    pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: Vec<Account>,
     /// The active profile's accounts, which the saved rows show.
     #[serde(default)]
@@ -253,7 +287,8 @@ pub(crate) struct WarmStartSnapshot {
 pub(crate) struct WarmStartProjection<'a> {
     pub(crate) scope: Scope,
     pub(crate) inbox_count: usize,
-    pub(crate) next_cursor: Option<ThreadCursor>,
+    pub(crate) grouping: MailGrouping,
+    pub(crate) next_cursor: Option<WarmStartCursor>,
     pub(crate) accounts: &'a [Account],
     pub(crate) profile_accounts: Option<&'a [i64]>,
     pub(crate) messages: &'a [mail::MailMessage],
@@ -275,6 +310,7 @@ impl WarmStartSnapshot {
             saved_at_ms: chrono::Utc::now().timestamp_millis(),
             scope: projection.scope,
             inbox_count: projection.inbox_count,
+            grouping: projection.grouping,
             next_cursor: projection.next_cursor,
             accounts: projection
                 .accounts
@@ -359,7 +395,8 @@ pub(crate) fn apply_warm_start_snapshot(
         let _ = state.set_connected_accounts(snapshot.accounts);
         state.set_scope(snapshot.scope);
         state.inbox_count = snapshot.inbox_count;
-        state.next_cursor = snapshot.next_cursor.map(MailCursor::Thread);
+        state.grouping = snapshot.grouping;
+        state.next_cursor = snapshot.next_cursor.map(WarmStartCursor::mail_cursor);
         state.messages = snapshot
             .messages
             .into_iter()
@@ -578,6 +615,12 @@ pub(crate) async fn load_startup_snapshot(
     metrics.emit("core_opened", serde_json::Value::Null);
     // The first page shows only the active profile's accounts.
     let settings = core.load_settings().await.ok();
+    // The first page is listed the way the saved preference groups mail.
+    let _ = core.set_grouping(
+        settings
+            .as_ref()
+            .map_or(MailGrouping::Conversations, Settings::mail_grouping),
+    );
     let _ = core.set_profile_accounts(settings.as_ref().and_then(|settings| {
         AccountPresentationSettings::from_settings(settings).active_profile_accounts()
     }));
@@ -747,6 +790,10 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_google_client_id(settings.google_client_id.clone().into());
     app.set_google_client_secret(settings.google_client_secret.clone().into());
     app.set_ms_client_id(settings.ms_client_id.clone().into());
+    app.set_download_directory(
+        crate::documents::download_directory_label(&settings.download_directory).into(),
+    );
+    app.set_download_directory_available(cfg!(desktop));
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
     app.set_notification_scope(settings.notification_scope.clone().into());
@@ -768,6 +815,8 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     crate::app_icon::apply(app, settings.app_icon);
     app.set_show_avatars(settings.show_avatars);
     app.set_group_mail_by_date(settings.group_mail_by_date);
+    app.set_show_tabs(settings.show_tabs);
+    app.set_conversation_view(settings.conversation_view);
     app.set_show_account_markers(settings.show_account_badges);
     app.set_workspace_layout(
         match settings.workspace_layout.as_str() {
@@ -976,6 +1025,7 @@ mod warm_start_tests {
         WarmStartSnapshot::capture(WarmStartProjection {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: 3,
+            grouping: MailGrouping::Conversations,
             next_cursor: None,
             accounts: &[account()],
             profile_accounts: None,
@@ -1131,6 +1181,7 @@ mod warm_start_tests {
         mail::MailMessage {
             id: 9,
             thread_id: Some(19),
+            message_id: None,
             account_id: 7,
             account: "Person".into(),
             folder: "Inbox".into(),
@@ -1200,10 +1251,11 @@ mod warm_start_tests {
         let snapshot = WarmStartSnapshot::capture(WarmStartProjection {
             scope: PERSON_INBOX,
             inbox_count: 3,
-            next_cursor: Some(ThreadCursor {
-                last_message_at: 123,
-                thread_id: 7,
-            }),
+            grouping: MailGrouping::Messages,
+            next_cursor: Some(WarmStartCursor::Message(MessageCursor {
+                date: 123,
+                message_id: 9,
+            })),
             accounts: &accounts,
             profile_accounts: Some(&[7]),
             messages: &messages,
@@ -1221,6 +1273,14 @@ mod warm_start_tests {
 
         let restored = load_warm_start_snapshot(&path).await.unwrap();
         assert_eq!(restored.scope, PERSON_INBOX);
+        assert_eq!(restored.grouping, MailGrouping::Messages);
+        assert_eq!(
+            restored.next_cursor,
+            Some(WarmStartCursor::Message(MessageCursor {
+                date: 123,
+                message_id: 9,
+            }))
+        );
         assert_eq!(restored.profile_accounts, Some(vec![7]));
         assert_eq!(restored.messages.len(), 1);
         let restored_message = mail::MailMessage::from(restored.messages[0].clone());
@@ -1273,6 +1333,7 @@ mod warm_start_tests {
         let snapshot = WarmStartSnapshot::capture(WarmStartProjection {
             scope: Scope::UNIFIED_INBOX,
             inbox_count: messages.len(),
+            grouping: MailGrouping::Conversations,
             next_cursor: None,
             accounts: &accounts,
             profile_accounts: None,
@@ -1287,7 +1348,7 @@ mod warm_start_tests {
     #[test]
     fn benchmark_warm_cache_fixture_matches_the_current_format() {
         let snapshot: WarmStartSnapshot = serde_json::from_str(include_str!(
-            "../resources/benchmarks/warm-cache/warm-start-mailbox-v6.json"
+            "../resources/benchmarks/warm-cache/warm-start-mailbox-v7.json"
         ))
         .unwrap();
 
@@ -1295,5 +1356,6 @@ mod warm_start_tests {
         assert_eq!(snapshot.messages.len(), 3);
         // Caches written before profiles filtered mail show every account.
         assert_eq!(snapshot.profile_accounts, None);
+        assert_eq!(snapshot.grouping, MailGrouping::Conversations);
     }
 }

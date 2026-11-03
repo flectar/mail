@@ -14,6 +14,32 @@ import { LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system
 import { LocalMailUi } from "../local-mail.slint";
 import { TypeScale } from "../typography.slint";
 
+// The profile switcher across a sidebar, as tall as its buttons.
+component SidebarProfileSwitcher inherits Rectangle {
+    in property <[MailProfileRow]> profiles;
+    in property <MailProfileRow> active;
+    in property <int> account-count;
+    callback choose(string);
+    callback create-profile();
+    callback manage-profiles();
+
+    height: LayoutMetrics.sidebar-action-height;
+
+    ProfileSwitcher {
+        x: 0px;
+        y: 0px;
+        height: parent.height;
+        fill-width: true;
+        widest: parent.width;
+        profiles: root.profiles;
+        active: root.active;
+        account-count: root.account-count;
+        choose(id) => { root.choose(id); }
+        create-profile => { root.create-profile(); }
+        manage-profiles => { root.manage-profiles(); }
+    }
+}
+
 export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     in property <bool> touch-mode: false;
     in property <[SidebarRow]> rows: [];
@@ -72,18 +98,15 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
         padding: 0px;
         spacing: 8px;
 
-        if root.show-profiles && root.profiles.length > 0 : HorizontalLayout {
-            alignment: start;
-            ProfileSwitcher {
-                height: 36px;
-                widest: root.width - 2 * LayoutMetrics.sidebar-inset;
-                profiles: root.profiles;
-                active: root.active-profile;
-                account-count: root.account-count;
-                choose(id) => { root.choose-profile(id); }
-                create-profile => { root.create-profile(); }
-                manage-profiles => { root.manage-profiles(); }
-            }
+        // The phone drawer opens on the profile, once there are profiles.
+        if root.show-profiles && root.touch-mode && root.profiles.length > 0 : SidebarProfileSwitcher {
+            width: parent.width;
+            profiles: root.profiles;
+            active: root.active-profile;
+            account-count: root.account-count;
+            choose(id) => { root.choose-profile(id); }
+            create-profile => { root.create-profile(); }
+            manage-profiles => { root.manage-profiles(); }
         }
 
         // With only local mail, nothing could send; adding an account comes
@@ -102,6 +125,18 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                     root.manage-accounts();
                 }
             }
+        }
+
+        // A desktop sidebar stands in for the top bar's pill, which is always
+        // there, below the sidebar's main action.
+        if root.show-profiles && !root.touch-mode : SidebarProfileSwitcher {
+            width: parent.width;
+            profiles: root.profiles;
+            active: root.active-profile;
+            account-count: root.account-count;
+            choose(id) => { root.choose-profile(id); }
+            create-profile => { root.create-profile(); }
+            manage-profiles => { root.manage-profiles(); }
         }
 
 

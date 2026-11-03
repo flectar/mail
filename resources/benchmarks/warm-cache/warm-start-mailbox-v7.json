@@ -1,0 +1,136 @@
+{
+  "format_version": 7,
+  "saved_at_ms": 1787961600000,
+  "scope": "Unified Inbox",
+  "inbox_count": 2,
+  "grouping": "conversations",
+  "next_cursor": null,
+  "accounts": [
+    {
+      "id": 1,
+      "email": "alex@example.com",
+      "displayName": "Example account",
+      "avatarUrl": null,
+      "provider": "generic",
+      "authKind": "password",
+      "mailProtocol": "imap",
+      "syncState": "idle",
+      "syncError": null,
+      "canCreateTopLevelMailbox": true
+    }
+  ],
+  "messages": [
+    {
+      "id": 101,
+      "thread_id": 101,
+      "account": "Example account",
+      "folder": "Inbox",
+      "sender": "Design team",
+      "address": "design@example.net",
+      "domain": "example.net",
+      "initials": "DT",
+      "subject": "Updated launch review",
+      "preview": "The latest native UI build is ready to review.",
+      "date_ms": 1787954400000,
+      "label": "UNREAD",
+      "unread": true,
+      "starred": true,
+      "has_attachments": false,
+      "has_replied": true,
+      "sender_verification": ""
+    },
+    {
+      "id": 102,
+      "thread_id": 102,
+      "account": "Example account",
+      "folder": "Inbox",
+      "sender": "Build service",
+      "address": "builds@example.org",
+      "domain": "example.org",
+      "initials": "BS",
+      "subject": "Native checks completed",
+      "preview": "All desktop platform checks passed.",
+      "date_ms": 1787868000000,
+      "label": "UNREAD",
+      "unread": true,
+      "starred": false,
+      "has_attachments": true,
+      "has_replied": false,
+      "sender_verification": "domain"
+    },
+    {
+      "id": 103,
+      "thread_id": 103,
+      "account": "Example account",
+      "folder": "Inbox",
+      "sender": "Product team",
+      "address": "product@example.com",
+      "domain": "example.com",
+      "initials": "PT",
+      "subject": "Mailbox startup notes",
+      "preview": "Here are the measurements from the latest run.",
+      "date_ms": 1787824800000,
+      "label": "MAIL",
+      "unread": false,
+      "starred": false,
+      "has_attachments": false,
+      "has_replied": false,
+      "sender_verification": ""
+    }
+  ],
+  "mailboxes": [
+    {
+      "account_id": 1,
+      "label": "Example account",
+      "scope": null,
+      "context": "Example account",
+      "detail": "alex@example.com",
+      "avatar": "EA",
+      "is_account": true,
+      "can_create_children": true,
+      "count": "2"
+    },
+    {
+      "account_id": 1,
+      "label": "Inbox",
+      "scope": "Account:1:Inbox",
+      "context": "Example account",
+      "detail": "",
+      "avatar": "",
+      "is_account": false,
+      "count": "2"
+    },
+    {
+      "account_id": 1,
+      "label": "Starred",
+      "scope": "Account:1:Starred",
+      "context": "Example account",
+      "detail": "",
+      "avatar": "",
+      "is_account": false,
+      "count": "1"
+    }
+  ],
+  "unified_mailboxes": [
+    {
+      "account_id": 0,
+      "label": "Starred",
+      "scope": "Unified Starred",
+      "context": "",
+      "detail": "",
+      "avatar": "",
+      "is_account": false,
+      "count": "1"
+    },
+    {
+      "account_id": 0,
+      "label": "Sent",
+      "scope": "Unified Sent",
+      "context": "",
+      "detail": "",
+      "avatar": "",
+      "is_account": false,
+      "count": ""
+    }
+  ]
+}
