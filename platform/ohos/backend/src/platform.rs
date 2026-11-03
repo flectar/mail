@@ -20,9 +20,9 @@ use crate::window::OhosWindow;
 
 /// Lower bound of the wake-up cadence while animations are running (~60 Hz).
 const ANIMATION_TICK: Duration = Duration::from_millis(16);
-/// Idle poll interval. Bounded so Slint `Timer`s fire with acceptable latency
-/// without burning a core. (A vsync-driven loop can replace this later.)
-const IDLE_TICK: Duration = Duration::from_millis(100);
+/// Longest idle sleep. Timers wake the loop at their own deadline and events
+/// arrive on the channel, so this is only a safety net.
+const IDLE_FALLBACK: Duration = Duration::from_secs(1);
 
 /// Backend platform state. Lives on the application thread inside Slint's
 /// thread-local context.
@@ -70,23 +70,29 @@ impl OhosPlatform {
 
         loop {
             let now = Instant::now();
+            let visible = self.visible.load(Ordering::Relaxed);
+            let has_animations = visible
+                && self
+                    .window
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|w| w.window().has_active_animations());
+            let redraw_pending = visible
+                && self
+                    .window
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|w| w.has_pending_redraw());
             let mut timeout = if self.quit.load(Ordering::Relaxed) {
                 Duration::ZERO
-            } else if self
-                .window
-                .borrow()
-                .as_ref()
-                .is_some_and(|w| w.window().has_active_animations())
-            {
-                ANIMATION_TICK
             } else {
-                IDLE_TICK
+                Self::next_timeout(has_animations)
             };
-            // Throttle redraws to the animation cadence: Slint may request a
-            // redraw for every frame (e.g. through `animation-tick()`), and
-            // without this the loop would spin at unbounded fps.
-            if now < next_frame {
-                timeout = timeout.min(next_frame - now);
+            // Throttle only a frame that is actually pending. Applying the
+            // 16 ms redraw cadence to every timeout kept the loop awake at
+            // ~60 Hz even when no frame had been requested.
+            if redraw_pending {
+                timeout = timeout.min(next_frame.saturating_duration_since(now));
             }
 
             match rx.recv_timeout(timeout) {
@@ -123,6 +129,16 @@ impl OhosPlatform {
         }
 
         Ok(())
+    }
+
+    /// Sleep until the next animation frame or Slint timer, whichever is
+    /// sooner, and no longer than [`IDLE_FALLBACK`].
+    fn next_timeout(has_animations: bool) -> Duration {
+        if has_animations {
+            return ANIMATION_TICK;
+        }
+        slint::platform::duration_until_next_timer_update()
+            .map_or(IDLE_FALLBACK, |timer| timer.min(IDLE_FALLBACK))
     }
 
     fn handle_event(

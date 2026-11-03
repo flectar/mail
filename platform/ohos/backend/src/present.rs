@@ -28,6 +28,10 @@ use crate::ffi;
 /// Bytes per frame pixel (RGBA8888).
 const PIXEL_BYTES: usize = core::mem::size_of::<PremultipliedRgbaColor>();
 
+/// The acquire fence normally signals immediately. Do not block the Slint
+/// thread for a full second on a stalled compositor; retry the frame instead.
+const ACQUIRE_FENCE_TIMEOUT_MS: i32 = 250;
+
 /// Upper bound for the damage rectangles passed to `FlushBuffer`.
 const MAX_FLUSH_RECTS: usize = 64;
 
@@ -306,17 +310,28 @@ impl Presenter {
             // The acquire fence belongs to this call. Wait for the producer to
             // finish writing and close it; leaking it costs one fd per frame
             // and writing before it signals shows stale buffer contents.
+            if rc != 0 || buffer.is_null() {
+                if fence_fd >= 0 {
+                    let _ = ffi::close(fence_fd);
+                }
+                return PresentOutcome::Failed(rc);
+            }
             if fence_fd >= 0 {
                 let mut poll_fd = ffi::PollFd {
                     fd: fence_fd,
                     events: ffi::POLLIN,
                     revents: 0,
                 };
-                let _ = ffi::poll(&mut poll_fd, 1, 1000);
+                let poll_rc = ffi::poll(&mut poll_fd, 1, ACQUIRE_FENCE_TIMEOUT_MS);
+                let ready = poll_rc > 0 && poll_fd.revents & ffi::POLLIN != 0;
                 let _ = ffi::close(fence_fd);
-            }
-            if rc != 0 || buffer.is_null() {
-                return PresentOutcome::Failed(rc);
+                if !ready {
+                    // Writing after an unsignalled fence can expose stale
+                    // buffer contents. Drop this frame and let the presenter
+                    // request another one.
+                    let _ = ffi::OH_NativeWindow_NativeWindowAbortBuffer(self.window, buffer);
+                    return PresentOutcome::Failed(-2);
+                }
             }
 
             let handle = ffi::OH_NativeWindow_GetBufferHandleFromNative(buffer);
