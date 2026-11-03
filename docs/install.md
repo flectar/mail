@@ -29,6 +29,9 @@ Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
 manually.
 
+Windows downloads come in x64 and arm64 builds. A Windows on Arm PC can run
+the x64 build through emulation, but the arm64 build runs natively.
+
 ## Linux
 
 ### Installing a package

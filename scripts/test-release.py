@@ -553,6 +553,8 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                 "flectar-mail-flatpak-arm64/flectar-mail.flatpak",
                 "flectar-mail-windows-x64/flectar-mail-windows-x64.zip",
                 "flectar-mail-windows-x64/flectar-mail-windows-x64-setup.exe",
+                "flectar-mail-windows-arm64/flectar-mail-windows-arm64.zip",
+                "flectar-mail-windows-arm64/flectar-mail-windows-arm64-setup.exe",
                 "flectar-mail-macos-arm64/flectar-mail-macos-arm64.zip",
                 "flectar-mail-macos-arm64/flectar-mail-macos-arm64.dmg",
                 "flectar-mail-macos-x64/flectar-mail-macos-x64.zip",
@@ -567,7 +569,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
             (source / "flectar-mail-linux-x64/startup-benchmark/benchmark.json").write_text("{}")
             dist = root / "dist"
             prepare(source, dist, "0.1.0-beta.1")
-            self.assertEqual(len(list(dist.iterdir())), 16)
+            self.assertEqual(len(list(dist.iterdir())), 18)
             self.assertTrue((dist / "flectar-mail-0.1.0-beta.1-android-arm64.apk").is_file())
             # Each download comes from its own architecture's artifact.
             for download, name in (
@@ -580,6 +582,8 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                 # GitHub must not rewrite a download name after we checksum it.
                 ("flectar-mail_0.1.0.beta.1_amd64.deb", names[1]),
                 ("flectar-mail_0.1.0.beta.1_arm64.deb", names[3]),
+                ("flectar-mail-0.1.0-beta.1-windows-arm64.zip", names[10]),
+                ("flectar-mail-0.1.0-beta.1-windows-arm64-setup.exe", names[11]),
             ):
                 self.assertEqual((dist / download).read_bytes(), name.encode())
             for path in dist.iterdir():
@@ -617,7 +621,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                 (folder / f"flectar-mail_0.1.0~beta.1_{arch}.deb").rename(folder / f"flectar-mail_0.1.0_{arch}.deb")
             stable_dist = root / "stable"
             prepare(source, stable_dist, "0.1.0")
-            self.assertEqual(len(list(stable_dist.iterdir())), 16)
+            self.assertEqual(len(list(stable_dist.iterdir())), 18)
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_amd64.deb").is_file())
             self.assertTrue((stable_dist / "flectar-mail_0.1.0_arm64.deb").is_file())
             self.assertTrue((stable_dist / "flectar-mail-0.1.0-android-arm64.apk").is_file())
@@ -631,7 +635,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
         self.assertIn("does not receive Flathub updates", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("build-provenance attestations", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("Apple silicon and Intel", release_assets.release_notes("0.1.0-beta.1"))
-        self.assertIn("Linux x64 and arm64", release_assets.release_notes("0.1.0-beta.1"))
+        self.assertIn("Linux and Windows on x64 and arm64", release_assets.release_notes("0.1.0-beta.1"))
         self.assertIn("-linux-arm64.rpm", release_assets.release_notes("0.1.0-beta.1"))
 
     def test_metadata_rejects_stale_android_lockfile(self):
