@@ -8718,9 +8718,17 @@ impl Core {
                     Ok(settled)
                 })
                 .await?;
+            // Every claimed row goes out even if recording one fails; the
+            // failed ones are delivered again after recovery.
+            let mut failure = None;
             for (id, notification) in &settled.claimed {
                 publish(notification);
-                self.mark_notification_delivered(*id).await?;
+                if let Err(error) = self.mark_notification_delivered(*id).await {
+                    failure.get_or_insert(error);
+                }
+            }
+            if let Some(error) = failure {
+                return Err(error);
             }
             if settled.read < NOTIFICATION_BATCH {
                 break;
