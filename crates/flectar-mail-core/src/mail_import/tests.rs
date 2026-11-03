@@ -3,7 +3,7 @@ use crate::config::Paths;
 use crate::db::repo;
 use crate::migration::{Source, SourceError};
 use crate::models::{
-    ActionKind, AuthKind, MailProtocol, PerformActionArgs, Provider, now_ms, roles,
+    ActionKind, ActionTarget, AuthKind, MailProtocol, PerformActionArgs, Provider, now_ms, roles,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -381,7 +381,10 @@ async fn saved_mail_goes_into_local_mail_once() {
         .await
         .unwrap();
     assert_eq!(found.threads.len(), 1);
-    let badges = core.mailbox_badge_counts().await.unwrap();
+    let badges = core
+        .mailbox_badge_counts(crate::models::MailGrouping::Conversations)
+        .await
+        .unwrap();
     assert!(
         badges
             .iter()
@@ -650,7 +653,7 @@ async fn local_mail_folders_trash_export_and_removal_work_without_a_server() {
         .unwrap();
     core.perform_action(PerformActionArgs {
         kind: ActionKind::Trash,
-        thread_ids: vec![thread_id],
+        target: ActionTarget::Threads(vec![thread_id]),
         params: None,
     })
     .await

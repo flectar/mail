@@ -4,6 +4,8 @@ import { TypeScale } from "../typography.slint";
 import { LineEdit, ToolbarIconButton } from "controls.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { WindowChrome, WindowControlsClearance } from "../window-chrome.slint";
+import { TabSwitcherButton } from "tab-overview.slint";
+import { TabsUi } from "tabs-ui.slint";
 
 export struct WorkspaceSearchFilter {
     title: string,
@@ -418,6 +420,8 @@ export component WorkspaceSearchToolbar inherits Rectangle {
             accessible-id: root.refresh-accessible-id;
             clicked => { root.refresh(); }
         }
+
+        if TabsUi.enabled && TabsUi.compact : TabSwitcherButton {}
     }
 }
 
@@ -432,6 +436,7 @@ export component CompactPageHeader inherits Rectangle {
     in property <color> background-color: AppTheme.surface;
     in property <bool> leading-ghost: false;
     in property <length> leading-inset: LayoutMetrics.compact-inset;
+    in property <relative-font-size> title-font-size: TypeScale.title-small;
     callback leading-clicked;
 
     height: LayoutMetrics.compact-header-height;
@@ -449,6 +454,7 @@ export component CompactPageHeader inherits Rectangle {
         leading-ghost: root.leading-ghost;
         horizontal-inset: LayoutMetrics.compact-inset;
         leading-inset: root.leading-inset;
+        title-font-size: root.title-font-size;
         leading-clicked => { root.leading-clicked(); }
 
         @children

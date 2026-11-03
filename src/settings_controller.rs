@@ -21,6 +21,35 @@ fn apply_account_presentation_settings(
     app.invoke_mail_profile_changed();
 }
 
+/// Persists the download location and only then reflects it in the UI, so a
+/// failed write never leaves Settings showing a directory that was not saved.
+#[cfg(desktop)]
+fn save_download_directory(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &tokio::runtime::Runtime,
+    directory: String,
+) {
+    let Some(core) = state.borrow().core.clone() else {
+        app.set_sync_status(UiMessage::plain(
+            "Download location is saved once an account is set up.",
+        ));
+        return;
+    };
+    match runtime.block_on(core.set_download_directory(&directory)) {
+        Ok(()) => {
+            app.set_download_directory(
+                crate::documents::download_directory_label(&directory).into(),
+            );
+            app.set_sync_status(UiMessage::plain("Download location saved."));
+        }
+        Err(error) => app.set_sync_status(UiMessage::detail(
+            "Could not save the download location: {}",
+            error,
+        )),
+    }
+}
+
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
@@ -183,6 +212,84 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    // Only desktop hosts pick a filesystem directory; mobile hosts export
+    // through their own document provider and hide the setting entirely.
+    #[cfg(desktop)]
+    {
+        let state_for_download = Rc::clone(state);
+        let runtime_for_download = Rc::clone(runtime);
+        let app_weak_for_download = app_weak.clone();
+        let picking_download = Rc::new(Cell::new(false));
+        app.on_choose_download_directory(move || {
+            let Some(app) = app_weak_for_download.upgrade() else {
+                return;
+            };
+            if picking_download.replace(true) {
+                return;
+            }
+            let title = translated(&app, &UiMessage::plain("Choose download location")).to_string();
+            let core = state_for_download.borrow().core.clone();
+            // The portal picker needs the runtime: rfd's blocking dialog
+            // panics on the UI thread, which has no Tokio context.
+            let request: crate::documents::DocumentFuture<Option<std::path::PathBuf>> =
+                Box::pin(async move {
+                    // Starts in the saved folder as stored, not as Settings
+                    // shows it: inside Flatpak the shown host path may be
+                    // outside the sandbox.
+                    let current = match core {
+                        Some(core) => core.load_settings().await.ok().and_then(|settings| {
+                            crate::documents::resolve_download_directory(
+                                &settings.download_directory,
+                            )
+                        }),
+                        None => None,
+                    };
+                    let dialog = rfd::AsyncFileDialog::new().set_title(title);
+                    let dialog = match current {
+                        Some(directory) => {
+                            dialog.set_directory(crate::documents::picker_directory(&directory))
+                        }
+                        None => dialog,
+                    };
+                    Ok(dialog
+                        .pick_folder()
+                        .await
+                        .map(|folder| folder.path().to_owned()))
+                });
+            let state = Rc::clone(&state_for_download);
+            let runtime = Rc::clone(&runtime_for_download);
+            let picking = Rc::clone(&picking_download);
+            let app_weak = app.as_weak();
+            crate::documents::run_request(&runtime_for_download, request, move |picked| {
+                picking.set(false);
+                let Some(app) = app_weak.upgrade() else {
+                    return;
+                };
+                match picked {
+                    Ok(Some(directory)) => save_download_directory(
+                        &app,
+                        &state,
+                        &runtime,
+                        directory.to_string_lossy().into_owned(),
+                    ),
+                    Ok(None) => {}
+                    Err(error) => app.set_sync_status(UiMessage::detail(
+                        "Could not save the download location: {}",
+                        error,
+                    )),
+                }
+            });
+        });
+        let state_for_clear = Rc::clone(state);
+        let runtime_for_clear = Rc::clone(runtime);
+        let app_weak_for_clear = app_weak.clone();
+        app.on_clear_download_directory(move || {
+            let Some(app) = app_weak_for_clear.upgrade() else {
+                return;
+            };
+            save_download_directory(&app, &state_for_clear, &runtime_for_clear, String::new());
+        });
+    }
     let state_for_theme_preset = Rc::clone(state);
     let runtime_for_theme_preset = Rc::clone(runtime);
     app.on_save_theme_preset(move |preset| {
@@ -388,6 +495,64 @@ pub(super) fn register_settings_preference_callbacks(
                 "Could not save avatar preference: {}",
                 error,
             )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_tabs = Rc::clone(state);
+    let runtime_for_tabs = Rc::clone(runtime);
+    app.on_save_show_tabs(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_tabs.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Tabs preference updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_tabs.block_on(core.set_show_tabs(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Tabs preference saved.")),
+            Err(error) => app.set_sync_status(UiMessage::detail(
+                "Could not save tabs preference: {}",
+                error,
+            )),
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_for_grouping = Rc::clone(state);
+    let runtime_for_grouping = Rc::clone(runtime);
+    app.on_save_conversation_view(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let grouping = if enabled {
+            MailGrouping::Conversations
+        } else {
+            MailGrouping::Messages
+        };
+        apply_mail_grouping(&app, &state_for_grouping, &runtime_for_grouping, grouping);
+        let Some(core) = state_for_grouping.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Conversation view updated for this session.",
+            ));
+            return;
+        };
+        match runtime_for_grouping.block_on(core.set_conversation_view(enabled)) {
+            Ok(()) => app.set_sync_status(UiMessage::plain("Conversation view preference saved.")),
+            Err(error) => {
+                let previous = if enabled {
+                    MailGrouping::Messages
+                } else {
+                    MailGrouping::Conversations
+                };
+                apply_mail_grouping(&app, &state_for_grouping, &runtime_for_grouping, previous);
+                app.set_sync_status(UiMessage::detail(
+                    "Could not save conversation view preference: {}",
+                    error,
+                ));
+            }
         }
     });
 

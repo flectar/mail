@@ -121,7 +121,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let list_ms = started.elapsed().as_secs_f64() * 1000.0;
     let after_list = sample(&core).await?;
     let started = Instant::now();
-    let badges = core.mailbox_badge_counts().await?;
+    let badges = core
+        .mailbox_badge_counts(flectar_mail_core::models::MailGrouping::Conversations)
+        .await?;
     let badges_ms = started.elapsed().as_secs_f64() * 1000.0;
     let after_badges = sample(&core).await?;
     let deep_search = if deep_search_after_badges {
@@ -270,7 +272,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         let list_ms = started.elapsed().as_secs_f64() * 1000.0;
         let started = Instant::now();
-        let warm_badges = core.mailbox_badge_counts().await?;
+        let warm_badges = core
+            .mailbox_badge_counts(flectar_mail_core::models::MailGrouping::Conversations)
+            .await?;
         let badges_ms = started.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(
             warm_page
@@ -300,7 +304,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         let first_list_ms = started.elapsed().as_secs_f64() * 1000.0;
         let started = Instant::now();
-        let reopened_badges = core.mailbox_badge_counts().await?;
+        let reopened_badges = core
+            .mailbox_badge_counts(flectar_mail_core::models::MailGrouping::Conversations)
+            .await?;
         let first_badges_ms = started.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(
             reopened_page
@@ -319,7 +325,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
         let repeat_list_ms = started.elapsed().as_secs_f64() * 1000.0;
         let started = Instant::now();
-        let repeated_badges = core.mailbox_badge_counts().await?;
+        let repeated_badges = core
+            .mailbox_badge_counts(flectar_mail_core::models::MailGrouping::Conversations)
+            .await?;
         let repeat_badges_ms = started.elapsed().as_secs_f64() * 1000.0;
         assert_eq!(
             repeated_page

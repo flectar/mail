@@ -20,6 +20,7 @@ pub(super) fn register(
         let import = provider.import_with(documents::DocumentDialog {
             title: "Import server certificate".into(),
             filter: Some(("PEM certificate".into(), &["pem", "crt", "cer"])),
+            directory: None,
         });
         let request: documents::DocumentFuture<Option<String>> = Box::pin(async move {
             // Read before the document is dropped: a host's staged copy lives

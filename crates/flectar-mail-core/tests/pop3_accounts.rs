@@ -252,7 +252,7 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
     let result = core
         .perform_action(PerformActionArgs {
             kind: ActionKind::Move,
-            thread_ids: vec![thread.id],
+            target: ActionTarget::Threads(vec![thread.id]),
             params: Some(ActionParams {
                 wake_at: None,
                 target_folder_id: Some(projects),

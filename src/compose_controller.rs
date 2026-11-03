@@ -265,14 +265,14 @@ pub(super) fn perform_selected_action(
     _runtime: &tokio::runtime::Runtime,
     action: &str,
 ) -> Result<(), String> {
-    let (selected_id, thread_id, core, using_core) = {
+    let (selected_id, target, core, using_core) = {
         let state = state.borrow();
         let selected = state
             .selected_id
             .and_then(|id| state.messages.iter().find(|message| message.id == id));
         (
             state.selected_id,
-            selected.and_then(|message| message.thread_id),
+            selected.and_then(MailTarget::of),
             state.core.clone(),
             state.using_core,
         )
@@ -281,13 +281,13 @@ pub(super) fn perform_selected_action(
         return Err("mail account is not ready".to_owned());
     }
     let core = core.ok_or_else(|| "mail core is unavailable".to_owned())?;
-    let thread_id = thread_id.ok_or_else(|| "no message is selected".to_owned())?;
+    let target = target.ok_or_else(|| "no message is selected".to_owned())?;
     mail_work::enqueue(
         state,
         core,
         vec![(
             selected_id.unwrap(),
-            thread_id,
+            target,
             mail_work::Operation::Action(action.to_owned()),
         )],
     )
@@ -497,7 +497,7 @@ pub(super) fn contact_initials(contact: &flectar_mail_core::models::Address) -> 
 }
 
 pub(super) fn compose_recipient_query(recipients: &str) -> String {
-    let token_start = recipients.rfind([',', ';']).map_or(0, |index| index + 1);
+    let token_start = recipients.rfind([',', ';', '\n']).map_or(0, |index| index + 1);
     recipients[token_start..].trim().to_owned()
 }
 
@@ -511,7 +511,7 @@ pub(super) fn complete_compose_recipient(
     {
         return recipients.to_owned();
     }
-    let token_start = recipients.rfind([',', ';']).map_or(0, |index| index + 1);
+    let token_start = recipients.rfind([',', ';', '\n']).map_or(0, |index| index + 1);
     let prefix = recipients[..token_start].trim_end();
     let clean_name = contact
         .name
@@ -528,8 +528,12 @@ pub(super) fn complete_compose_recipient(
         };
     if prefix.is_empty() {
         format!("{recipient}, ")
-    } else {
+    } else if prefix.ends_with([',', ';']) {
         format!("{prefix} {recipient}, ")
+    } else {
+        // A newline-separated prefix normalizes to a comma separator so the
+        // completed address never glues onto the previous line.
+        format!("{prefix}, {recipient}, ")
     }
 }
 
@@ -764,6 +768,25 @@ mod tests {
                 .unwrap()
                 .subject,
             "FW: Launch plan"
+        );
+    }
+
+    #[test]
+    fn recipient_query_uses_text_after_last_separator_including_newlines() {
+        assert_eq!(compose_recipient_query("ada@example.com, gr"), "gr");
+        assert_eq!(compose_recipient_query("ada@example.com; gr"), "gr");
+        assert_eq!(compose_recipient_query("ada@example.com\ngr"), "gr");
+    }
+
+    #[test]
+    fn complete_recipient_keeps_newline_separated_prefix_usable() {
+        let completed = complete_compose_recipient(
+            "ada@example.com\ngr",
+            &address("Grace", "grace@example.com"),
+        );
+        assert_eq!(
+            completed,
+            "ada@example.com, Grace <grace@example.com>, "
         );
     }
 }

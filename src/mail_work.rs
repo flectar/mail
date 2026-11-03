@@ -66,22 +66,20 @@ impl Operation {
             _ => false,
         }
     }
-    async fn perform(&self, core: &CoreMailSource, thread: i64) -> Result<(), String> {
+    async fn perform(&self, core: &CoreMailSource, target: MailTarget) -> Result<(), String> {
         match self {
-            Self::Action(a) => core.perform_message_action(thread, a).await,
+            Self::Action(a) => core.perform_message_action(target, a).await,
             Self::EmptyTrash(account_id) => core.empty_trash(*account_id).await,
-            Self::Label(id, add) => core.perform_label_action(thread, *id, *add).await,
+            Self::Label(id, add) => core.perform_label_action(target, *id, *add).await,
             Self::Drop(MailDropDestination::Action(a)) => {
-                core.perform_message_action(thread, a).await
+                core.perform_message_action(target, a).await
             }
-            Self::Drop(MailDropDestination::Folder(id)) => {
-                core.move_thread_to_folder(thread, *id).await
-            }
+            Self::Drop(MailDropDestination::Folder(id)) => core.move_to_folder(target, *id).await,
             Self::Drop(MailDropDestination::Label(id)) => {
-                core.perform_label_action(thread, *id, true).await
+                core.perform_label_action(target, *id, true).await
             }
             Self::Drop(MailDropDestination::Route(tab)) => {
-                core.route_thread_to_tab(thread, tab.clone()).await
+                core.route_to_tab(target, tab.clone()).await
             }
         }
     }
@@ -89,7 +87,7 @@ impl Operation {
 struct ActionRequest {
     core: CoreMailSource,
     epoch: u64,
-    operations: Vec<(i32, i64, Operation)>,
+    operations: Vec<(i32, MailTarget, Operation)>,
 }
 struct ActionResult {
     epoch: u64,
@@ -138,9 +136,9 @@ pub(super) fn register(
             let result = collect_results(
                 request.epoch,
                 request.operations,
-                move |thread, operation| {
+                move |target, operation| {
                     let core = core.clone();
-                    async move { operation.perform(&core, thread).await }
+                    async move { operation.perform(&core, target).await }
                 },
             )
             .await;
@@ -372,7 +370,7 @@ fn load(
 pub(super) fn enqueue(
     state: &Rc<RefCell<InboxState>>,
     core: CoreMailSource,
-    operations: Vec<(i32, i64, Operation)>,
+    operations: Vec<(i32, MailTarget, Operation)>,
 ) -> Result<(), String> {
     if operations.is_empty() {
         return Err("no message is selected".into());
@@ -435,11 +433,11 @@ pub(super) fn invalidate(state: &mut InboxState) {
 
 async fn collect_results<F, Fut>(
     epoch: u64,
-    operations: Vec<(i32, i64, Operation)>,
+    operations: Vec<(i32, MailTarget, Operation)>,
     perform: F,
 ) -> ActionResult
 where
-    F: Fn(i64, Operation) -> Fut,
+    F: Fn(MailTarget, Operation) -> Fut,
     Fut: std::future::Future<Output = Result<(), String>>,
 {
     let mut result = ActionResult {
@@ -450,11 +448,11 @@ where
         error: None,
         deletion_queued: false,
     };
-    for (id, thread, operation) in operations {
+    for (id, target, operation) in operations {
         let deletion = operation.queues_permanent_deletion();
         result.ids.push(id);
         let moves = operation.moves();
-        match perform(thread, operation).await {
+        match perform(target, operation).await {
             Ok(()) => {
                 result.deletion_queued |= deletion;
                 result.completed.push(id);
@@ -527,14 +525,25 @@ mod tests {
         let result = collect_results(
             7,
             vec![
-                (1, 101, Operation::Action("archive".into())),
-                (2, 102, Operation::Action("trash".into())),
-                (3, 103, Operation::Action("star".into())),
+                (
+                    1,
+                    MailTarget::Thread(101),
+                    Operation::Action("archive".into()),
+                ),
+                (
+                    2,
+                    MailTarget::Message {
+                        id: 202,
+                        thread_id: 102,
+                    },
+                    Operation::Action("trash".into()),
+                ),
+                (3, MailTarget::Thread(103), Operation::Action("star".into())),
             ],
-            |thread, _| {
-                calls.borrow_mut().push(thread);
+            |target, _| {
+                calls.borrow_mut().push(target.thread_id());
                 async move {
-                    if thread == 102 {
+                    if target.thread_id() == 102 {
                         Err("database busy".into())
                     } else {
                         Ok(())
@@ -557,7 +566,11 @@ mod tests {
         let worker_gate = gate.clone();
         let worker = tokio::spawn(collect_results(
             0,
-            vec![(1, 101, Operation::Action("archive".into()))],
+            vec![(
+                1,
+                MailTarget::Thread(101),
+                Operation::Action("archive".into()),
+            )],
             move |_, _| {
                 let gate = worker_gate.clone();
                 async move {

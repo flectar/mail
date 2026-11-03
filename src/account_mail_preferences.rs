@@ -817,12 +817,12 @@ fn register_keys_and_reader(app: &AppWindow, state: &Rc<RefCell<InboxState>>, ta
     ui.on_read_message(move || {
         let Some(app) = weak.upgrade() else { return };
         let Some(core) = core(&state) else { return };
-        let Some((selected_id, thread_id)) = ({
+        let Some((selected_id, target)) = ({
             let state = state.borrow();
             state
                 .selected_id
                 .and_then(|id| state.messages.iter().find(|m| m.id == id))
-                .and_then(|m| m.thread_id.map(|thread| (m.id, thread)))
+                .and_then(|m| crate::mail::MailTarget::of(m).map(|target| (m.id, target)))
         }) else {
             return;
         };
@@ -842,11 +842,18 @@ fn register_keys_and_reader(app: &AppWindow, state: &Rc<RefCell<InboxState>>, ta
             &app,
             true,
             async move {
-                let detail = core
-                    .get_latest_thread_body(thread_id)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                core.open_openpgp_message(detail.id)
+                // A conversation opens its newest message; a single message's
+                // row, that message.
+                let message_id = match target {
+                    crate::mail::MailTarget::Message { id, .. } => id,
+                    crate::mail::MailTarget::Thread(thread_id) => {
+                        core.get_latest_thread_body(thread_id)
+                            .await
+                            .map_err(|e| e.to_string())?
+                            .id
+                    }
+                };
+                core.open_openpgp_message(message_id)
                     .await
                     .map_err(|e| e.to_string())
             },

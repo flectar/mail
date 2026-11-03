@@ -96,28 +96,6 @@ impl From<anyhow::Error> for CoreError {
     }
 }
 
-#[cfg(desktop)]
-impl From<keyring::Error> for CoreError {
-    fn from(e: keyring::Error) -> Self {
-        match e {
-            keyring::Error::PlatformFailure(error) => {
-                tracing::warn!(%error, "platform credential service failed");
-                CoreError::CredentialStoreUnavailable(
-                    "the system keyring could not be reached; start or unlock it and try again"
-                        .into(),
-                )
-            }
-            keyring::Error::NoStorageAccess(error) => {
-                tracing::warn!(%error, "platform credential service denied access");
-                CoreError::CredentialStoreUnavailable(
-                    "the system keyring is locked or denied access; unlock it and try again".into(),
-                )
-            }
-            error => CoreError::Keyring(error.to_string()),
-        }
-    }
-}
-
 impl From<serde_json::Error> for CoreError {
     fn from(e: serde_json::Error) -> Self {
         CoreError::Other(format!("json: {e}"))
