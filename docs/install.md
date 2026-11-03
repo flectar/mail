@@ -48,9 +48,10 @@ flatpak run com.flectar.mail
 
 Use the arm64 packages with the 64-bit Raspberry Pi OS. Every release checks
 that they load with the 16 KiB memory pages of the Raspberry Pi 5 kernel.
-Raspberry Pi OS kernels don't include Landlock, which the sandboxed PDF preview
-needs, so PDF attachments can't be previewed there. Download them to open them
-in another app.
+Raspberry Pi OS kernels don't include Landlock, which lets the sandboxed PDF
+preview read the system fonts and nothing else. There the preview can't open
+any file, so PDFs that don't embed their fonts are drawn with built-in fonts
+instead.
 
 ### Fedora RPM
 
