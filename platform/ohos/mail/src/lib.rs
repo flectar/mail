@@ -305,6 +305,13 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
     platform.notification_publisher = flectar_mail::NotificationPublisher::new(bridge::notify);
+    // Mail content and the composer fall back to the same system faces as the
+    // Slint UI the backend set up.
+    flectar_mail::platform::configure_email_fonts(flectar_mail::platform::EmailFonts {
+        dir: std::path::Path::new(slint_ohos_backend::fonts::SYSTEM_FONT_DIR),
+        han_families: &slint_ohos_backend::fonts::HAN_FAMILIES,
+        fallback_scripts: &slint_ohos_backend::fonts::FALLBACK_SCRIPTS,
+    });
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())

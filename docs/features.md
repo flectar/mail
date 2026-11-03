@@ -1,0 +1,216 @@
+# Flectar Mail features
+
+A closer look at what the [README](../README.md) summarizes.
+
+- [Conversation threads](#conversation-threads)
+- [Tabs](#tabs)
+- [Profiles and account colors](#profiles-and-account-colors)
+- [Appearance](#appearance)
+- [Frameless window](#frameless-window)
+- [Calendar, contacts, and files](#calendar-contacts-and-files)
+- [Signatures and OpenPGP](#signatures-and-openpgp)
+- [Storage and backups](#storage-and-backups)
+- [Importing accounts and mail](#importing-accounts-and-mail)
+- [HTML rendering](#html-rendering)
+- [Smaller screens](#smaller-screens)
+
+## Conversation threads
+
+Replies stay grouped in chronological order, with the active message expanded
+inside the reading pane. To list, open and act on every message on its own, turn
+off **Conversation view** in Settings → General.
+
+| Keys | Action |
+| --- | --- |
+| **Up/Down** | Move between messages |
+| **Home/End** | Jump to the first or last loaded message |
+| **Page Up/Page Down** | Move a page at a time |
+| **Enter** | Open the current message and focus its content |
+| **Space** | Check or uncheck the message for bulk actions |
+| **Tab/Shift+Tab** | Move between controls |
+| **F6** | In the full workspace, move focus between the message list and reader |
+
+In the minimal layout, arrow keys highlight messages and **Enter** opens them;
+**Escape** or **F6** returns to the list.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-thread-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-thread-light.png">
+  <img src="../resources/screenshots/desktop-thread-light.png" alt="Flectar Mail conversation with incoming and replied messages">
+</picture>
+
+## Tabs
+
+Keep several places open at once with browser-style tabs. Each tab remembers
+its own place: a mailbox, search, or open conversation, the calendar,
+contacts, files, or Settings, along with how far you scrolled the list and the
+message you were reading. Pick up where you left off the next time you open
+Flectar Mail.
+
+| Action | How |
+| --- | --- |
+| Open a message in a background tab | Middle-click or Ctrl/⌘-click it, or choose **Open in new tab** from its menu |
+| Open it and switch to it | Add Shift to the click |
+| New tab | **Ctrl/⌘+T** |
+| Close the current tab | **Ctrl/⌘+W**, or middle-click the tab |
+| Reopen the last closed tab | **Ctrl/⌘+Shift+T** |
+| Cycle through tabs | **Ctrl+Tab** and **Ctrl+Shift+Tab** |
+| Jump to a tab | **Ctrl/⌘+1–8**; **Ctrl/⌘+9** jumps to the last |
+| Reorder tabs | Drag them |
+| Close other tabs, or those to the right | Right-click a tab |
+
+On phones and in narrow windows, the button at the end of the toolbar shows
+how many tabs are open and lays them out as cards. Tap a card to switch to it,
+tap × or swipe it aside to close it, and use **+** for a new tab. Select
+messages and choose **Open in new tabs** from the selection menu to open them
+in the background. If you'd rather work without tabs, turn off **Tabs** in
+Settings → General.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-tabs-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-tabs-light.png">
+  <img src="../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail with tabs for several conversations, the calendar, contacts, and files">
+</picture>
+
+## Profiles and account colors
+
+Group related accounts into named profiles such as Work or Personal, then give
+each profile its own color. Create a profile from the profile menu at the start
+of the tab bar, or in Settings → Accounts → Profiles, and check the accounts
+that belong to it. Choose a profile in that menu to focus the mail view on its
+accounts: the unified inbox, search, counts, and sidebar show only their mail,
+while your tabs stay the same. **All accounts** shows everything again.
+
+You can also override an individual account's color and show the effective
+color along the left edge of every message. The markers make accounts easy to
+tell apart while working in the unified inbox; the example below uses purple
+for Work and orange for Support.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-profiles-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-profiles-light.png">
+  <img src="../resources/screenshots/desktop-profiles-light.png" alt="Flectar Mail unified inbox with purple and orange profile color markers">
+</picture>
+
+## Appearance
+
+Choose the workspace that fits the way you handle email. Keep the detailed
+three-pane layout, switch to a streamlined minimal view, choose a light or dark
+theme, select a built-in color palette or create a custom one, and show or hide
+sender avatars. You can also give the app icon a different color: on the
+taskbar or Dock, in the system tray, in the Linux app launcher, and on Android
+and iOS home screens.
+
+The full workspace keeps your folders, message list, and selected email visible
+together. The minimal layout reduces visual noise and gives each part of your
+inbox more room when you need it.
+
+Message appearance can follow the app theme or stay light or dark independently.
+It uses your selected color palette for HTML, plain text, and Reader mode.
+To temporarily show the sender's original colors, use the contrast icon between
+Find and Reader mode in the desktop message toolbar, or choose **Show original
+colors** from the message's three-dot menu on any screen size.
+
+## Frameless window
+
+Flectar Mail replaces the system title bar with window controls in the toolbar
+by default; turn off **Frameless window** in Settings → General → Interface to
+bring the system title bar back. Each platform keeps its own behavior: macOS
+keeps the native traffic lights, Windows keeps Snap Layouts and the system menu,
+and Linux follows the button order and title-bar actions configured for GNOME or
+KDE.
+
+## Calendar, contacts, and files
+
+Mail, calendars, and contacts sit side by side, synced over Google, Microsoft,
+CalDAV, and CardDAV. Mailbox and calendar data are stored locally, so synced
+data stays useful without a connection. The Files view browses JMAP and WebDAV
+storage, searches mail attachments, keeps files offline, and previews PDFs,
+images and text. [Contacts and CardDAV](carddav-contacts.md) describes how
+contacts are stored and synced.
+
+## Signatures and OpenPGP
+
+Settings → Accounts → Signatures & OpenPGP provides named signatures, separate
+new-message and reply defaults, and a composer signature selector. Desktop
+OpenPGP/MIME signing and encryption use installed GnuPG 2.x with pinentry for
+private-key passphrases. Required encryption blocks delivery when recipient keys
+are missing or invalid; protected drafts remain local until Send.
+
+S/MIME and mobile OpenPGP are not currently supported.
+
+## Storage and backups
+
+Settings → Storage shows how much space mail, attachments, offline files, and
+databases use on the device. From the same page, you can export verified database
+snapshots or transfer connected-account setup and preferences through a backup.
+Passwords and OAuth tokens stay in the system keyring, so a restored device asks
+you to sign in again.
+
+POP3 accounts download mail to this device and leave it on the server unless
+you choose otherwise: each account can remove mail from the server after 7, 14,
+or 30 days, once you delete it here, or as soon as it's downloaded, but never
+before it's stored on this device. Their folders exist only on this device, so
+snapshots include that mail, and removing a POP3 account or deleting all data
+offers to export it first as mbox files, one per folder, which other mail apps
+can import.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../resources/screenshots/desktop-storage-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="../resources/screenshots/desktop-storage-light.png">
+  <img src="../resources/screenshots/desktop-storage-light.png" alt="Flectar Mail Storage settings with local usage, mail on this device, database snapshot, and account backup controls">
+</picture>
+
+## Importing accounts and mail
+
+The same import also brings accounts over from Thunderbird (a profile folder,
+its Tools › Export archive, or `prefs.js`) and from Thunderbird for Android or
+K-9 Mail (`.k9s` settings exports). You review each account before anything is
+added: settings Flectar Mail can't reproduce, such as an Exchange server, are
+explained instead of changed silently, and POP3 accounts keep their rule for
+removing mail from the server. Existing accounts are never modified, and
+passwords are never imported.
+
+Saved mail comes over the same way: Thunderbird's Local Folders and the mail
+its POP3 accounts downloaded, mbox files such as a Google Takeout export or
+Flectar Mail's own, `.eml` messages, maildir folders, Apple Mail mailboxes, and
+ZIP archives of them. You pick the files, several at once if you like, then the
+folders, with Trash and Junk left out unless you check them, and the folder
+structure and read and starred states come along. Mail that's already there is
+skipped, so a stopped import can simply run again, and a long one can carry on
+in the background. Mail that belongs to no account goes to **On this device**:
+folders kept only here, which Settings → Storage can export or delete. It can
+also go into a POP3 account's folders, or up to the server of an IMAP, JMAP or
+Gmail account, into a folder of its own there.
+
+## HTML rendering
+
+To keep the client fully native and its memory use low, Flectar Mail renders
+email HTML with [Blitz](https://github.com/DioxusLabs/blitz), a Rust HTML/CSS
+renderer from the Dioxus team, instead of embedding a browser or WebView.
+
+As far as we know, Flectar Mail is one of the first projects using Blitz for
+arbitrary, real-world email HTML. Email markup contains plenty of unusual HTML
+and CSS, so this pushes the renderer into demanding territory. We currently
+carry several patches on top of Blitz and hope to upstream as much of that work
+as possible over time.
+
+If you find an email that renders incorrectly, please
+[report it](https://github.com/flectar/mail/issues). This approach is still
+experimental, but it is also a major reason Flectar Mail can remain so
+lightweight compared with WebView-based clients built with frameworks such as
+Tauri or Wails.
+
+Desktop builds offer two renderers under Settings → General → Renderer:
+
+| Renderer | Details |
+| --- | --- |
+| **CPU — Low Memory** | Selected initially. Doesn't initialize WGPU. |
+| **GPU — WGPU** | Slint and Vello on a shared WGPU 30 device. A failed GPU startup falls back to CPU automatically. |
+
+Changing the renderer takes effect after restarting the app.
+
+## Smaller screens
+
+The compact interface keeps the important actions within reach while giving
+messages, events, and contacts the full screen when they need it.

@@ -20,9 +20,21 @@ mod ohos;
 #[cfg(target_env = "ohos")]
 pub use ohos::*;
 
+/// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
+/// and the composer: the platform font directory, and the fallback policy the
+/// host applies to its own UI, so mail content falls back the same way.
+pub struct EmailFonts {
+    /// The platform font directory.
+    pub dir: &'static std::path::Path,
+    /// Family-name fragments of the Han (CJK) faces, most preferred first.
+    pub han_families: &'static [&'static str],
+    /// Scripts, as ISO 15924 tags, that fall back to every system family.
+    pub fallback_scripts: &'static [[u8; 4]],
+}
+
 /// Desktop reach system fonts through the fontique system backend.
 #[cfg(desktop)]
-pub(crate) fn email_font_dir() -> Option<&'static std::path::Path> {
+pub(crate) fn email_fonts() -> Option<&'static EmailFonts> {
     None
 }
 

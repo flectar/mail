@@ -1677,7 +1677,7 @@ msgstr "Impossible d’ouvrir l’éditeur de message : {}"
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:516 ui/components/sidebar.slint:479
+#: ui/app.slint:516 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
@@ -2017,22 +2017,22 @@ msgstr "Chargement du message…"
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1265 ui/app.slint:1278
+#: ui/app.slint:1269 ui/app.slint:1282
 #, fuzzy
 msgid "Global Labels (local only)"
 msgstr "Étiquettes globales (locales uniquement)"
 
-#: ui/app.slint:2216
+#: ui/app.slint:2221
 #, fuzzy
 msgid "Empty Trash?"
 msgstr "Vider la corbeille ?"
 
-#: ui/app.slint:2216 ui/views/files-view.slint:541
+#: ui/app.slint:2221 ui/views/files-view.slint:578
 #, fuzzy
 msgid "Delete permanently?"
 msgstr "Supprimer définitivement ?"
 
-#: ui/app.slint:2220
+#: ui/app.slint:2225
 #, fuzzy
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
@@ -2040,64 +2040,64 @@ msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de tous les "
 "comptes connectés ?"
 
-#: ui/app.slint:2221
+#: ui/app.slint:2226
 #, fuzzy
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 "Supprimer définitivement tous les messages de la corbeille de ce compte ?"
 
-#: ui/app.slint:2223
+#: ui/app.slint:2228
 #, fuzzy
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 "Supprimer définitivement les conversations sélectionnées dans la corbeille ?"
 
-#: ui/app.slint:2224
+#: ui/app.slint:2229
 #, fuzzy
 msgid "Permanently delete this conversation from Trash?"
 msgstr "Supprimer définitivement cette conversation de la corbeille ?"
 
-#: ui/app.slint:2225 ui/components/calendar.slint:947
+#: ui/app.slint:2230 ui/components/calendar.slint:947
 #, fuzzy
 msgid "This action cannot be undone."
 msgstr "Cette action est irréversible."
 
-#: ui/app.slint:2226
+#: ui/app.slint:2231
 #, fuzzy
 msgid "Empty Trash"
 msgstr "Vider la corbeille"
 
-#: ui/app.slint:2226 ui/views/files-view.slint:623
+#: ui/app.slint:2231 ui/views/files-view.slint:660
 #, fuzzy
 msgid "Delete permanently"
 msgstr "Supprimer définitivement"
 
-#: ui/app.slint:2400
+#: ui/app.slint:2405
 #, fuzzy
 msgid "Mailbox startup failed"
 msgstr "Échec de l’initialisation de la boîte aux lettres"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2411
 #, fuzzy
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail n’a pas pu ouvrir le stockage local"
 
-#: ui/app.slint:2419
+#: ui/app.slint:2424
 #, fuzzy
 msgid "Diagnostic ID: {}"
 msgstr "Identifiant de diagnostic : {}"
 
-#: ui/app.slint:2422
+#: ui/app.slint:2427
 #, fuzzy
 msgid "Diagnostic ID {}"
 msgstr "Identifiant de diagnostic {}"
 
-#: ui/app.slint:2427
+#: ui/app.slint:2432
 #, fuzzy
 msgid "Retry"
 msgstr "Réessayer"
 
-#: ui/app.slint:2435 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2440 ui/components/copyable-diagnostic.slint:43
 #, fuzzy
 msgid "Copy diagnostics"
 msgstr "Copier le diagnostic"
@@ -2385,7 +2385,7 @@ msgstr "Ajouter l’adresse d’expéditeur"
 #: ui/components/account-mail-preferences.slint:178
 #: ui/dialogs/folder-dialog.slint:128 ui/dialogs/oauth-setup-dialog.slint:126
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
-#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:622
+#: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 #, fuzzy
 msgid "Cancel"
 msgstr "Annuler"
@@ -2635,8 +2635,8 @@ msgid "Export decrypted message"
 msgstr "Exporter le message déchiffré"
 
 #: ui/components/account-mail-preferences.slint:265
-#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:468
-#: ui/views/files-view.slint:658 ui/window-chrome.slint:201
+#: ui/dialogs/settings-dialog.slint:2929 ui/views/files-view.slint:505
+#: ui/views/files-view.slint:695 ui/window-chrome.slint:201
 #, fuzzy
 msgid "Close"
 msgstr "Fermer"
@@ -2751,7 +2751,7 @@ msgstr "Affichez davantage de calendriers pour voir leurs événements."
 msgid "Create an event to start planning your month."
 msgstr "Créez un événement pour commencer à organiser votre mois."
 
-#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:549
+#: ui/components/calendar-agenda.slint:290 ui/views/files-view.slint:586
 #, fuzzy
 msgid "Reset filters"
 msgstr "Réinitialiser les filtres"
@@ -3124,7 +3124,7 @@ msgstr "Modifier le brouillon"
 msgid "New message"
 msgstr "Nouveau message"
 
-#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:664
+#: ui/components/composer-fields.slint:100 ui/views/files-view.slint:701
 #, fuzzy
 msgid "Account"
 msgstr "Compte"
@@ -3576,17 +3576,17 @@ msgstr "Utiliser une couleur personnalisée"
 msgid "Done"
 msgstr ""
 
-#: ui/components/profile-switcher.slint:124 ui/views/files-view.slint:39
+#: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 #, fuzzy
 msgid "All accounts"
 msgstr "Tous les comptes"
 
-#: ui/components/profile-switcher.slint:192
+#: ui/components/profile-switcher.slint:196
 #, fuzzy
 msgid "Profile"
 msgstr "Profil"
 
-#: ui/components/profile-switcher.slint:291
+#: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
 msgstr ""
 
@@ -3664,92 +3664,92 @@ msgstr "Supprimer l’étiquette globale"
 msgid "Delete label from {}"
 msgstr "Supprimer l’étiquette de {}"
 
-#: ui/components/sidebar.slint:94 ui/views/mail-list-pane.slint:1430
+#: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 #, fuzzy
 msgid "New email"
 msgstr "Nouvel e-mail"
 
-#: ui/components/sidebar.slint:94
+#: ui/components/sidebar.slint:117
 msgid "Add an account"
 msgstr ""
 
-#: ui/components/sidebar.slint:136 ui/components/sidebar.slint:145
-#: ui/components/sidebar.slint:165
+#: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
+#: ui/components/sidebar.slint:200
 #, fuzzy
 msgid "Find folder or label"
 msgstr "Rechercher un dossier ou une étiquette"
 
-#: ui/components/sidebar.slint:182
+#: ui/components/sidebar.slint:217
 #, fuzzy
 msgid "Clear folder filter"
 msgstr "Effacer le filtre des dossiers"
 
-#: ui/components/sidebar.slint:198
+#: ui/components/sidebar.slint:233
 #, fuzzy
 msgid "Add account"
 msgstr "Ajouter un compte"
 
-#: ui/components/sidebar.slint:247
+#: ui/components/sidebar.slint:282
 #, fuzzy
 msgid "ALL ACCOUNTS"
 msgstr "TOUS LES COMPTES"
 
-#: ui/components/sidebar.slint:256
+#: ui/components/sidebar.slint:291
 #, fuzzy
 msgid "All Inboxes"
 msgstr "Toutes les boîtes de réception"
 
-#: ui/components/sidebar.slint:272
+#: ui/components/sidebar.slint:307
 #, fuzzy
 msgid "Inbox"
 msgstr "Boîte de réception"
 
-#: ui/components/sidebar.slint:334
+#: ui/components/sidebar.slint:369
 #, fuzzy
 msgid "Categories"
 msgstr "Catégories"
 
-#: ui/components/sidebar.slint:352
+#: ui/components/sidebar.slint:387
 msgid "Important"
 msgstr "Important"
 
-#: ui/components/sidebar.slint:372 ui/dialogs/settings-dialog.slint:271
+#: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 #, fuzzy
 msgid "Other"
 msgstr "Autre"
 
-#: ui/components/sidebar.slint:415 ui/components/sidebar.slint:574
+#: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 #, fuzzy
 msgid "Labels"
 msgstr "Étiquettes"
 
-#: ui/components/sidebar.slint:434
+#: ui/components/sidebar.slint:469
 #, fuzzy
 msgid "Global label {}"
 msgstr "Étiquette globale {}"
 
-#: ui/components/sidebar.slint:466 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 #, fuzzy
 msgid "ACCOUNTS"
 msgstr "COMPTES"
 
-#: ui/components/sidebar.slint:594
+#: ui/components/sidebar.slint:629
 #, fuzzy
 msgid "{} label, {} account"
 msgstr "{} étiquette, {} compte"
 
-#: ui/components/sidebar.slint:636 ui/dialogs/folder-dialog.slint:27
-#: ui/views/files-view.slint:345
+#: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
+#: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 #, fuzzy
 msgid "New folder"
 msgstr "Nouveau dossier"
 
-#: ui/components/sidebar.slint:653 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 #, fuzzy
 msgid "New label"
 msgstr "Nouvelle étiquette"
 
-#: ui/components/sidebar.slint:673
+#: ui/components/sidebar.slint:708
 #, fuzzy
 msgid "No folders found"
 msgstr "Aucun dossier trouvé"
@@ -3764,7 +3764,7 @@ msgid_plural "{n} tabs open"
 msgstr[0] ""
 msgstr[1] ""
 
-#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:390
+#: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 #, fuzzy
 msgid "Files"
 msgstr "Fichiers"
@@ -4043,12 +4043,12 @@ msgstr "Agrandir le zoom"
 msgid "Fit to width"
 msgstr "Ajuster à la largeur"
 
-#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:465
+#: ui/dialogs/attachment-preview-dialog.slint:39 ui/views/files-view.slint:502
 #, fuzzy
 msgid "Download"
 msgstr "Télécharger"
 
-#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:477
+#: ui/dialogs/attachment-preview-dialog.slint:50 ui/views/files-view.slint:514
 #, fuzzy
 msgid "Loading preview…"
 msgstr "Chargement de l’aperçu…"
@@ -4817,7 +4817,7 @@ msgstr ""
 msgid "Show"
 msgstr ""
 
-#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:696
+#: ui/dialogs/import-dialog.slint:953 ui/views/files-view.slint:733
 #, fuzzy
 msgid "Dismiss"
 msgstr "Ignorer"
@@ -5025,7 +5025,7 @@ msgstr "Stockage local"
 msgid "Calculating…"
 msgstr "Calcul en cours…"
 
-#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:306
+#: ui/dialogs/settings-dialog.slint:207 ui/views/files-view.slint:313
 #, fuzzy
 msgid "Refresh"
 msgstr "Actualiser"
@@ -5842,7 +5842,7 @@ msgstr "État du compte : {}"
 msgid "Reconnect"
 msgstr "Reconnecter"
 
-#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:467
+#: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 #, fuzzy
 msgid "Manage"
 msgstr "Gérer"
@@ -6076,7 +6076,7 @@ msgstr[1] ""
 msgid "Export mail…"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:563
+#: ui/dialogs/settings-dialog.slint:2288 ui/views/files-view.slint:600
 #, fuzzy
 msgid "Delete…"
 msgstr "Supprimer…"
@@ -7210,7 +7210,7 @@ msgstr "Consultez et modifiez les détails du contact ici."
 msgid "Email attachments"
 msgstr "Pièces jointes des e-mails"
 
-#: ui/views/files-view.slint:100 ui/views/files-view.slint:657
+#: ui/views/files-view.slint:100 ui/views/files-view.slint:694
 #, fuzzy
 msgid "Connect storage"
 msgstr "Connecter un espace de stockage"
@@ -7225,7 +7225,7 @@ msgstr "Stockage sur le serveur"
 msgid "STORAGE SPACE"
 msgstr "ESPACE DE STOCKAGE"
 
-#: ui/views/files-view.slint:155 ui/views/files-view.slint:459
+#: ui/views/files-view.slint:155 ui/views/files-view.slint:496
 #, fuzzy
 msgid "Sharing activity"
 msgstr "Activité de partage"
@@ -7235,251 +7235,255 @@ msgstr "Activité de partage"
 msgid "Transfers"
 msgstr "Transferts"
 
-#: ui/views/files-view.slint:301 ui/views/files-view.slint:521
+#: ui/views/files-view.slint:308 ui/views/files-view.slint:558
 #, fuzzy
 msgid "File sources"
 msgstr "Sources des fichiers"
 
-#: ui/views/files-view.slint:304
+#: ui/views/files-view.slint:311
 #, fuzzy
 msgid "Search files"
 msgstr "Rechercher des fichiers"
 
-#: ui/views/files-view.slint:307 ui/views/files-view.slint:314
+#: ui/views/files-view.slint:314 ui/views/files-view.slint:321
 #, fuzzy
 msgid "Filter and sort files"
 msgstr "Filtrer et trier les fichiers"
 
-#: ui/views/files-view.slint:310
+#: ui/views/files-view.slint:317
 #, fuzzy
 msgid "Synchronized mail"
 msgstr "Messages synchronisés"
 
-#: ui/views/files-view.slint:311
+#: ui/views/files-view.slint:318
 #, fuzzy
 msgid "All mail on server (JMAP)"
 msgstr "Tous les messages sur le serveur (JMAP)"
 
-#: ui/views/files-view.slint:312
+#: ui/views/files-view.slint:319
 #, fuzzy
 msgid "Index cached text"
 msgstr "Indexer le texte en cache"
 
-#: ui/views/files-view.slint:338
+#: ui/views/files-view.slint:347 ui/views/files-view.slint:459
 #, fuzzy
 msgid "Upload"
 msgstr "Téléverser"
 
-#: ui/views/files-view.slint:376
+#: ui/views/files-view.slint:385
 #, fuzzy
 msgid "No files to show"
 msgstr "Aucun fichier à afficher"
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 #, fuzzy
 msgid "Attachments from synchronized messages will appear here."
 msgstr "Les pièces jointes des messages synchronisés apparaîtront ici."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 #, fuzzy
 msgid "Upload a file or create a folder to get started."
 msgstr "Téléversez un fichier ou créez un dossier pour commencer."
 
-#: ui/views/files-view.slint:377
+#: ui/views/files-view.slint:386
 #, fuzzy
 msgid "Select an account and connect its storage."
 msgstr "Sélectionnez un compte et connectez son espace de stockage."
 
-#: ui/views/files-view.slint:436
+#: ui/views/files-view.slint:451
+msgid "Upload or create a folder"
+msgstr ""
+
+#: ui/views/files-view.slint:473
 #, fuzzy
 msgid "Load more"
 msgstr "Charger davantage"
 
-#: ui/views/files-view.slint:445
+#: ui/views/files-view.slint:482
 #, fuzzy
 msgid "File list width"
 msgstr "Largeur de la liste des fichiers"
 
-#: ui/views/files-view.slint:462
+#: ui/views/files-view.slint:499
 #, fuzzy
 msgid "Back to files"
 msgstr "Retour aux fichiers"
 
-#: ui/views/files-view.slint:464
+#: ui/views/files-view.slint:501
 #, fuzzy
 msgid "Open folder"
 msgstr "Ouvrir le dossier"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 #, fuzzy
 msgid "Preview"
 msgstr "Aperçu"
 
-#: ui/views/files-view.slint:466
+#: ui/views/files-view.slint:503
 #, fuzzy
 msgid "Details"
 msgstr "Détails"
 
-#: ui/views/files-view.slint:474
+#: ui/views/files-view.slint:511
 #, fuzzy
 msgid "Select a file to preview"
 msgstr "Sélectionnez un fichier à prévisualiser"
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 #, fuzzy
 msgid "PDFs, images and text appear here. Other formats can be downloaded."
 msgstr ""
 "Les PDF, images et fichiers texte s’affichent ici. Les autres formats "
 "peuvent être téléchargés."
 
-#: ui/views/files-view.slint:475
+#: ui/views/files-view.slint:512
 #, fuzzy
 msgid "Images and text appear here. Other formats can be downloaded."
 msgstr ""
 "Les images et fichiers texte s’affichent ici. Les autres formats peuvent "
 "être téléchargés."
 
-#: ui/views/files-view.slint:478
+#: ui/views/files-view.slint:515
 #, fuzzy
 msgid "Clear displayed activity"
 msgstr "Effacer l’activité affichée"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "Share file or folder"
 msgstr "Partager un fichier ou un dossier"
 
-#: ui/views/files-view.slint:541 ui/views/files-view.slint:555
+#: ui/views/files-view.slint:578 ui/views/files-view.slint:592
 #, fuzzy
 msgid "Rename"
 msgstr "Renommer"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "Move to folder"
 msgstr "Déplacer vers un dossier"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "Copy to folder"
 msgstr "Copier dans un dossier"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "File properties"
 msgstr "Propriétés du fichier"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "Lock file or folder"
 msgstr "Verrouiller le fichier ou le dossier"
 
-#: ui/views/files-view.slint:541
+#: ui/views/files-view.slint:578
 #, fuzzy
 msgid "Manage file"
 msgstr "Gérer le fichier"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 #, fuzzy
 msgid "Files and folders"
 msgstr "Fichiers et dossiers"
 
-#: ui/views/files-view.slint:544
+#: ui/views/files-view.slint:581
 #, fuzzy
 msgid "Folders"
 msgstr "Dossiers"
 
-#: ui/views/files-view.slint:545 ui/views/files-view.slint:566
+#: ui/views/files-view.slint:582 ui/views/files-view.slint:603
 #, fuzzy
 msgid "Name"
 msgstr "Nom"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 #, fuzzy
 msgid "Size"
 msgstr "Taille"
 
-#: ui/views/files-view.slint:545
+#: ui/views/files-view.slint:582
 #, fuzzy
 msgid "Kind"
 msgstr "Type"
 
-#: ui/views/files-view.slint:546
+#: ui/views/files-view.slint:583
 #, fuzzy
 msgid "Descending order"
 msgstr "Ordre décroissant"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 #, fuzzy
 msgid "Minimum bytes"
 msgstr "Taille minimale en octets"
 
-#: ui/views/files-view.slint:547
+#: ui/views/files-view.slint:584
 #, fuzzy
 msgid "Minimum bytes (optional)"
 msgstr "Taille minimale en octets (facultatif)"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 #, fuzzy
 msgid "Maximum bytes"
 msgstr "Taille maximale en octets"
 
-#: ui/views/files-view.slint:548
+#: ui/views/files-view.slint:585
 #, fuzzy
 msgid "Maximum bytes (optional)"
 msgstr "Taille maximale en octets (facultatif)"
 
-#: ui/views/files-view.slint:553
+#: ui/views/files-view.slint:590
 #, fuzzy
 msgid "Keep offline"
 msgstr "Conserver hors ligne"
 
-#: ui/views/files-view.slint:554
+#: ui/views/files-view.slint:591
 #, fuzzy
 msgid "Release offline copy"
 msgstr "Supprimer la copie hors ligne"
 
-#: ui/views/files-view.slint:556
+#: ui/views/files-view.slint:593
 #, fuzzy
 msgid "Move…"
 msgstr "Déplacer…"
 
-#: ui/views/files-view.slint:557
+#: ui/views/files-view.slint:594
 #, fuzzy
 msgid "Copy…"
 msgstr "Copier…"
 
-#: ui/views/files-view.slint:558
+#: ui/views/files-view.slint:595
 #, fuzzy
 msgid "Replace content…"
 msgstr "Remplacer le contenu…"
 
-#: ui/views/files-view.slint:559
+#: ui/views/files-view.slint:596
 #, fuzzy
 msgid "Properties…"
 msgstr "Propriétés…"
 
-#: ui/views/files-view.slint:560
+#: ui/views/files-view.slint:597
 #, fuzzy
 msgid "Sharing…"
 msgstr "Partage…"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 #, fuzzy
 msgid "Release lock"
 msgstr "Libérer le verrou"
 
-#: ui/views/files-view.slint:561
+#: ui/views/files-view.slint:598
 #, fuzzy
 msgid "Lock…"
 msgstr "Verrouiller…"
 
-#: ui/views/files-view.slint:562
+#: ui/views/files-view.slint:599
 #, fuzzy
 msgid "Renew lock for 5 minutes"
 msgstr "Renouveler le verrou pour 5 minutes"
 
-#: ui/views/files-view.slint:565
+#: ui/views/files-view.slint:602
 #, fuzzy
 msgid ""
 "This permanently deletes “{}” and all of its contents from storage. This "
@@ -7488,7 +7492,7 @@ msgstr ""
 "« {} » et tout son contenu seront définitivement supprimés du stockage. "
 "Cette action est irréversible."
 
-#: ui/views/files-view.slint:570
+#: ui/views/files-view.slint:607
 #, fuzzy
 msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
@@ -7497,182 +7501,182 @@ msgstr ""
 "Chemin du dossier de destination (par exemple /Documents). Laisser vide pour "
 "le dossier actuel ou la racine d’un autre espace de stockage."
 
-#: ui/views/files-view.slint:571
+#: ui/views/files-view.slint:608
 #, fuzzy
 msgid "Destination folder"
 msgstr "Dossier de destination"
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 #, fuzzy
 msgid "Enter the recipient’s principal URL on this server."
 msgstr "Saisissez l’URL du principal du destinataire sur ce serveur."
 
-#: ui/views/files-view.slint:575
+#: ui/views/files-view.slint:612
 #, fuzzy
 msgid "Enter the recipient’s email or principal ID on this server."
 msgstr ""
 "Saisissez l’adresse e-mail ou l’identifiant du principal du destinataire sur "
 "ce serveur."
 
-#: ui/views/files-view.slint:576
+#: ui/views/files-view.slint:613
 #, fuzzy
 msgid "Recipient"
 msgstr "Destinataire"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 #, fuzzy
 msgid "Allow editing"
 msgstr "Autoriser la modification"
 
-#: ui/views/files-view.slint:577
+#: ui/views/files-view.slint:614
 #, fuzzy
 msgid "Modify content"
 msgstr "Modifier le contenu"
 
-#: ui/views/files-view.slint:580
+#: ui/views/files-view.slint:617
 #, fuzzy
 msgid "Modify properties"
 msgstr "Modifier les propriétés"
 
-#: ui/views/files-view.slint:581
+#: ui/views/files-view.slint:618
 #, fuzzy
 msgid "Add children"
 msgstr "Ajouter des fichiers et sous-dossiers"
 
-#: ui/views/files-view.slint:582
+#: ui/views/files-view.slint:619
 #, fuzzy
 msgid "Rename and move"
 msgstr "Renommer et déplacer"
 
-#: ui/views/files-view.slint:584
+#: ui/views/files-view.slint:621
 #, fuzzy
 msgid "Manage sharing"
 msgstr "Gérer le partage"
 
-#: ui/views/files-view.slint:586
+#: ui/views/files-view.slint:623
 #, fuzzy
 msgid "Remove recipient’s access"
 msgstr "Révoquer l’accès du destinataire"
 
-#: ui/views/files-view.slint:590
+#: ui/views/files-view.slint:627
 #, fuzzy
 msgid "Shared lock"
 msgstr "Verrou partagé"
 
-#: ui/views/files-view.slint:591
+#: ui/views/files-view.slint:628
 #, fuzzy
 msgid "Include folder contents"
 msgstr "Inclure le contenu des dossiers"
 
-#: ui/views/files-view.slint:592
+#: ui/views/files-view.slint:629
 #, fuzzy
 msgid "Locks expire after 5 minutes unless renewed."
 msgstr ""
 "Les verrous expirent au bout de 5 minutes s’ils ne sont pas renouvelés."
 
-#: ui/views/files-view.slint:596
+#: ui/views/files-view.slint:633
 #, fuzzy
 msgid "If a name already exists"
 msgstr "Si un nom existe déjà"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 #, fuzzy
 msgid "Stop and report conflict"
 msgstr "Arrêter et signaler le conflit"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 #, fuzzy
 msgid "Keep both with a new name"
 msgstr "Conserver les deux avec un nouveau nom"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 #, fuzzy
 msgid "Replace existing"
 msgstr "Remplacer l’existant"
 
-#: ui/views/files-view.slint:597
+#: ui/views/files-view.slint:634
 #, fuzzy
 msgid "Keep newest"
 msgstr "Conserver le plus récent"
 
-#: ui/views/files-view.slint:598
+#: ui/views/files-view.slint:635
 #, fuzzy
 msgid "This can replace existing content at the destination."
 msgstr "Cela peut remplacer le contenu existant à la destination."
 
-#: ui/views/files-view.slint:599
+#: ui/views/files-view.slint:636
 #, fuzzy
 msgid "Compare names without case"
 msgstr "Comparer les noms sans tenir compte de la casse"
 
-#: ui/views/files-view.slint:605
+#: ui/views/files-view.slint:642
 #, fuzzy
 msgid "Property namespace"
 msgstr "Espace de noms de la propriété"
 
-#: ui/views/files-view.slint:606
+#: ui/views/files-view.slint:643
 #, fuzzy
 msgid "Property name"
 msgstr "Nom de la propriété"
 
-#: ui/views/files-view.slint:607
+#: ui/views/files-view.slint:644
 #, fuzzy
 msgid "Value"
 msgstr "Valeur"
 
-#: ui/views/files-view.slint:608
+#: ui/views/files-view.slint:645
 #, fuzzy
 msgid "Remove property"
 msgstr "Supprimer la propriété"
 
-#: ui/views/files-view.slint:612
+#: ui/views/files-view.slint:649
 #, fuzzy
 msgid "Dates use UTC, for example 2026-09-09T12:00:00Z."
 msgstr "Les dates utilisent UTC, par exemple 2026-09-09T12:00:00Z."
 
-#: ui/views/files-view.slint:613
+#: ui/views/files-view.slint:650
 #, fuzzy
 msgid "Created"
 msgstr "Créé"
 
-#: ui/views/files-view.slint:614
+#: ui/views/files-view.slint:651
 #, fuzzy
 msgid "Modified"
 msgstr "Modifié"
 
-#: ui/views/files-view.slint:615
+#: ui/views/files-view.slint:652
 #, fuzzy
 msgid "Accessed"
 msgstr "Consulté"
 
-#: ui/views/files-view.slint:616
+#: ui/views/files-view.slint:653
 #, fuzzy
 msgid "Executable"
 msgstr "Exécutable"
 
-#: ui/views/files-view.slint:617
+#: ui/views/files-view.slint:654
 #, fuzzy
 msgid "Subscription changes are unavailable on this server version."
 msgstr ""
 "Les modifications d’abonnement ne sont pas disponibles sur cette version du "
 "serveur."
 
-#: ui/views/files-view.slint:669
+#: ui/views/files-view.slint:706
 #, fuzzy
 msgid "Uses the selected account’s saved credentials."
 msgstr "Utilise les identifiants enregistrés du compte sélectionné."
 
-#: ui/views/files-view.slint:673
+#: ui/views/files-view.slint:710
 #, fuzzy
 msgid "Storage URL"
 msgstr "URL du stockage"
 
-#: ui/views/files-view.slint:687
+#: ui/views/files-view.slint:724
 #, fuzzy
 msgid "Transfers and operations"
 msgstr "Transferts et opérations"
 
-#: ui/views/files-view.slint:688
+#: ui/views/files-view.slint:725
 #, fuzzy
 msgid ""
 "Interrupted changes need review before retrying. Refresh storage and inspect "
@@ -7681,12 +7685,12 @@ msgstr ""
 "Les modifications interrompues doivent être examinées avant une nouvelle "
 "tentative. Actualisez le stockage et vérifiez d’abord la destination."
 
-#: ui/views/files-view.slint:695
+#: ui/views/files-view.slint:732
 #, fuzzy
 msgid "Resume"
 msgstr "Reprendre"
 
-#: ui/views/files-view.slint:697
+#: ui/views/files-view.slint:734
 #, fuzzy
 msgid "Reviewed as completed"
 msgstr "Examiné et marqué comme terminé"
@@ -8207,12 +8211,12 @@ msgstr "Gris ardoise"
 msgid "Use across all accounts (local only)"
 msgstr "Utiliser pour tous les comptes (local uniquement)"
 
-#: ui/views/mail-view.slint:391
+#: ui/views/mail-view.slint:403
 #, fuzzy
 msgid "Message list width"
 msgstr "Largeur de la liste des messages"
 
-#: ui/views/mail-view.slint:724
+#: ui/views/mail-view.slint:746
 #, fuzzy
 msgid "Close folders"
 msgstr "Fermer le panneau des dossiers"
