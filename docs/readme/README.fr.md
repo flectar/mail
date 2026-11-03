@@ -10,7 +10,7 @@
   </p>
   <div align="center">
     <h3>L’e-mail retrouve sa rapidité</h3>
-    <p>Conçu de zéro pour la vitesse. Flectar Mail offre des performances natives, un démarrage instantané et une consommation de RAM à partir de seulement 80 Mo.</p>
+    <p>Conçu de zéro pour la vitesse. Flectar Mail offre des performances natives, un démarrage instantané et une consommation d’environ 20 Mo de RAM au repos.</p>
   </div>
   <p>
     <a href="https://flectar.com">Site web</a> ·
@@ -39,85 +39,54 @@ Flectar Mail est une application native et légère pour vos e-mails, calendrier
 
 ## ❓ Pourquoi Flectar Mail ?
 
-- **Rapide dès le premier clic.** Une interface native et un accès aux données privilégiant le stockage local vous conduisent à votre boîte de réception sans attendre le démarrage d’un environnement de navigateur.
-- **À partir de seulement 80 Mo de RAM.** Flectar Mail est délibérément conçu pour limiter la consommation de mémoire, tout en proposant une boîte de réception riche en fonctionnalités.
-- **Tout au même endroit.** Passez de la messagerie aux calendriers et aux contacts sans devoir assembler plusieurs applications.
-- **Pensé pour fonctionner hors ligne.** Votre messagerie et votre calendrier sont stockés localement : vos données synchronisées restent donc utiles sans connexion.
-- **Compatible avec vos comptes.** Connectez Gmail, Outlook et Microsoft 365, ou des services reposant sur IMAP, POP3, SMTP, JMAP, CalDAV et CardDAV.
-- **La confidentialité par défaut.** Les images distantes sont bloquées jusqu’à votre autorisation, ce qui aide à empêcher les pixels de suivi de signaler quand vous lisez un message.
-- **La sécurité dès l’architecture.** Le contenu des e-mails n’est jamais ouvert dans une WebView. Flectar Mail affiche le HTML et le CSS au moyen de son propre système natif en Rust, n’exécute pas les scripts des messages et bloque les images distantes par défaut. Cela évite par conception la surface d’attaque d’un navigateur intégré.
-- **Un moteur de rendu expérimental en Rust.** Construire un moteur d’affichage des e-mails sans navigateur est un terrain nouveau. Des problèmes de rendu sont à prévoir, notamment pour les messages complexes, à mesure que la compatibilité s’améliore.
-- **Pour tous les écrans.** Les interfaces de bureau, complète et minimaliste, partagent la même expérience que l’interface compacte adaptée au tactile.
-- **Natif et libre.** Créé de zéro en Rust. Il ne s’agit pas d’un navigateur dans une fenêtre ; l’application est distribuée sous AGPLv3.
+| Avantage | Détails |
+| --- | --- |
+| **Rapide dès le premier clic** | Une interface native et un accès aux données privilégiant le stockage local vous conduisent à votre boîte de réception sans attendre le démarrage d’un environnement de navigateur. |
+| **Environ 20 Mo de RAM au repos** | Un douzième de la mémoire privée de Thunderbird, avec la même boîte aux lettres. Voir [Performances](#-performances). |
+| **Tout au même endroit** | Passez de la messagerie aux calendriers et aux contacts sans devoir assembler plusieurs applications. |
+| **Pensé pour fonctionner hors ligne** | Votre messagerie et votre calendrier sont stockés localement : vos données synchronisées restent donc utiles sans connexion. |
+| **Compatible avec vos comptes** | Gmail, Outlook et Microsoft 365, ou des services reposant sur IMAP, POP3, SMTP, JMAP, CalDAV et CardDAV. |
+| **La confidentialité par défaut** | Les images distantes sont bloquées jusqu’à votre autorisation, pour que les pixels de suivi ne puissent pas signaler quand vous lisez un message. |
+| **La sécurité dès l’architecture** | Les e-mails ne sont jamais ouverts dans une WebView. Un système natif en Rust affiche leur HTML et leur CSS sans exécuter les scripts qu’ils contiennent, ce qui évite la surface d’attaque d’un navigateur intégré. |
+| **Un moteur de rendu expérimental en Rust** | Afficher des e-mails sans moteur de navigateur est un terrain nouveau. Les messages complexes peuvent encore s’afficher incorrectement, le temps que la compatibilité s’améliore. |
+| **Pour tous les écrans** | Les interfaces de bureau, complète et minimaliste, partagent la même expérience que l’interface compacte adaptée au tactile. |
+| **Natif et libre** | Créé de zéro en Rust. Il ne s’agit pas d’un navigateur dans une fenêtre ; l’application est distribuée sous AGPLv3. |
 
-## 📁 Fichiers et pièces jointes
+## ⚡ Performances
 
-Parcourez le stockage JMAP/WebDAV, recherchez des pièces jointes, gardez des fichiers hors ligne et prévisualisez des PDF, des images et du texte.
+| Au repos, même boîte aux lettres | Flectar Mail | Thunderbird 159 |
+| --- | ---: | ---: |
+| Mémoire privée | **~20 Mo** | ~250 Mo |
+| Y compris le code et les bibliothèques (PSS) | **~85 Mo** | ~435 Mo |
+| Moteur de navigateur | Aucun | Gecko |
 
-## ✍🏻 Signatures de compte et OpenPGP
+Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
 
-Paramètres → Comptes → Signatures et OpenPGP permet de nommer vos signatures, de choisir des valeurs par défaut distinctes pour les nouveaux messages et les réponses, et de sélectionner une signature lors de la rédaction. La signature et le chiffrement OpenPGP/MIME sur ordinateur utilisent GnuPG 2.x installé, avec pinentry pour les phrases secrètes des clés privées. Le chiffrement obligatoire bloque l’envoi si les clés des destinataires sont absentes ou invalides ; les brouillons protégés restent locaux jusqu’à l’envoi.
+### Comparatif
 
-S/MIME et OpenPGP sur mobile ne sont pas encore pris en charge.
+| Client de messagerie | Interface | Rendu des e-mails | Plateformes |
+| --- | --- | --- | --- |
+| **Flectar Mail** | Application native en Rust | Blitz, un moteur HTML/CSS en Rust ; aucune WebView | Windows, macOS, Linux, Android ; iOS bientôt disponible |
+| Thunderbird | Application de bureau basée sur Gecko | Gecko | Windows, macOS, Linux, Android |
+| Outlook pour Windows | Application Windows à interface web | Microsoft Edge WebView2 | Windows |
+| Spark | Application Electron | Chromium | macOS, Windows, iOS, Android |
+| Aerion | Application Go avec une interface web Wails | WebView du système | Linux, macOS, Windows |
+| Gmail dans un onglet de navigateur | Application web | Chrome ou un autre navigateur | Web |
 
-## 🧪 Rendu HTML expérimental
+## ✨ Fonctionnalités
 
-> [!WARNING]
-> Le rendu des e-mails HTML est actuellement la partie la plus expérimentale de Flectar Mail. Certains messages, notamment ceux dont le balisage et le CSS sont complexes ou inhabituels, peuvent encore s’afficher incorrectement.
-
-Pour conserver un client entièrement natif et une consommation de mémoire d’environ 80 Mo, Flectar Mail affiche le HTML des e-mails avec [Blitz](https://github.com/DioxusLabs/blitz), un moteur HTML/CSS en Rust de l’équipe Dioxus, plutôt qu’en intégrant un navigateur ou une WebView.
-
-Les versions de bureau proposent **CPU — Low Memory** et **GPU — WGPU** dans Paramètres → Général → Moteur de rendu. Le CPU est sélectionné au départ et n’initialise pas WGPU. L’option GPU utilise Slint et Vello sur un périphérique WGPU 30 partagé ; le changement s’applique après le redémarrage de l’application. Si le démarrage avec le GPU échoue, l’application revient automatiquement au CPU.
-
-À notre connaissance, Flectar Mail est l’un des premiers projets à utiliser Blitz pour du HTML provenant d’e-mails réels de toute origine. Le balisage des messages comporte beaucoup de HTML et de CSS inhabituels, ce qui met le moteur à l’épreuve. Nous maintenons actuellement plusieurs correctifs pour Blitz et espérons en intégrer autant que possible au projet d’origine au fil du temps.
-
-Si un e-mail s’affiche incorrectement, [signalez-le](https://github.com/flectar/mail/issues). Cette approche reste expérimentale, mais c’est aussi l’une des principales raisons pour lesquelles Flectar Mail peut être si léger par rapport aux clients basés sur une WebView et créés avec des outils comme Tauri ou Wails.
-
-## 🎨 À votre image
-
-Choisissez l’espace de travail adapté à votre façon de gérer vos e-mails. Conservez la disposition détaillée à trois volets, passez à une vue minimaliste, choisissez un thème clair ou sombre, sélectionnez une palette intégrée ou créez la vôtre, et affichez ou masquez les avatars des expéditeurs. Vous pouvez aussi changer la couleur de l’icône de l’application : dans la barre des tâches ou le Dock, dans la zone de notification, dans le lanceur d’applications Linux et sur l’écran d’accueil d’Android et d’iOS.
-
-L’apparence des messages peut suivre le thème de l’application ou rester claire ou sombre indépendamment. La palette choisie s’applique au HTML, au texte brut et au mode lecture. Pour afficher temporairement les couleurs d’origine de l’expéditeur, utilisez l’icône de contraste entre la recherche et le mode lecture dans la barre d’outils du message sur ordinateur, ou choisissez **Afficher les couleurs d’origine** dans le menu à trois points du message, quelle que soit la taille de l’écran.
-
-L’espace complet affiche simultanément les dossiers, la liste des messages et l’e-mail sélectionné. La disposition minimaliste réduit les distractions visuelles et donne davantage de place à chaque partie de la boîte de réception quand vous en avez besoin.
-
-### 👥 Profils et couleurs des comptes
-
-Regroupez les comptes liés dans des profils nommés, comme Travail ou Personnel, et attribuez une couleur à chaque profil. Créez un profil depuis le menu au début de la barre d’onglets ou dans Paramètres → Comptes → Profils, puis cochez les comptes qui en font partie. Choisir un profil limite la vue de messagerie à ses comptes : la boîte de réception unifiée, la recherche, les compteurs et la barre latérale n’affichent que leurs messages, tandis que vos onglets restent inchangés. **Tous les comptes** réaffiche l’ensemble.
-
-Vous pouvez aussi remplacer la couleur d’un compte particulier et afficher la couleur effective sur le bord gauche de chaque message. Ces repères facilitent la distinction des comptes dans la boîte unifiée ; l’exemple ci-dessous utilise le violet pour Travail et l’orange pour Assistance.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-profiles-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-profiles-light.png">
-  <img src="../../resources/screenshots/desktop-profiles-light.png" alt="Boîte de réception unifiée de Flectar Mail avec des repères de profil violets et orange">
-</picture>
-
-### 🧵 Fils de discussion
-
-Les réponses restent regroupées par ordre chronologique, avec le message actif déplié dans le volet de lecture. Pour afficher, ouvrir et traiter chaque message séparément, désactivez **Vue conversation** dans Paramètres → Général.
-
-Utilisez **Haut/Bas** pour parcourir les messages, **Début/Fin** pour atteindre le premier ou le dernier message chargé, et **Page précédente/Page suivante** pour avancer d’une page. **Entrée** ouvre le message courant et place le focus sur son contenu ; **Espace** le coche ou le décoche pour les actions groupées. **Tab/Maj+Tab** passent d’un contrôle à l’autre. Dans l’espace complet, **F6** déplace le focus entre la liste et le lecteur. Dans la disposition minimaliste, les flèches mettent les messages en surbrillance et **Entrée** les ouvre ; **Échap** ou **F6** revient à la liste.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-thread-light.png">
-  <img src="../../resources/screenshots/desktop-thread-light.png" alt="Conversation Flectar Mail avec les messages reçus et les réponses">
-</picture>
-
-### 🗂️ Onglets
-
-Gardez plusieurs espaces ouverts avec des onglets comme dans un navigateur. Chaque onglet mémorise son emplacement : une boîte, une recherche ou une conversation ouverte, le calendrier, les contacts, les fichiers ou les paramètres, ainsi que la position de défilement et le message en cours de lecture. Un clic du milieu ou Ctrl/⌘+clic ouvre un message dans un onglet en arrière-plan (ajoutez Maj pour y accéder), ou choisissez **Ouvrir dans un nouvel onglet** dans son menu. Faites glisser les onglets pour les réorganiser, fermez-les avec le bouton du milieu et utilisez le clic droit pour fermer les autres ou ceux à droite. Au prochain lancement de Flectar Mail, reprenez là où vous en étiez.
-
-**Ctrl/⌘+T** ouvre un onglet, **Ctrl/⌘+W** ferme l’onglet courant et **Ctrl/⌘+Maj+T** rouvre le dernier onglet fermé. **Ctrl+Tab** et **Ctrl+Maj+Tab** parcourent les onglets, **Ctrl/⌘+1–8** accèdent à un onglet précis et **Ctrl/⌘+9** au dernier.
-
-Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’outils indique combien d’onglets sont ouverts et les présente sous forme de cartes. Touchez une carte pour y passer, touchez × ou faites-la glisser sur le côté pour la fermer, et utilisez **+** pour ouvrir un nouvel onglet. Sélectionnez des messages et choisissez **Ouvrir dans de nouveaux onglets** dans le menu de la sélection pour les ouvrir en arrière-plan. Si vous préférez travailler sans onglets, désactivez **Onglets** dans Paramètres → Général.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">
-  <img src="../../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail avec des onglets pour plusieurs conversations, le calendrier, les contacts et les fichiers">
-</picture>
+| Fonctionnalité | Ce qu’elle fait |
+| --- | --- |
+| [Fils de discussion](../features.md#conversation-threads) | Regroupe les réponses par ordre chronologique, avec une navigation complète au clavier. Vous pouvez désactiver ce regroupement. |
+| [Onglets](../features.md#tabs) | Des onglets comme dans un navigateur, qui retiennent où vous en étiez, avec des raccourcis sur ordinateur et un sélecteur d’onglets sur mobile. |
+| [Profils et couleurs des comptes](../features.md#profiles-and-account-colors) | Regroupe les comptes dans des profils, comme Travail ou Personnel, et attribue un code couleur à chaque message. |
+| [Apparence](../features.md#appearance) | Disposition complète ou minimaliste, thème clair ou sombre, palettes de couleurs, avatars des expéditeurs et couleurs de l’icône de l’application. |
+| [Fenêtre sans bordure](../features.md#frameless-window) | Des contrôles de fenêtre dans la barre d’outils, qui conservent le comportement propre à chaque plateforme. |
+| [Calendrier, contacts et fichiers](../features.md#calendar-contacts-and-files) | Synchronisation CalDAV et CardDAV, fichiers JMAP et WebDAV, recherche dans les pièces jointes, fichiers hors ligne et aperçus. |
+| [Signatures et OpenPGP](../features.md#signatures-and-openpgp) | Signatures nommées, ainsi que signature et chiffrement OpenPGP/MIME sur ordinateur avec GnuPG. |
+| [Stockage et sauvegardes](../features.md#storage-and-backups) | Espace utilisé par type de données, instantanés des bases de données, sauvegardes des comptes et règles de suppression sur le serveur POP3. |
+| [Importation des comptes et des e-mails](../features.md#importing-accounts-and-mail) | Thunderbird, K-9 Mail, mbox, `.eml`, maildir, Apple Mail et archives ZIP. |
+| [Rendu HTML](../features.md#html-rendering) | Affiche le HTML des e-mails en Rust avec Blitz, sur le CPU ou le GPU. |
 
 ### Espaces de travail complet et minimaliste
 
@@ -142,6 +111,43 @@ Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’ou
           <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-minimal-dark.png">
           <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-minimal-light.png">
           <img src="../../resources/screenshots/desktop-minimal-light.png" alt="Espace de travail minimaliste de Flectar Mail sur ordinateur" width="100%">
+        </picture>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+### Onglets, conversations et profils
+
+<table>
+  <thead>
+    <tr>
+      <th width="33.33%">Onglets</th>
+      <th width="33.33%">Conversation</th>
+      <th width="33.33%">Couleurs des profils</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-tabs-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-tabs-light.png">
+          <img src="../../resources/screenshots/desktop-tabs-light.png" alt="Flectar Mail avec des onglets pour plusieurs conversations, le calendrier, les contacts et les fichiers" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-thread-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-thread-light.png">
+          <img src="../../resources/screenshots/desktop-thread-light.png" alt="Conversation Flectar Mail avec les messages reçus et les réponses" width="100%">
+        </picture>
+      </td>
+      <td width="33.33%">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-profiles-dark.png">
+          <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-profiles-light.png">
+          <img src="../../resources/screenshots/desktop-profiles-light.png" alt="Boîte de réception unifiée de Flectar Mail avec des repères de profil violets et orange" width="100%">
         </picture>
       </td>
     </tr>
@@ -193,9 +199,7 @@ Sur mobile et dans les fenêtres étroites, le bouton au bout de la barre d’ou
   </tbody>
 </table>
 
-### 🪟 Fenêtre sans bordure
-
-Par défaut, Flectar Mail remplace la barre de titre du système par des contrôles dans la barre d’outils ; désactivez **Fenêtre sans bordure** dans Paramètres → Général → Interface pour retrouver la barre de titre du système. Chaque plateforme conserve son comportement : macOS garde ses boutons colorés natifs, Windows conserve Snap Layouts et le menu système, et Linux suit l’ordre des boutons et les actions de la barre de titre configurés dans GNOME ou KDE.
+### Fenêtre sans bordure
 
 <table>
   <tbody>
@@ -242,7 +246,7 @@ Par défaut, Flectar Mail remplace la barre de titre du système par des contrô
   </tbody>
 </table>
 
-### 📅 Calendrier, contacts et fichiers
+### Calendrier, contacts et fichiers
 
 <table>
   <thead>
@@ -279,109 +283,47 @@ Par défaut, Flectar Mail remplace la barre de titre du système par des contrô
   </tbody>
 </table>
 
-### 💾 Stockage et sauvegardes
-
-Paramètres → Stockage indique l’espace utilisé sur l’appareil par les e-mails, pièces jointes, fichiers hors ligne et bases de données. Depuis cette page, vous pouvez exporter des instantanés vérifiés des bases ou transférer les réglages des comptes connectés et vos préférences au moyen d’une sauvegarde. Les mots de passe et jetons OAuth restent dans le trousseau du système : un appareil restauré vous demande donc de vous reconnecter.
-
-Les comptes POP3 téléchargent les e-mails sur cet appareil et les laissent sur le serveur sauf choix contraire : chaque compte peut supprimer les messages du serveur après 7, 14 ou 30 jours, lorsque vous les supprimez ici ou dès leur téléchargement, mais jamais avant leur stockage sur l’appareil. Leurs dossiers n’existent que sur cet appareil, donc les instantanés incluent ces messages. Lors de la suppression d’un compte POP3 ou de toutes les données, l’application propose d’abord de les exporter en fichiers mbox, un par dossier, importables dans d’autres logiciels de messagerie.
-
-La même fonction importe les comptes de Thunderbird (dossier de profil, archive Outils › Exporter ou `prefs.js`), de Thunderbird pour Android ou de K-9 Mail (exports de paramètres `.k9s`). Vous vérifiez chaque compte avant tout ajout : les réglages que Flectar Mail ne peut pas reproduire, comme un serveur Exchange, sont expliqués plutôt que modifiés sans avertissement, et les comptes POP3 conservent leur règle de suppression des messages du serveur. Les comptes existants ne sont jamais modifiés et les mots de passe ne sont jamais importés.
-
-Le courrier enregistré s’importe de la même façon : les Dossiers locaux de Thunderbird et les messages téléchargés par ses comptes POP3, les fichiers mbox comme un export Google Takeout ou ceux de Flectar Mail, les messages `.eml`, les dossiers maildir, les boîtes aux lettres d’Apple Mail et les archives ZIP qui les contiennent. Vous choisissez les fichiers, plusieurs à la fois si vous le souhaitez, puis les dossiers (la Corbeille et les Indésirables sont exclus sauf si vous les cochez), et l’arborescence ainsi que les états lu et suivi sont conservés. Les messages déjà présents sont ignorés : une importation interrompue peut simplement être relancée, et une longue importation peut se poursuivre en arrière-plan. Le courrier qui n’appartient à aucun compte va dans **Sur cet appareil** : des dossiers qui n’existent qu’ici, que Paramètres → Stockage permet d’exporter ou de supprimer. Il peut aussi rejoindre les dossiers d’un compte POP3, ou être envoyé sur le serveur d’un compte IMAP, JMAP ou Gmail, dans un dossier à part.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../resources/screenshots/desktop-storage-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="../../resources/screenshots/desktop-storage-light.png">
-  <img src="../../resources/screenshots/desktop-storage-light.png" alt="Paramètres de stockage de Flectar Mail avec l’utilisation locale, le courrier sur cet appareil, les instantanés de bases de données et les sauvegardes des comptes">
-</picture>
-
-### 📱 Pour les petits écrans
-
-L’interface compacte garde les actions importantes à portée de main tout en laissant tout l’écran aux messages, événements et contacts quand ils en ont besoin.
+### Pour les petits écrans
 
 | Clair | Sombre |
 | --- | --- |
 | ![Boîte de réception mobile de Flectar Mail en mode clair](../../resources/screenshots/mobile-light.png) | ![Boîte de réception mobile de Flectar Mail en mode sombre](../../resources/screenshots/mobile-dark.png) |
 
+## 🧪 Rendu HTML expérimental
+
+> [!WARNING]
+> Le rendu des e-mails HTML est actuellement la partie la plus expérimentale de Flectar Mail. Certains messages, notamment ceux dont le balisage et le CSS sont complexes ou inhabituels, peuvent encore s’afficher incorrectement.
+
+Flectar Mail affiche les e-mails avec [Blitz](https://github.com/DioxusLabs/blitz), un moteur HTML/CSS en Rust de l’équipe Dioxus, plutôt qu’en intégrant un navigateur ou une WebView. Si un message s’affiche incorrectement, [signalez-le](https://github.com/flectar/mail/issues). En savoir plus sur [le moteur de rendu et les options CPU et GPU](../features.md#html-rendering).
+
 ## 📥 Obtenir Flectar Mail
 
-Flectar Mail est en cours de développement et n’est pas encore stable.
+Flectar Mail est en cours de développement et n’est pas encore stable. Les versions de test sont disponibles sur [GitHub Releases](https://github.com/flectar/mail/releases) avec la mention **Pre-release**.
 
 > [!WARNING]
 > **La vérification OAuth de Google exige une évaluation annuelle de sécurité CASA.** Flectar est un projet libre communautaire ; cette évaluation dépend donc du soutien des sponsors. Tant que la vérification requise n’est pas financée et terminée, une version stable avec OAuth Gmail configuré par défaut ne sera pas possible. Pour aider à proposer la connexion Gmail intégrée, [sponsorisez Flectar](https://github.com/sponsors/flectar).
->
-> La vérification OAuth de Google et Microsoft est toujours en cours. Les préversions antérieures sur GitHub s’adressent aux personnes qui testent l’application avec leurs propres inscriptions OAuth ou des comptes IMAP, POP3 ou JMAP.
 
-Dans les compilations sans clés d’application OAuth, la connexion Gmail et Outlook reste désactivée. Utilisez la roue dentée **Paramètres de connexion** de l’écran d’accueil pour enregistrer votre propre inscription d’application Google ou Microsoft, ou connectez un compte IMAP, POP3 ou JMAP. Les clés personnalisées sont partagées avec les paramètres et prennent le pas sur les clés intégrées ; effacer un ID client personnalisé rétablit les valeurs par défaut lorsqu’elles existent. Chaque fournisseur s’active séparément après l’enregistrement de sa configuration.
+| Plateforme | Téléchargement | Remarques |
+| --- | --- | --- |
+| Linux x64 | AppImage, `.deb` pour Debian/Ubuntu, `.rpm` pour Fedora 43/44 ou paquet Flatpak | Nécessite un trousseau compatible Secret Service. Le Flatpak est une version de test à installer manuellement, pas encore disponible sur Flathub. |
+| Windows x64 | Installateur `.exe` ou ZIP portable | Préversions non signées |
+| macOS 14+ (Apple silicon ou Intel) | DMG ou ZIP de l’application | Préversions avec signature ad hoc, non notariées |
+| Android 8.0+ (arm64) | APK signé | Préversions et versions stables partagent une même identité d’application. |
+| HarmonyOS et OpenHarmony | [Portage communautaire](../../platform/ohos/README.md) par [springmin](https://github.com/springmin) | Ne fait pas partie des publications GitHub ; à compiler à partir des sources. |
 
-Lorsque des versions de test sont publiées, téléchargez-les depuis [GitHub Releases](https://github.com/flectar/mail/releases) et repérez la mention **Pre-release** :
+Dans les compilations sans clés d’application OAuth, la connexion Gmail et Outlook reste désactivée. Utilisez la roue dentée **Paramètres de connexion** de l’écran d’accueil pour ajouter votre propre inscription d’application Google ou Microsoft, ou connectez un compte IMAP, POP3 ou JMAP.
 
-- **Linux x64 :** AppImage, `.deb` pour Debian/Ubuntu, `.rpm` pour Fedora 43/44 ou paquet Flatpak de test à installer manuellement
-- **Windows x64 :** Installateur `.exe` ou ZIP portable
-- **macOS Apple silicon ou Intel (macOS 14+) :** DMG ou ZIP de l’application
-- **Android arm64 (Android 8.0+) :** APK signé ; préversions et versions stables partagent une même identité d’application
+Le [guide d’installation](../install.md) couvre les commandes d’installation, le trousseau et le portail du bureau sur Linux, les remarques sur Flatpak et RPM, la vérification des téléchargements, la signature Android et la compilation à partir des sources avec `cargo run --bin flectar-mail`.
 
-Les préversions Windows ne sont pas signées ; celles de macOS portent une signature ad hoc et ne sont pas notariées. Les avertissements de sécurité du système sont donc attendus. Installez les mises à jour manuellement.
+## 🤝 Participer
 
-La préversion Flatpak est fournie comme paquet de test indépendant. Elle n’est pas encore disponible sur Flathub et ne reçoit donc pas ses mises à jour automatiques. L’option de fermeture dans la zone de notification est désactivée tant que son composant ne peut pas utiliser un nom D-Bus compatible avec le bac à sable. Le démarrage automatique à l’ouverture de session passe par le portail Background du bureau et ouvre la fenêtre, puisqu’il n’y a pas de zone de notification où démarrer. L’icône de l’application y reste orange, car le bac à sable ne peut pas modifier l’icône du lanceur sur le système hôte.
-
-Installez le paquet Linux téléchargé avec `sudo dnf install ./flectar-mail-<version>-linux-x64.rpm` ou `flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak`. Lancez la version Flatpak avec `flatpak run com.flectar.mail`.
-
-Le RPM cible Fedora 43 et 44 sur x86_64. Les compilations de publication prennent Fedora 43 comme base de compatibilité ; le même RPM doit passer les contrôles d’installation, de rendu PDF, de démarrage sous X11 et Wayland et de désinstallation dans des conteneurs propres des deux versions avant publication. Les autres distributions basées sur RPM ne sont pas encore testées. Si Discover signale un conflit générique, exécutez la commande `dnf install` ci-dessus et joignez l’erreur de dépendances à votre rapport.
-
-L’ancien RPM `0.1.0-alpha.7` a été compilé sur Fedora 44 et ne peut pas être installé sur Fedora 43, car il exige glibc 2.43. Son paquet Flatpak constitue une alternative en attendant un RPM construit avec les contrôles de compatibilité ci-dessus.
-
-Sur Linux, les mots de passe, jetons OAuth et clés d’API sont conservés dans le trousseau du système via freedesktop Secret Service, jamais dans la base de données de Flectar Mail. Tout fournisseur Secret Service convient, sous n’importe quel bureau ou gestionnaire de fenêtres, sway compris : GNOME Keyring, KWallet ou KeePassXC avec son intégration Secret Service activée. Le Flatpak utilise le même trousseau que le reste de votre session. Si la session n’a pas encore de trousseau par défaut, l’ajout du premier compte demande au fournisseur d’en créer un, et celui-ci vous invite à choisir son mot de passe. Sans fournisseur, l’ajout d’un compte s’arrête sur une erreur qui indique ce qui manque, car Flectar Mail ne stocke jamais de secrets dans un endroit moins sûr.
-
-Chaque publication GitHub inclut `SHA256SUMS` et des attestations signées de provenance de compilation. Avec GitHub CLI installé, vérifiez un téléchargement avec `gh attestation verify <download> --repo flectar/mail`.
-
-Depuis alpha 8, les versions alpha, bêta, candidates et stables d’Android utilisent un seul paquet (`com.flectar.mail`) et une identité de signature persistante. Les versions suivantes peuvent mettre à jour l’application en conservant les données locales. Alpha 6 et alpha 7 utilisaient des clés différentes et ne peuvent pas être mises à jour vers cette identité de signature.
-
-Les deux processus de publication Android utilisent l’environnement GitHub `android-release`. Ils exigent les mêmes secrets de keystore et de mots de passe, vérifient le certificat public avec `platform/android/app-signing-certificate.sha256` et déduisent les codes de version Android du numéro de version publié. Une clé absente ou différente bloque la publication. **Ne générez pas de clé de remplacement et ne modifiez pas l’empreinte fixée pour une publication courante.** Un changement de mot de passe préserve l’identité si la clé privée et le certificat d’origine sont conservés.
-
-Consultez la [configuration et récupération de la signature Android](../android-signing.md) pour la commande de migration à exécuter une seule fois, les secrets nécessaires, les sauvegardes et Play App Signing.
-
-Les compilations locales de développement peuvent toujours générer une clé de test locale. Elles ne mettent à jour que les installations signées avec cette même clé.
-
-Vous pouvez aussi compiler Flectar Mail à partir des sources avec la [chaîne d’outils Rust](https://rustup.rs/) :
-
-```bash
-cargo run --bin flectar-mail
-```
-
-Sur Linux, OAuth ouvre aussi le navigateur système via le portail du bureau ; la session nécessite donc un composant `xdg-desktop-portal` en plus du trousseau décrit plus haut. Si le stockage sécurisé est indisponible, les compilations de publication s’arrêtent avant d’ouvrir la page OAuth, afin qu’une autorisation ne soit jamais terminée sans emplacement sûr où la conserver.
-
-Les environnements de développement Podman et Docker n’ont généralement accès ni au D-Bus de la session hôte ni au réseau de boucle locale du navigateur hôte. Les compilations de débogage prennent en charge cette configuration avec un fichier d’identifiants de développement clairement identifié, accessible uniquement à son propriétaire, et un panneau dépliable pour coller l’URL finale de retour en boucle locale. Le stockage par fichier est exclu des compilations de publication.
-
-## 🌍 Aidez à traduire Flectar Mail
-
-Flectar Mail est conçu pour tout le monde, et votre aide pour le rendre disponible dans davantage de langues serait la bienvenue !
-
-Nous utilisons [Weblate](https://translate.flectar.com/) pour gérer les traductions communautaires. Que vous souhaitiez traduire Flectar Mail dans votre langue maternelle, améliorer une traduction existante ou relire des textes traduits, toute contribution est bienvenue.
-
-**[Commencer à traduire Flectar Mail →](https://translate.flectar.com/)**
-
-Pour commencer :
-
-1. Créez un compte sur notre plateforme de traduction.
-2. Sélectionnez votre langue ou lancez une nouvelle traduction si elle n’existe pas encore.
-3. Traduisez directement dans Weblate : aucune connaissance en programmation ou expérience de GitHub n’est nécessaire.
-
-Les traductions sont synchronisées avec notre dépôt GitHub et soumises à relecture sous forme de pull requests. Les personnes qui contribuent peuvent aussi être créditées pour leur travail sur GitHub.
-
-Les traductions du README sont maintenues dans ce dépôt. Consultez [Contribuer aux traductions](../../CONTRIBUTING.md#translations) pour en ajouter ou en mettre une à jour.
-
-## ♿ Accessibilité
-
-Flectar Mail propose la navigation au clavier, des thèmes clairs et sombres et des dispositions flexibles. Le travail sur l’accessibilité se poursuit. Consultez [ACCESSIBILITY.md](../../ACCESSIBILITY.md) pour les fonctions actuelles, les limites des tests et la manière de signaler un obstacle.
-
-## 🔒 Sécurité
-
-Pour signaler une vulnérabilité en privé, suivez [SECURITY.md](../../SECURITY.md). Ne publiez pas de détails sur les vulnérabilités dans les signalements publics.
-
-## 🌐 Un logiciel libre pour tous
-
-Flectar Mail est une seule application libre, sans édition communautaire séparée. Le client est distribué sous [GNU Affero General Public License v3](../../LICENSE). Consultez la [présentation des licences](../../LICENSING.md) pour les détails pratiques ou [CONTRIBUTING.md](../../CONTRIBUTING.md) pour participer au projet.
+| Sujet | Détails |
+| --- | --- |
+| 🌍 **Traduire** | Traduisez l’application, améliorez une traduction ou relisez des textes traduits sur [Weblate](https://translate.flectar.com/) : aucune connaissance en programmation ou expérience de GitHub n’est nécessaire. Les traductions arrivent dans ce dépôt sous forme de pull requests, et les personnes qui contribuent sont créditées sur GitHub. Les traductions du README sont maintenues ici ; consultez [Contribuer aux traductions](../../CONTRIBUTING.md#translations). |
+| ♿ **Accessibilité** | Navigation au clavier, thèmes clairs et sombres et dispositions flexibles ; le travail sur l’accessibilité se poursuit. Consultez [ACCESSIBILITY.md](../../ACCESSIBILITY.md) pour les fonctions actuelles, les limites des tests et la manière de signaler un obstacle. |
+| 🔒 **Sécurité** | Signalez les vulnérabilités en privé en suivant [SECURITY.md](../../SECURITY.md), et n’en publiez pas les détails dans les signalements publics. |
+| 🌐 **Logiciel libre** | Une seule application libre, sans édition communautaire séparée, distribuée sous [GNU Affero General Public License v3](../../LICENSE). La [présentation des licences](../../LICENSING.md) en donne les détails pratiques. |
+| 🛠️ **Contribuer** | [CONTRIBUTING.md](../../CONTRIBUTING.md) explique comment participer au projet. |
 
 ## 🫡 Remerciements
 
