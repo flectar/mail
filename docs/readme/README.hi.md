@@ -305,7 +305,7 @@ Flectar Mail अभी विकास में है और स्थिर �
 
 | प्लेटफ़ॉर्म | डाउनलोड | टिप्पणी |
 | --- | --- | --- |
-| Linux x64 | AppImage, Debian/Ubuntu के लिए `.deb`, Fedora 43/44 के लिए `.rpm` या Flatpak पैकेज | Secret Service कीरिंग ज़रूरी है। Flatpak मैन्युअल रूप से इंस्टॉल होने वाला प्रीव्यू है और अभी Flathub पर नहीं है। |
+| Linux x64 और arm64 | AppImage, Debian/Ubuntu के लिए `.deb`, Fedora 43/44 के लिए `.rpm` या Flatpak पैकेज | Secret Service कीरिंग ज़रूरी है। Flatpak मैन्युअल रूप से इंस्टॉल होने वाला प्रीव्यू है और अभी Flathub पर नहीं है। |
 | Windows x64 | `.exe` इंस्टॉलर या पोर्टेबल ZIP | प्रीव्यू हस्ताक्षरित नहीं हैं |
 | macOS 14+ (Apple silicon या Intel) | DMG या ऐप का ZIP | ad hoc हस्ताक्षरित, नोटराइज़ नहीं |
 | Android 8.0+ (arm64) | हस्ताक्षरित APK | प्रीव्यू और स्थिर रिलीज़ की ऐप पहचान एक ही है। |
