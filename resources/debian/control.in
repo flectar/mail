@@ -2,7 +2,7 @@ Package: flectar-mail
 Version: @VERSION@
 Section: mail
 Priority: optional
-Architecture: amd64
+Architecture: @ARCHITECTURE@
 Maintainer: Flectar <flectar@users.noreply.github.com>
 Depends: @DEPENDS@
 Recommends: xdg-desktop-portal, gnome-keyring, gnupg, pinentry-gnome3 | pinentry-qt

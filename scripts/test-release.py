@@ -175,13 +175,20 @@ class ReleaseTests(unittest.TestCase):
             "/app/lib/flectar-mail/libpdfium.so",
             manifest,
         )
-        self.assertRegex(
-            manifest,
-            r"(?s)url: .*pdfium-linux-x64\.tgz\n"
-            r"\s+sha256: [0-9a-f]{64}\n"
-            r"\s+dest: pdfium-runtime\n"
-            r"\s+strip-components: 0\n",
-        )
+        # Each Flatpak architecture gets the archive the other packages pin.
+        pinned = load_script("stage-pdfium")
+        for target, arch in (("linux-x64", "x86_64"), ("linux-arm64", "aarch64")):
+            with self.subTest(target=target):
+                checksum = pinned.ASSETS[target][0]
+                self.assertIn(
+                    f"/{pinned.RELEASE.replace('/', '%2F')}/pdfium-{target}.tgz\n"
+                    f"        sha256: {checksum}\n"
+                    "        dest: pdfium-runtime\n"
+                    "        strip-components: 0\n"
+                    "        only-arches:\n"
+                    f"          - {arch}\n",
+                    manifest,
+                )
 
     def test_flatpak_cargo_sources_match_lockfile(self):
         project = SCRIPTS.parent
@@ -299,9 +306,10 @@ class ReleaseTests(unittest.TestCase):
                     (root / "Cargo.toml").write_text(f'[package]\nversion = "{version}"\n')
                     destination = root / version
                     with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
-                        stage_linux_metadata(root, destination)
+                        stage_linux_metadata(root, destination, arch="aarch64")
                     desktop = (destination / "usr/share/applications/com.flectar.mail.desktop").read_text()
                     self.assertIn(f"X-AppImage-Version={version}\n", desktop)
+                    self.assertIn("X-AppImage-Arch=aarch64\n", desktop)
                     release = ET.parse(destination / "usr/share/metainfo/com.flectar.mail.metainfo.xml").find("./releases/release")
                     self.assertEqual(release.get("version"), version)
                     self.assertEqual(release.get("date"), "2026-01-01")
@@ -312,7 +320,7 @@ class ReleaseTests(unittest.TestCase):
                     with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1767225600"}):
                         with patch.object(linux_metadata, "datetime", wraps=linux_metadata.datetime) as clock:
                             clock.now.side_effect = AssertionError("Metadata must use the source date")
-                            stage_linux_metadata(root, repeated)
+                            stage_linux_metadata(root, repeated, arch="aarch64")
                     for path in destination.rglob("*"):
                         if path.is_file():
                             self.assertEqual(path.read_bytes(), (repeated / path.relative_to(destination)).read_bytes())
@@ -321,11 +329,15 @@ class ReleaseTests(unittest.TestCase):
                     stage_linux_metadata(root, flatpak, flatpak=True)
                 desktop = (flatpak / "usr/share/applications/com.flectar.mail.desktop").read_text()
                 self.assertNotIn("X-AppImage-", desktop)
+            # Every other package names the architecture it was built for.
+            for arch in (None, "amd64", "arm64"):
+                with self.subTest(arch=arch), self.assertRaisesRegex(ValueError, "architecture"):
+                    stage_linux_metadata(root, root / "unnamed", arch=arch)
             for name in ("com.flectar.mail.desktop", "com.flectar.mail.metainfo.xml"):
                 self.assertEqual((root / "resources" / name).read_bytes(), (SCRIPTS.parent / "resources" / name).read_bytes())
 
     def test_linux_package_metadata(self):
-        # Exercise the actual shell packager and dpkg with a tiny existing ELF,
+        # Exercise the actual shell packagers and dpkg with a tiny existing ELF,
         # so shell expansion bugs cannot hide behind Python-only asset tests.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -353,6 +365,8 @@ class ReleaseTests(unittest.TestCase):
             # native PDF rendering is exercised by the dedicated smoke tests.
             (root / "scripts/stage-pdfium.py").write_text(
                 "import pathlib, shutil, sys\n"
+                "with open('pdfium-targets.txt', 'a') as output:\n"
+                "    output.write(sys.argv[1] + '\\n')\n"
                 "destination = pathlib.Path(sys.argv[2])\n"
                 "destination.mkdir(parents=True, exist_ok=True)\n"
                 "shutil.copyfile('/bin/true', destination / 'libpdfium.so')\n"
@@ -360,6 +374,15 @@ class ReleaseTests(unittest.TestCase):
             (root / "scripts/test-pdf-preview.py").write_text(
                 "import pathlib, sys\n"
                 "assert pathlib.Path(sys.argv[1]).is_file()\n"
+            )
+            # The host's /bin/true stands in for each architecture's executable;
+            # test-pdf-packaging.py covers the real ELF helper.
+            (root / "scripts/linux-elf.py").write_text(
+                "import json, pathlib, sys\n"
+                "with open('linux-elf-calls.jsonl', 'a') as output:\n"
+                "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1] == 'arch':\n"
+                "    print(pathlib.Path('fixture-architecture').read_text())\n"
             )
             (root / "bin").mkdir()
             cargo = root / "bin/cargo"
@@ -370,28 +393,6 @@ class ReleaseTests(unittest.TestCase):
                 "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             )
             cargo.chmod(0o755)
-            result = subprocess.run(
-                ["bash", str(root / "scripts/build-deb.sh")], cwd=root,
-                env={**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
-                     "FLECTAR_SKIP_BUILD": "0", "FLECTAR_APP_FEATURES": ""},
-                capture_output=True, text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            package = root / "target/deb/flectar-mail_0.1.0~alpha.1_amd64.deb"
-            self.assertTrue(package.is_file())
-            version = subprocess.check_output(["dpkg-deb", "--field", str(package), "Version"], text=True)
-            self.assertEqual(version.strip(), "0.1.0~alpha.1")
-            extracted = root / "extracted"
-            subprocess.run(["dpkg-deb", "--extract", str(package), str(extracted)], check=True)
-            desktop_path = "usr/share/applications/com.flectar.mail.desktop"
-            metainfo_path = "usr/share/metainfo/com.flectar.mail.metainfo.xml"
-            self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", (extracted / desktop_path).read_text())
-            release = ET.parse(extracted / metainfo_path).find("./releases/release")
-            self.assertEqual(release.get("version"), "0.1.0-alpha.1")
-            self.assertEqual(release.get("type"), "development")
-
-            # Exercise the AppImage shell packager up to its tool boundary,
-            # without downloading deployment tools or compiling the application.
             # Model the explicitly bundled X11 libraries without depending on
             # the host's development packages or invoking real deployment tools.
             libraries = root / "fixture-libs"
@@ -416,8 +417,46 @@ class ReleaseTests(unittest.TestCase):
                 "print(f' 0x000000000000001d (RUNPATH)            Library runpath: [{runpath}]')\n"
             )
             readelf.chmod(0o755)
-            deploy = root / "bin/linuxdeploy"
-            deploy.write_text('''#!/usr/bin/env python3
+            environment = {
+                **os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}", "VERSION": "stale",
+                "FLECTAR_SKIP_BUILD": "0", "FLECTAR_APP_FEATURES": "",
+            }
+            for machine, debian, pdfium in (
+                ("x86_64", "amd64", "linux-x64"), ("aarch64", "arm64", "linux-arm64"),
+            ):
+                with self.subTest(machine=machine):
+                    (root / "fixture-architecture").write_text(f"{machine} {debian} {pdfium}")
+                    for name in ("pdfium-targets.txt", "linux-elf-calls.jsonl"):
+                        (root / name).unlink(missing_ok=True)
+                    result = subprocess.run(
+                        ["bash", str(root / "scripts/build-deb.sh")], cwd=root,
+                        env=environment, capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    package = root / f"target/deb/flectar-mail_0.1.0~alpha.1_{debian}.deb"
+                    self.assertTrue(package.is_file())
+                    for field, expected in (("Version", "0.1.0~alpha.1"), ("Architecture", debian)):
+                        value = subprocess.check_output(["dpkg-deb", "--field", str(package), field], text=True)
+                        self.assertEqual(value.strip(), expected)
+                    extracted = root / f"extracted-{machine}"
+                    subprocess.run(["dpkg-deb", "--extract", str(package), str(extracted)], check=True)
+                    desktop_path = "usr/share/applications/com.flectar.mail.desktop"
+                    metainfo_path = "usr/share/metainfo/com.flectar.mail.metainfo.xml"
+                    desktop = (extracted / desktop_path).read_text()
+                    self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", desktop)
+                    self.assertIn(f"X-AppImage-Arch={machine}\n", desktop)
+                    release = ET.parse(extracted / metainfo_path).find("./releases/release")
+                    self.assertEqual(release.get("version"), "0.1.0-alpha.1")
+                    self.assertEqual(release.get("type"), "development")
+
+                    # Exercise the AppImage shell packager up to its tool boundary,
+                    # without downloading deployment tools or compiling the
+                    # application. The tools sit where the packager caches the
+                    # downloads for this architecture.
+                    tools = root / "target/appimage/tools"
+                    tools.mkdir(parents=True, exist_ok=True)
+                    deploy = tools / f"linuxdeploy-{machine}.AppImage"
+                    deploy.write_text('''#!/usr/bin/env python3
 import pathlib, shutil, sys
 appdir = pathlib.Path(sys.argv[sys.argv.index("--appdir") + 1])
 library = pathlib.Path(sys.argv[sys.argv.index("--library") + 1])
@@ -426,8 +465,8 @@ for name in ("libxkbcommon-x11.so.0", "libxkbcommon.so.0"):
     shutil.copyfile(library.parent / name, appdir / "usr/lib" / name)
 (appdir / "com.flectar.mail.desktop").symlink_to("usr/share/applications/com.flectar.mail.desktop")
 ''')
-            pack = root / "bin/appimagetool"
-            pack.write_text('''#!/usr/bin/env python3
+                    pack = tools / f"appimagetool-{machine}.AppImage"
+                    pack.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
 appdir = pathlib.Path(sys.argv[1])
 pathlib.Path(sys.argv[2]).write_text(json.dumps({
@@ -436,22 +475,36 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
     "metainfo": (appdir / "usr/share/metainfo/com.flectar.mail.metainfo.xml").read_text(),
 }))
 ''')
-            deploy.chmod(0o755)
-            pack.chmod(0o755)
-            result = subprocess.run(
-                ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
-                env={**os.environ, "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
-                     "LINUXDEPLOY": str(deploy), "APPIMAGETOOL": str(pack), "VERSION": "stale",
-                     "FLECTAR_SKIP_BUILD": "0", "FLECTAR_APP_FEATURES": ""},
-                capture_output=True, text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            packaged = json.loads((root / "target/appimage/flectar-mail.AppImage").read_text())
-            self.assertEqual(packaged["version"], "0.1.0-alpha.1")
-            self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", packaged["desktop"])
-            release = ET.fromstring(packaged["metainfo"]).find("./releases/release")
-            self.assertEqual(release.get("version"), "0.1.0-alpha.1")
-            self.assertEqual(release.get("type"), "development")
+                    deploy.chmod(0o755)
+                    pack.chmod(0o755)
+                    result = subprocess.run(
+                        ["bash", str(root / "scripts/build-appimage.sh")], cwd=root,
+                        env=environment, capture_output=True, text=True,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    packaged = json.loads((root / "target/appimage/flectar-mail.AppImage").read_text())
+                    self.assertEqual(packaged["version"], "0.1.0-alpha.1")
+                    self.assertIn("X-AppImage-Version=0.1.0-alpha.1\n", packaged["desktop"])
+                    self.assertIn(f"X-AppImage-Arch={machine}\n", packaged["desktop"])
+                    release = ET.fromstring(packaged["metainfo"]).find("./releases/release")
+                    self.assertEqual(release.get("version"), "0.1.0-alpha.1")
+                    self.assertEqual(release.get("type"), "development")
+
+                    # Both packages carry this architecture's PDFium, and every
+                    # staged ELF file is checked for the machine's page sizes.
+                    self.assertEqual((root / "pdfium-targets.txt").read_text().split(), [pdfium, pdfium])
+                    calls = [
+                        json.loads(line)
+                        for line in (root / "linux-elf-calls.jsonl").read_text().splitlines()
+                    ]
+                    executable = str(root / "target/release/flectar-mail")
+                    self.assertEqual(calls, [
+                        ["arch", executable],
+                        ["verify", str(root / "target/deb/debian/flectar-mail")],
+                        ["arch", executable],
+                        ["verify", str(root / "target/appimage/flectar-mail.AppDir")],
+                        ["verify", str(root / "target/appimage/.flectar-mail.AppImage.new")],
+                    ])
 
             # Both normal package commands must include the optional runtime
             # choice, even though their builds disable Cargo's default features.
@@ -459,7 +512,7 @@ pathlib.Path(sys.argv[2]).write_text(json.dumps({
                 json.loads(line)
                 for line in (root / "cargo-args.jsonl").read_text().splitlines()
             ]
-            self.assertEqual(len(invocations), 2)
+            self.assertEqual(len(invocations), 4)
             for args in invocations:
                 enabled = {
                     feature
