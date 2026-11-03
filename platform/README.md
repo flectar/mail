@@ -107,8 +107,6 @@ up changes that one function.
 
 ### Known gaps
 
-- iOS has no Keychain-backed `CredentialStore` yet and uses
-  `UnavailableCredentialStore`.
 - Mobile document transfers are capped at 512 MiB, so Android and iOS cannot
   export database snapshots of larger mailboxes yet. The export fails before
   the picker opens.

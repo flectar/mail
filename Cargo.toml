@@ -177,6 +177,11 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 
+# Account secrets live in the iOS Keychain (src/platform/ios/security.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem"] }
+
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }

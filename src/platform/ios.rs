@@ -1,6 +1,7 @@
 //! iOS integration. The Objective-C bridges in platform/ios are compiled by
 //! build.rs; this module owns their Rust side.
 mod documents;
+mod security;
 
 use flectar_mail_core::models::AppIcon;
 use std::{ffi::CStr, path::PathBuf, sync::Arc};
@@ -34,9 +35,9 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
             root.join("Library/Caches/Flectar"),
         ),
         documents: Arc::new(documents::IosDocuments),
-        // The Keychain bridge is not integrated yet; account setup reports
-        // that instead of storing secrets anywhere else.
-        credentials: Arc::new(flectar_mail_core::accounts::credentials::UnavailableCredentialStore),
+        credentials: Arc::new(super::keychain::KeychainCredentialStore::new(
+            security::SecurityKeychain,
+        )),
         oauth_redirects: Arc::new(
             flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default(),
         ),
