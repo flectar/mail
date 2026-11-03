@@ -66,7 +66,7 @@ Flectar Mail आपके ईमेल, कैलेंडर और संप�
 
 | ईमेल क्लाइंट | इंटरफ़ेस | ईमेल किससे रेंडर होता है | प्लेटफ़ॉर्म |
 | --- | --- | --- | --- |
-| **Flectar Mail** | नेटिव Rust ऐप | Blitz, Rust में बना HTML/CSS रेंडरर; कोई WebView नहीं | Windows, macOS, Linux, Android; iOS जल्द आ रहा है |
+| **Flectar Mail** | नेटिव Rust ऐप | Blitz, Rust में बना HTML/CSS रेंडरर; कोई WebView नहीं | Windows, macOS, Linux, Android, iOS (साइडलोड करके) |
 | Thunderbird | Gecko-आधारित डेस्कटॉप ऐप | Gecko | Windows, macOS, Linux, Android |
 | Windows के लिए Outlook | वेब UI वाला Windows ऐप | Microsoft Edge WebView2 | Windows |
 | Spark | Electron ऐप | Chromium | macOS, Windows, iOS, Android |
@@ -309,11 +309,12 @@ Flectar Mail अभी विकास में है और स्थिर �
 | Windows x64 और arm64 | `.exe` इंस्टॉलर या पोर्टेबल ZIP | प्रीव्यू हस्ताक्षरित नहीं हैं |
 | macOS 14+ (Apple silicon या Intel) | DMG या ऐप का ZIP | ad hoc हस्ताक्षरित, नोटराइज़ नहीं |
 | Android 8.0+ (arm64) | हस्ताक्षरित APK | प्रीव्यू और स्थिर रिलीज़ की ऐप पहचान एक ही है। |
+| iOS 17+ (iPhone और iPad) | बिना हस्ताक्षर वाली `.ipa` | AltStore, SideStore या Sideloadly और अपनी Apple ID से साइडलोड करें। |
 | HarmonyOS और OpenHarmony | [springmin](https://github.com/springmin) का [सामुदायिक पोर्ट](../../platform/ohos/README.md) | GitHub रिलीज़ में शामिल नहीं है; इसे स्रोत कोड से बनाएँ। |
 
 OAuth ऐप कुंजियों के बिना बने बिल्ड में Gmail और Outlook साइन-इन बंद रहता है। स्वागत स्क्रीन पर **साइन-इन सेटिंग्स** के गियर आइकन से अपना Google या Microsoft ऐप पंजीकरण जोड़ें, या IMAP, POP3 अथवा JMAP खाता कनेक्ट करें।
 
-[इंस्टॉलेशन गाइड](../install.md) में इंस्टॉल करने के कमांड, Linux कीरिंग और डेस्कटॉप पोर्टल, Flatpak और RPM से जुड़ी बातें, डाउनलोड का सत्यापन, Android हस्ताक्षर और `cargo run --bin flectar-mail` के ज़रिए स्रोत कोड से बिल्ड करना शामिल हैं।
+[इंस्टॉलेशन गाइड](../install.md) में इंस्टॉल करने के कमांड, Linux कीरिंग और डेस्कटॉप पोर्टल, Flatpak और RPM से जुड़ी बातें, डाउनलोड का सत्यापन, Android हस्ताक्षर, iOS पर साइडलोडिंग और `cargo run --bin flectar-mail` के ज़रिए स्रोत कोड से बिल्ड करना शामिल हैं।
 
 ## 🤝 शामिल हों
 

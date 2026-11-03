@@ -66,7 +66,7 @@ Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Postein
 
 | E-Mail-Client | Oberfläche | E-Mail-Darstellung | Plattformen |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Native Rust-App | Blitz, ein Rust-Renderer für HTML/CSS; keine WebView | Windows, macOS, Linux, Android; iOS folgt in Kürze |
+| **Flectar Mail** | Native Rust-App | Blitz, ein Rust-Renderer für HTML/CSS; keine WebView | Windows, macOS, Linux, Android, iOS (per Sideloading) |
 | Thunderbird | Gecko-basierte Desktop-App | Gecko | Windows, macOS, Linux, Android |
 | Outlook für Windows | Windows-App mit Web-Oberfläche | Microsoft Edge WebView2 | Windows |
 | Spark | Electron-App | Chromium | macOS, Windows, iOS, Android |
@@ -309,11 +309,12 @@ Flectar Mail wird derzeit entwickelt und ist noch nicht stabil. Vorschauversione
 | Windows x64 und arm64 | `.exe`-Installationsprogramm oder portables ZIP | Unsignierte Vorschauversionen |
 | macOS 14+ (Apple silicon oder Intel) | DMG oder Anwendungs-ZIP | Ad hoc signiert, nicht notarisiert |
 | Android 8.0+ (arm64) | Signiertes APK | Vorschauversionen und stabile Veröffentlichungen teilen dieselbe App-Identität. |
+| iOS 17+ (iPhone und iPad) | Unsigniertes `.ipa` | Installiere es mit AltStore, SideStore oder Sideloadly und deiner Apple-ID. |
 | HarmonyOS und OpenHarmony | [Community-Portierung](../../platform/ohos/README.md) von [springmin](https://github.com/springmin) | Nicht Teil der GitHub-Veröffentlichungen; du baust sie selbst aus dem Quellcode. |
 
 In Builds ohne OAuth-App-Schlüssel bleiben Gmail- und Outlook-Anmeldung deaktiviert. Über das Zahnrad **Anmeldeeinstellungen** auf dem Begrüßungsbildschirm kannst du deine eigene Google- oder Microsoft-App-Registrierung hinzufügen oder ein IMAP-, POP3- oder JMAP-Konto verbinden.
 
-Die [Installationsanleitung](../install.md) behandelt Installationsbefehle, Schlüsselbund und Desktop-Portal unter Linux, Hinweise zu Flatpak und RPM, das Prüfen von Downloads, die Android-Signatur und das Bauen aus dem Quellcode mit `cargo run --bin flectar-mail`.
+Die [Installationsanleitung](../install.md) behandelt Installationsbefehle, Schlüsselbund und Desktop-Portal unter Linux, Hinweise zu Flatpak und RPM, das Prüfen von Downloads, die Android-Signatur, das Sideloading unter iOS und das Bauen aus dem Quellcode mit `cargo run --bin flectar-mail`.
 
 ## 🤝 Mitmachen
 

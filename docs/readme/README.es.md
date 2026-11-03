@@ -74,7 +74,7 @@ al cerrarla a la bandeja del sistema. Consulta [cómo lo medimos y cómo comprob
 
 | Cliente de correo | Interfaz | Renderiza el correo con | Plataformas |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Aplicación nativa en Rust | Blitz, un renderizador HTML/CSS en Rust; sin WebView | Windows, macOS, Linux, Android; iOS próximamente |
+| **Flectar Mail** | Aplicación nativa en Rust | Blitz, un renderizador HTML/CSS en Rust; sin WebView | Windows, macOS, Linux, Android, iOS (mediante sideloading) |
 | Thunderbird | Aplicación de escritorio basada en Gecko | Gecko | Windows, macOS, Linux, Android |
 | Outlook para Windows | Aplicación de Windows con interfaz web | Microsoft Edge WebView2 | Windows |
 | Spark | Aplicación Electron | Chromium | macOS, Windows, iOS, Android |
@@ -331,6 +331,7 @@ la etiqueta **Pre-release**.
 | Windows x64 y arm64 | Instalador `.exe` o ZIP portátil | Versiones de prueba sin firmar |
 | macOS 14+ (Apple silicon o Intel) | DMG o ZIP de la aplicación | Firma ad hoc, sin notarizar |
 | Android 8.0+ (arm64) | APK firmado | Las versiones de prueba y las estables comparten una misma identidad de aplicación. |
+| iOS 17+ (iPhone y iPad) | `.ipa` sin firmar | Se instala con AltStore, SideStore o Sideloadly usando tu ID de Apple. |
 | HarmonyOS y OpenHarmony | [Adaptación comunitaria](../../platform/ohos/README.md) de [springmin](https://github.com/springmin) | No forma parte de las publicaciones de GitHub; compílala desde el código fuente. |
 
 Las compilaciones sin claves de aplicación OAuth mantienen desactivado el
@@ -340,8 +341,8 @@ aplicación de Google o Microsoft, o conecta una cuenta IMAP, POP3 o JMAP.
 
 La [guía de instalación](../install.md) explica los comandos de instalación, el
 llavero y el portal del escritorio en Linux, las notas sobre Flatpak y RPM, cómo
-verificar las descargas, la firma de Android y cómo compilar desde el código
-fuente con `cargo run --bin flectar-mail`.
+verificar las descargas, la firma de Android, la instalación en iOS y cómo
+compilar desde el código fuente con `cargo run --bin flectar-mail`.
 
 ## 🤝 Participa
 

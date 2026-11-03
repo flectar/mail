@@ -76,7 +76,7 @@
 
 | عميل البريد | الواجهة | يعرض البريد عبر | المنصات |
 | --- | --- | --- | --- |
-| **Flectar Mail** | تطبيق Rust أصيل | Blitz، محرّك HTML/CSS بلغة Rust؛ دون WebView | Windows وmacOS وLinux وAndroid؛ وiOS قريبًا |
+| **Flectar Mail** | تطبيق Rust أصيل | Blitz، محرّك HTML/CSS بلغة Rust؛ دون WebView | Windows وmacOS وLinux وAndroid وiOS (بالتثبيت الجانبي) |
 | Thunderbird | تطبيق سطح مكتب مبني على Gecko | Gecko | Windows وmacOS وLinux وAndroid |
 | Outlook for Windows | تطبيق Windows بواجهة ويب | Microsoft Edge WebView2 | Windows |
 | Spark | تطبيق Electron | Chromium | macOS وWindows وiOS وAndroid |
@@ -341,13 +341,14 @@
 | Windows x64 و arm64 | مثبّت ‎`.exe` أو ملف ZIP محمول | نسخ معاينة غير موقعة |
 | macOS 14+‎ (بمعالج Apple silicon أو Intel) | ملف DMG أو ZIP للتطبيق | تحمل توقيعًا مؤقتًا ad hoc ولم تخضع للتوثيق |
 | Android 8.0+ (arm64) | ملف APK موقّع | تشترك نسخ المعاينة والإصدارات المستقرة في هوية تطبيق واحدة. |
+| iOS 17+‎ (iPhone وiPad) | ملف ‎`.ipa` غير موقّع | ثبّته تثبيتًا جانبيًا عبر AltStore أو SideStore أو Sideloadly باستخدام Apple ID الخاص بك. |
 | HarmonyOS وOpenHarmony | [نسخة مجتمعية منقولة](../../platform/ohos/README.md) يطوّرها [springmin](https://github.com/springmin) | ليست ضمن إصدارات GitHub؛ ابنِها من المصدر. |
 
 </div>
 
 تُبقي النسخ المبنية دون مفاتيح تطبيق OAuth تسجيل الدخول إلى Gmail وOutlook معطلًا. استخدم ترس **إعدادات تسجيل الدخول** في شاشة الترحيب لإضافة تسجيل تطبيق Google أو Microsoft الخاص بك، أو اربط حساب IMAP أو POP3 أو JMAP.
 
-يشرح [دليل التثبيت](../install.md) أوامر التثبيت، ومخزن المفاتيح وبوابة سطح المكتب على Linux، وملاحظات Flatpak وRPM، والتحقق من التنزيلات، وتوقيع Android، والبناء من المصدر باستخدام `cargo run --bin flectar-mail`.
+يشرح [دليل التثبيت](../install.md) أوامر التثبيت، ومخزن المفاتيح وبوابة سطح المكتب على Linux، وملاحظات Flatpak وRPM، والتحقق من التنزيلات، وتوقيع Android، والتثبيت الجانبي على iOS، والبناء من المصدر باستخدام `cargo run --bin flectar-mail`.
 
 ## 🤝 شارك في المشروع
 
