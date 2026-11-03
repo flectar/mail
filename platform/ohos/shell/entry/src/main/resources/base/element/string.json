@@ -6,6 +6,8 @@
     {
       "name": "pasteboard_permission_reason",
       "value": "Used to paste the copied text into the message body, subject and recipient fields."
-    }
+    },
+    { "name": "notification_new_mail", "value": "New mail" },
+    { "name": "notification_no_subject", "value": "(No subject)" }
   ]
 }

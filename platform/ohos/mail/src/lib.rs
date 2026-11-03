@@ -304,6 +304,7 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     let mut platform =
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
+    platform.notification_publisher = flectar_mail::NotificationPublisher::new(bridge::notify);
     // Mail content and the composer fall back to the same system faces as the
     // Slint UI the backend set up.
     flectar_mail::platform::configure_email_fonts(flectar_mail::platform::EmailFonts {

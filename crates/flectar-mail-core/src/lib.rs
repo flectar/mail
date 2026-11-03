@@ -66,6 +66,11 @@ const MAX_DRAFT_ATTACHMENTS: usize = 32;
 const MAX_DRAFT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_DRAFT_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CACHED_MESSAGE_BYTES: usize = 128 * 1024 * 1024;
+/// Notification rows one database write settles; a dispatch keeps going until
+/// nothing more is due.
+const NOTIFICATION_BATCH: usize = 32;
+/// How long a notification the host couldn't raise waits for another try.
+const NOTIFICATION_RETRY_MS: i64 = 60_000;
 /// Originals written durably before the transaction that refers to them
 /// commits. One nothing refers to was left by an interrupted write.
 const DURABLE_ORIGINAL_SUFFIXES: [&str; 2] =
@@ -165,7 +170,7 @@ fn validate_folder_leaf(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 
-pub use crate::db::repo::notifications::{NotificationOutboxItem, RoutedTab};
+pub use crate::db::repo::notifications::{NewMailNotification, NotificationOutboxItem, RoutedTab};
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
 
 /// Read the presentation state needed to lay out the first application frame.
@@ -8685,6 +8690,63 @@ impl Core {
             .write(move |conn| repo::notifications::recover_delivering(conn, now))
             .await
     }
+
+    /// Hand every due new-mail notification to `publish`, which raises it on
+    /// the host or says why it couldn't, and suppress or postpone the rest (see
+    /// [`repo::notifications::settle_due`]). Each row is claimed before
+    /// `publish` and marked delivered after it, so a crash in between delivers
+    /// it again once [`Self::recover_notification_deliveries`] runs; a row the
+    /// host couldn't raise is tried again a minute later. Returns when the next
+    /// postponed notification falls due, for the caller to dispatch again then.
+    pub async fn dispatch_notifications(
+        &self,
+        publish: impl Fn(&NewMailNotification) -> std::result::Result<(), String>,
+    ) -> Result<Option<i64>> {
+        let settings = Arc::new(self.get_settings().await?);
+        loop {
+            let now = now_ms();
+            let batch_settings = Arc::clone(&settings);
+            let settled = self
+                .db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    let settled = repo::notifications::settle_due(
+                        &tx,
+                        &batch_settings,
+                        now,
+                        NOTIFICATION_BATCH as i64,
+                    )?;
+                    tx.commit()?;
+                    Ok(settled)
+                })
+                .await?;
+            // Every claimed row goes to the host even if recording one fails;
+            // the failed ones are delivered again after recovery.
+            let mut failure = None;
+            for (id, notification) in &settled.claimed {
+                let recorded = match publish(notification) {
+                    Ok(()) => self.mark_notification_delivered(*id).await,
+                    Err(error) => {
+                        self.retry_notification_delivery(*id, NOTIFICATION_RETRY_MS, error)
+                            .await
+                    }
+                };
+                if let Err(error) = recorded {
+                    failure.get_or_insert(error);
+                }
+            }
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            if settled.read < NOTIFICATION_BATCH {
+                break;
+            }
+        }
+        let now = now_ms();
+        self.db
+            .read(move |conn| repo::notifications::next_due_at(conn, now))
+            .await
+    }
 }
 
 /// Build a (incoming → the user's reply) example from one of their sent
@@ -9460,6 +9522,78 @@ fn apply_thread_action(
     repo::threads::recompute(&tx, thread_id)?;
     tx.commit()?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod notification_dispatch_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dispatch_publishes_every_due_notification_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let count = NOTIFICATION_BATCH + 2;
+        core.db
+            .write(move |conn| {
+                db::testutil::seed_account(conn);
+                for index in 0..count {
+                    let subject = format!("Mail {index}");
+                    let (_, id) = db::testutil::seed_message(conn, "a@test.dev", &subject, false);
+                    repo::notifications::enqueue(conn, id)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let published = std::sync::Mutex::new(Vec::new());
+        let next = core
+            .dispatch_notifications(|notification| {
+                published.lock().unwrap().push(notification.subject.clone());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(next, None);
+        assert_eq!(published.lock().unwrap().len(), count);
+
+        // Delivered rows never come back.
+        core.dispatch_notifications(|notification| {
+            panic!("{} was published twice", notification.subject);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_retries_what_the_host_could_not_raise() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "a@test.dev", "Later", false);
+                repo::notifications::enqueue(conn, id)
+            })
+            .await
+            .unwrap();
+
+        let next = core
+            .dispatch_notifications(|_| Err("bridge not ready".into()))
+            .await
+            .unwrap();
+        let row = core
+            .db
+            .read(move |conn| repo::notifications::get(conn, id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.state, "pending");
+        assert_eq!(row.last_error.as_deref(), Some("bridge not ready"));
+        assert!(next.is_some());
+        assert_eq!(next, row.not_before);
+    }
 }
 
 #[cfg(test)]

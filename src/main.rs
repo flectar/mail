@@ -33,6 +33,8 @@ mod mail_setup;
 mod mail_view_model;
 mod mail_work;
 mod message_appearance;
+mod notifications;
+pub use notifications::{NewMailNotification, NotificationPublisher};
 mod number_format;
 mod oauth_browser;
 #[cfg(test)]
@@ -1324,6 +1326,8 @@ impl InboxState {
 pub struct PlatformContext {
     /// Host URL dispatch for mail links and browser-based authorization.
     pub external_urls: ExternalUrlOpener,
+    /// Host publisher for new-mail system notifications.
+    pub notification_publisher: NotificationPublisher,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1338,6 +1342,7 @@ impl PlatformContext {
         Ok(Self {
             paths,
             external_urls: ExternalUrlOpener::default(),
+            notification_publisher: NotificationPublisher::default(),
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1358,6 +1363,7 @@ impl PlatformContext {
         Self {
             paths: Paths::new(data_root.join("data"), cache_dir),
             external_urls: ExternalUrlOpener::default(),
+            notification_publisher: NotificationPublisher::default(),
             documents,
             credentials,
             oauth_redirects,
@@ -4173,6 +4179,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let startup_runtime = Rc::clone(&runtime);
     let startup_pending_core_updates = Arc::clone(&pending_core_updates);
     let startup_core_wake = core_updates_wake.clone();
+    let startup_notification_publisher = platform.notification_publisher.clone();
     let startup_app = app.as_weak();
     let startup_paths_for_ui = platform.paths.clone();
     let startup_tray = tray.as_ref().map(|tray| tray.as_weak());
@@ -4350,6 +4357,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         core.clone(),
                         Arc::clone(&startup_pending_core_updates),
                         startup_core_wake.clone(),
+                    );
+                    notifications::spawn_dispatcher(
+                        &startup_runtime,
+                        core.file_core(),
+                        startup_notification_publisher.clone(),
                     );
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
