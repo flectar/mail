@@ -15,7 +15,7 @@ use rusqlite::Connection;
 /// A message older than this never triggers the new-mail chime or a
 /// notification, even if it lands unread, so old mail that a server replays
 /// as new stays silent.
-const CHIME_RECENT_MS: i64 = 24 * 60 * 60 * 1000;
+pub(crate) const CHIME_RECENT_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// How a protocol delivered a message.
 pub(crate) struct Delivery<'a> {

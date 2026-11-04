@@ -175,6 +175,11 @@ impl OhosWindow {
         }
     }
 
+    /// Whether Slint has queued a frame that has not been consumed yet.
+    pub fn has_pending_redraw(&self) -> bool {
+        self.needs_redraw.get()
+    }
+
     /// Render if a redraw was requested since the last call. Software frames
     /// are handed to `present_software` (the buffer-queue presenter); GPU
     /// frames present themselves through the wgpu surface.
