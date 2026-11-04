@@ -29,6 +29,7 @@ def module(name):
 
 stage = module("stage-pdfium")
 native = module("verify-android-native")
+linux_elf = module("linux-elf")
 framework = module("write-pdfium-framework-plist")
 
 
@@ -52,7 +53,72 @@ def elf(alignment=16384):
     return bytes(data)
 
 
+def linux_elf_file(machine, *loads):
+    """A little-endian ELF64 header with one program header per (offset, address, alignment)."""
+    data = bytearray(64 + 56 * len(loads))
+    data[:6] = b"\x7fELF\x02\x01"
+    struct.pack_into("<H", data, 18, machine)
+    struct.pack_into("<Q", data, 32, 64)
+    struct.pack_into("<HH", data, 54, 56, len(loads))
+    for index, (offset, address, alignment) in enumerate(loads):
+        entry = 64 + 56 * index
+        struct.pack_into("<I", data, entry, 1)
+        struct.pack_into("<QQ", data, entry + 8, offset, address)
+        struct.pack_into("<Q", data, entry + 48, alignment)
+    return bytes(data)
+
+
 class PackagingTests(unittest.TestCase):
+    def test_linux_packages_name_and_align_their_elf_files(self):
+        x86 = linux_elf_file(62, (0, 0, 4096), (0x1234, 0x2234, 4096))
+        arm = linux_elf_file(183, (0, 0, 65536), (0x1234, 0x11234, 65536))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            package = root / "package"
+            (package / "usr/lib").mkdir(parents=True)
+            (package / "usr/bin").mkdir()
+            (package / "usr/bin/flectar-mail").write_bytes(arm)
+            (package / "usr/lib/libpdfium.so").write_bytes(arm)
+            (package / "usr/lib/libpdfium.so.0").symlink_to("libpdfium.so")
+            (package / "usr/lib/missing.so").symlink_to("nowhere.so")
+            (package / "AppRun").write_text("#!/bin/sh\n")
+            self.assertEqual(linux_elf.architecture(package / "usr/bin/flectar-mail"), ("aarch64", "arm64", "linux-arm64"))
+            self.assertEqual(linux_elf.verify([package]), (linux_elf.MACHINES[183], 2))
+            x86_file = root / "x86"
+            x86_file.write_bytes(x86)
+            self.assertEqual(linux_elf.architecture(x86_file), ("x86_64", "amd64", "linux-x64"))
+            self.assertEqual(linux_elf.verify([x86_file]), (linux_elf.MACHINES[62], 1))
+
+            # A Raspberry Pi 5 or 64 KiB kernel cannot map 4 KiB-aligned segments.
+            for loads in (((0, 0, 4096),), ((0, 0, 65536), (0x1234, 0x2234, 65536))):
+                with self.subTest(loads=loads):
+                    (package / "usr/lib/libpdfium.so").write_bytes(linux_elf_file(183, *loads))
+                    with self.assertRaisesRegex(ValueError, "libpdfium.so: .*64 KiB pages"):
+                        linux_elf.verify([package])
+            (package / "usr/lib/libpdfium.so").write_bytes(x86)
+            with self.assertRaisesRegex(ValueError, "built for"):
+                linux_elf.verify([package])
+            (package / "usr/lib/libpdfium.so").write_bytes(linux_elf_file(183))
+            with self.assertRaisesRegex(ValueError, "missing ELF load segments"):
+                linux_elf.verify([package])
+
+            for data, message in (
+                (b"#!/bin/sh\n", "is not an ELF file"),
+                (linux_elf_file(243, (0, 0, 65536)), "unsupported ELF machine 243"),
+                (b"\x7fELF\x01\x01" + bytes(58), "64-bit"),
+                (x86[:64] + x86[64:100], "truncated"),
+            ):
+                with self.subTest(message=message):
+                    x86_file.write_bytes(data)
+                    with self.assertRaisesRegex(ValueError, message):
+                        linux_elf.architecture(x86_file)
+                    with self.assertRaisesRegex(ValueError, message):
+                        linux_elf.verify([x86_file])
+            empty = root / "empty"
+            empty.mkdir()
+            with self.assertRaisesRegex(ValueError, "no ELF files"):
+                linux_elf.verify([empty])
+
     def test_cached_archive_is_verified_before_writing(self):
         data = archive({"lib/libpdfium.so": b"library", "LICENSE": b"license", "licenses/notice": b"notice"})
         checksum = hashlib.sha256(data).hexdigest()

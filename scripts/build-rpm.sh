@@ -6,6 +6,7 @@ build_dir="$project_dir/target/rpm"
 top_dir="$build_dir/rpmbuild"
 source_dir="$top_dir/SOURCES"
 package_root="$build_dir/package"
+executable="$project_dir/target/release/flectar-mail"
 rpm_libdir="$(rpm --eval '%{_libdir}')"
 version="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n 1)"
 
@@ -23,24 +24,27 @@ fi
 
 build_args=(--locked --bin flectar-mail --manifest-path "$project_dir/Cargo.toml" --release --no-default-features --features remote-content,gpu-renderer)
 if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
-  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+  if [[ ! -x "$executable" ]]; then
     printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
     exit 1
   fi
 else
   cargo build "${build_args[@]}"
 fi
+architecture="$(python3 "$project_dir/scripts/linux-elf.py" arch "$executable")"
+read -r machine _ pdfium_target <<<"$architecture"
 
 rm -rf "$build_dir"
 mkdir -p "$source_dir" "$top_dir/BUILD" "$top_dir/BUILDROOT" "$top_dir/RPMS" "$top_dir/SPECS" "$top_dir/SRPMS"
-install -Dm0755 "$project_dir/target/release/flectar-mail" "$package_root/usr/bin/flectar-mail"
-python3 "$project_dir/scripts/stage-pdfium.py" linux-x64 "$package_root$rpm_libdir/flectar-mail"
+install -Dm0755 "$executable" "$package_root/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/stage-pdfium.py" "$pdfium_target" "$package_root$rpm_libdir/flectar-mail"
 python3 "$project_dir/scripts/test-pdf-preview.py" "$package_root/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/linux-elf.py" verify "$package_root"
 install -m0755 "$package_root/usr/bin/flectar-mail" "$source_dir/flectar-mail"
 install -m0755 "$package_root$rpm_libdir/flectar-mail/libpdfium.so" "$source_dir/libpdfium.so"
 tar -C "$package_root$rpm_libdir/flectar-mail/pdfium-licenses" -czf "$source_dir/pdfium-licenses.tar.gz" .
 
-python3 "$project_dir/scripts/stage-linux-metadata.py" "$build_dir/metadata" >/dev/null
+python3 "$project_dir/scripts/stage-linux-metadata.py" --arch "$machine" "$build_dir/metadata" >/dev/null
 install -m0644 "$build_dir/metadata/usr/share/applications/com.flectar.mail.desktop" "$source_dir/com.flectar.mail.desktop"
 install -m0644 "$build_dir/metadata/usr/share/metainfo/com.flectar.mail.metainfo.xml" "$source_dir/com.flectar.mail.metainfo.xml"
 install -m0644 "$project_dir/resources/app-icon/flectar-mail-masked-512.png" "$source_dir/com.flectar.mail.png"
@@ -58,7 +62,9 @@ sed \
   -e "s/@RPM_CHANGELOG_DATE@/$changelog_date/g" \
   "$project_dir/resources/rpm/flectar-mail.spec.in" > "$top_dir/SPECS/flectar-mail.spec"
 
+# Label the package with the executable's architecture, not the build machine's.
 rpmbuild -bb \
+  --target "$machine" \
   --define "_topdir $top_dir" \
   "$top_dir/SPECS/flectar-mail.spec"
 

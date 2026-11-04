@@ -33,16 +33,30 @@ manually.
 
 ### Installing a package
 
+Each Linux package has an x64 build and an arm64 build for 64-bit Arm
+computers. Run `uname -m` to see which one you need (`x86_64` or `aarch64`).
+The commands below install the x64 files, and the arm64 files install the same
+way.
+
 ```bash
 sudo dnf install ./flectar-mail-<version>-linux-x64.rpm
 flatpak install --user ./flectar-mail-<version>-linux-x64.flatpak
 flatpak run com.flectar.mail
 ```
 
+### Raspberry Pi
+
+Use the arm64 packages with the 64-bit Raspberry Pi OS. Every release checks
+that they load with the 16 KiB memory pages of the Raspberry Pi 5 kernel.
+Raspberry Pi OS kernels don't include Landlock, which lets the sandboxed PDF
+preview read the system fonts and nothing else. There the preview can't open
+any file, so PDFs that don't embed their fonts are drawn with built-in fonts
+instead.
+
 ### Fedora RPM
 
-The RPM targets Fedora 43 and 44 on x86_64. Release builds use Fedora 43 as
-their compatibility baseline; the same RPM must pass installation, PDF
+The RPMs target Fedora 43 and 44 on x86_64 and aarch64. Release builds use
+Fedora 43 as their compatibility baseline; each RPM must pass installation, PDF
 rendering, X11 and Wayland startup, and removal checks in clean containers for
 both versions before publication. Other RPM-based distributions are not yet
 tested. If Discover reports a generic conflict, run the `dnf install` command

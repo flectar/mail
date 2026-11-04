@@ -21,9 +21,11 @@ desktop-file-validate resources/com.flectar.mail.desktop
 # Validate the metadata that packaging will embed, as well as its source files.
 metadata_dir="$(mktemp -d)"
 trap 'rm -rf "$metadata_dir"' EXIT
-python3 scripts/stage-linux-metadata.py "$metadata_dir"
-desktop-file-validate "$metadata_dir/usr/share/applications/com.flectar.mail.desktop"
-"$appstream" validate --no-net "$metadata_dir/usr/share/metainfo/com.flectar.mail.metainfo.xml"
+for arch in x86_64 aarch64; do
+  python3 scripts/stage-linux-metadata.py --arch "$arch" "$metadata_dir/$arch"
+  desktop-file-validate "$metadata_dir/$arch/usr/share/applications/com.flectar.mail.desktop"
+  "$appstream" validate --no-net "$metadata_dir/$arch/usr/share/metainfo/com.flectar.mail.metainfo.xml"
+done
 
 python3 - <<'PY'
 import ast

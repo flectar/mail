@@ -4,8 +4,12 @@
 Usage: python3 scripts/test-pdf-preview.py target/debug/flectar-mail [output.png]
 Creates an original two-page vector/text fixture and checks page selection,
 colors, dimensions, malformed inputs and protocol limits. Requires staged PDFium.
+On Linux it repeats the checks as on a kernel without Landlock, where the
+worker's sandbox blocks all file access instead.
 """
+import ctypes
 import pathlib
+import platform
 import struct
 import subprocess
 import sys
@@ -36,11 +40,50 @@ def png(path, width, height, pixels):
     pathlib.Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
+# seccomp_data.arch for the architectures whose landlock_create_ruleset is 444.
+AUDIT_ARCHES = {"x86_64": 0xC000003E, "aarch64": 0xC00000B7}
+
+
+def without_landlock():
+    """Make landlock_create_ruleset fail with ENOSYS in the worker, as it does
+    on kernels built without Landlock, such as Raspberry Pi OS's."""
+    def instruction(code, k, jump_true=0, jump_false=0):
+        return struct.pack("=HBBI", code, jump_true, jump_false, k)
+    load, jump_equal, ret = 0x20, 0x15, 0x06
+    program = b"".join([
+        instruction(load, 4),  # seccomp_data.arch
+        instruction(jump_equal, AUDIT_ARCHES[platform.machine()], 0, 3),
+        instruction(load, 0),  # seccomp_data.nr
+        instruction(jump_equal, 444, 0, 1),
+        instruction(ret, 0x00050000 | 38),  # SECCOMP_RET_ERRNO | ENOSYS
+        instruction(ret, 0x7FFF0000),  # SECCOMP_RET_ALLOW
+    ])
+
+    class Program(ctypes.Structure):
+        _fields_ = [("length", ctypes.c_ushort), ("filter", ctypes.c_void_p)]
+
+    def install():
+        libc = ctypes.CDLL(None, use_errno=True)
+        buffer = ctypes.create_string_buffer(program)
+        filter_program = Program(len(program) // 8, ctypes.cast(buffer, ctypes.c_void_p))
+        # PR_SET_NO_NEW_PRIVS, then PR_SET_SECCOMP with SECCOMP_MODE_FILTER.
+        if libc.prctl(38, 1, 0, 0, 0) or libc.prctl(22, 2, ctypes.byref(filter_program), 0, 0):
+            raise OSError(ctypes.get_errno(), "could not hide Landlock from the PDF worker")
+    return install
+
+
 def check(binary, output=None):
+    check_mode(binary, output, None)
+    if sys.platform == "linux":
+        check_mode(binary, None, without_landlock())
+
+
+def check_mode(binary, output, preexec):
+    mode = " without Landlock" if preexec else ""
     data = fixture()
     for index, zoom in [(0, 100), (1, 100), (0, 200)]:
         start = time.monotonic()
-        result = subprocess.run([binary, "--render-pdf-page"], input=struct.pack("<III", index, zoom, len(data)) + data, capture_output=True, timeout=22)
+        result = subprocess.run([binary, "--render-pdf-page"], input=struct.pack("<III", index, zoom, len(data)) + data, capture_output=True, timeout=22, preexec_fn=preexec)
         assert result.returncode == 0, (result.returncode, result.stderr.decode(errors="replace"))
         magic, count, width, height = struct.unpack("<4sIII", result.stdout[:16])
         pixels = result.stdout[16:]
@@ -50,12 +93,12 @@ def check(binary, output=None):
         center = pixels[(height // 2 * width + width // 2) * 4:][:4]
         expected = (26, 102, 204, 255) if index == 0 else (204, 51, 26, 255)
         assert all(abs(a - b) <= 1 for a, b in zip(center, expected)), center
-        print(f"Page {index + 1} at {zoom}%: {width}x{height}, {time.monotonic() - start:.3f}s")
+        print(f"Page {index + 1} at {zoom}%{mode}: {width}x{height}, {time.monotonic() - start:.3f}s")
         if output and index == 0 and zoom == 100: png(output, width, height, pixels)
     for payload in [struct.pack("<III", 9, 100, len(data)) + data, struct.pack("<III", 0, 100, 4) + b"oops", struct.pack("<III", 0, 100, 16 * 1024 * 1024 + 1), struct.pack("<III", 0, 999, 0), b"short"]:
-        result = subprocess.run([binary, "--render-pdf-page"], input=payload, capture_output=True, timeout=22)
+        result = subprocess.run([binary, "--render-pdf-page"], input=payload, capture_output=True, timeout=22, preexec_fn=preexec)
         assert result.returncode != 0 and not result.stdout
-    print("PASS: pages, zoom, bitmap bounds, colors, malformed input and oversized requests")
+    print(f"PASS{mode}: pages, zoom, bitmap bounds, colors, malformed input and oversized requests")
 
 
 if __name__ == "__main__":

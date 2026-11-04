@@ -325,7 +325,7 @@ Flectar Mail is in development and not yet stable. Preview builds are on
 
 | Platform | Download | Notes |
 | --- | --- | --- |
-| Linux x64 | AppImage, Debian/Ubuntu `.deb`, Fedora 43/44 `.rpm`, or a Flatpak bundle | Needs a Secret Service keyring. The Flatpak is a sideloaded preview, not on Flathub yet. |
+| Linux x64 and arm64 | AppImage, Debian/Ubuntu `.deb`, Fedora 43/44 `.rpm`, or a Flatpak bundle | Needs a Secret Service keyring. The Flatpak is a sideloaded preview, not on Flathub yet. |
 | Windows x64 | Setup `.exe` or portable ZIP | Unsigned previews |
 | macOS 14+ (Apple silicon or Intel) | DMG or application ZIP | Ad-hoc signed, not notarized |
 | Android 8.0+ (arm64) | Signed APK | Previews and stable releases share one app identity. |

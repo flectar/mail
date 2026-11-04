@@ -327,7 +327,7 @@ la etiqueta **Pre-release**.
 
 | Plataforma | Descarga | Notas |
 | --- | --- | --- |
-| Linux x64 | AppImage, `.deb` para Debian/Ubuntu, `.rpm` para Fedora 43/44 o un paquete Flatpak | Necesita un llavero compatible con Secret Service. El Flatpak es una versión de prueba para instalar manualmente y todavía no está en Flathub. |
+| Linux x64 y arm64 | AppImage, `.deb` para Debian/Ubuntu, `.rpm` para Fedora 43/44 o un paquete Flatpak | Necesita un llavero compatible con Secret Service. El Flatpak es una versión de prueba para instalar manualmente y todavía no está en Flathub. |
 | Windows x64 | Instalador `.exe` o ZIP portátil | Versiones de prueba sin firmar |
 | macOS 14+ (Apple silicon o Intel) | DMG o ZIP de la aplicación | Firma ad hoc, sin notarizar |
 | Android 8.0+ (arm64) | APK firmado | Las versiones de prueba y las estables comparten una misma identidad de aplicación. |

@@ -12,26 +12,32 @@ def prepare(source: Path, destination: Path, version: str) -> None:
     # GitHub rewrites '~' in asset filenames. Normalize before checksumming;
     # the package's internal Debian version keeps '~' for prerelease ordering.
     deb_filename_version = deb_version.replace("~", ".")
-    packages = {
-        "flectar-mail.AppImage": f"flectar-mail-{version}-linux-x64.AppImage",
-        f"flectar-mail_{deb_version}_amd64.deb": f"flectar-mail_{deb_filename_version}_amd64.deb",
-        "flectar-mail.rpm": f"flectar-mail-{version}-linux-x64.rpm",
-        "flectar-mail.flatpak": f"flectar-mail-{version}-linux-x64.flatpak",
-        "flectar-mail-windows-x64.zip": f"flectar-mail-{version}-windows-x64.zip",
-        "flectar-mail-windows-x64-setup.exe": f"flectar-mail-{version}-windows-x64-setup.exe",
-        "flectar-mail-macos-arm64.zip": f"flectar-mail-{version}-macos-arm64.zip",
-        "flectar-mail-macos-arm64.dmg": f"flectar-mail-{version}-macos-arm64.dmg",
-        "flectar-mail-macos-x64.zip": f"flectar-mail-{version}-macos-x64.zip",
-        "flectar-mail-macos-x64.dmg": f"flectar-mail-{version}-macos-x64.dmg",
-        "flectar-mail.apk": f"flectar-mail-{version}-android-arm64.apk",
-    }
+    # Each workflow artifact unpacks into source/<artifact name>.
+    packages = (
+        # (workflow artifact, package file, download name)
+        ("flectar-mail-linux-x64", "flectar-mail.AppImage", f"flectar-mail-{version}-linux-x64.AppImage"),
+        ("flectar-mail-linux-x64", f"flectar-mail_{deb_version}_amd64.deb", f"flectar-mail_{deb_filename_version}_amd64.deb"),
+        ("flectar-mail-linux-arm64", "flectar-mail.AppImage", f"flectar-mail-{version}-linux-arm64.AppImage"),
+        ("flectar-mail-linux-arm64", f"flectar-mail_{deb_version}_arm64.deb", f"flectar-mail_{deb_filename_version}_arm64.deb"),
+        ("flectar-mail-rpm-x64", "flectar-mail.rpm", f"flectar-mail-{version}-linux-x64.rpm"),
+        ("flectar-mail-rpm-arm64", "flectar-mail.rpm", f"flectar-mail-{version}-linux-arm64.rpm"),
+        ("flectar-mail-flatpak-x64", "flectar-mail.flatpak", f"flectar-mail-{version}-linux-x64.flatpak"),
+        ("flectar-mail-flatpak-arm64", "flectar-mail.flatpak", f"flectar-mail-{version}-linux-arm64.flatpak"),
+        ("flectar-mail-windows-x64", "flectar-mail-windows-x64.zip", f"flectar-mail-{version}-windows-x64.zip"),
+        ("flectar-mail-windows-x64", "flectar-mail-windows-x64-setup.exe", f"flectar-mail-{version}-windows-x64-setup.exe"),
+        ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.zip", f"flectar-mail-{version}-macos-arm64.zip"),
+        ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.dmg", f"flectar-mail-{version}-macos-arm64.dmg"),
+        ("flectar-mail-macos-x64", "flectar-mail-macos-x64.zip", f"flectar-mail-{version}-macos-x64.zip"),
+        ("flectar-mail-macos-x64", "flectar-mail-macos-x64.dmg", f"flectar-mail-{version}-macos-x64.dmg"),
+        ("flectar-mail-android-signed-arm64", "flectar-mail.apk", f"flectar-mail-{version}-android-arm64.apk"),
+    )
     # Validate every input before copying anything; unrelated benchmark files
     # are intentionally excluded from the public downloads.
     selected = []
-    for name, output_name in packages.items():
-        matches = list(source.rglob(name))
+    for artifact, name, output_name in packages:
+        matches = list((source / artifact).rglob(name))
         if len(matches) != 1 or not matches[0].is_file() or matches[0].stat().st_size == 0:
-            raise ValueError(f"Expected exactly one nonempty {name}, found {len(matches)}")
+            raise ValueError(f"Expected exactly one nonempty {artifact}/{name}, found {len(matches)}")
         selected.append((matches[0], output_name))
     destination.mkdir()  # Refuse to mix new artifacts with a stale dist folder.
     checksums = []
@@ -54,14 +60,15 @@ def release_notes(version: str) -> str:
         "identity; desktop keys alone do not enable it.\n"
     )
     return (
-        "Desktop builds for Linux x64, Windows x64, and macOS Apple silicon and Intel. "
-        "Linux testers can choose AppImage, Debian, Fedora RPM, or Flatpak.\n\n"
-        "The x86_64 RPM supports Fedora 43 and 44. The same package is built "
-        "on Fedora 43 and tested in clean containers on both releases, including "
-        "PDF rendering and X11/Wayland startup. Other RPM distributions are not "
-        "yet tested. Install it with `sudo dnf install ./flectar-mail-"
-        f"{version}-linux-x64.rpm`; if a graphical installer reports a conflict, "
-        "this command shows the dependency details.\n\n"
+        "Desktop builds for Linux x64 and arm64, Windows x64, and macOS Apple "
+        "silicon and Intel. Linux testers can choose AppImage, Debian, Fedora "
+        "RPM, or Flatpak on either architecture.\n\n"
+        "The RPMs support Fedora 43 and 44 on x86_64 and aarch64. Each package is "
+        "built on Fedora 43 and tested in clean containers on both releases, "
+        "including PDF rendering and X11/Wayland startup. Other RPM distributions "
+        "are not yet tested. Install one with `sudo dnf install ./flectar-mail-"
+        f"{version}-linux-x64.rpm` (or `-linux-arm64.rpm`); if a graphical "
+        "installer reports a conflict, this command shows the dependency details.\n\n"
         "Gmail and Outlook sign-in require a bundled OAuth registration or your own "
         "keys in **Sign-in settings** on the welcome screen. IMAP/SMTP and JMAP "
         "do not require Google or Microsoft app keys. Provider policies still apply.\n\n"

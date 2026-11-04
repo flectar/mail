@@ -16,6 +16,7 @@ import urllib.request
 RELEASE = "chromium/8044"
 ASSETS = {
     "linux-x64": ("eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4", "lib/libpdfium.so"),
+    "linux-arm64": ("e98400ef5f005f27cfba5c14f72d464e25187298f04950de46646033cf24cef0", "lib/libpdfium.so"),
     "mac-arm64": ("61424884d4a7f153b808deba6437848e4400834ce30aaf95d3050da44df8f420", "lib/libpdfium.dylib"),
     "mac-x64": ("a93d44238e05de20028446561b951d50988b849efbbe56fe40c0d376c05b45e8", "lib/libpdfium.dylib"),
     "android-arm64": ("37686e64fa005484d619550a78805500de4c5a6f4df7aa06d8576145bfbee98f", "lib/libpdfium.so"),

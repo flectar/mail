@@ -94,8 +94,17 @@ jobs:
   linux:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Linux packages (x64)
-    runs-on: ubuntu-22.04
+    name: Linux packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 keeps the glibc 2.35 baseline on both architectures.
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -133,7 +142,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
-          key: native-linux-x64
+          key: native-linux-${{ matrix.arch }}
 
       - name: Validate desktop metadata
         run: |
@@ -170,7 +179,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-linux-x64
+          name: flectar-mail-linux-${{ matrix.arch }}
           path: |
             target/appimage/*.AppImage
             target/deb/*.deb
@@ -180,8 +189,16 @@ jobs:
   rpm:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Fedora RPM build (x64, Fedora 43 baseline)
-    runs-on: ubuntu-24.04
+    name: Fedora RPM build (${{ matrix.arch }}, Fedora 43 baseline)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     # Build against the oldest supported Fedora; test this exact artifact below.
     container: fedora:43
     env:
@@ -218,7 +235,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
-          key: native-fedora-43-rpm-x64
+          key: native-fedora-43-rpm-${{ matrix.arch }}
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -234,23 +251,29 @@ jobs:
           rpm -qlp target/rpm/flectar-mail.rpm
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-rpm-x64
+          name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm/flectar-mail.rpm
           if-no-files-found: error
 
   rpm-test:
     needs: rpm
-    name: RPM runtime (Fedora ${{ matrix.fedora }}, x64)
-    runs-on: ubuntu-24.04
+    name: RPM runtime (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         fedora: [43, 44]
+        arch: [x64, arm64]
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: flectar-mail-rpm-x64
+          name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm
       - name: Test published RPM in a clean Fedora container
         shell: bash
@@ -268,15 +291,23 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-rpm-test-fedora-${{ matrix.fedora }}
+          name: rpm-test-fedora-${{ matrix.fedora }}-${{ matrix.arch }}
           path: target/rpm-test
           if-no-files-found: error
 
   flatpak:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Flatpak preview bundle (x64)
-    runs-on: ubuntu-24.04
+    name: Flatpak preview bundle (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -320,7 +351,7 @@ jobs:
           flatpak uninstall --user --noninteractive -y com.flectar.mail
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-flatpak-x64
+          name: flectar-mail-flatpak-${{ matrix.arch }}
           path: target/flatpak/flectar-mail.flatpak
           if-no-files-found: error
 
@@ -661,47 +692,13 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Download Linux packages
+      # Each package artifact unpacks into release-assets/<artifact name>.
+      # The staging script picks the expected files from those folders.
+      - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: flectar-mail-linux-x64
-          path: release-assets/linux
-
-      - name: Download Windows package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-windows-x64
-          path: release-assets/windows
-
-      - name: Download RPM package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-rpm-x64
-          path: release-assets/rpm
-
-      - name: Download Flatpak bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-flatpak-x64
-          path: release-assets/flatpak
-
-      - name: Download macOS Apple silicon package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-macos-arm64
-          path: release-assets/macos/arm64
-
-      - name: Download macOS Intel package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-macos-x64
-          path: release-assets/macos/x64
-
-      - name: Download Android signed APK
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-android-signed-arm64
-          path: release-assets/android
+          pattern: flectar-mail-*
+          path: release-assets
 
       - name: Prepare release downloads
         env:

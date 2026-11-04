@@ -337,7 +337,7 @@
 
 | المنصة | التنزيل | ملاحظات |
 | --- | --- | --- |
-| Linux x64 | AppImage، أو ‎`.deb` لـ Debian/Ubuntu، أو ‎`.rpm` لـ Fedora 43/44، أو حزمة Flatpak | يتطلب مخزن مفاتيح يدعم Secret Service. حزمة Flatpak نسخة معاينة للتثبيت اليدوي، وليست متاحة على Flathub بعد. |
+| Linux x64 و arm64 | AppImage، أو ‎`.deb` لـ Debian/Ubuntu، أو ‎`.rpm` لـ Fedora 43/44، أو حزمة Flatpak | يتطلب مخزن مفاتيح يدعم Secret Service. حزمة Flatpak نسخة معاينة للتثبيت اليدوي، وليست متاحة على Flathub بعد. |
 | Windows x64 | مثبّت ‎`.exe` أو ملف ZIP محمول | نسخ معاينة غير موقعة |
 | macOS 14+‎ (بمعالج Apple silicon أو Intel) | ملف DMG أو ZIP للتطبيق | تحمل توقيعًا مؤقتًا ad hoc ولم تخضع للتوثيق |
 | Android 8.0+ (arm64) | ملف APK موقّع | تشترك نسخ المعاينة والإصدارات المستقرة في هوية تطبيق واحدة. |

@@ -40,6 +40,7 @@ modules:
       - install -Dm0755 target/release/flectar-mail /app/bin/flectar-mail
       - install -Dm0755 pdfium-runtime/lib/libpdfium.so /app/lib/flectar-mail/libpdfium.so
       - python3 scripts/test-pdf-preview.py /app/bin/flectar-mail
+      - python3 scripts/linux-elf.py verify /app/bin/flectar-mail /app/lib/flectar-mail
       - python3 scripts/stage-linux-metadata.py --flatpak _flatpak-stage
       - install -Dm0644 _flatpak-stage/usr/share/applications/com.flectar.mail.desktop /app/share/applications/com.flectar.mail.desktop
       - install -Dm0644 _flatpak-stage/usr/share/metainfo/com.flectar.mail.metainfo.xml /app/share/metainfo/com.flectar.mail.metainfo.xml
@@ -69,7 +70,8 @@ modules:
           - target
           - tmp
       - cargo-sources.json
-      # Include PDF preview in the standalone alpha bundle.
+      # Include PDF preview in the standalone alpha bundle. These are the
+      # archives scripts/stage-pdfium.py pins for linux-x64 and linux-arm64.
       - type: archive
         url: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8044/pdfium-linux-x64.tgz
         sha256: eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4
@@ -77,3 +79,10 @@ modules:
         strip-components: 0
         only-arches:
           - x86_64
+      - type: archive
+        url: https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F8044/pdfium-linux-arm64.tgz
+        sha256: e98400ef5f005f27cfba5c14f72d464e25187298f04950de46646033cf24cef0
+        dest: pdfium-runtime
+        strip-components: 0
+        only-arches:
+          - aarch64
