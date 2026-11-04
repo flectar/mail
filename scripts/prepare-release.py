@@ -2,12 +2,27 @@
 """Stage desktop and mobile downloads with checksums."""
 
 import hashlib
+import importlib.util
+import json
 import os
 import shutil
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
-def prepare(source: Path, destination: Path, version: str) -> None:
+def _ios_release():
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("ios_release", Path(__file__).with_name("ios-release.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ios_release = _ios_release()
+
+
+def prepare(source: Path, destination: Path, version: str, repository: str, date: str) -> None:
     deb_version = version.replace("-", "~", 1)
     # GitHub rewrites '~' in asset filenames. Normalize before checksumming;
     # the package's internal Debian version keeps '~' for prerelease ordering.
@@ -31,7 +46,7 @@ def prepare(source: Path, destination: Path, version: str) -> None:
         ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.dmg", f"flectar-mail-{version}-macos-arm64.dmg"),
         ("flectar-mail-macos-x64", "flectar-mail-macos-x64.zip", f"flectar-mail-{version}-macos-x64.zip"),
         ("flectar-mail-macos-x64", "flectar-mail-macos-x64.dmg", f"flectar-mail-{version}-macos-x64.dmg"),
-        ("flectar-mail-ios-arm64", "flectar-mail-ios-arm64.ipa", f"flectar-mail-{version}-ios-arm64.ipa"),
+        ("flectar-mail-ios-arm64", "flectar-mail-ios-arm64.ipa", ios_release.ipa_name(version)),
         ("flectar-mail-android-signed-arm64", "flectar-mail.apk", f"flectar-mail-{version}-android-arm64.apk"),
     )
     # Validate every input before copying anything; unrelated benchmark files
@@ -42,14 +57,19 @@ def prepare(source: Path, destination: Path, version: str) -> None:
         if len(matches) != 1 or not matches[0].is_file() or matches[0].stat().st_size == 0:
             raise ValueError(f"Expected exactly one nonempty {artifact}/{name}, found {len(matches)}")
         selected.append((matches[0], output_name))
+    # AltStore and SideStore read the newest IPA's description from the
+    # latest release, at a fixed address (scripts/ios-release.py).
+    ipa = next(path for path, name in selected if name == ios_release.ipa_name(version))
+    altstore_source = json.dumps(ios_release.source(ipa, version, repository, date), indent=2, ensure_ascii=False)
     destination.mkdir()  # Refuse to mix new artifacts with a stale dist folder.
+    for path, name in selected:
+        shutil.copyfile(path, destination / name)
+    (destination / ios_release.SOURCE_NAME).write_text(altstore_source + "\n", encoding="utf-8")
     checksums = []
-    for path, name in sorted(selected, key=lambda entry: entry[1]):
-        output = destination / name
-        shutil.copyfile(path, output)
+    for output in sorted(destination.iterdir()):
         with output.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        checksums.append(f"{digest}  {name}\n")
+        checksums.append(f"{digest}  {output.name}\n")
     (destination / "SHA256SUMS").write_text("".join(checksums), encoding="utf-8")
 
 
@@ -85,12 +105,15 @@ def release_notes(version: str) -> str:
         "records signed build-provenance attestations.\n\n"
         "The iOS app (iOS 17 or later) is unsigned. Sideload it with AltStore, "
         "SideStore, or Sideloadly, which sign it with your Apple ID; see "
-        "https://github.com/flectar/mail/blob/main/docs/install.md#ios.\n\n"
+        "https://github.com/flectar/mail/blob/main/docs/install.md#ios. In AltStore "
+        "or SideStore, add the source "
+        f"{ios_release.source_address('flectar/mail')} to receive updates.\n\n"
         + android
     )
 
 
 if __name__ == "__main__":
     version = os.environ["RELEASE_VERSION"]
-    prepare(Path("release-assets"), Path("dist"), version)
+    published = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    prepare(Path("release-assets"), Path("dist"), version, os.environ["GITHUB_REPOSITORY"], published)
     Path("release-notes.md").write_text(release_notes(version), encoding="utf-8")

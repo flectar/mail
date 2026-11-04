@@ -2,15 +2,13 @@
 """Package the iOS app for sideloading and describe it for AltStore.
 
 `ipa` turns the unsigned app that scripts/package-ios.sh builds into the IPA
-that GitHub releases publish. `latest` names the newest release with an IPA,
-and `site` writes the AltStore source for it, which SideStore also reads, for
-.github/workflows/ios-source.yml to publish.
+that GitHub releases publish. scripts/prepare-release.py adds the AltStore
+source for it, which SideStore also reads, to the same release.
 """
 
 import argparse
 import hashlib
 import importlib.util
-import json
 import os
 import plistlib
 import re
@@ -27,12 +25,15 @@ ROOT = Path(__file__).resolve().parent.parent
 BUNDLE_ID = "com.flectar.mail"
 # The earliest time a ZIP entry can record.
 ZIP_EPOCH = 315532800
+# People add the latest release's copy to AltStore or SideStore once, and the
+# apps read it again from that address to find updates.
+SOURCE_NAME = "flectar-mail-altstore-source.json"
 # Info.plist keys that make iOS ask the user for a permission. AltStore and
 # SideStore refuse apps that ask for one their source does not list.
 PRIVACY_KEY = re.compile(r"NS\w+UsageDescription")
 # The middle of the app icon's gradient.
 TINT_COLOR = "#FE660C"
-ICON = ROOT / "platform/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
+ICON = "platform/ios/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png"
 SCREENSHOTS = {
     "iphone": ("mobile-light.png", "mobile-dark.png", "mobile-agenda-light.png"),
     "ipad": ("tablet-agenda-light.png",),
@@ -98,8 +99,8 @@ def write_ipa(app: Path, output: Path, short_version: str, build_version: str) -
                     ipa.writestr(entry, b"")
                     continue
                 entry.compress_type = zipfile.ZIP_DEFLATED
-                with path.open("rb") as source, ipa.open(entry, "w") as target:
-                    shutil.copyfileobj(source, target)
+                with path.open("rb") as data, ipa.open(entry, "w") as target:
+                    shutil.copyfileobj(data, target)
         partial.replace(output)
     finally:
         partial.unlink(missing_ok=True)
@@ -109,21 +110,8 @@ def ipa_name(version: str) -> str:
     return f"flectar-mail-{version}-ios-arm64.ipa"
 
 
-def newest(releases: list[dict]) -> tuple[dict, dict]:
-    """The published release with the highest version that has an IPA, and
-    that IPA's asset."""
-    found = []
-    for release in releases:
-        if release.get("draft"):
-            continue
-        version = release["tag_name"].removeprefix("v")
-        for asset in release.get("assets", ()):
-            if asset["name"] == ipa_name(version) and asset.get("state", "uploaded") == "uploaded":
-                found.append((version_code(version), release, asset))
-    if not found:
-        raise ValueError("No published release has an iOS app yet")
-    _, release, asset = max(found, key=lambda entry: entry[0])
-    return release, asset
+def source_address(repository: str) -> str:
+    return f"https://github.com/{repository}/releases/latest/download/{SOURCE_NAME}"
 
 
 def app_info(ipa: Path) -> dict:
@@ -141,12 +129,6 @@ def png_size(path: Path) -> tuple[int, int]:
     return struct.unpack(">II", header[16:24])
 
 
-def screenshot(name: str, url: str) -> dict:
-    # AltStore needs the size of iPad screenshots and uses it for the rest.
-    width, height = png_size(ROOT / "resources/screenshots" / name)
-    return {"imageURL": f"{url}/screenshots/{name}", "width": width, "height": height}
-
-
 def describe() -> tuple[str, str]:
     """The app's summary and description, as Linux software centres show them."""
     component = ET.parse(ROOT / "resources/com.flectar.mail.metainfo.xml").getroot()
@@ -155,14 +137,15 @@ def describe() -> tuple[str, str]:
     return summary, "\n\n".join(paragraphs)
 
 
-def source(release: dict, asset: dict, info: dict, sha256: str, url: str) -> dict:
-    """An AltStore source offering this release's IPA.
+def source(ipa: Path, version: str, repository: str, date: str) -> dict:
+    """An AltStore source offering the IPA of release `version`.
 
     Its fields follow https://faq.altstore.io/developers/make-a-source. The
-    newest version is repeated in the app's own fields for AltStore 1 and
-    SideStore releases that predate version lists.
+    version is repeated in the app's own fields for AltStore 1 and SideStore
+    releases that predate version lists. Images come from the release's tag,
+    so they never change under it.
     """
-    version = release["tag_name"].removeprefix("v")
+    info = app_info(ipa)
     for key, expected in (
         ("CFBundleIdentifier", BUNDLE_ID),
         ("CFBundleShortVersionString", version.split("-")[0]),
@@ -170,27 +153,36 @@ def source(release: dict, asset: dict, info: dict, sha256: str, url: str) -> dic
     ):
         if info.get(key) != expected:
             raise ValueError(f"The IPA of {version} has {key} {info.get(key)!r}, expected {expected!r}")
+    with ipa.open("rb") as stream:
+        sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
+    files = f"https://raw.githubusercontent.com/{repository}/v{version}"
     summary, description = describe()
-    notes = f"Release notes: {release['html_url']}"
+    notes = f"Release notes: https://github.com/{repository}/releases/tag/v{version}"
     latest = {
         "version": info["CFBundleShortVersionString"],
         "buildVersion": info["CFBundleVersion"],
         "marketingVersion": version,
-        "date": release["published_at"],
+        "date": date,
         "localizedDescription": notes,
-        "downloadURL": asset["browser_download_url"],
-        "size": asset["size"],
+        "downloadURL": f"https://github.com/{repository}/releases/download/v{version}/{ipa_name(version)}",
+        "size": ipa.stat().st_size,
         "sha256": sha256,
         "minOSVersion": info["MinimumOSVersion"],
     }
-    screenshots = {device: [screenshot(name, url) for name in names] for device, names in SCREENSHOTS.items()}
+    screenshots = {}
+    for device, names in SCREENSHOTS.items():
+        screenshots[device] = []
+        for name in names:
+            # AltStore needs the size of iPad screenshots and uses it for the rest.
+            width, height = png_size(ROOT / "resources/screenshots" / name)
+            screenshots[device].append({"imageURL": f"{files}/resources/screenshots/{name}", "width": width, "height": height})
     app = {
         "name": "Flectar Mail",
         "bundleIdentifier": BUNDLE_ID,
         "developerName": "Flectar",
         "subtitle": summary,
-        "localizedDescription": f"{description}\n\nThis is a preview. Report problems at https://github.com/flectar/mail/issues.",
-        "iconURL": f"{url}/icon.png",
+        "localizedDescription": f"{description}\n\nThis is a preview. Report problems at https://github.com/{repository}/issues.",
+        "iconURL": f"{files}/{ICON}",
         "tintColor": TINT_COLOR,
         "category": "utilities",
         "screenshots": screenshots,
@@ -201,7 +193,7 @@ def source(release: dict, asset: dict, info: dict, sha256: str, url: str) -> dic
             "privacy": {key: value for key, value in sorted(info.items()) if PRIVACY_KEY.fullmatch(key)},
         },
         "version": latest["version"],
-        "versionDate": latest["date"],
+        "versionDate": date,
         "versionDescription": notes,
         "downloadURL": latest["downloadURL"],
         "size": latest["size"],
@@ -210,7 +202,7 @@ def source(release: dict, asset: dict, info: dict, sha256: str, url: str) -> dic
     return {
         "name": "Flectar Mail",
         "identifier": "com.flectar.mail.source",
-        "sourceURL": f"{url}/source.json",
+        "sourceURL": source_address(repository),
         "subtitle": summary,
         "description": description,
         "iconURL": app["iconURL"],
@@ -221,27 +213,6 @@ def source(release: dict, asset: dict, info: dict, sha256: str, url: str) -> dic
     }
 
 
-def write_site(releases: list[dict], downloads: Path, url: str, output: Path) -> None:
-    """Write the source for the newest IPA, downloaded into `downloads`, and
-    the images it shows, for publishing at `url`."""
-    url = url.rstrip("/")
-    release, asset = newest(releases)
-    ipa = downloads / asset["name"]
-    with ipa.open("rb") as stream:
-        sha256 = hashlib.file_digest(stream, "sha256").hexdigest()
-    # The source must describe exactly the file GitHub serves.
-    if ipa.stat().st_size != asset["size"] or asset.get("digest", f"sha256:{sha256}") != f"sha256:{sha256}":
-        raise ValueError(f"{ipa.name} differs from the release download")
-    document = source(release, asset, app_info(ipa), sha256, url)
-    output.mkdir(parents=True)
-    shutil.copyfile(ICON, output / "icon.png")
-    (output / "screenshots").mkdir()
-    for names in SCREENSHOTS.values():
-        for name in names:
-            shutil.copyfile(ROOT / "resources/screenshots" / name, output / "screenshots" / name)
-    (output / "source.json").write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -250,23 +221,9 @@ def main() -> None:
     ipa.add_argument("output", type=Path)
     ipa.add_argument("--short-version", required=True)
     ipa.add_argument("--build-version", required=True)
-    latest = commands.add_parser("latest", help="print the tag and IPA name of the newest iOS release")
-    latest.add_argument("releases", type=Path, help="GitHub's release list as JSON")
-    site = commands.add_parser("site", help="write the AltStore source for the newest iOS release")
-    site.add_argument("releases", type=Path, help="GitHub's release list as JSON")
-    site.add_argument("downloads", type=Path, help="the folder holding that release's IPA")
-    site.add_argument("--url", required=True, help="where the site is published")
-    site.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
-        if args.command == "ipa":
-            write_ipa(args.app, args.output, args.short_version, args.build_version)
-        elif args.command == "latest":
-            release, asset = newest(json.loads(args.releases.read_text(encoding="utf-8")))
-            print(f"tag={release['tag_name']}\nasset={asset['name']}")
-        else:
-            releases = json.loads(args.releases.read_text(encoding="utf-8"))
-            write_site(releases, args.downloads, args.url, args.output)
+        write_ipa(args.app, args.output, args.short_version, args.build_version)
     except (OSError, ValueError) as error:
         raise SystemExit(str(error)) from error
 

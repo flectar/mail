@@ -135,9 +135,11 @@ includes an unsigned `.ipa` that a sideloading tool signs with your own Apple
 ID:
 
 - [AltStore](https://altstore.io) or [SideStore](https://sidestore.io): add
-  the source `https://flectar.github.io/mail/source.json` in the app's
-  **Sources** and install Flectar Mail from it. Both offer each new release as
-  an update and check the download's SHA-256 before installing it.
+  the source
+  `https://github.com/flectar/mail/releases/latest/download/flectar-mail-altstore-source.json`
+  in the app's **Sources** and install Flectar Mail from it. Both offer each
+  new release as an update and check the download's SHA-256 before installing
+  it.
 - [Sideloadly](https://sideloadly.io) on Windows or macOS: install
   `flectar-mail-<version>-ios-arm64.ipa` from the
   [release](https://github.com/flectar/mail/releases) with your Apple ID.

@@ -66,22 +66,14 @@ Tag pushes run the iOS job in `native-platforms.yml`, and the release
 publishes `flectar-mail-<version>-ios-arm64.ipa` with its checksum and build
 provenance like every other download.
 
-After a release run succeeds, `ios-source.yml` publishes an
-[AltStore source](https://faq.altstore.io/developers/make-a-source), which
-SideStore also reads, at `https://flectar.github.io/mail/source.json`. It
-offers the newest release's IPA with its size, SHA-256 and permissions, which
-both apps check before installing. Run the workflow by hand to publish it
-again.
-
-The apps find updates by reading the source again from the address people
-added, so it needs one that never changes. Release downloads have none: each
-release has its own URL, and GitHub's latest-release link skips prereleases.
-GitHub Pages serves the file at a fixed address, and a custom domain can be
-added later; GitHub then redirects the old address.
-
-The source needs GitHub Pages once: in the repository settings, open
-**Pages** and set **Source** to **GitHub Actions**. Until then the workflow
-fails at its first Pages step.
+Next to it, `scripts/prepare-release.py` publishes
+`flectar-mail-altstore-source.json`, an
+[AltStore source](https://faq.altstore.io/developers/make-a-source) that
+SideStore also reads. It offers the release's IPA with its size, SHA-256 and
+permissions, which both apps check before installing. People add it once from
+`https://github.com/flectar/mail/releases/latest/download/flectar-mail-altstore-source.json`,
+and the apps read it again from there to find updates. Every release is
+published as the latest one, so that address always reaches the newest IPA.
 
 ## Known limitations
 
