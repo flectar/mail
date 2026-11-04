@@ -1,6 +1,6 @@
 import { abilityAccessCtrl, common, ConfigurationConstant, PermissionRequestResult, Permissions, Want, wantAgent } from '@kit.AbilityKit';
 import { BusinessError, pasteboard } from '@kit.BasicServicesKit';
-import { fileIo, picker } from '@kit.CoreFileKit';
+import { fileIo, fileUri, picker, statfs } from '@kit.CoreFileKit';
 import { inputMethod } from '@kit.IMEKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -8,11 +8,11 @@ import { window } from '@kit.ArkUI';
 import { util } from '@kit.ArkTS';
 
 const LOG_TAG = 'FlectarOhos';
-// Keep picker imports bounded: a mail attachment is copied into the app
-// cache, so a mis-picked multi-GB file must not fill the sandbox.
-// Per-file cache guard for the picker; the shared compose/draft limit is
-// 25 MiB total across attachments on every platform.
-const MAX_IMPORT_BYTES = 50 * 1024 * 1024;
+// One document is copied for the Files pane, whose transfers stop here.
+// Several are bounded by the free space alone, which a copy never takes
+// below the reserve. The same limits apply on Android and iOS.
+const SINGLE_DOCUMENT_LIMIT = 512 * 1024 * 1024;
+const FREE_SPACE_RESERVE = 64 * 1024 * 1024;
 // Services the native module invokes from Rust; the closures run on the ArkTS
 // UI thread through a thread-safe function. `pickOpen`/`pickSave` are
 // request/response: the page reports the outcome through `submitBridgeResult`.
@@ -44,6 +44,7 @@ interface StagedFile {
 interface FlectarNativeModule {
   setBridge?: (bridge: FlectarBridge) => void;
   submitBridgeResult?: (requestId: number, path: string, name: string, error: string) => boolean;
+  pickerClosed?: (requestId: number) => void;
   imeCommit?: (text: string) => void;
   imeDelete?: (count: number) => void;
   imeFunction?: (key: number) => void;
@@ -222,7 +223,7 @@ struct Index {
   }
 
   private reportBridgeResult(
-    requestId: number, path: string, error: string, name: string = ''): boolean {
+    requestId: number, path: string, name: string, error: string = ''): boolean {
     return this.nativeModule?.submitBridgeResult?.(requestId, path, name, error) ?? false;
   }
 
@@ -293,13 +294,15 @@ struct Index {
       const options = new picker.DocumentSelectOptions();
       options.maxSelectNumber = 1;
       const uris = await viewPicker.select(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
-        this.reportBridgeResult(requestId, '', '');
+        this.reportBridgeResult(requestId, '', '', '');
         return;
       }
+      await this.checkSpace(context, uris, SINGLE_DOCUMENT_LIMIT);
       const staged = await this.stageCopy(context, uris[0]);
       hilog.info(0x0000, LOG_TAG, 'picker imported a document (%{public}d picked)', uris.length);
-      if (!this.reportBridgeResult(requestId, staged.path, '', staged.name)) {
+      if (!this.reportBridgeResult(requestId, staged.path, staged.name, '')) {
         // The native request timed out or was cancelled while the picker was
         // open; do not leave the staged copy behind.
         fileIo.unlink(staged.path).catch((error: BusinessError): void => {
@@ -311,7 +314,7 @@ struct Index {
       const failure = error as BusinessError;
       hilog.error(0x0000, LOG_TAG, 'document picker failed: %{public}d %{public}s',
         failure.code, failure.message);
-      this.reportBridgeResult(requestId, '', failure.message ?? 'document picker failed');
+      this.reportBridgeResult(requestId, '', '', failure.message ?? 'document picker failed');
     }
   }
 
@@ -323,16 +326,18 @@ struct Index {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       const viewPicker = new picker.DocumentViewPicker(context);
       const options = new picker.DocumentSelectOptions();
-      options.maxSelectNumber = Math.max(1, Math.min(limit, 64));
+      options.maxSelectNumber = Math.max(1, limit);
       const uris = await viewPicker.select(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
-        this.reportBridgeResult(requestId, '', '');
+        this.reportBridgeResult(requestId, '', '', '');
         return;
       }
+      await this.checkSpace(context, uris, Number.MAX_SAFE_INTEGER);
       for (const uri of uris) {
         staged.push(await this.stageCopy(context, uri));
       }
-      const result = this.reportBridgeResult(requestId, JSON.stringify(staged), '');
+      const result = this.reportBridgeResult(requestId, JSON.stringify(staged), '', '');
       if (!result) {
         this.discardStaged(staged);
       }
@@ -341,7 +346,7 @@ struct Index {
       const failure = error as BusinessError;
       hilog.error(0x0000, LOG_TAG, 'multi-document picker failed: %{public}d %{public}s',
         failure.code, failure.message);
-      this.reportBridgeResult(requestId, '', failure.message ?? 'document picker failed');
+      this.reportBridgeResult(requestId, '', '', failure.message ?? 'document picker failed');
     }
   }
 
@@ -362,8 +367,9 @@ struct Index {
       const options = new picker.DocumentSaveOptions();
       options.newFileNames = [suggestedName];
       const uris = await viewPicker.save(options);
+      this.nativeModule?.pickerClosed?.(requestId);
       if (uris.length === 0) {
-        this.reportBridgeResult(requestId, '', '');
+        this.reportBridgeResult(requestId, '', '', '');
         return;
       }
       const destination = await fileIo.open(
@@ -379,12 +385,12 @@ struct Index {
         await fileIo.close(destination);
       }
       hilog.info(0x0000, LOG_TAG, 'picker exported a document');
-      this.reportBridgeResult(requestId, uris[0], '');
+      this.reportBridgeResult(requestId, uris[0], '', '');
     } catch (error) {
       const failure = error as BusinessError;
       hilog.error(0x0000, LOG_TAG, 'document save failed: %{public}d %{public}s',
         failure.code, failure.message);
-      this.reportBridgeResult(requestId, '', failure.message ?? 'document save failed');
+      this.reportBridgeResult(requestId, '', '', failure.message ?? 'document save failed');
     }
   }
 
@@ -712,6 +718,50 @@ struct Index {
    * @throws { BusinessError } when the picked file cannot be opened or copied;
    * the caller reports it through the bridge result.
    */
+  private pickerDisplayName(uri: string): string {
+    try {
+      const name = new fileUri.FileUri(uri).name;
+      if (name.length > 0) {
+        return name;
+      }
+    } catch (error) {
+      // Fall back to the raw URI basename below on older providers.
+    }
+    let raw = uri.split('/').pop() ?? '';
+    const query = raw.search(/[?#]/);
+    if (query >= 0) {
+      raw = raw.substring(0, query);
+    }
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (error) {
+      // Keep the encoded name rather than failing the attachment import.
+    }
+    return raw;
+  }
+
+  // Check the picked documents' sizes before anything is copied: their total
+  // against `maxBytes`, and against the free space, which a copy never takes
+  // below the reserve.
+  private async checkSpace(
+    context: common.UIAbilityContext, uris: string[], maxBytes: number): Promise<void> {
+    let total = 0;
+    for (const uri of uris) {
+      const file = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
+      try {
+        total += (await fileIo.stat(file.fd)).size;
+      } finally {
+        await fileIo.close(file);
+      }
+    }
+    if (total > maxBytes) {
+      throw new Error('File exceeds the transfer limit.');
+    }
+    if (total + FREE_SPACE_RESERVE > await statfs.getFreeSize(context.cacheDir)) {
+      throw new Error('There is not enough free space on this device.');
+    }
+  }
+
   private async stageCopy(context: common.UIAbilityContext, uri: string): Promise<StagedFile> {
     const directory = `${context.cacheDir}/imports`;
     try {
@@ -725,25 +775,12 @@ struct Index {
     }
     const source = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
     try {
-      const size = (await fileIo.stat(source.fd)).size;
-      if (size > MAX_IMPORT_BYTES) {
-        throw new Error(`the selected file is too large (${size} bytes; limit ${MAX_IMPORT_BYTES})`);
-      }
       // Never reuse the picked file name (or a predictable timestamp) in the
       // cache: it can leak the user's document name and collide with another
       // staged import. Keep only a short extension for content detection.
-      // The display name is a separate field; decode the URI basename so a
-      // Chinese or spaced filename is not shown as `%E8%AE%BE...`.
-      let raw = uri.split('/').pop() ?? '';
-      const query = raw.search(/[?#]/);
-      if (query >= 0) {
-        raw = raw.substring(0, query);
-      }
-      try {
-        raw = decodeURIComponent(raw);
-      } catch (error) {
-        // Keep the encoded name rather than failing the attachment import.
-      }
+      // The display name is a separate field; FileUri.name returns the
+      // decoded name, with a basename fallback for older providers.
+      const raw = this.pickerDisplayName(uri);
       const dot = raw.lastIndexOf('.');
       const extension = dot > 0
         ? raw.substring(dot).replace(/[^A-Za-z0-9.]/g, '').substring(0, 12)
