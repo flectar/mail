@@ -25,6 +25,7 @@ ASSETS = {
     "ios-simulator-arm64": ("544537fce5257146e0df501c632d490d1aa95768737770f1912c8e23b1dd238d", "lib/libpdfium.dylib"),
     "ios-simulator-x64": ("8d4e33e415e29894aa98481bc9a9162a42039a1672796db14c9fed9cd545c881", "lib/libpdfium.dylib"),
     "win-x64": ("78a17d9a5f14467631c26a3ac8741b27a0471ecc05bd6a119b523598160a0537", "bin/pdfium.dll"),
+    "win-arm64": ("6c9ac0ddc69edd8a18d47b95098a5b843eaed5c5bbdcb9587a18c196457449f8", "bin/pdfium.dll"),
 }
 
 

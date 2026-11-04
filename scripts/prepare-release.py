@@ -25,6 +25,8 @@ def prepare(source: Path, destination: Path, version: str) -> None:
         ("flectar-mail-flatpak-arm64", "flectar-mail.flatpak", f"flectar-mail-{version}-linux-arm64.flatpak"),
         ("flectar-mail-windows-x64", "flectar-mail-windows-x64.zip", f"flectar-mail-{version}-windows-x64.zip"),
         ("flectar-mail-windows-x64", "flectar-mail-windows-x64-setup.exe", f"flectar-mail-{version}-windows-x64-setup.exe"),
+        ("flectar-mail-windows-arm64", "flectar-mail-windows-arm64.zip", f"flectar-mail-{version}-windows-arm64.zip"),
+        ("flectar-mail-windows-arm64", "flectar-mail-windows-arm64-setup.exe", f"flectar-mail-{version}-windows-arm64-setup.exe"),
         ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.zip", f"flectar-mail-{version}-macos-arm64.zip"),
         ("flectar-mail-macos-arm64", "flectar-mail-macos-arm64.dmg", f"flectar-mail-{version}-macos-arm64.dmg"),
         ("flectar-mail-macos-x64", "flectar-mail-macos-x64.zip", f"flectar-mail-{version}-macos-x64.zip"),
@@ -60,7 +62,7 @@ def release_notes(version: str) -> str:
         "identity; desktop keys alone do not enable it.\n"
     )
     return (
-        "Desktop builds for Linux x64 and arm64, Windows x64, and macOS Apple "
+        "Desktop builds for Linux and Windows on x64 and arm64, and macOS Apple "
         "silicon and Intel. Linux testers can choose AppImage, Debian, Fedora "
         "RPM, or Flatpak on either architecture.\n\n"
         "The RPMs support Fedora 43 and 44 on x86_64 and aarch64. Each package is "

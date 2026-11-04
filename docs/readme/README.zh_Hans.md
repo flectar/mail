@@ -306,7 +306,7 @@ Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHu
 | 平台 | 下载 | 说明 |
 | --- | --- | --- |
 | Linux x64 和 arm64 | AppImage、Debian/Ubuntu `.deb`、Fedora 43/44 `.rpm` 或 Flatpak 包 | 需要支持 Secret Service 的密钥环。Flatpak 为侧载预览版，尚未上架 Flathub。 |
-| Windows x64 | 安装程序 `.exe` 或便携版 ZIP | 预览版未签名 |
+| Windows x64 和 arm64 | 安装程序 `.exe` 或便携版 ZIP | 预览版未签名 |
 | macOS 14+（Apple 芯片或 Intel） | DMG 或应用程序 ZIP | 临时签名（ad-hoc），未经公证 |
 | Android 8.0+（arm64） | 已签名的 APK | 预览版与稳定版共用同一个应用身份。 |
 | HarmonyOS 与 OpenHarmony | 由 [springmin](https://github.com/springmin) 维护的[社区移植版](../../platform/ohos/README.md) | 不包含在 GitHub 发布版本中，需从源码构建。 |

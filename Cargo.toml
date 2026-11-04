@@ -128,6 +128,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
     "Win32_System_Memory",
     "Win32_System_Registry",
@@ -137,6 +138,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# The Microsoft Store build's startup task is a WinRT API. Slint and wgpu
+# already build this version of the crate.
+windows = { version = "0.62", default-features = false, features = ["std", "ApplicationModel"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

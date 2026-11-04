@@ -306,7 +306,7 @@ O Flectar Mail está em desenvolvimento e ainda não é estável. As versões de
 | Plataforma | Download | Observações |
 | --- | --- | --- |
 | Linux x64 e arm64 | AppImage, `.deb` para Debian/Ubuntu, `.rpm` para Fedora 43/44 ou pacote Flatpak | Requer um chaveiro compatível com o Secret Service. O Flatpak é uma versão de teste para instalação manual e ainda não está no Flathub. |
-| Windows x64 | Instalador `.exe` ou ZIP portátil | Versões de teste não assinadas |
+| Windows x64 e arm64 | Instalador `.exe` ou ZIP portátil | Versões de teste não assinadas |
 | macOS 14+ (Apple silicon ou Intel) | DMG ou ZIP do aplicativo | Assinatura ad hoc, sem notarização |
 | Android 8.0+ (arm64) | APK assinado | Versões de teste e estáveis compartilham uma identidade de aplicativo. |
 | HarmonyOS e OpenHarmony | [Adaptação comunitária](../../platform/ohos/README.md) de [springmin](https://github.com/springmin) | Não faz parte dos lançamentos no GitHub; compile a partir do código-fonte. |

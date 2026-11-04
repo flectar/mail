@@ -1838,6 +1838,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "webbrowser",
+ "windows",
  "windows-sys 0.61.2",
  "winresource",
  "x11rb",

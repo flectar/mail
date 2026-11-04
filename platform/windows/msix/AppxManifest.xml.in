@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Microsoft Store package manifest. scripts/build-msix.py fills in the
+     package version and processor architecture. -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 uap10 rescap">
+
+  <!-- Package identity reserved in Partner Center (Product management >
+       Product identity). These are placeholders until the name is reserved;
+       docs/microsoft-store.md explains how to replace them. -->
+  <Identity
+    Name="Flectar.FlectarMail"
+    Publisher="CN=00000000-0000-0000-0000-000000000000"
+    Version="@VERSION@"
+    ProcessorArchitecture="@ARCHITECTURE@" />
+
+  <Properties>
+    <DisplayName>Flectar Mail</DisplayName>
+    <PublisherDisplayName>Flectar</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <!-- uap10:Parameters, which starts the sign-in launch in the background,
+       needs Windows 10 version 2004. -->
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <!-- The languages of the bundled translations; en-US is the default. -->
+  <Resources>
+    <Resource Language="en-US" />
+    <Resource Language="da" />
+    <Resource Language="de" />
+    <Resource Language="es" />
+    <Resource Language="fr" />
+    <Resource Language="it" />
+    <Resource Language="ja" />
+    <Resource Language="nl" />
+    <Resource Language="ru" />
+    <Resource Language="tr" />
+    <Resource Language="zh-Hans" />
+  </Resources>
+
+  <Applications>
+    <Application Id="FlectarMail" Executable="flectar-mail.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="Flectar Mail"
+        Description="Native, offline-first email client"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <!-- Packaged apps cannot use the Run registry key, whose writes
+             Windows keeps private to the package. src/autostart.rs enables
+             this task instead; its TaskId must match. -->
+        <uap5:Extension
+          Category="windows.startupTask"
+          Executable="flectar-mail.exe"
+          EntryPoint="Windows.FullTrustApplication"
+          uap10:Parameters="--background">
+          <uap5:StartupTask TaskId="FlectarMailStartup" Enabled="false" DisplayName="Flectar Mail" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
