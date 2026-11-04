@@ -154,10 +154,11 @@ pub fn set_configured(provider: Provider, client_id: &str, client_secret: &str) 
 }
 
 fn bundled_credentials(provider: Provider) -> Option<(String, Option<String>)> {
+    // build.rs fills these from the mobile platform's own registrations.
     #[cfg(mobile)]
     let (client_id, client_secret) = match provider {
-        Provider::Gmail => (option_env!("FLECTAR_GOOGLE_ANDROID_CLIENT_ID"), None),
-        Provider::Microsoft => (option_env!("FLECTAR_MICROSOFT_ANDROID_CLIENT_ID"), None),
+        Provider::Gmail => (option_env!("FLECTAR_MOBILE_GOOGLE_CLIENT_ID"), None),
+        Provider::Microsoft => (option_env!("FLECTAR_MOBILE_MICROSOFT_CLIENT_ID"), None),
         Provider::Generic => return None,
     };
     #[cfg(desktop)]
@@ -172,6 +173,27 @@ fn bundled_credentials(provider: Provider) -> Option<(String, Option<String>)> {
     // Invalid build-time defaults must not enable the sign-in buttons. Runtime
     // or user configuration may still provide a real registration.
     checked_credentials(provider, client_id?, client_secret).ok()
+}
+
+/// The custom-scheme redirect of a Google iOS OAuth client: its client ID
+/// reversed into a URL scheme, as Google's own iOS libraries use.
+pub fn google_reversed_client_id_redirect(client_id: &str) -> Result<String> {
+    client_id
+        .trim()
+        .strip_suffix(".apps.googleusercontent.com")
+        .filter(|id| {
+            !id.is_empty()
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .map(|id| format!("com.googleusercontent.apps.{id}:/oauth2redirect"))
+        .ok_or_else(|| {
+            CoreError::Auth(
+                "Google sign-in here needs an iOS OAuth client ID ending in .apps.googleusercontent.com"
+                    .into(),
+            )
+        })
 }
 
 pub fn has_bundled_credentials(provider: Provider) -> bool {
@@ -224,8 +246,8 @@ pub fn resolve_credentials(provider: Provider) -> Result<(String, Option<String>
 fn bundled_client_id_env(provider: Provider) -> &'static str {
     #[cfg(mobile)]
     return match provider {
-        Provider::Gmail => "FLECTAR_GOOGLE_ANDROID_CLIENT_ID",
-        Provider::Microsoft => "FLECTAR_MICROSOFT_ANDROID_CLIENT_ID",
+        Provider::Gmail => env!("FLECTAR_MOBILE_GOOGLE_CLIENT_ID_SOURCE"),
+        Provider::Microsoft => env!("FLECTAR_MOBILE_MICROSOFT_CLIENT_ID_SOURCE"),
         Provider::Generic => "",
     };
     #[cfg(desktop)]
@@ -270,6 +292,25 @@ mod tests {
             assert!(secret.is_none());
         }
         assert!(validate_custom_client_id(Provider::Microsoft, "  ").is_ok());
+    }
+
+    #[test]
+    fn google_ios_clients_redirect_to_their_reversed_client_id() {
+        assert_eq!(
+            google_reversed_client_id_redirect(" 1234-abc9.apps.googleusercontent.com ").unwrap(),
+            "com.googleusercontent.apps.1234-abc9:/oauth2redirect"
+        );
+        // Anything else would not form a valid URL scheme.
+        for id in [
+            "",
+            ".apps.googleusercontent.com",
+            "1234-abc9",
+            "1234 abc.apps.googleusercontent.com",
+            "1234/abc.apps.googleusercontent.com",
+            "1234_abc.apps.googleusercontent.com",
+        ] {
+            assert!(google_reversed_client_id_redirect(id).is_err(), "{id:?}");
+        }
     }
 
     #[test]

@@ -1,9 +1,8 @@
 # Installing Flectar Mail
 
 Flectar Mail is in development and isn't stable yet. Preview builds are
-published on [GitHub Releases](https://github.com/flectar/mail/releases) with
-the **Pre-release** badge. The [README](../README.md#-get-flectar-mail) lists
-the files for each platform.
+published on [GitHub Releases](https://github.com/flectar/mail/releases). The
+[README](../README.md#-get-flectar-mail) lists the files for each platform.
 
 ## Signing in to Gmail and Outlook
 
@@ -128,6 +127,37 @@ migration command, required secrets, backups, and Play App Signing.
 Local developer builds can still generate a local test key. They only update
 installations signed with that same local key.
 
+## iOS
+
+The iOS app runs on iPhone and iPad with iOS 17 or later. Apple only installs
+signed apps and Flectar Mail isn't on the App Store yet, so each release
+includes an unsigned `.ipa` that a sideloading tool signs with your own Apple
+ID:
+
+- [AltStore](https://altstore.io) or [SideStore](https://sidestore.io): add
+  the source
+  `https://github.com/flectar/mail/releases/latest/download/flectar-mail-altstore-source.json`
+  in the app's **Sources** and install Flectar Mail from it. Both offer each
+  new release as an update and check the download's SHA-256 before installing
+  it.
+- [Sideloadly](https://sideloadly.io) on Windows or macOS: install
+  `flectar-mail-<version>-ios-arm64.ipa` from the
+  [release](https://github.com/flectar/mail/releases) with your Apple ID.
+
+After the first install, turn on **Settings > Privacy & Security > Developer
+Mode**. With a free Apple ID, sideloaded apps stop opening after 7 days unless
+AltStore or SideStore refreshes them or you install them again, and only three
+can be installed at once, counting AltStore or SideStore. A paid Apple
+Developer Program membership extends this to a year.
+
+Mail syncs while the app is open; it doesn't check in the background or show
+notifications on iOS yet.
+
+Releases built with Flectar's iOS registrations sign in to Gmail and Outlook
+directly. Your own keys in **Sign-in settings** must be iOS registrations: a
+Google OAuth client of type iOS, or a Microsoft app registration with the
+iOS / macOS platform and the redirect `msauth.com.flectar.mail://auth`.
+
 ## HarmonyOS and OpenHarmony
 
 HarmonyOS and OpenHarmony have a community port maintained by
@@ -142,7 +172,9 @@ Install the [Rust toolchain](https://rustup.rs/), then run:
 cargo run --bin flectar-mail
 ```
 
-On Linux, the app needs the keyring and desktop portal described above.
+On Linux, the app needs the keyring and desktop portal described above. The
+iOS app builds with Xcode, as [platform/ios](../platform/ios/README.md)
+describes.
 
 Podman and Docker development shells commonly have neither the host session
 D-Bus nor the host browser's loopback network. Debug builds support that setup

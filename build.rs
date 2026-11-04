@@ -18,13 +18,16 @@ fn main() {
             .file("platform/ios/Documents.m")
             .file("platform/ios/PdfPreview.m")
             .file("platform/ios/AppIcon.m")
+            .file("platform/ios/WebAuthentication.m")
             .flag("-fobjc-arc")
             .compile("flectar_documents");
         println!("cargo:rustc-link-lib=framework=UIKit");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        println!("cargo:rustc-link-lib=framework=AuthenticationServices");
         println!("cargo:rerun-if-changed=platform/ios/Documents.m");
         println!("cargo:rerun-if-changed=platform/ios/PdfPreview.m");
         println!("cargo:rerun-if-changed=platform/ios/AppIcon.m");
+        println!("cargo:rerun-if-changed=platform/ios/WebAuthentication.m");
     }
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         winresource::WindowsResource::new()

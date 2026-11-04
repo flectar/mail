@@ -1,6 +1,8 @@
 //! iOS integration. The Objective-C bridges in platform/ios are compiled by
 //! build.rs; this module owns their Rust side.
 mod documents;
+mod oauth;
+mod security;
 
 use flectar_mail_core::models::AppIcon;
 use std::{ffi::CStr, path::PathBuf, sync::Arc};
@@ -27,20 +29,23 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
             "iOS did not supply the application sandbox.".into(),
         )
     })?;
+    let sign_in = oauth::broker();
+    let authorize = sign_in.clone();
     Ok(crate::PlatformContext {
-        external_urls: crate::ExternalUrlOpener::default(),
+        // Mail links open in Safari; sign-in pages in a web authentication
+        // session that returns the provider's redirect to the app.
+        external_urls: crate::ExternalUrlOpener::default()
+            .with_authorization(move |url| authorize.authorize(url)),
         notification_publisher: crate::NotificationPublisher::default(),
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),
         ),
         documents: Arc::new(documents::IosDocuments),
-        // The Keychain bridge is not integrated yet; account setup reports
-        // that instead of storing secrets anywhere else.
-        credentials: Arc::new(flectar_mail_core::accounts::credentials::UnavailableCredentialStore),
-        oauth_redirects: Arc::new(
-            flectar_mail_core::oauth::redirect::LoopbackRedirectBroker::default(),
-        ),
+        credentials: Arc::new(super::keychain::KeychainCredentialStore::new(
+            security::SecurityKeychain,
+        )),
+        oauth_redirects: Arc::new(sign_in),
     })
 }
 

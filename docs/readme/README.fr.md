@@ -66,7 +66,7 @@ Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de r
 
 | Client de messagerie | Interface | Rendu des e-mails | Plateformes |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Application native en Rust | Blitz, un moteur HTML/CSS en Rust ; aucune WebView | Windows, macOS, Linux, Android ; iOS bientôt disponible |
+| **Flectar Mail** | Application native en Rust | Blitz, un moteur HTML/CSS en Rust ; aucune WebView | Windows, macOS, Linux, Android, iOS (par sideloading) |
 | Thunderbird | Application de bureau basée sur Gecko | Gecko | Windows, macOS, Linux, Android |
 | Outlook pour Windows | Application Windows à interface web | Microsoft Edge WebView2 | Windows |
 | Spark | Application Electron | Chromium | macOS, Windows, iOS, Android |
@@ -298,7 +298,7 @@ Flectar Mail affiche les e-mails avec [Blitz](https://github.com/DioxusLabs/blit
 
 ## 📥 Obtenir Flectar Mail
 
-Flectar Mail est en cours de développement et n’est pas encore stable. Les versions de test sont disponibles sur [GitHub Releases](https://github.com/flectar/mail/releases) avec la mention **Pre-release**.
+Flectar Mail est en cours de développement et n’est pas encore stable. Les versions de test sont disponibles sur [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **La vérification OAuth de Google exige une évaluation annuelle de sécurité CASA.** Flectar est un projet libre communautaire ; cette évaluation dépend donc du soutien des sponsors. Tant que la vérification requise n’est pas financée et terminée, une version stable avec OAuth Gmail configuré par défaut ne sera pas possible. Pour aider à proposer la connexion Gmail intégrée, [sponsorisez Flectar](https://github.com/sponsors/flectar).
@@ -309,11 +309,12 @@ Flectar Mail est en cours de développement et n’est pas encore stable. Les ve
 | Windows x64 et arm64 | Installateur `.exe` ou ZIP portable | Préversions non signées |
 | macOS 14+ (Apple silicon ou Intel) | DMG ou ZIP de l’application | Préversions avec signature ad hoc, non notariées |
 | Android 8.0+ (arm64) | APK signé | Préversions et versions stables partagent une même identité d’application. |
+| iOS 17+ (iPhone et iPad) | `.ipa` non signé | À installer avec AltStore, SideStore ou Sideloadly et votre identifiant Apple. |
 | HarmonyOS et OpenHarmony | [Portage communautaire](../../platform/ohos/README.md) par [springmin](https://github.com/springmin) | Ne fait pas partie des publications GitHub ; à compiler à partir des sources. |
 
 Dans les compilations sans clés d’application OAuth, la connexion Gmail et Outlook reste désactivée. Utilisez la roue dentée **Paramètres de connexion** de l’écran d’accueil pour ajouter votre propre inscription d’application Google ou Microsoft, ou connectez un compte IMAP, POP3 ou JMAP.
 
-Le [guide d’installation](../install.md) couvre les commandes d’installation, le trousseau et le portail du bureau sur Linux, les remarques sur Flatpak et RPM, la vérification des téléchargements, la signature Android et la compilation à partir des sources avec `cargo run --bin flectar-mail`.
+Le [guide d’installation](../install.md) couvre les commandes d’installation, le trousseau et le portail du bureau sur Linux, les remarques sur Flatpak et RPM, la vérification des téléchargements, la signature Android, l’installation sur iOS et la compilation à partir des sources avec `cargo run --bin flectar-mail`.
 
 ## 🤝 Participer
 

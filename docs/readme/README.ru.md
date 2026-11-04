@@ -66,7 +66,7 @@ Flectar Mail — лёгкое нативное приложение для по�
 
 | Почтовый клиент | Интерфейс | Отображение писем | Платформы |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Нативное приложение на Rust | Blitz, движок HTML/CSS на Rust; без WebView | Windows, macOS, Linux, Android; скоро iOS |
+| **Flectar Mail** | Нативное приложение на Rust | Blitz, движок HTML/CSS на Rust; без WebView | Windows, macOS, Linux, Android, iOS (сторонняя установка) |
 | Thunderbird | Настольное приложение на основе Gecko | Gecko | Windows, macOS, Linux, Android |
 | Outlook для Windows | Приложение Windows с веб-интерфейсом | Microsoft Edge WebView2 | Windows |
 | Spark | Приложение на Electron | Chromium | macOS, Windows, iOS, Android |
@@ -298,7 +298,7 @@ Flectar Mail отображает письма с помощью [Blitz](https:/
 
 ## 📥 Скачать Flectar Mail
 
-Flectar Mail находится в разработке и пока не является стабильным. Предварительные сборки публикуются в [GitHub Releases](https://github.com/flectar/mail/releases) с отметкой **Pre-release**.
+Flectar Mail находится в разработке и пока не является стабильным. Предварительные сборки публикуются в [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **Верификация Google OAuth требует ежегодной оценки безопасности CASA.** Flectar — открытый общественный проект, поэтому прохождение оценки зависит от спонсорской поддержки. Пока необходимая верификация не профинансирована и не завершена, стабильный выпуск с Gmail OAuth, настроенным по умолчанию, невозможен. Если хотите помочь сделать встроенный вход в Gmail доступным, [поддержите Flectar](https://github.com/sponsors/flectar).
@@ -309,11 +309,12 @@ Flectar Mail находится в разработке и пока не явл�
 | Windows x64 и arm64 | Установщик `.exe` или переносимый ZIP | Предварительные сборки без подписи |
 | macOS 14+ (Apple silicon или Intel) | DMG или ZIP приложения | Подпись ad hoc, без нотарификации |
 | Android 8.0+ (arm64) | Подписанный APK | Предварительные и стабильные выпуски используют одну идентичность приложения. |
+| iOS 17+ (iPhone и iPad) | Неподписанный `.ipa` | Устанавливается через AltStore, SideStore или Sideloadly с вашим Apple ID. |
 | HarmonyOS и OpenHarmony | [Порт сообщества](../../platform/ohos/README.md) от [springmin](https://github.com/springmin) | Не входит в выпуски на GitHub; соберите его из исходного кода. |
 
 В сборках без ключей приложений OAuth вход в Gmail и Outlook отключён. Используйте значок шестерёнки **Настройки входа** на экране приветствия, чтобы добавить собственную регистрацию приложения Google или Microsoft, либо подключите аккаунт IMAP, POP3 или JMAP.
 
-В [руководстве по установке](../install.md) описаны команды установки, хранилище ключей и портал рабочего стола в Linux, особенности Flatpak и RPM, проверка загрузок, подпись сборок Android и сборка из исходного кода командой `cargo run --bin flectar-mail`.
+В [руководстве по установке](../install.md) описаны команды установки, хранилище ключей и портал рабочего стола в Linux, особенности Flatpak и RPM, проверка загрузок, подпись сборок Android, установка на iOS и сборка из исходного кода командой `cargo run --bin flectar-mail`.
 
 ## 🤝 Как принять участие
 
