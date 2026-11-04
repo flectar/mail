@@ -729,10 +729,11 @@ jobs:
 
       # Unsigned, so people can sideload it with their own Apple ID.
       - name: Build the IPA
-        # iOS bundles its own OAuth registrations (platform/ios/README.md).
+        # Google gives iOS its own OAuth client, while one Microsoft
+        # registration serves Android and iOS (platform/ios/README.md).
         env:
           FLECTAR_GOOGLE_IOS_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_IOS_CLIENT_ID }}
-          FLECTAR_MICROSOFT_IOS_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_IOS_CLIENT_ID }}
+          FLECTAR_MICROSOFT_IOS_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_CLIENT_ID }}
         run: bash scripts/package-ios.sh target/ios
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
