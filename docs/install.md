@@ -1,9 +1,8 @@
 # Installing Flectar Mail
 
 Flectar Mail is in development and isn't stable yet. Preview builds are
-published on [GitHub Releases](https://github.com/flectar/mail/releases) with
-the **Pre-release** badge. The [README](../README.md#-get-flectar-mail) lists
-the files for each platform.
+published on [GitHub Releases](https://github.com/flectar/mail/releases). The
+[README](../README.md#-get-flectar-mail) lists the files for each platform.
 
 ## Signing in to Gmail and Outlook
 

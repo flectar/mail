@@ -298,7 +298,7 @@ O Flectar Mail renderiza os e-mails com o [Blitz](https://github.com/DioxusLabs/
 
 ## 📥 Baixe o Flectar Mail
 
-O Flectar Mail está em desenvolvimento e ainda não é estável. As versões de teste são publicadas em [GitHub Releases](https://github.com/flectar/mail/releases) com a indicação **Pre-release**.
+O Flectar Mail está em desenvolvimento e ainda não é estável. As versões de teste são publicadas em [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **A verificação OAuth do Google exige uma avaliação anual de segurança CASA.** O Flectar é um projeto comunitário de código aberto, então essa avaliação depende do apoio de patrocinadores. Até que a verificação necessária seja financiada e concluída, não será possível oferecer uma versão estável com OAuth do Gmail configurado por padrão. Para ajudar a disponibilizar o login integrado do Gmail, [patrocine o Flectar](https://github.com/sponsors/flectar).

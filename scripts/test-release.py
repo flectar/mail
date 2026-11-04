@@ -1095,7 +1095,7 @@ for name in ("FlectarMail", "Frameworks/PDFium.framework/PDFium"):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("prerelease=true", result.stdout)
 
-    def publish(self, *, existing="missing", prerelease="true", fail_upload=False):
+    def publish(self, *, tag="v0.1.0-beta.1", existing="missing", fail_upload=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "dist").mkdir()
@@ -1119,23 +1119,26 @@ if command == "upload" and os.environ["FAIL_UPLOAD"] == "true":
             result = subprocess.run(
                 ["bash", str(SCRIPTS / "publish-release.sh")], cwd=root,
                 env={**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
-                     "GITHUB_REF_NAME": "v0.1.0-beta.1" if prerelease == "true" else "v0.1.0",
-                     "RELEASE_PRERELEASE": prerelease, "EXISTING": existing,
+                     "GITHUB_REF_NAME": tag, "EXISTING": existing,
                      "FAIL_UPLOAD": str(fail_upload).lower()},
                 capture_output=True, text=True,
             )
             calls = [json.loads(line) for line in (root / "calls.jsonl").read_text().splitlines()]
             return result, calls
 
-    def test_preview_and_stable_publication(self):
-        for prerelease in ("true", "false"):
-            with self.subTest(prerelease=prerelease):
-                result, calls = self.publish(prerelease=prerelease)
+    def test_previews_and_stable_releases_publish_as_the_latest(self):
+        # The latest-download links, such as the AltStore source's address,
+        # must reach every new release.
+        for tag in ("v0.1.0-beta.1", "v0.1.0"):
+            with self.subTest(tag=tag):
+                result, calls = self.publish(tag=tag)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual([c[1] for c in calls], ["view", "create", "upload", "edit"])
                 self.assertIn("--draft", calls[1])
-                self.assertIn(f"--prerelease={prerelease}", calls[-1])
-                self.assertIn("--latest=" + str(prerelease == "false").lower(), calls[-1])
+                self.assertFalse(any(argument.startswith("--prerelease") for argument in calls[1]))
+                self.assertIn("--prerelease=false", calls[-1])
+                self.assertIn("--latest=true", calls[-1])
+                self.assertIn("--draft=false", calls[-1])
 
     def test_failed_upload_does_not_publish(self):
         result, calls = self.publish(fail_upload=True)

@@ -313,8 +313,7 @@ sobre [el renderizador y las opciones de CPU y GPU](../features.md#html-renderin
 ## 📥 Consigue Flectar Mail
 
 Flectar Mail está en desarrollo y todavía no es estable. Las versiones de prueba
-se publican en [GitHub Releases](https://github.com/flectar/mail/releases) con
-la etiqueta **Pre-release**.
+se publican en [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **La verificación OAuth de Google requiere una evaluación de seguridad CASA

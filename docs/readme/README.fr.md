@@ -298,7 +298,7 @@ Flectar Mail affiche les e-mails avec [Blitz](https://github.com/DioxusLabs/blit
 
 ## 📥 Obtenir Flectar Mail
 
-Flectar Mail est en cours de développement et n’est pas encore stable. Les versions de test sont disponibles sur [GitHub Releases](https://github.com/flectar/mail/releases) avec la mention **Pre-release**.
+Flectar Mail est en cours de développement et n’est pas encore stable. Les versions de test sont disponibles sur [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **La vérification OAuth de Google exige une évaluation annuelle de sécurité CASA.** Flectar est un projet libre communautaire ; cette évaluation dépend donc du soutien des sponsors. Tant que la vérification requise n’est pas financée et terminée, une version stable avec OAuth Gmail configuré par défaut ne sera pas possible. Pour aider à proposer la connexion Gmail intégrée, [sponsorisez Flectar](https://github.com/sponsors/flectar).

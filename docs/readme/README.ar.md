@@ -328,7 +328,7 @@
 
 ## 📥 احصل على Flectar Mail
 
-لا يزال Flectar Mail قيد التطوير ولم يصل إلى الاستقرار بعد. تتوفر نسخ المعاينة على [GitHub Releases](https://github.com/flectar/mail/releases) وتحمل شارة **Pre-release**.
+لا يزال Flectar Mail قيد التطوير ولم يصل إلى الاستقرار بعد. تتوفر نسخ المعاينة على [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **يتطلب تحقق Google OAuth تقييمًا أمنيًا سنويًا من CASA.** Flectar مشروع مجتمعي مفتوح المصدر، لذا يعتمد إجراء هذا التقييم على دعم الرعاة. لن يكون إصدار مستقر مع Gmail OAuth مهيأ افتراضيًا ممكنًا قبل تمويل التحقق المطلوب وإتمامه. إذا أردت المساعدة في توفير تسجيل الدخول المدمج إلى Gmail، يرجى [رعاية Flectar](https://github.com/sponsors/flectar).

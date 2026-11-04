@@ -298,7 +298,7 @@ Flectar Mail 使用 [Blitz](https://github.com/DioxusLabs/blitz)——Dioxus 团
 
 ## 📥 获取 Flectar Mail
 
-Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHub Releases](https://github.com/flectar/mail/releases) 上，带有 **Pre-release** 标记。
+Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHub Releases](https://github.com/flectar/mail/releases) 上。
 
 > [!WARNING]
 > **Google OAuth 验证需要每年进行一次 CASA 安全评估。** Flectar 是社区开源项目，因此能否完成该项评估取决于赞助支持。在所需的验证获得资金并完成之前，无法推出默认配置 Gmail OAuth 的稳定版本。如果你希望帮助实现内置的 Gmail 登录，请[赞助 Flectar](https://github.com/sponsors/flectar)。

@@ -312,8 +312,7 @@ WebView. If a message renders incorrectly, please
 ## 📥 Get Flectar Mail
 
 Flectar Mail is in development and not yet stable. Preview builds are on
-[GitHub Releases](https://github.com/flectar/mail/releases) with the
-**Pre-release** badge.
+[GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **Google OAuth verification requires an annual CASA security assessment.**

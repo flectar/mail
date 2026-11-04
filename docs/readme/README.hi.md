@@ -298,7 +298,7 @@ Flectar Mail ब्राउज़र या WebView जोड़ने के �
 
 ## 📥 Flectar Mail पाएँ
 
-Flectar Mail अभी विकास में है और स्थिर नहीं है। प्रीव्यू बिल्ड [GitHub Releases](https://github.com/flectar/mail/releases) पर **Pre-release** चिह्न के साथ उपलब्ध हैं।
+Flectar Mail अभी विकास में है और स्थिर नहीं है। प्रीव्यू बिल्ड [GitHub Releases](https://github.com/flectar/mail/releases) पर उपलब्ध हैं।
 
 > [!WARNING]
 > **Google OAuth सत्यापन के लिए हर साल CASA सुरक्षा मूल्यांकन ज़रूरी है।** Flectar एक सामुदायिक ओपन-सोर्स परियोजना है, इसलिए यह मूल्यांकन प्रायोजकों के सहयोग पर निर्भर करता है। जब तक आवश्यक सत्यापन के लिए धन नहीं मिलता और वह पूरा नहीं होता, डिफ़ॉल्ट रूप से कॉन्फ़िगर किए गए Gmail OAuth वाली स्थिर रिलीज़ संभव नहीं होगी। अंतर्निहित Gmail साइन-इन उपलब्ध कराने में मदद के लिए [Flectar को प्रायोजित करें](https://github.com/sponsors/flectar)।
