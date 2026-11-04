@@ -4,10 +4,10 @@ set -euo pipefail
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 build_dir="$project_dir/target/deb"
 package_root="$build_dir/debian/flectar-mail"
+executable="$project_dir/target/release/flectar-mail"
 version="$(sed -n '/^\[package\]$/,/^\[/s/^version = "\([^"]*\)"/\1/p' "$project_dir/Cargo.toml" | head -n 1)"
 # Debian sorts ~beta before the final version. A hyphen means a Debian revision.
 version="${version/-/\~}"
-output_path="$build_dir/flectar-mail_${version}_amd64.deb"
 
 if [[ -z "$version" ]]; then
   printf 'Could not read the package version from Cargo.toml.\n' >&2
@@ -20,13 +20,16 @@ if [[ -n "$app_features" ]]; then
   build_args+=(--features "$app_features")
 fi
 if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
-  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+  if [[ ! -x "$executable" ]]; then
     printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
     exit 1
   fi
 else
   cargo build "${build_args[@]}"
 fi
+architecture="$(python3 "$project_dir/scripts/linux-elf.py" arch "$executable")"
+read -r machine deb_architecture pdfium_target <<<"$architecture"
+output_path="$build_dir/flectar-mail_${version}_${deb_architecture}.deb"
 
 rm -rf "$package_root"
 mkdir -p \
@@ -38,11 +41,11 @@ mkdir -p \
   "$package_root/usr/share/icons/hicolor/scalable/apps" \
   "$package_root/usr/share/metainfo"
 
-install -m755 "$project_dir/target/release/flectar-mail" \
-  "$package_root/usr/bin/flectar-mail"
-python3 "$project_dir/scripts/stage-pdfium.py" linux-x64 "$package_root/usr/lib/flectar-mail"
+install -m755 "$executable" "$package_root/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/stage-pdfium.py" "$pdfium_target" "$package_root/usr/lib/flectar-mail"
 python3 "$project_dir/scripts/test-pdf-preview.py" "$package_root/usr/bin/flectar-mail"
-python3 "$project_dir/scripts/stage-linux-metadata.py" "$package_root"
+python3 "$project_dir/scripts/linux-elf.py" verify "$package_root"
+python3 "$project_dir/scripts/stage-linux-metadata.py" --arch "$machine" "$package_root"
 install -m644 "$project_dir/resources/app-icon/flectar-mail-masked-512.png" \
   "$package_root/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
 install -m644 "$project_dir/resources/app-icon/flectar-mail-masked.svg" \
@@ -70,6 +73,7 @@ runtime_dependencies="${shlib_substitution#shlibs:Depends=}"
 runtime_dependencies+=", libfontconfig1, libwayland-client0, libx11-6, libx11-xcb1, libxkbcommon0, libxkbcommon-x11-0, hicolor-icon-theme, xdg-utils"
 sed \
   -e "s/@VERSION@/$version/g" \
+  -e "s/@ARCHITECTURE@/$deb_architecture/g" \
   -e "s/@DEPENDS@/$runtime_dependencies/g" \
   "$project_dir/resources/debian/control.in" \
   > "$package_root/DEBIAN/control"

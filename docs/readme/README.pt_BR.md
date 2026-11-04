@@ -66,7 +66,7 @@ Medições feitas no Linux com uma conta IMAP (860 mensagens), a caixa de entrad
 
 | Cliente de e-mail | Interface | Renderiza e-mails com | Plataformas |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Aplicativo nativo em Rust | Blitz, um renderizador HTML/CSS em Rust; sem WebView | Windows, macOS, Linux, Android; iOS em breve |
+| **Flectar Mail** | Aplicativo nativo em Rust | Blitz, um renderizador HTML/CSS em Rust; sem WebView | Windows, macOS, Linux, Android, iOS (via sideloading) |
 | Thunderbird | Aplicativo de desktop baseado no Gecko | Gecko | Windows, macOS, Linux, Android |
 | Outlook para Windows | Aplicativo do Windows com interface web | Microsoft Edge WebView2 | Windows |
 | Spark | Aplicativo Electron | Chromium | macOS, Windows, iOS, Android |
@@ -298,22 +298,23 @@ O Flectar Mail renderiza os e-mails com o [Blitz](https://github.com/DioxusLabs/
 
 ## 📥 Baixe o Flectar Mail
 
-O Flectar Mail está em desenvolvimento e ainda não é estável. As versões de teste são publicadas em [GitHub Releases](https://github.com/flectar/mail/releases) com a indicação **Pre-release**.
+O Flectar Mail está em desenvolvimento e ainda não é estável. As versões de teste são publicadas em [GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **A verificação OAuth do Google exige uma avaliação anual de segurança CASA.** O Flectar é um projeto comunitário de código aberto, então essa avaliação depende do apoio de patrocinadores. Até que a verificação necessária seja financiada e concluída, não será possível oferecer uma versão estável com OAuth do Gmail configurado por padrão. Para ajudar a disponibilizar o login integrado do Gmail, [patrocine o Flectar](https://github.com/sponsors/flectar).
 
 | Plataforma | Download | Observações |
 | --- | --- | --- |
-| Linux x64 | AppImage, `.deb` para Debian/Ubuntu, `.rpm` para Fedora 43/44 ou pacote Flatpak | Requer um chaveiro compatível com o Secret Service. O Flatpak é uma versão de teste para instalação manual e ainda não está no Flathub. |
-| Windows x64 | Instalador `.exe` ou ZIP portátil | Versões de teste não assinadas |
+| Linux x64 e arm64 | AppImage, `.deb` para Debian/Ubuntu, `.rpm` para Fedora 43/44 ou pacote Flatpak | Requer um chaveiro compatível com o Secret Service. O Flatpak é uma versão de teste para instalação manual e ainda não está no Flathub. |
+| Windows x64 e arm64 | Instalador `.exe` ou ZIP portátil | Versões de teste não assinadas |
 | macOS 14+ (Apple silicon ou Intel) | DMG ou ZIP do aplicativo | Assinatura ad hoc, sem notarização |
 | Android 8.0+ (arm64) | APK assinado | Versões de teste e estáveis compartilham uma identidade de aplicativo. |
+| iOS 17+ (iPhone e iPad) | `.ipa` sem assinatura | Instale com AltStore, SideStore ou Sideloadly usando seu ID Apple. |
 | HarmonyOS e OpenHarmony | [Adaptação comunitária](../../platform/ohos/README.md) de [springmin](https://github.com/springmin) | Não faz parte dos lançamentos no GitHub; compile a partir do código-fonte. |
 
 Compilações sem chaves de aplicativo OAuth mantêm o login do Gmail e Outlook desativado. Use a engrenagem de **Configurações de login** na tela de boas-vindas para adicionar seu próprio registro de aplicativo do Google ou da Microsoft, ou conecte uma conta IMAP, POP3 ou JMAP.
 
-O [guia de instalação](../install.md) aborda os comandos de instalação, o chaveiro e o portal do desktop no Linux, observações sobre Flatpak e RPM, a verificação de downloads, a assinatura do Android e a compilação a partir do código-fonte com `cargo run --bin flectar-mail`.
+O [guia de instalação](../install.md) aborda os comandos de instalação, o chaveiro e o portal do desktop no Linux, observações sobre Flatpak e RPM, a verificação de downloads, a assinatura do Android, a instalação no iOS e a compilação a partir do código-fonte com `cargo run --bin flectar-mail`.
 
 ## 🤝 Participe
 

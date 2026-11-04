@@ -7,6 +7,7 @@ app_dir="$build_dir/flectar-mail.AppDir"
 output_path="$build_dir/flectar-mail.AppImage"
 staged_output="$build_dir/.flectar-mail.AppImage.new"
 tools_dir="$build_dir/tools"
+executable="$project_dir/target/release/flectar-mail"
 
 download_tool() {
   local url="$1"
@@ -37,15 +38,18 @@ if [[ -n "$app_features" ]]; then
 fi
 # The controls are app-owned and the Linux shell uses winit directly.
 if [[ "${FLECTAR_SKIP_BUILD:-0}" == "1" ]]; then
-  if [[ ! -x "$project_dir/target/release/flectar-mail" ]]; then
+  if [[ ! -x "$executable" ]]; then
     printf 'FLECTAR_SKIP_BUILD=1 requires an existing release executable.\n' >&2
     exit 1
   fi
 else
   cargo build "${build_args[@]}"
 fi
+# Name the package and its tools after the executable's architecture.
+architecture="$(python3 "$project_dir/scripts/linux-elf.py" arch "$executable")"
+read -r machine _ pdfium_target <<<"$architecture"
 
-if ldd "$project_dir/target/release/flectar-mail" | grep -q 'libQt'; then
+if ldd "$executable" | grep -q 'libQt'; then
   printf 'The release binary unexpectedly links Qt; refusing to package it.\n' >&2
   exit 1
 fi
@@ -58,9 +62,9 @@ mkdir -p \
   "$app_dir/usr/share/icons/hicolor/512x512/apps" \
   "$app_dir/usr/share/icons/hicolor/scalable/apps" \
   "$app_dir/usr/share/metainfo"
-cp "$project_dir/target/release/flectar-mail" "$app_dir/usr/bin/flectar-mail"
-python3 "$project_dir/scripts/stage-pdfium.py" linux-x64 "$app_dir/usr/lib/flectar-mail"
-app_version="$(python3 "$project_dir/scripts/stage-linux-metadata.py" "$app_dir")"
+cp "$executable" "$app_dir/usr/bin/flectar-mail"
+python3 "$project_dir/scripts/stage-pdfium.py" "$pdfium_target" "$app_dir/usr/lib/flectar-mail"
+app_version="$(python3 "$project_dir/scripts/stage-linux-metadata.py" --arch "$machine" "$app_dir")"
 cp "$project_dir/resources/app-icon/flectar-mail-masked-512.png" "$app_dir/usr/share/icons/hicolor/512x512/apps/com.flectar.mail.png"
 cp "$project_dir/resources/app-icon/flectar-mail-masked.svg" "$app_dir/usr/share/icons/hicolor/scalable/apps/com.flectar.mail.svg"
 cp "$project_dir/LICENSE" "$app_dir/usr/share/doc/flectar-mail/LICENSE"
@@ -73,13 +77,13 @@ cp "$project_dir/resources/fonts/google-sans-flex/README.md" \
 cp "$project_dir/resources/AppRun" "$app_dir/AppRun"
 chmod +x "$app_dir/AppRun" "$app_dir/usr/bin/flectar-mail"
 
-linuxdeploy="${LINUXDEPLOY:-$tools_dir/linuxdeploy-x86_64.AppImage}"
+linuxdeploy="${LINUXDEPLOY:-$tools_dir/linuxdeploy-$machine.AppImage}"
 download_tool \
-  'https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage' \
+  "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$machine.AppImage" \
   "$linuxdeploy"
-appimagetool="${APPIMAGETOOL:-$tools_dir/appimagetool-x86_64.AppImage}"
+appimagetool="${APPIMAGETOOL:-$tools_dir/appimagetool-$machine.AppImage}"
 download_tool \
-  'https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage' \
+  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$machine.AppImage" \
   "$appimagetool"
 
 # Winit opens libxkbcommon-x11 with dlopen(), so linuxdeploy cannot discover
@@ -130,6 +134,8 @@ chmod +x "$app_dir/AppRun"
 # The pinned PDFium runtime depends only on the ordinary glibc runtime. Keep
 # its private path intact and verify it after deployment has adjusted the ELF files.
 python3 "$project_dir/scripts/test-pdf-preview.py" "$app_dir/usr/bin/flectar-mail"
+# Deployment rewrites ELF files; they must still load on 16 and 64 KiB pages.
+python3 "$project_dir/scripts/linux-elf.py" verify "$app_dir"
 
 # AppDir specifies a PNG .DirIcon for file-manager thumbnails. linuxdeploy
 # prefers the scalable icon for the root entry, so restore the PNG thumbnail
@@ -141,6 +147,8 @@ mkdir -p "$(dirname "$output_path")"
 rm -f "$staged_output"
 VERSION="$app_version" APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}" \
   "$appimagetool" "$app_dir" "$staged_output"
+# The AppImage starts with appimagetool's runtime, which is an ELF executable.
+python3 "$project_dir/scripts/linux-elf.py" verify "$staged_output"
 # Renaming over an executing AppImage is atomic on Linux; the running process
 # keeps its old inode while new launches receive the freshly packaged build.
 mv -f "$staged_output" "$output_path"

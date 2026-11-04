@@ -200,9 +200,11 @@ fn worker() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// Files arrive through stdin; only system font directories remain readable.
-// Fail closed if the kernel cannot enforce the sandbox. Seccomp complements
-// Landlock by denying networking, process creation, ptrace and signal delivery.
+// Files arrive through stdin. Landlock leaves only the system font directories
+// readable. Kernels without Landlock, such as Raspberry Pi OS's, can't limit
+// file access to those directories, so there seccomp blocks opening any file
+// and PDFs that rely on installed fonts render with PDFium's built-in ones.
+// Seccomp also denies networking, process creation, ptrace and signal delivery.
 #[cfg(linux_desktop)]
 fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
     use landlock::{
@@ -223,9 +225,17 @@ fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
             AccessFs::from_read(ABI::V1),
         ))?
         .restrict_self()?;
-    if status.ruleset != RulesetStatus::FullyEnforced || !status.no_new_privs {
-        return Err("PDF sandbox requires Linux Landlock support".into());
+    if !status.no_new_privs {
+        return Err("PDF sandbox requires no_new_privs".into());
     }
+    let read_fonts = match status.ruleset {
+        RulesetStatus::FullyEnforced => true,
+        RulesetStatus::NotEnforced => false,
+        // Part of the file access would remain unrestricted.
+        RulesetStatus::PartiallyEnforced => {
+            return Err("PDF sandbox requires full Linux Landlock support".into());
+        }
+    };
     let mut calls = vec![
         libc::SYS_read,
         libc::SYS_write,
@@ -235,15 +245,10 @@ fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
         libc::SYS_pread64,
         libc::SYS_lseek,
         libc::SYS_fstat,
+        // glibc implements fstat() with newfstatat on an empty path.
         libc::SYS_newfstatat,
-        libc::SYS_statx,
-        libc::SYS_openat,
-        libc::SYS_faccessat,
-        libc::SYS_faccessat2,
         libc::SYS_fcntl,
         libc::SYS_flock,
-        libc::SYS_getdents64,
-        libc::SYS_readlinkat,
         libc::SYS_brk,
         libc::SYS_mmap,
         libc::SYS_mprotect,
@@ -268,14 +273,24 @@ fn sandbox() -> Result<(), Box<dyn std::error::Error>> {
         libc::SYS_exit,
         libc::SYS_exit_group,
     ];
-    #[cfg(target_arch = "x86_64")]
-    calls.extend([
-        libc::SYS_open,
-        libc::SYS_access,
-        libc::SYS_stat,
-        libc::SYS_lstat,
-        libc::SYS_readlink,
-    ]);
+    if read_fonts {
+        calls.extend([
+            libc::SYS_openat,
+            libc::SYS_statx,
+            libc::SYS_faccessat,
+            libc::SYS_faccessat2,
+            libc::SYS_getdents64,
+            libc::SYS_readlinkat,
+        ]);
+        #[cfg(target_arch = "x86_64")]
+        calls.extend([
+            libc::SYS_open,
+            libc::SYS_access,
+            libc::SYS_stat,
+            libc::SYS_lstat,
+            libc::SYS_readlink,
+        ]);
+    }
     let filter: BpfProgram = SeccompFilter::new(
         calls.into_iter().map(|number| (number, vec![])).collect(),
         SeccompAction::Errno(libc::EPERM as u32),

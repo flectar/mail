@@ -24,9 +24,9 @@ on:
         type: boolean
         default: true
       include_ios:
-        description: Also build an experimental unsigned iOS archive
+        description: Build the unsigned iOS app
         type: boolean
-        default: false
+        default: true
   pull_request:
     paths:
       - ".github/workflows/native-platforms.yml"
@@ -63,6 +63,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       native_version: ${{ steps.version.outputs.native_version }}
+      msix_version: ${{ steps.version.outputs.msix_version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       source_date_epoch: ${{ steps.source.outputs.source_date_epoch }}
     steps:
@@ -94,8 +95,17 @@ jobs:
   linux:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Linux packages (x64)
-    runs-on: ubuntu-22.04
+    name: Linux packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 keeps the glibc 2.35 baseline on both architectures.
+          - arch: x64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -133,7 +143,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
-          key: native-linux-x64
+          key: native-linux-${{ matrix.arch }}
 
       - name: Validate desktop metadata
         run: |
@@ -170,7 +180,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-linux-x64
+          name: flectar-mail-linux-${{ matrix.arch }}
           path: |
             target/appimage/*.AppImage
             target/deb/*.deb
@@ -180,8 +190,16 @@ jobs:
   rpm:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Fedora RPM build (x64, Fedora 43 baseline)
-    runs-on: ubuntu-24.04
+    name: Fedora RPM build (${{ matrix.arch }}, Fedora 43 baseline)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     # Build against the oldest supported Fedora; test this exact artifact below.
     container: fedora:43
     env:
@@ -218,7 +236,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
-          key: native-fedora-43-rpm-x64
+          key: native-fedora-43-rpm-${{ matrix.arch }}
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -234,23 +252,29 @@ jobs:
           rpm -qlp target/rpm/flectar-mail.rpm
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-rpm-x64
+          name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm/flectar-mail.rpm
           if-no-files-found: error
 
   rpm-test:
     needs: rpm
-    name: RPM runtime (Fedora ${{ matrix.fedora }}, x64)
-    runs-on: ubuntu-24.04
+    name: RPM runtime (Fedora ${{ matrix.fedora }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         fedora: [43, 44]
+        arch: [x64, arm64]
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: flectar-mail-rpm-x64
+          name: flectar-mail-rpm-${{ matrix.arch }}
           path: target/rpm
       - name: Test published RPM in a clean Fedora container
         shell: bash
@@ -268,15 +292,23 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-rpm-test-fedora-${{ matrix.fedora }}
+          name: rpm-test-fedora-${{ matrix.fedora }}-${{ matrix.arch }}
           path: target/rpm-test
           if-no-files-found: error
 
   flatpak:
     needs: metadata
     if: github.event_name == 'push' || github.event_name == 'pull_request' || inputs.include_linux
-    name: Flatpak preview bundle (x64)
-    runs-on: ubuntu-24.04
+    name: Flatpak preview bundle (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
@@ -320,15 +352,23 @@ jobs:
           flatpak uninstall --user --noninteractive -y com.flectar.mail
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-flatpak-x64
+          name: flectar-mail-flatpak-${{ matrix.arch }}
           path: target/flatpak/flectar-mail.flatpak
           if-no-files-found: error
 
   windows:
     needs: metadata
     if: github.event_name == 'push' || inputs.include_windows
-    name: Windows installer and portable executable (x64)
-    runs-on: windows-2025
+    name: Windows packages (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
@@ -337,7 +377,18 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
-          key: native-windows-x64
+          key: native-windows-${{ matrix.arch }}
+
+      - name: Put Clang on the path
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          # ring and aws-lc compile their Arm64 Windows sources with Clang.
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+            $llvm = Join-Path $env:ProgramFiles 'LLVM\bin'
+            if (-not (Test-Path (Join-Path $llvm 'clang.exe'))) { throw 'LLVM is missing from the runner' }
+            Add-Content $env:GITHUB_PATH $llvm
+          }
 
       - name: Build release executable
         shell: bash
@@ -365,11 +416,13 @@ jobs:
 
       - name: Package executable
         shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
           New-Item -ItemType Directory -Force target/package/windows | Out-Null
           New-Item -ItemType Directory -Force "target/package/windows/LICENSES/Google Sans Flex" | Out-Null
           New-Item -ItemType Directory -Force "target/package/windows/LICENSES/Noto Emoji" | Out-Null
-          python scripts/stage-pdfium.py win-x64 target/package/windows
+          python scripts/stage-pdfium.py "win-$env:ARCH" target/package/windows
           if ($LASTEXITCODE -ne 0) { throw "PDFium staging failed" }
           Copy-Item target/release/flectar-mail.exe target/package/windows/
           Copy-Item README.md target/package/windows/
@@ -382,7 +435,7 @@ jobs:
           Copy-Item resources/fonts/noto-emoji/README.md "target/package/windows/LICENSES/Noto Emoji/"
           python scripts/test-pdf-preview.py target/package/windows/flectar-mail.exe
           if ($LASTEXITCODE -ne 0) { throw "Packaged PDF preview test failed" }
-          Compress-Archive -Path target/package/windows/* -DestinationPath target/flectar-mail-windows-x64.zip -Force
+          Compress-Archive -Path target/package/windows/* -DestinationPath "target/flectar-mail-windows-$env:ARCH.zip" -Force
 
       - name: Install pinned Inno Setup compiler
         shell: pwsh
@@ -399,17 +452,20 @@ jobs:
         env:
           APP_VERSION: ${{ needs.metadata.outputs.version }}
           NATIVE_VERSION: ${{ needs.metadata.outputs.native_version }}
+          ARCH: ${{ matrix.arch }}
         run: |
           $compiler = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $compiler)) { throw "Inno Setup 6 is missing from the runner" }
-          & $compiler "/DAppVersion=$env:APP_VERSION" "/DNativeVersion=$env:NATIVE_VERSION" platform/windows/installer.iss
+          & $compiler "/DAppVersion=$env:APP_VERSION" "/DNativeVersion=$env:NATIVE_VERSION" "/DArch=$env:ARCH" platform/windows/installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with exit code $LASTEXITCODE" }
 
       - name: Verify unattended installation and uninstall
         shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
           $destination = Join-Path $env:RUNNER_TEMP 'Flectar Mail install test'
-          $installer = (Resolve-Path target/flectar-mail-windows-x64-setup.exe).Path
+          $installer = (Resolve-Path "target/flectar-mail-windows-$env:ARCH-setup.exe").Path
           $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"")
           $process = Start-Process $installer -ArgumentList $arguments -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installation failed: $($process.ExitCode)" }
@@ -418,12 +474,71 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Uninstall failed: $($process.ExitCode)" }
           if (Test-Path "$destination/flectar-mail.exe") { throw 'Uninstall left the executable behind' }
 
+      - name: Build Microsoft Store package
+        shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
+          MSIX_VERSION: ${{ needs.metadata.outputs.msix_version }}
+        run: |
+          python scripts/build-msix.py pack --arch $env:ARCH --version $env:MSIX_VERSION target/package/windows "target/msix/flectar-mail-$env:ARCH.msix"
+          if ($LASTEXITCODE -ne 0) { throw "Store packaging failed" }
+
+      - name: Install, start and remove the Store package
+        shell: pwsh
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-msix.ps1 -Package "target/msix/flectar-mail-$env:ARCH.msix"
+          if ($LASTEXITCODE -ne 0) { throw "Store package test failed" }
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-windows-x64
+          name: msix-${{ matrix.arch }}
+          path: target/msix/flectar-mail-${{ matrix.arch }}.msix
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: flectar-mail-windows-${{ matrix.arch }}
           path: |
-            target/flectar-mail-windows-x64.zip
-            target/flectar-mail-windows-x64-setup.exe
+            target/flectar-mail-windows-${{ matrix.arch }}.zip
+            target/flectar-mail-windows-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+
+  microsoft-store:
+    needs: [metadata, windows]
+    name: Microsoft Store bundle
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: msix-*
+          path: target/msix
+          merge-multiple: true
+
+      # Partner Center takes this one file and serves each device its architecture.
+      - name: Bundle the Store packages
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.metadata.outputs.version }}
+          MSIX_VERSION: ${{ needs.metadata.outputs.msix_version }}
+        run: |
+          python scripts/build-msix.py bundle --version $env:MSIX_VERSION "target/flectar-mail-$env:APP_VERSION.msixbundle" target/msix/flectar-mail-x64.msix target/msix/flectar-mail-arm64.msix
+          if ($LASTEXITCODE -ne 0) { throw "Store bundling failed" }
+
+      - name: Install, start and remove the Store bundle
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-msix.ps1 -Package "target/flectar-mail-$env:APP_VERSION.msixbundle"
+          if ($LASTEXITCODE -ne 0) { throw "Store bundle test failed" }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: microsoft-store-package
+          path: target/flectar-mail-${{ needs.metadata.outputs.version }}.msixbundle
           if-no-files-found: error
 
   macos:
@@ -593,15 +708,17 @@ jobs:
 
   ios:
     needs: metadata
-    if: github.event_name == 'workflow_dispatch' && inputs.include_ios
-    name: iOS unsigned archive (arm64)
+    if: github.event_name == 'push' || inputs.include_ios
+    name: iOS app (arm64, unsigned)
     runs-on: macos-15
+    env:
+      SOURCE_DATE_EPOCH: ${{ needs.metadata.outputs.source_date_epoch }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: stable
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
@@ -610,34 +727,19 @@ jobs:
       - name: Install Xcode project generator
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        working-directory: platform/ios
-        run: xcodegen generate
-
-      - name: Build unsigned device archive
+      # Unsigned, so people can sideload it with their own Apple ID.
+      - name: Build the IPA
+        # Google gives iOS its own OAuth client, while one Microsoft
+        # registration serves Android and iOS (platform/ios/README.md).
         env:
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
-          FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_SECRET }}
-          FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_DESKTOP_CLIENT_ID }}
-        run: |
-          mkdir -p target/ios
-          xcodebuild \
-            -project platform/ios/FlectarMail.xcodeproj \
-            -scheme FlectarMail \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$PWD/target/ios/FlectarMail.xcarchive" \
-            CODE_SIGNING_ALLOWED=NO \
-            archive
-          ditto -c -k --sequesterRsrc --keepParent \
-            target/ios/FlectarMail.xcarchive \
-            target/ios/flectar-mail-ios-unsigned-xcarchive.zip
+          FLECTAR_GOOGLE_IOS_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_IOS_CLIENT_ID }}
+          FLECTAR_MICROSOFT_IOS_CLIENT_ID: ${{ secrets.FLECTAR_MICROSOFT_ANDROID_CLIENT_ID }}
+        run: bash scripts/package-ios.sh target/ios
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: flectar-mail-ios-arm64-unsigned
-          path: target/ios/flectar-mail-ios-unsigned-xcarchive.zip
+          name: flectar-mail-ios-arm64
+          path: target/ios/flectar-mail-ios-arm64.ipa
           if-no-files-found: error
 
   release:
@@ -649,8 +751,10 @@ jobs:
       needs.linux.result == 'success' && needs.rpm.result == 'success' &&
       needs.rpm-test.result == 'success' &&
       needs.flatpak.result == 'success' && needs.windows.result == 'success' &&
-      needs.macos.result == 'success' && needs.android.result == 'success'
-    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, macos, android]
+      needs.microsoft-store.result == 'success' &&
+      needs.macos.result == 'success' && needs.android.result == 'success' &&
+      needs.ios.result == 'success'
+    needs: [metadata, quality, linux, rpm, rpm-test, flatpak, windows, microsoft-store, macos, android, ios]
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -661,47 +765,13 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Download Linux packages
+      # Each package artifact unpacks into release-assets/<artifact name>.
+      # The staging script picks the expected files from those folders.
+      - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: flectar-mail-linux-x64
-          path: release-assets/linux
-
-      - name: Download Windows package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-windows-x64
-          path: release-assets/windows
-
-      - name: Download RPM package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-rpm-x64
-          path: release-assets/rpm
-
-      - name: Download Flatpak bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-flatpak-x64
-          path: release-assets/flatpak
-
-      - name: Download macOS Apple silicon package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-macos-arm64
-          path: release-assets/macos/arm64
-
-      - name: Download macOS Intel package
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-macos-x64
-          path: release-assets/macos/x64
-
-      - name: Download Android signed APK
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: flectar-mail-android-signed-arm64
-          path: release-assets/android
+          pattern: flectar-mail-*
+          path: release-assets
 
       - name: Prepare release downloads
         env:
@@ -717,5 +787,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         run: bash scripts/publish-release.sh

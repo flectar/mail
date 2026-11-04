@@ -16,6 +16,7 @@ import urllib.request
 RELEASE = "chromium/8044"
 ASSETS = {
     "linux-x64": ("eb142f416aed3a72fc5a02dbd5884868a16cb99dc0cf53e6bdd64afbf67b05f4", "lib/libpdfium.so"),
+    "linux-arm64": ("e98400ef5f005f27cfba5c14f72d464e25187298f04950de46646033cf24cef0", "lib/libpdfium.so"),
     "mac-arm64": ("61424884d4a7f153b808deba6437848e4400834ce30aaf95d3050da44df8f420", "lib/libpdfium.dylib"),
     "mac-x64": ("a93d44238e05de20028446561b951d50988b849efbbe56fe40c0d376c05b45e8", "lib/libpdfium.dylib"),
     "android-arm64": ("37686e64fa005484d619550a78805500de4c5a6f4df7aa06d8576145bfbee98f", "lib/libpdfium.so"),
@@ -24,6 +25,7 @@ ASSETS = {
     "ios-simulator-arm64": ("544537fce5257146e0df501c632d490d1aa95768737770f1912c8e23b1dd238d", "lib/libpdfium.dylib"),
     "ios-simulator-x64": ("8d4e33e415e29894aa98481bc9a9162a42039a1672796db14c9fed9cd545c881", "lib/libpdfium.dylib"),
     "win-x64": ("78a17d9a5f14467631c26a3ac8741b27a0471ecc05bd6a119b523598160a0537", "bin/pdfium.dll"),
+    "win-arm64": ("6c9ac0ddc69edd8a18d47b95098a5b843eaed5c5bbdcb9587a18c196457449f8", "bin/pdfium.dll"),
 }
 
 

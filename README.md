@@ -73,7 +73,7 @@ tray. See [how we measure and how to check it yourself](docs/performance.md).
 
 | Email client | Interface | Renders email with | Platforms |
 | --- | --- | --- | --- |
-| **Flectar Mail** | Native Rust app | Blitz, a Rust HTML/CSS renderer; no WebView | Windows, macOS, Linux, Android; iOS coming soon |
+| **Flectar Mail** | Native Rust app | Blitz, a Rust HTML/CSS renderer; no WebView | Windows, macOS, Linux, Android, iOS (sideloaded) |
 | Thunderbird | Gecko-based desktop app | Gecko | Windows, macOS, Linux, Android |
 | Outlook for Windows | Windows shell with a web UI | Microsoft Edge WebView2 | Windows |
 | Spark | Electron app | Chromium | macOS, Windows, iOS, Android |
@@ -312,8 +312,7 @@ WebView. If a message renders incorrectly, please
 ## 📥 Get Flectar Mail
 
 Flectar Mail is in development and not yet stable. Preview builds are on
-[GitHub Releases](https://github.com/flectar/mail/releases) with the
-**Pre-release** badge.
+[GitHub Releases](https://github.com/flectar/mail/releases).
 
 > [!WARNING]
 > **Google OAuth verification requires an annual CASA security assessment.**
@@ -325,10 +324,11 @@ Flectar Mail is in development and not yet stable. Preview builds are on
 
 | Platform | Download | Notes |
 | --- | --- | --- |
-| Linux x64 | AppImage, Debian/Ubuntu `.deb`, Fedora 43/44 `.rpm`, or a Flatpak bundle | Needs a Secret Service keyring. The Flatpak is a sideloaded preview, not on Flathub yet. |
-| Windows x64 | Setup `.exe` or portable ZIP | Unsigned previews |
+| Linux x64 and arm64 | AppImage, Debian/Ubuntu `.deb`, Fedora 43/44 `.rpm`, or a Flatpak bundle | Needs a Secret Service keyring. The Flatpak is a sideloaded preview, not on Flathub yet. |
+| Windows x64 and arm64 | Setup `.exe` or portable ZIP | Unsigned previews |
 | macOS 14+ (Apple silicon or Intel) | DMG or application ZIP | Ad-hoc signed, not notarized |
 | Android 8.0+ (arm64) | Signed APK | Previews and stable releases share one app identity. |
+| iOS 17+ (iPhone and iPad) | Unsigned `.ipa` | Sideload it with AltStore, SideStore, or Sideloadly and your Apple ID. |
 | HarmonyOS and OpenHarmony | [Community port](platform/ohos/README.md) by [springmin](https://github.com/springmin) | Not part of GitHub releases; build it from source. |
 
 Builds without OAuth app keys keep Gmail and Outlook sign-in disabled. Use the
@@ -337,7 +337,8 @@ Microsoft app registration, or connect an IMAP, POP3, or JMAP account.
 
 The [installation guide](docs/install.md) covers install commands, the Linux
 keyring and desktop portal, Flatpak and RPM notes, verifying downloads, Android
-signing, and building from source with `cargo run --bin flectar-mail`.
+signing, iOS sideloading, and building from source with
+`cargo run --bin flectar-mail`.
 
 ## 🤝 Get involved
 

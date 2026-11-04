@@ -161,7 +161,9 @@ jobs:
           - name: iOS
             runner: macos-15
             target: aarch64-apple-ios
+            # The app's deployment target (platform/ios/project.yml).
             command: >-
+              IPHONEOS_DEPLOYMENT_TARGET=17.0
               cargo clippy --locked --target aarch64-apple-ios --bin flectar-mail
               --no-default-features --features remote-content,ios -- -D warnings
           - name: Android
@@ -204,6 +206,21 @@ jobs:
       - name: Lint without warnings
         shell: bash
         run: ${{ matrix.command }}
+      # rustc links without compiler-rt, so an Objective-C `@available` check
+      # above the deployment target would only fail when the release build
+      # links the app.
+      - name: Keep the Objective-C bridges linkable
+        if: matrix.name == 'iOS'
+        run: |
+          archive=""
+          for candidate in target/aarch64-apple-ios/debug/build/flectar-mail-*/out/libflectar_documents.a; do
+            if [[ -z "$archive" || "$candidate" -nt "$archive" ]]; then archive="$candidate"; fi
+          done
+          undefined="$(nm -u "$archive")"
+          if grep -E '___is(Platform|OS)VersionAtLeast' <<<"$undefined"; then
+            echo "::error::Use a runtime check instead of @available in platform/ios; rustc doesn't link compiler-rt."
+            exit 1
+          fi
 
   optional-embeddings:
     if: github.event_name != 'schedule'

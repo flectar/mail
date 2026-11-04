@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage Linux desktop and AppStream metadata using the Cargo package version."""
+"""Stage Linux desktop and AppStream metadata for the Cargo package version and architecture."""
 
 import argparse
 import os
@@ -10,7 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def stage(project: Path, destination: Path, *, flatpak: bool = False) -> str:
+# AppImage names for the architectures that release packages are built for.
+ARCHITECTURES = ("x86_64", "aarch64")
+
+
+def stage(project: Path, destination: Path, *, arch: str | None = None, flatpak: bool = False) -> str:
     with (project / "Cargo.toml").open("rb") as stream:
         version = tomllib.load(stream)["package"]["version"]
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.[1-9]\d*)?", version):
@@ -31,6 +35,14 @@ def stage(project: Path, destination: Path, *, flatpak: bool = False) -> str:
         raise ValueError("Expected one X-AppImage-Version field in the desktop template")
     if flatpak:
         desktop = re.sub(r"^X-AppImage-[^\n]*\n?", "", desktop, flags=re.MULTILINE)
+    else:
+        if arch not in ARCHITECTURES:
+            raise ValueError(f"Expected an architecture from {', '.join(ARCHITECTURES)}, not {arch}")
+        desktop, count = re.subn(
+            r"^X-AppImage-Arch=.*$", f"X-AppImage-Arch={arch}", desktop, flags=re.MULTILINE,
+        )
+        if count != 1:
+            raise ValueError("Expected one X-AppImage-Arch field in the desktop template")
     parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
     metainfo = ET.parse(resources / "com.flectar.mail.metainfo.xml", parser=parser)
     # The first release describes the build being packaged. Retain older entries.
@@ -52,7 +64,9 @@ def stage(project: Path, destination: Path, *, flatpak: bool = False) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--flatpak", action="store_true", help="omit AppImage-only desktop keys")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--arch", choices=ARCHITECTURES, help="architecture of the packaged executable")
+    target.add_argument("--flatpak", action="store_true", help="omit AppImage-only desktop keys")
     parser.add_argument("destination", type=Path, help="AppDir or Debian package root")
     args = parser.parse_args()
-    print(stage(Path(__file__).resolve().parent.parent, args.destination, flatpak=args.flatpak))
+    print(stage(Path(__file__).resolve().parent.parent, args.destination, arch=args.arch, flatpak=args.flatpak))

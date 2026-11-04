@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Generate and check the alternate app icons offered in Settings.
+"""Generate and check the alternate app icons offered in Settings, and the
+Microsoft Store package logos.
 
 Every variant is the master icon with its own colors; the default orange icon
 is the master itself and is not generated. Outputs:
@@ -8,7 +9,8 @@ is the master itself and is not generated. Outputs:
   PNGs used on the desktop;
 - platform/ios/Assets.xcassets/AppIcon<Name>.appiconset: opaque 1024 px
   alternate icons;
-- platform/android/.../res: adaptive launcher icons for the launcher aliases.
+- platform/android/.../res: adaptive launcher icons for the launcher aliases;
+- platform/windows/msix/Assets: the master icon's logos for the Store package.
 
 Rasterizing needs the resvg command-line tool (`cargo install resvg`); --check
 only reads files, and also checks that the Android manifest and the iOS
@@ -32,6 +34,7 @@ IOS_ASSETS = PROJECT / "platform/ios/Assets.xcassets"
 IOS_PROJECT = PROJECT / "platform/ios/project.yml"
 ANDROID_MAIN = PROJECT / "platform/android/gradle/app/src/main"
 ANDROID_RES = ANDROID_MAIN / "res"
+WINDOWS_ASSETS = PROJECT / "platform/windows/msix/Assets"
 
 # Background gradients run from the bottom stop to the top stop, like the
 # master's. A glyph gradient replaces the white envelope.
@@ -48,6 +51,28 @@ ICONS = ["orange", *VARIANTS]
 # flectar-mail-window.png and flectar-mail-tray.png; 512 px feeds the Dock and
 # the Linux icon theme.
 RASTERS = (("512", 512), ("window", 256), ("tray", 64))
+
+
+
+def windows_logos():
+    """Store package logo file names, with their pixel size and icon scale.
+
+    These are the sizes Microsoft's app icon guidance lists. Windows uses an
+    exact size when it has one and otherwise shrinks the next larger file, so
+    every size the taskbar, Start and title bars use at each display scale is
+    rendered from the SVG. The altform-unplated (dark theme) and
+    altform-lightunplated files stop Windows from drawing a plate behind the
+    icon. Start menu tiles keep the icon at half size.
+    """
+    logos = {}
+    for scale in (100, 125, 150, 200, 400):
+        for name, base, icon in (("StoreLogo", 50, 1), ("Square44x44Logo", 44, 1), ("Square150x150Logo", 150, 0.5)):
+            logos[f"{name}.scale-{scale}.png"] = (int(base * scale / 100 + 0.5), icon)
+    for size in (16, 20, 24, 30, 32, 36, 40, 48, 60, 64, 72, 80, 96, 256):
+        for form in ("", "_altform-unplated", "_altform-lightunplated"):
+            logos[f"Square44x44Logo.targetsize-{size}{form}.png"] = (size, 1)
+    return logos
+
 
 MASTER_STOPS = ('<stop stop-color="#FF3F0A"/>', '<stop offset="1" stop-color="#FD8D0E"/>')
 GLYPH_FILL = re.compile(r'(<path d="M[^"]*") fill="white"')
@@ -238,7 +263,17 @@ def expected_rasters():
                for name in VARIANTS for label, size in RASTERS}
     rasters.update({IOS_ASSETS / f"AppIcon{title(name)}.appiconset/AppIcon-1024.png": (1024, 2)
                     for name in VARIANTS})
+    rasters.update({WINDOWS_ASSETS / name: (size, 6) for name, (size, _) in windows_logos().items()})
     return rasters
+
+
+def scaled_svg(svg, scale, source):
+    """Center the 1024-unit master at `scale` of its canvas."""
+    side = round(1024 / scale)
+    margin = (side - 1024) // 2
+    return replace_once(
+        svg, '<svg width="1024" height="1024" viewBox="0 0 1024 1024"',
+        f'<svg width="{side}" height="{side}" viewBox="-{margin} -{margin} {side} {side}"', source)
 
 
 def check_declarations():
@@ -261,10 +296,12 @@ def main():
     try:
         texts = expected_text()
         rasters = expected_rasters()
-        unexpected = {path.name for path in VARIANTS_DIR.glob("*")} - {
-            path.name for path in [*texts, *rasters] if path.parent == VARIANTS_DIR}
-        if unexpected:
-            raise ValueError("Unexpected icon variant files: " + ", ".join(sorted(unexpected)))
+        for directory in (VARIANTS_DIR, WINDOWS_ASSETS):
+            unexpected = {path.name for path in directory.glob("*")} - {
+                path.name for path in [*texts, *rasters] if path.parent == directory}
+            if unexpected:
+                raise ValueError(f"Unexpected files in {directory.relative_to(PROJECT)}: "
+                                 + ", ".join(sorted(unexpected)))
         stale = [path for path, text in texts.items()
                  if not path.is_file() or path.read_text(encoding="utf-8") != text]
         if args.check:
@@ -279,7 +316,8 @@ def main():
                 if (width, height, actual) != (size, size, color):
                     raise ValueError(f"{path.relative_to(PROJECT)} is {width}x{height} "
                                      f"(color type {actual}), expected {size}x{size} (color type {color})")
-            print(f"Checked {len(VARIANTS)} icon variants: {len(texts)} files and {len(rasters)} rasters")
+            print(f"Checked {len(VARIANTS)} icon variants and the Store logos: "
+                  f"{len(texts)} files and {len(rasters)} rasters")
             return 0
         for path, text in texts.items():
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,8 +338,15 @@ def main():
                 png = IOS_ASSETS / f"AppIcon{title(name)}.appiconset/AppIcon-1024.png"
                 rasterize(svg, png, 1024)
                 opaque_rgb(png)
+            masked = (ROOT / "flectar-mail-masked.svg").read_text(encoding="utf-8")
+            WINDOWS_ASSETS.mkdir(parents=True, exist_ok=True)
+            for name, (size, scale) in windows_logos().items():
+                svg = Path(directory) / f"windows-{scale}.svg"
+                svg.write_text(scaled_svg(masked, scale, "flectar-mail-masked.svg"), encoding="utf-8")
+                rasterize(svg, WINDOWS_ASSETS / name, size)
         check_declarations()
-        print(f"Generated {len(VARIANTS)} icon variants: {len(texts)} files and {len(rasters)} rasters")
+        print(f"Generated {len(VARIANTS)} icon variants and the Store logos: "
+              f"{len(texts)} files and {len(rasters)} rasters")
         return 0
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)

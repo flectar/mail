@@ -128,6 +128,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "Win32_Storage_Packaging_Appx",
     "Win32_System_JobObjects",
     "Win32_System_Memory",
     "Win32_System_Registry",
@@ -137,6 +138,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# The Microsoft Store build's startup task is a WinRT API. Slint and wgpu
+# already build this version of the crate.
+windows = { version = "0.62", default-features = false, features = ["std", "ApplicationModel"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -173,6 +177,13 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
 
+# Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and
+# sign-in uses the core's async OAuth broker trait (src/platform/web_authentication.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+async-trait = "0.1"
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFBase", "CFData", "CFDictionary", "CFNumber", "CFString"] }
+objc2-security = { version = "0.3", default-features = false, features = ["std", "SecBase", "SecItem"] }
+
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
@@ -207,6 +218,8 @@ ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "
 # only the internal crate exposes. It must stay on the version `slint` uses.
 [dev-dependencies]
 i-slint-core = { version = "=1.18.1", default-features = false }
+# src/platform/web_authentication.rs, which only iOS builds otherwise.
+async-trait = "0.1"
 
 [build-dependencies]
 cc = "1"

@@ -66,7 +66,7 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 | 邮件客户端 | 界面 | 邮件渲染方式 | 平台 |
 | --- | --- | --- | --- |
-| **Flectar Mail** | 原生 Rust 应用 | Blitz（Rust HTML/CSS 渲染器），不使用 WebView | Windows、macOS、Linux、Android；iOS 即将推出 |
+| **Flectar Mail** | 原生 Rust 应用 | Blitz（Rust HTML/CSS 渲染器），不使用 WebView | Windows、macOS、Linux、Android、iOS（侧载） |
 | Thunderbird | 基于 Gecko 的桌面应用 | Gecko | Windows、macOS、Linux、Android |
 | Outlook for Windows | 带网页界面的 Windows 应用 | Microsoft Edge WebView2 | Windows |
 | Spark | Electron 应用 | Chromium | macOS、Windows、iOS、Android |
@@ -298,22 +298,23 @@ Flectar Mail 使用 [Blitz](https://github.com/DioxusLabs/blitz)——Dioxus 团
 
 ## 📥 获取 Flectar Mail
 
-Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHub Releases](https://github.com/flectar/mail/releases) 上，带有 **Pre-release** 标记。
+Flectar Mail 目前仍在开发中，尚未稳定。预览构建发布在 [GitHub Releases](https://github.com/flectar/mail/releases) 上。
 
 > [!WARNING]
 > **Google OAuth 验证需要每年进行一次 CASA 安全评估。** Flectar 是社区开源项目，因此能否完成该项评估取决于赞助支持。在所需的验证获得资金并完成之前，无法推出默认配置 Gmail OAuth 的稳定版本。如果你希望帮助实现内置的 Gmail 登录，请[赞助 Flectar](https://github.com/sponsors/flectar)。
 
 | 平台 | 下载 | 说明 |
 | --- | --- | --- |
-| Linux x64 | AppImage、Debian/Ubuntu `.deb`、Fedora 43/44 `.rpm` 或 Flatpak 包 | 需要支持 Secret Service 的密钥环。Flatpak 为侧载预览版，尚未上架 Flathub。 |
-| Windows x64 | 安装程序 `.exe` 或便携版 ZIP | 预览版未签名 |
+| Linux x64 和 arm64 | AppImage、Debian/Ubuntu `.deb`、Fedora 43/44 `.rpm` 或 Flatpak 包 | 需要支持 Secret Service 的密钥环。Flatpak 为侧载预览版，尚未上架 Flathub。 |
+| Windows x64 和 arm64 | 安装程序 `.exe` 或便携版 ZIP | 预览版未签名 |
 | macOS 14+（Apple 芯片或 Intel） | DMG 或应用程序 ZIP | 临时签名（ad-hoc），未经公证 |
 | Android 8.0+（arm64） | 已签名的 APK | 预览版与稳定版共用同一个应用身份。 |
+| iOS 17+（iPhone 与 iPad） | 未签名的 `.ipa` | 使用 AltStore、SideStore 或 Sideloadly 以你的 Apple ID 侧载安装。 |
 | HarmonyOS 与 OpenHarmony | 由 [springmin](https://github.com/springmin) 维护的[社区移植版](../../platform/ohos/README.md) | 不包含在 GitHub 发布版本中，需从源码构建。 |
 
 未内置 OAuth 应用密钥的构建版本会禁用 Gmail 和 Outlook 登录。可使用欢迎界面上的**登录设置**齿轮，添加你自己的 Google 或 Microsoft 应用注册信息，或连接 IMAP、POP3 或 JMAP 账户。
 
-[安装指南](../install.md)介绍了安装命令、Linux 密钥环与桌面门户、Flatpak 与 RPM 注意事项、下载校验、Android 签名，以及如何使用 `cargo run --bin flectar-mail` 从源码构建。
+[安装指南](../install.md)介绍了安装命令、Linux 密钥环与桌面门户、Flatpak 与 RPM 注意事项、下载校验、Android 签名、iOS 侧载，以及如何使用 `cargo run --bin flectar-mail` 从源码构建。
 
 ## 🤝 参与项目
 

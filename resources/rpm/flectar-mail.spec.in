@@ -6,7 +6,7 @@ Release:        @RPM_RELEASE@%{?dist}
 Summary:        Native, offline-first email client
 License:        AGPL-3.0-only
 URL:            https://flectar.com
-ExclusiveArch:  x86_64
+ExclusiveArch:  x86_64 aarch64
 
 Source0:        flectar-mail
 Source1:        libpdfium.so
