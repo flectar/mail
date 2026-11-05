@@ -54,13 +54,17 @@ Flectar Mail 是一个轻量、原生的客户端，用来承载你的邮件、�
 
 ## ⚡ 性能
 
-| 空闲时（同一邮箱） | Flectar Mail | Thunderbird 159 |
-| --- | ---: | ---: |
-| 私有内存 | **~20 MB** | ~250 MB |
-| 含代码与库（PSS） | **~85 MB** | ~435 MB |
-| 浏览器引擎 | 无 | Gecko |
+| 空闲时（同一邮箱） | 私有内存 | 含代码与库（PSS） | 邮件渲染方式 |
+| --- | ---: | ---: | --- |
+| **Flectar Mail** | **~18 MB** | **~85 MB** | Blitz |
+| Geary 46 | ~130 MB | ~330 MB | WebKitGTK |
+| Evolution 3.56 | ~200 MB | ~410 MB | WebKitGTK |
+| Thunderbird 159 | ~260 MB | ~450 MB | Gecko |
+| Betterbird 153 | ~260 MB | ~440 MB | Gecko |
+| Mailspring 1.26 | ~330 MB | ~580 MB | Chromium |
+| Aerion 0.3.6 | ~450 MB | ~700 MB | WebKitGTK |
 
-以上数据在 Linux 上测得：一个 IMAP 账户（860 封邮件），打开收件箱并显示一封 HTML 新闻简报，采用默认的 CPU 渲染器，在启动 60 秒后采样。私有内存即 Windows 任务管理器中 **内存** 一栏显示的数值。在 Windows 上，使用 7 个真实账户、约 69,000 封未读邮件时，任务管理器在窗口打开时显示约 40 MB，关闭到系统托盘后约 4 MB。详见[我们的测量方法及自行验证方式](../performance.md)。
+以上数据在 Linux 上测得：一个 IMAP 账户（860 封邮件），打开收件箱并显示一封 HTML 新闻简报，采用默认的 CPU 渲染器，在启动 60 秒后采样。每个应用启动的全部进程均计算在内。私有内存即 Windows 任务管理器中 **内存** 一栏显示的数值。在 Windows 上，使用 7 个真实账户、约 69,000 封未读邮件时，任务管理器在窗口打开时显示约 40 MB，关闭到系统托盘后约 4 MB。详见[我们的测量方法及自行验证方式](../performance.md)。
 
 ### 与其他客户端对比
 

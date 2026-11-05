@@ -56,18 +56,23 @@ fraction of the memory of a typical web-based mail client.
 
 ## ⚡ Performance
 
-| Idle, same mailbox | Flectar Mail | Thunderbird 159 |
-| --- | ---: | ---: |
-| Private memory | **~20 MB** | ~250 MB |
-| Including code and libraries (PSS) | **~85 MB** | ~435 MB |
-| Browser engine | None | Gecko |
+| Idle, same mailbox | Private memory | Including code and libraries (PSS) | Renders email with |
+| --- | ---: | ---: | --- |
+| **Flectar Mail** | **~18 MB** | **~85 MB** | Blitz |
+| Geary 46 | ~130 MB | ~330 MB | WebKitGTK |
+| Evolution 3.56 | ~200 MB | ~410 MB | WebKitGTK |
+| Thunderbird 159 | ~260 MB | ~450 MB | Gecko |
+| Betterbird 153 | ~260 MB | ~440 MB | Gecko |
+| Mailspring 1.26 | ~330 MB | ~580 MB | Chromium |
+| Aerion 0.3.6 | ~450 MB | ~700 MB | WebKitGTK |
 
 Measured on Linux with one IMAP account (860 messages), the inbox open and an
 HTML newsletter displayed, 60 seconds after launch, with the default CPU
-renderer. Private memory is what Windows Task Manager lists as **Memory**. On
-Windows, with 7 real accounts and about 69,000 unread messages, Task Manager
-shows about 40 MB with the window open and about 4 MB once it's closed to the
-tray. See [how we measure and how to check it yourself](docs/performance.md).
+renderer. Every process an app starts is counted. Private memory is what
+Windows Task Manager lists as **Memory**. On Windows, with 7 real accounts and
+about 69,000 unread messages, Task Manager shows about 40 MB with the window
+open and about 4 MB once it's closed to the tray. See
+[how we measure and how to check it yourself](docs/performance.md).
 
 ### How it compares
 

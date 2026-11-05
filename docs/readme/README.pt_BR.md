@@ -54,13 +54,17 @@ O Flectar Mail é um aplicativo nativo e leve para seus e-mails, calendários e 
 
 ## ⚡ Desempenho
 
-| Em repouso, mesma caixa de e-mail | Flectar Mail | Thunderbird 159 |
-| --- | ---: | ---: |
-| Memória privada | **~20 MB** | ~250 MB |
-| Incluindo código e bibliotecas (PSS) | **~85 MB** | ~435 MB |
-| Motor de navegador | Nenhum | Gecko |
+| Em repouso, mesma caixa de e-mail | Memória privada | Incluindo código e bibliotecas (PSS) | Renderiza e-mails com |
+| --- | ---: | ---: | --- |
+| **Flectar Mail** | **~18 MB** | **~85 MB** | Blitz |
+| Geary 46 | ~130 MB | ~330 MB | WebKitGTK |
+| Evolution 3.56 | ~200 MB | ~410 MB | WebKitGTK |
+| Thunderbird 159 | ~260 MB | ~450 MB | Gecko |
+| Betterbird 153 | ~260 MB | ~440 MB | Gecko |
+| Mailspring 1.26 | ~330 MB | ~580 MB | Chromium |
+| Aerion 0.3.6 | ~450 MB | ~700 MB | WebKitGTK |
 
-Medições feitas no Linux com uma conta IMAP (860 mensagens), a caixa de entrada aberta e uma newsletter em HTML na tela, 60 segundos após abrir o aplicativo e com o renderizador por CPU, que é o padrão. A memória privada é o que o Gerenciador de Tarefas do Windows mostra como **Memória**. No Windows, com 7 contas reais e cerca de 69.000 mensagens não lidas, o Gerenciador de Tarefas mostra cerca de 40 MB com a janela aberta e cerca de 4 MB depois de fechá-la para a bandeja do sistema. Consulte [como medimos e como verificar por conta própria](../performance.md).
+Medições feitas no Linux com uma conta IMAP (860 mensagens), a caixa de entrada aberta e uma newsletter em HTML na tela, 60 segundos após abrir o aplicativo e com o renderizador por CPU, que é o padrão. São contados todos os processos que cada aplicativo inicia. A memória privada é o que o Gerenciador de Tarefas do Windows mostra como **Memória**. No Windows, com 7 contas reais e cerca de 69.000 mensagens não lidas, o Gerenciador de Tarefas mostra cerca de 40 MB com a janela aberta e cerca de 4 MB depois de fechá-la para a bandeja do sistema. Consulte [como medimos e como verificar por conta própria](../performance.md).
 
 ### Comparação com outros clientes
 

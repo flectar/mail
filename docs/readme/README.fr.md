@@ -54,13 +54,17 @@ Flectar Mail est une application native et légère pour vos e-mails, calendrier
 
 ## ⚡ Performances
 
-| Au repos, même boîte aux lettres | Flectar Mail | Thunderbird 159 |
-| --- | ---: | ---: |
-| Mémoire privée | **~20 Mo** | ~250 Mo |
-| Y compris le code et les bibliothèques (PSS) | **~85 Mo** | ~435 Mo |
-| Moteur de navigateur | Aucun | Gecko |
+| Au repos, même boîte aux lettres | Mémoire privée | Y compris le code et les bibliothèques (PSS) | Rendu des e-mails |
+| --- | ---: | ---: | --- |
+| **Flectar Mail** | **~18 Mo** | **~85 Mo** | Blitz |
+| Geary 46 | ~130 Mo | ~330 Mo | WebKitGTK |
+| Evolution 3.56 | ~200 Mo | ~410 Mo | WebKitGTK |
+| Thunderbird 159 | ~260 Mo | ~450 Mo | Gecko |
+| Betterbird 153 | ~260 Mo | ~440 Mo | Gecko |
+| Mailspring 1.26 | ~330 Mo | ~580 Mo | Chromium |
+| Aerion 0.3.6 | ~450 Mo | ~700 Mo | WebKitGTK |
 
-Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Sous Windows, avec 7 comptes réels et environ 69 000 messages non lus, le Gestionnaire des tâches affiche environ 40 Mo avec la fenêtre ouverte et environ 4 Mo une fois celle-ci fermée dans la zone de notification. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
+Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. Tous les processus lancés par chaque application sont comptés. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Sous Windows, avec 7 comptes réels et environ 69 000 messages non lus, le Gestionnaire des tâches affiche environ 40 Mo avec la fenêtre ouverte et environ 4 Mo une fois celle-ci fermée dans la zone de notification. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
 
 ### Comparatif
 
