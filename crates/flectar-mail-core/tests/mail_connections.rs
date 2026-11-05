@@ -157,10 +157,22 @@ async fn imap_server_with_certificate(
         if !starttls {
             stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
         }
-        let login = line(&mut stream).await;
-        if login.is_empty() {
+        // The greeting announced nothing, and after STARTTLS the client must
+        // ask again anyway (RFC 9051 6.2.1).
+        let command = line(&mut stream).await;
+        if command.is_empty() {
             return;
         }
+        assert!(
+            command.contains(" CAPABILITY"),
+            "unexpected command: {command:?}"
+        );
+        let tag = command.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* CAPABILITY IMAP4rev1 ID\r\n{tag} OK capability\r\n").as_bytes())
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "));
         let tag = login.split_whitespace().next().unwrap();
         stream
@@ -488,6 +500,58 @@ async fn imap_implicit_tls_on_custom_port() {
     imap::logout(session).await;
     task.await.unwrap();
 }
+/// AUTHENTICATE PLAIN over implicit TLS, offered in the greeting, so no
+/// CAPABILITY command goes out before signing in.
+#[tokio::test]
+async fn imap_signs_in_with_sasl_plain_when_offered() {
+    use base64::Engine as _;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
+        let mut stream = BufReader::new(tls);
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1 SASL-IR AUTH=PLAIN ID] ready\r\n")
+            .await
+            .unwrap();
+        let command = line(&mut stream).await;
+        assert!(
+            command.ends_with(" AUTHENTICATE PLAIN\r\n"),
+            "unexpected command: {command:?}"
+        );
+        let tag = command.split_whitespace().next().unwrap();
+        stream.write_all(b"+ \r\n").await.unwrap();
+        let credentials = base64::engine::general_purpose::STANDARD
+            .decode(line(&mut stream).await.trim_end())
+            .unwrap();
+        assert_eq!(credentials, b"\0bridge-user\0bridge-password");
+        stream
+            .write_all(format!("{tag} OK signed in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    let session = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::Tls),
+    )
+    .await
+    .unwrap();
+    imap::logout(session).await;
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn rejected_starttls_never_sends_credentials() {
     let (port, task) = imap_server(true, true).await;
@@ -524,7 +588,10 @@ async fn imap_incremental_search_handles_sparse_uids_and_reversed_star_ranges() 
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -623,7 +690,10 @@ async fn imap_move_server(fixture: ImapMoveFixture) -> (u16, tokio::task::JoinHa
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -811,7 +881,10 @@ async fn trash_server(fixture: TrashFixture) -> (u16, tokio::task::JoinHandle<()
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -1482,7 +1555,10 @@ async fn imap_mailbox_failure_prevents_saving_account() {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");

@@ -10,7 +10,10 @@ use crate::mime::{self, MimePlan};
 use crate::net::{self, MailStream};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use futures::StreamExt;
+use std::collections::HashSet;
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -57,6 +60,7 @@ struct XOAuth2Authenticator {
 #[derive(Clone, Copy)]
 struct SignInTarget<'a> {
     host: &'a str,
+    port: u16,
     /// Text a server sends over an unencrypted connection could come from
     /// anyone on the path.
     encrypted: bool,
@@ -197,6 +201,21 @@ impl SignInFailure {
         }
     }
 
+    /// Whether LOGIN may still work after AUTHENTICATE PLAIN failed this
+    /// way. Some servers announce AUTH=PLAIN and then refuse it (K-9 Mail
+    /// #2648 and #9406), and RFC 9051 6.2.3 allows LOGIN once AUTHENTICATE
+    /// has failed. A coded rejection after the credentials went out is
+    /// final, though: RFC 5530 says retrying the same credentials is
+    /// pointless, and every try counts against the server's lockout limits.
+    fn allows_login_after_plain(&self, credentials_sent: bool) -> bool {
+        match self {
+            Self::Transport(_) | Self::Unavailable(_) | Self::Unsendable => false,
+            _ if !credentials_sent => true,
+            Self::Rejected(reply) => reply.bad || reply.code.is_none(),
+            Self::Refused(_) => false,
+        }
+    }
+
     /// The error for a password sign-in. Only a rejection waits for the
     /// user; anything else is retried like other connection problems.
     fn into_error(self, target: SignInTarget<'_>, user: &str) -> CoreError {
@@ -287,6 +306,139 @@ impl async_imap::Authenticator for XOAuth2Authenticator {
     }
 }
 
+/// SASL PLAIN (RFC 4616): one message with the username and password as
+/// UTF-8, which LOGIN's quoted strings can't carry to IMAP4rev1 servers.
+struct PlainAuthenticator {
+    message: String,
+    /// Set once the server asked for the credentials, so a refusal tells
+    /// whether they were sent.
+    challenged: Arc<AtomicBool>,
+}
+
+impl async_imap::Authenticator for PlainAuthenticator {
+    type Response = String;
+    fn process(&mut self, _challenge: &[u8]) -> Self::Response {
+        // PLAIN has a single message. A further challenge can only come
+        // before a failure, and an empty reply lets the server send it.
+        if self.challenged.swap(true, Ordering::Relaxed) {
+            return String::new();
+        }
+        std::mem::take(&mut self.message)
+    }
+}
+
+/// What a server announced before sign-in that decides how to sign in.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SignInCapabilities {
+    /// AUTH=PLAIN: SASL PLAIN is offered.
+    plain: bool,
+    /// LOGINDISABLED: the LOGIN command must not be sent (RFC 9051 6.2.3).
+    login_disabled: bool,
+}
+
+impl SignInCapabilities {
+    fn add(&mut self, capabilities: &[async_imap::imap_proto::Capability<'_>]) {
+        use async_imap::imap_proto::Capability;
+        for capability in capabilities {
+            match capability {
+                Capability::Auth(mechanism) if mechanism.eq_ignore_ascii_case("PLAIN") => {
+                    self.plain = true;
+                }
+                Capability::Atom(name) if name.eq_ignore_ascii_case("LOGINDISABLED") => {
+                    self.login_disabled = true;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Servers, as "host:port", whose AUTH=PLAIN failed where LOGIN then worked.
+/// Later connections go straight to LOGIN, so a broken mechanism doesn't add
+/// a failed sign-in, which servers count toward lockouts, to every
+/// reconnect.
+static PLAIN_UNUSABLE: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
+
+fn plain_unusable_key(target: SignInTarget<'_>) -> String {
+    format!("{}:{}", target.host.to_ascii_lowercase(), target.port)
+}
+
+/// Sign in with a password: SASL PLAIN when the server offers it and LOGIN
+/// only as the last resort (RFC 9051 6.2.3), like Thunderbird and K-9 Mail.
+async fn sign_in_with_password<T>(
+    client: async_imap::Client<T>,
+    target: SignInTarget<'_>,
+    user: &str,
+    password: &str,
+    capabilities: SignInCapabilities,
+) -> Result<async_imap::Session<T>>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    let key = plain_unusable_key(target);
+    let plain_unusable = PLAIN_UNUSABLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .contains(&key);
+    let mut client = client;
+    let mut plain_failure = None;
+    if capabilities.plain && !plain_unusable {
+        let challenged = Arc::new(AtomicBool::new(false));
+        let authenticator = PlainAuthenticator {
+            message: format!("\0{user}\0{password}"),
+            challenged: challenged.clone(),
+        };
+        match client.authenticate("PLAIN", authenticator).await {
+            Ok(session) => return Ok(session),
+            Err((error, returned)) => {
+                let failure = SignInFailure::from_imap(error);
+                if capabilities.login_disabled
+                    || !failure.allows_login_after_plain(challenged.load(Ordering::Relaxed))
+                {
+                    return Err(failure.into_error(target, user));
+                }
+                tracing::info!(
+                    host = target.host,
+                    "imap connect: AUTHENTICATE PLAIN failed; trying LOGIN"
+                );
+                plain_failure = Some(failure);
+                client = returned;
+            }
+        }
+    }
+    if capabilities.login_disabled {
+        let host = target.host;
+        return Err(CoreError::Imap(if target.encrypted {
+            format!("{host} offers no sign-in with a password")
+        } else {
+            format!(
+                "{host} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
+            )
+        }));
+    }
+    match client.login(user, password).await {
+        Ok(session) => {
+            if plain_failure.is_some() {
+                PLAIN_UNUSABLE
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(key);
+            }
+            Ok(session)
+        }
+        Err((error, _)) => {
+            let failure = match (SignInFailure::from_imap(error), plain_failure) {
+                // A server may hang up instead of answering LOGIN after a
+                // failed AUTHENTICATE (K-9 Mail #6762); then PLAIN's answer
+                // is the one to report.
+                (SignInFailure::Transport(_), Some(plain)) => plain,
+                (failure, _) => failure,
+            };
+            Err(failure.into_error(target, user))
+        }
+    }
+}
+
 /// Connect with TLS from the first byte, trusting only the system roots.
 pub async fn connect(host: &str, port: u16, creds: ImapCredentials) -> Result<Session> {
     use crate::models::{ConnectionSecurity, MailConnectionSettings};
@@ -353,25 +505,28 @@ async fn connect_inner(
         ConnectionSecurity::None => MailStream::Plain(tcp),
     };
     let mut client = async_imap::Client::new(stream);
-    // STARTTLS has already consumed the greeting; no second greeting follows.
-    if security != ConnectionSecurity::Starttls {
-        read_greeting(&mut client).await?;
-    }
-    if !security.is_encrypted() && login_disabled(&mut client).await? {
-        return Err(CoreError::Imap(format!(
-            "{host} accepts passwords only over an encrypted connection. Choose STARTTLS or SSL/TLS."
-        )));
-    }
+    // STARTTLS has already consumed the greeting; no second greeting follows,
+    // and what the server announced before TLS can't be trusted (RFC 9051
+    // 6.2.1).
+    let announced = if security == ConnectionSecurity::Starttls {
+        None
+    } else {
+        read_greeting(&mut client).await?
+    };
 
     let target = SignInTarget {
         host,
+        port,
         encrypted: security.is_encrypted(),
     };
     let mut session = match creds {
-        ImapCredentials::Password { user, password } => client
-            .login(&user, &password)
-            .await
-            .map_err(|(error, _)| SignInFailure::from_imap(error).into_error(target, &user))?,
+        ImapCredentials::Password { user, password } => {
+            let capabilities = match announced {
+                Some(capabilities) => capabilities,
+                None => request_capabilities(&mut client).await?,
+            };
+            sign_in_with_password(client, target, &user, &password, capabilities).await?
+        }
         ImapCredentials::XOAuth2 { user, access_token } => {
             let auth = XOAuth2Authenticator {
                 response: crate::oauth::xoauth2::raw_response(&user, &access_token),
@@ -405,16 +560,18 @@ async fn tls_handshake(
     Ok(MailStream::Tls(Box::new(tls)))
 }
 
-/// Whether the server refuses LOGIN on this connection (RFC 9051
-/// LOGINDISABLED). Asked before any credentials are sent, so a server that
-/// only accepts passwords over TLS is reported as such rather than as a
-/// failed sign-in.
-async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<bool> {
-    use async_imap::imap_proto::{Capability, Response, Status};
+/// Ask what the server offers for sign-in, before any credentials are sent:
+/// SASL PLAIN, and whether LOGIN is disabled, as servers that accept
+/// passwords only over TLS announce on unencrypted connections.
+async fn request_capabilities<T>(client: &mut async_imap::Client<T>) -> Result<SignInCapabilities>
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
+{
+    use async_imap::imap_proto::{Response, Status};
     use tokio::io::AsyncWriteExt;
     // async-imap has no CAPABILITY command before sign-in, so send it with a
-    // tag its own counter (a1, a2, ...) never produces. Nothing else has been
-    // sent yet, so no buffered command can interleave with it.
+    // tag its own counter (A0001, A0002, ...) never produces. Nothing else has
+    // been sent yet, so no buffered command can interleave with it.
     const TAG: &str = "flectar0";
     let stream = client.get_mut();
     stream
@@ -425,7 +582,7 @@ async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<b
         .flush()
         .await
         .map_err(|e| CoreError::Imap(format!("CAPABILITY: {e}")))?;
-    let mut disabled = false;
+    let mut announced = SignInCapabilities::default();
     loop {
         let response = client
             .read_response()
@@ -433,18 +590,14 @@ async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<b
             .map_err(|e| CoreError::Imap(e.to_string()))?
             .ok_or_else(|| CoreError::Imap("Server closed during CAPABILITY.".into()))?;
         match response.parsed() {
-            Response::Capabilities(capabilities) => {
-                disabled |= capabilities.iter().any(|capability| {
-                    matches!(capability, Capability::Atom(name) if name.eq_ignore_ascii_case("LOGINDISABLED"))
-                });
-            }
+            Response::Capabilities(capabilities) => announced.add(capabilities),
             Response::Done {
                 tag,
                 status,
                 outcome,
             } if tag.0 == TAG => {
                 return match status {
-                    Status::Ok => Ok(disabled),
+                    Status::Ok => Ok(announced),
                     _ => Err(CoreError::Imap(format!(
                         "CAPABILITY failed: {}",
                         outcome.information.as_deref().unwrap_or_default()
@@ -456,21 +609,29 @@ async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<b
     }
 }
 
-async fn read_greeting<T>(client: &mut async_imap::Client<T>) -> Result<()>
+/// Read the greeting, and the capabilities it announces if it does (RFC 9051
+/// 7.1 lets a greeting carry a CAPABILITY response code).
+async fn read_greeting<T>(client: &mut async_imap::Client<T>) -> Result<Option<SignInCapabilities>>
 where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + std::fmt::Debug + Send,
 {
-    if client
+    use async_imap::imap_proto::{Response, ResponseCode};
+    let greeting = client
         .read_response()
         .await
         .map_err(|e| CoreError::Imap(e.to_string()))?
-        .is_none()
-    {
-        return Err(CoreError::Imap(
-            "Server closed before the IMAP greeting.".into(),
-        ));
-    }
-    Ok(())
+        .ok_or_else(|| CoreError::Imap("Server closed before the IMAP greeting.".into()))?;
+    Ok(match greeting.parsed() {
+        Response::Data { outcome, .. } => match &outcome.code {
+            Some(ResponseCode::Capabilities(capabilities)) => {
+                let mut announced = SignInCapabilities::default();
+                announced.add(capabilities);
+                Some(announced)
+            }
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 /// Identify Flectar Mail to servers that implement RFC 2971. Some services
@@ -1727,13 +1888,15 @@ pub fn uid_set(uids: &[u32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        MIME_PLAN_QUERY, ServerReply, SignInFailure, SignInTarget, normalized_uid_set,
-        section_fetch_query, section_paths,
+        MIME_PLAN_QUERY, PLAIN_UNUSABLE, ServerReply, SignInCapabilities, SignInFailure,
+        SignInTarget, normalized_uid_set, plain_unusable_key, section_fetch_query, section_paths,
     };
     use crate::error::CoreError;
+    use base64::Engine as _;
 
     const TARGET: SignInTarget<'static> = SignInTarget {
         host: "mail.example.com",
+        port: 993,
         encrypted: true,
     };
 
@@ -1905,6 +2068,262 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    /// The server side of a scripted IMAP conversation.
+    struct ScriptedServer {
+        read: tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        write: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    }
+
+    impl ScriptedServer {
+        fn start() -> (tokio::io::DuplexStream, Self) {
+            let (client, server) = tokio::io::duplex(4096);
+            let (read, write) = tokio::io::split(server);
+            let read = tokio::io::BufReader::new(read);
+            (client, Self { read, write })
+        }
+
+        /// The client's next line, or None once it hung up.
+        async fn next_line(&mut self) -> Option<String> {
+            use tokio::io::AsyncBufReadExt;
+            let mut line = String::new();
+            (self.read.read_line(&mut line).await.unwrap() > 0).then_some(line)
+        }
+
+        /// Expect a command, returning its tag.
+        async fn expect(&mut self, command: &str) -> String {
+            let line = self.next_line().await.expect("the client hung up");
+            let (tag, rest) = line.split_once(' ').unwrap();
+            assert!(
+                rest.starts_with(command),
+                "expected {command}, got {line:?}"
+            );
+            tag.to_owned()
+        }
+
+        async fn send(&mut self, line: &str) {
+            use tokio::io::AsyncWriteExt;
+            self.write
+                .write_all(format!("{line}\r\n").as_bytes())
+                .await
+                .unwrap();
+        }
+
+        /// Answer AUTHENTICATE PLAIN's continuation and return the decoded
+        /// credentials.
+        async fn read_plain_credentials(&mut self) -> String {
+            self.send("+ ").await;
+            let line = self.next_line().await.unwrap();
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(line.trim_end())
+                .unwrap();
+            String::from_utf8(decoded).unwrap()
+        }
+    }
+
+    const PLAIN: SignInCapabilities = SignInCapabilities {
+        plain: true,
+        login_disabled: false,
+    };
+
+    fn target(host: &'static str) -> SignInTarget<'static> {
+        SignInTarget { host, ..TARGET }
+    }
+
+    async fn sign_in(
+        client: tokio::io::DuplexStream,
+        target: SignInTarget<'static>,
+        capabilities: SignInCapabilities,
+    ) -> crate::error::Result<async_imap::Session<tokio::io::DuplexStream>> {
+        super::sign_in_with_password(
+            async_imap::Client::new(client),
+            target,
+            "jane@example.com",
+            "pässwörd",
+            capabilities,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn signs_in_with_plain_when_offered() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            // UTF-8 as typed, which LOGIN's quoted strings can't carry.
+            assert_eq!(
+                server.read_plain_credentials().await,
+                "\0jane@example.com\0pässwörd"
+            );
+            server.send(&format!("{tag} OK signed in")).await;
+        });
+        sign_in(client, target("plain.example"), PLAIN)
+            .await
+            .unwrap();
+        script.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn signs_in_with_login_when_plain_is_not_offered() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("LOGIN \"jane@example.com\"").await;
+            server.send(&format!("{tag} OK signed in")).await;
+        });
+        sign_in(
+            client,
+            target("login.example"),
+            SignInCapabilities::default(),
+        )
+        .await
+        .unwrap();
+        script.await.unwrap();
+    }
+
+    /// fh-koeln.de and scarlet.be announce AUTH=PLAIN and refuse it before
+    /// asking for credentials (K-9 Mail #9406, #2648).
+    #[tokio::test]
+    async fn falls_back_to_login_when_plain_is_refused_and_remembers_it() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server
+                .send(&format!(
+                    "{tag} NO AUTHENTICATE mechanism not supported, mate"
+                ))
+                .await;
+            let tag = server.expect("LOGIN").await;
+            server.send(&format!("{tag} OK signed in")).await;
+        });
+        sign_in(client, target("broken-plain.example"), PLAIN)
+            .await
+            .unwrap();
+        script.await.unwrap();
+
+        // The next connection goes straight to LOGIN.
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("LOGIN").await;
+            server.send(&format!("{tag} OK signed in")).await;
+        });
+        sign_in(client, target("broken-plain.example"), PLAIN)
+            .await
+            .unwrap();
+        script.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_rejected_password_is_not_sent_again_with_login() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server.read_plain_credentials().await;
+            server
+                .send(&format!(
+                    "{tag} NO [AUTHENTICATIONFAILED] Authentication failed."
+                ))
+                .await;
+            assert_eq!(server.next_line().await, None, "credentials sent again");
+        });
+        let error = sign_in(client, target("rejected.example"), PLAIN)
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(error, CoreError::Auth(_)), "{error}");
+        script.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_unexplained_plain_failure_is_tried_with_login() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server.read_plain_credentials().await;
+            server.send(&format!("{tag} NO AUTHENTICATE failed.")).await;
+            let tag = server.expect("LOGIN").await;
+            server.send(&format!("{tag} NO LOGIN failed.")).await;
+        });
+        let error = sign_in(client, target("unexplained.example"), PLAIN)
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(error, CoreError::Auth(_)), "{error}");
+        script.await.unwrap();
+        // Both failed, so PLAIN isn't marked as unusable.
+        assert!(
+            !PLAIN_UNUSABLE
+                .lock()
+                .unwrap()
+                .contains(&plain_unusable_key(target("unexplained.example")))
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_server_is_not_tried_with_login() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server.read_plain_credentials().await;
+            server
+                .send(&format!(
+                    "{tag} NO [UNAVAILABLE] Temporary authentication failure."
+                ))
+                .await;
+            assert_eq!(server.next_line().await, None, "credentials sent again");
+        });
+        let error = sign_in(client, target("unavailable.example"), PLAIN)
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(error, CoreError::Imap(_)), "{error}");
+        script.await.unwrap();
+    }
+
+    /// A server may hang up instead of answering LOGIN after a failed
+    /// AUTHENTICATE (K-9 Mail #6762). PLAIN's answer is the one to report.
+    #[tokio::test]
+    async fn a_hang_up_after_plain_reports_what_plain_got() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            let tag = server.expect("AUTHENTICATE PLAIN").await;
+            server.read_plain_credentials().await;
+            server
+                .send(&format!("{tag} NO Authentication failed"))
+                .await;
+            server.expect("LOGIN").await;
+        });
+        let error = sign_in(client, target("hang-up.example"), PLAIN)
+            .await
+            .err()
+            .unwrap();
+        assert!(matches!(error, CoreError::Auth(_)), "{error}");
+        assert!(
+            error.to_string().contains("Authentication failed"),
+            "{error}"
+        );
+        script.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn no_password_is_sent_where_login_is_disabled() {
+        let (client, mut server) = ScriptedServer::start();
+        let script = tokio::spawn(async move {
+            assert_eq!(server.next_line().await, None, "a password was sent");
+        });
+        let error = sign_in(
+            client,
+            target("disabled.example"),
+            SignInCapabilities {
+                plain: false,
+                login_disabled: true,
+            },
+        )
+        .await
+        .err()
+        .unwrap();
+        assert!(matches!(error, CoreError::Imap(_)), "{error}");
+        script.await.unwrap();
     }
 
     #[test]
