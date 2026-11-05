@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-05 02:33+0000\n"
-"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"PO-Revision-Date: 2026-11-05 09:47+0000\n"
+"Last-Translator: Paul van der Vlis <paul@vandervlis.nl>\n"
 "Language-Team: Dutch <https://translate.flectar.com/projects/flectar-mail/"
 "mail/nl/>\n"
 "Language: nl\n"
@@ -16,7 +16,7 @@ msgstr ""
 
 #: ui/app-icon.slint:19
 msgid "Orange"
-msgstr ""
+msgstr "Oranje"
 
 #: ui/app-icon.slint:20
 msgid "Graphite"
