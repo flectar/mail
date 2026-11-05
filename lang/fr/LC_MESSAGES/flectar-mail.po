@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-10-14 08:37+0000\n"
-"Last-Translator: Cyril Hansen <cyril.hansen@gmail.com>\n"
+"PO-Revision-Date: 2026-11-05 02:32+0000\n"
+"Last-Translator: llayz46 <layzer@outlook.fr>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
 "Language: fr\n"
@@ -292,7 +292,6 @@ msgid "AM"
 msgstr "AM"
 
 #: ui/app.slint:153 ui/views/mail-list-pane.slint:603
-#, fuzzy
 msgid "Yesterday"
 msgstr "Hier"
 
@@ -4665,9 +4664,9 @@ msgstr ""
 #: ui/dialogs/import-dialog.slint:575
 msgid ""
 "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups (."
-"json), and mail saved as .mbox or .eml files, in maildir folders, or in ZIP "
-"archives of them."
+"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups "
+"(.json), and mail saved as .mbox or .eml files, in maildir folders, or in "
+"ZIP archives of them."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:576
