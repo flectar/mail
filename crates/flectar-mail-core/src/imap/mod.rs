@@ -82,7 +82,8 @@ impl ServerReply {
     /// async-imap hands a tagged NO or BAD on only as the text
     /// `code: {code:?}, info: {information:?}` (async-imap 0.12,
     /// `Connection::check_status_ok`). imap-proto parses ALERT itself and
-    /// leaves the RFC 5530 codes at the start of the text.
+    /// leaves the RFC 5530 codes at the start of the text. Read the fields
+    /// directly once async-imap exposes them (chatmail/async-imap#157).
     fn from_async_imap(formatted: &str, bad: bool) -> Self {
         let parsed = formatted.split_once(", info: ").and_then(|(code, info)| {
             let code = code.strip_prefix("code: ")?;
