@@ -14,6 +14,15 @@ and safe for a mail client that handles private user data.
 ## Translations
 
 Translate the application through [Weblate](https://translate.flectar.com/).
+Weblate owns the catalogs in `lang/*/LC_MESSAGES/` and sends them back as pull
+requests, so other pull requests must not edit them. When a change adds, edits
+or moves translatable strings in `.slint` files, run
+`scripts/update-translation-template.sh` (it needs `slint-tr-extractor` 1.18.1)
+and commit only `lang/flectar-mail.pot`. Weblate merges the template into every
+language after the change reaches `main`. Releases require complete Spanish and
+Russian translations, which `scripts/check-translation-completeness.sh es ru`
+checks.
+
 README translations are maintained directly in this repository:
 
 - Use [README.md](README.md) as the source and add
