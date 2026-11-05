@@ -51,6 +51,31 @@ pub fn inbox_badge_query_plan(conn: &Connection) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Every account's drafts, as conversations or messages. Draft folders are
+/// normally tiny. Starting from those folders uses the existing folder and
+/// message indexes and avoids inspecting every inbox row; `CROSS JOIN` keeps
+/// the folders the outer loop.
+fn drafts_sql(messages: bool) -> String {
+    let counted = if messages { "message_id" } else { "thread_id" };
+    format!(
+        "SELECT account_id, COUNT(DISTINCT {counted})
+         FROM (
+             SELECT m.account_id, m.thread_id, m.id AS message_id
+             FROM folders f
+             CROSS JOIN messages m ON m.folder_id = f.id
+             WHERE f.role = 'drafts' AND m.is_draft = 1 AND m.thread_id IS NOT NULL
+             UNION ALL
+             SELECT m.account_id, m.thread_id, m.id AS message_id
+             FROM folders f
+             CROSS JOIN message_folders mf ON mf.folder_id = f.id
+             CROSS JOIN messages m ON m.id = mf.message_id
+             JOIN accounts a ON a.id = m.account_id AND a.provider = 'gmail'
+             WHERE f.role = 'drafts' AND m.is_draft = 1 AND m.thread_id IS NOT NULL
+         )
+         GROUP BY account_id"
+    )
+}
+
 /// Return the native sidebar's badges for every account in one grouped scan,
 /// so a live refresh does not grow with the number of accounts. Badges count
 /// what the mail list shows: conversations, or messages.
@@ -106,26 +131,7 @@ pub fn mailbox_badge_counts(
         }
     }
 
-    // Draft folders are normally tiny. Starting from those folders uses the
-    // existing folder/message indexes and avoids inspecting every inbox row.
-    let counted = if messages { "message_id" } else { "thread_id" };
-    let mut drafts = conn.prepare(&format!(
-        "SELECT account_id, COUNT(DISTINCT {counted})
-         FROM (
-             SELECT m.account_id, m.thread_id, m.id AS message_id
-             FROM folders f
-             JOIN messages m ON m.folder_id = f.id
-             WHERE f.role = 'drafts' AND m.is_draft = 1 AND m.thread_id IS NOT NULL
-             UNION ALL
-             SELECT m.account_id, m.thread_id, m.id AS message_id
-             FROM folders f
-             JOIN message_folders mf ON mf.folder_id = f.id
-             JOIN messages m ON m.id = mf.message_id
-             JOIN accounts a ON a.id = m.account_id AND a.provider = 'gmail'
-             WHERE f.role = 'drafts' AND m.is_draft = 1 AND m.thread_id IS NOT NULL
-         )
-         GROUP BY account_id"
-    ))?;
+    let mut drafts = conn.prepare(&drafts_sql(messages))?;
     for row in drafts.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))? {
         let (account_id, value) = row?;
         if let Some(index) = positions.get(&account_id) {
@@ -335,5 +341,22 @@ mod tests {
         assert_eq!((conversations[0].inbox, conversations[0].starred), (1, 1));
         let messages = mailbox_badge_counts(&conn, MailGrouping::Messages).unwrap();
         assert_eq!((messages[0].inbox, messages[0].starred), (2, 1));
+    }
+
+    #[test]
+    fn drafts_are_counted_from_the_drafts_folders() {
+        let conn = test_db();
+        for messages in [false, true] {
+            let plan = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {}", drafts_sql(messages)))
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+                .join("\n");
+            assert!(plan.contains("SCAN f"), "{plan}");
+            assert!(!plan.contains("SCAN m"), "{plan}");
+        }
     }
 }
