@@ -69,76 +69,19 @@ fn has_scheme_prefix(uri: &str, prefix: &str) -> bool {
         .is_some_and(|bytes| bytes.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
-/// Parse `mailto:addr?subject=…&body=…` into a Mailto plan. Subject defaults
-/// to "unsubscribe" (the RFC 2369 convention); body to the subject text, so
-/// list processors that only read the body still trigger.
+/// The request a List-Unsubscribe mailto asks for. Subject defaults to
+/// "unsubscribe" (the RFC 2369 convention); body to the subject text, so list
+/// processors that only read the body still trigger. Only the first address
+/// is used: the message goes out without the user reviewing it.
 fn parse_mailto(uri: &str) -> Option<UnsubscribePlan> {
-    let rest = &uri[uri.find(':')? + 1..];
-    let (addr, query) = match rest.split_once('?') {
-        Some((a, q)) => (a, Some(q)),
-        None => (rest, None),
-    };
-    let to = percent_decode(addr.trim());
-    if to.is_empty() || !to.contains('@') {
-        return None;
-    }
-    let mut subject = None;
-    let mut body = None;
-    for pair in query.unwrap_or("").split('&') {
-        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        if k.eq_ignore_ascii_case("subject") {
-            subject = Some(v);
-        } else if k.eq_ignore_ascii_case("body") {
-            body = Some(v);
-        }
-    }
-    let subject = subject
-        .map(percent_decode)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "unsubscribe".into());
-    let body = body
-        .map(percent_decode)
-        .filter(|s| !s.is_empty())
+    let message = crate::mailto::parse(uri)?;
+    let to = message.to.into_iter().next()?.email;
+    let subject = message.subject.unwrap_or_else(|| "unsubscribe".into());
+    let body = message
+        .body
+        .filter(|body| !body.trim().is_empty())
         .unwrap_or_else(|| subject.clone());
     Some(UnsubscribePlan::Mailto { to, subject, body })
-}
-
-/// Minimal percent-decoding ('+' as space, %XX bytes, lossy UTF-8) - enough
-/// for mailto query values without pulling in a URL crate.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 3 <= bytes.len() => {
-                let hi = (bytes[i + 1] as char).to_digit(16);
-                let lo = (bytes[i + 2] as char).to_digit(16);
-                match (hi, lo) {
-                    (Some(hi), Some(lo)) => {
-                        out.push((hi * 16 + lo) as u8);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(b'%');
-                        i += 1;
-                    }
-                }
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    match String::from_utf8(out) {
-        Ok(decoded) => decoded,
-        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
-    }
 }
 
 /// Perform the RFC 8058 one-click POST. Success is a 2xx only: no redirects
@@ -305,7 +248,7 @@ mod tests {
     #[test]
     fn mailto_parses_subject_and_body() {
         let p = plan(
-            "<mailto:leave@list.example?subject=unsub%20me&body=please+go>",
+            "<mailto:leave@list.example?subject=unsub%20me&body=please%20go>",
             None,
         );
         assert_eq!(
@@ -332,6 +275,33 @@ mod tests {
     }
 
     #[test]
+    fn mailto_keeps_plus_addresses() {
+        let p = plan(
+            "<mailto:googlegroups-manage+123+unsubscribe@googlegroups.com?subject=Unsubscribe+me>",
+            None,
+        );
+        assert_eq!(
+            p,
+            Some(UnsubscribePlan::Mailto {
+                to: "googlegroups-manage+123+unsubscribe@googlegroups.com".into(),
+                subject: "Unsubscribe+me".into(),
+                body: "Unsubscribe+me".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn mailto_without_an_address_is_not_usable() {
+        assert_eq!(plan("<mailto:?subject=unsubscribe>", None), None);
+        assert_eq!(
+            plan("<mailto:?subject=x>, <https://x.example/u>", None),
+            Some(UnsubscribePlan::Browser {
+                url: "https://x.example/u".into()
+            })
+        );
+    }
+
+    #[test]
     fn browser_fallback_and_empty() {
         assert_eq!(
             plan("<https://x.example/u>", None),
@@ -345,12 +315,5 @@ mod tests {
             plan("https://x.example/u", Some("List-Unsubscribe=One-Click")),
             Some(UnsubscribePlan::OneClick { .. })
         ));
-    }
-
-    #[test]
-    fn percent_decode_edge_cases() {
-        assert_eq!(percent_decode("a%2Bb+c"), "a+b c");
-        assert_eq!(percent_decode("bad%2"), "bad%2");
-        assert_eq!(percent_decode("%zz"), "%zz");
     }
 }

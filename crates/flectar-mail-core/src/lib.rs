@@ -23,6 +23,7 @@ pub mod imap;
 pub mod jmap;
 pub mod mail_import;
 pub mod mail_security;
+pub mod mailto;
 mod mbox;
 pub mod migration;
 pub mod mime;
