@@ -116,7 +116,7 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         }
         if flectar_mail_core::mailto::is_mailto(&url) {
-            crate::mailto_links::open(&app, [url.as_str()]);
+            crate::mailto_links::open(&app, "message", [url.as_str()]);
             return;
         }
         if let Err(error) = open_email_link(&opener, &url) {

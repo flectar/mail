@@ -105,23 +105,43 @@ pub(super) fn receive_from_macos(app: &AppWindow) {
             return;
         };
         window_controller::activate(&app, None);
-        open(&app, [url]);
+        open(&app, "apple-event", [url]);
     });
 }
 
-/// Open mailto links in the composer as soon as it can take them.
-pub(super) fn open<S: AsRef<str>>(app: &AppWindow, uris: impl IntoIterator<Item = S>) {
-    let mut unreadable = false;
+/// Open mailto links in the composer as soon as it can take them. `source`
+/// says how they arrived ("message", "launch", "forwarded" or
+/// "apple-event") for the diagnostic line.
+pub(super) fn open<S: AsRef<str>>(
+    app: &AppWindow,
+    source: &'static str,
+    uris: impl IntoIterator<Item = S>,
+) {
+    let (mut received, mut unreadable) = (0_usize, 0_usize);
     LINKS.with(|links| {
         let mut links = links.borrow_mut();
         for uri in uris {
             match mailto::parse(uri.as_ref()) {
-                Some(message) => links.pending.push_back(message),
-                None => unreadable = true,
+                Some(message) => {
+                    links.pending.push_back(message);
+                    received += 1;
+                }
+                None => unreadable += 1,
             }
         }
     });
-    if unreadable {
+    if received + unreadable > 0 {
+        // Whether a link reached the application, without any of its
+        // content, like the FLECTAR_RENDERER lines.
+        eprintln!(
+            "FLECTAR_MAIL_LINKS {}",
+            serde_json::json!({
+                "event": "received", "source": source,
+                "links": received, "unreadable": unreadable,
+            })
+        );
+    }
+    if unreadable > 0 {
         app.set_render_status(UiMessage::plain("This email link is too long to open."));
     }
     open_pending_soon(app);

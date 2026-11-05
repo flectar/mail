@@ -1806,13 +1806,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         instance.serve(&runtime, move |activation| {
             let _ = app.upgrade_in_event_loop(move |app| {
                 window_controller::activate(&app, activation.activation_token);
-                mailto_links::open(&app, activation.links);
+                mailto_links::open(&app, "forwarded", activation.links);
             });
         });
     }
     // They open once the mail store is ready and the composer connected.
     #[cfg(desktop)]
-    mailto_links::open(&app, launch_links.unwrap_or_default());
+    mailto_links::open(&app, "launch", launch_links.unwrap_or_default());
     // The launcher's token was meant for this window: it lets the desktop
     // focus it (Wayland) and ends the launch feedback (X11).
     #[cfg(desktop)]

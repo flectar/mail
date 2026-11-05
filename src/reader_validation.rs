@@ -842,7 +842,11 @@ fn mailto_links_open_without_losing_the_draft(
     app.set_compose_subject("My own subject".into());
     // The reader's link handler was replaced by a recorder above; open the
     // link the way it does.
-    mailto_links::open(app, ["mailto:second@example.com?attach=/etc/passwd"]);
+    mailto_links::open(
+        app,
+        "message",
+        ["mailto:second@example.com?attach=/etc/passwd"],
+    );
     frame();
     assert_eq!(
         *saved.borrow(),
