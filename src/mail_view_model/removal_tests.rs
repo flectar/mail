@@ -200,7 +200,7 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
             false,
             false,
-            WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
+            WarmStartCacheWriter::spawn(runtime.handle(), dir.path().join("warm.json")),
         );
         state.core = Some(core.clone());
         state.using_core = true;
@@ -216,7 +216,7 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
         app.set_emails(ModelRc::from(state.email_rows.clone()));
         app.set_mail_list_entries(ModelRc::from(state.mail_list_entries.clone()));
         let state = Rc::new(RefCell::new(state));
-        render_current(&app, &state, &runtime).unwrap();
+        render_current(&app, &state, runtime.handle()).unwrap();
         if let Some(id) = case.collapsed {
             let key = mail_group_key(make_message(id).date_ms, now);
             let mut state_mut = state.borrow_mut();
@@ -224,7 +224,7 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
             assert!(!expanded);
             state_mut.mail_groups.finish_transition(&key, generation);
             drop(state_mut);
-            refresh_rows_only(&app, &state, &runtime);
+            refresh_rows_only(&app, &state, runtime.handle());
             assert!(
                 !state
                     .borrow()
@@ -240,7 +240,7 @@ fn background_removal_keeps_the_reader_and_visible_selection_in_sync() {
         apply_background_mail_page(
             &app,
             &state,
-            &runtime,
+            runtime.handle(),
             mail::MailPage {
                 account_revision: core.account_revision(),
                 messages: case

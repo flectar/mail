@@ -36,7 +36,7 @@ pub(crate) fn suspend() {
 pub(crate) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     documents: Arc<dyn crate::documents::DocumentProvider>,
     scratch_root: std::path::PathBuf,
 ) {
@@ -65,7 +65,7 @@ pub(crate) fn register(
     let profile_pdf = pdf_document.clone();
     let weak = app.as_weak();
     let inbox = Rc::clone(state);
-    let handle = runtime.handle().clone();
+    let handle = runtime.clone();
     let worker = Rc::new(RefCell::new(
         None::<(Arc<flectar_mail_core::Core>, SyncWorker)>,
     ));

@@ -4,11 +4,11 @@ use super::*;
 
 pub(super) fn register(
     app: &AppWindow,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     documents: &std::sync::Arc<dyn documents::DocumentProvider>,
 ) {
     let weak = app.as_weak();
-    let runtime = Rc::clone(runtime);
+    let runtime = runtime.clone();
     let provider = std::sync::Arc::clone(documents);
     app.on_import_mail_certificate(move || {
         let Some(app) = weak.upgrade() else {
