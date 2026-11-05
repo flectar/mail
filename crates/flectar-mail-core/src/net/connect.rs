@@ -36,6 +36,8 @@ async fn connect_address(address: SocketAddr) -> io::Result<TcpStream> {
     } else {
         TcpSocket::new_v6()?
     };
+    #[cfg(windows)]
+    windows::fail_fast_on_loopback(&socket, address);
     socket.connect(address).await
 }
 
@@ -108,6 +110,80 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::net::SocketAddr;
+    use std::os::windows::io::AsRawSocket;
+    use std::sync::OnceLock;
+    use tokio::net::TcpSocket;
+    use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
+    use windows_sys::Win32::Networking::WinSock::{
+        SIO_TCP_INITIAL_RTO, TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS, TCP_INITIAL_RTO_PARAMETERS,
+        WSAIoctl,
+    };
+    use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+
+    /// `TCP_INITIAL_RTO_UNSPECIFIED_RTT` from mstcpip.h, `((USHORT) -1)`,
+    /// which windows-sys doesn't carry: keep the system's or the
+    /// administrator's round-trip estimate.
+    const UNSPECIFIED_RTT: u16 = u16::MAX;
+
+    /// Windows answers a refused connection by sending the SYN again, so a
+    /// closed port on this machine takes about two seconds to fail where
+    /// other systems fail at once. A loopback SYN can't get lost, so the
+    /// resends are turned off there, as Go, libuv, curl, OpenJDK and
+    /// Chromium do. This is best effort: if the call fails, connecting still
+    /// works, only slower.
+    pub(super) fn fail_fast_on_loopback(socket: &TcpSocket, address: SocketAddr) {
+        if !address.ip().is_loopback() {
+            return;
+        }
+        let parameters = TCP_INITIAL_RTO_PARAMETERS {
+            Rtt: UNSPECIFIED_RTT,
+            MaxSynRetransmissions: if accepts_no_syn_retransmissions() {
+                // `((USHORT) -2)` stored in the UCHAR field, as in mstcpip.h.
+                TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS as u8
+            } else {
+                1
+            },
+        };
+        let mut returned = 0;
+        // SAFETY: the socket is open, the input buffer is a live
+        // TCP_INITIAL_RTO_PARAMETERS of the size passed, and the call is
+        // synchronous: no output buffer, no OVERLAPPED, no completion routine.
+        unsafe {
+            WSAIoctl(
+                socket.as_raw_socket() as usize,
+                SIO_TCP_INITIAL_RTO,
+                (&raw const parameters).cast(),
+                size_of::<TCP_INITIAL_RTO_PARAMETERS>() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+                None,
+            );
+        }
+    }
+
+    /// Windows 10 1709 (build 16299) is the first to accept "no SYN
+    /// retransmissions". Older builds read that value as 254
+    /// retransmissions, so they get the smallest count they accept, 1.
+    fn accepts_no_syn_retransmissions() -> bool {
+        static ACCEPTS: OnceLock<bool> = OnceLock::new();
+        *ACCEPTS.get_or_init(|| {
+            // SAFETY: OSVERSIONINFOW is plain data, so all zeroes is valid.
+            let mut version: OSVERSIONINFOW = unsafe { std::mem::zeroed() };
+            version.dwOSVersionInfoSize = size_of::<OSVERSIONINFOW>() as u32;
+            // RtlGetVersion reports the real version whatever the
+            // application manifest declares.
+            // SAFETY: `version` is a live OSVERSIONINFOW with its size set.
+            let status = unsafe { RtlGetVersion(&mut version) };
+            status == 0 && (version.dwMajorVersion, version.dwBuildNumber) >= (10, 16299)
+        })
     }
 }
 
@@ -331,5 +407,27 @@ mod tests {
         drop(closed);
         let error = connect_tcp("127.0.0.1", port).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+    }
+
+    /// Go's TestDialClosedPortFailFast: without the loopback setting,
+    /// Windows takes about two seconds to report the refusal.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_closed_loopback_port_fails_fast_on_windows() {
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        // A busy machine can be slow once; Go's test retries too.
+        let mut fastest = Duration::MAX;
+        for _ in 0..3 {
+            let started = std::time::Instant::now();
+            let error = connect_tcp("127.0.0.1", port).await.unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+            fastest = fastest.min(started.elapsed());
+            if fastest < Duration::from_secs(1) {
+                return;
+            }
+        }
+        panic!("refusals took {fastest:?} at best");
     }
 }
