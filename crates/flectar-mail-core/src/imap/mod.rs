@@ -195,11 +195,14 @@ async fn tls_handshake(
     host: &str,
     port: u16,
 ) -> Result<MailStream> {
-    let tls = net::tls::handshake(connector, tcp, host).await.map_err(|e| {
-        CoreError::Tls(format!(
-            "IMAP {host}:{port}: {e}. Check SSL/TLS versus STARTTLS and use the hostname on the server certificate. For Proton Bridge, import its exported certificate."
-        ))
-    })?;
+    let tls = net::tls::handshake(connector, tcp, host)
+        .await
+        .map_err(|e| {
+            CoreError::Tls(format!(
+                "IMAP {host}:{port}: {e}. {}",
+                net::tls::handshake_advice(&e)
+            ))
+        })?;
     Ok(MailStream::Tls(Box::new(tls)))
 }
 

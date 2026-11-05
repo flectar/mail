@@ -217,11 +217,13 @@ async fn tls_handshake(cfg: &AccountConfig, tcp: TcpStream) -> Result<MailStream
     let tls = net::tls::handshake(&connector, tcp, &cfg.smtp_host)
         .await
         .map_err(|error| {
-        CoreError::Tls(format!(
-            "SMTP {}:{}: {error}. Check SSL/TLS versus STARTTLS and the server certificate. For Proton Bridge, import its exported certificate.",
-            cfg.smtp_host, cfg.smtp_port
-        ))
-    })?;
+            CoreError::Tls(format!(
+                "SMTP {}:{}: {error}. {}",
+                cfg.smtp_host,
+                cfg.smtp_port,
+                net::tls::handshake_advice(&error)
+            ))
+        })?;
     Ok(MailStream::Tls(Box::new(tls)))
 }
 

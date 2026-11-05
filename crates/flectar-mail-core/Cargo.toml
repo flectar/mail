@@ -48,6 +48,9 @@ mail-builder = "0.4"
 # TLS
 tokio-rustls = "0.26"
 rustls = "0.23"
+# The operating system verifies server certificates, as for reqwest. Mozilla's
+# bundled roots are the fallback when a Linux system has no CA bundle.
+rustls-platform-verifier = "0.7"
 webpki = { package = "rustls-webpki", version = "0.103" }
 webpki-roots = "1"
 futures = "0.3"
