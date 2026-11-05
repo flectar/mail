@@ -11,10 +11,6 @@ use tokio::time::{Duration, Instant};
 /// alongside it: RFC 8305's recommended Connection Attempt Delay.
 const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
 
-/// RFC 8305 forbids starting attempts closer together than this, even when
-/// the previous one has already failed.
-const MIN_ATTEMPT_GAP: Duration = Duration::from_millis(10);
-
 /// Open a TCP connection for a mail protocol. Nagle's algorithm only delays
 /// their short request/response exchanges, so it is disabled when the
 /// platform allows.
@@ -64,10 +60,11 @@ fn interleave(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
 /// running attempts have gone unanswered for [`ATTEMPT_DELAY`], keep the
 /// first connection that succeeds and drop the others.
 ///
-/// When an attempt fails, the next one starts right away, as Go and
-/// hyper-util do, but no sooner than [`MIN_ATTEMPT_GAP`] after the previous
-/// start. If every attempt fails, the first address's error is returned, as
-/// Go does: it belongs to the most preferred address.
+/// When an attempt fails, the next one starts at once, as Go and hyper-util
+/// do. The RFC's 10 ms minimum bounds the Connection Attempt Delay, the wait
+/// while earlier attempts are still pending. If every attempt fails, the
+/// first address's error is returned, as Go does: it belongs to the most
+/// preferred address.
 async fn race<T, Attempt>(
     addresses: Vec<SocketAddr>,
     connect: impl Fn(SocketAddr) -> Attempt,
@@ -78,19 +75,17 @@ where
     let mut waiting = addresses.into_iter().enumerate().peekable();
     let mut attempts = FuturesUnordered::new();
     let mut first_error: Option<(usize, io::Error)> = None;
-    let mut last_start = Instant::now();
-    let mut next_start = last_start;
+    let mut next_start = Instant::now();
     loop {
         // An attempt that is due starts here rather than after a sleep: even
         // a sleep that has already expired waits for the timer's next tick,
-        // which is about 15 ms on Windows.
+        // up to about 15 ms on Windows.
         if Instant::now() >= next_start
             && let Some((index, address)) = waiting.next()
         {
             let attempt = connect(address);
             attempts.push(async move { (index, attempt.await) });
-            last_start = Instant::now();
-            next_start = last_start + ATTEMPT_DELAY;
+            next_start = Instant::now() + ATTEMPT_DELAY;
         }
         let can_start = waiting.peek().is_some();
         if attempts.is_empty() && !can_start {
@@ -109,7 +104,7 @@ where
                     if first_error.as_ref().is_none_or(|(first, _)| index < *first) {
                         first_error = Some((index, error));
                     }
-                    next_start = next_start.min(last_start + MIN_ATTEMPT_GAP);
+                    next_start = Instant::now();
                 }
             },
             () = tokio::time::sleep_until(next_start), if can_start => {}
@@ -236,6 +231,7 @@ mod tests {
     enum Outcome {
         Connect(u64),
         Fail(u64, io::ErrorKind),
+        FailNow(io::ErrorKind),
         Hang,
     }
 
@@ -296,6 +292,7 @@ mod tests {
                         tokio::time::sleep(Duration::from_millis(after)).await;
                         Err(io::Error::from(kind))
                     }
+                    Outcome::FailNow(kind) => Err(io::Error::from(kind)),
                     Outcome::Hang => std::future::pending().await,
                 };
                 let note = guard.0.take().unwrap();
@@ -344,7 +341,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn attempts_start_at_least_the_minimum_gap_apart() {
+    async fn instant_failures_start_the_next_address_at_once() {
         let script = Script::new(&[
             (v6(1), Outcome::Fail(0, io::ErrorKind::NetworkUnreachable)),
             (v6(2), Outcome::Fail(0, io::ErrorKind::NetworkUnreachable)),
@@ -352,13 +349,10 @@ mod tests {
         ]);
         let (result, elapsed, log) = script.run().await;
         assert_eq!(result.unwrap(), v4(1));
-        assert_eq!(elapsed, 20);
+        assert_eq!(elapsed, 0);
         let starts: Vec<_> = log.iter().filter(|line| line.contains(" start ")).collect();
-        assert_eq!(starts.len(), 3);
-        assert!(
-            starts[1].starts_with("10 ") && starts[2].starts_with("20 "),
-            "{log:?}"
-        );
+        assert_eq!(starts.len(), 3, "{log:?}");
+        assert!(starts.iter().all(|line| line.starts_with("0 ")), "{log:?}");
     }
 
     #[tokio::test(start_paused = true)]
@@ -411,7 +405,7 @@ mod tests {
     }
 
     /// The first attempt starts on the first poll. Waiting on even an expired
-    /// timer first cost about 15 ms per connection on Windows.
+    /// timer first could cost up to a timer tick, about 15 ms on Windows.
     #[tokio::test]
     async fn the_first_attempt_starts_without_waiting_on_a_timer() {
         let script = Script::new(&[(v6(1), Outcome::Hang), (v4(1), Outcome::Hang)]);
@@ -422,6 +416,23 @@ mod tests {
         let log = script.log.lock().unwrap().clone();
         assert_eq!(log.len(), 1, "{log:?}");
         assert!(log[0].ends_with(&format!(" start {}", v6(1))), "{log:?}");
+    }
+
+    /// A failed attempt is replaced on the same poll, so the `127.0.0.1`
+    /// attempt after a `::1` refusal doesn't wait on a timer either.
+    #[tokio::test]
+    async fn a_failed_attempt_is_replaced_without_waiting_on_a_timer() {
+        let script = Script::new(&[
+            (v6(1), Outcome::FailNow(io::ErrorKind::ConnectionRefused)),
+            (v4(1), Outcome::Hang),
+        ]);
+        let start = Instant::now();
+        let race = race(script.addresses(), |address| script.attempt(start, address));
+        let mut race = std::pin::pin!(race);
+        assert!(futures::poll!(race.as_mut()).is_pending());
+        let log = script.log.lock().unwrap().clone();
+        let starts = log.iter().filter(|line| line.contains(" start ")).count();
+        assert_eq!(starts, 2, "{log:?}");
     }
 
     #[tokio::test]
