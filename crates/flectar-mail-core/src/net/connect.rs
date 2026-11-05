@@ -81,6 +81,17 @@ where
     let mut last_start = Instant::now();
     let mut next_start = last_start;
     loop {
+        // An attempt that is due starts here rather than after a sleep: even
+        // a sleep that has already expired waits for the timer's next tick,
+        // which is about 15 ms on Windows.
+        if Instant::now() >= next_start
+            && let Some((index, address)) = waiting.next()
+        {
+            let attempt = connect(address);
+            attempts.push(async move { (index, attempt.await) });
+            last_start = Instant::now();
+            next_start = last_start + ATTEMPT_DELAY;
+        }
         let can_start = waiting.peek().is_some();
         if attempts.is_empty() && !can_start {
             return Err(first_error.map(|(_, error)| error).unwrap_or_else(|| {
@@ -101,14 +112,7 @@ where
                     next_start = next_start.min(last_start + MIN_ATTEMPT_GAP);
                 }
             },
-            () = tokio::time::sleep_until(next_start), if can_start => {
-                if let Some((index, address)) = waiting.next() {
-                    let attempt = connect(address);
-                    attempts.push(async move { (index, attempt.await) });
-                    last_start = Instant::now();
-                    next_start = last_start + ATTEMPT_DELAY;
-                }
-            }
+            () = tokio::time::sleep_until(next_start), if can_start => {}
         }
     }
 }
@@ -389,6 +393,20 @@ mod tests {
     async fn no_addresses_is_an_error() {
         let (result, _, _) = Script::new(&[]).run().await;
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    /// The first attempt starts on the first poll. Waiting on even an expired
+    /// timer first cost about 15 ms per connection on Windows.
+    #[tokio::test]
+    async fn the_first_attempt_starts_without_waiting_on_a_timer() {
+        let script = Script::new(&[(v6(1), Outcome::Hang), (v4(1), Outcome::Hang)]);
+        let start = Instant::now();
+        let race = race(script.addresses(), |address| script.attempt(start, address));
+        let mut race = std::pin::pin!(race);
+        assert!(futures::poll!(race.as_mut()).is_pending());
+        let log = script.log.lock().unwrap().clone();
+        assert_eq!(log.len(), 1, "{log:?}");
+        assert!(log[0].ends_with(&format!(" start {}", v6(1))), "{log:?}");
     }
 
     #[tokio::test]
