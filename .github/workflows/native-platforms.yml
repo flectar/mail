@@ -80,7 +80,7 @@ jobs:
       - name: Install preflight tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y appstream desktop-file-utils dpkg-dev
+          sudo apt-get install -y appstream desktop-file-utils dpkg-dev gettext
       - name: Check release metadata and packaging
         id: version
         env:
@@ -91,6 +91,9 @@ jobs:
           else
             bash scripts/check-release.sh
           fi
+      - name: Require complete Spanish and Russian translations
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        run: bash scripts/check-translation-completeness.sh es ru
 
   linux:
     needs: metadata

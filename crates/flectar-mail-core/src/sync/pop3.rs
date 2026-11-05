@@ -279,9 +279,9 @@ fn failure(config: &AccountConfig, error: pop3::Error) -> Failure {
                 }
             },
         )),
-        pop3::Error::Tls(message) => Failure::Other(CoreError::Tls(format!(
-            "POP3 {host}:{port}: {message}. Check SSL/TLS versus STARTTLS and use the hostname on the server certificate."
-        ))),
+        pop3::Error::Tls(message) => {
+            Failure::Other(CoreError::Tls(format!("POP3 {host}:{port}: {message}")))
+        }
         pop3::Error::Refused {
             command: "STLS", ..
         } => Failure::Other(CoreError::Tls(format!(

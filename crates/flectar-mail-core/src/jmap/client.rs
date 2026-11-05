@@ -1199,18 +1199,35 @@ pub(crate) mod tests {
         ));
         held.abort();
 
-        // Nothing listens on a port that was just released.
+        // Nothing listens on a port that was just released. Windows retries a
+        // refused connection for about two seconds before reporting it, longer
+        // than the client's 200 ms timeout, so this request overrides it.
         let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let closed_url = format!("http://{}/jmap/", closed.local_addr().unwrap());
         drop(closed);
-        let error = http.post(&closed_url).send().await.unwrap_err();
+        let error = http
+            .post(&closed_url)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await
+            .unwrap_err();
         let failure = transport_failure(&error);
-        assert!(
-            failure.starts_with(&format!("could not connect ({closed_url}): ")),
-            "{failure}"
+        // The OS words the refusal in the system language, so check that the
+        // message carries the root cause and that the cause is a refusal,
+        // rather than looking for the English word.
+        let mut cause: &(dyn std::error::Error + 'static) = &error;
+        while let Some(source) = cause.source() {
+            cause = source;
+        }
+        assert_eq!(
+            failure,
+            format!("could not connect ({closed_url}): {cause}")
         );
-        assert!(
-            failure.to_ascii_lowercase().contains("refused"),
+        assert_eq!(
+            cause
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::ConnectionRefused),
             "{failure}"
         );
     }
