@@ -103,16 +103,7 @@ pub(super) fn state() -> io::Result<State> {
         Copy::Installed => current.as_deref() == Some(INSTALLED.prog_id),
         Copy::Portable => current.as_deref() == Some(PORTABLE.prog_id),
     };
-    let mut removable = false;
-    if matches!(copy, Copy::Portable)
-        && let Some(registered) = registered_executable(&PORTABLE)?
-    {
-        // A portable copy that moved keeps receiving its links.
-        if !same_file(&registered, &std::env::current_exe()?) {
-            register(&PORTABLE)?;
-        }
-        removable = true;
-    }
+    let removable = matches!(copy, Copy::Portable) && registered_executable(&PORTABLE)?.is_some();
     Ok(State {
         status: if default {
             Status::Default
@@ -121,6 +112,21 @@ pub(super) fn state() -> io::Result<State> {
         },
         removable,
     })
+}
+
+/// Point a portable copy's registration at this executable when it moved, so
+/// its links keep arriving. Runs once at startup, like the sign-in entry's
+/// repair: with several portable copies, the one last started gets them.
+pub(super) fn repair() -> io::Result<()> {
+    if !matches!(copy()?, Copy::Portable) {
+        return Ok(());
+    }
+    match registered_executable(&PORTABLE)? {
+        Some(registered) if !same_file(&registered, &std::env::current_exe()?) => {
+            register(&PORTABLE)
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(super) fn make_default(done: Done) {

@@ -135,12 +135,20 @@ impl Dirs {
             .map(str::to_owned)
     }
 
-    /// The desktop entry that starts this copy. An AppImage that an AppImage
-    /// manager added gets an entry of another name whose command is the
-    /// image itself.
+    /// The desktop entry that starts this copy for a mail link. An AppImage
+    /// that an AppImage manager added gets an entry of another name whose
+    /// command is the image itself. An entry written before this release
+    /// passes no link, so it does not count until the AppImage is added
+    /// again.
     fn own_desktop_id(&self) -> Option<String> {
-        if self.installed(DESKTOP_ID) {
-            return Some(DESKTOP_ID.to_owned());
+        // The first entry of that name is the one the desktop uses.
+        if let Some(path) = self
+            .data
+            .iter()
+            .map(|directory| directory.join("applications").join(DESKTOP_ID))
+            .find(|path| path.is_file())
+        {
+            return opens_mail_links(&KeyFile::read(&path).ok()??).then(|| DESKTOP_ID.to_owned());
         }
         let image = self.appimage.as_deref()?;
         let applications = self.data.first()?.join("applications");
@@ -150,10 +158,12 @@ impl Dirs {
             .filter(|entry| entry.file_name().to_string_lossy().ends_with(".desktop"))
             .find(|entry| {
                 fs::read_to_string(entry.path()).is_ok_and(|text| {
-                    KeyFile::parse(&text)
+                    let entry = KeyFile::parse(&text);
+                    entry
                         .get("Desktop Entry", "Exec")
                         .and_then(exec_program)
                         .is_some_and(|program| Path::new(&program) == image)
+                        && opens_mail_links(&entry)
                 })
             })
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
@@ -220,6 +230,21 @@ impl Dirs {
     }
 }
 
+/// Whether a desktop entry declares mail links and passes them to the
+/// program (`%u` or `%U`).
+fn opens_mail_links(entry: &KeyFile) -> bool {
+    let declared = entry.get("Desktop Entry", "MimeType").is_some_and(|types| {
+        types
+            .split(';')
+            .any(|mime_type| mime_type.trim() == MIME_TYPE)
+    });
+    let passes = entry.get("Desktop Entry", "Exec").is_some_and(|exec| {
+        exec.split_whitespace()
+            .any(|argument| argument.eq_ignore_ascii_case("%u"))
+    });
+    declared && passes
+}
+
 /// The program an `Exec` line starts, unquoted.
 fn exec_program(exec: &str) -> Option<String> {
     let exec = exec.trim_start();
@@ -257,8 +282,18 @@ fn edit(path: &Path, change: impl FnOnce(&mut KeyFile)) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("a list path has no directory"))?;
     fs::create_dir_all(directory)?;
+    // Keep the file's permissions, as the desktops' own settings do; a new
+    // list is readable like any other configuration file.
+    let permissions = match fs::metadata(&path) {
+        Ok(metadata) => metadata.permissions(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            std::os::unix::fs::PermissionsExt::from_mode(0o644)
+        }
+        Err(error) => return Err(error),
+    };
     let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
     io::Write::write_all(&mut temporary, text.as_bytes())?;
+    temporary.as_file().set_permissions(permissions)?;
     temporary.as_file().sync_all()?;
     temporary.persist(&path).map_err(|error| error.error)?;
     Ok(())
@@ -353,6 +388,10 @@ impl KeyFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The entry this release installs, which opens mail links.
+    const ENTRY: &str =
+        "[Desktop Entry]\nExec=flectar-mail %U\nMimeType=x-scheme-handler/mailto;\n";
 
     struct Fixture {
         _root: tempfile::TempDir,
@@ -450,7 +489,7 @@ mod tests {
         let fixture = Fixture::new(&["kde"]);
         let dirs = &fixture.dirs;
         fixture.install(1, "org.kde.kmail2.desktop", "[Desktop Entry]\n");
-        fixture.install(1, DESKTOP_ID, "[Desktop Entry]\n");
+        fixture.install(1, DESKTOP_ID, ENTRY);
         let user = dirs.config[0].join("mimeapps.list");
         fixture.write(
             &user,
@@ -482,7 +521,7 @@ mod tests {
     fn a_linked_list_keeps_its_link() {
         let fixture = Fixture::new(&[]);
         let dirs = &fixture.dirs;
-        fixture.install(0, DESKTOP_ID, "[Desktop Entry]\n");
+        fixture.install(0, DESKTOP_ID, ENTRY);
         let dotfiles = dirs.data[0].join("dotfiles/mimeapps.list");
         fixture.write(&dotfiles, "[Default Applications]\n");
         fs::create_dir_all(&dirs.config[0]).unwrap();
@@ -511,7 +550,7 @@ mod tests {
         fixture.install(
             0,
             "appimagekit_0123-Flectar_Mail.desktop",
-            "[Desktop Entry]\nExec=\"/home/me/Apps/Flectar \\\"Mail\\\".AppImage\" %U\n",
+            "[Desktop Entry]\nExec=\"/home/me/Apps/Flectar \\\"Mail\\\".AppImage\" %U\nMimeType=x-scheme-handler/mailto;\n",
         );
         fixture.install(
             0,
@@ -523,8 +562,55 @@ mod tests {
             Some("appimagekit_0123-Flectar_Mail.desktop")
         );
         // The entry the packages install is preferred when there is one.
-        fixture.install(1, DESKTOP_ID, "[Desktop Entry]\n");
+        fixture.install(1, DESKTOP_ID, ENTRY);
         assert_eq!(fixture.dirs.own_desktop_id().as_deref(), Some(DESKTOP_ID));
+    }
+
+    #[test]
+    fn an_entry_that_passes_no_link_does_not_count() {
+        let fixture = Fixture::new(&[]);
+        // Written by an AppImage integration before this release.
+        fixture.install(
+            0,
+            DESKTOP_ID,
+            "[Desktop Entry]\nExec=\"/home/me/Applications/flectar-mail.AppImage\"\n",
+        );
+        fixture.install(1, DESKTOP_ID, ENTRY);
+        assert_eq!(
+            fixture.dirs.own_desktop_id(),
+            None,
+            "the user's entry shadows the system one"
+        );
+        assert!(fixture.dirs.set_default().is_err());
+        fixture.install(
+            0,
+            DESKTOP_ID,
+            "[Desktop Entry]\nExec=flectar-mail %U\nMimeType=text/html;\n",
+        );
+        assert_eq!(fixture.dirs.own_desktop_id(), None);
+        fixture.install(0, DESKTOP_ID, ENTRY);
+        assert_eq!(fixture.dirs.own_desktop_id().as_deref(), Some(DESKTOP_ID));
+    }
+
+    #[test]
+    fn rewritten_lists_keep_their_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new(&[]);
+        let dirs = &fixture.dirs;
+        fixture.install(0, DESKTOP_ID, ENTRY);
+        let user = dirs.config[0].join("mimeapps.list");
+        dirs.set_default().unwrap();
+        assert_eq!(
+            fs::metadata(&user).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        fixture.write(&user, "[Default Applications]\n");
+        fs::set_permissions(&user, fs::Permissions::from_mode(0o640)).unwrap();
+        dirs.set_default().unwrap();
+        assert_eq!(
+            fs::metadata(&user).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
     }
 
     #[test]

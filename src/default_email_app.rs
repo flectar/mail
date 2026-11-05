@@ -21,8 +21,12 @@ use crate::{
 };
 use slint::ComponentHandle;
 use std::{
+    cell::RefCell,
     io,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 #[cfg(target_os = "macos")]
@@ -126,6 +130,23 @@ type Done = Box<dyn FnOnce(io::Result<Applied>) + Send>;
 pub(crate) struct DefaultEmailAppRow {
     runtime: tokio::runtime::Handle,
     lock: Arc<Mutex<()>>,
+    /// The system settings were opened for the user to finish the change.
+    awaiting_system: Arc<AtomicBool>,
+}
+
+thread_local! {
+    static ROW: RefCell<Option<DefaultEmailAppRow>> = const { RefCell::new(None) };
+}
+
+/// The window is focused again. Coming back from the system settings this
+/// row opened, read the choice the user made there.
+pub(crate) fn window_focused(app: &AppWindow) {
+    let row = ROW.with(|row| row.borrow().clone());
+    if let Some(row) = row
+        && row.awaiting_system.swap(false, Ordering::SeqCst)
+    {
+        row.refresh(app);
+    }
 }
 
 impl DefaultEmailAppRow {
@@ -137,7 +158,19 @@ impl DefaultEmailAppRow {
         let row = Self {
             runtime: runtime.handle().clone(),
             lock: Arc::default(),
+            awaiting_system: Arc::default(),
         };
+        ROW.with(|slot| *slot.borrow_mut() = Some(row.clone()));
+        #[cfg(target_os = "windows")]
+        {
+            let lock = Arc::clone(&row.lock);
+            row.runtime.spawn_blocking(move || {
+                let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Err(error) = platform::repair() {
+                    eprintln!("could not update the email link registration: {error}");
+                }
+            });
+        }
         let ui = app.global::<DefaultEmailApp>();
         let this = row.clone();
         let weak = app.as_weak();
@@ -165,10 +198,14 @@ impl DefaultEmailAppRow {
         };
         window.global::<DefaultEmailApp>().set_busy(true);
         let lock = Arc::clone(&self.lock);
+        let awaiting_system = Arc::clone(&self.awaiting_system);
         self.runtime.spawn_blocking(move || {
             let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
             let finished = app.clone();
             platform::make_default(Box::new(move |result| {
+                if matches!(result, Ok(Applied::Settings)) {
+                    awaiting_system.store(true, Ordering::SeqCst);
+                }
                 let state = platform::state();
                 let message = match result {
                     Ok(Applied::Done) => Some(UiMessage::plain(

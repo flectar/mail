@@ -342,8 +342,7 @@ pub(super) fn register_window_preference_callbacks(
     });
     // The startup entry and the default email app can also change in the
     // system's own settings, so read them again whenever Settings appears:
-    // from the rail, a tab or a shortcut into a settings page, or when the
-    // window comes back from the system settings.
+    // from the rail, a tab or a shortcut into a settings page.
     #[cfg(desktop)]
     {
         let launch_at_login = LaunchAtLogin::register(app, runtime);
