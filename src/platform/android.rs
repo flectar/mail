@@ -31,6 +31,36 @@ pub fn configure_pdfium(directory: PathBuf) -> Result<(), String> {
         .map_err(|_| "PDF library already configured.".into())
 }
 
+/// `onTrimMemory` from the activity, with the device's API level.
+pub fn trim_memory(level: i32, sdk: i32) {
+    if let Some(pressure) = super::memory_levels::android_trim_level(level, sdk) {
+        crate::memory::memory_pressure(pressure);
+    }
+}
+
+/// The activity forwards trim levels as they arrive; there is nothing to
+/// subscribe to.
+pub(crate) fn watch_memory_pressure() {}
+
+/// Bionic returns free pages through mallopt. M_PURGE (API 28) is quick;
+/// M_PURGE_ALL (API 34) also drains every thread cache and takes longer, so it
+/// is kept for critical pressure. Releases without them return 0, which is
+/// harmless; Zygote falls back the same way.
+pub(crate) fn purge_allocator(urgent: bool) {
+    use std::ffi::c_int;
+    const M_PURGE: c_int = -101;
+    const M_PURGE_ALL: c_int = -104;
+    unsafe extern "C" {
+        fn mallopt(param: c_int, value: c_int) -> c_int;
+    }
+    // SAFETY: these options only return free pages; no pointers change.
+    unsafe {
+        if !urgent || mallopt(M_PURGE_ALL, 0) != 1 {
+            mallopt(M_PURGE, 0);
+        }
+    }
+}
+
 pub(crate) fn pdfium_library() -> Result<PathBuf, String> {
     PDFIUM_LIBRARY
         .get()

@@ -105,7 +105,8 @@ fn dispatch_pressure(flags: usize) -> Option<MemoryPressure> {
     }
 }
 
-/// Start listening to the system's memory-pressure signal.
+/// Start listening to the system's memory-pressure signal. Android and
+/// OpenHarmony forward theirs from the activity or ability as they arrive.
 pub(crate) fn watch_pressure(runtime: &tokio::runtime::Runtime) {
     #[cfg(linux_desktop)]
     linux::watch(runtime);
@@ -115,6 +116,8 @@ pub(crate) fn watch_pressure(runtime: &tokio::runtime::Runtime) {
     macos::watch();
     #[cfg(target_os = "windows")]
     windows::watch();
+    #[cfg(mobile)]
+    crate::platform::watch_memory_pressure();
 }
 
 /// Return already-free allocator pages to the operating system. Live
@@ -125,6 +128,9 @@ pub(crate) fn release_free_heap() {
 
 /// Return free allocator pages, as far as `level` asks.
 pub(crate) fn release_heap(level: MemoryPressure) {
+    #[cfg(mobile)]
+    crate::platform::purge_allocator(level == MemoryPressure::Critical);
+    #[cfg(not(mobile))]
     let _ = level;
     #[cfg(glibc)]
     // SAFETY: malloc_trim only releases free heap pages; no pointers change.

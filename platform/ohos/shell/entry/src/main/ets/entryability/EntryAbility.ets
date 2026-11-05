@@ -1,4 +1,4 @@
-import { Configuration, ConfigurationConstant, UIAbility } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -11,6 +11,13 @@ export default class EntryAbility extends UIAbility {
     // The page releases any preview resources when this event arrives; using
     // the ability lifecycle covers background paths that onPageHide misses.
     this.context.eventHub.emit('flectarBackground');
+  }
+
+  // The page forwards memory levels to Rust, which frees caches it can
+  // rebuild. Every ability and stage receives each level, so only this one
+  // handles them, and it returns at once: the release runs in Rust.
+  onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
+    this.context.eventHub.emit('flectarMemoryLevel', level);
   }
 
   onConfigurationUpdate(newConfig: Configuration): void {

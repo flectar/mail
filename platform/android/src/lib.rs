@@ -156,4 +156,6 @@ mod documents;
 #[cfg(target_os = "android")]
 mod launcher_icon;
 #[cfg(target_os = "android")]
+mod memory;
+#[cfg(target_os = "android")]
 mod pdf;
