@@ -1208,7 +1208,8 @@ msgstr "邮件加载失败：{}"
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
-msgstr "无法打开本地邮箱，未执行任何账户操作。请重试，或复制诊断信息以寻求支持。"
+msgstr ""
+"无法打开本地邮箱，未执行任何账户操作。请重试，或复制诊断信息以寻求支持。"
 
 #: ui/app.slint:446
 msgid "Local storage startup failed."
@@ -1985,7 +1986,8 @@ msgstr "添加发件人地址"
 msgid ""
 "Your server lets you send from any address at the domains shown as "
 "wildcards. Add the addresses you want to choose from."
-msgstr "您的服务器允许您从显示为通配符的域中的任何地址发送。添加您要选择的地址。"
+msgstr ""
+"您的服务器允许您从显示为通配符的域中的任何地址发送。添加您要选择的地址。"
 
 #: ui/components/account-mail-preferences.slint:169
 msgid ""
@@ -2113,15 +2115,16 @@ msgstr "OpenPGP 用于保护邮件正文和附件。数字签名可让收件人�
 msgid ""
 "Uses installed GnuPG 2.x and its secure key storage. Passphrases are entered "
 "in GnuPG's unlock dialog."
-msgstr "使用已安装的 GnuPG 2.x 及其安全密钥存储。口令在 GnuPG 的解锁对话框中输入。"
+msgstr ""
+"使用已安装的 GnuPG 2.x 及其安全密钥存储。口令在 GnuPG 的解锁对话框中输入。"
 
 #: ui/components/account-mail-preferences.slint:213
 msgid ""
 "OpenPGP is unavailable on this mobile build. Protected accounts cannot send "
 "without a supported encryption engine."
 msgstr ""
-"此移动版本不支持 OpenPGP。在不支持加密引擎的情况下，受保护的账户无法发送邮件"
-"。"
+"此移动版本不支持 OpenPGP。在不支持加密引擎的情况下，受保护的账户无法发送邮"
+"件。"
 
 #: ui/components/account-mail-preferences.slint:214
 msgid "Create a new key"
@@ -2924,7 +2927,8 @@ msgstr "复制登录链接"
 msgid ""
 "If the final browser page says localhost can’t be reached, copy its full "
 "address and paste it below."
-msgstr "如果浏览器最终页面提示无法访问 localhost，请复制其完整地址并粘贴到下方。"
+msgstr ""
+"如果浏览器最终页面提示无法访问 localhost，请复制其完整地址并粘贴到下方。"
 
 #: ui/components/oauth-browser-help.slint:89
 msgid "Final browser address"
@@ -3805,7 +3809,8 @@ msgstr "此文件夹不是 Thunderbird 配置文件。请选择包含 prefs.js �
 msgid ""
 "This Thunderbird profile is on a network location. Choose the profile folder "
 "itself to import it."
-msgstr "此 Thunderbird 配置文件位于网络位置。要导入它，请直接选择该配置文件夹。"
+msgstr ""
+"此 Thunderbird 配置文件位于网络位置。要导入它，请直接选择该配置文件夹。"
 
 #: ui/dialogs/import-dialog.slint:178
 msgid "The backup could not be restored: {}"
@@ -3954,9 +3959,9 @@ msgstr "{}（默认配置文件）"
 #: ui/dialogs/import-dialog.slint:575
 msgid ""
 "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups (."
-"json), and mail saved as .mbox or .eml files, in maildir folders, or in ZIP "
-"archives of them."
+"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups "
+"(.json), and mail saved as .mbox or .eml files, in maildir folders, or in "
+"ZIP archives of them."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:576
@@ -4783,7 +4788,8 @@ msgstr "记住我发过邮件的人"
 msgid ""
 "While enabled, remember To, Cc, and Bcc recipients from new sends and synced "
 "Sent mail."
-msgstr "启用后，将记住新发送邮件以及已同步的“已发送”邮件中的收件人、抄送和密送地址。"
+msgstr ""
+"启用后，将记住新发送邮件以及已同步的“已发送”邮件中的收件人、抄送和密送地址。"
 
 #: ui/dialogs/settings-dialog.slint:1620
 msgid "Remember incoming senders"
@@ -4815,7 +4821,8 @@ msgstr "撰写邮件时使用推荐"
 msgid ""
 "Include learned people in recipient autocomplete. Saved and CardDAV contacts "
 "are always available."
-msgstr "在收件人自动补全中纳入已记住的人。已保存的联系人和 CardDAV 联系人始终可用。"
+msgstr ""
+"在收件人自动补全中纳入已记住的人。已保存的联系人和 CardDAV 联系人始终可用。"
 
 #: ui/dialogs/settings-dialog.slint:1674
 msgid "Suggested people"
@@ -5149,7 +5156,8 @@ msgstr[0] ""
 msgid ""
 "Passwords and OAuth tokens stay in the system keyring. A restored device "
 "asks you to sign in securely."
-msgstr "密码和 OAuth 令牌保存在系统密钥环中。在恢复的设备上，系统会要求您安全登录。"
+msgstr ""
+"密码和 OAuth 令牌保存在系统密钥环中。在恢复的设备上，系统会要求您安全登录。"
 
 #: ui/dialogs/settings-dialog.slint:2317
 msgid "Export"
@@ -5286,7 +5294,8 @@ msgstr ""
 msgid ""
 "Optional paid services from Flectar. Flectar Mail stays free and works "
 "without them."
-msgstr "来自 Flectar 的可选付费服务。Flectar Mail 保持免费，无需这些服务即可使用。"
+msgstr ""
+"来自 Flectar 的可选付费服务。Flectar Mail 保持免费，无需这些服务即可使用。"
 
 #: ui/dialogs/settings-dialog.slint:2443
 msgid "Flectar account"
@@ -5430,7 +5439,8 @@ msgstr "AGPL-3.0-only。"
 msgid ""
 "Flectar Mail is released under the GNU Affero General Public License v3.0 "
 "only."
-msgstr "Flectar Mail 以 GNU Affero 通用公共许可证第 3 版（AGPL-3.0-only）发布。"
+msgstr ""
+"Flectar Mail 以 GNU Affero 通用公共许可证第 3 版（AGPL-3.0-only）发布。"
 
 #: ui/dialogs/settings-dialog.slint:2625
 msgid "Third-party components retain their own licenses and notices."
@@ -6267,8 +6277,8 @@ msgid ""
 "Destination folder path (for example /Documents). Leave empty for the "
 "current folder, or the root of another storage space."
 msgstr ""
-"目标文件夹路径（例如 /Documents）。留空表示当前文件夹，或其他存储空间的根目录"
-"。"
+"目标文件夹路径（例如 /Documents）。留空表示当前文件夹，或其他存储空间的根目"
+"录。"
 
 #: ui/views/files-view.slint:608
 msgid "Destination folder"

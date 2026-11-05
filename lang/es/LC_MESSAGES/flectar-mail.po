@@ -470,7 +470,8 @@ msgstr "Preferencias de sugerencias de contactos guardadas."
 
 #: ui/app.slint:233
 msgid "Could not save contact suggestion preferences: {}"
-msgstr "No se pudieron guardar las preferencias de sugerencias de contactos: {}"
+msgstr ""
+"No se pudieron guardar las preferencias de sugerencias de contactos: {}"
 
 #: ui/app.slint:234
 msgid "Contact storage is still starting. Try again shortly."
@@ -723,7 +724,8 @@ msgstr ""
 
 #: ui/app.slint:295
 msgid "Workspace layout updated for this session."
-msgstr "La disposición del espacio de trabajo se actualizó durante esta sesión."
+msgstr ""
+"La disposición del espacio de trabajo se actualizó durante esta sesión."
 
 #: ui/app.slint:296
 msgid "Workspace layout preference saved."
@@ -1124,7 +1126,8 @@ msgstr "Guardado en contactos."
 
 #: ui/app.slint:409
 msgid "Could not delete: contact storage is unavailable."
-msgstr "No se pudo eliminar: el almacenamiento de contactos no está disponible."
+msgstr ""
+"No se pudo eliminar: el almacenamiento de contactos no está disponible."
 
 #: ui/app.slint:410
 msgid "Could not delete contact: {}"
@@ -4109,13 +4112,13 @@ msgstr "{} (perfil predeterminado)"
 #: ui/dialogs/import-dialog.slint:575
 msgid ""
 "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups (."
-"json), and mail saved as .mbox or .eml files, in maildir folders, or in ZIP "
-"archives of them."
+"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups "
+"(.json), and mail saved as .mbox or .eml files, in maildir folders, or in "
+"ZIP archives of them."
 msgstr ""
 "Compatibles: configuración de Thunderbird para Android y K-9 Mail (.k9s), "
-"exportaciones de perfil de Thunderbird (.zip), carpetas de perfil y prefs."
-"js, copias de seguridad de Flectar Mail (.json), y correo guardado en "
+"exportaciones de perfil de Thunderbird (.zip), carpetas de perfil y "
+"prefs.js, copias de seguridad de Flectar Mail (.json), y correo guardado en "
 "archivos .mbox o .eml, en carpetas maildir o en archivos ZIP que los "
 "contengan."
 
@@ -4127,8 +4130,8 @@ msgid ""
 msgstr ""
 "Compatibles: configuración de Thunderbird para Android y K-9 Mail (.k9s), "
 "exportaciones de perfil de Thunderbird (.zip) y prefs.js, copias de "
-"seguridad de Flectar Mail (.json), y correo guardado en archivos .mbox o ."
-"eml o en archivos ZIP que los contengan."
+"seguridad de Flectar Mail (.json), y correo guardado en archivos .mbox "
+"o .eml o en archivos ZIP que los contengan."
 
 #: ui/dialogs/import-dialog.slint:589
 msgid "Looking for accounts and mail…"
