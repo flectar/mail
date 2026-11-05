@@ -4,7 +4,7 @@ msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
 "PO-Revision-Date: 2026-11-05 02:31+0000\n"
-"Last-Translator: Admin <admin@flectar.com>\n"
+"Last-Translator: Anonymous <noreply@weblate.org>\n"
 "Language-Team: Spanish <https://translate.flectar.com/projects/flectar-mail/"
 "mail/es/>\n"
 "Language: es\n"
@@ -470,8 +470,7 @@ msgstr "Preferencias de sugerencias de contactos guardadas."
 
 #: ui/app.slint:233
 msgid "Could not save contact suggestion preferences: {}"
-msgstr ""
-"No se pudieron guardar las preferencias de sugerencias de contactos: {}"
+msgstr "No se pudieron guardar las preferencias de sugerencias de contactos: {}"
 
 #: ui/app.slint:234
 msgid "Contact storage is still starting. Try again shortly."
@@ -724,8 +723,7 @@ msgstr ""
 
 #: ui/app.slint:295
 msgid "Workspace layout updated for this session."
-msgstr ""
-"La disposición del espacio de trabajo se actualizó durante esta sesión."
+msgstr "La disposición del espacio de trabajo se actualizó durante esta sesión."
 
 #: ui/app.slint:296
 msgid "Workspace layout preference saved."
@@ -1126,8 +1124,7 @@ msgstr "Guardado en contactos."
 
 #: ui/app.slint:409
 msgid "Could not delete: contact storage is unavailable."
-msgstr ""
-"No se pudo eliminar: el almacenamiento de contactos no está disponible."
+msgstr "No se pudo eliminar: el almacenamiento de contactos no está disponible."
 
 #: ui/app.slint:410
 msgid "Could not delete contact: {}"
