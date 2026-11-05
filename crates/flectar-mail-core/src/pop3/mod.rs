@@ -593,7 +593,7 @@ impl Session {
 async fn tls_handshake(connector: &TlsConnector, tcp: TcpStream, host: &str) -> Result<MailStream> {
     let tls = net::tls::handshake(connector, tcp, host)
         .await
-        .map_err(|error| Error::Tls(error.to_string()))?;
+        .map_err(|error| Error::Tls(format!("{error}. {}", net::tls::handshake_advice(&error))))?;
     Ok(MailStream::Tls(Box::new(tls)))
 }
 
