@@ -32,6 +32,7 @@ mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
 mod mail_work;
+mod memory;
 mod message_appearance;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
