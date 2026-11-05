@@ -148,7 +148,8 @@ mod windows {
         let parameters = TCP_INITIAL_RTO_PARAMETERS {
             Rtt: UNSPECIFIED_RTT,
             MaxSynRetransmissions: if accepts_no_syn_retransmissions() {
-                // `((USHORT) -2)` stored in the UCHAR field, as in mstcpip.h.
+                // mstcpip.h defines it as `((UCHAR) -2)`; windows-sys widens
+                // it to u16.
                 TCP_INITIAL_RTO_NO_SYN_RETRANSMISSIONS as u8
             } else {
                 1
