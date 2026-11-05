@@ -6328,7 +6328,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             {
                 let mut document = document_for_message_compose.borrow_mut();
                 let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                let selection = document.synchronize(&draft.body_text, cursor, cursor);
+                let selection = document.load(&draft.body_text, cursor, cursor);
                 editor_for_message_compose.borrow_mut().reset();
                 apply_rich_compose(
                     &app,
@@ -6425,7 +6425,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_compose_subject(prepared.subject.into());
         {
             let mut document = document_for_message_compose.borrow_mut();
-            let selection = document.synchronize(&prepared.body, 0, 0);
+            let selection = document.load(&prepared.body, 0, 0);
             editor_for_message_compose.borrow_mut().reset();
             apply_rich_compose(
                 &app,
