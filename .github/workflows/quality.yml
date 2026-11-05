@@ -58,6 +58,25 @@ jobs:
           key: quality-default
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Leave translation catalogs to Weblate
+        # Weblate's msgmerge add-on owns lang/*/LC_MESSAGES; edits from other
+        # branches conflict with its pending commits and lock the component.
+        if: >-
+          github.event_name == 'pull_request' &&
+          !(github.head_ref == 'weblate-flectar-mail-mail' &&
+            github.event.pull_request.head.repo.full_name == github.repository)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The checkout is the pull request's merge commit; its first parent
+          # is the base branch.
+          git fetch --quiet --deepen=1 origin "$GITHUB_SHA"
+          changed=$(git diff --name-only HEAD^1 HEAD -- 'lang/*/LC_MESSAGES/*.po')
+          if [[ -n $changed ]]; then
+            printf '%s\n' "$changed"
+            echo "::error::Only Weblate edits lang/*/LC_MESSAGES. Commit lang/flectar-mail.pot alone (scripts/update-translation-template.sh) and translate on https://translate.flectar.com/."
+            exit 1
+          fi
       - name: Validate repository support files
         shell: bash
         run: |
@@ -123,14 +142,6 @@ jobs:
         run: |
           cargo install slint-tr-extractor --version 1.18.1 --locked
           bash scripts/check-translations.sh
-          for language in es ru; do
-            catalog="lang/$language/LC_MESSAGES/flectar-mail.po"
-            msgfmt --check --check-header --check-format \
-              -o "/tmp/flectar-mail-$language.mo" "$catalog"
-            test -z "$(msgattrib --untranslated --no-obsolete "$catalog")"
-            test -z "$(msgattrib --only-fuzzy --no-obsolete "$catalog")"
-            test -z "$(msgattrib --only-obsolete "$catalog")"
-          done
       - name: Run the default test suite
         run: cargo test --workspace --all-targets --locked
       - name: Test the vendored Blitz patches
