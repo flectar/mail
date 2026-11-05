@@ -3090,62 +3090,58 @@ msgstr ""
 msgid "{}, {}"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:171
-msgid "Collapse label"
-msgstr ""
-
-#: ui/components/sidebar-controls.slint:171
-msgid "Expand label"
-msgstr ""
-
-#: ui/components/sidebar-controls.slint:172
-msgid "Collapse folder"
-msgstr ""
-
-#: ui/components/sidebar-controls.slint:172
-msgid "Expand folder"
-msgstr ""
-
-#: ui/components/sidebar-controls.slint:187
+#: ui/components/sidebar-controls.slint:211
 msgid "New subfolder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:193 ui/dialogs/folder-dialog.slint:29
-#: ui/components/sidebar-controls.slint:193 ui/dialogs/folder-dialog.slint:29
+#: ui/components/sidebar-controls.slint:216 ui/dialogs/folder-dialog.slint:29
+#: ui/components/sidebar-controls.slint:216 ui/dialogs/folder-dialog.slint:29
 msgid "Rename folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:199
+#: ui/components/sidebar-controls.slint:221
 msgid "Delete folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:212
-#: ui/components/sidebar-controls.slint:212
+#: ui/components/sidebar-controls.slint:226
+#: ui/components/sidebar-controls.slint:226
 msgid "Empty Trash…"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:224
+#: ui/components/sidebar-controls.slint:230
 msgid "New nested label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:230
-#: ui/components/sidebar-controls.slint:230
+#: ui/components/sidebar-controls.slint:234
 msgid "Rename global label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:230
-#: ui/components/sidebar-controls.slint:230
+#: ui/components/sidebar-controls.slint:234
 msgid "Rename label in {}"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:235
-#: ui/components/sidebar-controls.slint:235
+#: ui/components/sidebar-controls.slint:238
 msgid "Delete global label"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:235
-#: ui/components/sidebar-controls.slint:235
+#: ui/components/sidebar-controls.slint:238
 msgid "Delete label from {}"
+msgstr ""
+
+#: ui/components/sidebar-controls.slint:264
+msgid "Collapse label"
+msgstr ""
+
+#: ui/components/sidebar-controls.slint:264
+msgid "Expand label"
+msgstr ""
+
+#: ui/components/sidebar-controls.slint:265
+msgid "Collapse folder"
+msgstr ""
+
+#: ui/components/sidebar-controls.slint:265
+msgid "Expand folder"
 msgstr ""
 
 #: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
