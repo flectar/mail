@@ -52,7 +52,7 @@ pub fn plan(
         });
     }
 
-    if let Some(m) = uris.find(|u| has_scheme_prefix(u, "mailto:"))
+    if let Some(m) = uris.find(|u| crate::mailto::is_mailto(u))
         && let Some(p) = parse_mailto(m)
     {
         return Some(p);
