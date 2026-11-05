@@ -310,8 +310,49 @@ fn scrolling_reuses_pixels_and_layout_with_a_bounded_cache() {
 
 #[test]
 fn exact_tile_boundary_has_only_one_overscan_tile() {
-    assert_eq!(desired_tile_range(0.0, 512.0, 4096.0), 0..=1);
-    assert_eq!(desired_tile_range(512.0, 512.0, 4096.0), 0..=2);
+    assert_eq!(
+        desired_tile_range(0.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        0..=1
+    );
+    assert_eq!(
+        desired_tile_range(512.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        0..=2
+    );
+}
+
+#[test]
+fn tiles_stay_near_512_device_pixels_at_every_scale() {
+    assert_eq!(email_tile_height(1.0), 512.0);
+    assert_eq!(email_tile_height(1.5), 512.0);
+    assert_eq!(email_tile_height(2.0), 256.0);
+    assert_eq!(email_tile_height(4.0), 128.0);
+    // Display scales up to 4 times zoom up to 3.
+    for step in 2..=48 {
+        let scale = step as f32 * 0.25;
+        let device_pixels = email_tile_height(scale) * scale;
+        assert!(
+            (256.0..=768.0).contains(&device_pixels),
+            "{scale}: {device_pixels}"
+        );
+    }
+}
+
+#[test]
+fn hidpi_tiles_are_opaque_rgb_and_512_device_pixels_tall() {
+    let mut r = renderer(&format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='height:110px;margin:0'>Scrollable words</p>".repeat(100)
+    ));
+    let frame = r.render_cpu_if_needed(520, 900, 2.0).unwrap().unwrap();
+    // 900 logical pixels need tiles 0 to 3 of 256; tile 4 is the overscan.
+    assert_eq!(frame.tiles.len(), 5);
+    for tile in &frame.tiles {
+        let pixels = tile.image.to_rgb8().expect("tiles are RGB");
+        assert_eq!((pixels.width(), pixels.height()), (1040, 512));
+    }
+    r.set_visible_region(2000.0, 900.0);
+    let frame = r.render_cpu_if_needed(520, 900, 2.0).unwrap().unwrap();
+    assert!(frame.tiles.len() <= 7);
 }
 
 #[test]
