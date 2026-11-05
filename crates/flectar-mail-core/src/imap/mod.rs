@@ -10,6 +10,7 @@ use crate::mime::{self, MimePlan};
 use crate::net::{self, MailStream};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use futures::StreamExt;
+use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -1414,23 +1415,152 @@ pub async fn logout(mut session: Session) {
 
 /// Whether the server advertises the IDLE extension (RFC 2177). Issues a
 /// CAPABILITY command; callers cache the result for the connection's lifetime.
-pub async fn supports_idle(session: &mut Session) -> Result<bool> {
-    with_deadline("CAPABILITY", METADATA_TIMEOUT, supports_idle_inner(session)).await
+/// What a server offers that syncing uses, read once per connection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerCapabilities {
+    /// IDLE (RFC 2177): the server pushes changes to the selected mailbox.
+    pub idle: bool,
+    /// The STATUS return option of LIST (RFC 5819): one command reports the
+    /// STATUS of every mailbox.
+    pub list_status: bool,
 }
 
-async fn supports_idle_inner(session: &mut Session) -> Result<bool> {
+pub async fn capabilities(session: &mut Session) -> Result<ServerCapabilities> {
+    with_deadline("CAPABILITY", METADATA_TIMEOUT, capabilities_inner(session)).await
+}
+
+async fn capabilities_inner(session: &mut Session) -> Result<ServerCapabilities> {
     let caps = session
         .capabilities()
         .await
         .map_err(|e| CoreError::Imap(e.to_string()))?;
-    Ok(caps.has_str("IDLE"))
+    Ok(ServerCapabilities {
+        idle: caps.has_str("IDLE"),
+        // IMAP4rev2 includes LIST-STATUS, but a server that also speaks
+        // IMAP4rev1 enables only the IMAP4rev1 base until ENABLE IMAP4rev2
+        // (RFC 9051, section 6.1.1), so it must name the extension.
+        list_status: caps.has_str("LIST-STATUS")
+            || (caps.has_str("IMAP4rev2") && !caps.has_str("IMAP4rev1")),
+    })
+}
+
+/// A mailbox's STATUS: what tells whether mail arrived, left or was read
+/// elsewhere since the client last looked.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MailboxStatus {
+    pub messages: u32,
+    pub uid_next: Option<u32>,
+    pub unseen: Option<u32>,
+    pub uid_validity: Option<u32>,
+}
+
+const STATUS_ITEMS: &str = "(MESSAGES UIDNEXT UNSEEN UIDVALIDITY)";
+
+fn mailbox_status(attributes: &[async_imap::imap_proto::StatusAttribute]) -> MailboxStatus {
+    use async_imap::imap_proto::StatusAttribute;
+    let mut status = MailboxStatus::default();
+    for attribute in attributes {
+        match attribute {
+            StatusAttribute::Messages(messages) => status.messages = *messages,
+            StatusAttribute::UidNext(uid_next) => status.uid_next = Some(*uid_next),
+            StatusAttribute::Unseen(unseen) => status.unseen = Some(*unseen),
+            StatusAttribute::UidValidity(uid_validity) => status.uid_validity = Some(*uid_validity),
+            _ => {}
+        }
+    }
+    status
+}
+
+/// The STATUS of one mailbox. RFC 9051 asks clients not to use it on the
+/// selected mailbox, whose changes the server reports on its own.
+pub async fn status(session: &mut Session, folder: &str) -> Result<MailboxStatus> {
+    with_deadline("STATUS", METADATA_TIMEOUT, async {
+        let mailbox = session
+            .status(folder, STATUS_ITEMS)
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?;
+        Ok(MailboxStatus {
+            messages: mailbox.exists,
+            uid_next: mailbox.uid_next,
+            unseen: mailbox.unseen,
+            uid_validity: mailbox.uid_validity,
+        })
+    })
+    .await
+}
+
+/// The STATUS of every mailbox, from one LIST-STATUS command, by mailbox
+/// name as LIST names it. A server may leave out a mailbox it could not
+/// look up (RFC 5819), so a missing name means "unknown", not "unchanged".
+pub async fn list_status(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
+    with_deadline("LIST-STATUS", METADATA_TIMEOUT, list_status_inner(session)).await
+}
+
+async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, MailboxStatus>> {
+    use async_imap::imap_proto::{MailboxDatum, Response, Status};
+    let tag = session
+        .run_command(format!("LIST \"\" \"*\" RETURN (STATUS {STATUS_ITEMS})"))
+        .await
+        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let mut statuses = HashMap::new();
+    loop {
+        let response = session
+            .read_response()
+            .await
+            .map_err(|e| CoreError::Imap(e.to_string()))?
+            .ok_or_else(|| CoreError::Imap("connection closed during LIST-STATUS".into()))?;
+        match response.parsed() {
+            Response::Done {
+                tag: done,
+                status,
+                information,
+                ..
+            } if *done == tag => {
+                return match status {
+                    Status::Ok => Ok(statuses),
+                    _ => Err(CoreError::Imap(format!(
+                        "LIST-STATUS failed: {}",
+                        information.as_deref().unwrap_or("no reason given")
+                    ))),
+                };
+            }
+            Response::MailboxData(MailboxDatum::Status { mailbox, status }) => {
+                statuses.insert(mailbox.to_string(), mailbox_status(status));
+            }
+            // LIST replies, and changes to the selected mailbox, which its
+            // next SELECT reads again.
+            _ => {}
+        }
+    }
+}
+
+/// What a push during IDLE says changed in the selected mailbox.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MailboxChange {
+    /// New mail (EXISTS), or a push that names nothing more specific.
+    Arrival,
+    /// A message's flags changed, as when it is read on another device.
+    Flags,
+    /// A message was removed.
+    Removal,
+}
+
+impl MailboxChange {
+    fn of(response: &async_imap::imap_proto::Response<'_>) -> Self {
+        use async_imap::imap_proto::Response;
+        match response {
+            Response::Fetch(..) => Self::Flags,
+            Response::Expunge(_) | Response::Vanished { .. } => Self::Removal,
+            _ => Self::Arrival,
+        }
+    }
 }
 
 /// Why an `idle_wait` returned. Generic over the actor's command type `C` so
 /// this module stays free of any `sync::engine` dependency.
 pub enum IdleOutcome<C> {
-    /// The server pushed unsolicited data (likely new mail): run a sync.
-    Activity,
+    /// The server pushed a change to the selected mailbox: run a sync.
+    Activity(MailboxChange),
     /// The max-idle cap elapsed with no activity: run a sync as a backstop.
     Timeout,
     /// A command arrived on the actor channel; hand it back to the caller.
@@ -1465,7 +1595,9 @@ pub async fn idle_wait<C>(
         tokio::pin!(wait_fut);
         tokio::select! {
             res = &mut wait_fut => match res {
-                Ok(IdleResponse::NewData(_)) => IdleOutcome::Activity,
+                Ok(IdleResponse::NewData(data)) => {
+                    IdleOutcome::Activity(MailboxChange::of(data.parsed()))
+                }
                 // We interrupt via `rx.recv()`, not the StopSource, so a
                 // ManualInterrupt here is unexpected; treat it as a backstop.
                 Ok(IdleResponse::Timeout) | Ok(IdleResponse::ManualInterrupt) => IdleOutcome::Timeout,
@@ -1512,6 +1644,24 @@ pub fn uid_set(uids: &[u32]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn idle_pushes_name_what_changed() {
+        use super::MailboxChange;
+        use async_imap::imap_proto::{MailboxDatum, Response};
+        assert_eq!(
+            MailboxChange::of(&Response::Fetch(3, Vec::new())),
+            MailboxChange::Flags
+        );
+        assert_eq!(
+            MailboxChange::of(&Response::Expunge(3)),
+            MailboxChange::Removal
+        );
+        assert_eq!(
+            MailboxChange::of(&Response::MailboxData(MailboxDatum::Exists(4))),
+            MailboxChange::Arrival
+        );
+    }
+
     use super::{MIME_PLAN_QUERY, normalized_uid_set, section_fetch_query, section_paths};
     use crate::error::CoreError;
 

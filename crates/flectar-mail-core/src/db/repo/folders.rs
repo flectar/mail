@@ -590,9 +590,55 @@ pub fn reset_uid_mappings(conn: &Connection, id: i64) -> Result<()> {
     )?;
     conn.execute(
         "UPDATE folders SET last_seen_uid = 0, uidnext = NULL, highestmodseq = NULL,
-                            backfill_cursor = NULL, backfill_done = 0
+                            backfill_cursor = NULL, backfill_done = 0,
+                            server_messages = NULL, server_unseen = NULL
          WHERE id = ?1",
         params![id],
+    )?;
+    Ok(())
+}
+
+/// What an IMAP server last reported for a folder, as STATUS reports it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerStatus {
+    pub uidvalidity: Option<i64>,
+    pub uidnext: Option<i64>,
+    pub messages: Option<i64>,
+    pub unseen: Option<i64>,
+}
+
+/// The last reported status of each of an account's folders, by folder id.
+pub fn server_statuses(conn: &Connection, account_id: i64) -> Result<HashMap<i64, ServerStatus>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, uidvalidity, uidnext, server_messages, server_unseen
+         FROM folders WHERE account_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![account_id], |row| {
+        Ok((
+            row.get(0)?,
+            ServerStatus {
+                uidvalidity: row.get(1)?,
+                uidnext: row.get(2)?,
+                messages: row.get(3)?,
+                unseen: row.get(4)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Records the counts the server reported for a folder once a sync has
+/// caught up with them. UIDNEXT and UIDVALIDITY come from the folder's
+/// SELECT, which `set_uid_state` records.
+pub fn set_server_counts(
+    conn: &Connection,
+    id: i64,
+    messages: Option<i64>,
+    unseen: Option<i64>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET server_messages = ?2, server_unseen = ?3 WHERE id = ?1",
+        params![id, messages, unseen],
     )?;
     Ok(())
 }

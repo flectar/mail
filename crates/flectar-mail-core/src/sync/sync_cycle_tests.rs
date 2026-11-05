@@ -92,6 +92,14 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
                 "CAPABILITY" => {
                     format!("* CAPABILITY IMAP4rev1 UIDPLUS\r\n{tag} OK capability\r\n")
                 }
+                // Without LIST-STATUS, each folder but the Inbox is asked.
+                "STATUS" => {
+                    assert!(command.contains("\"Archive\""), "{command:?}");
+                    format!(
+                        "* STATUS \"Archive\" (MESSAGES 1 UIDNEXT 89 UNSEEN 1 UIDVALIDITY 7)\r\n\
+                         {tag} OK status\r\n"
+                    )
+                }
                 "SELECT" => {
                     selected = if command.contains("Archive") {
                         "Archive".into()
@@ -310,6 +318,8 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
             CycleMode {
                 foreground_only: false,
                 immediate_follow_up: false,
+                list_status: false,
+                inbox_pushed: PushedChanges::default(),
             },
         ),
     )
@@ -665,6 +675,8 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
         CycleMode {
             foreground_only: true,
             immediate_follow_up: false,
+            list_status: false,
+            inbox_pushed: PushedChanges::default(),
         },
     )
     .await
@@ -715,6 +727,8 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
         CycleMode {
             foreground_only: true,
             immediate_follow_up: false,
+            list_status: false,
+            inbox_pushed: PushedChanges::default(),
         },
     )
     .await
@@ -1013,4 +1027,227 @@ async fn waiting_mail_is_matched_with_the_server_or_removed() {
             .count(),
         2
     );
+}
+
+#[test]
+fn reported_changes_are_rechecked_only_where_new_mail_does_not_explain_them() {
+    let known = repo::folders::ServerStatus {
+        uidvalidity: Some(7),
+        uidnext: Some(51),
+        messages: Some(50),
+        unseen: Some(5),
+    };
+    let now = |messages, uid_next, unseen| imap::MailboxStatus {
+        messages,
+        uid_next: Some(uid_next),
+        unseen: Some(unseen),
+        uid_validity: Some(7),
+    };
+    let check = |reported| FolderCheck {
+        reported: Some(reported),
+        known: Some(known),
+        ..Default::default()
+    };
+
+    assert!(check(now(50, 51, 5)).unchanged());
+    assert!(!check(now(50, 51, 4)).unchanged());
+    assert!(!check(now(50, 52, 5)).unchanged());
+    // Two new messages, one of them unread, explain the whole change.
+    assert_eq!(check(now(52, 53, 6)).reconcile(2, 1, true), (false, false));
+    // A message was read elsewhere while an unread one arrived.
+    assert_eq!(check(now(51, 52, 5)).reconcile(1, 1, true), (true, false));
+    // A message was removed elsewhere.
+    assert_eq!(check(now(49, 51, 5)).reconcile(0, 0, true), (false, true));
+    // A folder still catching up with new mail is compared once it has.
+    assert_eq!(check(now(49, 51, 4)).reconcile(0, 0, false), (false, false));
+    // Without counts from the last sync there is nothing to compare yet.
+    let first = FolderCheck {
+        known: Some(repo::folders::ServerStatus {
+            messages: None,
+            unseen: None,
+            ..known
+        }),
+        ..check(now(50, 51, 4))
+    };
+    assert!(!first.unchanged());
+    assert_eq!(first.reconcile(0, 0, true), (false, false));
+    // What a full pass or a push asks for is checked regardless.
+    let asked = FolderCheck {
+        flags: true,
+        removals: true,
+        ..check(now(52, 53, 6))
+    };
+    assert_eq!(asked.reconcile(2, 1, true), (true, true));
+}
+
+/// A folder that reports what it did at its last sync is not opened; one
+/// whose unread count fell is opened and its read state checked again.
+#[tokio::test]
+async fn list_status_opens_only_the_folders_that_changed() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let command_log = commands.clone();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tls_acceptor().accept(tcp).await.unwrap());
+        stream.write_all(b"* OK fixture ready\r\n").await.unwrap();
+        loop {
+            let command = read_line(&mut stream).await;
+            if command.is_empty() {
+                break;
+            }
+            command_log.lock().unwrap().push(command.clone());
+            let fields: Vec<_> = command.split_whitespace().collect();
+            let tag = fields[0];
+            let response = match fields[1] {
+                "LOGIN" => format!("{tag} OK logged in\r\n"),
+                "CAPABILITY" => {
+                    format!("* CAPABILITY IMAP4rev1 IDLE LIST-STATUS\r\n{tag} OK capability\r\n")
+                }
+                "LIST" => {
+                    assert!(command.contains("RETURN (STATUS"), "{command:?}");
+                    format!(
+                        "* LIST () \"/\" INBOX\r\n\
+                         * STATUS INBOX (MESSAGES 3 UIDNEXT 10 UNSEEN 1 UIDVALIDITY 7)\r\n\
+                         * LIST () \"/\" Archive\r\n\
+                         * STATUS Archive (MESSAGES 20 UIDNEXT 21 UNSEEN 0 UIDVALIDITY 7)\r\n\
+                         * LIST () \"/\" Lists\r\n\
+                         * STATUS Lists (MESSAGES 50 UIDNEXT 51 UNSEEN 4 UIDVALIDITY 7)\r\n\
+                         {tag} OK list completed\r\n"
+                    )
+                }
+                "SELECT" => {
+                    assert!(!command.contains("Archive"), "unchanged folder opened");
+                    let (exists, uid_next) = if command.contains("Lists") {
+                        (50, 51)
+                    } else {
+                        (3, 10)
+                    };
+                    format!(
+                        "* {exists} EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                         * OK [UIDNEXT {uid_next}] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                    )
+                }
+                "UID" if fields[2] == "FETCH" => {
+                    assert!(command.contains("FLAGS"), "{command:?}");
+                    format!("* 1 FETCH (UID 50 FLAGS (\\Seen))\r\n{tag} OK fetched\r\n")
+                }
+                "LOGOUT" => {
+                    stream
+                        .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    break;
+                }
+                other => panic!("unexpected command {other}: {command:?}"),
+            };
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let (_dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox.id;
+    let (archive_id, lists_id, message_id) = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
+            repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
+            let folder = |path: &str, uid_next: i64, messages: i64, unseen: i64| {
+                let id = repo::folders::upsert(conn, account_id, path, Some("/"), None)?;
+                repo::folders::set_uid_state(conn, id, Some(7), Some(uid_next), None)?;
+                repo::folders::set_last_seen_uid(conn, id, uid_next - 1)?;
+                repo::folders::set_backfill(conn, id, Some(1), true)?;
+                repo::folders::set_server_counts(conn, id, Some(messages), Some(unseen))?;
+                crate::Result::Ok(id)
+            };
+            let archive_id = folder("Archive", 21, 20, 0)?;
+            let lists_id = folder("Lists", 51, 50, 5)?;
+            let thread_id = repo::threads::create(conn, account_id, None, "digest")?;
+            let message_id = repo::messages::insert(
+                conn,
+                &NewMessage {
+                    account_id,
+                    folder_id: lists_id,
+                    uid: Some(50),
+                    message_id: Some("digest@example.test".into()),
+                    gm_msgid: None,
+                    gm_thrid: None,
+                    subject: "Digest".into(),
+                    from: Some(Address {
+                        name: None,
+                        email: "list@example.test".into(),
+                    }),
+                    to: Vec::new(),
+                    cc: Vec::new(),
+                    bcc: Vec::new(),
+                    date: 1,
+                    internal_date: None,
+                    is_read: false,
+                    is_starred: false,
+                    is_draft: false,
+                    is_outgoing: false,
+                    is_automated: true,
+                    has_attachments: false,
+                    size: None,
+                    snippet: String::new(),
+                    references: Vec::new(),
+                    list_unsubscribe: None,
+                    list_unsubscribe_post: None,
+                    sender_addr: None,
+                    sender_verification: SenderVerification::None,
+                },
+                thread_id,
+            )?;
+            repo::threads::recompute(conn, thread_id)?;
+            Ok((archive_id, lists_id, message_id))
+        })
+        .await
+        .unwrap();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let offered = imap::capabilities(&mut session).await.unwrap();
+    assert!(offered.list_status);
+    let (hist_tx, _hist_rx) = mpsc::channel(1);
+    let remaining = run_cycle(
+        &ctx,
+        &config,
+        &mut session,
+        1,
+        &hist_tx,
+        &mut None,
+        CycleMode {
+            foreground_only: false,
+            immediate_follow_up: false,
+            list_status: offered.list_status,
+            inbox_pushed: PushedChanges::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!remaining);
+    imap::logout(session).await;
+    server.await.unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    assert!(
+        !commands.iter().any(|command| command.contains(" STATUS ")),
+        "LIST-STATUS answered for every folder: {commands:?}"
+    );
+    assert!(
+        !commands.iter().any(|command| command.contains("UNDELETED")),
+        "nothing was removed, so nothing is searched for removals: {commands:?}"
+    );
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::get_row(conn, message_id)?.unwrap().is_read);
+            let statuses = repo::folders::server_statuses(conn, account_id)?;
+            assert_eq!(statuses[&lists_id].unseen, Some(4));
+            assert_eq!(statuses[&archive_id].messages, Some(20));
+            assert_eq!(statuses[&inbox_id].unseen, Some(1));
+            Ok(())
+        })
+        .await
+        .unwrap();
 }
