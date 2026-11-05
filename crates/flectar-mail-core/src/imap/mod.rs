@@ -242,14 +242,13 @@ async fn login_disabled(client: &mut async_imap::Client<MailStream>) -> Result<b
             Response::Done {
                 tag,
                 status,
-                information,
-                ..
+                outcome,
             } if tag.0 == TAG => {
                 return match status {
                     Status::Ok => Ok(disabled),
                     _ => Err(CoreError::Imap(format!(
                         "CAPABILITY failed: {}",
-                        information.as_deref().unwrap_or_default()
+                        outcome.information.as_deref().unwrap_or_default()
                     ))),
                 };
             }
@@ -545,22 +544,25 @@ pub struct FetchedMimePlan {
 
 const MIME_PLAN_QUERY: &str = "(UID BODYSTRUCTURE)";
 
+/// Do not include response bytes: they can contain private headers.
+fn unparsed_selective_fetch() -> CoreError {
+    CoreError::ImapParse("could not parse selective FETCH response".into())
+}
+
 fn selective_fetch_error(error: async_imap::error::Error) -> CoreError {
     match error {
-        // Do not include response bytes: they can contain private headers.
-        async_imap::error::Error::Parse(_) => {
-            CoreError::ImapParse("could not parse selective FETCH response".into())
-        }
-        // async-imap 0.11.3 wraps its wire decoder's nom errors in Io(Other)
-        // rather than Parse. Match that decoder format only, never NO/BAD or
-        // an arbitrary transport error. Keep the embedded response private.
+        async_imap::error::Error::Parse(_) => unparsed_selective_fetch(),
+        // async-imap (0.11 and 0.12) wraps its wire decoder's nom errors in
+        // Io(Other) rather than Parse. Match that decoder format only, never
+        // NO/BAD or an arbitrary transport error. Keep the embedded response
+        // private.
         async_imap::error::Error::Io(ref detail)
             if detail.kind() == std::io::ErrorKind::Other
                 && (detail.to_string().starts_with("Error(")
                     || detail.to_string().starts_with("Failure("))
                 && detail.to_string().contains(" during parsing of ") =>
         {
-            CoreError::ImapParse("could not parse selective FETCH response".into())
+            unparsed_selective_fetch()
         }
         error => CoreError::Imap(error.to_string()),
     }
@@ -590,13 +592,13 @@ async fn selective_fetch(
             Response::Done {
                 tag: received,
                 status,
-                code,
-                information,
+                outcome,
             } if *received == tag => {
                 return match status {
                     Status::Ok => Ok(()),
                     _ => Err(CoreError::Imap(format!(
-                        "FETCH rejected: {status:?}, {code:?}, {information:?}"
+                        "FETCH rejected: {status:?}, {:?}, {:?}",
+                        outcome.code, outcome.information
                     ))),
                 };
             }
@@ -630,20 +632,32 @@ async fn fetch_mime_plans_batch_inner(
     if uid_set.is_empty() {
         return Ok(Vec::new());
     }
+    use async_imap::imap_proto::AttributeValue;
     let requested: std::collections::HashSet<u32> = uids.iter().copied().collect();
     let mut result = std::collections::BTreeMap::<u32, MimePlan>::new();
+    let mut unparsed = std::collections::HashSet::new();
     selective_fetch(session, &uid_set, MIME_PLAN_QUERY, |uid, attributes| {
         if requested.contains(&uid) {
             for attribute in attributes {
-                if let async_imap::imap_proto::AttributeValue::BodyStructure(bodystructure) =
-                    attribute
-                {
-                    result.insert(uid, mime::plan_bodystructure(bodystructure));
+                match attribute {
+                    AttributeValue::BodyStructure(bodystructure) => {
+                        result.insert(uid, mime::plan_bodystructure(bodystructure));
+                    }
+                    AttributeValue::Unknown => {
+                        unparsed.insert(uid);
+                    }
+                    _ => {}
                 }
             }
         }
     })
     .await?;
+    // imap-proto 0.17 reads an attribute it can't parse, such as a malformed
+    // BODYSTRUCTURE, as Unknown instead of failing the response. A missing
+    // plan with one of those in its place is that parse failure.
+    if unparsed.iter().any(|uid| !result.contains_key(uid)) {
+        return Err(unparsed_selective_fetch());
+    }
     Ok(result
         .into_iter()
         .map(|(uid, plan)| FetchedMimePlan { uid, plan })
@@ -652,7 +666,8 @@ async fn fetch_mime_plans_batch_inner(
 
 /// Fetch only UID + BODYSTRUCTURE for several messages in one metadata
 /// command. Results are sorted by UID; vanished UIDs or responses without a
-/// usable BODYSTRUCTURE are absent.
+/// BODYSTRUCTURE are absent, and one that can't be parsed is an
+/// `ImapParse` error.
 pub async fn fetch_mime_plans_batch(
     session: &mut Session,
     uids: &[u32],
@@ -1217,7 +1232,8 @@ async fn append_inner(
     flags: &str,
     date: &str,
 ) -> Result<Option<AppendReceipt>> {
-    use async_imap::imap_proto::{Response, ResponseCode, Status, UidSetMember};
+    use async_imap::imap_proto::rfc4315::UidSetMember;
+    use async_imap::imap_proto::{Response, ResponseCode, Status};
     use tokio::io::AsyncWriteExt;
 
     if folder.chars().any(|c| matches!(c, '\r' | '\n' | '\0')) {
@@ -1239,7 +1255,7 @@ async fn append_inner(
             .map_err(|e| CoreError::Imap(format!("APPEND connection failed: {e}")))?
             .ok_or_else(|| CoreError::Imap("connection closed before APPEND completed".into()))?;
         match response.parsed() {
-            Response::Continue { .. } if !sent_literal => {
+            Response::Continue(_) if !sent_literal => {
                 let stream = session.as_mut();
                 stream
                     .write_all(raw)
@@ -1258,11 +1274,10 @@ async fn append_inner(
             Response::Done {
                 tag: received,
                 status,
-                code,
-                information,
+                outcome,
             } if *received == tag => {
                 if *status != Status::Ok {
-                    let reason = information.as_deref().unwrap_or_default().trim();
+                    let reason = outcome.information.as_deref().unwrap_or_default().trim();
                     return Err(CoreError::Imap(if reason.is_empty() {
                         format!("{status:?}: APPEND rejected")
                     } else {
@@ -1274,7 +1289,7 @@ async fn append_inner(
                         "APPEND completed before literal was sent".into(),
                     ));
                 }
-                return Ok(match code {
+                return Ok(match &outcome.code {
                     Some(ResponseCode::AppendUid(validity, uids)) if *validity > 0 => {
                         match uids.as_slice() {
                             [UidSetMember::Uid(uid)] if *uid > 0 => Some(AppendReceipt {
@@ -1287,7 +1302,7 @@ async fn append_inner(
                     _ => None,
                 });
             }
-            Response::Done { .. } | Response::Continue { .. } => {
+            Response::Done { .. } | Response::Continue(_) => {
                 return Err(CoreError::Imap(
                     "unexpected APPEND response; connection must close".into(),
                 ));

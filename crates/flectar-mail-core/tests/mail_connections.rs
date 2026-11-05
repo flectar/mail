@@ -287,6 +287,51 @@ async fn imap_without_encryption_signs_in_over_plain_tcp() {
     task.await.unwrap();
 }
 
+/// imap-proto before 0.17 could not parse UTF-8 in status text, so a
+/// greeting or a refusal written in another language broke the connection.
+#[tokio::test]
+async fn imap_reads_status_text_in_any_language() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream
+            .write_all("* OK Serveur prêt – bienvenue\r\n".as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+        let login = line(&mut stream).await;
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [AUTHENTICATIONFAILED] Échec de l'authentification\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Auth(_)),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("Échec de l'authentification"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn imap_never_sends_a_password_the_server_refuses_unencrypted() {
     let (port, task) = plaintext_imap_server(true).await;
