@@ -53,20 +53,215 @@ struct XOAuth2Authenticator {
     sent_initial: bool,
 }
 
-/// Exchange Online sometimes accepts the OAuth identity but fails to attach
-/// the resulting IMAP session to the mailbox, returning this exact response.
-/// That is a transient mailbox/backend failure, not evidence that the refresh
-/// token was revoked. Keep it out of `Auth` so the sync actor uses its normal
-/// reconnect backoff instead of pausing indefinitely in `needs_reauth`.
-fn xoauth2_error(detail: String) -> CoreError {
-    let message = format!("imap xoauth2: {detail}");
-    if detail
-        .to_ascii_lowercase()
-        .contains("user is authenticated but not connected")
-    {
-        CoreError::Imap(message)
-    } else {
-        CoreError::Auth(message)
+/// The server a sign-in goes to, as error messages name it.
+#[derive(Clone, Copy)]
+struct SignInTarget<'a> {
+    host: &'a str,
+    /// Text a server sends over an unencrypted connection could come from
+    /// anyone on the path.
+    encrypted: bool,
+}
+
+/// A server's NO or BAD reply to a sign-in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ServerReply {
+    /// BAD (the command wasn't understood) rather than NO.
+    bad: bool,
+    /// The response code in upper case: AUTHENTICATIONFAILED, UNAVAILABLE
+    /// and the other RFC 5530 codes, or ALERT (RFC 9051 7.1).
+    code: Option<String>,
+    /// The server's text.
+    text: String,
+}
+
+impl ServerReply {
+    /// async-imap hands a tagged NO or BAD on only as the text
+    /// `code: {code:?}, info: {information:?}` (async-imap 0.12,
+    /// `Connection::check_status_ok`). imap-proto parses ALERT itself and
+    /// leaves the RFC 5530 codes at the start of the text.
+    fn from_async_imap(formatted: &str, bad: bool) -> Self {
+        let parsed = formatted.split_once(", info: ").and_then(|(code, info)| {
+            let code = code.strip_prefix("code: ")?;
+            let text = match info {
+                "None" => String::new(),
+                quoted => read_debug_str(quoted.strip_prefix("Some(")?.strip_suffix(')')?)?,
+            };
+            Some((code, text))
+        });
+        let Some((code, text)) = parsed else {
+            return Self {
+                bad,
+                code: None,
+                text: formatted.to_owned(),
+            };
+        };
+        let code = match code.strip_prefix("Some(") {
+            Some(name) => Some(
+                name.chars()
+                    .take_while(char::is_ascii_alphanumeric)
+                    .collect::<String>()
+                    .to_ascii_uppercase(),
+            ),
+            None => leading_response_code(&text),
+        };
+        Self { bad, code, text }
+    }
+
+    /// The server's text for an error message. Over an unencrypted
+    /// connection it is marked as unverified, as RFC 9051 7.1 asks for
+    /// alerts.
+    fn quoted(&self, encrypted: bool) -> String {
+        match self.text.trim() {
+            "" => String::new(),
+            text if encrypted => format!(" ({text})"),
+            text => format!(" (unverified reply over an unencrypted connection: {text})"),
+        }
+    }
+}
+
+/// The response code at the start of a reply's text, such as UNAVAILABLE in
+/// "[UNAVAILABLE] Try again later" (RFC 5530).
+fn leading_response_code(text: &str) -> Option<String> {
+    let rest = text.strip_prefix('[')?;
+    let atom = &rest[..rest.find([']', ' '])?];
+    (!atom.is_empty()
+        && atom
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
+    .then(|| atom.to_ascii_uppercase())
+}
+
+/// Read back a string written with `{:?}`.
+fn read_debug_str(quoted: &str) -> Option<String> {
+    let mut chars = quoted.strip_prefix('"')?.strip_suffix('"')?.chars();
+    let mut text = String::new();
+    while let Some(c) = chars.next() {
+        text.push(match c {
+            '\\' => match chars.next()? {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '0' => '\0',
+                escaped @ ('\\' | '"' | '\'') => escaped,
+                'u' => {
+                    if chars.next()? != '{' {
+                        return None;
+                    }
+                    let hex: String = chars.by_ref().take_while(|&c| c != '}').collect();
+                    char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?
+                }
+                _ => return None,
+            },
+            c => c,
+        });
+    }
+    Some(text)
+}
+
+/// Why a server did not sign in, sorted by RFC 5530 the way Thunderbird,
+/// K-9 Mail, Evolution and Geary sort it: only a refusal without a code, or
+/// with one about the credentials, says they are wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SignInFailure {
+    /// The credentials weren't accepted, and trying again won't help: a NO
+    /// without a code or with AUTHENTICATIONFAILED, AUTHORIZATIONFAILED or
+    /// EXPIRED, a BAD, or an ALERT the user has to read (RFC 3501 7.1).
+    Rejected(ServerReply),
+    /// UNAVAILABLE: the server can't check credentials right now, and they
+    /// may well be right.
+    Unavailable(ServerReply),
+    /// Another response code: a server problem new credentials won't fix.
+    Refused(ServerReply),
+    /// The username or password has a line break, so nothing was sent.
+    Unsendable,
+    /// The connection failed before the server answered. Not a refusal.
+    Transport(String),
+}
+
+impl SignInFailure {
+    fn from_imap(error: async_imap::error::Error) -> Self {
+        use async_imap::error::Error;
+        let reply = match error {
+            Error::No(formatted) => ServerReply::from_async_imap(&formatted, false),
+            Error::Bad(formatted) => ServerReply::from_async_imap(&formatted, true),
+            Error::Validate(_) => return Self::Unsendable,
+            error => return Self::Transport(error.to_string()),
+        };
+        match reply.code.as_deref() {
+            _ if reply.bad => Self::Rejected(reply),
+            None | Some("AUTHENTICATIONFAILED" | "AUTHORIZATIONFAILED" | "EXPIRED" | "ALERT") => {
+                Self::Rejected(reply)
+            }
+            Some("UNAVAILABLE") => Self::Unavailable(reply),
+            Some(_) => Self::Refused(reply),
+        }
+    }
+
+    /// The error for a password sign-in. Only a rejection waits for the
+    /// user; anything else is retried like other connection problems.
+    fn into_error(self, target: SignInTarget<'_>, user: &str) -> CoreError {
+        let host = target.host;
+        match self {
+            Self::Rejected(reply) => {
+                let quoted = reply.quoted(target.encrypted);
+                CoreError::Auth(match reply.code.as_deref() {
+                    Some("EXPIRED") => {
+                        format!("{host} says the password for {user} has expired{quoted}")
+                    }
+                    _ if reply.bad => {
+                        format!("{host} did not accept the sign-in for {user}{quoted}")
+                    }
+                    _ => format!("{host} rejected the username {user} or its password{quoted}"),
+                })
+            }
+            Self::Unavailable(reply) => CoreError::Imap(format!(
+                "{host} can't check sign-ins right now{}",
+                reply.quoted(target.encrypted)
+            )),
+            Self::Refused(reply) => CoreError::Imap(format!(
+                "{host} refused the sign-in for {user}{}",
+                reply.quoted(target.encrypted)
+            )),
+            Self::Unsendable => CoreError::Auth(format!(
+                "the username or password for {host} has a line break, which can't be sent"
+            )),
+            Self::Transport(detail) => CoreError::Imap(format!(
+                "connection to {host} failed while signing in: {detail}"
+            )),
+        }
+    }
+}
+
+/// OAuth sign-in failures. Exchange Online sometimes accepts the OAuth
+/// identity but fails to attach the resulting IMAP session to the mailbox,
+/// answering "User is authenticated but not connected." That is a transient
+/// mailbox/backend failure, not evidence that the refresh token was revoked,
+/// so it stays out of `Auth` and the sync actor uses its normal reconnect
+/// backoff instead of pausing indefinitely in `needs_reauth`.
+fn xoauth2_error(
+    target: SignInTarget<'_>,
+    user: &str,
+    error: async_imap::error::Error,
+) -> CoreError {
+    match SignInFailure::from_imap(error) {
+        SignInFailure::Rejected(reply)
+            if reply
+                .text
+                .to_ascii_lowercase()
+                .contains("user is authenticated but not connected") =>
+        {
+            CoreError::Imap(format!(
+                "{} signed in {user} but could not open the mailbox{}",
+                target.host,
+                reply.quoted(target.encrypted)
+            ))
+        }
+        SignInFailure::Rejected(reply) => CoreError::Auth(format!(
+            "{} rejected the OAuth sign-in for {user}{}",
+            target.host,
+            reply.quoted(target.encrypted)
+        )),
+        failure => failure.into_error(target, user),
     }
 }
 
@@ -168,11 +363,15 @@ async fn connect_inner(
         )));
     }
 
+    let target = SignInTarget {
+        host,
+        encrypted: security.is_encrypted(),
+    };
     let mut session = match creds {
         ImapCredentials::Password { user, password } => client
             .login(&user, &password)
             .await
-            .map_err(|(e, _)| CoreError::Auth(format!("imap login: {e}")))?,
+            .map_err(|(error, _)| SignInFailure::from_imap(error).into_error(target, &user))?,
         ImapCredentials::XOAuth2 { user, access_token } => {
             let auth = XOAuth2Authenticator {
                 response: crate::oauth::xoauth2::raw_response(&user, &access_token),
@@ -181,7 +380,7 @@ async fn connect_inner(
             client
                 .authenticate("XOAUTH2", auth)
                 .await
-                .map_err(|(e, _)| xoauth2_error(e.to_string()))?
+                .map_err(|(error, _)| xoauth2_error(target, &user, error))?
         }
     };
     identify_client(&mut session).await;
@@ -1527,22 +1726,216 @@ pub fn uid_set(uids: &[u32]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{MIME_PLAN_QUERY, normalized_uid_set, section_fetch_query, section_paths};
+    use super::{
+        MIME_PLAN_QUERY, ServerReply, SignInFailure, SignInTarget, normalized_uid_set,
+        section_fetch_query, section_paths,
+    };
     use crate::error::CoreError;
+
+    const TARGET: SignInTarget<'static> = SignInTarget {
+        host: "mail.example.com",
+        encrypted: true,
+    };
+
+    fn reply(bad: bool, code: Option<&str>, text: &str) -> ServerReply {
+        ServerReply {
+            bad,
+            code: code.map(str::to_owned),
+            text: text.to_owned(),
+        }
+    }
+
+    /// What async-imap's own LOGIN returns for a server's reply, so the tests
+    /// read async-imap's real formatting.
+    async fn refused_login(reply: &'static str) -> async_imap::error::Error {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (client, server) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(server);
+            let mut read = BufReader::new(read);
+            let mut command = String::new();
+            read.read_line(&mut command).await.unwrap();
+            let tag = command.split_whitespace().next().unwrap().to_owned();
+            write
+                .write_all(format!("{tag} {reply}\r\n").as_bytes())
+                .await
+                .unwrap();
+            // Stay connected until the client is done with the reply.
+            read.read_line(&mut command).await.unwrap();
+        });
+        let Err((error, client)) = async_imap::Client::new(client)
+            .login("user", "password")
+            .await
+        else {
+            panic!("the server accepted the sign-in");
+        };
+        drop(client);
+        server.await.unwrap();
+        error
+    }
+
+    #[tokio::test]
+    async fn sign_in_refusals_are_sorted_by_response_code() {
+        for (server, expected) in [
+            (
+                "NO [AUTHENTICATIONFAILED] Authentication failed.",
+                SignInFailure::Rejected(reply(
+                    false,
+                    Some("AUTHENTICATIONFAILED"),
+                    "[AUTHENTICATIONFAILED] Authentication failed.",
+                )),
+            ),
+            (
+                "NO LOGIN failed.",
+                SignInFailure::Rejected(reply(false, None, "LOGIN failed.")),
+            ),
+            (
+                "NO [EXPIRED] That password isn't valid any more",
+                SignInFailure::Rejected(reply(
+                    false,
+                    Some("EXPIRED"),
+                    "[EXPIRED] That password isn't valid any more",
+                )),
+            ),
+            (
+                "NO [ALERT] Please log in via your web browser",
+                SignInFailure::Rejected(reply(
+                    false,
+                    Some("ALERT"),
+                    "Please log in via your web browser",
+                )),
+            ),
+            (
+                "BAD Error in IMAP command LOGIN: Invalid characters",
+                SignInFailure::Rejected(reply(
+                    true,
+                    None,
+                    "Error in IMAP command LOGIN: Invalid characters",
+                )),
+            ),
+            (
+                "NO [UNAVAILABLE] Temporary authentication failure.",
+                SignInFailure::Unavailable(reply(
+                    false,
+                    Some("UNAVAILABLE"),
+                    "[UNAVAILABLE] Temporary authentication failure.",
+                )),
+            ),
+            (
+                "NO [CONTACTADMIN] Account suspended",
+                SignInFailure::Refused(reply(
+                    false,
+                    Some("CONTACTADMIN"),
+                    "[CONTACTADMIN] Account suspended",
+                )),
+            ),
+            // UTF-8, quotes and backslashes come back exactly as sent.
+            (
+                "NO [AUTHENTICATIONFAILED] Échec de l'authentification – \"réessayez\" \\o/",
+                SignInFailure::Rejected(reply(
+                    false,
+                    Some("AUTHENTICATIONFAILED"),
+                    "[AUTHENTICATIONFAILED] Échec de l'authentification – \"réessayez\" \\o/",
+                )),
+            ),
+        ] {
+            assert_eq!(
+                SignInFailure::from_imap(refused_login(server).await),
+                expected,
+                "{server}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_dropped_connection_is_not_a_refusal() {
+        let (client, server) = tokio::io::duplex(64);
+        drop(server);
+        let Err((error, _)) = async_imap::Client::new(client)
+            .login("user", "password")
+            .await
+        else {
+            panic!("signed in without a server");
+        };
+        assert!(matches!(
+            SignInFailure::from_imap(error),
+            SignInFailure::Transport(_)
+        ));
+    }
+
+    #[test]
+    fn sign_in_errors_name_the_server_and_username() {
+        let rejected = reply(
+            false,
+            Some("AUTHENTICATIONFAILED"),
+            "[AUTHENTICATIONFAILED] Authentication failed.",
+        );
+        let error =
+            SignInFailure::Rejected(rejected.clone()).into_error(TARGET, "jane@example.com");
+        assert!(matches!(error, CoreError::Auth(_)));
+        assert_eq!(
+            error.to_string(),
+            "auth failed: mail.example.com rejected the username jane@example.com or its password ([AUTHENTICATIONFAILED] Authentication failed.)"
+        );
+
+        // Only rejections wait for the user. The rest is retried like any
+        // other connection problem.
+        for failure in [
+            SignInFailure::Unavailable(reply(
+                false,
+                Some("UNAVAILABLE"),
+                "[UNAVAILABLE] Try later",
+            )),
+            SignInFailure::Refused(reply(false, Some("CONTACTADMIN"), "[CONTACTADMIN] Call us")),
+            SignInFailure::Transport("connection lost".into()),
+        ] {
+            let error = failure.into_error(TARGET, "jane");
+            assert!(matches!(error, CoreError::Imap(_)), "{error}");
+            assert!(error.to_string().contains("mail.example.com"), "{error}");
+        }
+
+        let plain = SignInTarget {
+            encrypted: false,
+            ..TARGET
+        };
+        let error = SignInFailure::Rejected(rejected).into_error(plain, "jane");
+        assert!(
+            error.to_string().contains(
+                "(unverified reply over an unencrypted connection: [AUTHENTICATIONFAILED] Authentication failed.)"
+            ),
+            "{error}"
+        );
+    }
 
     #[test]
     fn exchange_authenticated_but_not_connected_is_retryable() {
         let error = super::xoauth2_error(
-            "no response: code: None, info: Some(\"User is authenticated but not connected.\")"
-                .into(),
+            TARGET,
+            "user@example.com",
+            async_imap::error::Error::No(
+                "code: None, info: Some(\"User is authenticated but not connected.\")".into(),
+            ),
         );
         assert!(matches!(error, CoreError::Imap(_)));
     }
 
     #[test]
     fn ordinary_xoauth2_rejection_still_requires_reauth() {
-        let error = super::xoauth2_error("authentication failed".into());
+        let no =
+            |info: &str| async_imap::error::Error::No(format!("code: None, info: Some({info:?})"));
+        let error = super::xoauth2_error(
+            TARGET,
+            "user@example.com",
+            no("[AUTHENTICATIONFAILED] Invalid credentials (Failure)"),
+        );
         assert!(matches!(error, CoreError::Auth(_)));
+        // A server that can't check the token right now hasn't revoked it.
+        let error = super::xoauth2_error(
+            TARGET,
+            "user@example.com",
+            no("[UNAVAILABLE] Temporary System Problem. Try again later"),
+        );
+        assert!(matches!(error, CoreError::Imap(_)));
     }
 
     #[test]

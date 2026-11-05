@@ -332,6 +332,48 @@ async fn imap_reads_status_text_in_any_language() {
     task.await.unwrap();
 }
 
+/// A server that can't check passwords right now hasn't rejected one, so the
+/// account keeps retrying instead of asking for the password again.
+#[tokio::test]
+async fn imap_temporary_sign_in_failure_is_not_a_rejected_password() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+        let login = line(&mut stream).await;
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [UNAVAILABLE] Temporary authentication failure.\r\n").as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Imap(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("127.0.0.1 can't check sign-ins right now"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn imap_never_sends_a_password_the_server_refuses_unencrypted() {
     let (port, task) = plaintext_imap_server(true).await;
