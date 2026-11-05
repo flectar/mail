@@ -3170,11 +3170,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if resource_callback_pending.replace(true) {
             return;
         }
-        let renderer = Rc::clone(&resource_renderer);
+        let renderer = Rc::downgrade(&resource_renderer);
         let app = resource_app.clone();
         let pending = Rc::clone(&resource_callback_pending);
         Timer::single_shot(Duration::from_millis(50), move || {
             pending.set(false);
+            let Some(renderer) = renderer.upgrade() else {
+                return;
+            };
             if !renderer.borrow_mut().poll_resources() {
                 return;
             }
@@ -5529,10 +5532,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         refresh_rows_only(&app, &state_for_mail_group, &runtime_for_mail_group);
         if motion_enabled {
-            let state = Rc::clone(&state_for_mail_group);
+            let state = Rc::downgrade(&state_for_mail_group);
             let runtime = runtime_for_mail_group.clone();
             let app_weak = app.as_weak();
             Timer::single_shot(Duration::from_millis(330), move || {
+                let Some(state) = state.upgrade() else {
+                    return;
+                };
                 if state.borrow_mut().mail_groups.finish_transition(&key, generation)
                     && let Some(app) = app_weak.upgrade()
                 {
