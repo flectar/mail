@@ -6199,6 +6199,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             state: Rc::clone(&state),
             runtime: Rc::clone(&runtime),
             intent: Rc::clone(&compose_intent),
+            document: Rc::clone(&compose_document),
+            editor: Rc::clone(&compose_editor),
         },
     );
     #[cfg(target_os = "macos")]

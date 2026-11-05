@@ -826,6 +826,8 @@ fn mailto_links_open_without_losing_the_draft(
             state: Rc::clone(state),
             runtime: Rc::clone(runtime),
             intent: Rc::new(RefCell::new(ComposeIntent::default())),
+            document: Rc::new(RefCell::new(RichComposeDocument::default())),
+            editor: Rc::new(RefCell::new(LazyComposeEditor::default())),
         },
     );
     frame();
@@ -834,6 +836,9 @@ fn mailto_links_open_without_losing_the_draft(
     assert_eq!(app.get_compose_subject(), "Hello+there!");
     assert_eq!(app.get_compose_bcc(), "hidden@example.com");
 
+    // The message's sender identity has loaded, so it can be saved.
+    app.global::<AccountMailPreferences>()
+        .set_composer_sender_email("me@example.test".into());
     app.set_compose_subject("My own subject".into());
     // The reader's link handler was replaced by a recorder above; open the
     // link the way it does.
