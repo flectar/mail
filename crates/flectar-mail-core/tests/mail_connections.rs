@@ -452,6 +452,115 @@ async fn smtp_without_encryption_signs_in_over_plain_tcp() {
     task.await.unwrap();
 }
 
+/// An unencrypted SMTP server that answers AUTH with `reply`, and when that
+/// signs in, answers MAIL FROM with `sender_reply`.
+async fn smtp_sign_in_server(
+    reply: &'static str,
+    sender_reply: &'static str,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        assert!(line(&mut stream).await.starts_with("AUTH PLAIN "));
+        stream
+            .write_all(format!("{reply}\r\n").as_bytes())
+            .await
+            .unwrap();
+        if reply.starts_with("235") {
+            assert!(line(&mut stream).await.starts_with("MAIL FROM:"));
+            stream
+                .write_all(format!("{sender_reply}\r\n").as_bytes())
+                .await
+                .unwrap();
+        }
+        // The client hangs up, with or without QUIT.
+        while !line_or_eof(&mut stream).await.is_empty() {
+            stream.write_all(b"221 Goodbye\r\n").await.ok();
+        }
+    });
+    (port, task)
+}
+
+async fn line_or_eof<S: tokio::io::AsyncRead + Unpin>(stream: &mut BufReader<S>) -> String {
+    let mut line = String::new();
+    stream.read_line(&mut line).await.unwrap_or(0);
+    line
+}
+
+#[tokio::test]
+async fn smtp_rejected_password_names_the_server_and_username() {
+    let (port, task) =
+        smtp_sign_in_server("535 5.7.8 Authentication credentials invalid", "").await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("wrong".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Auth(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("127.0.0.1 rejected the username bridge-user or its password"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
+/// RFC 4954's temporary failure says nothing about the password.
+#[tokio::test]
+async fn smtp_temporary_sign_in_failure_is_not_a_rejected_password() {
+    let (port, task) = smtp_sign_in_server("454 4.7.0 Temporary authentication failure", "").await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("secret".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Smtp(_)),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("can't check sign-ins right now"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
+/// A sender refused after sign-in, even in words about authentication, is
+/// not a wrong password and must not pause the account for one.
+#[tokio::test]
+async fn smtp_refusal_after_sign_in_is_not_a_rejected_password() {
+    let (port, task) = smtp_sign_in_server(
+        "235 Authenticated",
+        "553 5.7.1 Sender address rejected: not owned by authenticated user",
+    )
+    .await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::send_raw(
+        &config,
+        &smtp::SmtpAuth::Password("secret".into()),
+        "someone@example.com",
+        &["recipient@example.com".into()],
+        b"Subject: Hello\r\n\r\nHi\r\n",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Smtp(_)),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn smtp_never_sends_a_password_the_server_does_not_accept_unencrypted() {
     let (port, task) = plaintext_smtp_server(false).await;
