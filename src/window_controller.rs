@@ -17,7 +17,7 @@ mod macos;
 const MINIMIZED_RELEASE_DELAY: Duration = Duration::from_secs(10);
 /// Let Slint destroy the native surface and process pending property changes
 /// that may still own image references before returning memory.
-const TRIM_DELAY: Duration = Duration::from_millis(250);
+pub(super) const TRIM_DELAY: Duration = Duration::from_millis(250);
 /// Coalesces the burst of startup updates applied while the window is hidden.
 const HIDDEN_TRIM_DELAY: Duration = Duration::from_secs(1);
 
