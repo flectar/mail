@@ -117,6 +117,20 @@ where
     }
 }
 
+/// A loopback port nothing listens on, for tests of refused connections.
+/// Until the returned value is dropped it keeps a connection on the port, so
+/// the system can't choose the port as the source of the connection under
+/// test and connect that connection to itself. Go's
+/// TestDialClosedPortFailFast reserves its port the same way.
+#[cfg(test)]
+pub(crate) async fn closed_loopback_port() -> (u16, impl Sized) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let client = TcpStream::connect(address).await.unwrap();
+    let (server, _) = listener.accept().await.unwrap();
+    (address.port(), (client, server))
+}
+
 #[cfg(windows)]
 mod windows {
     use std::net::SocketAddr;
@@ -421,9 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_closed_port_is_reported_as_refused() {
-        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = closed.local_addr().unwrap().port();
-        drop(closed);
+        let (port, _port_in_use) = closed_loopback_port().await;
         let error = connect_tcp("127.0.0.1", port).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
     }
@@ -433,9 +445,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn a_closed_loopback_port_fails_fast_on_windows() {
-        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = closed.local_addr().unwrap().port();
-        drop(closed);
+        let (port, _port_in_use) = closed_loopback_port().await;
         // A busy machine can be slow once; Go's test retries too.
         let mut fastest = Duration::MAX;
         for _ in 0..3 {

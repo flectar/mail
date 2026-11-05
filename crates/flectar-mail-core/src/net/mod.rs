@@ -4,6 +4,8 @@
 mod connect;
 pub mod tls;
 
+#[cfg(test)]
+pub(crate) use connect::closed_loopback_port;
 pub use connect::connect_tcp;
 
 use std::io;
