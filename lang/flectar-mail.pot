@@ -2713,20 +2713,28 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
-#: ui/components/controls.slint:185
+#: ui/components/controls.slint:108
 msgid "On"
 msgstr ""
 
-#: ui/components/controls.slint:185 ui/dialogs/settings-dialog.slint:654
+#: ui/components/controls.slint:108 ui/dialogs/settings-dialog.slint:654
 msgid "Off"
 msgstr ""
 
-#: ui/components/controls.slint:233 ui/views/mail-list-pane.slint:694
+#: ui/components/controls.slint:156 ui/views/mail-list-pane.slint:694
 msgid "Clear selection"
 msgstr ""
 
-#: ui/components/controls.slint:233
+#: ui/components/controls.slint:156
 msgid "Select"
+msgstr ""
+
+#: ui/components/controls.slint:487
+msgid "Hide password"
+msgstr ""
+
+#: ui/components/controls.slint:487
+msgid "Show password"
 msgstr ""
 
 #: ui/components/document-preview.slint:17
