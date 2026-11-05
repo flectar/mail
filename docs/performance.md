@@ -76,6 +76,12 @@ from one run, or a range over two.
 - **Threads.** The D-Bus connection for the tray no longer starts a Tokio
   runtime with one idle thread per CPU core: the idle app now runs 11 threads
   instead of 22 on the 12-core test machine.
+- **Low memory.** When the system reports memory pressure, Flectar Mail drops
+  what it can rebuild, such as message tiles outside the viewport, image caches
+  and SQLite's page caches, and returns the freed memory
+  ([#201](https://github.com/flectar/mail/pull/201)). Measured on that pull
+  request's build with the newsletter open, a low-memory warning from the
+  desktop portal took private memory from 17.5 to 16.2 MiB within five seconds.
 
 On Windows 11, with 7 real accounts and about 69,000 unread messages, Task
 Manager's **Details** tab showed, before these changes:
