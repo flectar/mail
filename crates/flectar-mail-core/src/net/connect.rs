@@ -1,0 +1,335 @@
+//! TCP connection setup for the mail protocols.
+
+use futures::stream::{FuturesUnordered, StreamExt};
+use std::future::Future;
+use std::io;
+use std::net::SocketAddr;
+use tokio::net::{TcpSocket, TcpStream};
+use tokio::time::{Duration, Instant};
+
+/// How long an attempt may go unanswered before the next address is tried
+/// alongside it: RFC 8305's recommended Connection Attempt Delay.
+const ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+
+/// RFC 8305 forbids starting attempts closer together than this, even when
+/// the previous one has already failed.
+const MIN_ATTEMPT_GAP: Duration = Duration::from_millis(10);
+
+/// Open a TCP connection for a mail protocol. Nagle's algorithm only delays
+/// their short request/response exchanges, so it is disabled when the
+/// platform allows.
+///
+/// The host's addresses are raced as RFC 8305 (Happy Eyeballs) describes,
+/// so an address that doesn't answer, such as one behind a broken IPv6
+/// route, delays the connection by a quarter of a second instead of holding
+/// it until the system gives up on that address.
+pub async fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
+    let addresses = interleave(tokio::net::lookup_host((host, port)).await?.collect());
+    let stream = race(addresses, connect_address).await?;
+    stream.set_nodelay(true).ok();
+    Ok(stream)
+}
+
+async fn connect_address(address: SocketAddr) -> io::Result<TcpStream> {
+    let socket = if address.is_ipv4() {
+        TcpSocket::new_v4()?
+    } else {
+        TcpSocket::new_v6()?
+    };
+    socket.connect(address).await
+}
+
+/// RFC 8305 section 4: alternate the address families, starting with the
+/// family of the resolver's first address. The resolver already ranks
+/// addresses by RFC 6724, and the order within each family is kept.
+fn interleave(addresses: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let first_is_ipv6 = addresses.first().is_some_and(SocketAddr::is_ipv6);
+    let (preferred, other): (Vec<_>, Vec<_>) = addresses
+        .into_iter()
+        .partition(|address| address.is_ipv6() == first_is_ipv6);
+    let mut preferred = preferred.into_iter();
+    let mut other = other.into_iter();
+    let mut ordered = Vec::with_capacity(preferred.len() + other.len());
+    loop {
+        match (preferred.next(), other.next()) {
+            (None, None) => return ordered,
+            (first, second) => ordered.extend(first.into_iter().chain(second)),
+        }
+    }
+}
+
+/// RFC 8305 section 5: start one attempt at a time, the next one once the
+/// running attempts have gone unanswered for [`ATTEMPT_DELAY`], keep the
+/// first connection that succeeds and drop the others.
+///
+/// When an attempt fails, the next one starts right away, as Go and
+/// hyper-util do, but no sooner than [`MIN_ATTEMPT_GAP`] after the previous
+/// start. If every attempt fails, the first address's error is returned, as
+/// Go does: it belongs to the most preferred address.
+async fn race<T, Attempt>(
+    addresses: Vec<SocketAddr>,
+    connect: impl Fn(SocketAddr) -> Attempt,
+) -> io::Result<T>
+where
+    Attempt: Future<Output = io::Result<T>>,
+{
+    let mut waiting = addresses.into_iter().enumerate().peekable();
+    let mut attempts = FuturesUnordered::new();
+    let mut first_error: Option<(usize, io::Error)> = None;
+    let mut last_start = Instant::now();
+    let mut next_start = last_start;
+    loop {
+        let can_start = waiting.peek().is_some();
+        if attempts.is_empty() && !can_start {
+            return Err(first_error.map(|(_, error)| error).unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "could not resolve to any address",
+                )
+            }));
+        }
+        tokio::select! {
+            biased;
+            Some((index, result)) = attempts.next(), if !attempts.is_empty() => match result {
+                Ok(connection) => return Ok(connection),
+                Err(error) => {
+                    if first_error.as_ref().is_none_or(|(first, _)| index < *first) {
+                        first_error = Some((index, error));
+                    }
+                    next_start = next_start.min(last_start + MIN_ATTEMPT_GAP);
+                }
+            },
+            () = tokio::time::sleep_until(next_start), if can_start => {
+                if let Some((index, address)) = waiting.next() {
+                    let attempt = connect(address);
+                    attempts.push(async move { (index, attempt.await) });
+                    last_start = Instant::now();
+                    next_start = last_start + ATTEMPT_DELAY;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+
+    fn v4(last: u8) -> SocketAddr {
+        SocketAddr::from((Ipv4Addr::new(192, 0, 2, last), 993))
+    }
+
+    fn v6(last: u16) -> SocketAddr {
+        SocketAddr::from((Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, last), 993))
+    }
+
+    #[test]
+    fn interleave_alternates_families_starting_with_the_first() {
+        assert_eq!(
+            interleave(vec![v6(1), v6(2), v4(1), v4(2), v4(3)]),
+            [v6(1), v4(1), v6(2), v4(2), v4(3)]
+        );
+        assert_eq!(interleave(vec![v4(1), v4(2), v6(1)]), [v4(1), v6(1), v4(2)]);
+        assert_eq!(interleave(vec![v4(1), v4(2)]), [v4(1), v4(2)]);
+        assert!(interleave(Vec::new()).is_empty());
+    }
+
+    #[derive(Clone, Copy)]
+    enum Outcome {
+        Connect(u64),
+        Fail(u64, io::ErrorKind),
+        Hang,
+    }
+
+    type Attempt = Pin<Box<dyn Future<Output = io::Result<SocketAddr>> + Send>>;
+
+    /// Connection attempts that finish after the given number of
+    /// milliseconds, and a log of when each one started and ended.
+    #[derive(Clone, Default)]
+    struct Script {
+        outcomes: Vec<(SocketAddr, Outcome)>,
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Script {
+        fn new(outcomes: &[(SocketAddr, Outcome)]) -> Self {
+            Self {
+                outcomes: outcomes.to_vec(),
+                ..Self::default()
+            }
+        }
+
+        fn addresses(&self) -> Vec<SocketAddr> {
+            self.outcomes.iter().map(|(address, _)| *address).collect()
+        }
+
+        fn attempt(&self, start: Instant, address: SocketAddr) -> Attempt {
+            let outcome = self
+                .outcomes
+                .iter()
+                .find(|(candidate, _)| *candidate == address)
+                .unwrap()
+                .1;
+            let log = self.log.clone();
+            let note = move |event: &str| {
+                let elapsed = start.elapsed().as_millis();
+                log.lock()
+                    .unwrap()
+                    .push(format!("{elapsed} {event} {address}"));
+            };
+            note("start");
+            Box::pin(async move {
+                // Notes an attempt that is dropped before it finishes.
+                struct LogIfDropped<F: Fn(&str)>(Option<F>);
+                impl<F: Fn(&str)> Drop for LogIfDropped<F> {
+                    fn drop(&mut self) {
+                        if let Some(note) = self.0.take() {
+                            note("dropped");
+                        }
+                    }
+                }
+                let mut guard = LogIfDropped(Some(note));
+                let result = match outcome {
+                    Outcome::Connect(after) => {
+                        tokio::time::sleep(Duration::from_millis(after)).await;
+                        Ok(address)
+                    }
+                    Outcome::Fail(after, kind) => {
+                        tokio::time::sleep(Duration::from_millis(after)).await;
+                        Err(io::Error::from(kind))
+                    }
+                    Outcome::Hang => std::future::pending().await,
+                };
+                let note = guard.0.take().unwrap();
+                note(match result {
+                    Ok(_) => "connected",
+                    Err(_) => "failed",
+                });
+                result
+            })
+        }
+
+        async fn run(&self) -> (io::Result<SocketAddr>, u128, Vec<String>) {
+            let start = Instant::now();
+            let result = race(self.addresses(), |address| self.attempt(start, address)).await;
+            let elapsed = start.elapsed().as_millis();
+            (result, elapsed, self.log.lock().unwrap().clone())
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unanswered_attempt_starts_the_next_address_after_the_delay() {
+        let script = Script::new(&[(v6(1), Outcome::Hang), (v4(1), Outcome::Connect(5))]);
+        let (result, elapsed, log) = script.run().await;
+        assert_eq!(result.unwrap(), v4(1));
+        assert_eq!(elapsed, 255);
+        assert_eq!(
+            log,
+            [
+                format!("0 start {}", v6(1)),
+                format!("250 start {}", v4(1)),
+                format!("255 connected {}", v4(1)),
+                format!("255 dropped {}", v6(1)),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_attempt_starts_the_next_address_at_once() {
+        let script = Script::new(&[
+            (v6(1), Outcome::Fail(30, io::ErrorKind::ConnectionRefused)),
+            (v4(1), Outcome::Connect(5)),
+        ]);
+        let (result, elapsed, _) = script.run().await;
+        assert_eq!(result.unwrap(), v4(1));
+        assert_eq!(elapsed, 35);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn attempts_start_at_least_the_minimum_gap_apart() {
+        let script = Script::new(&[
+            (v6(1), Outcome::Fail(0, io::ErrorKind::NetworkUnreachable)),
+            (v6(2), Outcome::Fail(0, io::ErrorKind::NetworkUnreachable)),
+            (v4(1), Outcome::Connect(0)),
+        ]);
+        let (result, elapsed, log) = script.run().await;
+        assert_eq!(result.unwrap(), v4(1));
+        assert_eq!(elapsed, 20);
+        let starts: Vec<_> = log.iter().filter(|line| line.contains(" start ")).collect();
+        assert_eq!(starts.len(), 3);
+        assert!(
+            starts[1].starts_with("10 ") && starts[2].starts_with("20 "),
+            "{log:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_first_connection_wins_and_later_addresses_are_never_tried() {
+        let script = Script::new(&[
+            (v6(1), Outcome::Connect(400)),
+            (v4(1), Outcome::Connect(1000)),
+            (v6(2), Outcome::Connect(0)),
+        ]);
+        let (result, elapsed, log) = script.run().await;
+        assert_eq!(result.unwrap(), v6(1));
+        assert_eq!(elapsed, 400);
+        // The third address was due at 500 ms, after the winner connected.
+        assert_eq!(
+            log.iter().filter(|line| line.contains(" start ")).count(),
+            2
+        );
+        assert!(
+            log.iter()
+                .any(|line| line == &format!("400 dropped {}", v4(1))),
+            "{log:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn when_every_attempt_fails_the_first_address_error_is_returned() {
+        // The first address fails last.
+        let script = Script::new(&[
+            (v6(1), Outcome::Fail(300, io::ErrorKind::TimedOut)),
+            (v4(1), Outcome::Fail(10, io::ErrorKind::ConnectionRefused)),
+        ]);
+        let (result, elapsed, _) = script.run().await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert_eq!(elapsed, 300);
+
+        // The first address fails first.
+        let script = Script::new(&[
+            (v6(1), Outcome::Fail(30, io::ErrorKind::TimedOut)),
+            (v4(1), Outcome::Fail(10, io::ErrorKind::ConnectionRefused)),
+        ]);
+        let (result, elapsed, _) = script.run().await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
+        assert_eq!(elapsed, 40);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_addresses_is_an_error() {
+        let (result, _, _) = Script::new(&[]).run().await;
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn connects_to_a_server_that_only_listens_on_ipv4_through_localhost() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stream = connect_tcp("localhost", port).await.unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), listener.local_addr().unwrap());
+        assert!(stream.nodelay().unwrap());
+    }
+
+    #[tokio::test]
+    async fn a_closed_port_is_reported_as_refused() {
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let error = connect_tcp("127.0.0.1", port).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+    }
+}
