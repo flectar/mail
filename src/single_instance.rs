@@ -3,27 +3,31 @@
 //! The first process owns the profile and listens on a private local endpoint:
 //! a Unix socket guarded by an advisory lock, or a named pipe whose first
 //! instance is exclusive on Windows. A later launch asks that process to show
-//! its window and exits, so opening Flectar Mail from a launcher while it runs
-//! in the tray restores the existing window instead of starting a second sync
-//! engine on the same database. A sign-in launch that finds the application
-//! already running exits without disturbing it.
+//! its window, passing on any mail links it was opened with, and exits. So
+//! opening Flectar Mail from a launcher or a `mailto:` link while it runs in
+//! the tray uses the existing window instead of starting a second sync engine
+//! on the same database. A sign-in launch that finds the application already
+//! running exits without disturbing it.
 //!
 //! Both the lock and the pipe are released by the kernel when the owner exits,
 //! even after a crash, so a stale endpoint never blocks a later launch.
 
+use crate::mailto_links::MAX_LAUNCH_LINKS;
+use flectar_mail_core::mailto;
 use sha2::{Digest, Sha256};
 use std::{io, path::Path, sync::Arc, time::Duration};
 use tokio::{io::AsyncReadExt, runtime::Runtime, task::JoinHandle};
 
-/// The only request: show and focus the main window, optionally followed by
+/// The only request: show and focus the main window. The first line may add
 /// the launcher's activation token so the compositor lets the window take
-/// focus.
+/// focus; each further line is a mail link to open.
 const SHOW: &str = "show";
 /// Activation tokens are short opaque strings; bound what we accept.
 const MAX_TOKEN: usize = 512;
 /// Longer than any valid request, so a misbehaving client cannot make the
 /// owner buffer more.
-const MAX_REQUEST: u64 = (SHOW.len() + 1 + MAX_TOKEN + 1) as u64;
+const MAX_REQUEST: u64 =
+    (SHOW.len() + 1 + MAX_TOKEN + 1 + MAX_LAUNCH_LINKS * (mailto::MAX_URI_BYTES + 1)) as u64;
 /// How long the owner waits for a connected client to send its request.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long a later launch waits for a starting owner to accept requests.
@@ -43,14 +47,23 @@ pub(crate) enum Acquired {
 /// What a launch should ask of an already running instance.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) enum Request {
-    /// Show the window, passing on the launcher's activation token.
-    Show { activation_token: Option<String> },
+    /// Show the window and open the mail links.
+    Show(Activation),
     /// A sign-in launch: leave a running instance exactly as it is.
     Nothing,
 }
 
-/// Runs on a runtime worker thread with the forwarded activation token.
-type ShowCallback = Arc<dyn Fn(Option<String>) + Send + Sync>;
+/// A launch handed to the running instance.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Activation {
+    /// The launcher's token, for the compositor to let the window take focus.
+    pub(crate) activation_token: Option<String>,
+    /// `mailto:` links the launch was opened with.
+    pub(crate) links: Vec<String>,
+}
+
+/// Runs on a runtime worker thread with each forwarded launch.
+type ShowCallback = Arc<dyn Fn(Activation) + Send + Sync>;
 
 pub(crate) struct Primary {
     endpoint: imp::Endpoint,
@@ -58,13 +71,13 @@ pub(crate) struct Primary {
 }
 
 impl Primary {
-    /// Start answering later launches. `show` receives the forwarded
-    /// activation token on a runtime worker thread and must forward to the
-    /// UI thread itself.
+    /// Start answering later launches. `show` receives each forwarded
+    /// launch on a runtime worker thread and must forward to the UI thread
+    /// itself.
     pub(crate) fn serve(
         &mut self,
         runtime: &Runtime,
-        show: impl Fn(Option<String>) + Send + Sync + 'static,
+        show: impl Fn(Activation) + Send + Sync + 'static,
     ) {
         let show: ShowCallback = Arc::new(show);
         let _context = runtime.enter();
@@ -102,10 +115,10 @@ pub(crate) fn acquire(
                 server: None,
             }));
         }
-        let Request::Show { activation_token } = &request else {
+        let Request::Show(activation) = &request else {
             return Ok(Acquired::Forwarded);
         };
-        let message = encode_show(activation_token.as_deref());
+        let message = encode_show(activation);
         match runtime.block_on(imp::forward(data_dir, &message)) {
             Ok(()) => return Ok(Acquired::Forwarded),
             // The owner may have exited after the claim failed; claim again.
@@ -139,26 +152,58 @@ fn valid_token(token: &str) -> bool {
     (1..=MAX_TOKEN).contains(&token.len()) && token.bytes().all(|byte| byte.is_ascii_graphic())
 }
 
-fn encode_show(activation_token: Option<&str>) -> Vec<u8> {
-    match activation_token.filter(|token| valid_token(token)) {
-        Some(token) => format!("{SHOW} {token}\n").into_bytes(),
-        None => format!("{SHOW}\n").into_bytes(),
+fn encode_show(activation: &Activation) -> Vec<u8> {
+    let mut request = match activation
+        .activation_token
+        .as_deref()
+        .filter(|token| valid_token(token))
+    {
+        Some(token) => format!("{SHOW} {token}\n"),
+        None => format!("{SHOW}\n"),
+    };
+    // Line breaks mean the same percent-encoded inside a mailto link, so a
+    // link always fits on one line. Links the owner would refuse are dropped
+    // here rather than failing the whole launch.
+    let links = activation
+        .links
+        .iter()
+        .map(|link| link.replace('\r', "%0D").replace('\n', "%0A"))
+        .filter(|link| valid_link(link))
+        .take(MAX_LAUNCH_LINKS);
+    for link in links {
+        request.push_str(&link);
+        request.push('\n');
     }
+    request.into_bytes()
 }
 
-/// `Some(token)` for a well-formed show request; anything else is ignored.
-fn parse_show(request: &[u8]) -> Option<Option<String>> {
-    let line = std::str::from_utf8(request).ok()?.strip_suffix('\n')?;
-    match line.split_once(' ') {
-        None => (line == SHOW).then_some(None),
-        Some((SHOW, token)) => valid_token(token).then(|| Some(token.to_owned())),
-        Some(_) => None,
+/// The launch for a well-formed show request; anything else is ignored.
+fn parse_show(request: &[u8]) -> Option<Activation> {
+    let request = std::str::from_utf8(request).ok()?.strip_suffix('\n')?;
+    let mut lines = request.split('\n');
+    let first = lines.next()?;
+    let activation_token = match first.split_once(' ') {
+        None if first == SHOW => None,
+        Some((SHOW, token)) if valid_token(token) => Some(token.to_owned()),
+        _ => return None,
+    };
+    let links = lines.map(str::to_owned).collect::<Vec<_>>();
+    if links.len() > MAX_LAUNCH_LINKS || !links.iter().all(|link| valid_link(link)) {
+        return None;
     }
+    Some(Activation {
+        activation_token,
+        links,
+    })
 }
 
-fn handle_request(request: Option<Vec<u8>>, show: &(dyn Fn(Option<String>) + Send + Sync)) {
-    if let Some(activation_token) = request.as_deref().and_then(parse_show) {
-        show(activation_token);
+fn valid_link(link: &str) -> bool {
+    mailto::is_mailto(link) && link.len() <= mailto::MAX_URI_BYTES && !link.contains(['\r', '\n'])
+}
+
+fn handle_request(request: Option<Vec<u8>>, show: &(dyn Fn(Activation) + Send + Sync)) {
+    if let Some(activation) = request.as_deref().and_then(parse_show) {
+        show(activation);
     }
 }
 
@@ -421,10 +466,15 @@ mod tests {
             .unwrap()
     }
 
-    fn show(activation_token: Option<&str>) -> Request {
-        Request::Show {
+    fn activation(activation_token: Option<&str>, links: &[&str]) -> Activation {
+        Activation {
             activation_token: activation_token.map(str::to_owned),
+            links: links.iter().map(|link| (*link).to_owned()).collect(),
         }
+    }
+
+    fn show(activation_token: Option<&str>) -> Request {
+        Request::Show(activation(activation_token, &[]))
     }
 
     #[test]
@@ -437,15 +487,32 @@ mod tests {
             panic!("the first launch must own the profile");
         };
         let (shown_tx, shown_rx) = std::sync::mpsc::channel();
-        primary.serve(&runtime, move |token| shown_tx.send(token).unwrap());
+        primary.serve(&runtime, move |activation| {
+            shown_tx.send(activation).unwrap()
+        });
 
         assert!(matches!(
             acquire(&runtime, directory.path(), show(Some("launcher-token_1"))).unwrap(),
             Acquired::Forwarded
         ));
         assert_eq!(
-            shown_rx.recv_timeout(Duration::from_secs(5)).unwrap().as_deref(),
-            Some("launcher-token_1")
+            shown_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            activation(Some("launcher-token_1"), &[])
+        );
+
+        // A mail link opened while the application runs reaches it whole.
+        let link = format!(
+            "mailto:a+b@example.com?subject=Hi&body={}%0D%0Aend",
+            "x".repeat(100_000)
+        );
+        let request = Request::Show(activation(None, &[&link, "mailto:"]));
+        assert!(matches!(
+            acquire(&runtime, directory.path(), request).unwrap(),
+            Acquired::Forwarded
+        ));
+        assert_eq!(
+            shown_rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            activation(None, &[&link, "mailto:"])
         );
 
         assert!(matches!(
@@ -482,14 +549,39 @@ mod tests {
 
     #[test]
     fn only_well_formed_show_requests_are_accepted() {
-        assert_eq!(parse_show(&encode_show(None)), Some(None));
+        let round_trip = |activation: Activation| parse_show(&encode_show(&activation));
         assert_eq!(
-            parse_show(&encode_show(Some("abc:123"))),
-            Some(Some("abc:123".to_owned()))
+            round_trip(activation(None, &[])),
+            Some(activation(None, &[]))
+        );
+        assert_eq!(
+            round_trip(activation(Some("abc:123"), &["mailto:a@example.com"])),
+            Some(activation(Some("abc:123"), &["mailto:a@example.com"]))
         );
         // Invalid tokens are dropped by the sender rather than the request.
-        assert_eq!(parse_show(&encode_show(Some("has space"))), Some(None));
-        assert_eq!(parse_show(&encode_show(Some(&"x".repeat(MAX_TOKEN + 1)))), Some(None));
+        assert_eq!(
+            round_trip(activation(Some("has space"), &[])),
+            Some(activation(None, &[]))
+        );
+        assert_eq!(
+            round_trip(activation(Some(&"x".repeat(MAX_TOKEN + 1)), &[])),
+            Some(activation(None, &[]))
+        );
+        // So are links the owner would refuse, and raw line breaks are
+        // encoded the way the link means them.
+        let too_long = format!("mailto:?body={}", "x".repeat(mailto::MAX_URI_BYTES));
+        assert_eq!(
+            round_trip(activation(
+                None,
+                &["https://example.com", &too_long, "mailto:?body=a\r\nb"]
+            )),
+            Some(activation(None, &["mailto:?body=a%0D%0Ab"]))
+        );
+        let many = vec!["mailto:a@example.com"; MAX_LAUNCH_LINKS + 3];
+        assert_eq!(
+            round_trip(activation(None, &many)).unwrap().links.len(),
+            MAX_LAUNCH_LINKS
+        );
 
         for request in [
             &b"quit\n"[..],
@@ -499,9 +591,22 @@ mod tests {
             b"show a b\n",
             b"shows\n",
             b"show \xff\n",
+            b"show\nhttps://example.com\n",
+            b"show\nmailto:a@example.com",
+            b"show\nmailto:a@example.com\n\n",
+            b"mailto:a@example.com\n",
         ] {
             assert_eq!(parse_show(request), None, "{request:?}");
         }
-        assert!(MAX_REQUEST as usize >= encode_show(Some(&"x".repeat(MAX_TOKEN))).len());
+        let largest = activation(
+            Some(&"x".repeat(MAX_TOKEN)),
+            &vec![
+                &*format!("mailto:?body={}", "x".repeat(mailto::MAX_URI_BYTES - 13));
+                MAX_LAUNCH_LINKS
+            ],
+        );
+        assert_eq!(largest.links[0].len(), mailto::MAX_URI_BYTES);
+        assert!(MAX_REQUEST as usize >= encode_show(&largest).len());
+        assert_eq!(round_trip(largest.clone()), Some(largest));
     }
 }

@@ -386,6 +386,8 @@ pub(super) fn refresh_connected_accounts(app: &AppWindow, state: &Rc<RefCell<Inb
     app.global::<AccountMailPreferences>()
         .invoke_context_changed();
     app.global::<FilesUi>().invoke_context_changed();
+    // A link that waited for an account to send from can open now.
+    mailto_links::open_pending_soon(app);
 }
 
 /// Show the mail kept on this device, or that there is none.

@@ -89,10 +89,13 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     assert_eq!(app.get_render_message().argument, "test host unavailable");
     app.invoke_open_email_link("javascript:alert(1)".into());
     app.invoke_open_email_link("#fragment".into());
-    app.invoke_open_email_link("mailto:person@example.com?subject=Hello%20there".into());
-    assert_eq!(app.get_compose_to(), "person@example.com");
-    assert_eq!(app.get_compose_subject(), "Hello there");
+    // Mail links never go to the browser. This one waits for the composer,
+    // which is connected at the end of the test.
+    app.invoke_open_email_link(
+        "mailto:person+list@example.com?subject=Hello+there%21&bcc=hidden@example.com".into(),
+    );
     assert_eq!(opened_urls.lock().unwrap().len(), 1);
+    assert!(!app.get_compose_open());
     let requests = Rc::new(RefCell::new(Vec::new()));
     let requests2 = requests.clone();
     app.global::<EmailReader>()
@@ -766,7 +769,93 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         &mut directory.borrow_mut()
     ));
     assert!(directory.borrow().contacts.is_empty());
+    app.set_active_view("mail".into());
+    mailto_links_open_without_losing_the_draft(&app, &state, &runtime);
     app.hide().unwrap();
+}
+
+fn mailto_links_open_without_losing_the_draft(
+    app: &AppWindow,
+    state: &Rc<RefCell<InboxState>>,
+    runtime: &Rc<tokio::runtime::Runtime>,
+) {
+    state.borrow_mut().connected_accounts = vec![Account {
+        id: 1,
+        email: "me@example.test".into(),
+        display_name: None,
+        avatar_url: None,
+        provider: Provider::Generic,
+        auth_kind: flectar_mail_core::models::AuthKind::Password,
+        mail_protocol: MailProtocol::Imap,
+        sync_state: "idle".into(),
+        sync_error: None,
+        can_create_top_level_mailbox: true,
+        server_keeps_mail_days: None,
+    }];
+    app.set_compose_account_id(1);
+    let weak = app.as_weak();
+    app.on_open_compose(move || weak.unwrap().set_compose_open(true));
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let weak = app.as_weak();
+    let recorded = saved.clone();
+    app.on_save_compose(move |_, to, _, _, subject, _, send| {
+        assert!(!send, "a link must never send");
+        recorded
+            .borrow_mut()
+            .push((to.to_string(), subject.to_string()));
+        let app = weak.unwrap();
+        for clear in [
+            AppWindow::set_compose_to,
+            AppWindow::set_compose_cc,
+            AppWindow::set_compose_bcc,
+            AppWindow::set_compose_subject,
+            AppWindow::set_compose_body,
+        ] {
+            clear(&app, "".into());
+        }
+        app.set_compose_open(false);
+    });
+    let frame = || {
+        slint::platform::update_timers_and_animations();
+        let _ = app.window().size();
+    };
+
+    mailto_links::install(
+        app,
+        mailto_links::Composer {
+            state: Rc::clone(state),
+            runtime: Rc::clone(runtime),
+            intent: Rc::new(RefCell::new(ComposeIntent::default())),
+        },
+    );
+    frame();
+    assert!(app.get_compose_open(), "the waiting link opens once it can");
+    assert_eq!(app.get_compose_to(), "person+list@example.com");
+    assert_eq!(app.get_compose_subject(), "Hello+there!");
+    assert_eq!(app.get_compose_bcc(), "hidden@example.com");
+
+    app.set_compose_subject("My own subject".into());
+    // The reader's link handler was replaced by a recorder above; open the
+    // link the way it does.
+    mailto_links::open(app, ["mailto:second@example.com?attach=/etc/passwd"]);
+    frame();
+    assert_eq!(
+        *saved.borrow(),
+        [(
+            "person+list@example.com".to_owned(),
+            "My own subject".to_owned()
+        )],
+        "what the user wrote is saved to Drafts before the next link opens"
+    );
+    assert!(app.get_compose_open());
+    assert_eq!(app.get_compose_to(), "second@example.com");
+    assert_eq!(app.get_compose_bcc(), "");
+    assert_eq!(
+        app.get_compose_message().key,
+        "Files from links are never attached for you. Attach them yourself if you trust them: {}"
+    );
+    assert_eq!(app.get_compose_message().argument, "/etc/passwd");
+    assert!(app.get_compose_attachments().row_count() == 0);
 }
 
 /// The desktop mail view at scale 2, drawn by Slint's software renderer like

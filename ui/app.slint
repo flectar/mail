@@ -302,6 +302,10 @@ export global I18n {
     ui-message-system(key, argument, second-argument, third-argument) => {
         if (key == "Opened {}") { return @tr("Opened {}", argument); }
         if (key == "Could not open link: {}") { return @tr("Could not open link: {}", argument); }
+        if (key == "This email link is too long to open.") { return @tr("This email link is too long to open."); }
+        if (key == "The email link will open when you close this message.") { return @tr("The email link will open when you close this message."); }
+        if (key == "The message you were writing was saved to Drafts.") { return @tr("The message you were writing was saved to Drafts."); }
+        if (key == "Files from links are never attached for you. Attach them yourself if you trust them: {}") { return @tr("Files from links are never attached for you. Attach them yourself if you trust them: {}", argument); }
         if (key == "Copied HTML source") { return @tr("Copied HTML source"); }
         if (key == "Copied selected text") { return @tr("Copied selected text"); }
         if (key == "Copied email text") { return @tr("Copied email text"); }

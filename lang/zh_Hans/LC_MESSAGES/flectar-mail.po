@@ -386,7 +386,7 @@ msgstr "有往来邮件记录"
 msgid "New address-book entry"
 msgstr "新建通讯录条目"
 
-#: ui/app.slint:179 ui/app.slint:1037 ui/components/composer-fields.slint:66
+#: ui/app.slint:179 ui/app.slint:1041 ui/components/composer-fields.slint:66
 #: ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr "未连接账户"
@@ -400,11 +400,11 @@ msgstr[0] "{n} 次互动"
 msgid "Last contacted {}"
 msgstr "上次联系于 {}"
 
-#: ui/app.slint:184 ui/app.slint:447
+#: ui/app.slint:184 ui/app.slint:451
 msgid "Loading local data…"
 msgstr "正在加载本地数据…"
 
-#: ui/app.slint:185 ui/app.slint:448
+#: ui/app.slint:185 ui/app.slint:452
 msgid "Local data ready."
 msgstr "本地数据已就绪。"
 
@@ -737,905 +737,923 @@ msgid "Could not open link: {}"
 msgstr "无法打开链接：{}"
 
 #: ui/app.slint:305
+msgid "This email link is too long to open."
+msgstr ""
+
+#: ui/app.slint:306
+msgid "The email link will open when you close this message."
+msgstr ""
+
+#: ui/app.slint:307
+msgid "The message you were writing was saved to Drafts."
+msgstr ""
+
+#: ui/app.slint:308
+msgid ""
+"Files from links are never attached for you. Attach them yourself if you "
+"trust them: {}"
+msgstr ""
+
+#: ui/app.slint:309
 msgid "Copied HTML source"
 msgstr "已复制 HTML 源码"
 
-#: ui/app.slint:306
+#: ui/app.slint:310
 msgid "Copied selected text"
 msgstr "已复制选中文本"
 
-#: ui/app.slint:307
+#: ui/app.slint:311
 msgid "Copied email text"
 msgstr "已复制邮件正文"
 
-#: ui/app.slint:308
+#: ui/app.slint:312
 msgid "Copied link"
 msgstr "已复制链接"
 
-#: ui/app.slint:309
+#: ui/app.slint:313
 msgid "Blitz software selection render failed: {}"
 msgstr "Blitz 软件方式渲染选区失败：{}"
 
-#: ui/app.slint:310
+#: ui/app.slint:314
 msgid "Blitz software tile render failed: {}"
 msgstr "Blitz 软件方式渲染分块失败：{}"
 
-#: ui/app.slint:311
+#: ui/app.slint:315
 msgid "Message ready."
 msgstr "邮件已就绪。"
 
-#: ui/app.slint:312
+#: ui/app.slint:316
 msgid "System tray behavior is unavailable in this package."
 msgstr "当前版本不支持系统托盘行为。"
 
-#: ui/app.slint:313
+#: ui/app.slint:317
 msgid "Close-to-tray is active for this session."
 msgstr "关闭时最小化到托盘仅在本次会话中生效。"
 
-#: ui/app.slint:314
+#: ui/app.slint:318
 msgid "Saving close behavior…"
 msgstr "正在保存关闭行为…"
 
-#: ui/app.slint:315
+#: ui/app.slint:319
 msgid "Closing the window will now keep Flectar Mail in the tray."
 msgstr "现在关闭窗口会将 Flectar Mail 保留在托盘中。"
 
-#: ui/app.slint:316
+#: ui/app.slint:320
 msgid "Closing the window will now quit Flectar Mail."
 msgstr "现在关闭窗口将退出 Flectar Mail。"
 
-#: ui/app.slint:317
+#: ui/app.slint:321
 msgid "Could not save close behavior: {}"
 msgstr "无法保存关闭行为：{}"
 
-#: ui/app.slint:318
+#: ui/app.slint:322
 msgid "Flectar Mail will start when you sign in."
 msgstr "Flectar Mail 将在您登录时启动。"
 
-#: ui/app.slint:319
+#: ui/app.slint:323
 msgid "Flectar Mail will no longer start when you sign in."
 msgstr "Flectar Mail 将不再在您登录时启动。"
 
-#: ui/app.slint:320
+#: ui/app.slint:324
 msgid "Could not change startup behavior: {}"
 msgstr "无法更改启动行为：{}"
 
-#: ui/app.slint:321
+#: ui/app.slint:325
 msgid "Allow Flectar Mail under Login Items in System Settings to finish."
 msgstr "请在“系统设置”的“登录项”中允许 Flectar Mail 以完成设置。"
 
-#: ui/app.slint:322
+#: ui/app.slint:326
 msgid "Turn on Flectar Mail under Startup apps in Windows Settings to finish."
 msgstr ""
 
-#: ui/app.slint:327
+#: ui/app.slint:331
 msgid "Database snapshot exported to {}."
 msgstr "数据库快照已导出至 {}。"
 
-#: ui/app.slint:328
+#: ui/app.slint:332
 msgid "Choose where to export the mail"
 msgstr ""
 
-#: ui/app.slint:329
+#: ui/app.slint:333
 msgid "Exporting mail…"
 msgstr ""
 
-#: ui/app.slint:330
+#: ui/app.slint:334
 msgid "Mail exported to {}."
 msgstr ""
 
-#: ui/app.slint:331
+#: ui/app.slint:335
 msgid ""
 "Mail exported to {}. Some messages could not be found on this device or the "
 "mail server."
 msgstr ""
 
-#: ui/app.slint:332
+#: ui/app.slint:336
 msgid "Could not export mail: {}"
 msgstr ""
 
-#: ui/app.slint:333
+#: ui/app.slint:337
 msgid "Could not export database snapshot: {}"
 msgstr "无法导出数据库快照：{}"
 
-#: ui/app.slint:334
+#: ui/app.slint:338
 msgid "Account order saved."
 msgstr "账户顺序已保存。"
 
-#: ui/app.slint:335
+#: ui/app.slint:339
 msgid "Could not save account order: {}"
 msgstr "无法保存账户顺序：{}"
 
-#: ui/app.slint:336
+#: ui/app.slint:340
 msgid "Mail history updated. Background sync is adjusting now."
 msgstr "邮件同步范围已更新，后台同步正在调整。"
 
-#: ui/app.slint:337
+#: ui/app.slint:341
 msgid "Account removed from this device."
 msgstr "账户已从此设备移除。"
 
-#: ui/app.slint:338
+#: ui/app.slint:342
 msgid "Account removed. Mail refresh will retry."
 msgstr "账户已移除，邮件刷新将重试。"
 
-#: ui/app.slint:339
+#: ui/app.slint:343
 msgid "Account removed; local cleanup needs a retry: {}"
 msgstr "账户已移除，但本地清理需要重试：{}"
 
-#: ui/app.slint:340
+#: ui/app.slint:344
 msgid "Could not remove account: {}"
 msgstr "无法移除账户：{}"
 
-#: ui/app.slint:341
+#: ui/app.slint:345
 msgid "Removing account…"
 msgstr "正在移除账户…"
 
-#: ui/app.slint:342
+#: ui/app.slint:346
 msgid "Deleting mail on this device…"
 msgstr ""
 
-#: ui/app.slint:343
+#: ui/app.slint:347
 msgid "Mail on this device deleted."
 msgstr ""
 
-#: ui/app.slint:344
+#: ui/app.slint:348
 msgid "Mail on this device deleted. Mail refresh will retry."
 msgstr ""
 
-#: ui/app.slint:345
+#: ui/app.slint:349
 msgid "Mail on this device deleted; local cleanup needs a retry: {}"
 msgstr ""
 
-#: ui/app.slint:346
+#: ui/app.slint:350
 msgid "Could not delete mail on this device: {}"
 msgstr ""
 
-#: ui/app.slint:347
+#: ui/app.slint:351
 msgid "Synchronizing account…"
 msgstr "正在同步账户…"
 
-#: ui/app.slint:348
+#: ui/app.slint:352
 msgid "Could not update mail history: {}"
 msgstr "无法更新邮件同步范围：{}"
 
-#: ui/app.slint:349
+#: ui/app.slint:353
 msgid "Connected {}. Initial sync is running in the background."
 msgstr "已连接 {}，首次同步正在后台运行。"
 
-#: ui/app.slint:350
+#: ui/app.slint:354
 msgid "Account setup failed: {}"
 msgstr "账户设置失败：{}"
 
-#: ui/app.slint:351
+#: ui/app.slint:355
 msgid "OAuth failed: {}"
 msgstr "OAuth 授权失败：{}"
 
-#: ui/app.slint:352
+#: ui/app.slint:356
 msgid "Reconnected {}. Synchronization is resuming."
 msgstr "已重新连接 {}，同步正在恢复。"
 
-#: ui/app.slint:353
+#: ui/app.slint:357
 msgid "Reconnection failed: {}"
 msgstr "重新连接失败：{}"
 
-#: ui/app.slint:354
+#: ui/app.slint:358
 msgid "Calendar connected and initial sync started."
 msgstr "日历已连接，首次同步已开始。"
 
-#: ui/app.slint:355 ui/components/account-calendars.slint:270
+#: ui/app.slint:359 ui/components/account-calendars.slint:270
 msgid "Could not connect calendar: {}"
 msgstr "无法连接日历：{}"
 
-#: ui/app.slint:356
+#: ui/app.slint:360
 msgid "Calendar sync enabled."
 msgstr "日历同步已启用。"
 
-#: ui/app.slint:357
+#: ui/app.slint:361
 msgid "Calendar sync paused."
 msgstr "日历同步已暂停。"
 
-#: ui/app.slint:358
+#: ui/app.slint:362
 msgid "Could not update calendar sync: {}"
 msgstr "无法更新日历同步：{}"
 
-#: ui/app.slint:359
+#: ui/app.slint:363
 msgid "CalDAV connected and initial sync started."
 msgstr "CalDAV 已连接，首次同步已开始。"
 
-#: ui/app.slint:360
+#: ui/app.slint:364
 msgid "Could not connect CalDAV: {}"
 msgstr "无法连接 CalDAV：{}"
 
-#: ui/app.slint:361
+#: ui/app.slint:365
 msgid "Calendar removed."
 msgstr ""
 
-#: ui/app.slint:362
+#: ui/app.slint:366
 msgid "Could not remove calendar: {}"
 msgstr ""
 
-#: ui/app.slint:363
+#: ui/app.slint:367
 msgid "CardDAV connected and initial sync started."
 msgstr "CardDAV 已连接，首次同步已开始。"
 
-#: ui/app.slint:364
+#: ui/app.slint:368
 msgid "Could not connect CardDAV: {}"
 msgstr "无法连接 CardDAV：{}"
 
-#: ui/app.slint:365
+#: ui/app.slint:369
 msgid "CardDAV sync enabled."
 msgstr "CardDAV 同步已启用。"
 
-#: ui/app.slint:366
+#: ui/app.slint:370
 msgid "CardDAV sync paused."
 msgstr "CardDAV 同步已暂停。"
 
-#: ui/app.slint:367
+#: ui/app.slint:371
 msgid "Could not update CardDAV sync: {}"
 msgstr "无法更新 CardDAV 同步：{}"
 
-#: ui/app.slint:368
+#: ui/app.slint:372
 msgid "CardDAV disconnected."
 msgstr "CardDAV 已断开连接。"
 
-#: ui/app.slint:369
+#: ui/app.slint:373
 msgid "Could not disconnect CardDAV: {}"
 msgstr "无法断开 CardDAV：{}"
 
-#: ui/app.slint:374
+#: ui/app.slint:378
 msgid "Connect an account before creating a backup."
 msgstr "请先连接账户再创建备份。"
 
-#: ui/app.slint:375
+#: ui/app.slint:379
 msgid "Export Flectar Mail account backup"
 msgstr "导出 Flectar Mail 账户备份"
 
-#: ui/app.slint:376
+#: ui/app.slint:380
 msgid "Flectar Mail backup"
 msgstr "Flectar Mail 备份"
 
-#: ui/app.slint:377 ui/dialogs/import-dialog.slint:407
+#: ui/app.slint:381 ui/dialogs/import-dialog.slint:407
 #: ui/views/onboarding-view.slint:223
 msgid "Import accounts and mail"
 msgstr ""
 
-#: ui/app.slint:378
+#: ui/app.slint:382
 msgid "Choose a Thunderbird profile or a folder of mail"
 msgstr ""
 
-#: ui/app.slint:379
+#: ui/app.slint:383
 msgid "Imported messages"
 msgstr ""
 
-#: ui/app.slint:380
+#: ui/app.slint:384
 msgid "Choose where to export the database snapshot"
 msgstr "选择数据库快照的导出位置"
 
-#: ui/app.slint:381
+#: ui/app.slint:385
 msgid "Backup exported. Passwords and OAuth tokens were not included."
 msgstr "备份已导出，其中不包含密码和 OAuth 令牌。"
 
-#: ui/app.slint:382
+#: ui/app.slint:386
 msgid "Could not export backup: {}"
 msgstr "无法导出备份：{}"
 
-#: ui/app.slint:383
+#: ui/app.slint:387
 msgid "Local data storage is unavailable. Retry startup."
 msgstr "本地数据存储不可用，请重新启动。"
 
-#: ui/app.slint:384
+#: ui/app.slint:388
 msgid "Creating verified database snapshot…"
 msgstr "正在创建已验证的数据库快照…"
 
-#: ui/app.slint:385
+#: ui/app.slint:389
 msgid "All local Flectar Mail data was deleted."
 msgstr "Flectar Mail 的全部本地数据已删除。"
 
-#: ui/app.slint:386
+#: ui/app.slint:390
 msgid "Could not delete all local data: {}"
 msgstr "无法删除全部本地数据：{}"
 
-#: ui/app.slint:387
+#: ui/app.slint:391
 msgid "Deleting local accounts and cached data…"
 msgstr "正在删除本地账户和缓存数据…"
 
-#: ui/app.slint:392
+#: ui/app.slint:396
 msgid "Background mail refresh failed: {}"
 msgstr "后台邮件刷新失败：{}"
 
-#: ui/app.slint:393
+#: ui/app.slint:397
 msgid "No conversations in this folder"
 msgstr "此文件夹中没有会话"
 
-#: ui/app.slint:394
+#: ui/app.slint:398
 msgid "No conversations match this search"
 msgstr "没有符合该搜索条件的会话"
 
-#: ui/app.slint:395
+#: ui/app.slint:399
 msgid "Mail core is ready for account synchronization and message actions."
 msgstr "邮件核心已就绪，可进行账户同步和邮件操作。"
 
-#: ui/app.slint:396
+#: ui/app.slint:400
 msgid "Large message rendered in compatibility mode."
 msgstr "大型邮件已使用兼容模式渲染。"
 
-#: ui/app.slint:397
+#: ui/app.slint:401
 msgid "Software email render failed: {}"
 msgstr "软件方式渲染邮件失败：{}"
 
-#: ui/app.slint:398
+#: ui/app.slint:402
 msgid "Rendered with software fallback after GPU error: {}"
 msgstr "GPU 出错后已改用软件方式渲染：{}"
 
-#: ui/app.slint:399
+#: ui/app.slint:403
 msgid "Blitz render failed (GPU: {}; software: {})"
 msgstr "Blitz 渲染失败（GPU：{}；软件：{}）"
 
-#: ui/app.slint:404
+#: ui/app.slint:408
 msgid "Enter a name, email address, or phone number, then save."
 msgstr "输入姓名、邮箱地址或电话号码，然后保存。"
 
-#: ui/app.slint:405
+#: ui/app.slint:409
 msgid "Could not save: contact storage is unavailable."
 msgstr "无法保存：联系人存储不可用。"
 
-#: ui/app.slint:406
+#: ui/app.slint:410
 msgid "Could not save contact: {}"
 msgstr "无法保存联系人：{}"
 
-#: ui/app.slint:407
+#: ui/app.slint:411
 msgid "Contact saved."
 msgstr "联系人已保存。"
 
-#: ui/app.slint:408
+#: ui/app.slint:412
 msgid "Saved to contacts."
 msgstr "已保存到联系人。"
 
-#: ui/app.slint:409
+#: ui/app.slint:413
 msgid "Could not delete: contact storage is unavailable."
 msgstr "无法删除：联系人存储不可用。"
 
-#: ui/app.slint:410
+#: ui/app.slint:414
 msgid "Could not delete contact: {}"
 msgstr "无法删除联系人：{}"
 
-#: ui/app.slint:411
+#: ui/app.slint:415
 msgid "Contact deleted."
 msgstr "联系人已删除。"
 
-#: ui/app.slint:412
+#: ui/app.slint:416
 msgid "Could not load contacts: {}"
 msgstr "无法加载联系人：{}"
 
-#: ui/app.slint:413
+#: ui/app.slint:417
 msgid "Local contact storage is still starting…"
 msgstr "本地联系人存储仍在启动中…"
 
-#: ui/app.slint:414
+#: ui/app.slint:418
 msgid "Loading contacts…"
 msgstr "正在加载联系人…"
 
-#: ui/app.slint:419 ui/components/calendar-agenda.slint:235
+#: ui/app.slint:423 ui/components/calendar-agenda.slint:235
 msgid "Local calendar"
 msgstr "本地日历"
 
-#: ui/app.slint:420 ui/components/calendar.slint:273
+#: ui/app.slint:424 ui/components/calendar.slint:273
 #: ui/components/calendar.slint:321 ui/components/calendar.slint:439
 msgid "Calendar"
 msgstr "日历"
 
-#: ui/app.slint:421
+#: ui/app.slint:425
 msgid "Could not load calendar: {}"
 msgstr "无法加载日历：{}"
 
-#: ui/app.slint:422
+#: ui/app.slint:426
 msgid "Calendar shown and syncing."
 msgstr "日历已显示，正在同步。"
 
-#: ui/app.slint:423
+#: ui/app.slint:427
 msgid "Calendar hidden and sync paused."
 msgstr "日历已隐藏，同步已暂停。"
 
-#: ui/app.slint:424
+#: ui/app.slint:428
 msgid "Calendar update failed: {}"
 msgstr "日历更新失败：{}"
 
-#: ui/app.slint:425
+#: ui/app.slint:429
 msgid "Only events created in Flectar Mail can be edited."
 msgstr "只能编辑在 Flectar Mail 中创建的日程。"
 
-#: ui/app.slint:426
+#: ui/app.slint:430
 msgid "Only events created in Flectar Mail can be deleted."
 msgstr "只能删除在 Flectar Mail 中创建的日程。"
 
-#: ui/app.slint:427
+#: ui/app.slint:431
 msgid "Calendar storage is unavailable."
 msgstr "日历存储不可用。"
 
-#: ui/app.slint:428
+#: ui/app.slint:432
 msgid "Could not delete event: {}"
 msgstr "无法删除日程：{}"
 
-#: ui/app.slint:429
+#: ui/app.slint:433
 msgid "Event deleted, but refresh failed: {}"
 msgstr "日程已删除，但刷新失败：{}"
 
-#: ui/app.slint:430
+#: ui/app.slint:434
 msgid "Event deleted."
 msgstr "日程已删除。"
 
-#: ui/app.slint:431
+#: ui/app.slint:435
 msgid "Use YYYY-MM-DD for the date and a time such as {}."
 msgstr "请使用 YYYY-MM-DD 格式的日期和时间，例如 {}。"
 
-#: ui/app.slint:432
+#: ui/app.slint:436
 msgid "Event duration must be a number of minutes."
 msgstr "日程时长必须是以分钟为单位的数字。"
 
-#: ui/app.slint:433
+#: ui/app.slint:437
 msgid "Add a title and choose a duration from 15 to 1440 minutes."
 msgstr "请填写标题，并选择 15 至 1440 分钟之间的时长。"
 
-#: ui/app.slint:434
+#: ui/app.slint:438
 msgid "That local time does not exist in the current time zone."
 msgstr "该本地时间在当前时区不存在。"
 
-#: ui/app.slint:435
+#: ui/app.slint:439
 msgid "Could not save event: {}"
 msgstr "无法保存日程：{}"
 
-#: ui/app.slint:436
+#: ui/app.slint:440
 msgid "Event saved, but refresh failed: {}"
 msgstr "日程已保存，但刷新失败：{}"
 
-#: ui/app.slint:437
+#: ui/app.slint:441
 msgid "Event saved. Provider sync will run when enabled."
 msgstr "日程已保存。启用服务商同步后将自动同步。"
 
-#: ui/app.slint:442
+#: ui/app.slint:446
 msgid "Email resource render failed: {}"
 msgstr "邮件资源渲染失败：{}"
 
-#: ui/app.slint:443
+#: ui/app.slint:447
 msgid "Message refresh failed: {}"
 msgstr "邮件刷新失败：{}"
 
-#: ui/app.slint:444
+#: ui/app.slint:448
 msgid "Message load failed: {}"
 msgstr "邮件加载失败：{}"
 
-#: ui/app.slint:445
+#: ui/app.slint:449
 msgid ""
 "Your local mailbox could not be opened. No account operation was started. "
 "Retry, or copy the diagnostics for support."
 msgstr ""
 "无法打开本地邮箱，未执行任何账户操作。请重试，或复制诊断信息以寻求支持。"
 
-#: ui/app.slint:446
+#: ui/app.slint:450
 msgid "Local storage startup failed."
 msgstr "本地存储启动失败。"
 
-#: ui/app.slint:453
+#: ui/app.slint:457
 msgid "Could not identify the dragged account."
 msgstr "无法识别所拖动的账户。"
 
-#: ui/app.slint:454
+#: ui/app.slint:458
 msgid "Account ordering requires local mail data."
 msgstr "调整账户顺序需要本地邮件数据。"
 
-#: ui/app.slint:455
+#: ui/app.slint:459
 msgid "Could not find the account to reorder."
 msgstr "找不到要调整顺序的账户。"
 
-#: ui/app.slint:456
+#: ui/app.slint:460
 msgid "Saving account order…"
 msgstr "正在保存账户顺序…"
 
-#: ui/app.slint:457
+#: ui/app.slint:461
 msgid "Sent copy settings require local mail data."
 msgstr "已发送邮件副本设置需要本地邮件数据。"
 
-#: ui/app.slint:458
+#: ui/app.slint:462
 msgid "Updating Sent copy settings…"
 msgstr "正在更新已发送邮件副本设置…"
 
-#: ui/app.slint:459
+#: ui/app.slint:463
 msgid "Sent copy settings updated."
 msgstr "已发送邮件副本设置已更新。"
 
-#: ui/app.slint:460
+#: ui/app.slint:464
 msgid "Could not update Sent copy settings: {}"
 msgstr "无法更新已发送邮件副本设置：{}"
 
-#: ui/app.slint:461
+#: ui/app.slint:465
 msgid "Server mail settings require local mail data."
 msgstr ""
 
-#: ui/app.slint:462
+#: ui/app.slint:466
 msgid "Updating server mail settings…"
 msgstr ""
 
-#: ui/app.slint:463
+#: ui/app.slint:467
 msgid "Server mail settings updated."
 msgstr ""
 
-#: ui/app.slint:464
+#: ui/app.slint:468
 msgid "Could not update server mail settings: {}"
 msgstr ""
 
-#: ui/app.slint:465
+#: ui/app.slint:469
 msgid "Mail history requires local mail data."
 msgstr "设置邮件同步范围需要本地邮件数据。"
 
-#: ui/app.slint:466
+#: ui/app.slint:470
 msgid "Updating mail history…"
 msgstr "正在更新邮件同步范围…"
 
-#: ui/app.slint:467
+#: ui/app.slint:471
 msgid "Remote images are unavailable in this minimal build."
 msgstr "当前精简版本不支持远程图片。"
 
-#: ui/app.slint:468
+#: ui/app.slint:472
 msgid "Could not save remote-image setting: {}"
 msgstr "无法保存远程图片设置：{}"
 
-#: ui/app.slint:469
+#: ui/app.slint:473
 msgid "Remote sender icons unavailable: {}"
 msgstr "远程发件人图标不可用：{}"
 
-#: ui/app.slint:470
+#: ui/app.slint:474
 msgid "Remote images unavailable: {}"
 msgstr "远程图片不可用：{}"
 
-#: ui/app.slint:471
+#: ui/app.slint:475
 msgid "Remote body images and sender favicons enabled."
 msgstr "已启用正文远程图片和发件人网站图标。"
 
-#: ui/app.slint:472
+#: ui/app.slint:476
 msgid "Remote images blocked."
 msgstr "远程图片已阻止。"
 
-#: ui/app.slint:473
+#: ui/app.slint:477
 msgid "Could not refresh message images: {}"
 msgstr "无法刷新邮件图片：{}"
 
-#: ui/app.slint:474
+#: ui/app.slint:478
 msgid "Remote-image loading is disabled."
 msgstr "远程图片加载已禁用。"
 
-#: ui/app.slint:475
+#: ui/app.slint:479
 msgid "Could not load message images: {}"
 msgstr "无法加载邮件图片：{}"
 
-#: ui/app.slint:476
+#: ui/app.slint:480
 msgid "Sync finished, refresh failed: {}"
 msgstr "同步已完成，但刷新失败：{}"
 
-#: ui/app.slint:477
+#: ui/app.slint:481
 msgid "Sync complete."
 msgstr "同步完成。"
 
-#: ui/app.slint:478
+#: ui/app.slint:482
 msgid "Sync failed: {}"
 msgstr "同步失败：{}"
 
-#: ui/app.slint:479
+#: ui/app.slint:483
 msgid "Local mail data is unavailable; preview data is read-only."
 msgstr "本地邮件数据不可用，预览数据为只读。"
 
-#: ui/app.slint:480
+#: ui/app.slint:484
 msgid "Synchronizing accounts…"
 msgstr "正在同步账户…"
 
-#: ui/app.slint:485
+#: ui/app.slint:489
 msgid "Message action completed."
 msgstr "邮件操作已完成。"
 
-#: ui/app.slint:486
+#: ui/app.slint:490
 msgid ""
 "Permanent deletion queued. Mail will disappear after the server confirms."
 msgstr "已添加到永久删除队列。邮件将在服务器确认后消失。"
 
-#: ui/app.slint:487
+#: ui/app.slint:491
 msgid "Message action failed: {}"
 msgstr "邮件操作失败：{}"
 
-#: ui/app.slint:488
+#: ui/app.slint:492
 msgid "Message action failed: message is no longer available"
 msgstr "邮件操作失败：邮件已不存在"
 
-#: ui/app.slint:489
+#: ui/app.slint:493
 msgid "Label added."
 msgstr "标签已添加。"
 
-#: ui/app.slint:490
+#: ui/app.slint:494
 msgid "Label removed."
 msgstr "标签已移除。"
 
-#: ui/app.slint:491
+#: ui/app.slint:495
 msgid "Label created and added."
 msgstr "标签已创建并添加。"
 
-#: ui/app.slint:492
+#: ui/app.slint:496
 msgid "Label created."
 msgstr "标签已创建。"
 
-#: ui/app.slint:493
+#: ui/app.slint:497
 msgid "Label updated."
 msgstr "标签已更新。"
 
-#: ui/app.slint:494
+#: ui/app.slint:498
 msgid "Label deleted."
 msgstr "标签已删除。"
 
-#: ui/app.slint:495
+#: ui/app.slint:499
 msgid "Could not update label: {}"
 msgstr "无法更新标签：{}"
 
-#: ui/app.slint:496
+#: ui/app.slint:500
 msgid "Could not save label: {}"
 msgstr "无法保存标签：{}"
 
-#: ui/app.slint:497
+#: ui/app.slint:501
 msgid "Could not delete label: {}"
 msgstr "无法删除标签：{}"
 
-#: ui/app.slint:498
+#: ui/app.slint:502
 msgid "Folder created."
 msgstr "文件夹已创建。"
 
-#: ui/app.slint:499
+#: ui/app.slint:503
 msgid "Folder renamed."
 msgstr "文件夹已重命名。"
 
-#: ui/app.slint:500
+#: ui/app.slint:504
 msgid "Folder deleted."
 msgstr "文件夹已删除。"
 
-#: ui/app.slint:501
+#: ui/app.slint:505
 msgid "Could not create folder: {}"
 msgstr "无法创建文件夹：{}"
 
-#: ui/app.slint:502
+#: ui/app.slint:506
 msgid "Could not rename folder: {}"
 msgstr "无法重命名文件夹：{}"
 
-#: ui/app.slint:503
+#: ui/app.slint:507
 msgid "Could not delete folder: {}"
 msgstr "无法删除文件夹：{}"
 
-#: ui/app.slint:504
+#: ui/app.slint:508
 msgid "Could not close preview: {}"
 msgstr "无法关闭预览：{}"
 
-#: ui/app.slint:505
+#: ui/app.slint:509
 msgid "Opened the system print view."
 msgstr "已打开系统打印视图。"
 
-#: ui/app.slint:506
+#: ui/app.slint:510
 msgid "Could not print message: {}"
 msgstr "无法打印邮件：{}"
 
-#: ui/app.slint:507
+#: ui/app.slint:511
 msgid "Opened the message in your browser."
 msgstr "已在浏览器中打开该邮件。"
 
-#: ui/app.slint:508
+#: ui/app.slint:512
 msgid "Could not open message in browser: {}"
 msgstr "无法在浏览器中打开邮件：{}"
 
-#: ui/app.slint:509
+#: ui/app.slint:513
 msgid "Connect an account before replying or forwarding."
 msgstr "请先连接账户再进行回复或转发。"
 
-#: ui/app.slint:510
+#: ui/app.slint:514
 msgid "Choose a message first."
 msgstr "请先选择一封邮件。"
 
-#: ui/app.slint:511
+#: ui/app.slint:515
 msgid "Only drafts can be reopened for editing."
 msgstr "只有草稿箱中的邮件可以重新编辑。"
 
-#: ui/app.slint:512
+#: ui/app.slint:516
 msgid "Could not open draft: {}"
 msgstr "无法打开草稿：{}"
 
-#: ui/app.slint:513
+#: ui/app.slint:517
 msgid "Could not open draft: invalid account identifier"
 msgstr "无法打开草稿：账户标识无效"
 
-#: ui/app.slint:514
+#: ui/app.slint:518
 msgid "Connected account"
 msgstr "已连接账户"
 
-#: ui/app.slint:515
+#: ui/app.slint:519
 msgid "Could not open composer: {}"
 msgstr "无法打开邮件编辑器：{}"
 
-#: ui/app.slint:516
+#: ui/app.slint:520
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:517 ui/components/sidebar.slint:514
+#: ui/app.slint:521 ui/components/sidebar.slint:514
 msgid "On this device"
 msgstr ""
 
-#: ui/app.slint:518
+#: ui/app.slint:522
 msgid "Could not open composer: invalid account identifier"
 msgstr "无法打开邮件编辑器：账户标识无效"
 
 #. Reply and forward quotation headers, written into the draft.
-#: ui/app.slint:524
+#: ui/app.slint:528
 msgid "On {}, {} wrote:"
 msgstr "{}，{} 写道："
 
-#: ui/app.slint:525
+#: ui/app.slint:529
 msgid "{} wrote:"
 msgstr "{} 写道："
 
-#: ui/app.slint:526
+#: ui/app.slint:530
 msgid "Forwarded message"
 msgstr "转发的邮件"
 
-#: ui/app.slint:527
+#: ui/app.slint:531
 msgctxt "forwarded message header"
 msgid "From: {}"
 msgstr "发件人：{}"
 
-#: ui/app.slint:528
+#: ui/app.slint:532
 msgctxt "forwarded message header"
 msgid "Date: {}"
 msgstr "日期：{}"
 
-#: ui/app.slint:529
+#: ui/app.slint:533
 msgctxt "forwarded message header"
 msgid "Subject: {}"
 msgstr "主题：{}"
 
-#: ui/app.slint:530
+#: ui/app.slint:534
 msgctxt "forwarded message header"
 msgid "To: {}"
 msgstr "收件人：{}"
 
-#: ui/app.slint:531
+#: ui/app.slint:535
 msgid "Attach files to this email"
 msgstr "为此邮件添加附件"
 
-#: ui/app.slint:532
+#: ui/app.slint:536
 msgid "Could not add attachments: {}"
 msgstr "无法添加附件：{}"
 
-#: ui/app.slint:533
+#: ui/app.slint:537
 msgid "Added 1 attachment."
 msgstr "已添加 1 个附件。"
 
-#: ui/app.slint:534
+#: ui/app.slint:538
 msgid "Added {} attachments."
 msgstr "已添加 {} 个附件。"
 
-#: ui/app.slint:535
+#: ui/app.slint:539
 msgid ""
 "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB "
 "total limit)."
 msgstr "已添加 {} 个附件，跳过 {} 个（重复、无法读取或超过 25 MB 总量上限）。"
 
-#: ui/app.slint:536
+#: ui/app.slint:540
 msgid "Attachment removed."
 msgstr "附件已移除。"
 
-#: ui/app.slint:537
+#: ui/app.slint:541
 msgid "Choose the account this message should be sent from."
 msgstr "选择发送此邮件的账户。"
 
-#: ui/app.slint:538
+#: ui/app.slint:542
 msgid "Choose a verified sender identity for this message."
 msgstr "为此邮件选择已验证的发件人身份。"
 
-#: ui/app.slint:539
+#: ui/app.slint:543
 msgid "Connect an account before saving or sending mail."
 msgstr "请先连接账户再保存或发送邮件。"
 
-#: ui/app.slint:540
+#: ui/app.slint:544
 msgid "Message queued for delivery (action {})."
 msgstr "邮件已加入发送队列（操作 {}）。"
 
-#: ui/app.slint:541
+#: ui/app.slint:545
 msgid "Sending message…"
 msgstr "正在发送邮件…"
 
-#: ui/app.slint:542
+#: ui/app.slint:546
 msgid "Message sent."
 msgstr "邮件已发送。"
 
-#: ui/app.slint:543
+#: ui/app.slint:547
 msgid "Message was not sent: {} Your draft is preserved."
 msgstr "邮件未发送：{} 草稿已保留。"
 
-#: ui/app.slint:544
+#: ui/app.slint:548
 msgid "Draft saved locally (#{})."
 msgstr "草稿已保存到本地（#{}）。"
 
-#: ui/app.slint:545
+#: ui/app.slint:549
 msgid "Compose failed: {}"
 msgstr "撰写邮件失败：{}"
 
-#: ui/app.slint:546
+#: ui/app.slint:550
 msgid "Connect an account before managing email templates."
 msgstr "请先连接账户再管理邮件模板。"
 
-#: ui/app.slint:547
+#: ui/app.slint:551
 msgid "Could not load email templates: {}"
 msgstr "无法加载邮件模板：{}"
 
-#: ui/app.slint:548
+#: ui/app.slint:552
 msgid "Enter a template name."
 msgstr "请输入模板名称。"
 
-#: ui/app.slint:549
+#: ui/app.slint:553
 msgid "Add a subject or message to the template."
 msgstr "请为模板添加主题或正文。"
 
-#: ui/app.slint:550
+#: ui/app.slint:554
 msgid "Email template saved."
 msgstr "邮件模板已保存。"
 
-#: ui/app.slint:551
+#: ui/app.slint:555
 msgid "Could not save email template: {}"
 msgstr "无法保存邮件模板：{}"
 
-#: ui/app.slint:552
+#: ui/app.slint:556
 msgid "Email template deleted."
 msgstr "邮件模板已删除。"
 
-#: ui/app.slint:553
+#: ui/app.slint:557
 msgid "Could not delete email template: {}"
 msgstr "无法删除邮件模板：{}"
 
-#: ui/app.slint:554
+#: ui/app.slint:558
 msgid "Email template is no longer available."
 msgstr "邮件模板已不存在。"
 
-#: ui/app.slint:555
+#: ui/app.slint:559
 msgid "Email template inserted."
 msgstr "邮件模板已插入。"
 
-#: ui/app.slint:556
+#: ui/app.slint:560
 msgid "Email template inserted, but its usage could not be saved: {}"
 msgstr "邮件模板已插入，但无法记录其使用情况：{}"
 
-#: ui/app.slint:557
+#: ui/app.slint:561
 msgid "Choose a supported account type and connection security."
 msgstr ""
 
-#: ui/app.slint:558
+#: ui/app.slint:562
 msgid "IMAP port must be between 1 and 65535."
 msgstr "IMAP 端口必须在 1 到 65535 之间。"
 
-#: ui/app.slint:559
+#: ui/app.slint:563
 msgid "POP3 port must be between 1 and 65535."
 msgstr ""
 
-#: ui/app.slint:560
+#: ui/app.slint:564
 msgid "SMTP port must be between 1 and 65535."
 msgstr "SMTP 端口必须在 1 到 65535 之间。"
 
-#: ui/app.slint:561
+#: ui/app.slint:565
 msgid "Local mail data is unavailable. Retry startup."
 msgstr "本地邮件数据不可用，请重新启动。"
 
-#: ui/app.slint:562
+#: ui/app.slint:566
 msgid "Discovering JMAP and checking capabilities…"
 msgstr "正在发现 JMAP 并检查服务能力…"
 
-#: ui/app.slint:563
+#: ui/app.slint:567
 msgid "Certificate imported. Connect to verify the server."
 msgstr "证书已导入。请连接以验证服务器。"
 
-#: ui/app.slint:564
+#: ui/app.slint:568
 msgid "Could not load account preferences: {}"
 msgstr "无法加载账户偏好设置：{}"
 
-#: ui/app.slint:565
+#: ui/app.slint:569
 msgid ""
 "Your edited signature was preserved. Choose No signature to keep it as "
 "message text before inserting another."
@@ -1643,161 +1661,161 @@ msgstr ""
 "您编辑过的签名已保留。插入其他签名前，请选择“不使用签名”，以便将其保留为邮件"
 "正文。"
 
-#: ui/app.slint:566
+#: ui/app.slint:570
 msgid "Certificate import failed: {}"
 msgstr "证书导入失败：{}"
 
-#: ui/app.slint:567
+#: ui/app.slint:571
 msgid "Testing IMAP and SMTP connections…"
 msgstr "正在测试 IMAP 和 SMTP 连接…"
 
-#: ui/app.slint:568
+#: ui/app.slint:572
 msgid "Testing POP3 and SMTP connections…"
 msgstr ""
 
-#: ui/app.slint:573
+#: ui/app.slint:577
 msgid ""
 "Another browser authorization is already in progress; finish it or choose "
 "Cancel."
 msgstr "已有另一项浏览器授权正在进行，请完成它或选择“取消”。"
 
-#: ui/app.slint:574 ui/dialogs/settings-dialog.slint:1884
+#: ui/app.slint:578 ui/dialogs/settings-dialog.slint:1884
 #: ui/dialogs/settings-dialog.slint:1927 ui/views/onboarding-view.slint:161
 msgid "Add app keys in Sign-in settings to enable this provider."
 msgstr "请在“登录设置”中添加应用密钥以启用此服务商。"
 
-#: ui/app.slint:575
+#: ui/app.slint:579
 msgid "Choose Gmail or Outlook OAuth."
 msgstr "请选择 Gmail 或 Outlook OAuth。"
 
-#: ui/app.slint:576
+#: ui/app.slint:580
 msgid "Complete sign-in in your browser, or choose Cancel here."
 msgstr "请在浏览器中完成登录，或在此处选择“取消”。"
 
-#: ui/app.slint:577
+#: ui/app.slint:581
 msgid "Cancelling browser sign-in…"
 msgstr "正在取消浏览器登录…"
 
-#: ui/app.slint:578
+#: ui/app.slint:582
 msgid "Finishing browser sign-in…"
 msgstr "正在完成浏览器登录…"
 
-#: ui/app.slint:579
+#: ui/app.slint:583
 msgid "Could not use that browser address: {}"
 msgstr "无法使用该浏览器地址：{}"
 
-#: ui/app.slint:580
+#: ui/app.slint:584
 msgid "Calendar core is unavailable."
 msgstr "日历核心不可用。"
 
-#: ui/app.slint:581
+#: ui/app.slint:585
 msgid "Account no longer exists."
 msgstr "账户已不存在。"
 
-#: ui/app.slint:582
+#: ui/app.slint:586
 msgid "Authorize calendar access in your browser."
 msgstr "请在浏览器中授权日历访问。"
 
-#: ui/app.slint:583
+#: ui/app.slint:587
 msgid "OAuth app keys saved."
 msgstr "OAuth 应用密钥已保存。"
 
-#: ui/app.slint:584
+#: ui/app.slint:588
 msgid "{} OAuth settings saved."
 msgstr "{} OAuth 设置已保存。"
 
-#: ui/app.slint:585
+#: ui/app.slint:589
 msgid "OAuth settings failed: {}"
 msgstr "OAuth 设置失败：{}"
 
-#: ui/app.slint:586
+#: ui/app.slint:590
 msgid "Mail refresh failed: {}"
 msgstr "邮件刷新失败：{}"
 
-#: ui/app.slint:587
+#: ui/app.slint:591
 msgid "Mail filter failed: {}"
 msgstr "邮件筛选失败：{}"
 
-#: ui/app.slint:588
+#: ui/app.slint:592
 msgid "Mail pagination failed: {}"
 msgstr "邮件分页失败：{}"
 
-#: ui/app.slint:589
+#: ui/app.slint:593
 msgid "Could not mark message as read: {}"
 msgstr "无法将邮件标记为已读：{}"
 
-#: ui/app.slint:590 ui/views/mail-reading-pane.slint:196
+#: ui/app.slint:594 ui/views/mail-reading-pane.slint:196
 #: ui/views/mail-reading-pane.slint:1279
 msgid "Loading message…"
 msgstr "正在加载邮件…"
 
-#: ui/app.slint:596 ui/components/workspace-navigation.slint:787
+#: ui/app.slint:600 ui/components/workspace-navigation.slint:787
 #: ui/tray.slint:13 ui/tray.slint:14
 msgid "Flectar Mail"
 msgstr "Flectar Mail"
 
-#: ui/app.slint:1270 ui/app.slint:1283
+#: ui/app.slint:1274 ui/app.slint:1287
 msgid "Global Labels (local only)"
 msgstr "全局标签（仅本地）"
 
-#: ui/app.slint:2222
+#: ui/app.slint:2226
 msgid "Empty Trash?"
 msgstr "清空回收站？"
 
-#: ui/app.slint:2222 ui/views/files-view.slint:578
+#: ui/app.slint:2226 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr "永久删除？"
 
-#: ui/app.slint:2226
+#: ui/app.slint:2230
 msgid ""
 "Permanently delete all messages in Trash across every connected account?"
 msgstr "永久删除每个已连接帐户的回收站中的所有邮件？"
 
-#: ui/app.slint:2227
+#: ui/app.slint:2231
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr "是否永久删除此帐户的回收站中的所有邮件？"
 
-#: ui/app.slint:2229
+#: ui/app.slint:2233
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr "是否从回收站中永久删除选定的对话？"
 
-#: ui/app.slint:2230
+#: ui/app.slint:2234
 msgid "Permanently delete this conversation from Trash?"
 msgstr "是否从回收站中永久删除此对话？"
 
-#: ui/app.slint:2231 ui/components/calendar.slint:947
+#: ui/app.slint:2235 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr "此操作无法撤销。"
 
-#: ui/app.slint:2232
+#: ui/app.slint:2236
 msgid "Empty Trash"
 msgstr "清空回收站"
 
-#: ui/app.slint:2232 ui/views/files-view.slint:660
+#: ui/app.slint:2236 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr "永久删除"
 
-#: ui/app.slint:2406
+#: ui/app.slint:2410
 msgid "Mailbox startup failed"
 msgstr "邮箱启动失败"
 
-#: ui/app.slint:2412
+#: ui/app.slint:2416
 msgid "Flectar Mail could not open local storage"
 msgstr "Flectar Mail 无法打开本地存储"
 
-#: ui/app.slint:2425
+#: ui/app.slint:2429
 msgid "Diagnostic ID: {}"
 msgstr "诊断 ID：{}"
 
-#: ui/app.slint:2428
+#: ui/app.slint:2432
 msgid "Diagnostic ID {}"
 msgstr "诊断 ID {}"
 
-#: ui/app.slint:2433
+#: ui/app.slint:2437
 msgid "Retry"
 msgstr "重试"
 
-#: ui/app.slint:2441 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2445 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr "复制诊断信息"
 
@@ -2638,35 +2656,35 @@ msgstr "新建邮件"
 msgid "Account"
 msgstr "账户"
 
-#: ui/components/composer-fields.slint:332
+#: ui/components/composer-fields.slint:336
 msgid "To"
 msgstr "收件人"
 
-#: ui/components/composer-fields.slint:333
+#: ui/components/composer-fields.slint:337
 msgid "name@example.com · separate with commas"
 msgstr "name@example.com · 用逗号分隔"
 
-#: ui/components/composer-fields.slint:359
+#: ui/components/composer-fields.slint:363
 msgid "Cc"
 msgstr "抄送"
 
-#: ui/components/composer-fields.slint:360
+#: ui/components/composer-fields.slint:364
 msgid "Carbon copy"
 msgstr "抄送"
 
-#: ui/components/composer-fields.slint:370
+#: ui/components/composer-fields.slint:374
 msgid "Bcc"
 msgstr "密送"
 
-#: ui/components/composer-fields.slint:371
+#: ui/components/composer-fields.slint:375
 msgid "Blind carbon copy"
 msgstr "密送"
 
-#: ui/components/composer-fields.slint:459
+#: ui/components/composer-fields.slint:463
 msgid "Subject"
 msgstr "主题"
 
-#: ui/components/composer-fields.slint:471
+#: ui/components/composer-fields.slint:475
 msgid "What is this email about?"
 msgstr "这封邮件是关于什么的？"
 

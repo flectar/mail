@@ -32,6 +32,7 @@ mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
 mod mail_work;
+mod mailto_links;
 mod message_appearance;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
@@ -1588,16 +1589,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .build()?,
     );
     #[cfg(desktop)]
-    let background_launch = autostart::launched_in_background();
+    let launch_links = mailto_links::launch_links(std::env::args_os().skip(1));
+    // A mail link launch always shows the window, whatever else it says.
+    #[cfg(desktop)]
+    let background_launch = launch_links.is_none() && autostart::launched_in_background();
     #[cfg(desktop)]
     let mut instance = {
-        use single_instance::{Acquired, Request};
+        use single_instance::{Acquired, Activation, Request};
         let request = if background_launch {
             Request::Nothing
         } else {
-            Request::Show {
+            Request::Show(Activation {
                 activation_token: window_chrome::launch_activation_token(),
-            }
+                links: launch_links.clone().unwrap_or_default(),
+            })
         };
         match single_instance::acquire(&runtime, &platform.paths.data_dir, request) {
             Ok(Acquired::Primary(primary)) => Some(primary),
@@ -1796,12 +1801,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     #[cfg(desktop)]
     if let Some(instance) = instance.as_mut() {
         let app = app.as_weak();
-        instance.serve(&runtime, move |activation_token| {
+        instance.serve(&runtime, move |activation| {
             let _ = app.upgrade_in_event_loop(move |app| {
-                window_controller::activate(&app, activation_token);
+                window_controller::activate(&app, activation.activation_token);
+                mailto_links::open(&app, activation.links);
             });
         });
     }
+    // They open once the mail store is ready and the composer connected.
+    #[cfg(desktop)]
+    mailto_links::open(&app, launch_links.unwrap_or_default());
     // The launcher's token was meant for this window: it lets the desktop
     // focus it (Wayland) and ends the launch feedback (X11).
     #[cfg(desktop)]
@@ -4367,6 +4376,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     refresh_list_metadata(&app, &startup_state);
                     app.set_startup_hydrated(true);
                     app.set_startup_ready(true);
+                    mailto_links::open_pending_soon(&app);
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -6181,6 +6191,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    mailto_links::install(
+        &app,
+        mailto_links::Composer {
+            state: Rc::clone(&state),
+            runtime: Rc::clone(&runtime),
+            intent: Rc::clone(&compose_intent),
+        },
+    );
+    #[cfg(target_os = "macos")]
+    mailto_links::receive_from_macos(&app);
+
     let app_weak = app.as_weak();
     let state_for_message_compose = Rc::clone(&state);
     let runtime_for_message_compose = Rc::clone(&runtime);
@@ -6443,6 +6464,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 &contacts_for_close,
             );
             *intent_for_close.borrow_mut() = ComposeIntent::default();
+            mailto_links::open_pending_soon(&app);
         }
     });
 
@@ -6947,6 +6969,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_sync_status(message);
                 let _ =
                     refresh_from_source(&app, &state_for_compose, &runtime_for_compose, true, &[]);
+                mailto_links::open_pending_soon(&app);
             }
             Err(error) => {
                 let message = UiMessage::detail("Compose failed: {}", error);
@@ -6997,6 +7020,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         true,
                         &[],
                     );
+                    mailto_links::open_pending_soon(&app);
                 }
                 Err(error) => {
                     let message = UiMessage::detail(

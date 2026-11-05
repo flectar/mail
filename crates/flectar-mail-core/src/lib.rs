@@ -3341,6 +3341,25 @@ impl Core {
         Ok(detail)
     }
 
+    /// The stored message of `account_id` with this RFC Message-ID (with or
+    /// without angle brackets), so a mailto link's In-Reply-To can thread the
+    /// reply it starts.
+    pub async fn message_by_header_id(
+        &self,
+        account_id: i64,
+        message_id: &str,
+    ) -> Result<Option<i64>> {
+        let message_id = message_id.trim().trim_matches(['<', '>']).to_owned();
+        if message_id.is_empty() {
+            return Ok(None);
+        }
+        self.db
+            .read(move |conn| {
+                Ok(repo::messages::by_message_id(conn, account_id, &message_id)?.map(|row| row.id))
+            })
+            .await
+    }
+
     /// Newest message of `thread_id` that can be unsubscribed from, or None
     /// when the thread genuinely offers no list unsubscribe.
     ///
@@ -10372,6 +10391,51 @@ mod startup_connection_tests {
         let usage = core.db.cache_usage().await.unwrap();
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].role, "reader");
+    }
+}
+
+#[cfg(test)]
+mod message_by_header_id_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn finds_the_account_message_with_or_without_brackets() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "list@test.dev", "Topic", false);
+                conn.execute(
+                    "UPDATE messages SET message_id = 'abc.123@mail.test' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+
+        for header in [
+            "<abc.123@mail.test>",
+            "abc.123@mail.test",
+            " <abc.123@mail.test> ",
+        ] {
+            assert_eq!(
+                core.message_by_header_id(1, header).await.unwrap(),
+                Some(id)
+            );
+        }
+        assert_eq!(
+            core.message_by_header_id(2, "<abc.123@mail.test>")
+                .await
+                .unwrap(),
+            None,
+            "another account's message must not be found"
+        );
+        assert_eq!(core.message_by_header_id(1, "<>").await.unwrap(), None);
     }
 }
 

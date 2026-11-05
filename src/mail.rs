@@ -2018,6 +2018,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn message_by_header_id(
+        &self,
+        account_id: i64,
+        message_id: &str,
+    ) -> Result<Option<i64>, String> {
+        self.core
+            .message_by_header_id(account_id, message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn save_new_draft(&self, message: ComposeMessage<'_>) -> Result<i64, String> {
         self.save_draft(compose_args(message, false)?).await
     }
