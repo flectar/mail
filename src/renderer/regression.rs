@@ -310,8 +310,49 @@ fn scrolling_reuses_pixels_and_layout_with_a_bounded_cache() {
 
 #[test]
 fn exact_tile_boundary_has_only_one_overscan_tile() {
-    assert_eq!(desired_tile_range(0.0, 512.0, 4096.0), 0..=1);
-    assert_eq!(desired_tile_range(512.0, 512.0, 4096.0), 0..=2);
+    assert_eq!(
+        desired_tile_range(0.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        0..=1
+    );
+    assert_eq!(
+        desired_tile_range(512.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        0..=2
+    );
+}
+
+#[test]
+fn tiles_stay_near_512_device_pixels_at_every_scale() {
+    assert_eq!(email_tile_height(1.0), 512.0);
+    assert_eq!(email_tile_height(1.5), 512.0);
+    assert_eq!(email_tile_height(2.0), 256.0);
+    assert_eq!(email_tile_height(4.0), 128.0);
+    // Display scales up to 4 times zoom up to 3.
+    for step in 2..=48 {
+        let scale = step as f32 * 0.25;
+        let device_pixels = email_tile_height(scale) * scale;
+        assert!(
+            (256.0..=768.0).contains(&device_pixels),
+            "{scale}: {device_pixels}"
+        );
+    }
+}
+
+#[test]
+fn hidpi_tiles_are_opaque_rgb_and_512_device_pixels_tall() {
+    let mut r = renderer(&format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='height:110px;margin:0'>Scrollable words</p>".repeat(100)
+    ));
+    let frame = r.render_cpu_if_needed(520, 900, 2.0).unwrap().unwrap();
+    // 900 logical pixels need tiles 0 to 3 of 256; tile 4 is the overscan.
+    assert_eq!(frame.tiles.len(), 5);
+    for tile in &frame.tiles {
+        let pixels = tile.image.to_rgb8().expect("tiles are RGB");
+        assert_eq!((pixels.width(), pixels.height()), (1040, 512));
+    }
+    r.set_visible_region(2000.0, 900.0);
+    let frame = r.render_cpu_if_needed(520, 900, 2.0).unwrap().unwrap();
+    assert!(frame.tiles.len() <= 7);
 }
 
 #[test]
@@ -537,7 +578,7 @@ fn culled_text_tiles_match_a_full_surface() {
             if name == "cached-lines" {
                 assert!(email.paint_cache.line_count() >= 16);
             }
-            let mut full = render_to_buffer::<VelloCpuImageRenderer, _>(
+            let full = render_to_buffer::<VelloCpuImageRenderer, _>(
                 |scene| {
                     paint_scene(
                         scene,
@@ -552,10 +593,16 @@ fn culled_text_tiles_match_a_full_surface() {
                 tiled.width,
                 tiled.height,
             );
-            composite_over_canvas(&mut full, email.appearance.colors.canvas());
+            let full = flatten_over_canvas(
+                &full,
+                tiled.width,
+                tiled.height,
+                email.appearance.colors.canvas(),
+            );
+            let full = full.as_bytes();
             let mut offset = 0;
             for tile in &tiled.tiles {
-                let pixels = tile.image.to_rgba8().unwrap();
+                let pixels = tile.image.to_rgb8().unwrap();
                 let bytes = pixels.as_bytes();
                 let reference = &full[offset..offset + bytes.len()];
                 let different = bytes
@@ -723,16 +770,15 @@ fn find_handles_unicode_cycles_and_decoded_fragments() {
 #[test]
 fn premultiplied_alpha_matches_white_canvas() {
     let mut email=prepare_email_html("<body style='margin:0'><div style='width:50px;height:50px;background:rgba(255,0,0,0.5)'></div></body>").unwrap();
-    let mut pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
         |scene| paint_scene(scene, &mut email.document, 1.0, 100, 100, 0, 0),
         100,
         100,
     );
-    composite_over_canvas(&mut pixels, email.appearance.colors.canvas());
-    let pixel = &pixels[(10 * 100 + 10) * 4..(10 * 100 + 10) * 4 + 4];
-    assert_eq!(pixel[0], 255);
-    assert!((126..=129).contains(&pixel[1]));
-    assert_eq!(pixel[3], 255);
+    let pixels = flatten_over_canvas(&pixels, 100, 100, email.appearance.colors.canvas());
+    let pixel = pixels.as_slice()[10 * 100 + 10];
+    assert_eq!(pixel.r, 255);
+    assert!((126..=129).contains(&pixel.g));
 }
 
 #[test]
