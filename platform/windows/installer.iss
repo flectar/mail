@@ -48,7 +48,8 @@ Source: "..\..\target\package\windows\*"; DestDir: "{app}"; Flags: ignoreversion
 ; Offered as the default email app in Settings > Apps > Default apps. Only
 ; the user can make it the default, so the shared mailto key is left alone.
 ; The link is the whole command line after the option, as
-; src/mailto_links.rs requires.
+; src/mailto_links.rs requires. src/default_email_app.rs writes the same
+; layout under other names for the portable build.
 [Registry]
 Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto"; ValueType: string; ValueName: ""; ValueData: "Flectar Mail email link"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Flectar Mail email link"

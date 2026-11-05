@@ -186,6 +186,11 @@ fn register_desktop_events(app: &AppWindow) {
             winit::event::WindowEvent::Focused(focused) => {
                 let chrome = app.global::<WindowChrome>();
                 chrome.set_active(*focused);
+                // Back from the system settings, where the user may have
+                // changed what Settings shows.
+                if *focused && app.get_settings_open() {
+                    app.invoke_settings_shown();
+                }
                 #[cfg(linux_desktop)]
                 if *focused && chrome.get_integrated() {
                     linux::refresh(&app);

@@ -14,6 +14,8 @@ mod compose_editor;
 mod contacts;
 mod data_controller;
 mod date_format;
+#[cfg(desktop)]
+mod default_email_app;
 mod document_preview;
 pub mod documents;
 mod email_document;

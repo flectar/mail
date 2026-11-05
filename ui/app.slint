@@ -7,6 +7,7 @@ export { ZoomApi } from "components/zoom-controls.slint";
 export { RendererSettings } from "renderer-settings.slint";
 export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
+export { DefaultEmailApp } from "default-email-app.slint";
 import { AppIcon } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
@@ -320,6 +321,10 @@ export global I18n {
         if (key == "Closing the window will now quit Flectar Mail.") { return @tr("Closing the window will now quit Flectar Mail."); }
         if (key == "Could not save close behavior: {}") { return @tr("Could not save close behavior: {}", argument); }
         if (key == "Flectar Mail will start when you sign in.") { return @tr("Flectar Mail will start when you sign in."); }
+        if (key == "Flectar Mail is now your default email app.") { return @tr("Flectar Mail is now your default email app."); }
+        if (key == "Choose Flectar Mail for MAILTO in Windows Settings to finish.") { return @tr("Choose Flectar Mail for MAILTO in Windows Settings to finish."); }
+        if (key == "Windows no longer offers this copy for email links.") { return @tr("Windows no longer offers this copy for email links."); }
+        if (key == "Could not change the default email app: {}") { return @tr("Could not change the default email app: {}", argument); }
         if (key == "Flectar Mail will no longer start when you sign in.") { return @tr("Flectar Mail will no longer start when you sign in."); }
         if (key == "Could not change startup behavior: {}") { return @tr("Could not change startup behavior: {}", argument); }
         if (key == "Allow Flectar Mail under Login Items in System Settings to finish.") { return @tr("Allow Flectar Mail under Login Items in System Settings to finish."); }

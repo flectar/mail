@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -368,6 +369,42 @@ class ReleaseTests(unittest.TestCase):
             exec_lines = [line for line in desktop.splitlines() if line.startswith("Exec=")]
             self.assertEqual(exec_lines, [f'Exec="{installed}" %U', f'Exec="{installed}" mailto:'])
             self.assertIn("MimeType=x-scheme-handler/mailto;\n", desktop)
+
+    def test_windows_installer_registers_the_mail_link_handler_the_app_knows(self):
+        # The installer registers the installed copy; the app finds that
+        # registration, opens its Default apps page and writes the same
+        # layout for a portable copy.
+        root = SCRIPTS.parent
+        installer = (root / "platform/windows/installer.iss").read_text()
+        windows = (root / "src/default_email_app/windows.rs").read_text()
+        option = re.search(
+            r'MAILTO_OPTION: &str = "([^"]+)"', (root / "src/mailto_links.rs").read_text(),
+        ).group(1)
+        name, prog_id = re.search(
+            r'const INSTALLED: Registration = Registration \{\s*name: "([^"]+)",\s*prog_id: "([^"]+)"',
+            windows,
+        ).groups()
+        description = re.search(r'const DESCRIPTION: &str = "([^"]+)"', windows).group(1)
+        self.assertIn("\nChangesAssociations=yes\n", installer)
+        entries = {}
+        for line in installer.splitlines():
+            if not line.startswith("Root: HKA;"):
+                continue
+            fields = dict(
+                re.match(r'\s*(\w+): (?:"((?:[^"]|"")*)"|(\S+))', field).group(1, 2)
+                for field in line.split(";")[1:] if field.strip()
+            )
+            if "ValueName" in fields:
+                entries[(fields["Subkey"], fields["ValueName"])] = fields["ValueData"]
+        capabilities = rf"Software\Clients\Mail\{name}\Capabilities"
+        self.assertEqual(entries[(rf"Software\RegisteredApplications", name)], capabilities)
+        self.assertEqual(entries[(capabilities, "ApplicationName")], name)
+        self.assertEqual(entries[(capabilities, "ApplicationDescription")], description)
+        self.assertEqual(entries[(rf"{capabilities}\URLAssociations", "mailto")], prog_id)
+        self.assertEqual(
+            entries[(rf"Software\Classes\{prog_id}\shell\open\command", "")],
+            rf'""{{app}}\flectar-mail.exe"" {option} ""%1""',
+        )
 
     def test_linux_package_metadata(self):
         # Exercise the actual shell packagers and dpkg with a tiny existing ELF,
