@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-10-14 08:37+0000\n"
+"PO-Revision-Date: 2026-11-05 02:32+0000\n"
 "Last-Translator: Cyril Hansen <cyril.hansen@gmail.com>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
@@ -452,8 +452,7 @@ msgstr "Impossible d’enregistrer l’intervalle de synchronisation : {}"
 
 #: ui/app.slint:228
 msgid "Message-opening preference updated for this session."
-msgstr ""
-"Nouveau réglage d’ouverture des messages enregistré pour cette session."
+msgstr "Nouveau réglage d’ouverture des messages enregistré pour cette session."
 
 #: ui/app.slint:229
 msgid "Message-opening preference saved."
@@ -466,8 +465,7 @@ msgstr "Impossible d’enregistrer la préférence d’ouverture des messages :
 #: ui/app.slint:231
 #, fuzzy
 msgid "Contact suggestion preferences are active for this session."
-msgstr ""
-"Les préférences de suggestion de contacts s’appliquent à cette session."
+msgstr "Les préférences de suggestion de contacts s’appliquent à cette session."
 
 #: ui/app.slint:232
 msgid "Contact suggestion preferences saved."
@@ -475,8 +473,7 @@ msgstr "Préférences de suggestion de contacts enregistrées."
 
 #: ui/app.slint:233
 msgid "Could not save contact suggestion preferences: {}"
-msgstr ""
-"Impossible d’enregistrer les préférences de suggestion de contacts : {}"
+msgstr "Impossible d’enregistrer les préférences de suggestion de contacts : {}"
 
 #: ui/app.slint:234
 msgid "Contact storage is still starting. Try again shortly."
@@ -700,8 +697,7 @@ msgstr ""
 #: ui/app.slint:281
 #, fuzzy
 msgid "Profile changes require local mail data."
-msgstr ""
-"La modification des profils nécessite les données locales des messages."
+msgstr "La modification des profils nécessite les données locales des messages."
 
 #: ui/app.slint:282
 msgid "Profile saved."
@@ -2200,8 +2196,7 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:107
 #, fuzzy
 msgid "The server refused the last message from this address: {}"
-msgstr ""
-"Le serveur a refusé le dernier message envoyé depuis cette adresse : {}"
+msgstr "Le serveur a refusé le dernier message envoyé depuis cette adresse : {}"
 
 #: ui/components/account-mail-preferences.slint:107
 #, fuzzy
@@ -7575,8 +7570,7 @@ msgstr "Inclure le contenu des dossiers"
 #: ui/views/files-view.slint:629
 #, fuzzy
 msgid "Locks expire after 5 minutes unless renewed."
-msgstr ""
-"Les verrous expirent au bout de 5 minutes s’ils ne sont pas renouvelés."
+msgstr "Les verrous expirent au bout de 5 minutes s’ils ne sont pas renouvelés."
 
 #: ui/views/files-view.slint:633
 #, fuzzy
