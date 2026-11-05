@@ -344,6 +344,17 @@ pub(super) fn apply_cpu_frame(app: &AppWindow, rendered: RenderedEmail) {
     }
 }
 
+/// Show only the tiles the renderer still holds after it released memory.
+pub(super) fn retain_email_tiles(app: &AppWindow, tiles: Vec<renderer::RenderedEmailTile>) {
+    let tiles: Vec<_> = tiles.into_iter().map(slint_email_tile).collect();
+    let retained = app.get_email_tiles();
+    if let Some(model) = retained.as_any().downcast_ref::<VecModel<EmailTile>>() {
+        crate::reconcile_model_rows_by(model, tiles, |tile| tile.y.to_bits(), PartialEq::eq);
+    } else {
+        app.set_email_tiles(ModelRc::new(VecModel::from(tiles)));
+    }
+}
+
 pub(super) fn open_email_link(opener: &ExternalUrlOpener, url: &str) -> Result<(), String> {
     let Some((scheme, _)) = url.trim().split_once(':') else {
         return Err("only absolute links can be opened".into());

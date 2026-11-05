@@ -203,6 +203,9 @@ pub struct GpuEmailRenderer {
     tiles: BTreeMap<u32, RenderedEmailTile>,
     /// Height of `tiles` in document pixels; see `email_tile_height`.
     tile_height: f32,
+    /// No overscan is painted before this, after the system reported memory
+    /// pressure.
+    low_memory_until: Option<Instant>,
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     resource_runtime: Option<tokio::runtime::Handle>,
@@ -263,6 +266,7 @@ impl Default for GpuEmailRenderer {
             visible_height: INITIAL_HEIGHT as f32,
             tiles: BTreeMap::new(),
             tile_height: EMAIL_TILE_HEIGHT,
+            low_memory_until: None,
             pointer_down: false,
             last_pointer_down: None,
             resource_runtime: None,
@@ -587,6 +591,49 @@ impl GpuEmailRenderer {
         self.tiles.clear();
     }
 
+    /// Under memory pressure: keep the document and the tiles on screen, and
+    /// drop the overscan tiles, the painter with its image cache, and the paint
+    /// cache. Until `until` no overscan is painted, as WebKit keeps its tiles
+    /// to the visible area under pressure. Returns whether tiles were dropped.
+    pub fn release_caches(&mut self, until: Instant) -> bool {
+        self.low_memory_until = Some(until);
+        let visible = desired_tile_range(
+            self.visible_scroll_y,
+            self.visible_height,
+            self.content_height,
+            self.tile_height,
+            0,
+        );
+        let before = self.tiles.len();
+        self.tiles.retain(|index, _| visible.contains(index));
+        self.cpu_painter = None;
+        if let Some(email) = self.email.as_mut() {
+            email.paint_cache.clear();
+        }
+        #[cfg(feature = "gpu-renderer")]
+        {
+            self.scene = vello::Scene::new();
+        }
+        self.tiles.len() != before
+    }
+
+    /// The tiles held now, for the view after `release_caches`.
+    pub fn retained_tiles(&self) -> Vec<RenderedEmailTile> {
+        self.tiles.values().cloned().collect()
+    }
+
+    /// Tiles painted beyond each edge of the viewport.
+    fn overscan(&self) -> u32 {
+        if self
+            .low_memory_until
+            .is_some_and(|until| Instant::now() < until)
+        {
+            0
+        } else {
+            EMAIL_TILE_OVERSCAN
+        }
+    }
+
     /// Update the Slint scroll window. Rendering is requested only when the
     /// viewport crosses into a tile that is not already in the bounded cache.
     pub fn set_visible_region(&mut self, scroll_y: f32, viewport_height: f32) -> bool {
@@ -601,6 +648,7 @@ impl GpuEmailRenderer {
             viewport_height,
             self.content_height,
             self.tile_height,
+            self.overscan(),
         );
         let missing = desired
             .clone()
@@ -622,6 +670,7 @@ impl GpuEmailRenderer {
             self.visible_height,
             self.content_height,
             self.tile_height,
+            self.overscan(),
         );
         let window = (
             email.document.id(),
@@ -885,6 +934,7 @@ impl GpuEmailRenderer {
         logical_height: u32,
         scale_factor: f32,
     ) -> Result<Option<RenderedEmail>, String> {
+        let overscan = self.overscan();
         let _runtime = self
             .resource_runtime
             .as_ref()
@@ -970,6 +1020,7 @@ impl GpuEmailRenderer {
             self.visible_height.min(logical_height.max(1) as f32),
             self.content_height,
             self.tile_height,
+            overscan,
         );
         self.tiles
             .retain(|index, _| wanted.clone().any(|wanted| wanted == *index));
@@ -1071,6 +1122,7 @@ impl GpuEmailRenderer {
         logical_height: f32,
         scale_factor: f32,
     ) -> Result<Option<RenderedEmail>, String> {
+        let overscan = self.overscan();
         let Some(email) = self.email.as_mut() else {
             return Ok(None);
         };
@@ -1149,6 +1201,7 @@ impl GpuEmailRenderer {
             self.visible_height.min(logical_height),
             self.content_height,
             self.tile_height,
+            overscan,
         );
         self.tiles
             .retain(|index, _| wanted.clone().any(|wanted| wanted == *index));
@@ -1563,14 +1616,15 @@ fn desired_tile_range(
     viewport_height: f32,
     content_height: f32,
     tile_height: f32,
+    overscan: u32,
 ) -> std::ops::RangeInclusive<u32> {
     let last = ((content_height.max(1.0) / tile_height).ceil() as u32).saturating_sub(1);
     let first_visible = (scroll_y.max(0.0) / tile_height).floor() as u32;
     let last_visible = (((scroll_y.max(0.0) + viewport_height.max(1.0)) / tile_height).ceil()
         as u32)
         .saturating_sub(1);
-    let first = first_visible.saturating_sub(EMAIL_TILE_OVERSCAN).min(last);
-    let end = last_visible.saturating_add(EMAIL_TILE_OVERSCAN).min(last);
+    let first = first_visible.saturating_sub(overscan).min(last);
+    let end = last_visible.saturating_add(overscan).min(last);
     first..=end.max(first)
 }
 

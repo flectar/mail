@@ -311,13 +311,41 @@ fn scrolling_reuses_pixels_and_layout_with_a_bounded_cache() {
 #[test]
 fn exact_tile_boundary_has_only_one_overscan_tile() {
     assert_eq!(
-        desired_tile_range(0.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        desired_tile_range(0.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT, EMAIL_TILE_OVERSCAN),
         0..=1
     );
     assert_eq!(
-        desired_tile_range(512.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT),
+        desired_tile_range(512.0, 512.0, 4096.0, EMAIL_TILE_HEIGHT, EMAIL_TILE_OVERSCAN),
         0..=2
     );
+}
+
+#[test]
+fn memory_pressure_keeps_only_the_visible_tiles_until_it_passes() {
+    let mut r = renderer(&format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='height:110px;margin:0'>Scrollable words</p>".repeat(100)
+    ));
+    let tiles = |r: &GpuEmailRenderer| r.tiles.keys().copied().collect::<Vec<_>>();
+    r.set_visible_region(2000.0, 900.0);
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    // Tiles 3 to 5 show 2000-2900; 2 and 6 are overscan.
+    assert_eq!(tiles(&r), [2, 3, 4, 5, 6]);
+
+    assert!(r.release_caches(Instant::now() + Duration::from_secs(600)));
+    assert_eq!(tiles(&r), [3, 4, 5]);
+    assert!(r.cpu_painter.is_none());
+    assert_eq!(r.retained_tiles().len(), 3);
+    // Scrolling paints what it reveals, still without overscan.
+    r.set_visible_region(2100.0, 900.0);
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    assert_eq!(tiles(&r), [4, 5]);
+
+    // Once the pressure window has passed, overscan comes back.
+    r.release_caches(Instant::now());
+    assert!(r.set_visible_region(2100.0, 900.0));
+    r.render_cpu_if_needed(520, 900, 1.0).unwrap();
+    assert_eq!(tiles(&r), [3, 4, 5, 6]);
 }
 
 #[test]
