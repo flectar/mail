@@ -6340,6 +6340,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             *intent_for_message_compose.borrow_mut() = ComposeIntent {
                 mode: draft.mode,
                 in_reply_to_message_id: draft.in_reply_to_message_id,
+                in_reply_to_header: draft.in_reply_to_header,
                 draft_id: draft.draft_id,
             };
             app.set_compose_mode("draft".into());
@@ -6912,6 +6913,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 attachments: &attachments,
                 mode: intent.mode.as_str(),
                 in_reply_to_message_id: intent.in_reply_to_message_id,
+                in_reply_to_header: intent.in_reply_to_header.as_deref(),
             })) {
                 Ok(queued) => {
                     // Keep the exact saved draft attached to this composer so
@@ -6955,6 +6957,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 attachments: &attachments,
                 mode: intent.mode.as_str(),
                 in_reply_to_message_id: intent.in_reply_to_message_id,
+                in_reply_to_header: intent.in_reply_to_header.as_deref(),
             }))
             .map(|draft_id| UiMessage::detail("Draft saved locally (#{}).", draft_id));
         match result {

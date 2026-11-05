@@ -213,6 +213,7 @@ async fn offline_actions_queue_locally_and_survive_restart() {
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: vec![],
         })
         .await

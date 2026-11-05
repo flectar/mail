@@ -100,6 +100,13 @@ mod inline_cid_rewrite_tests {
     }
 }
 
+/// A draft's stored reply Message-ID: one valid id, without angle brackets,
+/// as the `message_id` column keeps them.
+fn reply_header(value: &str) -> Option<String> {
+    let id = mailto::message_id(value)?;
+    Some(id.trim_matches(['<', '>']).to_owned())
+}
+
 fn send_start_expired(now: i64, observed_at: i64, not_before: Option<i64>) -> bool {
     let timeout_ms = i64::try_from(SEND_START_TIMEOUT.as_millis()).unwrap_or(i64::MAX);
     now >= not_before.unwrap_or(observed_at).saturating_add(timeout_ms)
@@ -4697,10 +4704,21 @@ impl Core {
                             sender_verification: Default::default(),
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
+                        let in_reply_to_header = args
+                            .in_reply_to_message_id
+                            .is_none()
+                            .then(|| args.in_reply_to_header.as_deref().and_then(reply_header))
+                            .flatten();
                         tx.execute(
-                            "INSERT INTO drafts_meta (message_id, mode, in_reply_to_message_id)
-                             VALUES (?1, ?2, ?3)",
-                            rusqlite::params![id, args.mode, args.in_reply_to_message_id],
+                            "INSERT INTO drafts_meta
+                                    (message_id, mode, in_reply_to_message_id, in_reply_to_header)
+                             VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![
+                                id,
+                                args.mode,
+                                args.in_reply_to_message_id,
+                                in_reply_to_header
+                            ],
                         )?;
                         id
                     }
@@ -4820,7 +4838,7 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft
+                                m.is_draft, dm.in_reply_to_header
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -4846,6 +4864,7 @@ impl Core {
                                     body_html: row.get(8)?,
                                     mode: row.get(9)?,
                                     in_reply_to_message_id: row.get(10)?,
+                                    in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
                                 },
                                 is_draft,
@@ -6801,6 +6820,7 @@ impl Core {
                 body_html: None,
                 mode: "new".into(),
                 in_reply_to_message_id: None,
+                in_reply_to_header: None,
                 attachments: vec![DraftAttachmentIn {
                     file_path: tmp_path.to_string_lossy().into_owned(),
                     filename: "invite.ics".into(),
@@ -10437,6 +10457,89 @@ mod message_by_header_id_tests {
         );
         assert_eq!(core.message_by_header_id(1, "<>").await.unwrap(), None);
     }
+
+    #[tokio::test]
+    async fn a_reply_to_an_unstored_message_keeps_its_message_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let parent = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "list@test.dev", "Topic", false);
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let draft = |in_reply_to_message_id, header: &str| SaveDraftArgs {
+            draft_id: None,
+            account_id: 1,
+            from: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Re: Topic".into(),
+            body_text: "body".into(),
+            body_html: None,
+            mode: "reply".into(),
+            in_reply_to_message_id,
+            in_reply_to_header: Some(header.into()),
+            attachments: Vec::new(),
+        };
+        let headers = |id| {
+            let core = &core;
+            async move {
+                core.db
+                    .read(move |conn| repo::messages::draft_reply_headers(conn, id))
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let unstored = core
+            .save_draft(draft(None, "<1.2@lists.test>"))
+            .await
+            .unwrap();
+        assert_eq!(
+            core.get_draft(unstored)
+                .await
+                .unwrap()
+                .in_reply_to_header
+                .as_deref(),
+            Some("1.2@lists.test")
+        );
+        assert_eq!(
+            headers(unstored).await,
+            (
+                vec!["1.2@lists.test".to_owned()],
+                Some("1.2@lists.test".to_owned())
+            )
+        );
+        // A stored parent supplies the headers; the id is not kept.
+        let stored = core
+            .save_draft(draft(Some(parent), "<1.2@lists.test>"))
+            .await
+            .unwrap();
+        assert_eq!(
+            core.get_draft(stored).await.unwrap().in_reply_to_header,
+            None
+        );
+        let parent_header = core
+            .db
+            .read(move |conn| Ok(repo::messages::get_row(conn, parent)?.unwrap().message_id))
+            .await
+            .unwrap();
+        assert!(parent_header.is_some());
+        assert_eq!(headers(stored).await.1, parent_header);
+        // Anything that is not one message id is dropped.
+        let invalid = core
+            .save_draft(draft(None, "<a b@c>\r\nBcc: x@y"))
+            .await
+            .unwrap();
+        assert_eq!(headers(invalid).await, (Vec::new(), None));
+    }
 }
 
 #[cfg(test)]
@@ -10501,6 +10604,7 @@ mod draft_staging_tests {
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: vec![DraftAttachmentIn {
                 file_path: source.to_string_lossy().into_owned(),
                 filename: filename.into(),
@@ -10556,6 +10660,7 @@ mod draft_staging_tests {
             body_html: None,
             mode: "reply".into(),
             in_reply_to_message_id: Some(parent),
+            in_reply_to_header: None,
             attachments: Vec::new(),
         };
         let thread_of = |message_id: i64| {

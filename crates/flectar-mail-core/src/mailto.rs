@@ -223,7 +223,7 @@ fn is_invisible_format(c: char) -> bool {
 }
 
 /// The first `<id@domain>` in `value`. Bare ids get their brackets.
-fn message_id(value: &str) -> Option<String> {
+pub(crate) fn message_id(value: &str) -> Option<String> {
     let value = value.trim();
     let id = match value.strip_prefix('<') {
         Some(rest) => rest.split_once('>')?.0,
