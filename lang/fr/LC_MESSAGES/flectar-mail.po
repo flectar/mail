@@ -4,7 +4,7 @@ msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
 "PO-Revision-Date: 2026-11-05 02:32+0000\n"
-"Last-Translator: Anonymous <noreply@weblate.org>\n"
+"Last-Translator: llayz46 <layzer@outlook.fr>\n"
 "Language-Team: French <https://translate.flectar.com/projects/flectar-mail/"
 "mail/fr/>\n"
 "Language: fr\n"
@@ -292,7 +292,6 @@ msgid "AM"
 msgstr "AM"
 
 #: ui/app.slint:153 ui/views/mail-list-pane.slint:603
-#, fuzzy
 msgid "Yesterday"
 msgstr "Hier"
 
