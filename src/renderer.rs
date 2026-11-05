@@ -838,7 +838,7 @@ impl GpuEmailRenderer {
                 .values()
                 .map(|tile| {
                     let size = tile.image.size();
-                    u64::from(size.width) * u64::from(size.height) * 4
+                    u64::from(size.width) * u64::from(size.height) * 3
                 })
                 .sum();
             eprintln!(
@@ -1321,8 +1321,7 @@ fn render_cpu_tile_cached(
     if physical_width > 16384 || physical_tile_height > 8192 {
         return Err("Email surface exceeds rendering limits".into());
     }
-    let mut pixels =
-        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(physical_width, physical_tile_height);
+    let mut rgba = vec![0; physical_width as usize * physical_tile_height as usize * 4];
     if painter.is_none() {
         *painter = Some(VelloCpuImageRenderer::with_image_cache_config(
             physical_width,
@@ -1368,14 +1367,18 @@ fn render_cpu_tile_cached(
                 scene_time = start.elapsed();
             }
         },
-        pixels.make_mut_bytes(),
+        &mut rgba,
     );
     email.document.set_viewport_scroll(DomPoint::ZERO);
     let rendered = start.map(|start| start.elapsed());
 
-    // Blitz may leave pixels beyond the document's own painted boxes
-    // transparent. Every tile represents an opaque browser canvas.
-    composite_over_canvas(pixels.make_mut_bytes(), email.appearance.colors.canvas());
+    let pixels = flatten_over_canvas(
+        &rgba,
+        physical_width,
+        physical_tile_height,
+        email.appearance.colors.canvas(),
+    );
+    drop(rgba);
     if let (Some(start), Some(rendered)) = (start, rendered) {
         eprintln!(
             "email tile {index}: scene+encode={:.2}ms raster+cache={:.2}ms composite={:.2}ms",
@@ -1385,7 +1388,7 @@ fn render_cpu_tile_cached(
         );
     }
     Ok(RenderedEmailTile {
-        image: slint::Image::from_rgba8(pixels),
+        image: slint::Image::from_rgb8(pixels),
         y: logical_y / logical_width,
         height: logical_tile_height / logical_width,
     })
@@ -1557,20 +1560,28 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
         .clamp(MIN_EMAIL_SURFACE_HEIGHT, MAX_EMAIL_SURFACE_HEIGHT)
 }
 
-fn composite_over_canvas(rgba: &mut [u8], background: blitz_dom::util::Color) {
+/// Blitz may leave pixels beyond the document's own painted boxes
+/// transparent, while every tile represents an opaque browser canvas. Flatten
+/// the painter's premultiplied RGBA over the canvas colour into RGB: an opaque
+/// tile needs no alpha byte, a quarter of its memory. Slint draws RGB images
+/// as they are, and keeps its own opaque decoded images in this format.
+fn flatten_over_canvas(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    background: blitz_dom::util::Color,
+) -> slint::SharedPixelBuffer<slint::Rgb8Pixel> {
     let [r, g, b, _] = background.components;
     let canvas = [r, g, b].map(|channel| (channel * 255.0).round() as u16);
-    for pixel in rgba.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(pixel[3]);
-        if alpha < 255 {
-            let inverse = 255 - alpha;
-            for (channel, background) in pixel[..3].iter_mut().zip(canvas) {
-                *channel =
-                    (u16::from(*channel) + (background * inverse + 127) / 255).min(255) as u8;
-            }
-            pixel[3] = 255;
-        }
+    let mut rgb = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
+    for (out, pixel) in rgb.make_mut_slice().iter_mut().zip(rgba.as_chunks::<4>().0) {
+        let inverse = 255 - u16::from(pixel[3]);
+        let [r, g, b] = [0, 1, 2].map(|channel| {
+            (u16::from(pixel[channel]) + (canvas[channel] * inverse + 127) / 255).min(255) as u8
+        });
+        *out = slint::Rgb8Pixel { r, g, b };
     }
+    rgb
 }
 
 /// Parse sanitized email HTML into a retained Blitz DOM. The DOM is painted
@@ -2092,8 +2103,8 @@ fn painted_point(document: &HtmlDocument, mut id: NodeId, mut x: f32, mut y: f32
 #[cfg(test)]
 mod tests {
     use super::{
-        GpuEmailRenderer, InputModifiers, VelloCpuImageRenderer, composite_over_canvas,
-        paint_scene, prepare_email_html, render_prepared_cpu, render_to_buffer,
+        GpuEmailRenderer, InputModifiers, VelloCpuImageRenderer, flatten_over_canvas, paint_scene,
+        prepare_email_html, render_prepared_cpu, render_to_buffer,
     };
     use crate::mail::fixtures;
 
@@ -2243,13 +2254,13 @@ mod tests {
     }
 
     #[test]
-    fn software_canvas_is_composited_over_opaque_white() {
-        let mut rgba = vec![0, 0, 0, 0, 200, 100, 50, 128];
-        composite_over_canvas(&mut rgba, blitz_dom::util::Color::WHITE);
+    fn software_canvas_is_flattened_over_opaque_white() {
+        let rgba = [0, 0, 0, 0, 200, 100, 50, 128];
+        let rgb = flatten_over_canvas(&rgba, 2, 1, blitz_dom::util::Color::WHITE);
+        let [blank, blended] = [rgb.as_slice()[0], rgb.as_slice()[1]];
 
-        assert_eq!(&rgba[..4], &[255, 255, 255, 255]);
-        assert_eq!(rgba[7], 255);
-        assert!(rgba[4] > 200 && rgba[5] > 100 && rgba[6] > 50);
+        assert_eq!(blank, slint::Rgb8Pixel::new(255, 255, 255));
+        assert!(blended.r > 200 && blended.g > 100 && blended.b > 50);
     }
 
     #[test]
