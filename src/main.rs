@@ -2737,7 +2737,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let runtime_for_dates = Rc::clone(&runtime);
     let calendar_for_dates = Rc::clone(&calendar_state);
     let contacts_for_dates = Rc::clone(&contact_state);
-    date_format::on_change(move || {
+    app.on_date_formats_changed(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
@@ -2748,6 +2748,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             Local::now().date_naive(),
         );
         apply_contact_rows(&app, &contacts_for_dates);
+        files_controller::refresh_dates(&app);
     });
 
     let app_weak = app.as_weak();

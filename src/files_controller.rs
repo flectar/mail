@@ -53,23 +53,6 @@ pub(crate) fn register(
         }));
         crate::platform::install_preview_lifecycle();
     }
-    let weak = app.as_weak();
-    date_format::on_change(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let rows = app.global::<FilesUi>().get_rows();
-        let formats = date_format::current();
-        for index in 0..rows.row_count() {
-            if let Some(mut row) = rows.row_data(index) {
-                let date = file_date(&formats, &row.iso_date);
-                if row.date != date {
-                    row.date = date;
-                    rows.set_row_data(index, row);
-                }
-            }
-        }
-    });
     let view_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let directory = Arc::new(Mutex::new((
         (0usize, 0u64),
@@ -610,6 +593,21 @@ fn file_date(formats: &DateFormats, iso_date: &str) -> SharedString {
     chrono::NaiveDate::parse_from_str(iso_date, "%Y-%m-%d")
         .map(|date| formats.date(DateStyle::Medium, date).into())
         .unwrap_or_default()
+}
+
+/// Rewrites the listed files' dates after the date formats changed.
+pub(crate) fn refresh_dates(app: &AppWindow) {
+    let rows = app.global::<FilesUi>().get_rows();
+    let formats = date_format::current();
+    for index in 0..rows.row_count() {
+        if let Some(mut row) = rows.row_data(index) {
+            let date = file_date(&formats, &row.iso_date);
+            if row.date != date {
+                row.date = date;
+                rows.set_row_data(index, row);
+            }
+        }
+    }
 }
 
 impl Snapshot {
