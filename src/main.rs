@@ -106,8 +106,8 @@ use flectar_mail_core::models::{
 #[cfg(test)]
 use mail::fixture_messages;
 use mail::{
-    ComposeMessage, ComposeSource, CoreMailSource, MailCursor, MailMessage, MailTarget,
-    MailboxEntry, display_preview,
+    ComposeMessage, ComposeSource, CoreMailSource, MailCursor, MailMessage, MailMetadata,
+    MailTarget, MailboxEntry, SidebarBadges, display_preview,
 };
 use mail_groups::{
     MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
@@ -621,6 +621,7 @@ struct InboxState {
     mail_groups: MailGroupState,
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
+    sidebar_badges: SidebarBadges,
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
@@ -1142,6 +1143,7 @@ impl InboxState {
             using_core: false,
             mailboxes: Vec::new(),
             unified_mailboxes: Vec::new(),
+            sidebar_badges: SidebarBadges::default(),
             mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from([
@@ -1236,6 +1238,14 @@ impl InboxState {
             .filter(|account| self.shows_account(account.id))
             .cloned()
             .collect()
+    }
+
+    /// Takes the sidebar's mailboxes and badges from fresh metadata.
+    fn set_mail_metadata(&mut self, metadata: MailMetadata) {
+        self.mailboxes = metadata.mailboxes;
+        self.unified_mailboxes = metadata.unified_mailboxes;
+        self.sidebar_badges = metadata.sidebar_badges;
+        self.inbox_count = metadata.inbox_count;
     }
 
     /// The accounts a manual check for new mail covers in the current view:
@@ -3374,9 +3384,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 } else if navigate {
                     state.set_scope(metadata.scope);
                 }
-                state.mailboxes = metadata.mailboxes;
-                state.unified_mailboxes = metadata.unified_mailboxes;
-                state.inbox_count = metadata.inbox_count;
+                state.set_mail_metadata(metadata);
                 if let Some(parent_id) = update.reveal_parent_id {
                     state.initialized_sidebar_folders.insert(parent_id);
                     state.collapsed_folder_ids.remove(&parent_id);
@@ -3710,9 +3718,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     let local_mail = metadata.local_mail;
                     let local_mail_changed =
                         local_mail != state.local_mail.map(|local| local.account_id);
-                    state.mailboxes = metadata.mailboxes;
-                    state.unified_mailboxes = metadata.unified_mailboxes;
-                    state.inbox_count = metadata.inbox_count;
+                    state.set_mail_metadata(metadata);
                     drop(state);
                     if local_mail_changed {
                         // Its section is named at once; its size follows.
@@ -4408,9 +4414,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     Ok(metadata) => {
                         {
                             let mut state = startup_state.borrow_mut();
-                            state.mailboxes = metadata.mailboxes;
-                            state.unified_mailboxes = metadata.unified_mailboxes;
-                            state.inbox_count = metadata.inbox_count;
+                            state.set_mail_metadata(metadata);
                         }
                         refresh_list_metadata(&app, &startup_state);
                     }
@@ -4798,9 +4802,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let current_page = {
                     let mut state = ui_task_state.borrow_mut();
                     if let Some(metadata) = removal.metadata.take().filter(|_| state.has_mail()) {
-                        state.mailboxes = metadata.mailboxes;
-                        state.unified_mailboxes = metadata.unified_mailboxes;
-                        state.inbox_count = metadata.inbox_count;
+                        state.set_mail_metadata(metadata);
                     }
                     let current = removal.scope == state.scope && removal.query == state.query;
                     let has_page = removal.page.is_some();
@@ -5382,9 +5384,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 core.account_revision() == metadata.account_revision
                             })
                         }) {
-                            state.mailboxes = metadata.mailboxes;
-                            state.unified_mailboxes = metadata.unified_mailboxes;
-                            state.inbox_count = metadata.inbox_count;
+                            state.set_mail_metadata(metadata);
                         }
                     }
                     if let Err(error) =

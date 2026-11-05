@@ -31,7 +31,7 @@ fn mailbox(scope: Scope, folder_id: i64, label: &str) -> MailboxEntry {
         detail: String::new(),
         avatar: String::new(),
         is_account: false,
-        count: String::new(),
+        count: 0,
     }
 }
 

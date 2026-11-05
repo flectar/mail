@@ -387,6 +387,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: @tr("Important");
+                        count: entry.mailbox.count;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Important";
                         mail-drop-enabled: true;
@@ -407,6 +408,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: @tr("Other");
+                        count: entry.mailbox.count;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Other";
                         mail-drop-enabled: true;
@@ -427,6 +429,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: entry.label.name;
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Category:" + entry.label.id;
@@ -469,6 +472,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.label.name;
                         accessible-name: @tr("Global label {}", entry.label.name);
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         label-id: entry.label.id;
@@ -519,6 +523,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         avatar-image: entry.mailbox.avatar_image;
                         has-avatar-image: entry.mailbox.has_avatar;
                         has-avatar: !self.local;
+                        count: entry.mailbox.count;
                         icon: @image-url("../icons/lucide/filled/folders.svg");
                         sidebar-background: root.background-color;
                         hover-background: root.hover-background;
@@ -634,6 +639,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.label.display_name;
                         label-path: entry.label.name;
                         accessible-name: @tr("{} label, {} account", entry.label.name, entry.label.account_name);
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent
                             + entry.label.depth * SidebarStyle.branch-indent;

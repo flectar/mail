@@ -394,7 +394,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 limit: 50,
             };
             Ok(json!({
-                "inbox_badge": repo::counts::inbox_badge_query_plan(conn)?,
+                "badges": repo::counts::badge_query_plan(
+                    conn,
+                    flectar_mail_core::models::MailGrouping::Conversations,
+                )?,
                 "inbox_list": repo::threads::list_query_plan(conn, &args)?,
             }))
         })

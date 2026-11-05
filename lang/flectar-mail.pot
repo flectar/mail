@@ -1460,8 +1460,8 @@ msgstr ""
 msgid "Add an account to send mail."
 msgstr ""
 
-#: ui/app.slint:517 ui/components/sidebar.slint:516
-#: ui/app.slint:517 ui/components/sidebar.slint:516
+#: ui/app.slint:517 ui/components/sidebar.slint:520
+#: ui/app.slint:517 ui/components/sidebar.slint:520
 msgid "On this device"
 msgstr ""
 
@@ -3144,13 +3144,13 @@ msgstr ""
 msgid "Expand folder"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:398
-#: ui/components/sidebar-controls.slint:398 ui/dialogs/settings-dialog.slint:2394
-#: ui/components/sidebar-controls.slint:398 ui/dialogs/settings-dialog.slint:2394
+#: ui/components/sidebar-controls.slint:409
+#: ui/components/sidebar-controls.slint:409 ui/dialogs/settings-dialog.slint:2394
+#: ui/components/sidebar-controls.slint:409 ui/dialogs/settings-dialog.slint:2394
 msgid "Check for new mail"
 msgstr ""
 
-#: ui/components/sidebar-controls.slint:404
+#: ui/components/sidebar-controls.slint:415
 msgid "Account settings"
 msgstr ""
 
@@ -3195,40 +3195,40 @@ msgstr ""
 msgid "Important"
 msgstr ""
 
-#: ui/components/sidebar.slint:409 ui/dialogs/settings-dialog.slint:272
+#: ui/components/sidebar.slint:410 ui/dialogs/settings-dialog.slint:272
 msgid "Other"
 msgstr ""
 
-#: ui/components/sidebar.slint:452 ui/components/sidebar.slint:616
-#: ui/components/sidebar.slint:452 ui/components/sidebar.slint:616
+#: ui/components/sidebar.slint:455 ui/components/sidebar.slint:621
+#: ui/components/sidebar.slint:455 ui/components/sidebar.slint:621
 msgid "Labels"
 msgstr ""
 
-#: ui/components/sidebar.slint:471
+#: ui/components/sidebar.slint:474
 msgid "Global label {}"
 msgstr ""
 
-#: ui/components/sidebar.slint:503 ui/views/contacts-view.slint:221
-#: ui/components/sidebar.slint:503 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:507 ui/views/contacts-view.slint:221
+#: ui/components/sidebar.slint:507 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
 msgstr ""
 
-#: ui/components/sidebar.slint:636
+#: ui/components/sidebar.slint:641
 msgid "{} label, {} account"
 msgstr ""
 
-#: ui/components/sidebar.slint:678 ui/dialogs/folder-dialog.slint:27
-#: ui/components/sidebar.slint:678 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
-#: ui/components/sidebar.slint:678 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
+#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27
+#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354
+#: ui/components/sidebar.slint:684 ui/dialogs/folder-dialog.slint:27 ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
 msgstr ""
 
-#: ui/components/sidebar.slint:695 ui/dialogs/folder-dialog.slint:26
-#: ui/components/sidebar.slint:695 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:701 ui/dialogs/folder-dialog.slint:26
+#: ui/components/sidebar.slint:701 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
 msgstr ""
 
-#: ui/components/sidebar.slint:715
+#: ui/components/sidebar.slint:721
 msgid "No folders found"
 msgstr ""
 

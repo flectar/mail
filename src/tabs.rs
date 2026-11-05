@@ -2252,7 +2252,7 @@ mod tests {
             detail: String::new(),
             avatar: String::new(),
             is_account: false,
-            count: String::new(),
+            count: 0,
         }
     }
 
