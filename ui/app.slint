@@ -621,6 +621,8 @@ export component AppWindow inherits Window {
     callback toggle_settings();
     callback sync_mail();
     callback sync_account(int);
+    // F5: the accounts whose mail the view shows.
+    callback check_mail_in_view();
     callback delete_account(int);
     callback message_action(string);
     callback message_action_for_email(int, string);
@@ -1594,6 +1596,8 @@ export component AppWindow inherits Window {
             }
             load_more => { root.load_more(); }
             sync_mail => { root.sync_mail(); }
+            sync_account(account-id) => { root.sync_account(account-id); }
+            check_mail_in_view => { root.check_mail_in_view(); }
             message_action(action) => {
                 if action == "delete_permanently" { root.confirm-trash-deletion("selected", -1); }
                 else { root.message_action(action); }

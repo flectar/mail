@@ -315,11 +315,16 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     in property <int> label-font-weight: SidebarStyle.selected-weight;
     in property <length> left-padding: 4px;
     in property <bool> folder-row-style: false;
+    // An account's heading offers that account's actions on right-click.
+    in property <bool> account-menu: false;
+    in property <bool> can-check-mail: true;
     // Headers and children share the same icon and text columns. The leading
     // gutter belongs to disclosure controls, not to an extra icon indent.
     private property <length> icon-left: root.left-padding + SidebarStyle.icon-left - 4px;
     private property <length> label-left: root.icon-left + SidebarStyle.label-offset;
     callback toggled(bool);
+    callback check-mail();
+    callback account-settings();
 
     height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 7px + max(20px, header-label.preferred-height) + header-detail.height;
     idle-background: root.sidebar-background;
@@ -384,17 +389,37 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     }
 
 
-    header-hit := TouchArea {
-        enabled: root.interactive;
-        accessible-role: button;
-        accessible-label: root.label;
-        accessible-expanded: root.open;
-        accessible-action-default => {
-            root.toggled(!root.open);
+    heading-menu := ContextMenuArea {
+        enabled: root.interactive && root.account-menu;
+        width: parent.width;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("Check for new mail");
+                enabled: root.can-check-mail;
+                activated => { root.check-mail(); }
+            }
+
+            MenuItem {
+                title: @tr("Account settings");
+                activated => { root.account-settings(); }
+            }
         }
-        clicked => {
-            root.toggled(!root.open);
+
+        header-hit := SidebarRowHit {
+            enabled: root.interactive;
+            menu-enabled: heading-menu.enabled;
+            accessible-role: button;
+            accessible-label: root.label;
+            accessible-expanded: root.open;
+            accessible-action-default => {
+                root.toggled(!root.open);
+            }
+            activated => {
+                root.toggled(!root.open);
+            }
+            open-menu(position) => { heading-menu.show(position); }
+            mouse-cursor: pointer;
         }
-        mouse-cursor: pointer;
     }
 }

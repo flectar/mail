@@ -651,7 +651,7 @@ export component MailListPane inherits FocusScope {
                             filter-tooltip: @tr("Filter mail");
                             filter-accessible-id: "mail-filter-button";
                             refresh-enabled: !root.sync_in_progress;
-                            refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Reload mail");
+                            refresh-tooltip: root.sync_in_progress ? @tr("Synchronizing mail") : @tr("Check for new mail");
                             refresh-accessible-id: "mail-refresh-button";
                             leading-clicked => {
                                 if (root.single-pane-navigation) {

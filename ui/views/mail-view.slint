@@ -7,6 +7,7 @@ import { MailListPane } from "mail-list-pane.slint";
 import { MailReadingPane } from "mail-reading-pane.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { KeyboardKeys } from "../components/kbd.slint";
 import { LocalMailUi } from "../local-mail.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
@@ -151,6 +152,8 @@ export component MailView inherits FocusScope {
     callback request_label_delete(int, string, string, bool, bool);
     callback load_more();
     callback sync_mail();
+    callback sync_account(int);
+    callback check_mail_in_view();
     callback message_action(string);
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
@@ -236,6 +239,18 @@ export component MailView inherits FocusScope {
         keys: Shortcuts.switch-pane;
         activated => { root.switch-pane(); }
     }
+    KeyBinding {
+        keys: Shortcuts.check-mail;
+        activated => { root.check_mail_in_view(); }
+    }
+    KeyBinding {
+        keys: Shortcuts.check-all-mail;
+        activated => { root.sync_mail(); }
+    }
+    if KeyboardKeys.apple : KeyBinding {
+        keys: Shortcuts.check-all-mail-alternate;
+        activated => { root.sync_mail(); }
+    }
 
     init => {
         // A new mail view starts at the top; an earlier view's offset is stale.
@@ -311,6 +326,7 @@ export component MailView inherits FocusScope {
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
+                sync-in-progress: root.sync_in_progress;
                 selected-scope: root.selected_scope;
                 filter-query <=> root.folder_filter_query;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -337,6 +353,7 @@ export component MailView inherits FocusScope {
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
+                sync-account(account-id) => { root.sync_account(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -528,6 +545,7 @@ export component MailView inherits FocusScope {
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
+                sync-in-progress: root.sync_in_progress;
                 selected-scope: root.selected_scope;
                 filter-query <=> root.folder_filter_query;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -556,6 +574,7 @@ export component MailView inherits FocusScope {
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
+                sync-account(account-id) => { root.sync_account(account-id); }
                 compose => { root.open_compose(); }
                 manage-accounts => {
                     root.settings_tab = "Accounts";
@@ -784,6 +803,7 @@ export component MailView inherits FocusScope {
                 rows: root.sidebar_rows;
                 scroll-y <=> root.sidebar-scroll-y;
                 unified-count: root.unified_count;
+                sync-in-progress: root.sync_in_progress;
                 selected-scope: root.selected_scope;
                 filter-query <=> root.folder_filter_query;
                 monochrome-icons: root.monochrome_sidebar_icons;
@@ -814,6 +834,7 @@ export component MailView inherits FocusScope {
                 request-delete-label(id, name, account, global, has-children) => {
                     root.request_label_delete(id, name, account, global, has-children);
                 }
+                sync-account(account-id) => { root.sync_account(account-id); }
                 compose => {
                     root.folders-open = false;
                     root.open_compose();

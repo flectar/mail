@@ -253,6 +253,23 @@ impl AccountHandle {
 }
 
 #[cfg(test)]
+impl AccountHandle {
+    /// A handle whose commands go to `tx`, with no worker behind it.
+    pub(crate) fn for_test(account_id: i64, tx: mpsc::Sender<SyncCmd>) -> Self {
+        let (body_tx, _) = mpsc::channel(1);
+        Self {
+            account_id,
+            tx,
+            body_tx,
+            send_tx: None,
+            restore_tx: None,
+            settings_tx: None,
+            tasks: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
 mod account_handle_tests {
     use super::*;
 

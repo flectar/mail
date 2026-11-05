@@ -19,6 +19,7 @@ import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { FormField, SettingsCard, SettingsLinkRow, SettingsNavItem, SettingsSelectRow, SettingsSwitchRow, ShortcutRow, ShortcutSection } from "../components/settings-components.slint";
 import { Shortcuts } from "../shortcuts.slint";
+import { KeyboardKeys } from "../components/kbd.slint";
 import { TabsUi } from "../components/workspace-navigation.slint";
 import { AccountProfilePicker, ProfileColorChoice, ProfileMemberChoice, ProfilePalette } from "../components/profile-controls.slint";
 import { RuntimeColorPicker, ThemeEditor } from "../components/theme-editor.slint";
@@ -2390,6 +2391,8 @@ export component SettingsDialog inherits Rectangle {
                             Text { height: max(20px, self.preferred-height); text: @tr("Move through mail without leaving the keyboard."); color: root.secondary-text; font-size: TypeScale.secondary; vertical-alignment: center; wrap: word-wrap; }
                             ShortcutSection { vertical-stretch: 0; title: @tr("Mail"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
                                 ShortcutRow { title: @tr("Compose a new message"); keys: [Shortcuts.compose]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Check for new mail"); keys: [Shortcuts.check-mail]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Check every account for new mail"); keys: KeyboardKeys.apple ? [Shortcuts.check-all-mail, Shortcuts.check-all-mail-alternate] : [Shortcuts.check-all-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Archive"); keys: [Shortcuts.archive]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Move to spam"); keys: [Shortcuts.spam]; title-color: root.body-text; separator-color: root.faint-text; }

@@ -113,7 +113,7 @@ use mail_groups::{
     MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
 };
 use mail_render_projection::*;
-use mail_scope::{Scope, StandardMailbox};
+use mail_scope::{Scope, StandardMailbox, accounts_to_check};
 use mail_view_model::*;
 use renderer::{GpuEmailRenderer, RenderedEmail};
 use renderer_input_controller::register_renderer_input_callbacks;
@@ -1236,6 +1236,32 @@ impl InboxState {
             .filter(|account| self.shows_account(account.id))
             .cloned()
             .collect()
+    }
+
+    /// The accounts a manual check for new mail covers in the current view:
+    /// the account whose mailbox, folder or label it shows, otherwise the
+    /// shown accounts. `None` stands for every account.
+    fn accounts_in_view(&self) -> Option<Vec<i64>> {
+        let owner = match self.scope {
+            Scope::Account { account_id, .. } => Some(account_id),
+            Scope::Folder(_) => self
+                .mailboxes
+                .iter()
+                .find(|mailbox| mailbox.scope == Some(self.scope))
+                .map(|mailbox| mailbox.account_id),
+            Scope::Label { id, .. } => self
+                .labels
+                .iter()
+                .find(|label| label.id == id)
+                .and_then(|label| label.owner_account_id),
+            Scope::Unified(_) | Scope::Important | Scope::Other => None,
+        };
+        let connected = self
+            .connected_accounts
+            .iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        accounts_to_check(owner, &connected, self.profile_accounts.as_deref())
     }
 
     /// Whether there is any mail to show: an account's, or mail kept on this
@@ -5339,7 +5365,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let sync_runtime = Rc::clone(&runtime);
     let sync_progress = Rc::clone(&sync_in_progress);
     let sync_app = app.as_weak();
-    let sync_tx_for_all = sync_tx.clone();
     app.on_drain_sync_updates(move || {
         while let Ok(update) = sync_rx.borrow_mut().try_recv() {
             sync_progress.set(false);
@@ -5378,78 +5403,63 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
-    let app_weak = app.as_weak();
-    let state_for_sync = Rc::clone(&state);
-    let runtime_for_sync = Rc::clone(&runtime);
-    let sync_progress_for_click = Rc::clone(&sync_in_progress);
-    app.on_sync_mail(move || {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if sync_progress_for_click.replace(true) {
-            return;
-        }
-        let (core, scope) = {
-            let state = state_for_sync.borrow();
-            (state.core.clone(), state.scope)
-        };
-        let Some(core) = core else {
-            sync_progress_for_click.set(false);
-            app.set_sync_status(UiMessage::plain(
-                "Local mail data is unavailable; preview data is read-only.",
-            ));
-            return;
-        };
-        app.set_sync_in_progress(true);
-        app.set_sync_status(UiMessage::plain("Synchronizing accounts…"));
-        let sync_tx = sync_tx.clone();
-        runtime_for_sync.spawn(async move {
-            let result = core.sync_now(None).await;
-            let metadata = if result.is_ok() {
-                core.load_mail_metadata(scope).await.ok()
-            } else {
-                None
+    // Manual checks for new mail. The toolbar button and Shift+F5 check every
+    // account, an account's menu that account, and F5 the accounts in view.
+    let start_sync: Rc<dyn Fn(Option<Vec<i64>>)> = {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        let runtime = Rc::clone(&runtime);
+        let in_progress = Rc::clone(&sync_in_progress);
+        Rc::new(move |accounts: Option<Vec<i64>>| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
             };
-            let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
-        });
-    });
-
-    let app_weak = app.as_weak();
-    let state_for_account_sync = Rc::clone(&state);
-    let runtime_for_account_sync = Rc::clone(&runtime);
-    let sync_progress_for_account_click = Rc::clone(&sync_in_progress);
-    app.on_sync_account(move |account_id| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if sync_progress_for_account_click.replace(true) {
-            return;
-        }
-        let (core, scope) = {
-            let state = state_for_account_sync.borrow();
-            (state.core.clone(), state.scope)
-        };
-        let Some(core) = core else {
-            sync_progress_for_account_click.set(false);
-            app.set_sync_status(UiMessage::plain(
-                "Local mail data is unavailable; preview data is read-only.",
-            ));
-            return;
-        };
-        app.set_sync_in_progress(true);
-        app.set_sync_status(UiMessage::plain("Synchronizing account…"));
-        let sync_tx = sync_tx_for_all.clone();
-        let account_id = i64::from(account_id);
-        runtime_for_account_sync.spawn(async move {
-            let result = core.sync_now(Some(account_id)).await;
-            let metadata = if result.is_ok() {
-                core.load_mail_metadata(scope).await.ok()
-            } else {
-                None
+            if accounts.as_ref().is_some_and(Vec::is_empty) || in_progress.replace(true) {
+                return;
+            }
+            let (core, scope) = {
+                let state = state.borrow();
+                (state.core.clone(), state.scope)
             };
-            let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+            let Some(core) = core else {
+                in_progress.set(false);
+                app.set_sync_status(UiMessage::plain(
+                    "Local mail data is unavailable; preview data is read-only.",
+                ));
+                return;
+            };
+            app.set_sync_in_progress(true);
+            app.set_sync_status(match accounts.as_deref() {
+                Some([_]) => UiMessage::plain("Synchronizing account…"),
+                _ => UiMessage::plain("Synchronizing accounts…"),
+            });
+            let sync_tx = sync_tx.clone();
+            runtime.spawn(async move {
+                let result = core.sync_accounts(accounts.as_deref()).await;
+                let metadata = if result.is_ok() {
+                    core.load_mail_metadata(scope).await.ok()
+                } else {
+                    None
+                };
+                let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+            });
+        })
+    };
+    {
+        let start_sync = Rc::clone(&start_sync);
+        app.on_sync_mail(move || start_sync(None));
+    }
+    {
+        let start_sync = Rc::clone(&start_sync);
+        app.on_sync_account(move |account_id| start_sync(Some(vec![i64::from(account_id)])));
+    }
+    {
+        let state = Rc::clone(&state);
+        app.on_check_mail_in_view(move || {
+            let accounts = state.borrow().accounts_in_view();
+            start_sync(accounts);
         });
-    });
+    }
 
     let app_weak = app.as_weak();
     let state_for_check = Rc::clone(&state);

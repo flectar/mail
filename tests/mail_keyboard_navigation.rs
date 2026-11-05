@@ -92,6 +92,8 @@ slint::slint! {
         callback acted-on-checked(string);
         callback composed();
         callback searched(string);
+        callback checked-mail();
+        callback checked-all-mail();
         init => { Palette.color-scheme = ColorScheme.light; }
         changed dark => { Palette.color-scheme = root.dark ? ColorScheme.dark : ColorScheme.light; }
         public function focus-list() { view.focus-list(true); }
@@ -135,6 +137,8 @@ slint::slint! {
             bulk_message_action(action) => { root.acted-on-checked(action); }
             open_compose => { root.composed(); }
             search_changed(query) => { root.searched(query); }
+            check_mail_in_view => { root.checked-mail(); }
+            sync_mail => { root.checked-all-mail(); }
         }
     }
 }
@@ -588,7 +592,11 @@ fn keyboard_navigation_keeps_focus_scrolls_and_respects_text_inputs() {
     }
 }
 
-fn chord(window: &slint::Window, modifier: slint::platform::Key, text: &str) {
+fn chord(
+    window: &slint::Window,
+    modifier: slint::platform::Key,
+    text: impl Into<slint::SharedString>,
+) {
     window.dispatch_event(WindowEvent::KeyPressed {
         text: modifier.into(),
     });
@@ -630,9 +638,23 @@ fn mail_shortcuts_act_on_what_has_focus() {
     let searched = Rc::new(std::cell::RefCell::new(String::new()));
     let query = searched.clone();
     ui.on_searched(move |text| *query.borrow_mut() = text.into());
+    let checks = Rc::new(RefCell::new(Vec::<&str>::new()));
+    let log = checks.clone();
+    ui.on_checked_mail(move || log.borrow_mut().push("in view"));
+    let log = checks.clone();
+    ui.on_checked_all_mail(move || log.borrow_mut().push("every account"));
+    let checked = || std::mem::take(&mut *checks.borrow_mut());
     let take = || std::mem::take(&mut *acted.borrow_mut());
     ui.show().unwrap();
     ui.invoke_focus_list();
+
+    // F5 checks the accounts in view for new mail and Shift+F5 every account,
+    // as in Thunderbird. Neither acts on the list.
+    key(ui.window(), Key::F5);
+    chord(ui.window(), Key::Shift, Key::F5);
+    assert_eq!(checked(), ["in view", "every account"]);
+    assert!(take().is_empty());
+    assert_eq!(selected.get(), -1);
 
     // The list acts on the cursor row and moves on, as after a toolbar action.
     key(ui.window(), "a");
@@ -684,6 +706,10 @@ fn mail_shortcuts_act_on_what_has_focus() {
     assert!(take().is_empty(), "Delete edits the query");
     chord(ui.window(), Key::Control, "n");
     assert_eq!(composed.get(), 1);
+    // A function key types nothing, so it works from the search field too.
+    key(ui.window(), Key::F5);
+    assert_eq!(checked(), ["in view"]);
+    assert_eq!(searched.borrow().as_str(), "b");
 
     ui.set_layout_mode("minimal".into());
     slint::platform::update_timers_and_animations();

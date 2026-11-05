@@ -219,6 +219,28 @@ impl FromStr for Scope {
     }
 }
 
+/// The accounts a manual check for new mail covers in a view owned by
+/// `owner`: that account, or for views that span accounts the `shown` ones.
+/// `None` stands for every account. An owner that is not a connected account,
+/// such as mail kept on this device, has no server to check, so its view
+/// counts as spanning accounts.
+pub(crate) fn accounts_to_check(
+    owner: Option<i64>,
+    connected: &[i64],
+    shown: Option<&[i64]>,
+) -> Option<Vec<i64>> {
+    if let Some(account_id) = owner.filter(|id| connected.contains(id)) {
+        return Some(vec![account_id]);
+    }
+    shown.map(|accounts| {
+        accounts
+            .iter()
+            .copied()
+            .filter(|id| connected.contains(id))
+            .collect()
+    })
+}
+
 impl From<Scope> for String {
     fn from(scope: Scope) -> Self {
         scope.to_string()
@@ -380,5 +402,29 @@ mod tests {
             assert_eq!(scope.visible_for(&[account(9), account(10)]), scope);
             assert_eq!(expected.visible_for(&[account(9)]), expected);
         }
+    }
+
+    #[test]
+    fn a_manual_check_covers_the_account_in_view_or_the_shown_ones() {
+        let connected = [1, 2, 3];
+        // An account's own folder, label or mailbox checks that account.
+        assert_eq!(accounts_to_check(Some(2), &connected, None), Some(vec![2]));
+        assert_eq!(
+            accounts_to_check(Some(2), &connected, Some(&[1, 3])),
+            Some(vec![2])
+        );
+        // Unified views check every account, or the active profile's.
+        assert_eq!(accounts_to_check(None, &connected, None), None);
+        assert_eq!(
+            accounts_to_check(None, &connected, Some(&[1, 3])),
+            Some(vec![1, 3])
+        );
+        // Mail on this device has no server: its folders check what the
+        // unified views would, and a profile never names a removed account.
+        assert_eq!(accounts_to_check(Some(9), &connected, None), None);
+        assert_eq!(
+            accounts_to_check(Some(9), &connected, Some(&[3, 4])),
+            Some(vec![3])
+        );
     }
 }
