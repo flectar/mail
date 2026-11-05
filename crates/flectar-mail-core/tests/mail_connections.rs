@@ -1544,6 +1544,120 @@ async fn smtp_failure_prevents_saving_account() {
     smtp_task.await.unwrap();
 }
 
+/// Like Thunderbird's account setup, a rejected sign-in is tried once more
+/// with the other common username form. The one that worked is saved and
+/// used for sending too.
+#[tokio::test]
+async fn account_setup_tries_the_part_before_the_at_as_username() {
+    use base64::Engine as _;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let incoming_port = listener.local_addr().unwrap().port();
+    let imap_task = tokio::spawn(async move {
+        // The full address is rejected...
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
+        assert!(
+            login.contains(r#" LOGIN "jane@example.com" "#),
+            "unexpected command: {login:?}"
+        );
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [AUTHENTICATIONFAILED] Authentication failed.\r\n").as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        // ...and the part before the @ works.
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
+        assert!(
+            login.contains(r#" LOGIN "jane" "#),
+            "unexpected command: {login:?}"
+        );
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let select = line(&mut stream).await;
+        accept_inbox_select(&mut stream, &select).await;
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_task = tokio::spawn(async move {
+        let (tcp, _) = smtp_listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        let auth = line(&mut stream).await;
+        let credentials = base64::engine::general_purpose::STANDARD
+            .decode(auth.trim_end().strip_prefix("AUTH PLAIN ").unwrap())
+            .unwrap();
+        assert_eq!(credentials, b"\0jane\0secret");
+        stream.write_all(b"235 Authenticated\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "NOOP\r\n");
+        stream.write_all(b"250 OK\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "QUIT\r\n");
+        stream.write_all(b"221 Goodbye\r\n").await.unwrap();
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
+    core.add_account_password(AddPasswordAccountArgs {
+        email: "jane@example.com".into(),
+        display_name: None,
+        // Left empty, so the sign-in starts with the address.
+        username: String::new(),
+        password: "secret".into(),
+        mail_protocol: MailProtocol::Imap,
+        jmap_url: String::new(),
+        incoming_host: "127.0.0.1".into(),
+        incoming_port,
+        smtp_host: "127.0.0.1".into(),
+        smtp_port,
+        connection: settings(ConnectionSecurity::Tls),
+    })
+    .await
+    .unwrap();
+    imap_task.await.unwrap();
+    smtp_task.await.unwrap();
+    assert_eq!(
+        core.list_account_configs().await.unwrap()[0].username,
+        "jane"
+    );
+}
+
 #[tokio::test]
 async fn imap_mailbox_failure_prevents_saving_account() {
     use flectar_mail_core::{
