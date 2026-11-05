@@ -1568,20 +1568,6 @@ pub struct EmailStats {
     pub days: Vec<EmailActivityDay>,
 }
 
-/// Exact unread badge counts for split tabs and sidebar rows.
-/// Map keys are stringified ids (JSON object keys must be strings).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnreadCounts {
-    pub inbox: i64,
-    pub important: i64,
-    pub other: i64,
-    pub splits: std::collections::HashMap<String, i64>,
-    pub labels: std::collections::HashMap<String, i64>,
-    /// "starred" | "snoozed" | "drafts" (drafts counts all drafts, not unread)
-    pub views: std::collections::HashMap<String, i64>,
-}
-
 /// The badges rendered by the native mailbox sidebar for one account.
 /// Inbox and Starred count unread threads; Drafts counts all draft threads.
 /// Keeping this projection small lets the native shell refresh every account
