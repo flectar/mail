@@ -32,9 +32,14 @@ fn main() {
     if std::env::var_os("CARGO_CFG_TARGET_OS").as_deref() == Some(std::ffi::OsStr::new("windows")) {
         winresource::WindowsResource::new()
             .set_icon("resources/app-icon/flectar-mail.ico")
+            // Opts into the segment heap (Windows 10 2004 and later), which
+            // Microsoft says generally reduces memory use. Nothing else is set:
+            // declaring DPI awareness or an OS version would change behaviour.
+            .set_manifest_file("platform/windows/flectar-mail.manifest.xml")
             .compile()
-            .expect("failed to embed the Windows application icon");
+            .expect("failed to embed the Windows icon and manifest");
         println!("cargo:rerun-if-changed=resources/app-icon/flectar-mail.ico");
+        println!("cargo:rerun-if-changed=platform/windows/flectar-mail.manifest.xml");
     }
 
     // Application controls are painted from primitives in app.slint. Fluent is
