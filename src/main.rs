@@ -1540,6 +1540,18 @@ fn spawn_startup_load(
     });
 }
 
+/// Keep the launcher's activation token and clear it from the environment,
+/// so programs Flectar Mail starts do not inherit it.
+///
+/// # Safety
+///
+/// Changes the environment: call it before any other thread starts.
+#[cfg(desktop)]
+pub unsafe fn take_launch_activation_token() {
+    // SAFETY: forwarded from the caller.
+    unsafe { window_chrome::take_launch_activation_token() };
+}
+
 /// Slint installs one backend per process. Retry failed GPU startup in a fresh
 /// CPU process, releasing the failed device and keeping the saved choice intact.
 pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> {
@@ -1788,6 +1800,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let _ = app.upgrade_in_event_loop(move |app| {
                 window_controller::activate(&app, activation_token);
             });
+        });
+    }
+    // The launcher's token was meant for this window: it lets the desktop
+    // focus it (Wayland) and ends the launch feedback (X11).
+    #[cfg(desktop)]
+    if !start_hidden && let Some(token) = window_chrome::launch_activation_token() {
+        let weak = app.as_weak();
+        window_controller::when_first_shown(&app, move || {
+            if let Some(app) = weak.upgrade() {
+                window_chrome::focus(&app, Some(token));
+            }
         });
     }
     let email_renderer = Rc::clone(&initial_state.email_renderer);

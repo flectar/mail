@@ -14,6 +14,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // initialized libraries yet. Never mutate this from a tray callback.
         unsafe { std::env::set_var("SLINT_DESTROY_WINDOW_ON_HIDE", "1") };
     }
+    // SAFETY: as above, no other thread exists yet.
+    #[cfg(desktop)]
+    unsafe {
+        flectar_mail::take_launch_activation_token()
+    };
     #[cfg(desktop)]
     if let Some(code) = flectar_mail::pdf_preview::run_worker_if_requested() {
         std::process::exit(code);

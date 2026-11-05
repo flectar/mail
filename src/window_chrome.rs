@@ -299,12 +299,36 @@ fn toggle_maximized(window: &slint::Window) {
     window.set_maximized(!window.is_maximized());
 }
 
-/// The activation token this process was launched with, to forward to an
-/// already running instance.
+/// Keep the launcher's activation token and clear it from the environment.
+///
+/// # Safety
+///
+/// Changes the environment: no other thread may be running.
+#[cfg(desktop)]
+pub(crate) unsafe fn take_launch_activation_token() {
+    // SAFETY: forwarded from the caller.
+    #[cfg(linux_desktop)]
+    unsafe {
+        activation::take_launch_token()
+    };
+}
+
+/// The activation token this process was launched with, for its first window
+/// or to forward to an already running instance.
 #[cfg(desktop)]
 pub(crate) fn launch_activation_token() -> Option<String> {
     #[cfg(linux_desktop)]
     return activation::launch_token();
+    #[cfg(not(linux_desktop))]
+    None
+}
+
+/// The launch token as the environment variable it arrived in, so a process
+/// that replaces this one can still use it.
+#[cfg(desktop)]
+pub(crate) fn launch_activation_variable() -> Option<(&'static str, String)> {
+    #[cfg(linux_desktop)]
+    return activation::launch_token_variable();
     #[cfg(not(linux_desktop))]
     None
 }
