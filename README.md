@@ -58,21 +58,23 @@ fraction of the memory of a typical web-based mail client.
 
 | Idle, same mailbox | Private memory | Including code and libraries (PSS) | Renders email with |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **17.2–17.4 MiB** | **79.1–80.0 MiB** | Blitz |
-| Geary 46 | 126.1–126.2 MiB | 309.6–311.4 MiB | WebKitGTK |
-| Evolution 3.56 | 191.0–192.2 MiB | 395.0–395.9 MiB | WebKitGTK |
-| Thunderbird 159 | 244.1–248.1 MiB | 424.4–427.1 MiB | Gecko |
-| Betterbird 153 | 243.9–247.8 MiB | 411.9–419.7 MiB | Gecko |
-| Mailspring 1.26 | 311.4–314.9 MiB | 551.1–551.7 MiB | Chromium |
-| Aerion 0.3.6 | 421.9–437.3 MiB | 660.4–678.0 MiB | WebKitGTK |
+| **Flectar Mail** | **17.2 – 17.4 MiB** | **79.1 – 80.0 MiB** | Blitz |
+| Geary 46 | 126.1 – 126.2 MiB (+629%) | 309.6 – 311.4 MiB (+290%) | WebKitGTK |
+| Evolution 3.56 | 191.0 – 192.2 MiB (+1,008%) | 395.0 – 395.9 MiB (+397%) | WebKitGTK |
+| Thunderbird 159 | 244.1 – 248.1 MiB (+1,323%) | 424.4 – 427.1 MiB (+435%) | Gecko |
+| Betterbird 153 | 243.9 – 247.8 MiB (+1,321%) | 411.9 – 419.7 MiB (+423%) | Gecko |
+| Mailspring 1.26 | 311.4 – 314.9 MiB (+1,710%) | 551.1 – 551.7 MiB (+593%) | Chromium |
+| Aerion 0.3.6 | 421.9 – 437.3 MiB (+2,383%) | 660.4 – 678.0 MiB (+741%) | WebKitGTK |
 
 Measured on Linux with one IMAP account (860 messages), the inbox open and an
 HTML newsletter displayed, 60 seconds after launch, with the default CPU
-renderer. Each range covers two runs, and every process an app starts is
-counted. Private memory is what Windows Task Manager lists as **Memory**. On
-Windows, with 7 real accounts and about 69,000 unread messages, Task Manager
-showed 37.8 MiB with the window open and 4.2 MiB once it was closed to the
-tray. See [how we measure and how to check it yourself](docs/performance.md).
+renderer. Each range covers two runs, and each percentage shows how much more
+memory an app uses than Flectar Mail, comparing the means of those runs. Every
+process an app starts is counted. Private memory is what Windows Task Manager
+lists as **Memory**. On Windows, with 7 real accounts and about 69,000 unread
+messages, Task Manager showed 37.8 MiB with the window open and 4.2 MiB once
+it was closed to the tray. See
+[how we measure and how to check it yourself](docs/performance.md).
 
 ### How it compares
 
