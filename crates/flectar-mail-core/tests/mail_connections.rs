@@ -1407,6 +1407,7 @@ async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_a
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: Vec::new(),
         })
         .await
