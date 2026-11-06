@@ -440,6 +440,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Packaged PDF preview test failed" }
           Compress-Archive -Path target/package/windows/* -DestinationPath "target/flectar-mail-windows-$env:ARCH.zip" -Force
 
+      - name: Close the packaged app from its window
+        shell: pwsh
+        run: |
+          python scripts/test-clean-exit.py target/package/windows/flectar-mail.exe
+          if ($LASTEXITCODE -ne 0) { throw "The packaged app did not exit cleanly" }
+
       - name: Install pinned Inno Setup compiler
         shell: pwsh
         run: |

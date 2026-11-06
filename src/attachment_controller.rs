@@ -368,7 +368,7 @@ fn close(ui: &MailAttachments<'_>, generation: &AtomicU64, session: &RefCell<Ses
 pub(crate) fn register(
     app: &AppWindow,
     inbox: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     documents: Arc<dyn crate::documents::DocumentProvider>,
 ) {
     let session = Rc::new(RefCell::new(Session {
@@ -438,7 +438,7 @@ pub(crate) fn register(
         Arc<flectar_mail_core::Core>,
     )>(8);
     let thumbnail_window = weak.clone();
-    runtime.handle().spawn(async move {
+    runtime.spawn(async move {
         while let Some((message, attachment, core)) = thumbnail_job_receiver.recv().await {
             let attachment_id = attachment.id;
             let result = async {
@@ -554,7 +554,7 @@ pub(crate) fn register(
         }
     });
     let state = inbox.clone();
-    let handle = runtime.handle().clone();
+    let handle = runtime.clone();
     let pending_thumbnails = thumbnail_pending.clone();
     app.global::<MailAttachments>()
         .on_command(move |action, value| {
