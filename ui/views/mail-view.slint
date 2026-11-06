@@ -9,6 +9,7 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { KeyboardKeys } from "../components/kbd.slint";
 import { LocalMailUi } from "../local-mail.slint";
+import { MovePickerUi } from "../dialogs/move-dialog.slint";
 
 // Mail workspace composition. AppWindow owns the public state while this
 // component owns the feature layout, interaction wiring, and clipboard bridge.
@@ -293,6 +294,13 @@ export component MailView inherits FocusScope {
             root.focus-list-after-settings = false;
             root.focus-list(false);
         }
+    }
+    // Focus goes back to where Move to was opened from.
+    private property <bool> move-picker-open: MovePickerUi.open;
+    changed move-picker-open => {
+        if root.move-picker-open { return; }
+        if MovePickerUi.return-to == "reader" { root.focus-reader(); }
+        else { root.focus-list(false); }
     }
     changed compact => {
         if root.single-pane && root.compact-page == "message" { root.focus-reader(); }

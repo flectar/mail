@@ -3967,6 +3967,14 @@ impl Core {
             .await
     }
 
+    /// The account's folders the user moved mail into most recently, newest
+    /// first, for the Move to picker.
+    pub async fn recent_move_targets(&self, account_id: i64, limit: usize) -> Result<Vec<i64>> {
+        self.db
+            .read(move |conn| repo::folders::recently_moved_to(conn, account_id, limit))
+            .await
+    }
+
     pub async fn create_folder(
         &self,
         account_id: i64,
@@ -9640,6 +9648,10 @@ fn apply_thread_action(
                     out.push((aid, account_id));
                 }
             }
+            // The Move to picker lists these folders first.
+            if !out.is_empty() {
+                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+            }
         }
         ActionKind::Snooze => {
             let wake_at = params
@@ -10264,6 +10276,55 @@ mod move_action_validation_tests {
                 .unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn moving_mail_into_a_folder_makes_it_a_recent_move_target() {
+        let mut conn = db::testutil::conn();
+        db::testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, role)
+             VALUES (2, 1, 'Receipts', NULL), (3, 1, 'Archive', 'archive')",
+            [],
+        )
+        .unwrap();
+        let (thread_id, _) = db::testutil::seed_message(&conn, "shop@test.dev", "Order", false);
+        let move_to = |conn: &mut rusqlite::Connection, folder_id| {
+            apply_thread_action(
+                conn,
+                thread_id,
+                None,
+                ActionKind::Move,
+                Some(&ActionParams {
+                    wake_at: None,
+                    target_folder_id: Some(folder_id),
+                    label_id: None,
+                }),
+            )
+            .unwrap()
+            .len()
+        };
+        let moved_to_at = |conn: &rusqlite::Connection, folder_id: i64| {
+            conn.query_row(
+                "SELECT moved_to_at FROM folders WHERE id = ?1",
+                [folder_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .unwrap()
+        };
+
+        assert_eq!(move_to(&mut conn, 2), 1);
+        assert_eq!(repo::folders::recently_moved_to(&conn, 1, 5).unwrap(), [2]);
+
+        // A move that finds the mail already there changes nothing.
+        repo::folders::mark_moved_to(&conn, 2, 7).unwrap();
+        assert_eq!(move_to(&mut conn, 2), 0);
+        assert_eq!(moved_to_at(&conn, 2), Some(7));
+
+        // Archiving moves mail without the user picking a folder.
+        apply_thread_action(&mut conn, thread_id, None, ActionKind::Archive, None).unwrap();
+        assert_eq!(moved_to_at(&conn, 3), None);
+        assert_eq!(repo::folders::recently_moved_to(&conn, 1, 5).unwrap(), [2]);
     }
 
     #[test]

@@ -125,4 +125,18 @@ fn drops_resolve_by_scope_not_by_mailbox_name() {
         )
         .is_err()
     );
+
+    // Shown in the custom folder, the mail can still go to the Trash
+    // mailbox of the same name.
+    state.set_scope(Scope::Folder(12));
+    state.messages[0].folder = "Trash".into();
+    let drop = |scope, account_id, folder_id| {
+        resolve_single_mail_drop(&state, &item, scope, account_id, folder_id)
+            .map(|(_, destination)| destination)
+    };
+    assert_eq!(
+        drop(account(StandardMailbox::Trash), 1, 11),
+        Ok(MailDropDestination::Action("trash"))
+    );
+    assert!(drop(Scope::Folder(12), 1, 12).is_err());
 }

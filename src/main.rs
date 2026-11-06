@@ -38,6 +38,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod move_picker;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
 mod number_format;
@@ -852,7 +853,9 @@ fn resolve_single_mail_drop(
             if !target.is_selectable {
                 return Err("this mailbox is a hierarchy container".to_owned());
             }
-            if target.label == message.folder {
+            // Folders are told apart by scope: another folder can have the
+            // name of the one shown.
+            if state.scope.shows_mail_in(target_scope) {
                 return Err("message is already in this destination".to_owned());
             }
             // Custom folders are plain moves even when named like a
@@ -2042,6 +2045,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     mail_work::register(&app, &state, &runtime);
+    move_picker::register(&app, &state, &runtime);
     files_controller::register(
         &app,
         &state,

@@ -16,6 +16,7 @@ import { TabsUi } from "../components/workspace-navigation.slint";
 import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
+import { MovePickerUi } from "../dialogs/move-dialog.slint";
 
 // A chip on a message-list row that acts on what it shows instead of
 // opening the message. Other buttons act on the row, as anywhere else on it.
@@ -451,6 +452,27 @@ export component MailListPane inherits FocusScope {
         keys: Shortcuts.trash;
         activated => { root.act-on-messages(root.trash_view ? "delete_permanently" : "trash"); }
     }
+    KeyBinding {
+        keys: Shortcuts.move-to;
+        // Not while typing: text fields elsewhere paste plain text with it.
+        enabled: !search-toolbar.search-focused;
+        activated => { root.move-messages(); }
+    }
+
+    // Move to opens for what the other shortcuts act on.
+    function move-messages() {
+        if root.selection-mode {
+            MovePickerUi.return-to = "list";
+            MovePickerUi.request("checked", -1);
+            return;
+        }
+        let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
+        if target.id < 0 { return; }
+        let at-cursor = list-keyboard.has-focus && target.id == root.keyboard-email-id;
+        if !at-cursor && !root.list_entries[target.entry_index].email.selected { return; }
+        MovePickerUi.return-to = "list";
+        MovePickerUi.request("row", target.id);
+    }
 
     function pointer-focus(id: int) {
         root.keyboard-email-id = id;
@@ -755,6 +777,13 @@ export component MailListPane inherits FocusScope {
                                         activated => { TabsUi.open-checked(); }
                                     }
                                     if TabsUi.enabled : MenuSeparator {}
+                                    MenuItem {
+                                        title: @tr("Move to…");
+                                        activated => {
+                                            MovePickerUi.return-to = "list";
+                                            MovePickerUi.request("checked", -1);
+                                        }
+                                    }
                                     MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
                                     MenuItem { title: @tr("Mark as unread"); activated => { root.bulk_message_action("mark_unread"); } }
                                     MenuItem { title: @tr("Star message"); activated => { root.bulk_message_action("star"); } }
@@ -1346,6 +1375,13 @@ export component MailListPane inherits FocusScope {
                                             MenuItem { title: mail-data.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(mail-data.id, mail-data.unread ? "mark_read" : "mark_unread"); } }
                                             // Local mail has no archive or spam.
                                             if !mail-row.local-mail : MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
+                                            MenuItem {
+                                                title: @tr("Move to…");
+                                                activated => {
+                                                    MovePickerUi.return-to = "list";
+                                                    MovePickerUi.request("row", mail-data.id);
+                                                }
+                                            }
                                             if !mail-row.local-mail : MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }
                                             MenuItem { title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"); activated => { root.message_action_for_email(mail-data.id, root.trash_view ? "delete_permanently" : "trash"); } }
                                         }
