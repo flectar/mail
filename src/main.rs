@@ -3,6 +3,7 @@ mod account_mail_preferences;
 mod app_icon;
 #[cfg(test)]
 mod account_removal_tests;
+mod app_runtime;
 mod attachment_controller;
 #[cfg(desktop)]
 mod autostart;
@@ -434,7 +435,7 @@ struct ContactLoadUpdate {
 }
 
 fn spawn_contact_page(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     core: CoreMailSource,
     updates: UiSender<ContactLoadUpdate>,
     scope: String,
@@ -916,7 +917,7 @@ fn resolve_mail_drop(
 fn perform_mail_drop(
     _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    _runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Handle,
     payload: &MailDragPayload,
     target_scope: Scope,
     target_account_id: i32,
@@ -957,7 +958,7 @@ fn perform_mail_drop(
 fn apply_mail_grouping(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     grouping: MailGrouping,
 ) -> bool {
     app.set_conversation_view(grouping == MailGrouping::Conversations);
@@ -998,7 +999,7 @@ fn apply_mail_grouping(
 fn perform_mail_list_action(
     _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    _runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Handle,
     trigger_id: i32,
     action: &str,
     use_checked_selection: bool,
@@ -1496,7 +1497,7 @@ fn startup_diagnostics(paths: &Paths, diagnostic_id: &str, error: &str) -> Strin
 }
 
 fn spawn_startup_load(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     paths: Paths,
     credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
     oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
@@ -1603,8 +1604,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     // Created before the backend: claiming the profile uses its reactor, and
     // a launch that only forwards to a running instance should exit before
-    // any renderer or window is initialized.
-    let runtime = Rc::new(
+    // any renderer or window is initialized. Everything that uses it is
+    // declared later and dropped first, so the runtime shuts down last.
+    let app_runtime = app_runtime::AppRuntime::new(
         tokio::runtime::Builder::new_multi_thread()
             // Mail sync is I/O-bound. Avoid reserving one Tokio worker per
             // logical CPU in a desktop shell while leaving room for the UI,
@@ -1614,6 +1616,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             .enable_all()
             .build()?,
     );
+    let runtime = app_runtime.handle().clone();
     #[cfg(desktop)]
     let background_launch = autostart::launched_in_background();
     #[cfg(desktop)]
@@ -1793,7 +1796,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     if let Err(error) = initial_state
         .email_renderer
         .borrow_mut()
-        .configure_resources(runtime.handle().clone(), false)
+        .configure_resources(runtime.clone(), false)
     {
         eprintln!("email images unavailable: {error}");
     }
@@ -2064,7 +2067,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     let app_for_mail_drop = app.as_weak();
     let state_for_mail_drop = Rc::clone(&state);
-    let runtime_for_mail_drop = Rc::clone(&runtime);
+    let runtime_for_mail_drop = runtime.clone();
     app.global::<MailDragApi>().on_drop_on_mailbox(
         move |data, target_scope, target_account_id, target_folder_id| {
             let Some(app) = app_for_mail_drop.upgrade() else {
@@ -2225,7 +2228,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_search = Rc::clone(&contact_state);
     let inbox_for_contact_search = Rc::clone(&state);
-    let runtime_for_contact_search = Rc::clone(&runtime);
+    let runtime_for_contact_search = runtime.clone();
     let contact_load_tx_for_search = contact_load_tx.clone();
     let contact_load_generation_for_search = Rc::clone(&contact_load_generation);
     let contacts_loading_for_search = Rc::clone(&contacts_loading);
@@ -2271,7 +2274,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_scope = Rc::clone(&contact_state);
     let inbox_for_contact_scope = Rc::clone(&state);
-    let runtime_for_contact_scope = Rc::clone(&runtime);
+    let runtime_for_contact_scope = runtime.clone();
     let contact_load_tx_for_scope = contact_load_tx.clone();
     let contact_load_generation_for_scope = Rc::clone(&contact_load_generation);
     let contacts_loading_for_scope = Rc::clone(&contacts_loading);
@@ -2323,7 +2326,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_more = Rc::clone(&contact_state);
     let inbox_for_contact_more = Rc::clone(&state);
-    let runtime_for_contact_more = Rc::clone(&runtime);
+    let runtime_for_contact_more = runtime.clone();
     let contact_load_tx_for_more = contact_load_tx.clone();
     let contact_load_generation_for_more = Rc::clone(&contact_load_generation);
     let contacts_loading_for_more = Rc::clone(&contacts_loading);
@@ -2373,7 +2376,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_new = Rc::clone(&contact_state);
     let inbox_for_new_contact = Rc::clone(&state);
-    let runtime_for_new_contact = Rc::clone(&runtime);
+    let runtime_for_new_contact = runtime.clone();
     app.on_new_contact(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -2458,7 +2461,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let conflict_app = app.as_weak();
     let conflict_contacts = Rc::clone(&contact_state);
     let conflict_inbox = Rc::clone(&state);
-    let conflict_runtime = Rc::clone(&runtime);
+    let conflict_runtime = runtime.clone();
     let conflict_loaded = Rc::clone(&contacts_loaded);
     app.on_resolve_contact_conflict(move |keep_local| {
         let Some(app) = conflict_app.upgrade() else {
@@ -2495,7 +2498,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_save = Rc::clone(&contact_state);
     let inbox_for_contact_save = Rc::clone(&state);
-    let runtime_for_save = Rc::clone(&runtime);
+    let runtime_for_save = runtime.clone();
     let contact_load_tx_for_save = contact_load_tx.clone();
     let contact_load_generation_for_save = Rc::clone(&contact_load_generation);
     let contacts_loading_for_save = Rc::clone(&contacts_loading);
@@ -2648,7 +2651,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let contacts_for_delete = Rc::clone(&contact_state);
     let inbox_for_contact_delete = Rc::clone(&state);
-    let runtime_for_delete = Rc::clone(&runtime);
+    let runtime_for_delete = runtime.clone();
     let contact_load_tx_for_delete = contact_load_tx.clone();
     let contact_load_generation_for_delete = Rc::clone(&contact_load_generation);
     let contacts_loading_for_delete = Rc::clone(&contacts_loading);
@@ -2720,7 +2723,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let contacts_loaded_for_load = Rc::clone(&contacts_loaded);
     let contacts_loading_for_load = Rc::clone(&contacts_loading);
     let inbox_for_contact_load = Rc::clone(&state);
-    let runtime_for_contact_load = Rc::clone(&runtime);
+    let runtime_for_contact_load = runtime.clone();
     let contact_load_tx_for_load = contact_load_tx.clone();
     let contact_load_generation_for_load = Rc::clone(&contact_load_generation);
     app.on_load_contacts(move || {
@@ -2774,10 +2777,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_dates = Rc::clone(&state);
-    let runtime_for_dates = Rc::clone(&runtime);
+    let runtime_for_dates = runtime.clone();
     let calendar_for_dates = Rc::clone(&calendar_state);
     let contacts_for_dates = Rc::clone(&contact_state);
-    date_format::on_change(move || {
+    app.on_date_formats_changed(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
         };
@@ -2788,12 +2791,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             Local::now().date_naive(),
         );
         apply_contact_rows(&app, &contacts_for_dates);
+        files_controller::refresh_dates(&app);
     });
 
     let app_weak = app.as_weak();
     let calendar_for_navigation = Rc::clone(&calendar_state);
     let inbox_for_calendar_navigation = Rc::clone(&state);
-    let runtime_for_navigation = Rc::clone(&runtime);
+    let runtime_for_navigation = runtime.clone();
     app.on_calendar_navigate(move |scope, direction| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -2820,7 +2824,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let calendar_for_selection = Rc::clone(&calendar_state);
     let inbox_for_calendar_selection = Rc::clone(&state);
-    let runtime_for_selection = Rc::clone(&runtime);
+    let runtime_for_selection = runtime.clone();
     app.on_calendar_select_date(move |date| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -2851,7 +2855,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let calendar_for_view = Rc::clone(&calendar_state);
     let inbox_for_calendar_view = Rc::clone(&state);
-    let runtime_for_view = Rc::clone(&runtime);
+    let runtime_for_view = runtime.clone();
     app.on_calendar_set_view(move |view| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -2913,7 +2917,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let calendar_for_source_toggle = Rc::clone(&calendar_state);
     let inbox_for_source_toggle = Rc::clone(&state);
-    let runtime_for_source_toggle = Rc::clone(&runtime);
+    let runtime_for_source_toggle = runtime.clone();
     app.on_calendar_set_source_enabled(move |calendar_id, enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -2949,7 +2953,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let app_weak = app.as_weak();
     let calendar_for_today = Rc::clone(&calendar_state);
     let inbox_for_calendar_today = Rc::clone(&state);
-    let runtime_for_today = Rc::clone(&runtime);
+    let runtime_for_today = runtime.clone();
     app.on_calendar_today(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -3024,7 +3028,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let calendar_for_delete = Rc::clone(&calendar_state);
-    let runtime_for_calendar_delete = Rc::clone(&runtime);
+    let runtime_for_calendar_delete = runtime.clone();
     let inbox_for_calendar_delete = Rc::clone(&state);
     let editing_event_for_delete = Rc::clone(&calendar_editing_event_id);
     app.on_calendar_delete_event(move |event_id| {
@@ -3077,7 +3081,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let calendar_for_save = Rc::clone(&calendar_state);
-    let runtime_for_calendar_save = Rc::clone(&runtime);
+    let runtime_for_calendar_save = runtime.clone();
     let inbox_for_calendar_save = Rc::clone(&state);
     let editing_event_for_save = Rc::clone(&calendar_editing_event_id);
     app.on_calendar_save_event(move |title, date, time, duration, _color| {
@@ -3206,11 +3210,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         if resource_callback_pending.replace(true) {
             return;
         }
-        let renderer = Rc::clone(&resource_renderer);
+        let renderer = Rc::downgrade(&resource_renderer);
         let app = resource_app.clone();
         let pending = Rc::clone(&resource_callback_pending);
         Timer::single_shot(Duration::from_millis(50), move || {
             pending.set(false);
+            let Some(renderer) = renderer.upgrade() else {
+                return;
+            };
             if !renderer.borrow_mut().poll_resources() {
                 return;
             }
@@ -3365,7 +3372,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     let folder_rx = Rc::new(RefCell::new(folder_rx));
     let folder_update_state = Rc::clone(&state);
-    let folder_update_runtime = Rc::clone(&runtime);
+    let folder_update_runtime = runtime.clone();
     let folder_update_app = app.as_weak();
     app.on_drain_folder_updates(move || {
         while let Ok(update) = folder_rx.borrow_mut().try_recv() {
@@ -3460,7 +3467,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let create_folder_state = Rc::clone(&state);
-    let create_folder_runtime = Rc::clone(&runtime);
+    let create_folder_runtime = runtime.clone();
     let create_folder_updates = folder_tx.clone();
     app.on_create_folder(move |account_id, parent_id, name| {
         let Some(core) = create_folder_state.borrow().core.clone() else {
@@ -3499,7 +3506,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let rename_folder_state = Rc::clone(&state);
-    let rename_folder_runtime = Rc::clone(&runtime);
+    let rename_folder_runtime = runtime.clone();
     let rename_folder_updates = folder_tx.clone();
     app.on_rename_folder(move |folder_id, name| {
         let Some(core) = rename_folder_state.borrow().core.clone() else {
@@ -3532,7 +3539,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let delete_folder_state = Rc::clone(&state);
-    let delete_folder_runtime = Rc::clone(&runtime);
+    let delete_folder_runtime = runtime.clone();
     let delete_folder_updates = folder_tx;
     app.on_delete_folder(move |folder_id| {
         let Some(core) = delete_folder_state.borrow().core.clone() else {
@@ -3602,7 +3609,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         });
     });
     let mail_update_state = Rc::clone(&state);
-    let mail_update_runtime = Rc::clone(&runtime);
+    let mail_update_runtime = runtime.clone();
     let mail_update_app = app.as_weak();
     let pending_core_updates_for_ui = Arc::clone(&pending_core_updates);
     let calendar_for_core_updates = Rc::clone(&calendar_state);
@@ -3702,7 +3709,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let mail_metadata_state = Rc::clone(&state);
-    let mail_metadata_runtime = Rc::clone(&runtime);
+    let mail_metadata_runtime = runtime.clone();
     let mail_metadata_app = app.as_weak();
     let mail_metadata_refresh_in_progress_for_result =
         Rc::clone(&mail_metadata_refresh_in_progress);
@@ -3750,7 +3757,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let mail_update_state = Rc::clone(&state);
-    let mail_update_runtime = Rc::clone(&runtime);
+    let mail_update_runtime = runtime.clone();
     let mail_update_app = app.as_weak();
     let mail_list_refresh_requested_for_core = Rc::clone(&mail_list_refresh_requested);
     let mail_list_refresh_in_progress_for_core = Rc::clone(&mail_list_refresh_in_progress);
@@ -3945,7 +3952,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // but keep all of that work on Tokio so list input remains responsive.
     let message_load_rx = Rc::new(RefCell::new(message_load_rx));
     let message_load_state = Rc::clone(&state);
-    let message_load_runtime = Rc::clone(&runtime);
+    let message_load_runtime = runtime.clone();
     let message_load_pending_for_ui = body_pending.clone();
     let message_load_app = app.as_weak();
     app.on_drain_message_load_updates(move || {
@@ -4034,7 +4041,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // native UI state remains !Send and is touched only by this callback.
     let favicon_rx = Rc::new(RefCell::new(favicon_rx));
     let favicon_state = Rc::clone(&state);
-    let favicon_runtime = Rc::clone(&runtime);
+    let favicon_runtime = runtime.clone();
     let favicon_app = app.as_weak();
     app.on_drain_favicon_updates(move || {
         let mut changed = false;
@@ -4094,13 +4101,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             if let Some((domain, retry_at, delay)) = retry {
                 let retry_app = favicon_app.clone();
                 let retry_state = Rc::downgrade(&favicon_state);
-                let retry_runtime = Rc::downgrade(&favicon_runtime);
+                let runtime = favicon_runtime.clone();
                 Timer::single_shot(delay, move || {
-                    let (Some(app), Some(state), Some(runtime)) = (
-                        retry_app.upgrade(),
-                        retry_state.upgrade(),
-                        retry_runtime.upgrade(),
-                    ) else {
+                    let (Some(app), Some(state)) = (retry_app.upgrade(), retry_state.upgrade())
+                    else {
                         return;
                     };
                     let still_current = state
@@ -4146,7 +4150,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // software renderer sees them.
     let profile_avatar_rx = Rc::new(RefCell::new(profile_avatar_rx));
     let profile_avatar_state = Rc::clone(&state);
-    let profile_avatar_runtime = Rc::clone(&runtime);
+    let profile_avatar_runtime = runtime.clone();
     let profile_avatar_app = app.as_weak();
     app.on_drain_profile_avatar_updates(move || {
         let mut changed = false;
@@ -4212,7 +4216,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let startup_rx = Rc::new(RefCell::new(startup_rx));
     let startup_state = Rc::clone(&state);
     let startup_calendar = Rc::clone(&calendar_state);
-    let startup_runtime = Rc::clone(&runtime);
+    let startup_runtime = runtime.clone();
     let startup_pending_core_updates = Arc::clone(&pending_core_updates);
     let startup_core_wake = core_updates_wake.clone();
     let startup_notification_publisher = platform.notification_publisher.clone();
@@ -4351,7 +4355,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                             .email_renderer
                             .borrow_mut()
                             .configure_resources(
-                                startup_runtime.handle().clone(),
+                                startup_runtime.clone(),
                                 allow_remote_images,
                             );
                         if let Err(error) = configure_result {
@@ -4606,7 +4610,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     app.set_sync_status(UiMessage::plain("Loading local data…"));
-    let retry_runtime = Rc::clone(&runtime);
+    let retry_runtime = runtime.clone();
     let retry_paths = platform.paths.clone();
     let retry_credentials = platform.credentials.clone();
     let retry_oauth_redirects = platform.oauth_redirects.clone();
@@ -4648,7 +4652,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     let ui_task_rx = Rc::new(RefCell::new(ui_task_rx));
     let ui_task_state = Rc::clone(&state);
-    let ui_task_runtime = Rc::clone(&runtime);
+    let ui_task_runtime = runtime.clone();
     let ui_task_app = app.as_weak();
     let ui_task_tray = tray.as_ref().map(|tray| tray.as_weak());
     let removal_contacts = contact_state.clone();
@@ -4871,7 +4875,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         tabs::TabContext {
             app: app.as_weak(),
             state: Rc::clone(&state),
-            runtime: Rc::clone(&runtime),
+            runtime: runtime.clone(),
             calendar: Rc::clone(&calendar_state),
             mail_pagination_generation: Rc::clone(&mail_pagination_generation),
             mail_pagination_in_progress: Rc::clone(&mail_pagination_in_progress),
@@ -4884,7 +4888,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_account_order = Rc::clone(&state);
-    let runtime_for_account_order = Rc::clone(&runtime);
+    let runtime_for_account_order = runtime.clone();
     let ui_task_tx_for_account_order = ui_task_tx.clone();
     app.on_reorder_account(move |source, target, after| {
         let Some(app) = app_weak.upgrade() else {
@@ -4939,7 +4943,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_account_delete = Rc::clone(&state);
-    let runtime_for_account_delete = Rc::clone(&runtime);
+    let runtime_for_account_delete = runtime.clone();
     let ui_task_tx_for_account_delete = ui_task_tx.clone();
     let calendar_for_account_delete = calendar_state.clone();
     app.on_delete_account(move |account_id| {
@@ -5098,7 +5102,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_mail_history = Rc::clone(&state);
-    let runtime_for_mail_history = Rc::clone(&runtime);
+    let runtime_for_mail_history = runtime.clone();
     let ui_task_tx_for_mail_history = ui_task_tx.clone();
     app.on_save_account_mail_history(move |account_id, value| {
         let Some(app) = app_weak.upgrade() else {
@@ -5141,7 +5145,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_keep_on_server = Rc::clone(&state);
-    let runtime_for_keep_on_server = Rc::clone(&runtime);
+    let runtime_for_keep_on_server = runtime.clone();
     let ui_task_tx_for_keep_on_server = ui_task_tx.clone();
     app.on_save_account_keep_on_server(move |account_id, value| {
         let Some(app) = app_weak.upgrade() else {
@@ -5183,7 +5187,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_sent_copy_policy = Rc::clone(&state);
-    let runtime_for_sent_copy_policy = Rc::clone(&runtime);
+    let runtime_for_sent_copy_policy = runtime.clone();
     let ui_task_tx_for_sent_copy_policy = ui_task_tx.clone();
     app.on_save_account_sent_copy_policy(move |account_id, value| {
         let Some(app) = app_weak.upgrade() else {
@@ -5226,7 +5230,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_remote_images = Rc::clone(&state);
-    let runtime_for_remote_images = Rc::clone(&runtime);
+    let runtime_for_remote_images = runtime.clone();
     let remote_images_cache_dir = platform.paths.cache_dir.clone();
     app.on_set_remote_images(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
@@ -5277,7 +5281,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let renderer = Rc::clone(&state.email_renderer);
             let configure_result = renderer
                 .borrow_mut()
-                .configure_resources(runtime_for_remote_images.handle().clone(), enabled);
+                .configure_resources(runtime_for_remote_images.clone(), enabled);
             if let Err(error) = configure_result {
                 state.remote_images_enabled = false;
                 state.favicon_loader = None;
@@ -5286,7 +5290,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 let _ = renderer
                     .borrow_mut()
-                    .configure_resources(runtime_for_remote_images.handle().clone(), false);
+                    .configure_resources(runtime_for_remote_images.clone(), false);
                 app.set_remote_images_enabled(false);
                 app.set_sync_status(UiMessage::detail("Remote images unavailable: {}", error));
                 return;
@@ -5313,7 +5317,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let retry_app = app.as_weak();
     let retry_state = Rc::clone(&state);
-    let retry_runtime = Rc::clone(&runtime);
+    let retry_runtime = runtime.clone();
     app.global::<EmailReader>().on_retry_images(move || {
         let Some(app) = retry_app.upgrade() else {
             return;
@@ -5329,7 +5333,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_message_images = Rc::clone(&state);
-    let runtime_for_message_images = Rc::clone(&runtime);
+    let runtime_for_message_images = runtime.clone();
     app.on_load_remote_images_for_message(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5368,7 +5372,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let sync_in_progress = Rc::new(Cell::new(false));
     let sync_rx = Rc::new(RefCell::new(sync_rx));
     let sync_state = Rc::clone(&state);
-    let sync_runtime = Rc::clone(&runtime);
+    let sync_runtime = runtime.clone();
     let sync_progress = Rc::clone(&sync_in_progress);
     let sync_app = app.as_weak();
     app.on_drain_sync_updates(move || {
@@ -5412,7 +5416,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let start_sync: Rc<dyn Fn(Option<Vec<i64>>)> = {
         let app_weak = app.as_weak();
         let state = Rc::clone(&state);
-        let runtime = Rc::clone(&runtime);
+        let runtime = runtime.clone();
         let in_progress = Rc::clone(&sync_in_progress);
         Rc::new(move |accounts: Option<Vec<i64>>| {
             let Some(app) = app_weak.upgrade() else {
@@ -5467,7 +5471,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_check = Rc::clone(&state);
-    let runtime_for_check = Rc::clone(&runtime);
+    let runtime_for_check = runtime.clone();
     app.on_set_email_checked(move |id, checked| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5489,7 +5493,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_check_all = Rc::clone(&state);
-    let runtime_for_check_all = Rc::clone(&runtime);
+    let runtime_for_check_all = runtime.clone();
     app.on_set_all_emails_checked(move |checked| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5514,7 +5518,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_mail_group = Rc::clone(&state);
-    let runtime_for_mail_group = Rc::clone(&runtime);
+    let runtime_for_mail_group = runtime.clone();
     app.on_toggle_mail_group(move |key| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5542,10 +5546,13 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         refresh_rows_only(&app, &state_for_mail_group, &runtime_for_mail_group);
         if motion_enabled {
-            let state = Rc::clone(&state_for_mail_group);
-            let runtime = Rc::clone(&runtime_for_mail_group);
+            let state = Rc::downgrade(&state_for_mail_group);
+            let runtime = runtime_for_mail_group.clone();
             let app_weak = app.as_weak();
             Timer::single_shot(Duration::from_millis(330), move || {
+                let Some(state) = state.upgrade() else {
+                    return;
+                };
                 if state.borrow_mut().mail_groups.finish_transition(&key, generation)
                     && let Some(app) = app_weak.upgrade()
                 {
@@ -5557,7 +5564,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_action = Rc::clone(&state);
-    let runtime_for_action = Rc::clone(&runtime);
+    let runtime_for_action = runtime.clone();
     app.on_message_action(move |action| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5571,7 +5578,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_row_action = Rc::clone(&state);
-    let runtime_for_row_action = Rc::clone(&runtime);
+    let runtime_for_row_action = runtime.clone();
     app.on_message_action_for_email(move |id, action| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5590,7 +5597,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_bulk_action = Rc::clone(&state);
-    let runtime_for_bulk_action = Rc::clone(&runtime);
+    let runtime_for_bulk_action = runtime.clone();
     app.on_bulk_message_action(move |action| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5693,7 +5700,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_save_label = Rc::clone(&state);
-    let runtime_for_save_label = Rc::clone(&runtime);
+    let runtime_for_save_label = runtime.clone();
     app.on_save_mail_label(
         move |label_id, owner_account_id, name, color, global, parent_label_id| {
         let Some(app) = app_weak.upgrade() else {
@@ -5794,7 +5801,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_delete_label = Rc::clone(&state);
-    let runtime_for_delete_label = Rc::clone(&runtime);
+    let runtime_for_delete_label = runtime.clone();
     app.on_delete_mail_label(move |label_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5865,7 +5872,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_close_preview = Rc::clone(&state);
-    let runtime_for_close_preview = Rc::clone(&runtime);
+    let runtime_for_close_preview = runtime.clone();
     app.on_close_preview(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -5937,7 +5944,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_templates = Rc::clone(&state);
-    let runtime_for_templates = Rc::clone(&runtime);
+    let runtime_for_templates = runtime.clone();
     let templates_for_refresh = Rc::clone(&compose_templates);
     app.on_refresh_email_templates(move || {
         let Some(app) = app_weak.upgrade() else {
@@ -5969,7 +5976,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_template_save = Rc::clone(&state);
-    let runtime_for_template_save = Rc::clone(&runtime);
+    let runtime_for_template_save = runtime.clone();
     let templates_for_save = Rc::clone(&compose_templates);
     app.on_save_email_template(move |id, name, shortcut, subject, body| {
         let Some(app) = app_weak.upgrade() else {
@@ -6036,7 +6043,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_template_delete = Rc::clone(&state);
-    let runtime_for_template_delete = Rc::clone(&runtime);
+    let runtime_for_template_delete = runtime.clone();
     let templates_for_delete = Rc::clone(&compose_templates);
     app.on_delete_email_template(move |id| {
         let Some(app) = app_weak.upgrade() else {
@@ -6071,7 +6078,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_template_use = Rc::clone(&state);
-    let runtime_for_template_use = Rc::clone(&runtime);
+    let runtime_for_template_use = runtime.clone();
     let templates_for_use = Rc::clone(&compose_templates);
     let document_for_template_use = Rc::clone(&compose_document);
     let editor_for_template_use = Rc::clone(&compose_editor);
@@ -6174,7 +6181,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_message_compose = Rc::clone(&state);
-    let runtime_for_message_compose = Rc::clone(&runtime);
+    let runtime_for_message_compose = runtime.clone();
     let files_for_message_compose = Rc::clone(&compose_files);
     let session_for_message_compose = Rc::clone(&compose_session);
     let document_for_message_compose = Rc::clone(&compose_document);
@@ -6441,7 +6448,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let files_for_picker = Rc::clone(&compose_files);
     let session_for_picker = Rc::clone(&compose_session);
     let documents_for_picker = platform.documents.clone();
-    let runtime_for_picker = Rc::clone(&runtime);
+    let runtime_for_picker = runtime.clone();
     let picking_for_picker = Rc::new(Cell::new(false));
     app.on_pick_compose_attachments(move || {
         let Some(app) = app_weak.upgrade() else {
@@ -6748,7 +6755,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_contacts = Rc::clone(&state);
-    let runtime_for_contacts = Rc::clone(&runtime);
+    let runtime_for_contacts = runtime.clone();
     let contacts_for_search = Rc::clone(&compose_contacts);
     app.on_search_compose_contacts(move |recipients, account_id| {
         let Some(app) = app_weak.upgrade() else {
@@ -6802,7 +6809,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_compose = Rc::clone(&state);
-    let runtime_for_compose = Rc::clone(&runtime);
+    let runtime_for_compose = runtime.clone();
     let files_for_save = Rc::clone(&compose_files);
     let session_for_save = Rc::clone(&compose_session);
     let document_for_save = Rc::clone(&compose_document);
@@ -6951,7 +6958,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let compose_send_rx = Rc::new(RefCell::new(compose_send_rx));
     let app_weak = app.as_weak();
     let state_for_send_result = Rc::clone(&state);
-    let runtime_for_send_result = Rc::clone(&runtime);
+    let runtime_for_send_result = runtime.clone();
     let files_for_send_result = Rc::clone(&compose_files);
     let session_for_send_result = Rc::clone(&compose_session);
     let document_for_send_result = Rc::clone(&compose_document);
@@ -7004,7 +7011,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_account = Rc::clone(&state);
-    let runtime_for_account = Rc::clone(&runtime);
+    let runtime_for_account = runtime.clone();
     let ui_task_tx_for_account = ui_task_tx.clone();
     oauth_browser::register(
         &app,
@@ -7226,7 +7233,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_oauth = Rc::clone(&state);
-    let runtime_for_oauth = Rc::clone(&runtime);
+    let runtime_for_oauth = runtime.clone();
     let ui_task_tx_for_oauth = ui_task_tx.clone();
     let opener_for_oauth = platform.external_urls.clone();
     app.on_start_oauth(move |provider| {
@@ -7316,7 +7323,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_reauth = Rc::clone(&state);
-    let runtime_for_reauth = Rc::clone(&runtime);
+    let runtime_for_reauth = runtime.clone();
     let ui_task_tx_for_reauth = ui_task_tx.clone();
     let opener_for_reauth = platform.external_urls.clone();
     app.on_reauth_account(move |account_id| {
@@ -7403,7 +7410,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_calendar_connect = Rc::clone(&state);
-    let runtime_for_calendar_connect = Rc::clone(&runtime);
+    let runtime_for_calendar_connect = runtime.clone();
     let updates_for_calendar_connect = ui_task_tx.clone();
     let opener_for_calendar_connect = platform.external_urls.clone();
     app.on_connect_account_calendar(move |account_id| {
@@ -7475,7 +7482,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_calendar_toggle = Rc::clone(&state);
-    let runtime_for_calendar_toggle = Rc::clone(&runtime);
+    let runtime_for_calendar_toggle = runtime.clone();
     let updates_for_calendar_toggle = ui_task_tx.clone();
     app.on_set_calendar_connection_enabled(move |connection_id, enabled| {
         let Some(core) = state_for_calendar_toggle.borrow().core.clone() else {
@@ -7515,7 +7522,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_calendar_removal = Rc::clone(&state);
-    let runtime_for_calendar_removal = Rc::clone(&runtime);
+    let runtime_for_calendar_removal = runtime.clone();
     let updates_for_calendar_removal = ui_task_tx.clone();
     app.on_remove_calendar_connection(move |connection_id| {
         let Some(core) = state_for_calendar_removal.borrow().core.clone() else {
@@ -7549,7 +7556,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_caldav = Rc::clone(&state);
-    let runtime_for_caldav = Rc::clone(&runtime);
+    let runtime_for_caldav = runtime.clone();
     let updates_for_caldav = ui_task_tx.clone();
     let app_for_caldav = app.as_weak();
     app.on_connect_caldav(move |account_id, connection_id, url, username, password| {
@@ -7612,7 +7619,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_carddav = Rc::clone(&state);
-    let runtime_for_carddav = Rc::clone(&runtime);
+    let runtime_for_carddav = runtime.clone();
     let updates_for_carddav = ui_task_tx.clone();
     let app_for_carddav = app.as_weak();
     app.on_connect_carddav(move |account_id, url, username, password| {
@@ -7661,7 +7668,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_carddav_toggle = Rc::clone(&state);
-    let runtime_for_carddav_toggle = Rc::clone(&runtime);
+    let runtime_for_carddav_toggle = runtime.clone();
     let updates_for_carddav_toggle = ui_task_tx.clone();
     app.on_set_account_carddav_enabled(move |account_id, enabled| {
         let Some(core) = state_for_carddav_toggle.borrow().core.clone() else {
@@ -7696,7 +7703,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     let state_for_carddav_disconnect = Rc::clone(&state);
-    let runtime_for_carddav_disconnect = Rc::clone(&runtime);
+    let runtime_for_carddav_disconnect = runtime.clone();
     let updates_for_carddav_disconnect = ui_task_tx.clone();
     app.on_disconnect_carddav(move |account_id| {
         let Some(core) = state_for_carddav_disconnect.borrow().core.clone() else {
@@ -7753,7 +7760,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_search = Rc::clone(&state);
-    let runtime_for_search = Rc::clone(&runtime);
+    let runtime_for_search = runtime.clone();
     let mail_pagination_generation_for_search = Rc::clone(&mail_pagination_generation);
     let mail_pagination_in_progress_for_search = Rc::clone(&mail_pagination_in_progress);
     app.on_search_changed(move |query| {
@@ -7786,7 +7793,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_filter = Rc::clone(&state);
-    let runtime_for_filter = Rc::clone(&runtime);
+    let runtime_for_filter = runtime.clone();
     app.on_set_search_filter(move |filter| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -7806,7 +7813,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_scope = Rc::clone(&state);
-    let runtime_for_scope = Rc::clone(&runtime);
+    let runtime_for_scope = runtime.clone();
     let mail_metadata_refresh_requested_for_scope = Rc::clone(&mail_metadata_refresh_requested);
     let mail_pagination_generation_for_scope = Rc::clone(&mail_pagination_generation);
     let mail_pagination_in_progress_for_scope = Rc::clone(&mail_pagination_in_progress);
@@ -7844,7 +7851,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_profile = Rc::clone(&state);
-    let runtime_for_profile = Rc::clone(&runtime);
+    let runtime_for_profile = runtime.clone();
     let mail_metadata_refresh_requested_for_profile = Rc::clone(&mail_metadata_refresh_requested);
     let mail_pagination_generation_for_profile = Rc::clone(&mail_pagination_generation);
     let mail_pagination_in_progress_for_profile = Rc::clone(&mail_pagination_in_progress);
@@ -7901,7 +7908,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_more = Rc::clone(&state);
-    let runtime_for_more = Rc::clone(&runtime);
+    let runtime_for_more = runtime.clone();
     let mail_list_tx_for_more = mail_list_tx.clone();
     let mail_pagination_generation_for_more = Rc::clone(&mail_pagination_generation);
     let mail_pagination_in_progress_for_more = Rc::clone(&mail_pagination_in_progress);
@@ -7998,7 +8005,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_selection = Rc::clone(&state);
-    let runtime_for_selection = Rc::clone(&runtime);
+    let runtime_for_selection = runtime.clone();
     app.on_select_email(move |id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -8037,7 +8044,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     let app_weak = app.as_weak();
     let state_for_thread_selection = Rc::clone(&state);
-    let runtime_for_thread_selection = Rc::clone(&runtime);
+    let runtime_for_thread_selection = runtime.clone();
     app.on_select_thread_message(move |index| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -8074,7 +8081,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // A mailbox left open overnight must promote its date sections and row
     // timestamps without waiting for a network sync or a folder change.
     let date_refresh_state = Rc::clone(&state);
-    let date_refresh_runtime = Rc::clone(&runtime);
+    let date_refresh_runtime = runtime.clone();
     let date_refresh_app = app.as_weak();
     let date_refresh_calendar = Rc::clone(&calendar_state);
     let last_local_date = Cell::new(Local::now().date_naive());

@@ -63,6 +63,12 @@
     "download.svg": {
       "source": "download"
     },
+    "eye.svg": {
+      "source": "eye"
+    },
+    "eye-off.svg": {
+      "source": "eye-off"
+    },
     "file.svg": {
       "source": "file"
     },
@@ -302,6 +308,14 @@
     "ellipsis": {
       "path": "sources/ellipsis.svg",
       "sha256": "98a57ae67ca5f122d5cd517332f52b78ce7e685801b954c9d8c02f1a7ab8d939"
+    },
+    "eye": {
+      "path": "sources/eye.svg",
+      "sha256": "a8ae746151078f5029e740f940609d6d0fb9a2c0dce152002e3d31760d7b0e52"
+    },
+    "eye-off": {
+      "path": "sources/eye-off.svg",
+      "sha256": "03cbcab7ef08b7cd64c339f4e91bc4d76eae5e6b8a97616f7932331bbe608472"
     },
     "file": {
       "path": "sources/file.svg",

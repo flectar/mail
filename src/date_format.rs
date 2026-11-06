@@ -5,7 +5,7 @@
 //! order, punctuation and compactness of its dates instead of only naming the
 //! months. Controllers format through the formats loaded for the UI thread.
 //! They are reloaded whenever the language or the time format changes, and
-//! views registered with [`on_change`] then rebuild their date text.
+//! the window's `date-formats-changed` callback then rebuilds its date text.
 
 use crate::{AppWindow, I18n};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
@@ -283,7 +283,6 @@ thread_local! {
     // and tests running in parallel threads stay independent.
     static CURRENT: RefCell<Rc<DateFormats>> =
         RefCell::new(Rc::new(DateFormats::english(HourCycle::TwentyFour)));
-    static LISTENERS: RefCell<Vec<Rc<dyn Fn()>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The formats for the current language and time format.
@@ -291,9 +290,9 @@ pub(crate) fn current() -> Rc<DateFormats> {
     CURRENT.with(|current| Rc::clone(&current.borrow()))
 }
 
-/// Loads the formats after the language or the time format changed. Views
-/// registered with [`on_change`] rebuild their text on the next event-loop
-/// turn, outside whatever state the caller is holding.
+/// Loads the formats after the language or the time format changed. When
+/// they differ, the window rebuilds its date text on the next event-loop turn,
+/// outside whatever state the caller is holding.
 pub(crate) fn reload(app: &AppWindow) {
     let preference = TimeFormat::parse(&app.get_time_format()).unwrap_or_default();
     let formats = DateFormats::load(&app.global::<I18n>(), HourCycle::for_preference(preference));
@@ -306,19 +305,14 @@ pub(crate) fn reload(app: &AppWindow) {
         }
         changed
     });
-    let listeners = LISTENERS.with(|listeners| listeners.borrow().clone());
-    if changed && !listeners.is_empty() {
+    if changed {
+        let app = app.as_weak();
         slint::Timer::single_shot(Duration::ZERO, move || {
-            for listener in &listeners {
-                listener();
+            if let Some(app) = app.upgrade() {
+                app.invoke_date_formats_changed();
             }
         });
     }
-}
-
-/// Runs `listener` after each change of the formats.
-pub(crate) fn on_change(listener: impl Fn() + 'static) {
-    LISTENERS.with(|listeners| listeners.borrow_mut().push(Rc::new(listener)));
 }
 
 /// Regions whose preferred clock is 12-hour, from CLDR 48 `timeData`.

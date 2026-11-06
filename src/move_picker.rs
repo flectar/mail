@@ -222,7 +222,7 @@ fn picker_ids(state: &InboxState, source: &str, id: i32) -> Vec<i32> {
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     let picker = Rc::new(RefCell::new(MovePicker::default()));
     let ui = app.global::<MovePickerUi>();
