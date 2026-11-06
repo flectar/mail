@@ -9,7 +9,7 @@ use chrono::{Datelike, Timelike};
 pub(super) fn refresh_from_source(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     preserve_loaded_rows: bool,
     acted_on_ids: &[i32],
 ) -> Result<(), String> {
@@ -102,7 +102,7 @@ pub(super) fn carry_selected_detail(
 pub(super) fn apply_background_mail_page(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     page: mail::MailPage,
     acted_on_ids: &[i32],
 ) {
@@ -237,7 +237,7 @@ fn deeper_refresh(state: &InboxState, page: &mail::MailPage) -> Option<usize> {
 pub(super) fn append_mail_page(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     cursor: MailCursor,
     page: mail::MailPage,
 ) -> Result<(), String> {
@@ -276,7 +276,7 @@ pub(super) fn append_mail_page(
 pub(super) fn select_message(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     id: i32,
 ) -> Result<(), String> {
     {
@@ -339,7 +339,7 @@ fn adjacent_message_ids<M: std::borrow::Borrow<MailMessage>>(
 pub(super) fn render_current(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) -> Result<(), String> {
     if app.get_active_view() != "mail" {
         let mut state = state.borrow_mut();
@@ -651,7 +651,7 @@ pub(super) fn render_current(
 pub(super) fn select_thread_message(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     index: i32,
 ) -> Result<(), String> {
     let index = usize::try_from(index).map_err(|_| "invalid thread message".to_owned())?;
@@ -1133,7 +1133,7 @@ pub(super) fn apply_selected_favicon(app: &AppWindow, icons: Option<&FaviconImag
 pub(super) fn refresh_rows_only(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     let (
         selected_id,
@@ -1284,7 +1284,7 @@ pub(super) fn refresh_rows_only(
 pub(super) fn refresh_message_dates(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     refresh_rows_only(app, state, runtime);
     let date_ms = {
@@ -1363,7 +1363,7 @@ fn sidebar_badge_text(count: usize) -> String {
 pub(super) fn schedule_favicon_fetches(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     visible_domains: &[String],
 ) {
     let pixel_sides = (
@@ -1452,7 +1452,7 @@ pub(super) fn schedule_favicon_fetches(
 pub(super) fn schedule_profile_avatar_fetches(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     let pixel_sides = (
         physical_pixel_side(ACCOUNT_AVATAR_SMALL_SIDE, app.window().scale_factor()),

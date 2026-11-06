@@ -344,7 +344,7 @@ pub(super) fn restore_account_backup(
     bytes: &[u8],
     core: &CoreMailSource,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) -> Result<BackupRestore, String> {
     if bytes.len() as u64 > MAX_ACCOUNT_BACKUP_BYTES {
         return Err("backup is larger than the 1 MB safety limit".into());
@@ -987,7 +987,7 @@ fn mail_export_message(exported: &MailExport, location: &str) -> UiMessage {
 fn register_mail_export(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     // Mobile hosts stage the export and hand it to the platform's picker.
     #[cfg_attr(desktop, allow(unused_variables))] documents: &std::sync::Arc<
         dyn documents::DocumentProvider,
@@ -997,7 +997,7 @@ fn register_mail_export(
 ) {
     let app_weak = app.as_weak();
     let state = Rc::clone(state);
-    let runtime = Rc::clone(runtime);
+    let runtime = runtime.clone();
     #[cfg(mobile)]
     let documents = documents.clone();
     #[cfg(mobile)]
@@ -1054,7 +1054,7 @@ fn register_mail_export(
         let start = {
             let app_weak = app.as_weak();
             let running = Rc::clone(&running);
-            let runtime = Rc::clone(&runtime);
+            let runtime = runtime.clone();
             #[cfg(mobile)]
             let documents = documents.clone();
             #[cfg(mobile)]
@@ -1084,7 +1084,7 @@ fn register_mail_export(
                 #[cfg(mobile)]
                 let documents = documents.clone();
                 #[cfg(mobile)]
-                let runtime = Rc::clone(&runtime);
+                let runtime = runtime.clone();
                 let finish = move |message: UiMessage| {
                     finished.set(false);
                     if let Some(app) = app_weak.upgrade() {
@@ -1106,7 +1106,7 @@ fn register_mail_export(
                         Ok((staged, exported)) => {
                             let request =
                                 documents.export(staged.archive.clone(), staged.name.clone());
-                            let cleanup = runtime.handle().clone();
+                            let cleanup = runtime.clone();
                             documents::run_request(&runtime, request, move |saved| {
                                 let name = staged.name.clone();
                                 cleanup.spawn(staged.remove());
@@ -1185,7 +1185,7 @@ pub(super) fn register_data_management_callbacks(
     paths: &Paths,
     documents: &std::sync::Arc<dyn documents::DocumentProvider>,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     // Only the desktop snapshot export reports through the task channel.
     #[cfg_attr(mobile, allow(unused_variables))] ui_task_tx: &UiSender<UiTaskUpdate>,
     contact_state: &Rc<RefCell<ContactDirectoryState>>,
@@ -1211,7 +1211,7 @@ pub(super) fn register_data_management_callbacks(
     let storage_paths = paths.clone();
     let storage_app = app.as_weak();
     let storage_state = Rc::clone(state);
-    let storage_runtime = Rc::clone(runtime);
+    let storage_runtime = runtime.clone();
     app.on_load_storage_usage(move || {
         let Some(app) = storage_app.upgrade() else {
             return;
@@ -1261,7 +1261,7 @@ pub(super) fn register_data_management_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_backup = Rc::clone(state);
-    let runtime_for_backup = Rc::clone(runtime);
+    let runtime_for_backup = runtime.clone();
     let documents_for_backup = documents.clone();
     let paths_for_backup = paths.clone();
     let exporting_backup = Rc::new(Cell::new(false));
@@ -1408,7 +1408,7 @@ pub(super) fn register_data_management_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_database_snapshot = Rc::clone(state);
-    let runtime_for_database_snapshot = Rc::clone(runtime);
+    let runtime_for_database_snapshot = runtime.clone();
     #[cfg(desktop)]
     let updates_for_database_snapshot = ui_task_tx.clone();
     #[cfg(mobile)]
@@ -1450,7 +1450,7 @@ pub(super) fn register_data_management_callbacks(
                 Box::pin(async move { Ok(pick_database_snapshot_path(title).await) });
             let picking = Rc::clone(&picking_database_snapshot);
             let snapshot_running = Arc::clone(&database_snapshot_running);
-            let runtime = Rc::clone(&runtime_for_database_snapshot);
+            let runtime = runtime_for_database_snapshot.clone();
             let updates = updates_for_database_snapshot.clone();
             let app_weak = app.as_weak();
             documents::run_request(&runtime_for_database_snapshot, request, move |picked| {
@@ -1515,7 +1515,7 @@ pub(super) fn register_data_management_callbacks(
             let abort_staging = staged.abort_handle();
             let app_weak = app.as_weak();
             let documents = documents_for_database_snapshot.clone();
-            let runtime = Rc::clone(&runtime_for_database_snapshot);
+            let runtime = runtime_for_database_snapshot.clone();
             let spawned = slint::spawn_local(async move {
                 let snapshot = match staged.await.unwrap_or_else(|error| Err(error.to_string())) {
                     Ok(snapshot) => snapshot,
@@ -1531,7 +1531,7 @@ pub(super) fn register_data_management_callbacks(
                     }
                 };
                 let request = documents.export(snapshot.archive.clone(), snapshot.name.clone());
-                let cleanup = runtime.handle().clone();
+                let cleanup = runtime.clone();
                 documents::run_request(&runtime, request, move |exported| {
                     let name = snapshot.name.clone();
                     cleanup.spawn(snapshot.remove());
@@ -1572,7 +1572,7 @@ pub(super) fn register_data_management_callbacks(
     let data_reset_contacts_loading = Rc::clone(contacts_loading);
     let data_reset_contact_generation = Rc::clone(contact_load_generation);
     let data_reset_calendar = Rc::clone(calendar_state);
-    let data_reset_runtime = Rc::clone(runtime);
+    let data_reset_runtime = runtime.clone();
     app.on_drain_data_reset_updates(move || {
         while let Ok(update) = data_reset_rx.borrow_mut().try_recv() {
             let Some(app) = data_reset_app.upgrade() else {
@@ -1673,7 +1673,7 @@ pub(super) fn register_data_management_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_data_reset = Rc::clone(state);
-    let runtime_for_data_reset = Rc::clone(runtime);
+    let runtime_for_data_reset = runtime.clone();
     app.on_delete_all_data(move || {
         let Some(app) = app_weak.upgrade() else {
             return;

@@ -107,7 +107,7 @@ fn dispatch_pressure(flags: usize) -> Option<MemoryPressure> {
 
 /// Start listening to the system's memory-pressure signal. Android and
 /// OpenHarmony forward theirs from the activity or ability as they arrive.
-pub(crate) fn watch_pressure(runtime: &tokio::runtime::Runtime) {
+pub(crate) fn watch_pressure(runtime: &tokio::runtime::Handle) {
     #[cfg(linux_desktop)]
     linux::watch(runtime);
     #[cfg(not(linux_desktop))]

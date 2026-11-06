@@ -5,7 +5,7 @@
 use super::{MemoryPressure, memory_pressure};
 use futures_util::StreamExt;
 
-pub(super) fn watch(runtime: &tokio::runtime::Runtime) {
+pub(super) fn watch(runtime: &tokio::runtime::Handle) {
     runtime.spawn(async {
         // ashpd shares its session connection, so this adds no thread.
         let Ok(monitor) = ashpd::desktop::memory_monitor::MemoryMonitor::new().await else {
