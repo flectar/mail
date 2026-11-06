@@ -1,0 +1,42 @@
+name: Email rendering issue
+description: An email looks wrong or part of it doesn't work in Flectar Mail.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What looks wrong?
+      description: >-
+        Describe what's missing, broken or not working. A screenshot helps, and
+        one of the same email in another mail app helps even more.
+    validations:
+      required: true
+  - type: textarea
+    id: html
+    attributes:
+      label: Email HTML
+      description: >-
+        Report issue in Flectar Mail copies the email's HTML for you, or saves
+        it as a file when it's too long for GitHub. Paste it inside the code
+        block or attach the file. Replace names, email addresses and personal
+        links with placeholders first.
+      value: |
+        <details><summary>Email HTML</summary>
+
+        ```html
+
+        ```
+
+        </details>
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and system
+      description: >-
+        Report issue in Flectar Mail fills this in. Otherwise, add the version
+        shown in Settings and your system.
+      placeholder: |
+        Flectar Mail 0.1.0-alpha.7 (AppImage)
+        Linux x86_64 (Arch Linux)
+        GPU renderer, 100% zoom, light message colors
+    validations:
+      required: true
