@@ -101,7 +101,7 @@ struct ActionResult {
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     let (pages, page_rx) = tokio::sync::watch::channel(None);
     let (page_tx, mut page_results) = bounded_ui_channel();
@@ -293,7 +293,7 @@ pub(super) fn register(
 pub(super) fn refresh(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     preserve: bool,
     moved: &[i32],
 ) -> Result<(), String> {
@@ -307,7 +307,7 @@ pub(super) fn refresh(
 pub(super) fn refresh_rows(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     rows: usize,
     moved: &[i32],
 ) -> Result<(), String> {
@@ -319,7 +319,7 @@ pub(super) fn refresh_rows(
 pub(super) fn reload(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     rows: usize,
 ) -> Result<(), String> {
     load(app, state, runtime, false, &[], Some(rows))
@@ -328,7 +328,7 @@ pub(super) fn reload(
 fn load(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     preserve: bool,
     moved: &[i32],
     rows: Option<usize>,

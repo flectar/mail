@@ -548,7 +548,7 @@ fn write_file(path: &Path, tabs: &SavedTabs) -> Result<(), Box<dyn std::error::E
 pub(crate) struct TabContext {
     pub(crate) app: slint::Weak<AppWindow>,
     pub(crate) state: Rc<RefCell<InboxState>>,
-    pub(crate) runtime: Rc<tokio::runtime::Runtime>,
+    pub(crate) runtime: tokio::runtime::Handle,
     pub(crate) calendar: Rc<RefCell<LocalCalendarState>>,
     pub(crate) mail_pagination_generation: Rc<Cell<u64>>,
     pub(crate) mail_pagination_in_progress: Rc<Cell<bool>>,
@@ -1945,12 +1945,15 @@ mod tests {
         let _ = slint::platform::set_platform(Box::new(Headless(window.clone())));
         let app = AppWindow::new().unwrap();
         app.set_startup_ready(true);
-        let runtime = Rc::new(
+        // Contexts hold handles, which don't keep a runtime alive, so all the
+        // tests here share one that is never dropped.
+        static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+        let runtime = RUNTIME.get_or_init(|| {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .unwrap(),
-        );
+                .unwrap()
+        });
         let dir = tempfile::tempdir().unwrap();
         let (favicons, _) = bounded_ui_channel();
         let (avatars, _) = bounded_ui_channel();
@@ -1961,12 +1964,12 @@ mod tests {
             UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
             false,
             false,
-            WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
+            WarmStartCacheWriter::spawn(runtime.handle(), dir.path().join("warm.json")),
         )));
         let context = TabContext {
             app: app.as_weak(),
             state,
-            runtime,
+            runtime: runtime.handle().clone(),
             calendar: Rc::new(RefCell::new(LocalCalendarState::new(
                 NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
             ))),

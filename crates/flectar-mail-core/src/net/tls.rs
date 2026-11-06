@@ -7,7 +7,9 @@ use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{CertificateError, DigitallySignedStruct, SignatureScheme};
+use rustls::{
+    AlertDescription, CertificateError, DigitallySignedStruct, PeerIncompatible, SignatureScheme,
+};
 use std::sync::{Arc, LazyLock};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
@@ -315,6 +317,23 @@ pub fn handshake_advice(error: &std::io::Error) -> &'static str {
         Some(rustls::Error::InvalidCertificate(_)) => {
             "This device does not trust the server certificate. If antivirus or network security software inspects encrypted connections, trust its certificate on this device or import it for this account. For Proton Bridge, import its exported certificate."
         }
+        // The server turned down every TLS version or cipher suite offered,
+        // which Chromium reports as ERR_SSL_VERSION_OR_CIPHER_MISMATCH and NSS
+        // as "no common encryption algorithm(s)". Servers that offer only TLS
+        // 1.0/1.1 or the key exchanges RFC 10015 retired end up here.
+        Some(
+            rustls::Error::AlertReceived(
+                AlertDescription::HandshakeFailure
+                | AlertDescription::ProtocolVersion
+                | AlertDescription::InsufficientSecurity,
+            )
+            | rustls::Error::PeerIncompatible(
+                PeerIncompatible::ServerDoesNotSupportTls12Or13
+                | PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig,
+            ),
+        ) => {
+            "The server and this app have no TLS version or cipher suite in common. Servers that offer only outdated encryption need an update from their administrator."
+        }
         _ => "Check SSL/TLS versus STARTTLS for this port.",
     }
 }
@@ -366,5 +385,15 @@ mod tests {
         assert!(advice(plaintext).contains("STARTTLS"));
         let closed = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "tls handshake eof");
         assert!(advice(closed).contains("STARTTLS"));
+        // What rustls reports for a server offering only TLS 1.2 DHE/RSA key
+        // exchange or no shared curve (handshake_failure), or only TLS 1.0
+        // (protocol_version), as measured against OpenSSL servers.
+        for mismatch in [
+            rustls::Error::AlertReceived(AlertDescription::HandshakeFailure),
+            rustls::Error::AlertReceived(AlertDescription::ProtocolVersion),
+            rustls::Error::PeerIncompatible(PeerIncompatible::ServerDoesNotSupportTls12Or13),
+        ] {
+            assert!(advice(failed(mismatch)).contains("no TLS version or cipher suite in common"));
+        }
     }
 }

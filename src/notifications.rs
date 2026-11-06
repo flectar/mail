@@ -43,7 +43,7 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 /// after new mail arrives, and when a postponed notification falls due. A host
 /// without a publisher starts nothing.
 pub(crate) fn spawn_dispatcher(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     core: Arc<Core>,
     publisher: NotificationPublisher,
 ) {
