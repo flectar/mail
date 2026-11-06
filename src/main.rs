@@ -846,7 +846,9 @@ fn resolve_single_mail_drop(
             if !target.is_selectable {
                 return Err("this mailbox is a hierarchy container".to_owned());
             }
-            if target.label == message.folder {
+            // Folders are told apart by scope: another folder can have the
+            // name of the one shown.
+            if state.scope.shows_mail_in(target_scope) {
                 return Err("message is already in this destination".to_owned());
             }
             // Custom folders are plain moves even when named like a
