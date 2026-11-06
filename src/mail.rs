@@ -202,6 +202,8 @@ pub struct ComposeSource {
     pub subject: String,
     pub date: i64,
     pub text_body: String,
+    /// The message's files, for a forward or an edited copy to carry along.
+    pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
 }
 
 #[derive(Clone, Debug)]
@@ -990,7 +992,22 @@ impl CoreMailSource {
                 .clone()
                 .filter(|body| !body.trim().is_empty())
                 .unwrap_or_else(|| message.snippet.clone()),
+            // Images shown in the text are part of it, not files.
+            attachments: message
+                .attachments
+                .iter()
+                .filter(|attachment| !attachment.is_inline)
+                .cloned()
+                .collect(),
         })
+    }
+
+    /// Where a message's file is kept here, downloading it first if needed.
+    pub async fn attachment_path(&self, attachment_id: i64) -> Result<String, String> {
+        self.core
+            .get_attachment(attachment_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// The account that answers local mail, which is never sent from: the

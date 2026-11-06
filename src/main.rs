@@ -6483,7 +6483,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             );
         }
         *intent_for_message_compose.borrow_mut() = prepared.intent;
-        app.set_compose_mode(action);
+        app.set_compose_mode(action.clone());
         app.global::<AccountMailPreferences>()
             .invoke_composer_reset();
         app.global::<AccountMailPreferences>()
@@ -6491,6 +6491,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.global::<AccountMailPreferences>()
             .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
+        // A forward, and a message edited as new, carry the original's files.
+        if matches!(action.as_str(), "forward" | "edit_as_new") {
+            attach_original_files(
+                &app,
+                &files_for_message_compose,
+                &session_for_message_compose,
+                &runtime_for_message_compose,
+                core,
+                source.attachments,
+            );
+        }
     });
 
     let app_weak = app.as_weak();

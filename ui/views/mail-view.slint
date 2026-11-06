@@ -416,6 +416,7 @@ export component MailView inherits FocusScope {
                     root.message_action_for_email(id, action);
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
+                edit-as-new => { root.compose_message_action("edit_as_new"); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }
@@ -661,6 +662,7 @@ export component MailView inherits FocusScope {
                     root.message_action_for_email(id, action);
                 }
                 bulk_message_action(action) => { root.bulk_message_action(action); }
+                edit-as-new => { root.compose_message_action("edit_as_new"); }
                 toggle_mail_group(key) => { root.toggle_mail_group(key); }
                 set_email_checked(id, checked) => { root.set_email_checked(id, checked); }
                 set_all_emails_checked(checked) => { root.set_all_emails_checked(checked); }

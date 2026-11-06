@@ -355,6 +355,8 @@ export component MailListPane inherits FocusScope {
     callback open_compose();
     callback message_action_for_email(int, string);
     callback bulk_message_action(string);
+    // Edits the open message as new.
+    callback edit-as-new();
     callback toggle_mail_group(string);
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
@@ -462,6 +464,11 @@ export component MailListPane inherits FocusScope {
         keys: Shortcuts.copy-to;
         enabled: !search-toolbar.search-focused;
         activated => { root.pick-folder("copy"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.edit-as-new;
+        enabled: !search-toolbar.search-focused;
+        activated => { root.edit-as-new(); }
     }
 
     // Move to and Copy to open for what the other shortcuts act on.

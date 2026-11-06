@@ -40,6 +40,7 @@ export component ComposerHeader inherits Rectangle {
                     : root.mode == "reply_all" ? @tr("Reply all")
                     : root.mode == "forward" ? @tr("Forward")
                     : root.mode == "draft" ? @tr("Edit draft")
+                    : root.mode == "edit_as_new" ? @tr("Edit as new")
                     : @tr("New message");
                 color: root.title-color;
                 font-size: TypeScale.heading-small;
