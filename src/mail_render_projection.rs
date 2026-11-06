@@ -37,7 +37,8 @@ pub(super) fn fixture_mailboxes(messages: &[MailMessage]) -> Vec<MailboxEntry> {
             detail: "Account folders".to_owned(),
             avatar: avatar_initials(account),
             is_account: true,
-            count: account_messages().count().to_string(),
+            // A collapsed account adds up its folders' badges.
+            count: 0,
         });
 
         for mailbox in StandardMailbox::ALL {
@@ -62,10 +63,12 @@ pub(super) fn fixture_mailboxes(messages: &[MailMessage]) -> Vec<MailboxEntry> {
                 detail: String::new(),
                 avatar: String::new(),
                 is_account: false,
-                count: account_messages()
-                    .filter(|message| scope_matches(message, scope))
-                    .count()
-                    .to_string(),
+                count: u32::try_from(
+                    account_messages()
+                        .filter(|message| scope_matches(message, scope))
+                        .count(),
+                )
+                .unwrap_or(u32::MAX),
             });
         }
     }

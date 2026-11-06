@@ -1590,6 +1590,7 @@ pub(super) fn register_data_management_callbacks(
                         state.messages.clear();
                         state.mailboxes.clear();
                         state.unified_mailboxes.clear();
+                        state.sidebar_badges = Default::default();
                         state.inbox_count = 0;
                         state.next_cursor = None;
                         state.selected_id = None;

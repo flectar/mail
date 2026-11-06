@@ -39,7 +39,8 @@ use tokio::io::AsyncReadExt;
 // stores the provider and mail protocol names of the current account model.
 // Version 6 keeps message dates as timestamps instead of English text.
 // Version 7 records whether the rows are conversations or single messages.
-const WARM_START_FORMAT_VERSION: u32 = 7;
+// Version 8 stores mailbox badges as numbers.
+const WARM_START_FORMAT_VERSION: u32 = 8;
 const MAX_WARM_START_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_WARM_START_ACCOUNTS: usize = 64;
 const MAX_WARM_START_MESSAGES: usize = 25;
@@ -180,7 +181,7 @@ pub(crate) struct WarmStartMailbox {
     pub(crate) detail: String,
     pub(crate) avatar: String,
     pub(crate) is_account: bool,
-    pub(crate) count: String,
+    pub(crate) count: u32,
 }
 
 fn missing_folder_id() -> i64 {
@@ -210,7 +211,7 @@ impl From<&mail::MailboxEntry> for WarmStartMailbox {
             detail: mailbox.detail.clone(),
             avatar: mailbox.avatar.clone(),
             is_account: mailbox.is_account,
-            count: mailbox.count.clone(),
+            count: mailbox.count,
         }
     }
 }
@@ -1038,7 +1039,7 @@ mod warm_start_tests {
             is_standard: false,
             label: "Person".into(),
             scope: None,
-            count: String::new(),
+            count: 0,
             ..mailbox()
         }];
         for (index, mailbox_kind) in crate::StandardMailbox::ALL.into_iter().enumerate() {
@@ -1049,11 +1050,7 @@ mod warm_start_tests {
                     mailbox: mailbox_kind,
                 }),
                 folder_id: index as i64 + 1,
-                count: if index == 0 {
-                    "3".into()
-                } else {
-                    String::new()
-                },
+                count: if index == 0 { 3 } else { 0 },
                 ..mailbox()
             });
         }
@@ -1272,7 +1269,7 @@ mod warm_start_tests {
             detail: "person@example.com".into(),
             avatar: "P".into(),
             is_account: false,
-            count: "3".into(),
+            count: 3,
         }
     }
 
@@ -1383,7 +1380,7 @@ mod warm_start_tests {
     #[test]
     fn benchmark_warm_cache_fixture_matches_the_current_format() {
         let snapshot: WarmStartSnapshot = serde_json::from_str(include_str!(
-            "../resources/benchmarks/warm-cache/warm-start-mailbox-v7.json"
+            "../resources/benchmarks/warm-cache/warm-start-mailbox-v8.json"
         ))
         .unwrap();
 

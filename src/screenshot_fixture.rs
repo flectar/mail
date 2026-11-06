@@ -148,7 +148,8 @@ fixture_row!(MailLabelRow {
     color,
     applied,
     is_auto,
-    is_global
+    is_global,
+    count
 });
 fixture_row!(MailboxRow {
     account_id,

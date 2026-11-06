@@ -8459,17 +8459,6 @@ impl Core {
         Ok(count)
     }
 
-    /// Exact unread counts for every split tab and sidebar row in one call.
-    pub async fn unread_counts(&self, account_id: Option<i64>) -> Result<UnreadCounts> {
-        self.db
-            .read(move |conn| {
-                let splits = repo::splits::list(conn)?;
-                let labels = repo::labels::list(conn)?;
-                repo::counts::unread_counts(conn, account_id, &splits, &labels)
-            })
-            .await
-    }
-
     /// Native sidebar badges for all accounts, computed in one grouped query.
     /// They count conversations or messages, as the mail list shows them.
     pub async fn mailbox_badge_counts(
