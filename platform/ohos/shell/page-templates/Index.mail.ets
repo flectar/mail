@@ -52,6 +52,7 @@ interface FlectarNativeModule {
   imeFunction?: (key: number) => void;
   setColorScheme?: (dark: boolean) => void;
   suspendPreview?: () => void;
+  memoryLevel?: (level: number) => void;
   setClipboardText?: (text: string) => void;
 }
 
@@ -73,6 +74,9 @@ struct Index {
   private appBackgroundHandler: () => void = (): void => {
     this.nativeModule?.suspendPreview?.();
   };
+  private memoryLevelHandler: (level: number) => void = (level: number): void => {
+    this.nativeModule?.memoryLevel?.(level);
+  };
   private lastImeCursor: string = '';
   private pendingImeCursor: ImeCursor | undefined = undefined;
   private imeCursorRetries: number = 0;
@@ -88,6 +92,7 @@ struct Index {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       AppStorage.setOrCreate('flectarColorMode', context.config.colorMode ?? -1);
       context.eventHub.on('flectarBackground', this.appBackgroundHandler);
+      context.eventHub.on('flectarMemoryLevel', this.memoryLevelHandler);
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'could not read the system color mode: %{public}s',
         (error as BusinessError).message);
@@ -124,6 +129,7 @@ struct Index {
     try {
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       context.eventHub.off('flectarBackground', this.appBackgroundHandler);
+      context.eventHub.off('flectarMemoryLevel', this.memoryLevelHandler);
     } catch (error) {
       hilog.error(0x0000, LOG_TAG, 'background listener cleanup failed: %{public}s',
         (error as BusinessError).message);
