@@ -202,6 +202,10 @@ unsafe fn register_module_functions(env: napi_env, exports: napi_value) {
                 bridge::suspend_preview as ffi::napi_callback,
             ),
             (
+                &b"memoryLevel\0"[..],
+                bridge::memory_level as ffi::napi_callback,
+            ),
+            (
                 &b"setClipboardText\0"[..],
                 bridge::set_clipboard_text as ffi::napi_callback,
             ),
