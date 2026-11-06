@@ -36,6 +36,7 @@ mod mail_setup;
 mod mail_view_model;
 mod mail_work;
 mod mailto_links;
+mod memory;
 mod message_appearance;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
@@ -4568,6 +4569,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             if active != "mail" {
                 let _ = store_core.db.release_idle_connections().await;
             }
+            // The previous product's models and connections are gone. Give
+            // Slint a moment to drop its view, then return the freed pages.
+            tokio::time::sleep(window_controller::TRIM_DELAY).await;
+            crate::memory::release_free_heap();
         });
         if app.get_settings_open() {
             let updates = product_updates.clone();

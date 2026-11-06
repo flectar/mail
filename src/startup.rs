@@ -695,6 +695,17 @@ pub(crate) async fn load_startup_calendar_snapshot(
     }
 }
 
+/// How long the core must stay quiet after a burst of work before its SQLite
+/// caches and the allocator's free pages go back to the operating system.
+const IDLE_RELEASE_DELAY: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
 pub(crate) fn spawn_core_event_listener(
     runtime: &tokio::runtime::Handle,
     core: CoreMailSource,
@@ -702,11 +713,35 @@ pub(crate) fn spawn_core_event_listener(
     wake: UiWake,
 ) {
     let mut events = core.subscribe_events();
+    // Weak, so the loop still ends when the core and its event bus are gone.
+    let stores = Arc::downgrade(&core.file_core());
     runtime.spawn(async move {
         use tokio::sync::broadcast::error::RecvError;
 
+        // Core events come from database work: sync steps, new and changed
+        // mail, actions, calendar and contact pulls. A sync leaves the page
+        // caches full and the freed pages with the allocator, so hand both
+        // back once no event has arrived for a while.
+        let mut release_at = None;
         loop {
-            let should_wake = match events.recv().await {
+            let event = tokio::select! {
+                event = events.recv() => event,
+                () = until(release_at) => {
+                    release_at = None;
+                    // On its own task: the release waits behind any job
+                    // still queued on a database thread.
+                    let stores = stores.clone();
+                    tokio::spawn(async move {
+                        if let Some(core) = stores.upgrade() {
+                            let _ = core.release_cache_memory().await;
+                        }
+                        crate::memory::release_free_heap();
+                    });
+                    continue;
+                }
+            };
+            release_at = Some(tokio::time::Instant::now() + IDLE_RELEASE_DELAY);
+            let should_wake = match event {
                 Ok(CoreEvent::MailUpdated { thread_ids }) => {
                     pending
                         .lock()
