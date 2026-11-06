@@ -103,6 +103,48 @@ pub fn by_folder_uid(conn: &Connection, folder_id: i64, uid: i64) -> Result<Opti
         .optional()?)
 }
 
+/// The In-Reply-To and References a draft's message carries: from the stored
+/// message it replies to, or from the Message-ID kept for a reply to one that
+/// is not stored here.
+pub fn draft_reply_headers(
+    conn: &Connection,
+    draft_id: i64,
+) -> Result<(Vec<String>, Option<String>)> {
+    let (parent_id, header) = conn
+        .query_row(
+            "SELECT in_reply_to_message_id, in_reply_to_header FROM drafts_meta
+              WHERE message_id = ?1",
+            params![draft_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
+            },
+        )
+        .optional()?
+        .unwrap_or_default();
+    if let Some(parent_id) = parent_id {
+        let mut stmt =
+            conn.prepare("SELECT ref_message_id FROM message_refs WHERE message_id = ?1")?;
+        let mut references = stmt
+            .query_map(params![parent_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut in_reply_to = None;
+        if let Some(parent) = get_row(conn, parent_id)?
+            && let Some(message_id) = parent.message_id
+        {
+            references.push(message_id.clone());
+            in_reply_to = Some(message_id);
+        }
+        return Ok((references, in_reply_to));
+    }
+    Ok(match header.filter(|header| !header.is_empty()) {
+        Some(header) => (vec![header.clone()], Some(header)),
+        None => (Vec::new(), None),
+    })
+}
+
 /// Find an existing message row for this account by RFC Message-ID (used to
 /// re-link after UIDVALIDITY resets and to dedupe Gmail label-folders). Of
 /// several, the one still to be linked to the server comes first.

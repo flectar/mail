@@ -18,6 +18,19 @@
   <string>Flectar Mail</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <!-- Offered as the default email reader. macOS delivers each link as an
+       Apple Event; src/mailto_links/macos.rs receives it. -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>com.flectar.mail.mailto</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>mailto</string>
+      </array>
+    </dict>
+  </array>
   <key>CFBundleShortVersionString</key>
   <string>@VERSION@</string>
   <key>CFBundleVersion</key>

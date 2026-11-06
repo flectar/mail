@@ -182,6 +182,8 @@ pub struct ComposeMessage<'a> {
     pub attachments: &'a [DraftAttachmentIn],
     pub mode: &'a str,
     pub in_reply_to_message_id: Option<i64>,
+    /// The Message-ID answered when that message is not stored here.
+    pub in_reply_to_header: Option<&'a str>,
 }
 
 /// The latest concrete message in a selected thread, with the addressing data
@@ -2105,6 +2107,17 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    pub async fn message_by_header_id(
+        &self,
+        account_id: i64,
+        message_id: &str,
+    ) -> Result<Option<i64>, String> {
+        self.core
+            .message_by_header_id(account_id, message_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn save_new_draft(&self, message: ComposeMessage<'_>) -> Result<i64, String> {
         self.save_draft(compose_args(message, false)?).await
     }
@@ -2163,6 +2176,7 @@ fn compose_args(
         body_html,
         mode: message.mode.to_owned(),
         in_reply_to_message_id: message.in_reply_to_message_id,
+        in_reply_to_header: message.in_reply_to_header.map(str::to_owned),
         attachments: message.attachments.to_vec(),
     })
 }
@@ -3799,6 +3813,7 @@ mod tests {
             attachments: &[],
             mode: "new",
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
         };
         let draft = compose_args(message(), false).unwrap();
 
@@ -3824,6 +3839,7 @@ mod tests {
                 attachments: &[],
                 mode: "reply",
                 in_reply_to_message_id: Some(99),
+                in_reply_to_header: None,
             },
             true,
         )

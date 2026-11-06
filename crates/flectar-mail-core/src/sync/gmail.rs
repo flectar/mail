@@ -2811,29 +2811,7 @@ async fn prepare_draft(
                 |row| row.get(0),
             )?;
             let bcc = serde_json::from_str::<Vec<Address>>(&bcc_json)?;
-            let parent_id: Option<i64> = conn
-                .query_row(
-                    "SELECT in_reply_to_message_id FROM drafts_meta WHERE message_id = ?1",
-                    params![draft_id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            let mut refs = Vec::new();
-            let mut in_reply_to = None;
-            if let Some(parent_id) = parent_id {
-                let mut stmt =
-                    conn.prepare("SELECT ref_message_id FROM message_refs WHERE message_id = ?1")?;
-                refs = stmt
-                    .query_map(params![parent_id], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                if let Some(parent) = repo::messages::get_row(conn, parent_id)?
-                    && let Some(message_id) = parent.message_id
-                {
-                    refs.push(message_id.clone());
-                    in_reply_to = Some(message_id);
-                }
-            }
+            let (refs, in_reply_to) = repo::messages::draft_reply_headers(conn, draft_id)?;
             let provider: (
                 Option<String>,
                 Option<String>,
