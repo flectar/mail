@@ -16,7 +16,7 @@ use std::{cell::Cell, future::Future};
 /// replaced core must never receive a late settings or decrypted-content result.
 #[derive(Clone)]
 struct UiWork {
-    runtime: Rc<tokio::runtime::Runtime>,
+    runtime: tokio::runtime::Handle,
     generation: Rc<Cell<u64>>,
 }
 impl UiWork {
@@ -297,7 +297,7 @@ async fn cached_preferences(
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     document: &Rc<RefCell<RichComposeDocument>>,
     editor: &Rc<RefCell<LazyComposeEditor>>,
 ) {
@@ -1317,14 +1317,13 @@ mod tests {
         let (events, receiver) = mpsc::channel();
         slint::platform::set_platform(Box::new(Headless(events))).unwrap();
         let app = AppWindow::new().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
         let tasks = UiWork {
-            runtime: Rc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .worker_threads(1)
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
+            runtime: runtime.handle().clone(),
             generation: Rc::new(Cell::new(0)),
         };
         let (release, waiting) = tokio::sync::oneshot::channel();
