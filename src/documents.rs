@@ -124,7 +124,7 @@ pub trait DocumentProvider: Send + Sync {
 /// presentation thread idle while its picker covers the window changes only
 /// this function.
 pub(crate) fn run_request<T: Send + 'static>(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     request: DocumentFuture<T>,
     on_ready: impl FnOnce(Result<T, String>) + 'static,
 ) {
