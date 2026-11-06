@@ -4,10 +4,11 @@
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap5 uap10 rescap">
+  IgnorableNamespaces="uap uap3 uap5 uap10 rescap">
 
   <!-- Package identity reserved in Partner Center (Product management >
        Product identity). These are placeholders until the name is reserved;
@@ -64,6 +65,16 @@
           uap10:Parameters="--background">
           <uap5:StartupTask TaskId="FlectarMailStartup" Enabled="false" DisplayName="Flectar Mail" />
         </uap5:Extension>
+        <!-- Offered as the default email app in Settings > Apps > Default
+             apps. The link is the whole command line after the option, as
+             src/mailto_links.rs requires. Packaged apps cannot register this
+             in the registry: their writes stay private to the package. -->
+        <uap3:Extension Category="windows.protocol">
+          <uap3:Protocol Name="mailto" Parameters="--mailto &quot;%1&quot;">
+            <uap:DisplayName>mailto</uap:DisplayName>
+            <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
+          </uap3:Protocol>
+        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>

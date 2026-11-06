@@ -864,29 +864,7 @@ async fn send_action(
         .db
         .read(move |conn| {
             let detail = repo::messages::detail(conn, draft_id)?;
-            let irt: Option<i64> = conn
-                .query_row(
-                    "SELECT in_reply_to_message_id FROM drafts_meta WHERE message_id = ?1",
-                    rusqlite::params![draft_id],
-                    |r| r.get(0),
-                )
-                .unwrap_or(None);
-            let mut refs: Vec<String> = Vec::new();
-            let mut in_reply_to: Option<String> = None;
-            if let Some(parent_id) = irt {
-                let mut stmt =
-                    conn.prepare("SELECT ref_message_id FROM message_refs WHERE message_id = ?1")?;
-                refs = stmt
-                    .query_map(rusqlite::params![parent_id], |r| r.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                if let Some(parent) = repo::messages::get_row(conn, parent_id)?
-                    && let Some(pmid) = parent.message_id
-                {
-                    refs.push(pmid.clone());
-                    in_reply_to = Some(pmid);
-                }
-            }
-            Ok((detail, (refs, in_reply_to)))
+            Ok((detail, repo::messages::draft_reply_headers(conn, draft_id)?))
         })
         .await?;
 

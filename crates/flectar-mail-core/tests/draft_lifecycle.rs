@@ -48,6 +48,7 @@ fn args(attachment: Option<DraftAttachmentIn>) -> SaveDraftArgs {
         body_html: Some("<p>Still <strong>working</strong></p>".into()),
         mode: "new".into(),
         in_reply_to_message_id: None,
+        in_reply_to_header: None,
         attachments: attachment.into_iter().collect(),
     }
 }

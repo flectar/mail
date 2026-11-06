@@ -115,26 +115,8 @@ pub(super) fn register_renderer_input_callbacks(
             }
             return;
         }
-        if let Ok(parsed) = url::Url::parse(&url)
-            && parsed.scheme() == "mailto"
-        {
-            app.invoke_open_compose();
-            // Form decoding also handles UTF-8 and percent escapes in addresses.
-            let address = percent_encoding::percent_decode_str(parsed.path())
-                .decode_utf8_lossy()
-                .into_owned();
-            app.set_compose_to(address.into());
-            for (key, value) in parsed.query_pairs() {
-                match key.as_ref() {
-                    "subject" => app.set_compose_subject(value.into_owned().into()),
-                    "cc" => app.set_compose_cc(value.into_owned().into()),
-                    "bcc" => app.set_compose_bcc(value.into_owned().into()),
-                    "body" => {
-                        app.invoke_edit_compose_body(value.into_owned().into(), 0, 0, "".into())
-                    }
-                    _ => {}
-                }
-            }
+        if flectar_mail_core::mailto::is_mailto(&url) {
+            crate::mailto_links::open(&app, "message", [url.as_str()]);
             return;
         }
         if let Err(error) = open_email_link(&opener, &url) {
