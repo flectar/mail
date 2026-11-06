@@ -778,6 +778,8 @@ export component AppWindow inherits Window {
     callback refresh-email-resources();
     // Calendar connections changed state while Settings shows them.
     callback reload-calendar-connections();
+    // The language or the time format changed how dates are written.
+    callback date-formats-changed();
 
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> mail_list_entries: [];

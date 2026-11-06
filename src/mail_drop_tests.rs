@@ -63,7 +63,7 @@ fn drops_resolve_by_scope_not_by_mailbox_name() {
         UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
         false,
         false,
-        WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
+        WarmStartCacheWriter::spawn(runtime.handle(), dir.path().join("warm.json")),
     );
     state.core = Some(core);
     state.using_core = true;

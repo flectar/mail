@@ -252,7 +252,7 @@ fn failure(config: &AccountConfig, error: pop3::Error) -> Failure {
     let port = config.incoming_port;
     match error {
         pop3::Error::SignIn { refusal, .. } => {
-            let message = format!("POP3 sign-in to {host}: {error}");
+            let message = format!("POP3 sign-in to {host} as {}: {error}", config.username);
             match refusal {
                 SignInRefusal::Credentials => Failure::Credentials(message),
                 SignInRefusal::Unspecified => Failure::Unexplained(message),

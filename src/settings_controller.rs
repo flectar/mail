@@ -11,7 +11,7 @@ use flectar_mail_core::models::CustomTheme;
 fn apply_account_presentation_settings(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     settings: &flectar_mail_core::models::Settings,
 ) {
     state.borrow_mut().account_presentation = AccountPresentationSettings::from_settings(settings);
@@ -27,7 +27,7 @@ fn apply_account_presentation_settings(
 fn save_download_directory(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     directory: String,
 ) {
     let Some(core) = state.borrow().core.clone() else {
@@ -53,11 +53,11 @@ fn save_download_directory(
 pub(super) fn register_settings_preference_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     let app_weak = app.as_weak();
     let state_for_notifications = Rc::clone(state);
-    let runtime_for_notifications = Rc::clone(runtime);
+    let runtime_for_notifications = runtime.clone();
     app.on_save_notification_settings(move |enabled, sound, scope| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -82,7 +82,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_sync_interval = Rc::clone(state);
-    let runtime_for_sync_interval = Rc::clone(runtime);
+    let runtime_for_sync_interval = runtime.clone();
     app.on_save_sync_interval(move |minutes| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -107,7 +107,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_read_on_open = Rc::clone(state);
-    let runtime_for_read_on_open = Rc::clone(runtime);
+    let runtime_for_read_on_open = runtime.clone();
     app.on_save_mark_read_on_open(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -130,7 +130,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_contacts = Rc::clone(state);
-    let runtime_for_contacts = Rc::clone(runtime);
+    let runtime_for_contacts = runtime.clone();
     app.on_save_contact_discovery_settings(move |outgoing, incoming, all_accounts, suggest| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -167,7 +167,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_clear_contacts = Rc::clone(state);
-    let runtime_for_clear_contacts = Rc::clone(runtime);
+    let runtime_for_clear_contacts = runtime.clone();
     app.on_clear_contact_suggestions(move || {
         let Some(app) = app_weak.upgrade() else {
             return false;
@@ -196,7 +196,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_theme = Rc::clone(state);
-    let runtime_for_theme = Rc::clone(runtime);
+    let runtime_for_theme = runtime.clone();
     app.on_save_theme(move |theme| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -217,7 +217,7 @@ pub(super) fn register_settings_preference_callbacks(
     #[cfg(desktop)]
     {
         let state_for_download = Rc::clone(state);
-        let runtime_for_download = Rc::clone(runtime);
+        let runtime_for_download = runtime.clone();
         let app_weak_for_download = app_weak.clone();
         let picking_download = Rc::new(Cell::new(false));
         app.on_choose_download_directory(move || {
@@ -257,7 +257,7 @@ pub(super) fn register_settings_preference_callbacks(
                         .map(|folder| folder.path().to_owned()))
                 });
             let state = Rc::clone(&state_for_download);
-            let runtime = Rc::clone(&runtime_for_download);
+            let runtime = runtime_for_download.clone();
             let picking = Rc::clone(&picking_download);
             let app_weak = app.as_weak();
             crate::documents::run_request(&runtime_for_download, request, move |picked| {
@@ -281,7 +281,7 @@ pub(super) fn register_settings_preference_callbacks(
             });
         });
         let state_for_clear = Rc::clone(state);
-        let runtime_for_clear = Rc::clone(runtime);
+        let runtime_for_clear = runtime.clone();
         let app_weak_for_clear = app_weak.clone();
         app.on_clear_download_directory(move || {
             let Some(app) = app_weak_for_clear.upgrade() else {
@@ -291,7 +291,7 @@ pub(super) fn register_settings_preference_callbacks(
         });
     }
     let state_for_theme_preset = Rc::clone(state);
-    let runtime_for_theme_preset = Rc::clone(runtime);
+    let runtime_for_theme_preset = runtime.clone();
     app.on_save_theme_preset(move |preset| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -310,7 +310,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_appearance = Rc::clone(state);
-    let runtime_for_appearance = Rc::clone(runtime);
+    let runtime_for_appearance = runtime.clone();
     app.global::<MessageColors>().on_choose(move |preference| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -341,7 +341,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_custom_theme = Rc::clone(state);
-    let runtime_for_custom_theme = Rc::clone(runtime);
+    let runtime_for_custom_theme = runtime.clone();
     app.on_save_custom_theme(
         move |light_primary,
               light_page,
@@ -390,7 +390,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_language = Rc::clone(state);
-    let runtime_for_language = Rc::clone(runtime);
+    let runtime_for_language = runtime.clone();
     app.on_save_language(move |language| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -410,7 +410,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_time_format = Rc::clone(state);
-    let runtime_for_time_format = Rc::clone(runtime);
+    let runtime_for_time_format = runtime.clone();
     app.on_save_time_format(move |value| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -433,7 +433,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_app_icon = Rc::clone(state);
-    let runtime_for_app_icon = Rc::clone(runtime);
+    let runtime_for_app_icon = runtime.clone();
     app.global::<AppIcon>().on_choose(move |variant| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -456,7 +456,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_sidebar_icons = Rc::clone(state);
-    let runtime_for_sidebar_icons = Rc::clone(runtime);
+    let runtime_for_sidebar_icons = runtime.clone();
     app.on_save_sidebar_icon_style(move |monochrome| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -478,7 +478,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_avatars = Rc::clone(state);
-    let runtime_for_avatars = Rc::clone(runtime);
+    let runtime_for_avatars = runtime.clone();
     app.on_save_avatar_visibility(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -500,7 +500,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_tabs = Rc::clone(state);
-    let runtime_for_tabs = Rc::clone(runtime);
+    let runtime_for_tabs = runtime.clone();
     app.on_save_show_tabs(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -522,7 +522,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_grouping = Rc::clone(state);
-    let runtime_for_grouping = Rc::clone(runtime);
+    let runtime_for_grouping = runtime.clone();
     app.on_save_conversation_view(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -558,7 +558,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_date_groups = Rc::clone(state);
-    let runtime_for_date_groups = Rc::clone(runtime);
+    let runtime_for_date_groups = runtime.clone();
     app.on_save_group_mail_by_date(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -586,7 +586,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_profiles = Rc::clone(state);
-    let runtime_for_profiles = Rc::clone(runtime);
+    let runtime_for_profiles = runtime.clone();
     app.on_save_mail_profile(move |profile_id, name, color| {
         let Some(app) = app_weak.upgrade() else {
             return Default::default();
@@ -670,7 +670,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_profile_assignment = Rc::clone(state);
-    let runtime_for_profile_assignment = Rc::clone(runtime);
+    let runtime_for_profile_assignment = runtime.clone();
     app.on_assign_account_profile(move |account_id, profile_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -701,7 +701,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_account_color = Rc::clone(state);
-    let runtime_for_account_color = Rc::clone(runtime);
+    let runtime_for_account_color = runtime.clone();
     app.on_save_account_color(move |account_id, color, generated| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -734,7 +734,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_active_profile = Rc::clone(state);
-    let runtime_for_active_profile = Rc::clone(runtime);
+    let runtime_for_active_profile = runtime.clone();
     app.on_select_mail_profile(move |profile_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -759,7 +759,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_profile_delete = Rc::clone(state);
-    let runtime_for_profile_delete = Rc::clone(runtime);
+    let runtime_for_profile_delete = runtime.clone();
     app.on_delete_mail_profile(move |profile_id| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -787,7 +787,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_marker_visibility = Rc::clone(state);
-    let runtime_for_marker_visibility = Rc::clone(runtime);
+    let runtime_for_marker_visibility = runtime.clone();
     app.on_save_account_markers_visibility(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -826,7 +826,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_workspace_layout = Rc::clone(state);
-    let runtime_for_workspace_layout = Rc::clone(runtime);
+    let runtime_for_workspace_layout = runtime.clone();
     app.on_save_workspace_layout(move |layout| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -848,7 +848,7 @@ pub(super) fn register_settings_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_list_pane_width = Rc::clone(state);
-    let runtime_for_list_pane_width = Rc::clone(runtime);
+    let runtime_for_list_pane_width = runtime.clone();
     app.on_save_workspace_list_pane_width(move |width| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -874,11 +874,11 @@ pub(super) fn register_settings_preference_callbacks(
 pub(super) fn register_oauth_settings_callbacks(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     let weak = app.as_weak();
     let single_state = Rc::clone(state);
-    let single_runtime = Rc::clone(runtime);
+    let single_runtime = runtime.clone();
     app.on_save_oauth_app(move |provider, client_id, client_secret| {
         let Some(app) = weak.upgrade() else { return };
         let (google, microsoft) = match provider.as_str() {
@@ -901,7 +901,7 @@ pub(super) fn register_oauth_settings_callbacks(
 
     let weak = app.as_weak();
     let state = Rc::clone(state);
-    let runtime = Rc::clone(runtime);
+    let runtime = runtime.clone();
     app.on_save_oauth_apps(move |google_id, google_secret, microsoft_id| {
         let Some(app) = weak.upgrade() else { return };
         save_oauth_settings(
@@ -918,7 +918,7 @@ pub(super) fn register_oauth_settings_callbacks(
 fn save_oauth_settings(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     google: Option<(String, String)>,
     microsoft: Option<String>,
     close_dialog: bool,
