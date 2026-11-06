@@ -643,6 +643,32 @@ pub fn set_server_counts(
     Ok(())
 }
 
+/// Records that the user moved mail into a folder at `at` (ms).
+pub fn mark_moved_to(conn: &Connection, id: i64, at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET moved_to_at = ?2 WHERE id = ?1",
+        params![id, at],
+    )?;
+    Ok(())
+}
+
+/// The account's folders the user moved mail into most recently, newest
+/// first.
+pub fn recently_moved_to(conn: &Connection, account_id: i64, limit: usize) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id FROM folders
+         WHERE account_id = ?1 AND moved_to_at IS NOT NULL
+         ORDER BY moved_to_at DESC, id DESC LIMIT ?2",
+    )?;
+    let ids = stmt
+        .query_map(
+            params![account_id, i64::try_from(limit).unwrap_or(i64::MAX)],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -677,6 +703,34 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2]
         );
+    }
+
+    #[test]
+    fn recent_move_targets_are_the_accounts_newest_first() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username,
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'other@test.dev','generic','password','other','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path) VALUES
+               (2, 1, 'Receipts'), (3, 1, 'Travel'), (4, 1, 'Never'), (5, 2, 'Other')",
+            [],
+        )
+        .unwrap();
+        for (folder, at) in [(2, 10), (3, 30), (5, 40)] {
+            mark_moved_to(&conn, folder, at).unwrap();
+        }
+
+        assert_eq!(recently_moved_to(&conn, 1, 5).unwrap(), [3, 2]);
+        assert_eq!(recently_moved_to(&conn, 1, 1).unwrap(), [3]);
+        mark_moved_to(&conn, 2, 50).unwrap();
+        assert_eq!(recently_moved_to(&conn, 1, 5).unwrap(), [2, 3]);
+        assert_eq!(recently_moved_to(&conn, 2, 5).unwrap(), [5]);
     }
 
     #[test]

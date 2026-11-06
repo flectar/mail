@@ -13,6 +13,7 @@ import { FocusVisibleScope } from "../components/focus-visible-scope.slint";
 import { LabelChip } from "../components/label-chip.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
+import { MovePickerUi } from "../dialogs/move-dialog.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { MessageColors } from "../message-colors.slint";
@@ -346,6 +347,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
+        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -363,6 +365,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
+        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -381,6 +384,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> local-action-menu-no-print: [
@@ -396,6 +400,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "plain_text", title: root.text_mode ? @tr("Show rendered message") : @tr("View plain text"), icon: root.text_mode ? @image-url("../icons/lucide/outline/browser.svg") : @image-url("../icons/lucide/outline/file.svg") },
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
+        { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     // The reader toolbar drops actions that the More menu also offers when
@@ -553,6 +558,15 @@ export component MailReadingPane inherits FocusScope {
         keys: Shortcuts.trash;
         enabled: root.message-keys;
         activated => { root.message_action(root.trash_view ? "delete_permanently" : "trash"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.move-to;
+        // Not in find: text fields elsewhere paste plain text with it.
+        enabled: root.message-keys && !root.selected_is_draft && !EmailReader.find-open;
+        activated => {
+            MovePickerUi.return-to = "reader";
+            MovePickerUi.request("open", -1);
+        }
     }
 
     private property <bool> viewport-pending: false;
@@ -1050,6 +1064,9 @@ export component MailReadingPane inherits FocusScope {
                                         MessageColors.original = !MessageColors.original;
                                     } else if action == "read" {
                                         root.message_action(root.selected_unread ? "mark_read" : "mark_unread");
+                                    } else if action == "move" {
+                                        MovePickerUi.return-to = "reader";
+                                        MovePickerUi.request("open", -1);
                                     } else {
                                         root.message_action(action);
                                     }

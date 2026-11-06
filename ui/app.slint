@@ -34,6 +34,8 @@ import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
+export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
+import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
 import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
@@ -492,6 +494,8 @@ export global I18n {
         if (key == "Label created.") { return @tr("Label created."); }
         if (key == "Label updated.") { return @tr("Label updated."); }
         if (key == "Label deleted.") { return @tr("Label deleted."); }
+        if (key == "No other folder to move this mail to.") { return @tr("No other folder to move this mail to."); }
+        if (key == "Could not move mail: {}") { return @tr("Could not move mail: {}", argument); }
         if (key == "Could not update label: {}") { return @tr("Could not update label: {}", argument); }
         if (key == "Could not save label: {}") { return @tr("Could not save label: {}", argument); }
         if (key == "Could not delete label: {}") { return @tr("Could not delete label: {}", argument); }
@@ -2263,6 +2267,15 @@ export component AppWindow inherits Window {
             root.active_view = "mail";
             root.settings_open = false;
         }
+    }
+
+    if MovePickerUi.open : MoveDialog {
+        x: root.content-x;
+        y: root.content-y;
+        width: root.content-width;
+        height: root.content-height;
+        z: 15000;
+        compact: root.compact-layout;
     }
 
     if root.folder-dialog-open : FolderDialog {

@@ -1509,7 +1509,7 @@ pub(super) fn schedule_profile_avatar_fetches(
     }
 }
 
-fn contains_emoji(text: &str) -> bool {
+pub(super) fn contains_emoji(text: &str) -> bool {
     use unicode_properties::UnicodeEmoji as _;
 
     text.chars()

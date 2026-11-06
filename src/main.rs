@@ -33,6 +33,7 @@ mod mail_setup;
 mod mail_view_model;
 mod mail_work;
 mod message_appearance;
+mod move_picker;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
 mod number_format;
@@ -2005,6 +2006,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     mail_work::register(&app, &state, &runtime);
+    move_picker::register(&app, &state, &runtime);
     files_controller::register(
         &app,
         &state,

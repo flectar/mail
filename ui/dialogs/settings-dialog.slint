@@ -2395,6 +2395,7 @@ export component SettingsDialog inherits Rectangle {
                                 ShortcutRow { title: @tr("Check every account for new mail"); keys: KeyboardKeys.apple ? [Shortcuts.check-all-mail, Shortcuts.check-all-mail-alternate] : [Shortcuts.check-all-mail]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Search mail"); keys: [Shortcuts.search, Shortcuts.search-alternate]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Archive"); keys: [Shortcuts.archive]; title-color: root.body-text; separator-color: root.faint-text; }
+                                ShortcutRow { title: @tr("Move to a folder"); keys: [Shortcuts.move-to]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Move to spam"); keys: [Shortcuts.spam]; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Move to trash"); keys: [Shortcuts.trash]; title-color: root.body-text; separator-color: root.faint-text; }
                             }

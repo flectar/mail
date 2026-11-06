@@ -1775,6 +1775,18 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The account's folders mail was moved into most recently, newest first.
+    pub async fn recent_move_targets(
+        &self,
+        account_id: i64,
+        limit: usize,
+    ) -> Result<Vec<i64>, String> {
+        self.core
+            .recent_move_targets(account_id, limit)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
     /// Inbox tabs route conversations, so a message's routes its conversation.
     pub async fn route_to_tab(&self, target: MailTarget, tab: String) -> Result<(), String> {
         self.core
