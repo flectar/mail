@@ -355,6 +355,143 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
     );
 }
 
+/// One cycle against a server without LIST-STATUS in which Lists changed,
+/// the Inbox keeping one unread message here. Returns the commands, the
+/// Inbox's unread messages only on the server afterwards, and whether the
+/// app was told they changed.
+async fn count_inbox_without_list_status(inbox_uid_next: u32) -> (Vec<String>, Option<i64>, bool) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let command_log = commands.clone();
+    let server = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tls_acceptor().accept(tcp).await.unwrap());
+        stream.write_all(b"* OK fixture ready\r\n").await.unwrap();
+        loop {
+            let command = read_line(&mut stream).await;
+            if command.is_empty() {
+                break;
+            }
+            command_log.lock().unwrap().push(command.clone());
+            let fields: Vec<_> = command.split_whitespace().collect();
+            let tag = fields[0];
+            let response = match fields[1] {
+                "LOGIN" => format!("{tag} OK logged in\r\n"),
+                "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+                "STATUS" if command.contains("Lists") => format!(
+                    "* STATUS Lists (MESSAGES 50 UIDNEXT 51 UNSEEN 4 UIDVALIDITY 7)\r\n\
+                     {tag} OK status\r\n"
+                ),
+                "STATUS" => format!(
+                    "* STATUS INBOX (MESSAGES 3 UIDNEXT {inbox_uid_next} UNSEEN 3 UIDVALIDITY 7)\r\n\
+                     {tag} OK status\r\n"
+                ),
+                "SELECT" => {
+                    let (exists, uid_next) = if command.contains("Lists") {
+                        (50, 51)
+                    } else {
+                        (3, 10)
+                    };
+                    format!(
+                        "* {exists} EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                         * OK [UIDNEXT {uid_next}] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                    )
+                }
+                "UID" if fields[2] == "FETCH" => {
+                    format!("* 1 FETCH (UID 50 FLAGS (\\Seen))\r\n{tag} OK fetched\r\n")
+                }
+                "LOGOUT" => {
+                    stream
+                        .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+                        .await
+                        .unwrap();
+                    break;
+                }
+                other => panic!("unexpected command {other}: {command:?}"),
+            };
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let (_dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox.id;
+    ctx.db
+        .write(move |conn| {
+            repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
+            repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
+            crate::db::testutil::seed_message(conn, "sender@example.test", "Kept", false);
+            // Lists' history is still downloading, so only the Inbox's
+            // count can become known.
+            let lists = repo::folders::upsert(conn, account_id, "Lists", Some("/"), None)?;
+            repo::folders::set_uid_state(conn, lists, Some(7), Some(51), None)?;
+            repo::folders::set_last_seen_uid(conn, lists, 50)?;
+            repo::folders::set_backfill(conn, lists, Some(1), false)?;
+            repo::folders::set_server_counts(conn, lists, Some(50), Some(5))?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let mut events = ctx.bus.subscribe();
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let offered = imap::capabilities(&mut session).await.unwrap();
+    assert!(!offered.list_status);
+    let (hist_tx, _hist_rx) = mpsc::channel(1);
+    run_cycle(
+        &ctx,
+        &config,
+        &mut session,
+        1,
+        &hist_tx,
+        &mut None,
+        CycleMode {
+            foreground_only: false,
+            immediate_follow_up: false,
+            list_status: offered.list_status,
+            inbox_pushed: PushedChanges::default(),
+        },
+    )
+    .await
+    .unwrap();
+    imap::logout(session).await;
+    server.await.unwrap();
+    let server_only = ctx
+        .db
+        .read(move |conn| repo::folders::server_only_unseen(conn, &[inbox_id]))
+        .await
+        .unwrap();
+    let told = std::iter::from_fn(|| events.try_recv().ok())
+        .any(|event| matches!(event, CoreEvent::ServerOnlyUnreadChanged { .. }));
+    let commands = commands.lock().unwrap().clone();
+    (commands, server_only, told)
+}
+
+#[tokio::test]
+async fn without_list_status_the_inbox_is_counted_once_another_folder_is_open() {
+    let (commands, server_only, told) = count_inbox_without_list_status(10).await;
+    let position = |needle: &str| {
+        commands
+            .iter()
+            .position(|command| command.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle}: {commands:?}"))
+    };
+    // STATUS never asks the selected Inbox: only after Lists is open.
+    assert!(position("STATUS \"INBOX\"") > position("SELECT \"Lists\""));
+    // Three unread on the server, one of them kept here.
+    assert_eq!(server_only, Some(2));
+    assert!(told);
+}
+
+#[tokio::test]
+async fn an_inbox_count_taken_after_new_mail_arrived_is_not_kept() {
+    // UIDNEXT moved past what the Inbox's sync saw: the count includes mail
+    // that is not here yet.
+    let (_, server_only, told) = count_inbox_without_list_status(11).await;
+    assert_eq!((server_only, told), (None, false));
+}
+
 async fn deleted_mail_context(port: u16) -> (tempfile::TempDir, SyncCtx, AccountConfig, Folder) {
     let dir = tempfile::tempdir().unwrap();
     let credentials: CredentialStoreHandle = Arc::new(

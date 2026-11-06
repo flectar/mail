@@ -124,6 +124,10 @@ async fn actor(
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected).await?;
             execute_actions(&ctx, &config, &connected).await?;
+            // The counts only explain the badges, so they never fail a sync.
+            if let Err(error) = sync_mailbox_counts(&ctx, config.id, &connected).await {
+                tracing::warn!(account_id = config.id, %error, "JMAP mailbox counts failed");
+            }
             Ok::<ConnectedClient, CoreError>(connected)
         }
         .await;
@@ -426,6 +430,136 @@ pub(crate) async fn sync_mailboxes(
             Ok(())
         })
         .await
+}
+
+/// Mailboxes whose changes a count update takes at once; more start over
+/// from the Inbox.
+const MAX_COUNT_CHANGES: usize = 64;
+
+/// Brings the server's unread counts up to date once the sync has caught
+/// up: for the mailboxes Mailbox/changes reports since the counts were last
+/// read, and at first, or when the server cannot tell, for the Inbox alone.
+/// Mailbox/get without ids makes the server count every mailbox of a large
+/// account (see `get_mailboxes`), so nothing else is asked.
+pub(crate) async fn sync_mailbox_counts(
+    ctx: &SyncCtx,
+    local_account: i64,
+    c: &ConnectedClient,
+) -> Result<()> {
+    let (since, current, inbox, settling) = ctx
+        .db
+        .read(move |conn| {
+            let (since, current) = conn
+                .query_row(
+                    "SELECT count_state, mailbox_state FROM jmap_sync_state
+                     WHERE account_id = ?1",
+                    params![local_account],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
+                )
+                .optional()?
+                .unwrap_or_default();
+            let inbox = repo::folders::by_role(conn, local_account, roles::INBOX)?
+                .and_then(|folder| folder.jmap_id);
+            let settling = repo::actions::counts_settling(conn, local_account)?;
+            Ok((since, current, inbox, settling))
+        })
+        .await?;
+    // `current` is the state this cycle's mailboxes were read at, before its
+    // mail: what arrives later is still reported next time.
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if settling || since.as_deref() == Some(current.as_str()) {
+        return Ok(());
+    }
+    let changed = match since {
+        Some(since) => {
+            let mut request = c.request();
+            request
+                .changes_mailbox(since)
+                .account_id(&c.account_id)
+                .max_changes(MAX_COUNT_CHANGES);
+            match c
+                .send_single::<jmap_client::core::changes::ChangesResponse<Mailbox>>(request)
+                .await
+            {
+                Ok(changes) if !changes.has_more_changes() => Some(
+                    changes
+                        .created()
+                        .iter()
+                        .chain(changes.updated())
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                ),
+                // Too much changed, or the server forgot that state.
+                Ok(_) | Err(jmap_client::Error::Method(_)) => None,
+                Err(error) => return Err(client::map_error(error)),
+            }
+        }
+        None => None,
+    };
+    // Without the changes, any count kept may be out of date.
+    let forget = changed.is_none();
+    let ids = changed.unwrap_or_else(|| inbox.into_iter().collect());
+    let counts = if ids.is_empty() {
+        Vec::new()
+    } else {
+        let mut request = c.request();
+        request
+            .get_mailbox()
+            .account_id(&c.account_id)
+            .ids(ids.iter().cloned())
+            .properties([MailboxProperty::Id, MailboxProperty::UnreadEmails]);
+        let mut response: MailboxGetResponse =
+            c.send_single(request).await.map_err(client::map_error)?;
+        response
+            .take_list()
+            .into_iter()
+            .filter_map(|mailbox| {
+                Some((
+                    mailbox.id()?.to_owned(),
+                    i64::try_from(mailbox.unread_emails()).ok()?,
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let mut changed =
+                forget && repo::folders::forget_server_only_unseen(&tx, local_account)?;
+            for (remote_id, unread) in counts {
+                if let Some(folder) = tx
+                    .query_row(
+                        "SELECT id FROM folders WHERE account_id = ?1 AND jmap_id = ?2",
+                        params![local_account, remote_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?
+                {
+                    changed |= repo::folders::set_server_unseen(&tx, folder, unread)?;
+                }
+            }
+            tx.execute(
+                "UPDATE jmap_sync_state SET count_state = ?2 WHERE account_id = ?1",
+                params![local_account, current],
+            )?;
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+            account_id: local_account,
+        });
+    }
+    Ok(())
 }
 
 /// Every mailbox of the account and the Mailbox state they share.

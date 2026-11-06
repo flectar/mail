@@ -98,10 +98,50 @@ pub fn expire_history(conn: &Connection, account_id: i64) -> Result<()> {
          ON CONFLICT(account_id) DO UPDATE SET
              sync_cursor = NULL, history_id = NULL, history_page_token = NULL,
              generation = 0, backfill_done = 0, full_started_at = NULL,
-             updated_at = excluded.updated_at",
+             count_history_id = NULL, updated_at = excluded.updated_at",
         params![account_id, now_ms()],
     )?;
     Ok(())
+}
+
+/// The Inbox folder and the history id to read its unread count at, when
+/// the sync has caught up with the whole mail history, the mailbox changed
+/// since the count was last read, and no action that changes counts is on
+/// its way to Gmail.
+pub fn inbox_count_due(conn: &Connection, account_id: i64) -> Result<Option<(i64, String)>> {
+    let due = conn
+        .query_row(
+            &format!(
+                "SELECT f.id, s.history_id FROM gmail_sync_state s
+                 JOIN folders f ON f.account_id = s.account_id AND f.role = 'inbox'
+                 WHERE s.account_id = ?1 AND s.backfill_done AND s.history_page_token IS NULL
+                   AND s.history_id IS NOT NULL
+                   AND s.history_id IS NOT s.count_history_id
+                   AND NOT {}",
+                super::actions::counts_settling_sql("?1")
+            ),
+            params![account_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(due)
+}
+
+/// Records the Inbox's unread count on Gmail, read at `history_id`; returns
+/// whether what is only on Gmail changed.
+pub fn set_inbox_count(
+    conn: &Connection,
+    account_id: i64,
+    inbox: i64,
+    history_id: &str,
+    unread: i64,
+) -> Result<bool> {
+    let changed = super::folders::set_server_unseen(conn, inbox, unread)?;
+    conn.execute(
+        "UPDATE gmail_sync_state SET count_history_id = ?2 WHERE account_id = ?1",
+        params![account_id, history_id],
+    )?;
+    Ok(changed)
 }
 
 pub fn set_message_folders(conn: &Connection, message_id: i64, folder_ids: &[i64]) -> Result<()> {
@@ -228,5 +268,47 @@ mod tests {
             .collect::<rusqlite::Result<_>>()
             .unwrap();
         assert_eq!(memberships, vec![2]);
+    }
+
+    #[test]
+    fn the_inbox_count_is_read_once_the_history_is_here_and_changed() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        // One of the Inbox's unread messages is kept here.
+        testutil::seed_message(&conn, "a@test.dev", "Kept", false);
+        let due = |conn: &Connection| inbox_count_due(conn, 1).unwrap();
+
+        begin_full_sync(&conn, 1, "100").unwrap();
+        assert_eq!(due(&conn), None, "history still downloading");
+        checkpoint_full_page(&conn, 1, None).unwrap();
+        checkpoint_history_page(&conn, 1, Some("history-2"), None).unwrap();
+        assert_eq!(due(&conn), None, "history pages left");
+        checkpoint_history_page(&conn, 1, None, Some("200")).unwrap();
+        assert_eq!(due(&conn), Some((1, "200".to_owned())));
+
+        set_inbox_count(&conn, 1, 1, "200", 5).unwrap();
+        assert_eq!(
+            super::super::folders::server_only_unseen(&conn, &[1]).unwrap(),
+            Some(4)
+        );
+        assert_eq!(due(&conn), None, "nothing changed since");
+        checkpoint_history_page(&conn, 1, None, Some("300")).unwrap();
+        assert_eq!(due(&conn), Some((1, "300".to_owned())));
+
+        // Not while an action that changes counts is on its way.
+        conn.execute(
+            "INSERT INTO pending_actions (account_id, kind, created_at) VALUES (1, 'archive', 0)",
+            [],
+        )
+        .unwrap();
+        assert_eq!(due(&conn), None);
+        conn.execute("DELETE FROM pending_actions", []).unwrap();
+
+        // A full scan reads it again once done, even unchanged.
+        set_inbox_count(&conn, 1, 1, "300", 5).unwrap();
+        expire_history(&conn, 1).unwrap();
+        begin_full_sync(&conn, 1, "300").unwrap();
+        checkpoint_full_page(&conn, 1, None).unwrap();
+        assert_eq!(due(&conn), Some((1, "300".to_owned())));
     }
 }

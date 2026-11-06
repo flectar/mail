@@ -1510,11 +1510,11 @@ async fn run_cycle(
     };
 
     let mut inbox_forward_remaining = false;
-    if let Some(inbox) = ordered
+    let inbox = ordered
         .iter()
         .copied()
-        .find(|f| f.role.as_deref() == Some(roles::INBOX))
-    {
+        .find(|f| f.role.as_deref() == Some(roles::INBOX));
+    if let Some(inbox) = inbox {
         // Reload must also reconcile existing Inbox messages, even when the
         // next full pass is several cycles away, and so must changes the
         // server pushed during IDLE.
@@ -1540,6 +1540,7 @@ async fn run_cycle(
         return Ok(true);
     }
 
+    let mut left_inbox = false;
     for folder in ordered {
         if folder.role.as_deref() == Some(roles::INBOX) {
             continue;
@@ -1566,6 +1567,13 @@ async fn run_cycle(
             tracing::warn!(folder = %folder.path, "folder sync failed: {e}");
             return Err(e); // connection likely broken; reconnect
         }
+        left_inbox = true;
+    }
+    if !list_status
+        && left_inbox
+        && let Some(inbox) = inbox
+    {
+        count_inbox(ctx, session, inbox).await?;
     }
 
     // GC old finished actions (keep 7 days).
@@ -1575,6 +1583,57 @@ async fn run_cycle(
         .await;
 
     Ok(false)
+}
+
+/// Without LIST-STATUS nothing reports the Inbox's counts: STATUS should not
+/// ask the selected mailbox (RFC 9051 6.3.11), which the Inbox is from IDLE
+/// until another folder is opened. Once one is, ask, and keep the answer if
+/// nothing arrived since the Inbox's sync, which recorded UIDNEXT. A server
+/// whose SELECT reports no UIDNEXT leaves no way to tell, so it is not asked.
+async fn count_inbox(ctx: &SyncCtx, session: &mut Session, inbox: &Folder) -> Result<()> {
+    let id = inbox.id;
+    let synced = ctx
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT uidvalidity, uidnext FROM folders WHERE id = ?1",
+                rusqlite::params![id],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )?)
+        })
+        .await?;
+    let (Some(uid_validity), Some(uid_next)) = synced else {
+        return Ok(());
+    };
+    let status = match imap::status(session, &inbox.path).await {
+        Ok(status) => status,
+        Err(error) => {
+            tracing::debug!(folder = %inbox.path, "Inbox STATUS failed: {error}");
+            return Ok(());
+        }
+    };
+    if status.uid_validity.map(i64::from) != Some(uid_validity)
+        || status.uid_next.map(i64::from) != Some(uid_next)
+    {
+        return Ok(());
+    }
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_server_counts(
+                conn,
+                id,
+                Some(i64::from(status.messages)),
+                status.unseen.map(i64::from),
+            )
+        })
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+            account_id: inbox.account_id,
+        });
+    }
+    Ok(())
 }
 
 /// The STATUS the server reports for each folder, by path. LIST-STATUS
@@ -1949,7 +2008,8 @@ async fn sync_folder(
     // caught up with them, so a later cycle can tell they have not changed.
     if let Some(now) = check.reported.filter(|_| !forward_remaining) {
         let fid = folder.id;
-        ctx.db
+        let changed = ctx
+            .db
             .write(move |conn| {
                 repo::folders::set_server_counts(
                     conn,
@@ -1959,6 +2019,10 @@ async fn sync_folder(
                 )
             })
             .await?;
+        if changed {
+            ctx.bus
+                .emit(CoreEvent::ServerOnlyUnreadChanged { account_id });
+        }
     }
     Ok(forward_remaining)
 }
@@ -2407,9 +2471,14 @@ async fn bounded_history_backfill(
         .backfill_cursor
         .map_or(bounded_min_uid, |existing| existing.min(bounded_min_uid));
     let fid = folder.id;
-    ctx.db
+    let changed = ctx
+        .db
         .write(move |conn| repo::folders::set_backfill(conn, fid, Some(min_uid), complete))
         .await?;
+    if changed {
+        ctx.bus
+            .emit(CoreEvent::ServerOnlyUnreadChanged { account_id });
+    }
     let already_present = total.saturating_sub(missing.len() as u64);
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id,
@@ -2433,9 +2502,15 @@ async fn extend_history(
     };
     if cursor <= 1 {
         let fid = folder.id;
-        ctx.db
+        let changed = ctx
+            .db
             .write(move |conn| repo::folders::set_backfill(conn, fid, Some(1), true))
             .await?;
+        if changed {
+            ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+                account_id: config.id,
+            });
+        }
         return Ok(());
     }
     let hi = (cursor - 1).max(1) as u32;
@@ -2449,11 +2524,17 @@ async fn extend_history(
     }
     let fid = folder.id;
     let new_cursor = lo as i64;
-    ctx.db
+    let changed = ctx
+        .db
         .write(move |conn| {
             repo::folders::set_backfill(conn, fid, Some(new_cursor), new_cursor <= 1)
         })
         .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+            account_id: config.id,
+        });
+    }
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id: config.id,
         folder: folder.path.clone(),

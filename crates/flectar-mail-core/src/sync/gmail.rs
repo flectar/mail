@@ -256,6 +256,20 @@ impl GmailApi {
             .collect())
     }
 
+    /// How many unread messages carry a label: only labels.get counts them.
+    async fn unread_in_label(&self, label_id: &str) -> Result<i64> {
+        let label = self
+            .get_json(&format!(
+                "{GMAIL_API}/labels/{}?fields=messagesUnread",
+                urlencode(label_id)
+            ))
+            .await?;
+        Ok(label
+            .get("messagesUnread")
+            .and_then(Value::as_i64)
+            .unwrap_or(0))
+    }
+
     async fn sender_identities(&self) -> Result<Vec<crate::models::SenderIdentity>> {
         let value = self
             .get_json(&format!("{GMAIL_API}/settings/sendAs"))
@@ -2733,6 +2747,35 @@ async fn sync_once(
     Ok(true)
 }
 
+/// Reads the Inbox's unread count from Gmail when `inbox_count_due` says
+/// so. It is read after the history it is compared with, so mail arriving
+/// in between changes the history id and is counted again next time.
+async fn sync_inbox_count(ctx: &SyncCtx, account_id: i64, api: &GmailApi) -> Result<()> {
+    let Some((inbox, history_id)) = ctx
+        .db
+        .read(move |conn| repo::gmail::inbox_count_due(conn, account_id))
+        .await?
+    else {
+        return Ok(());
+    };
+    let unread = api.unread_in_label("INBOX").await?;
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            let tx = conn.transaction()?;
+            let changed =
+                repo::gmail::set_inbox_count(&tx, account_id, inbox, &history_id, unread)?;
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await?;
+    if changed {
+        ctx.bus
+            .emit(CoreEvent::ServerOnlyUnreadChanged { account_id });
+    }
+    Ok(())
+}
+
 struct PreparedDraft {
     raw: Vec<u8>,
     message_id: String,
@@ -3878,6 +3921,10 @@ async fn run_actor(
             }
             let actions_remaining = execute_actions(&ctx, &config, &api).await?;
             let backfill_done = sync_once(&ctx, &config, &api, false, mail_history).await?;
+            // The count only explains the Inbox's end, so it never fails a sync.
+            if let Err(error) = sync_inbox_count(&ctx, account_id, &api).await {
+                tracing::warn!(account_id, %error, "Gmail Inbox count failed");
+            }
             Ok::<_, CoreError>((actions_remaining, backfill_done))
         }
         .await;
