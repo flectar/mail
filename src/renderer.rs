@@ -39,6 +39,9 @@ const INITIAL_WIDTH: u32 = 520;
 const INITIAL_HEIGHT: u32 = 900;
 const MIN_EMAIL_SURFACE_HEIGHT: f32 = 64.0;
 const EMAIL_SURFACE_BOTTOM_PAD: f32 = 12.0;
+/// Email bodies are painted in tiles about this many device pixels tall, the
+/// height WebKit and WebRender use for vertically scrolling content. One tile
+/// of overscan above and below the viewport keeps short scrolls ready to draw.
 const EMAIL_TILE_HEIGHT: f32 = 512.0;
 const EMAIL_TILE_OVERSCAN: u32 = 1;
 const MAX_EMAIL_SURFACE_HEIGHT: f32 = 100_000.0;
@@ -198,6 +201,8 @@ pub struct GpuEmailRenderer {
     visible_scroll_y: f32,
     visible_height: f32,
     tiles: BTreeMap<u32, RenderedEmailTile>,
+    /// Height of `tiles` in document pixels; see `email_tile_height`.
+    tile_height: f32,
     pointer_down: bool,
     last_pointer_down: Option<(Instant, f32, f32)>,
     resource_runtime: Option<tokio::runtime::Handle>,
@@ -257,6 +262,7 @@ impl Default for GpuEmailRenderer {
             visible_scroll_y: 0.0,
             visible_height: INITIAL_HEIGHT as f32,
             tiles: BTreeMap::new(),
+            tile_height: EMAIL_TILE_HEIGHT,
             pointer_down: false,
             last_pointer_down: None,
             resource_runtime: None,
@@ -380,6 +386,7 @@ impl GpuEmailRenderer {
                     &mut self.region_dirty,
                     &mut self.tiles,
                     &mut self.metadata_revision,
+                    self.tile_height,
                 )
             }));
             match result {
@@ -589,7 +596,12 @@ impl GpuEmailRenderer {
         self.visible_height = viewport_height;
         self.update_image_priorities();
 
-        let desired = desired_tile_range(scroll_y, viewport_height, self.content_height);
+        let desired = desired_tile_range(
+            scroll_y,
+            viewport_height,
+            self.content_height,
+            self.tile_height,
+        );
         let missing = desired
             .clone()
             .any(|index| !self.tiles.contains_key(&index));
@@ -609,6 +621,7 @@ impl GpuEmailRenderer {
             self.visible_scroll_y,
             self.visible_height,
             self.content_height,
+            self.tile_height,
         );
         let window = (
             email.document.id(),
@@ -620,8 +633,8 @@ impl GpuEmailRenderer {
             return;
         }
         self.image_priority_window = Some(window);
-        let top = self.visible_scroll_y - EMAIL_TILE_HEIGHT;
-        let bottom = self.visible_scroll_y + self.visible_height + EMAIL_TILE_HEIGHT;
+        let top = self.visible_scroll_y - self.tile_height;
+        let bottom = self.visible_scroll_y + self.visible_height + self.tile_height;
         let mut priorities = std::collections::HashSet::new();
         // Only image elements are inspected; the shared scheduler holds no DOM
         // or image buffers and reorders requests that have not started yet.
@@ -780,6 +793,7 @@ impl GpuEmailRenderer {
             &mut self.region_dirty,
             &mut self.tiles,
             &mut self.metadata_revision,
+            self.tile_height,
         );
         if !self.dirty && self.fit_viewport == Some((width, height)) {
             return;
@@ -838,7 +852,7 @@ impl GpuEmailRenderer {
                 .values()
                 .map(|tile| {
                     let size = tile.image.size();
-                    u64::from(size.width) * u64::from(size.height) * 4
+                    u64::from(size.width) * u64::from(size.height) * 3
                 })
                 .sum();
             eprintln!(
@@ -884,11 +898,18 @@ impl GpuEmailRenderer {
             &mut self.region_dirty,
             &mut self.tiles,
             &mut self.metadata_revision,
+            self.tile_height,
         );
 
         let logical_width = ((logical_width as f32 / self.zoom).max(1.0)).ceil() as u32;
         let logical_height = ((logical_height as f32 / self.zoom).max(1.0)).ceil() as u32;
         let scale_factor = scale_factor.clamp(0.5, 4.0) * self.zoom;
+        set_tile_height(
+            &mut self.tile_height,
+            &mut self.tiles,
+            &mut self.region_dirty,
+            email_tile_height(scale_factor),
+        );
         let mut physical_width = ((logical_width.max(1) as f32) * scale_factor).ceil() as u32;
         let physical_height = ((logical_height.max(1) as f32) * scale_factor).ceil() as u32;
         let size = (
@@ -904,7 +925,12 @@ impl GpuEmailRenderer {
         }
 
         if self.paint_dirty {
-            invalidate_selection_tiles(&email.document, &self.painted_selection, &mut self.tiles);
+            invalidate_selection_tiles(
+                &email.document,
+                &self.painted_selection,
+                &mut self.tiles,
+                self.tile_height,
+            );
         }
         if needs_layout {
             let start = render_timings_enabled().then(Instant::now);
@@ -943,15 +969,17 @@ impl GpuEmailRenderer {
             self.visible_scroll_y,
             self.visible_height.min(logical_height.max(1) as f32),
             self.content_height,
+            self.tile_height,
         );
         self.tiles
             .retain(|index, _| wanted.clone().any(|wanted| wanted == *index));
         let mut ordered: Vec<_> = wanted.clone().collect();
         let top = self.visible_scroll_y;
         let bottom = top + self.visible_height.min(logical_height as f32);
+        let tile_height = self.tile_height;
         ordered.sort_by_key(|index| {
-            let y = *index as f32 * EMAIL_TILE_HEIGHT;
-            (y + EMAIL_TILE_HEIGHT <= top || y >= bottom, *index)
+            let y = *index as f32 * tile_height;
+            (y + tile_height <= top || y >= bottom, *index)
         });
         let mut rendered = 0;
         for index in ordered {
@@ -969,6 +997,7 @@ impl GpuEmailRenderer {
                 self.content_height,
                 index,
                 scale_factor,
+                self.tile_height,
             )?;
             self.tile_count += 1;
             rendered += 1;
@@ -1049,6 +1078,12 @@ impl GpuEmailRenderer {
         let logical_width = (logical_width / self.zoom).max(1.0);
         let logical_height = (logical_height / self.zoom).max(1.0);
         let scale_factor = scale_factor.clamp(0.5, 4.0) * self.zoom;
+        set_tile_height(
+            &mut self.tile_height,
+            &mut self.tiles,
+            &mut self.region_dirty,
+            email_tile_height(scale_factor),
+        );
         let mut physical_width = (logical_width * scale_factor).ceil() as u32;
         let physical_height = (logical_height * scale_factor).ceil() as u32;
         let size = (
@@ -1065,6 +1100,7 @@ impl GpuEmailRenderer {
             &mut self.region_dirty,
             &mut self.tiles,
             &mut self.metadata_revision,
+            self.tile_height,
         );
         let needs_layout = self.dirty || self.last_size != Some(size);
         if !needs_layout && !self.paint_dirty && !self.region_dirty {
@@ -1075,7 +1111,12 @@ impl GpuEmailRenderer {
             .as_ref()
             .map(tokio::runtime::Handle::enter);
         if self.paint_dirty {
-            invalidate_selection_tiles(&email.document, &self.painted_selection, &mut self.tiles);
+            invalidate_selection_tiles(
+                &email.document,
+                &self.painted_selection,
+                &mut self.tiles,
+                self.tile_height,
+            );
         }
         if needs_layout {
             self.layout_count += 1;
@@ -1107,6 +1148,7 @@ impl GpuEmailRenderer {
             self.visible_scroll_y,
             self.visible_height.min(logical_height),
             self.content_height,
+            self.tile_height,
         );
         self.tiles
             .retain(|index, _| wanted.clone().any(|wanted| wanted == *index));
@@ -1114,9 +1156,9 @@ impl GpuEmailRenderer {
             if self.tiles.contains_key(&index) {
                 continue;
             }
-            let logical_y = index as f32 * EMAIL_TILE_HEIGHT;
+            let logical_y = index as f32 * self.tile_height;
             let logical_tile_height =
-                (self.content_height - logical_y).clamp(1.0, EMAIL_TILE_HEIGHT);
+                (self.content_height - logical_y).clamp(1.0, self.tile_height);
             let physical_tile_height = (logical_tile_height * scale_factor).ceil() as u32;
             let limit = device.limits().max_texture_dimension_2d;
             if physical_width > limit || physical_tile_height > limit {
@@ -1266,7 +1308,8 @@ pub fn render_prepared_cpu(
     email.links = collect_email_links(&email.document, logical_width.max(1) as f32);
     let rendered_height = content_surface_height(&email.document);
     let rendered_physical_height = (rendered_height * scale_factor).ceil().max(1.0) as u32;
-    let last_tile = ((rendered_height / EMAIL_TILE_HEIGHT).ceil() as u32).saturating_sub(1);
+    let tile_height = email_tile_height(scale_factor);
+    let last_tile = ((rendered_height / tile_height).ceil() as u32).saturating_sub(1);
     let mut tiles = Vec::with_capacity(last_tile as usize + 1);
     for index in 0..=last_tile {
         tiles.push(render_cpu_tile(
@@ -1302,9 +1345,11 @@ fn render_cpu_tile(
         content_height,
         index,
         scale_factor,
+        email_tile_height(scale_factor),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_cpu_tile_cached(
     painter: &mut Option<VelloCpuImageRenderer>,
     size: &mut (u32, u32),
@@ -1313,16 +1358,16 @@ fn render_cpu_tile_cached(
     content_height: f32,
     index: u32,
     scale_factor: f32,
+    tile_height: f32,
 ) -> Result<RenderedEmailTile, String> {
-    let logical_y = index as f32 * EMAIL_TILE_HEIGHT;
-    let logical_tile_height = (content_height - logical_y).clamp(1.0, EMAIL_TILE_HEIGHT);
+    let logical_y = index as f32 * tile_height;
+    let logical_tile_height = (content_height - logical_y).clamp(1.0, tile_height);
     let physical_width = (logical_width * scale_factor).ceil().max(1.0) as u32;
     let physical_tile_height = (logical_tile_height * scale_factor).ceil().max(1.0) as u32;
     if physical_width > 16384 || physical_tile_height > 8192 {
         return Err("Email surface exceeds rendering limits".into());
     }
-    let mut pixels =
-        slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(physical_width, physical_tile_height);
+    let mut rgba = vec![0; physical_width as usize * physical_tile_height as usize * 4];
     if painter.is_none() {
         *painter = Some(VelloCpuImageRenderer::with_image_cache_config(
             physical_width,
@@ -1368,14 +1413,18 @@ fn render_cpu_tile_cached(
                 scene_time = start.elapsed();
             }
         },
-        pixels.make_mut_bytes(),
+        &mut rgba,
     );
     email.document.set_viewport_scroll(DomPoint::ZERO);
     let rendered = start.map(|start| start.elapsed());
 
-    // Blitz may leave pixels beyond the document's own painted boxes
-    // transparent. Every tile represents an opaque browser canvas.
-    composite_over_canvas(pixels.make_mut_bytes(), email.appearance.colors.canvas());
+    let pixels = flatten_over_canvas(
+        &rgba,
+        physical_width,
+        physical_tile_height,
+        email.appearance.colors.canvas(),
+    );
+    drop(rgba);
     if let (Some(start), Some(rendered)) = (start, rendered) {
         eprintln!(
             "email tile {index}: scene+encode={:.2}ms raster+cache={:.2}ms composite={:.2}ms",
@@ -1385,7 +1434,7 @@ fn render_cpu_tile_cached(
         );
     }
     Ok(RenderedEmailTile {
-        image: slint::Image::from_rgba8(pixels),
+        image: slint::Image::from_rgb8(pixels),
         y: logical_y / logical_width,
         height: logical_tile_height / logical_width,
     })
@@ -1395,6 +1444,7 @@ fn invalidate_selection_tiles(
     document: &HtmlDocument,
     previous: &[(NodeId, usize, usize)],
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
+    tile_height: f32,
 ) {
     let current = document.get_text_selection_ranges();
     let changed = previous
@@ -1409,8 +1459,8 @@ fn invalidate_selection_tiles(
         let y = node.absolute_position(0.0, 0.0).y;
         let end = y + node.final_layout().size.height;
         tiles.retain(|index, _| {
-            let top = *index as f32 * EMAIL_TILE_HEIGHT;
-            top + EMAIL_TILE_HEIGHT < y || top > end
+            let top = *index as f32 * tile_height;
+            top + tile_height < y || top > end
         });
     }
 }
@@ -1421,6 +1471,7 @@ fn drain_email_updates(
     region_dirty: &mut bool,
     tiles: &mut BTreeMap<u32, RenderedEmailTile>,
     metadata_revision: &mut u64,
+    tile_height: f32,
 ) -> bool {
     let updates = email.document.drain_pending_updates();
     *dirty |= updates.layout;
@@ -1473,22 +1524,49 @@ fn drain_email_updates(
         }
         let before = tiles.len();
         tiles.retain(|index, _| {
-            let top = *index as f32 * EMAIL_TILE_HEIGHT;
-            top + EMAIL_TILE_HEIGHT < y - 1.0 || top > bottom + 1.0
+            let top = *index as f32 * tile_height;
+            top + tile_height < y - 1.0 || top > bottom + 1.0
         });
         *region_dirty |= before != tiles.len();
     }
     updates.changed
 }
 
+/// Tile height in document pixels for a device scale (display scale times
+/// zoom). Halving it on dense displays keeps each tile, and so the overscan,
+/// near `EMAIL_TILE_HEIGHT` device pixels instead of growing with the scale.
+/// Whole logical heights keep tile edges on the same pixels as before.
+fn email_tile_height(scale: f32) -> f32 {
+    let mut height = EMAIL_TILE_HEIGHT;
+    while height * scale > EMAIL_TILE_HEIGHT * 1.5 && height > 64.0 {
+        height /= 2.0;
+    }
+    height
+}
+
+/// Tiles cut at another height no longer line up with the tile grid.
+fn set_tile_height(
+    current: &mut f32,
+    tiles: &mut BTreeMap<u32, RenderedEmailTile>,
+    region_dirty: &mut bool,
+    tile_height: f32,
+) {
+    if *current != tile_height {
+        *current = tile_height;
+        tiles.clear();
+        *region_dirty = true;
+    }
+}
+
 fn desired_tile_range(
     scroll_y: f32,
     viewport_height: f32,
     content_height: f32,
+    tile_height: f32,
 ) -> std::ops::RangeInclusive<u32> {
-    let last = ((content_height.max(1.0) / EMAIL_TILE_HEIGHT).ceil() as u32).saturating_sub(1);
-    let first_visible = (scroll_y.max(0.0) / EMAIL_TILE_HEIGHT).floor() as u32;
-    let last_visible = (((scroll_y.max(0.0) + viewport_height.max(1.0)) / EMAIL_TILE_HEIGHT).ceil()
+    let last = ((content_height.max(1.0) / tile_height).ceil() as u32).saturating_sub(1);
+    let first_visible = (scroll_y.max(0.0) / tile_height).floor() as u32;
+    let last_visible = (((scroll_y.max(0.0) + viewport_height.max(1.0)) / tile_height).ceil()
         as u32)
         .saturating_sub(1);
     let first = first_visible.saturating_sub(EMAIL_TILE_OVERSCAN).min(last);
@@ -1557,20 +1635,28 @@ fn content_surface_height(document: &HtmlDocument) -> f32 {
         .clamp(MIN_EMAIL_SURFACE_HEIGHT, MAX_EMAIL_SURFACE_HEIGHT)
 }
 
-fn composite_over_canvas(rgba: &mut [u8], background: blitz_dom::util::Color) {
+/// Blitz may leave pixels beyond the document's own painted boxes
+/// transparent, while every tile represents an opaque browser canvas. Flatten
+/// the painter's premultiplied RGBA over the canvas colour into RGB: an opaque
+/// tile needs no alpha byte, a quarter of its memory. Slint draws RGB images
+/// as they are, and keeps its own opaque decoded images in this format.
+fn flatten_over_canvas(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    background: blitz_dom::util::Color,
+) -> slint::SharedPixelBuffer<slint::Rgb8Pixel> {
     let [r, g, b, _] = background.components;
     let canvas = [r, g, b].map(|channel| (channel * 255.0).round() as u16);
-    for pixel in rgba.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(pixel[3]);
-        if alpha < 255 {
-            let inverse = 255 - alpha;
-            for (channel, background) in pixel[..3].iter_mut().zip(canvas) {
-                *channel =
-                    (u16::from(*channel) + (background * inverse + 127) / 255).min(255) as u8;
-            }
-            pixel[3] = 255;
-        }
+    let mut rgb = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(width, height);
+    for (out, pixel) in rgb.make_mut_slice().iter_mut().zip(rgba.as_chunks::<4>().0) {
+        let inverse = 255 - u16::from(pixel[3]);
+        let [r, g, b] = [0, 1, 2].map(|channel| {
+            (u16::from(pixel[channel]) + (canvas[channel] * inverse + 127) / 255).min(255) as u8
+        });
+        *out = slint::Rgb8Pixel { r, g, b };
     }
+    rgb
 }
 
 /// Parse sanitized email HTML into a retained Blitz DOM. The DOM is painted
@@ -2092,8 +2178,8 @@ fn painted_point(document: &HtmlDocument, mut id: NodeId, mut x: f32, mut y: f32
 #[cfg(test)]
 mod tests {
     use super::{
-        GpuEmailRenderer, InputModifiers, VelloCpuImageRenderer, composite_over_canvas,
-        paint_scene, prepare_email_html, render_prepared_cpu, render_to_buffer,
+        GpuEmailRenderer, InputModifiers, VelloCpuImageRenderer, flatten_over_canvas, paint_scene,
+        prepare_email_html, render_prepared_cpu, render_to_buffer,
     };
     use crate::mail::fixtures;
 
@@ -2243,13 +2329,13 @@ mod tests {
     }
 
     #[test]
-    fn software_canvas_is_composited_over_opaque_white() {
-        let mut rgba = vec![0, 0, 0, 0, 200, 100, 50, 128];
-        composite_over_canvas(&mut rgba, blitz_dom::util::Color::WHITE);
+    fn software_canvas_is_flattened_over_opaque_white() {
+        let rgba = [0, 0, 0, 0, 200, 100, 50, 128];
+        let rgb = flatten_over_canvas(&rgba, 2, 1, blitz_dom::util::Color::WHITE);
+        let [blank, blended] = [rgb.as_slice()[0], rgb.as_slice()[1]];
 
-        assert_eq!(&rgba[..4], &[255, 255, 255, 255]);
-        assert_eq!(rgba[7], 255);
-        assert!(rgba[4] > 200 && rgba[5] > 100 && rgba[6] > 50);
+        assert_eq!(blank, slint::Rgb8Pixel::new(255, 255, 255));
+        assert!(blended.r > 200 && blended.g > 100 && blended.b > 50);
     }
 
     #[test]
