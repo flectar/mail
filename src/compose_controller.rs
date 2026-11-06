@@ -7,6 +7,8 @@ use flectar_mail_core::sender_identities::{is_own_address, reply_sender};
 pub(super) struct ComposeIntent {
     pub mode: String,
     pub in_reply_to_message_id: Option<i64>,
+    /// The Message-ID a reply answers when that message is not stored here.
+    pub in_reply_to_header: Option<String>,
     pub draft_id: Option<i64>,
 }
 
@@ -15,6 +17,7 @@ impl Default for ComposeIntent {
         Self {
             mode: "new".to_owned(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             draft_id: None,
         }
     }
@@ -92,6 +95,7 @@ pub(super) fn prepare_message_compose(
             intent: ComposeIntent {
                 mode: "forward".to_owned(),
                 in_reply_to_message_id: None,
+                in_reply_to_header: None,
                 draft_id: None,
             },
         });
@@ -152,6 +156,7 @@ pub(super) fn prepare_message_compose(
         intent: ComposeIntent {
             mode: action.to_owned(),
             in_reply_to_message_id: Some(source.message_id),
+            in_reply_to_header: None,
             draft_id: None,
         },
     })

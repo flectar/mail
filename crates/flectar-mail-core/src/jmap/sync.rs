@@ -1982,29 +1982,7 @@ async fn build_draft_message(
                 params![draft_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )?;
-            let parent_id = conn
-                .query_row(
-                    "SELECT in_reply_to_message_id FROM drafts_meta WHERE message_id=?1",
-                    params![draft_id],
-                    |row| row.get::<_, Option<i64>>(0),
-                )
-                .optional()?
-                .flatten();
-            let mut references = Vec::new();
-            let mut in_reply_to = None;
-            if let Some(parent_id) = parent_id {
-                let mut stmt =
-                    conn.prepare("SELECT ref_message_id FROM message_refs WHERE message_id=?1")?;
-                references = stmt
-                    .query_map(params![parent_id], |row| row.get::<_, String>(0))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                if let Some(parent) = repo::messages::get_row(conn, parent_id)?
-                    && let Some(message_id) = parent.message_id
-                {
-                    references.push(message_id.clone());
-                    in_reply_to = Some(message_id);
-                }
-            }
+            let (references, in_reply_to) = repo::messages::draft_reply_headers(conn, draft_id)?;
             let mut stmt =
                 conn.prepare("SELECT file_path,filename FROM draft_attachments WHERE draft_id=?1")?;
             let attachments = stmt

@@ -2,6 +2,7 @@ import { AccountMailPreferencesPanel } from "../components/account-mail-preferen
 import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
+import { DefaultEmailApp } from "../default-email-app.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -1379,6 +1380,68 @@ export component SettingsDialog inherits Rectangle {
                                         // Two-way, so the app can correct the switch after a toggle.
                                         checked <=> root.launch_at_login;
                                         toggled => { root.set_launch_at_login(self.checked); }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: !root.compact && DefaultEmailApp.status != "";
+                                height: self.visible ? 51px + mailto-title.height + mailto-description.height + mailto-note.height : 0px;
+                                background: root.surface;
+                                border-radius: 8px;
+                                border-width: 1px;
+                                border-color: root.border-subtle;
+                                HorizontalBox {
+                                    padding-top: 18px;
+                                    padding-right: 20px;
+                                    padding-bottom: 18px;
+                                    padding-left: 20px;
+                                    spacing: 16px;
+                                    VerticalBox {
+                                        spacing: 5px;
+                                        mailto-title := Text { height: max(20px, self.preferred-height); text: @tr("Default email app"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+                                        mailto-description := Text {
+                                            height: max(17px, self.preferred-height);
+                                            text: DefaultEmailApp.status == "default" ? @tr("Email links in browsers and other apps open in Flectar Mail.")
+                                                : DefaultEmailApp.status == "system-settings" ? @tr("To open email links from browsers and other apps here, choose Flectar Mail for email in your system's default apps.")
+                                                : DefaultEmailApp.status == "not-installed" ? @tr("Add Flectar Mail to your applications menu to open email links from browsers and other apps here.")
+                                                : @tr("Open email links from browsers and other apps in Flectar Mail.");
+                                            color: root.faint-text;
+                                            font-size: TypeScale.secondary;
+                                            wrap: word-wrap;
+                                        }
+                                        mailto-note := Text {
+                                            height: max(16px, self.preferred-height);
+                                            text: DefaultEmailApp.status == "not-default" && AppIcon.platform == "windows" ? @tr("Opens Default apps in Windows Settings, where you choose Flectar Mail.")
+                                                : DefaultEmailApp.status == "not-default" && AppIcon.platform == "macos" ? @tr("macOS asks you to confirm the change.")
+                                                : DefaultEmailApp.status == "not-installed" ? @tr("Run the AppImage with --integrate, or add it with your AppImage manager.")
+                                                : @tr("Links fill in a new message for you to review; files are never attached from them.");
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                    Rectangle { horizontal-stretch: 1; }
+                                    // The buttons share the width of the wider one.
+                                    VerticalLayout {
+                                        alignment: center;
+                                        spacing: make-default.visible && remove-registration.visible ? 8px : 0px;
+                                        make-default := Button {
+                                            visible: DefaultEmailApp.status == "not-default";
+                                            width: self.visible ? max(132px, self.content-width, remove-registration.visible ? remove-registration.content-width : 0px) : 0px;
+                                            height: self.visible ? 32px : 0px;
+                                            text: @tr("Make default");
+                                            enabled: !DefaultEmailApp.busy;
+                                            clicked => { DefaultEmailApp.make-default(); }
+                                        }
+                                        remove-registration := Button {
+                                            visible: DefaultEmailApp.removable;
+                                            width: self.visible ? max(132px, self.content-width, make-default.visible ? make-default.content-width : 0px) : 0px;
+                                            height: self.visible ? 32px : 0px;
+                                            text: @tr("Remove from Windows");
+                                            enabled: !DefaultEmailApp.busy;
+                                            clicked => { DefaultEmailApp.remove(); }
+                                        }
                                     }
                                 }
                             }

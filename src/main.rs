@@ -15,6 +15,8 @@ mod compose_editor;
 mod contacts;
 mod data_controller;
 mod date_format;
+#[cfg(desktop)]
+mod default_email_app;
 mod document_preview;
 pub mod documents;
 mod email_document;
@@ -33,6 +35,7 @@ mod mail_scope;
 mod mail_setup;
 mod mail_view_model;
 mod mail_work;
+mod mailto_links;
 mod message_appearance;
 mod move_picker;
 mod notifications;
@@ -1594,6 +1597,18 @@ fn spawn_startup_load(
     });
 }
 
+/// Keep the launcher's activation token and clear it from the environment,
+/// so programs Flectar Mail starts do not inherit it.
+///
+/// # Safety
+///
+/// Changes the environment: call it before any other thread starts.
+#[cfg(desktop)]
+pub unsafe fn take_launch_activation_token() {
+    // SAFETY: forwarded from the caller.
+    unsafe { window_chrome::take_launch_activation_token() };
+}
+
 /// Slint installs one backend per process. Retry failed GPU startup in a fresh
 /// CPU process, releasing the failed device and keeping the saved choice intact.
 pub fn run_desktop(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> {
@@ -1632,16 +1647,20 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     let runtime = app_runtime.handle().clone();
     #[cfg(desktop)]
-    let background_launch = autostart::launched_in_background();
+    let launch_links = mailto_links::launch_links(std::env::args_os().skip(1));
+    // A mail link launch always shows the window, whatever else it says.
+    #[cfg(desktop)]
+    let background_launch = launch_links.is_none() && autostart::launched_in_background();
     #[cfg(desktop)]
     let mut instance = {
-        use single_instance::{Acquired, Request};
+        use single_instance::{Acquired, Activation, Request};
         let request = if background_launch {
             Request::Nothing
         } else {
-            Request::Show {
+            Request::Show(Activation {
                 activation_token: window_chrome::launch_activation_token(),
-            }
+                links: launch_links.clone().unwrap_or_default(),
+            })
         };
         match single_instance::acquire(&runtime, &platform.paths.data_dir, request) {
             Ok(Acquired::Primary(primary)) => Some(primary),
@@ -1840,10 +1859,25 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     #[cfg(desktop)]
     if let Some(instance) = instance.as_mut() {
         let app = app.as_weak();
-        instance.serve(&runtime, move |activation_token| {
+        instance.serve(&runtime, move |activation| {
             let _ = app.upgrade_in_event_loop(move |app| {
-                window_controller::activate(&app, activation_token);
+                window_controller::activate(&app, activation.activation_token);
+                mailto_links::open(&app, "forwarded", activation.links);
             });
+        });
+    }
+    // They open once the mail store is ready and the composer connected.
+    #[cfg(desktop)]
+    mailto_links::open(&app, "launch", launch_links.unwrap_or_default());
+    // The launcher's token was meant for this window: it lets the desktop
+    // focus it (Wayland) and ends the launch feedback (X11).
+    #[cfg(desktop)]
+    if !start_hidden && let Some(token) = window_chrome::launch_activation_token() {
+        let weak = app.as_weak();
+        window_controller::when_first_shown(&app, move || {
+            if let Some(app) = weak.upgrade() {
+                window_chrome::focus(&app, Some(token));
+            }
         });
     }
     let email_renderer = Rc::clone(&initial_state.email_renderer);
@@ -4403,6 +4437,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     refresh_list_metadata(&app, &startup_state);
                     app.set_startup_hydrated(true);
                     app.set_startup_ready(true);
+                    mailto_links::open_pending_soon(&app);
                     app.invoke_product_changed(app.get_active_view());
                     app.global::<TabsUi>().invoke_restore_active();
                     app.set_startup_failed(false);
@@ -6198,6 +6233,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
+    mailto_links::install(
+        &app,
+        mailto_links::Composer {
+            state: Rc::clone(&state),
+            runtime: runtime.clone(),
+            intent: Rc::clone(&compose_intent),
+            document: Rc::clone(&compose_document),
+            editor: Rc::clone(&compose_editor),
+        },
+    );
+    #[cfg(target_os = "macos")]
+    mailto_links::receive_from_macos(&app);
+
     let app_weak = app.as_weak();
     let state_for_message_compose = Rc::clone(&state);
     let runtime_for_message_compose = runtime.clone();
@@ -6322,7 +6370,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             {
                 let mut document = document_for_message_compose.borrow_mut();
                 let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                let selection = document.synchronize(&draft.body_text, cursor, cursor);
+                let selection = document.load(&draft.body_text, cursor, cursor);
                 editor_for_message_compose.borrow_mut().reset();
                 apply_rich_compose(
                     &app,
@@ -6334,6 +6382,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             *intent_for_message_compose.borrow_mut() = ComposeIntent {
                 mode: draft.mode,
                 in_reply_to_message_id: draft.in_reply_to_message_id,
+                in_reply_to_header: draft.in_reply_to_header,
                 draft_id: draft.draft_id,
             };
             app.set_compose_mode("draft".into());
@@ -6418,7 +6467,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.set_compose_subject(prepared.subject.into());
         {
             let mut document = document_for_message_compose.borrow_mut();
-            let selection = document.synchronize(&prepared.body, 0, 0);
+            let selection = document.load(&prepared.body, 0, 0);
             editor_for_message_compose.borrow_mut().reset();
             apply_rich_compose(
                 &app,
@@ -6460,6 +6509,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 &contacts_for_close,
             );
             *intent_for_close.borrow_mut() = ComposeIntent::default();
+            mailto_links::open_pending_soon(&app);
         }
     });
 
@@ -6905,6 +6955,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 attachments: &attachments,
                 mode: intent.mode.as_str(),
                 in_reply_to_message_id: intent.in_reply_to_message_id,
+                in_reply_to_header: intent.in_reply_to_header.as_deref(),
             })) {
                 Ok(queued) => {
                     // Keep the exact saved draft attached to this composer so
@@ -6948,6 +6999,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 attachments: &attachments,
                 mode: intent.mode.as_str(),
                 in_reply_to_message_id: intent.in_reply_to_message_id,
+                in_reply_to_header: intent.in_reply_to_header.as_deref(),
             }))
             .map(|draft_id| UiMessage::detail("Draft saved locally (#{}).", draft_id));
         match result {
@@ -6964,6 +7016,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 app.set_sync_status(message);
                 let _ =
                     refresh_from_source(&app, &state_for_compose, &runtime_for_compose, true, &[]);
+                mailto_links::open_pending_soon(&app);
             }
             Err(error) => {
                 let message = UiMessage::detail("Compose failed: {}", error);
@@ -7014,6 +7067,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         true,
                         &[],
                     );
+                    mailto_links::open_pending_soon(&app);
                 }
                 Err(error) => {
                     let message = UiMessage::detail(
