@@ -172,6 +172,7 @@ export component MailView inherits FocusScope {
     callback open_compose();
     callback open_email_link(string);
     callback copy_email_status(string);
+    callback report_rendering_issue();
     callback email-pointer-event(float, float, string, bool, bool, bool, bool);
     callback email-scroll(float, float);
     callback email-key-event(string, bool, bool, bool, bool, bool, bool);
@@ -434,6 +435,7 @@ export component MailView inherits FocusScope {
             }
 
             desktop-reading-pane := MailReadingPane {
+                shown: !root.single-pane;
                 show-avatars: root.show-avatars;
                 // This is the flexible column. Explicit constraints prevent
                 // the subject's wrapping width from becoming a hard maximum,
@@ -507,6 +509,7 @@ export component MailView inherits FocusScope {
                 open_message_in_browser => { root.open_message_in_browser(); }
                 open_email_link(url) => { root.open_email_link(url); }
                 copy_email_status(status) => { root.copy_email_status(status); }
+                report_rendering_issue => { root.report_rendering_issue(); }
                 load-remote-images-for-message => { root.load-remote-images-for-message(); }
                 email-pointer-event(x, y, kind, control, shift, alt, meta) => {
                     root.email-pointer-event(x, y, kind, control, shift, alt, meta);
@@ -668,6 +671,7 @@ export component MailView inherits FocusScope {
                 full-width: true;
                 show-avatars: root.show-avatars;
                 visible: root.compact-page == "message";
+                shown: root.single-pane && self.visible;
                 x: root.single-pane-content-x
                     + (root.compact-page == "message" ? 0px : root.page-transition-distance);
                 y: 0px;
@@ -743,6 +747,7 @@ export component MailView inherits FocusScope {
                 open_message_in_browser => { root.open_message_in_browser(); }
                 open_email_link(url) => { root.open_email_link(url); }
                 copy_email_status(status) => { root.copy_email_status(status); }
+                report_rendering_issue => { root.report_rendering_issue(); }
                 load-remote-images-for-message => { root.load-remote-images-for-message(); }
                 email-pointer-event(x, y, kind, control, shift, alt, meta) => {
                     root.email-pointer-event(x, y, kind, control, shift, alt, meta);

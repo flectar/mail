@@ -285,6 +285,8 @@ export component MailReadingPane inherits FocusScope {
     enabled: false;
     in property <bool> compact: false;
     in property <bool> full-width: false;
+    // Whether this pane is on screen. Mail view keeps one pane per layout.
+    in property <bool> shown: true;
     private property <bool> attachment-menu-mode: root.height < 500px;
     in property <bool> show-avatars: true;
     // The title wrap width comes from the containing window, not this pane's
@@ -528,6 +530,7 @@ export component MailReadingPane inherits FocusScope {
     callback open_message_in_browser();
     callback open_email_link(string);
     callback copy_email_status(string);
+    callback report_rendering_issue();
     callback email-pointer-event(float, float, string, bool, bool, bool, bool);
     callback email-scroll(float, float);
     callback email-key-event(string, bool, bool, bool, bool, bool, bool);
@@ -2061,6 +2064,7 @@ export component MailReadingPane inherits FocusScope {
 
                 RenderingInfoDialog {
                     open <=> root.rendering_info_open;
+                    shown: root.shown;
                     compact: root.compact;
                     x: 0px;
                     y: 0px;
@@ -2079,8 +2083,6 @@ export component MailReadingPane inherits FocusScope {
                         clipboard-source.copy();
                         root.copy_email_status("Copied HTML source");
                     }
-                    report-issue => {
-                        root.open_email_link("https://github.com/flectar/mail/issues/new?title=Email%20rendering%20issue&body=%23%23%20What%20looked%20wrong%3F%0A%0A%23%23%20Email%20HTML%20source%0A%3C!--%20Remove%20private%20information%20before%20pasting.%20--%3E%0A");
-                    }
+                    report-issue => { root.report_rendering_issue(); }
                 }
 }

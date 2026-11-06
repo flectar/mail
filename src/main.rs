@@ -63,6 +63,7 @@ mod remote;
 mod renderer;
 mod renderer_input_controller;
 mod renderer_preferences;
+mod rendering_report;
 mod retained_model;
 mod rich_compose;
 mod settings_controller;
@@ -7814,6 +7815,21 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         &app,
         &email_renderer,
         use_wgpu,
+        platform.external_urls.clone(),
+    );
+    let state_for_report = Rc::clone(&state);
+    rendering_report::register(
+        &app,
+        move || {
+            state_for_report
+                .borrow()
+                .core
+                .as_ref()
+                .map(|core| core.file_core())
+        },
+        &runtime,
+        platform.documents.clone(),
+        platform.paths.temp_dir(),
         platform.external_urls.clone(),
     );
 
