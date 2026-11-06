@@ -297,6 +297,46 @@ component MailGroupHeader inherits Rectangle {
     }
 }
 
+// Ends a list whose older unread mail is only on the server: how much, and
+// the setting that downloads further back.
+component ServerOnlyNote inherits Rectangle {
+    in property <int> count;
+    in property <color> text-color;
+    in property <color> divider-color;
+    callback open-mail-history();
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: LayoutMetrics.divider-width;
+        background: root.divider-color;
+        accessible-role: none;
+    }
+    VerticalLayout {
+        alignment: center;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 10px;
+        Text {
+            text: @tr("{n} older unread message is only on the server." | "{n} older unread messages are only on the server." % root.count);
+            color: root.text-color;
+            font-size: TypeScale.secondary;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: center;
+            history-button := Button {
+                width: self.content-width;
+                text: @tr("Change mail history");
+                accessible-id: "mail-list-mail-history";
+                clicked => { root.open-mail-history(); }
+            }
+        }
+    }
+}
+
 // A focus scope only so message shortcuts work from anywhere in the pane.
 export component MailListPane inherits FocusScope {
     enabled: false;
@@ -358,6 +398,8 @@ export component MailListPane inherits FocusScope {
     // Edits the open message as new.
     callback edit-as-new();
     callback toggle_mail_group(string);
+    // Settings where an account's mail history is chosen.
+    callback open-mail-history();
     callback set_email_checked(int, bool);
     callback set_all_emails_checked(bool);
 
@@ -914,7 +956,7 @@ export component MailListPane inherits FocusScope {
                                 private property <float> touch-start-x: 0;
                                 private property <float> touch-start-y: 0;
                                 width: max(0px, mail-list-scroll.visible-width - LayoutMetrics.list-scrollbar-gutter);
-                                height: entry.is_header ? (root.compact ? 44px : 40px)
+                                height: entry.is_header ? (entry.group_kind == "server-only" ? 100px : root.compact ? 44px : 40px)
                                     : entry.show_row && (mail-row.reveal-ready || !MotionSettings.enabled)
                                         ? root.message-row-height : 0px;
                                 border-radius: 6px;
@@ -1414,7 +1456,15 @@ export component MailListPane inherits FocusScope {
                                     }
                                 }
 
-                                if entry.is_header : MailGroupHeader {
+                                if entry.is_header && entry.group_kind == "server-only" : ServerOnlyNote {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    count: entry.group_count;
+                                    text-color: root.secondary-text;
+                                    divider-color: root.border-subtle;
+                                    open-mail-history => { root.open-mail-history(); }
+                                }
+                                if entry.is_header && entry.group_kind != "server-only" : MailGroupHeader {
                                     width: parent.width;
                                     height: parent.height;
                                     title: root.group-title(entry.group_kind);

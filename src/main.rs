@@ -113,6 +113,7 @@ use mail::{
 };
 use mail_groups::{
     MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
+    server_only_entry,
 };
 use mail_render_projection::*;
 use mail_scope::{Scope, StandardMailbox, accounts_to_check};
@@ -624,6 +625,8 @@ struct InboxState {
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
     sidebar_badges: SidebarBadges,
+    /// Unread mail only on the server of the scope it was counted for.
+    server_only: Option<(Scope, u32)>,
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
@@ -1162,6 +1165,7 @@ impl InboxState {
             mailboxes: Vec::new(),
             unified_mailboxes: Vec::new(),
             sidebar_badges: SidebarBadges::default(),
+            server_only: None,
             mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from([
@@ -1259,11 +1263,33 @@ impl InboxState {
     }
 
     /// Takes the sidebar's mailboxes and badges from fresh metadata.
-    fn set_mail_metadata(&mut self, metadata: MailMetadata) {
+    /// Returns whether the end of the list says something else now.
+    fn set_mail_metadata(&mut self, metadata: MailMetadata) -> bool {
+        let note = self.server_only_note();
         self.mailboxes = metadata.mailboxes;
         self.unified_mailboxes = metadata.unified_mailboxes;
         self.sidebar_badges = metadata.sidebar_badges;
         self.inbox_count = metadata.inbox_count;
+        self.server_only = Some((metadata.scope, metadata.server_only_unread));
+        self.server_only_note() != note
+    }
+
+    /// How many older unread messages of the list are only on the server,
+    /// which its end mentions once all of its mail is shown: not for
+    /// searches, nor for filters other than unread mail.
+    fn server_only_note(&self) -> u32 {
+        match self.server_only {
+            Some((scope, count))
+                if scope == self.scope
+                    && self.using_core
+                    && self.next_cursor.is_none()
+                    && self.query.trim().is_empty()
+                    && matches!(self.search_filter.as_str(), "All mail" | "Unread") =>
+            {
+                count
+            }
+            _ => 0,
+        }
     }
 
     /// The accounts a manual check for new mail covers in the current view:
@@ -3743,8 +3769,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     let local_mail = metadata.local_mail;
                     let local_mail_changed =
                         local_mail != state.local_mail.map(|local| local.account_id);
-                    state.set_mail_metadata(metadata);
+                    let note_changed = state.set_mail_metadata(metadata);
                     drop(state);
+                    if note_changed {
+                        refresh_rows_only(&app, &mail_metadata_state, &mail_metadata_runtime);
+                    }
                     if local_mail_changed {
                         // Its section is named at once; its size follows.
                         apply_local_mail(
@@ -3793,6 +3822,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         if pending.all_mail_changed || !pending.changed_threads.is_empty() {
             mail_list_refresh_requested_for_core.set(true);
+            mail_metadata_refresh_requested_for_core.set(true);
+        }
+        // The end of the list says how much older unread mail is only on
+        // the server; the badge refresh brings it.
+        if pending.server_only_changed {
             mail_metadata_refresh_requested_for_core.set(true);
         }
         let mail_active = mail_update_app
@@ -4439,9 +4473,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 StartupUpdate::MailMetadata(result) => match result {
                     Ok(metadata) => {
-                        {
-                            let mut state = startup_state.borrow_mut();
-                            state.set_mail_metadata(metadata);
+                        let note_changed = startup_state.borrow_mut().set_mail_metadata(metadata);
+                        if note_changed {
+                            refresh_rows_only(&app, &startup_state, &startup_runtime);
                         }
                         refresh_list_metadata(&app, &startup_state);
                     }

@@ -586,6 +586,8 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) action_error: Option<String>,
     /// What became of the latest mail copied or moved to other accounts.
     pub(crate) transfers: Option<TransferReport>,
+    /// A sync counted older unread mail only on the server again.
+    pub(crate) server_only_changed: bool,
     pub(crate) calendar_changed: bool,
     pub(crate) contacts_changed: bool,
 }
@@ -760,6 +762,13 @@ pub(crate) fn spawn_core_event_listener(
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .contacts_changed = true;
+                    true
+                }
+                Ok(CoreEvent::ServerOnlyUnreadChanged { .. }) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .server_only_changed = true;
                     true
                 }
                 Err(RecvError::Lagged(_)) => {
