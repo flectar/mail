@@ -336,6 +336,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
+        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
         { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
@@ -356,6 +357,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg") },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg") },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg") },
+        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg") },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
         { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
@@ -376,6 +378,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
         { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
@@ -394,6 +397,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "reply", title: @tr("Reply"), icon: @image-url("../icons/lucide/outline/reply.svg"), disabled: !LocalMailUi.can-send },
         { id: "reply_all", title: @tr("Reply all"), icon: @image-url("../icons/lucide/outline/reply-all.svg"), disabled: !LocalMailUi.can-send },
         { id: "forward", title: @tr("Forward"), icon: @image-url("../icons/lucide/outline/forward.svg"), disabled: !LocalMailUi.can-send },
+        { id: "edit_as_new", title: @tr("Edit as new"), icon: @image-url("../icons/lucide/outline/compose.svg"), disabled: !LocalMailUi.can-send },
         { id: "star", title: root.selected_starred ? @tr("Remove star") : @tr("Star message"), icon: root.selected_starred ? @image-url("../icons/lucide/filled/star.svg") : @image-url("../icons/lucide/outline/star.svg") },
         { id: "labels", title: @tr("Manage labels"), icon: root.selected-account-uses-labels ? @image-url("../icons/lucide/filled/tag.svg") : @image-url("../icons/lucide/filled/file-directory.svg") },
         { id: "openpgp", title: @tr("Decrypt / verify OpenPGP"), icon: @image-url("../icons/lucide/outline/lock.svg") },
@@ -571,6 +575,12 @@ export component MailReadingPane inherits FocusScope {
             MovePickerUi.return-to = "reader";
             MovePickerUi.request("move", "open", -1);
         }
+    }
+    KeyBinding {
+        keys: Shortcuts.edit-as-new;
+        enabled: root.message-keys && !root.selected_is_draft && !EmailReader.find-open
+            && (!LocalMailUi.selected || LocalMailUi.can-send);
+        activated => { root.compose_message_action("edit_as_new"); }
     }
     KeyBinding {
         keys: Shortcuts.copy-to;
@@ -1050,7 +1060,7 @@ export component MailReadingPane inherits FocusScope {
                                         ? root.message-action-menu
                                         : root.message-action-menu-no-print;
                                 activated(action) => {
-                                    if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" {
+                                    if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "edit_as_new" {
                                         root.compose_message_action(action);
                                     } else if action == "star" {
                                         root.message_action(root.selected_starred ? "unstar" : "star");

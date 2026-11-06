@@ -6436,8 +6436,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.global::<AccountMailPreferences>()
             .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
-        // A forward carries the original's files.
-        if action.as_str() == "forward" {
+        // A forward, and a message edited as new, carry the original's files.
+        if matches!(action.as_str(), "forward" | "edit_as_new") {
             attach_original_files(
                 &app,
                 &files_for_message_compose,

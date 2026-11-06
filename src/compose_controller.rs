@@ -31,15 +31,16 @@ pub(super) struct PreparedMessageCompose {
     pub intent: ComposeIntent,
 }
 
-/// Prepares a reply or forward. `translate` renders the quotation headers in
-/// the interface language, as mail clients write them for their user.
+/// Prepares a reply or forward, or a message edited as new. `translate`
+/// renders the quotation headers in the interface language, as mail clients
+/// write them for their user.
 pub(super) fn prepare_message_compose(
     source: &ComposeSource,
     action: &str,
     rendered_plain_text: &str,
     translate: impl Fn(UiMessage) -> String,
 ) -> Result<PreparedMessageCompose, String> {
-    if !matches!(action, "reply" | "reply_all" | "forward") {
+    if !matches!(action, "reply" | "reply_all" | "forward" | "edit_as_new") {
         return Err(format!("unsupported compose action: {action}"));
     }
 
@@ -53,6 +54,29 @@ pub(super) fn prepare_message_compose(
         .timestamp_millis_opt(source.date)
         .single()
         .map(|date| date_format::current().date_time(DateStyle::WeekdayMedium, date.naive_local()));
+
+    // Thunderbird's Edit As New Message: the message as it was, to send
+    // again or anew, from the address that sent it when that is one's own.
+    if action == "edit_as_new" {
+        let sender_email = if is_own_address(&source.sender_identities, &source.from.email) {
+            source.from.email.clone()
+        } else {
+            reply_sender(
+                &source.sender_identities,
+                source.to.iter().chain(source.cc.iter()),
+            )
+            .unwrap_or_else(|| source.default_sender_email.clone())
+        };
+        return Ok(PreparedMessageCompose {
+            account_id: source.account_id,
+            sender_email,
+            to: join_addresses(&source.to),
+            cc: join_addresses(&source.cc),
+            subject: source.subject.clone(),
+            body: original_body.trim_end().to_owned(),
+            intent: ComposeIntent::default(),
+        });
+    }
 
     if action == "forward" {
         let original_body = original_body.trim_end();
@@ -541,7 +565,7 @@ pub(super) fn complete_compose_recipient(
 /// why it could not be had.
 type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
 
-/// Attaches a forwarded message's files once they are here, the
+/// Attaches a forwarded or edited message's files once they are here, the
 /// way the attachment picker adds files, unless the composer was sent,
 /// discarded or replaced meanwhile.
 pub(super) fn attach_original_files(
@@ -796,6 +820,35 @@ mod tests {
         assert!(prepared.body.ends_with("Rendered body"));
         assert_eq!(prepared.intent.mode, "forward");
         assert_eq!(prepared.intent.in_reply_to_message_id, None);
+    }
+
+    #[test]
+    fn a_message_edited_as_new_is_the_message_as_it_was_and_no_reply() {
+        let prepared =
+            prepare_message_compose(&source(), "edit_as_new", "Rendered body\n\n", english)
+                .unwrap();
+
+        assert_eq!(prepared.account_id, 7);
+        assert_eq!(
+            prepared.to, "Alex <alex@example.com>, Jon <jon@example.com>",
+            "the same recipients, the account's own address too"
+        );
+        assert_eq!(
+            prepared.cc,
+            "Jon Duplicate <JON@example.com>, Lena <lena@example.com>"
+        );
+        assert_eq!(prepared.subject, "Launch plan", "no prefix");
+        assert_eq!(prepared.body, "Rendered body");
+        assert_eq!(prepared.intent, ComposeIntent::default());
+        // Received: sent from the address it reached.
+        assert_eq!(prepared.sender_email, "alex@example.com");
+
+        // Sent from an alias: sent from it again.
+        let mut sent = source();
+        sent.from = address("Alex at work", "work@example.net");
+        let prepared = prepare_message_compose(&sent, "edit_as_new", "", english).unwrap();
+        assert_eq!(prepared.sender_email, "work@example.net");
+        assert_eq!(prepared.body, "First line\nSecond line");
     }
 
     #[test]
