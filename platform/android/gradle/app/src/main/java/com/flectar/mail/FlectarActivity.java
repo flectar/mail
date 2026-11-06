@@ -34,12 +34,25 @@ public final class FlectarActivity extends NativeActivity {
     }
 
     private static native void nativeSuspendPdfPreview();
+    private static native void nativeTrimMemory(int level, int sdk);
 
     @Override
     protected void onStop() {
         applyLauncherIcon();
         nativeSuspendPdfPreview();
         super.onStop();
+    }
+
+    /**
+     * NativeActivity forwards only onLowMemory, which Android 14 no longer
+     * sends. Rust maps the trim level, for this API level, to the memory it
+     * releases. Releases that still send onLowMemory also send
+     * TRIM_MEMORY_COMPLETE.
+     */
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        nativeTrimMemory(level, Build.VERSION.SDK_INT);
     }
 
     private volatile String pendingLauncherIcon;

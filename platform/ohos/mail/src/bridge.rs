@@ -533,6 +533,33 @@ pub(super) unsafe extern "C" fn suspend_preview(
     undefined(env)
 }
 
+/// `memoryLevel(level)`: the ability reported an `onMemoryLevel` level.
+pub(super) unsafe extern "C" fn memory_level(
+    env: napi_env,
+    info: ffi::napi_callback_info,
+) -> napi_value {
+    // SAFETY: live NAPI env/info; argv holds one number.
+    unsafe {
+        let mut argc: usize = 1;
+        let mut argv: [napi_value; 1] = [core::ptr::null_mut()];
+        if ffi::napi_get_cb_info(
+            env,
+            info,
+            &mut argc,
+            argv.as_mut_ptr(),
+            core::ptr::null_mut(),
+            core::ptr::null_mut(),
+        ) == ffi::NAPI_OK
+            && argc >= 1
+            && let Some(level) = read_int64(env, argv[0])
+            && let Ok(level) = i32::try_from(level)
+        {
+            flectar_mail::platform::memory_level(level);
+        }
+        undefined(env)
+    }
+}
+
 /// `imeFunction(key)`: the action key of the soft keyboard was pressed.
 pub(super) unsafe extern "C" fn ime_function(
     env: napi_env,

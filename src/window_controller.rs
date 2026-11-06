@@ -17,7 +17,7 @@ mod macos;
 const MINIMIZED_RELEASE_DELAY: Duration = Duration::from_secs(10);
 /// Let Slint destroy the native surface and process pending property changes
 /// that may still own image references before returning memory.
-const TRIM_DELAY: Duration = Duration::from_millis(250);
+pub(super) const TRIM_DELAY: Duration = Duration::from_millis(250);
 /// Coalesces the burst of startup updates applied while the window is hidden.
 const HIDDEN_TRIM_DELAY: Duration = Duration::from_secs(1);
 
@@ -293,38 +293,11 @@ async fn status_notifier_host_registered() -> bool {
     )
 }
 
-/// Return already-free allocator pages to the operating system at an explicit
-/// idle boundary. Working caches are never purged periodically.
+/// Return memory once the window has gone to the tray or stayed minimized.
 fn release_free_memory() {
-    #[cfg(glibc)]
-    // SAFETY: malloc_trim only releases free heap pages; no pointers change.
-    unsafe {
-        libc::malloc_trim(0);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        unsafe extern "C" {
-            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-        }
-        // SAFETY: a null zone asks every malloc zone to release free pages.
-        unsafe {
-            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
-        }
-    }
+    crate::memory::release_free_heap();
     #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::System::{
-            Memory::{GetProcessHeap, HeapCompact, SetProcessWorkingSetSizeEx},
-            Threading::GetCurrentProcess,
-        };
-        // SAFETY: both calls act on this process's own heap and working set.
-        // Trimming moves idle pages to the standby list, which is what Task
-        // Manager reports; pages touched later by sync fault back cheaply.
-        unsafe {
-            HeapCompact(GetProcessHeap(), 0);
-            SetProcessWorkingSetSizeEx(GetCurrentProcess(), usize::MAX, usize::MAX, 0);
-        }
-    }
+    crate::memory::trim_working_set();
 }
 
 pub(super) fn register_window_preference_callbacks(
