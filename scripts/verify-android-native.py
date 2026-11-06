@@ -19,6 +19,7 @@ REQUIRED_EXPORTS = {
         "nativeDocumentsResult",
         "nativeDocumentRequestActive",
         "nativeSuspendPdfPreview",
+        "nativeTrimMemory",
     )),
 }
 
