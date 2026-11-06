@@ -1,5 +1,6 @@
 import { ComboBox, HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { LineEdit, Switch } from "controls.slint";
+import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
 import { SidebarStyle } from "sidebar-row.slint";
 import { KbdShortcut, KeyboardKeys } from "kbd.slint";
@@ -251,10 +252,14 @@ export component SettingsLinkRow inherits Rectangle {
     in property <color> body-text;
     in property <color> muted-text;
     in property <color> hover-background;
+    out property <bool> focus-visible: keyboard.focus-visible;
     callback clicked;
 
     height: 18px + link-title.height + link-description.height;
     border-radius: 7px;
+    forward-focus: keyboard;
+    border-width: keyboard.focus-visible ? 2px : 0px;
+    border-color: root.accent;
     background: link-hit.has-hover ? root.hover-background : transparent;
     accessible-role: button;
     accessible-label: root.text;
@@ -290,8 +295,15 @@ export component SettingsLinkRow inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
     }
+    keyboard := FocusVisibleScope {
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space { root.clicked(); return accept; }
+            reject
+        }
+    }
     link-hit := TouchArea {
-        clicked => { root.clicked(); }
+        clicked => { keyboard.focus(); keyboard.pointer-activated(); root.clicked(); }
         mouse-cursor: pointer;
     }
 }

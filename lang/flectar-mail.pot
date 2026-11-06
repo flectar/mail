@@ -3123,12 +3123,12 @@ msgstr ""
 msgid "Edit profiles…"
 msgstr ""
 
-#: ui/components/settings-components.slint:332
+#: ui/components/settings-components.slint:344
 msgid "or"
 msgstr ""
 
-#: ui/components/settings-components.slint:338
-#: ui/components/settings-components.slint:338
+#: ui/components/settings-components.slint:350
+#: ui/components/settings-components.slint:350
 msgid "{}, {}"
 msgstr ""
 
