@@ -1820,9 +1820,10 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn sync_now(&self, account_id: Option<i64>) -> Result<(), String> {
+    /// Checks these accounts for new mail, or every account with `None`.
+    pub async fn sync_accounts(&self, account_ids: Option<&[i64]>) -> Result<(), String> {
         self.core
-            .sync_now(account_id)
+            .sync_accounts(account_ids)
             .await
             .map_err(|error| error.to_string())
     }

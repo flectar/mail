@@ -3064,15 +3064,32 @@ impl Core {
         Ok(raw)
     }
 
-    pub async fn sync_now(&self, account_id: Option<i64>) -> Result<()> {
+    /// Checks these accounts for new mail now, or every account with `None`,
+    /// and waits until each has finished its Inbox pass. The accounts sync in
+    /// parallel. Accounts without a running worker, such as one still waiting
+    /// for its sign-in, are skipped; it is an error only when none of the
+    /// requested accounts has one.
+    pub async fn sync_accounts(&self, account_ids: Option<&[i64]>) -> Result<()> {
+        // Diagnostics name the account when there is exactly one.
+        let account_id = match account_ids {
+            Some([id]) => Some(*id),
+            _ => None,
+        };
         events::sync_diagnostic("refresh", account_id, "requested");
         let receivers = {
             let handles = self.handles.read().await;
-            match account_id {
-                Some(id) => handles
-                    .get(&id)
-                    .map(|handle| vec![handle.sync_now()])
-                    .ok_or_else(|| CoreError::NotFound(format!("account {id}")))?,
+            match account_ids {
+                Some(ids) => {
+                    let receivers = ids
+                        .iter()
+                        .filter_map(|id| handles.get(id))
+                        .map(AccountHandle::sync_now)
+                        .collect::<Vec<_>>();
+                    if let (true, Some(id)) = (receivers.is_empty(), ids.first()) {
+                        return Err(CoreError::NotFound(format!("account {id}")));
+                    }
+                    receivers
+                }
                 None => handles.values().map(AccountHandle::sync_now).collect(),
             }
         };
@@ -9713,6 +9730,60 @@ fn apply_thread_action(
     repo::threads::recompute(&tx, thread_id)?;
     tx.commit()?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod sync_accounts_tests {
+    use super::*;
+    use crate::sync::engine::SyncCmd;
+
+    /// Answers each check like a worker that found nothing new, and records
+    /// which accounts were asked.
+    async fn worker(core: &Core, account_id: i64, asked: &Arc<std::sync::Mutex<Vec<i64>>>) {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let asked = Arc::clone(asked);
+        tokio::spawn(async move {
+            while let Some(command) = rx.recv().await {
+                if let SyncCmd::SyncNow { complete } = command {
+                    asked.lock().unwrap().push(account_id);
+                    if let Some(complete) = complete {
+                        let _ = complete.send(Ok(()));
+                    }
+                }
+            }
+        });
+        core.handles
+            .write()
+            .await
+            .insert(account_id, AccountHandle::for_test(account_id, tx));
+    }
+
+    #[tokio::test]
+    async fn checks_the_requested_accounts_that_have_workers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let asked = Arc::new(std::sync::Mutex::new(Vec::new()));
+        worker(&core, 1, &asked).await;
+        worker(&core, 2, &asked).await;
+        let take = || {
+            let mut asked = std::mem::take(&mut *asked.lock().unwrap());
+            asked.sort_unstable();
+            asked
+        };
+
+        core.sync_accounts(Some(&[2])).await.unwrap();
+        assert_eq!(take(), [2]);
+        core.sync_accounts(None).await.unwrap();
+        assert_eq!(take(), [1, 2]);
+        // An account still waiting for its sign-in has no worker to ask.
+        core.sync_accounts(Some(&[1, 9])).await.unwrap();
+        assert_eq!(take(), [1]);
+        assert!(matches!(
+            core.sync_accounts(Some(&[9])).await,
+            Err(CoreError::NotFound(_))
+        ));
+        assert!(take().is_empty());
+    }
 }
 
 #[cfg(test)]

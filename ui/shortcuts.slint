@@ -12,6 +12,12 @@ export global Shortcuts {
     // Mac keyboards label Backspace "delete", and Apple Mail trashes with it.
     out property <keys> trash: KeyboardKeys.apple ? @keys(Backspace) : @keys(Delete);
 
+    // Thunderbird's keys: F5 checks the accounts in view, Shift+F5 every
+    // account. Apple Mail checks every account with Shift-Command-N.
+    out property <keys> check-mail: @keys(F5);
+    out property <keys> check-all-mail: @keys(Shift + F5);
+    out property <keys> check-all-mail-alternate: @keys(Control + Shift + N);
+
     out property <keys> previous-message: @keys(UpArrow);
     out property <keys> next-message: @keys(DownArrow);
     out property <keys> open-message: @keys(Return);

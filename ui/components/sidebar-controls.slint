@@ -50,6 +50,57 @@ component SidebarCountBadge inherits Rectangle {
     }
 }
 
+// A row's pointer area, which sits inside the row's ContextMenuArea so taps
+// reach it first: on Android, Slint holds every press on a menu's own area to
+// wait for a long press, which swallowed taps on the rows above it. A
+// right-click opens the menu, and so does holding a finger still for half a
+// second, as on Android and iOS.
+component SidebarRowHit inherits TouchArea {
+    in property <bool> menu-enabled;
+    callback activated();
+    callback open-menu(Point);
+    private property <bool> holding: false;
+    private property <bool> held: false;
+    private property <length> hold-x;
+    private property <length> hold-y;
+
+    pointer-event(event) => {
+        if event.kind == PointerEventKind.down {
+            self.held = false;
+            if event.button == PointerEventButton.right && root.menu-enabled {
+                root.open-menu({ x: self.mouse-x, y: self.mouse-y });
+            } else if event.button == PointerEventButton.left && event.touch-finger-id != 0 && root.menu-enabled {
+                self.hold-x = self.mouse-x;
+                self.hold-y = self.mouse-y;
+                self.holding = true;
+            }
+        } else if event.kind == PointerEventKind.move {
+            if self.holding && (abs(self.mouse-x - self.hold-x) > 8px || abs(self.mouse-y - self.hold-y) > 8px) {
+                self.holding = false;
+            }
+        } else {
+            self.holding = false;
+        }
+    }
+    clicked => {
+        // The finger that opened the menu lifts here; it was not a tap.
+        if !self.held {
+            root.activated();
+        }
+        self.held = false;
+    }
+
+    Timer {
+        interval: 500ms;
+        running: root.holding;
+        triggered => {
+            root.holding = false;
+            root.held = true;
+            root.open-menu({ x: root.hold-x, y: root.hold-y });
+        }
+    }
+}
+
 // A folder row is shared by unified and account sections so indentation,
 // selection, hover, and counts remain consistent throughout the tree.
 export component SidebarItem inherits SidebarRowSurface {
@@ -150,14 +201,56 @@ export component SidebarItem inherits SidebarRowSurface {
         muted-color: root.muted-color;
     }
 
-    row-hit := TouchArea {
-        enabled: root.interactive;
-        accessible-role: button;
-        accessible-label: root.accessible-name;
-        accessible-checked: root.selected;
-        accessible-action-default => { root.clicked(root.scope); }
-        clicked => { root.clicked(root.scope); }
-        mouse-cursor: pointer;
+    // Folder and label actions. Rows without any keep the area disabled.
+    row-menu := ContextMenuArea {
+        enabled: root.interactive && (root.folder-menu-enabled || root.can-empty-trash || root.label-manageable);
+        width: parent.width;
+        height: parent.height;
+        Menu {
+            if root.folder-menu-enabled: MenuItem {
+                title: @tr("New subfolder");
+                enabled: root.can-create-child;
+                activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
+            }
+            if root.folder-menu-enabled: MenuItem {
+                title: @tr("Rename folder");
+                enabled: root.can-rename;
+                activated => { root.rename-folder(root.folder-id, root.label); }
+            }
+            if root.folder-menu-enabled: MenuItem {
+                title: @tr("Delete folder");
+                enabled: root.can-delete;
+                activated => { root.delete-folder(root.folder-id, root.label); }
+            }
+            if root.can-empty-trash: MenuItem {
+                title: @tr("Empty Trash…");
+                activated => { root.empty-trash(root.account-id); }
+            }
+            if root.label-manageable && root.label-can-create-child: MenuItem {
+                title: @tr("New nested label");
+                activated => { root.new-child-label(root.account-id, root.label-id, root.label-path, root.label-account-name); }
+            }
+            if root.label-manageable: MenuItem {
+                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
+                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
+            }
+            if root.label-manageable: MenuItem {
+                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
+                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
+            }
+        }
+
+        row-hit := SidebarRowHit {
+            enabled: root.interactive;
+            menu-enabled: row-menu.enabled;
+            accessible-role: button;
+            accessible-label: root.accessible-name;
+            accessible-checked: root.selected;
+            accessible-action-default => { root.clicked(root.scope); }
+            activated => { root.clicked(root.scope); }
+            open-menu(position) => { row-menu.show(position); }
+            mouse-cursor: pointer;
+        }
     }
 
     if root.has-children: TouchArea {
@@ -176,83 +269,6 @@ export component SidebarItem inherits SidebarRowSurface {
         }
         clicked => { root.toggled(root.folder-id, !root.expanded); }
         mouse-cursor: pointer;
-    }
-
-    if root.interactive && root.folder-menu-enabled: ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: @tr("New subfolder");
-                enabled: root.can-create-child;
-                activated => { root.new-subfolder(root.account-id, root.folder-id, root.label); }
-            }
-
-            MenuItem {
-                title: @tr("Rename folder");
-                enabled: root.can-rename;
-                activated => { root.rename-folder(root.folder-id, root.label); }
-            }
-
-            MenuItem {
-                title: @tr("Delete folder");
-                enabled: root.can-delete;
-                activated => { root.delete-folder(root.folder-id, root.label); }
-            }
-        }
-    }
-
-    if root.interactive && root.can-empty-trash: ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: @tr("Empty Trash…");
-                activated => { root.empty-trash(root.account-id); }
-            }
-        }
-    }
-
-    if root.interactive && root.label-manageable && root.label-can-create-child: ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: @tr("New nested label");
-                enabled: root.label-can-create-child;
-                activated => { root.new-child-label(root.account-id, root.label-id, root.label-path, root.label-account-name); }
-            }
-
-            MenuItem {
-                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
-                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
-            }
-
-            MenuItem {
-                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
-                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
-            }
-        }
-    }
-
-    if root.interactive && root.label-manageable && !root.label-can-create-child: ContextMenuArea {
-        x: 22px;
-        width: parent.width - 22px;
-        height: parent.height;
-        Menu {
-            MenuItem {
-                title: root.label-is-global ? @tr("Rename global label") : @tr("Rename label in {}", root.label-account-name);
-                activated => { root.rename-label(root.label-id, root.label-path, root.editable-color, root.label-account-name, root.label-is-global); }
-            }
-
-            MenuItem {
-                title: root.label-is-global ? @tr("Delete global label") : @tr("Delete label from {}", root.label-account-name);
-                activated => { root.delete-label(root.label-id, root.label-path, root.label-account-name, root.label-is-global, root.has-children); }
-            }
-        }
     }
 
     mail-drop-target := DropArea {
@@ -299,11 +315,16 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     in property <int> label-font-weight: SidebarStyle.selected-weight;
     in property <length> left-padding: 4px;
     in property <bool> folder-row-style: false;
+    // An account's heading offers that account's actions on right-click.
+    in property <bool> account-menu: false;
+    in property <bool> can-check-mail: true;
     // Headers and children share the same icon and text columns. The leading
     // gutter belongs to disclosure controls, not to an extra icon indent.
     private property <length> icon-left: root.left-padding + SidebarStyle.icon-left - 4px;
     private property <length> label-left: root.icon-left + SidebarStyle.label-offset;
     callback toggled(bool);
+    callback check-mail();
+    callback account-settings();
 
     height: root.folder-row-style ? 28px : root.detail == "" ? 32px : 7px + max(20px, header-label.preferred-height) + header-detail.height;
     idle-background: root.sidebar-background;
@@ -368,17 +389,37 @@ export component SidebarSectionHeader inherits SidebarRowSurface {
     }
 
 
-    header-hit := TouchArea {
-        enabled: root.interactive;
-        accessible-role: button;
-        accessible-label: root.label;
-        accessible-expanded: root.open;
-        accessible-action-default => {
-            root.toggled(!root.open);
+    heading-menu := ContextMenuArea {
+        enabled: root.interactive && root.account-menu;
+        width: parent.width;
+        height: parent.height;
+        Menu {
+            MenuItem {
+                title: @tr("Check for new mail");
+                enabled: root.can-check-mail;
+                activated => { root.check-mail(); }
+            }
+
+            MenuItem {
+                title: @tr("Account settings");
+                activated => { root.account-settings(); }
+            }
         }
-        clicked => {
-            root.toggled(!root.open);
+
+        header-hit := SidebarRowHit {
+            enabled: root.interactive;
+            menu-enabled: heading-menu.enabled;
+            accessible-role: button;
+            accessible-label: root.label;
+            accessible-expanded: root.open;
+            accessible-action-default => {
+                root.toggled(!root.open);
+            }
+            activated => {
+                root.toggled(!root.open);
+            }
+            open-menu(position) => { heading-menu.show(position); }
+            mouse-cursor: pointer;
         }
-        mouse-cursor: pointer;
     }
 }
