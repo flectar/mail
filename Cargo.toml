@@ -148,7 +148,10 @@ libc = "0.2"
 
 # Cargo cannot evaluate build.rs aliases; this is `linux_desktop`.
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
-ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+# Portals use zbus's async-io backend, as Slint's tray already does. With
+# zbus 5's `tokio` feature on, the tray connection's driver thread starts
+# a Tokio runtime with one idle worker per CPU.
+ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
 slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
@@ -190,7 +193,8 @@ objc2-security = { version = "0.3", default-features = false, features = ["std",
 # This is `desktop`; keep it in step with the `mobile` alias in build.rs.
 [target.'cfg(not(any(target_os = "android", target_os = "ios", target_env = "ohos")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
-rfd = { version = "0.16", default-features = false, features = ["tokio", "xdg-portal"] }
+# The same async-io backend for the file chooser portal; see ashpd above.
+rfd = { version = "0.16", default-features = false, features = ["async-std", "xdg-portal"] }
 
 [package.metadata.appimage]
 icon = "resources/app-icon/flectar-mail-masked-512.png"
