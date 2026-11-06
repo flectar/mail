@@ -56,15 +56,15 @@ Flectar Mail ist eine schlanke, native Anwendung für E-Mails, Kalender und Kont
 
 | Im Leerlauf, gleiches Postfach | Privater Speicher | Einschließlich Code und Bibliotheken (PSS) | E-Mail-Darstellung |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **~18 MB** | **~85 MB** | Blitz |
-| Geary 46 | ~130 MB | ~330 MB | WebKitGTK |
-| Evolution 3.56 | ~200 MB | ~410 MB | WebKitGTK |
-| Thunderbird 159 | ~260 MB | ~450 MB | Gecko |
-| Betterbird 153 | ~260 MB | ~440 MB | Gecko |
-| Mailspring 1.26 | ~330 MB | ~580 MB | Chromium |
-| Aerion 0.3.6 | ~450 MB | ~700 MB | WebKitGTK |
+| **Flectar Mail** | **17,2–17,4 MiB** | **79,1–80,0 MiB** | Blitz |
+| Geary 46 | 126,1–126,2 MiB | 309,6–311,4 MiB | WebKitGTK |
+| Evolution 3.56 | 191,0–192,2 MiB | 395,0–395,9 MiB | WebKitGTK |
+| Thunderbird 159 | 244,1–248,1 MiB | 424,4–427,1 MiB | Gecko |
+| Betterbird 153 | 243,9–247,8 MiB | 411,9–419,7 MiB | Gecko |
+| Mailspring 1.26 | 311,4–314,9 MiB | 551,1–551,7 MiB | Chromium |
+| Aerion 0.3.6 | 421,9–437,3 MiB | 660,4–678,0 MiB | WebKitGTK |
 
-Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Posteingang und angezeigtem HTML-Newsletter, 60 Sekunden nach dem Start und mit dem voreingestellten CPU-Renderer. Mitgezählt sind alle Prozesse, die eine App startet. Privater Speicher entspricht dem Wert, den der Windows-Task-Manager als **Arbeitsspeicher** anzeigt. Unter Windows mit 7 echten Konten und etwa 69.000 ungelesenen Nachrichten zeigt der Task-Manager etwa 40 MB bei geöffnetem Fenster und etwa 4 MB, sobald es in den Infobereich geschlossen ist. Erfahre, [wie wir messen und wie du selbst nachmessen kannst](../performance.md).
+Gemessen unter Linux mit einem IMAP-Konto (860 Nachrichten), geöffnetem Posteingang und angezeigtem HTML-Newsletter, 60 Sekunden nach dem Start und mit dem voreingestellten CPU-Renderer. Jeder Wertebereich umfasst zwei Messungen, und mitgezählt sind alle Prozesse, die eine App startet. Privater Speicher entspricht dem Wert, den der Windows-Task-Manager als **Arbeitsspeicher** anzeigt. Unter Windows mit 7 echten Konten und etwa 69.000 ungelesenen Nachrichten zeigte der Task-Manager 37,8 MiB bei geöffnetem Fenster und 4,2 MiB, sobald es in den Infobereich geschlossen war. Erfahre, [wie wir messen und wie du selbst nachmessen kannst](../performance.md).
 
 ### Im Vergleich
 

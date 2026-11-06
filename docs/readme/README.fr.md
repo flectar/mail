@@ -56,15 +56,15 @@ Flectar Mail est une application native et légère pour vos e-mails, calendrier
 
 | Au repos, même boîte aux lettres | Mémoire privée | Y compris le code et les bibliothèques (PSS) | Rendu des e-mails |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **~18 Mo** | **~85 Mo** | Blitz |
-| Geary 46 | ~130 Mo | ~330 Mo | WebKitGTK |
-| Evolution 3.56 | ~200 Mo | ~410 Mo | WebKitGTK |
-| Thunderbird 159 | ~260 Mo | ~450 Mo | Gecko |
-| Betterbird 153 | ~260 Mo | ~440 Mo | Gecko |
-| Mailspring 1.26 | ~330 Mo | ~580 Mo | Chromium |
-| Aerion 0.3.6 | ~450 Mo | ~700 Mo | WebKitGTK |
+| **Flectar Mail** | **17,2–17,4 Mio** | **79,1–80,0 Mio** | Blitz |
+| Geary 46 | 126,1–126,2 Mio | 309,6–311,4 Mio | WebKitGTK |
+| Evolution 3.56 | 191,0–192,2 Mio | 395,0–395,9 Mio | WebKitGTK |
+| Thunderbird 159 | 244,1–248,1 Mio | 424,4–427,1 Mio | Gecko |
+| Betterbird 153 | 243,9–247,8 Mio | 411,9–419,7 Mio | Gecko |
+| Mailspring 1.26 | 311,4–314,9 Mio | 551,1–551,7 Mio | Chromium |
+| Aerion 0.3.6 | 421,9–437,3 Mio | 660,4–678,0 Mio | WebKitGTK |
 
-Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. Tous les processus lancés par chaque application sont comptés. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Sous Windows, avec 7 comptes réels et environ 69 000 messages non lus, le Gestionnaire des tâches affiche environ 40 Mo avec la fenêtre ouverte et environ 4 Mo une fois celle-ci fermée dans la zone de notification. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
+Mesures effectuées sur Linux avec un compte IMAP (860 messages), la boîte de réception ouverte et une newsletter HTML affichée, 60 secondes après le lancement, avec le moteur de rendu CPU par défaut. Chaque fourchette couvre deux mesures, et tous les processus lancés par chaque application sont comptés. La mémoire privée correspond à la colonne **Mémoire** du Gestionnaire des tâches de Windows. Sous Windows, avec 7 comptes réels et environ 69 000 messages non lus, le Gestionnaire des tâches affichait 37,8 Mio avec la fenêtre ouverte et 4,2 Mio une fois celle-ci fermée dans la zone de notification. Découvrez [comment nous mesurons et comment vérifier ces chiffres par vous-même](../performance.md).
 
 ### Comparatif
 

@@ -58,22 +58,22 @@ una fracción de la memoria de un cliente de correo típico basado en tecnologí
 
 | En reposo, mismo buzón | Memoria privada | Con código y bibliotecas (PSS) | Renderiza el correo con |
 | --- | ---: | ---: | --- |
-| **Flectar Mail** | **~18 MB** | **~85 MB** | Blitz |
-| Geary 46 | ~130 MB | ~330 MB | WebKitGTK |
-| Evolution 3.56 | ~200 MB | ~410 MB | WebKitGTK |
-| Thunderbird 159 | ~260 MB | ~450 MB | Gecko |
-| Betterbird 153 | ~260 MB | ~440 MB | Gecko |
-| Mailspring 1.26 | ~330 MB | ~580 MB | Chromium |
-| Aerion 0.3.6 | ~450 MB | ~700 MB | WebKitGTK |
+| **Flectar Mail** | **17,2–17,4 MiB** | **79,1–80,0 MiB** | Blitz |
+| Geary 46 | 126,1–126,2 MiB | 309,6–311,4 MiB | WebKitGTK |
+| Evolution 3.56 | 191,0–192,2 MiB | 395,0–395,9 MiB | WebKitGTK |
+| Thunderbird 159 | 244,1–248,1 MiB | 424,4–427,1 MiB | Gecko |
+| Betterbird 153 | 243,9–247,8 MiB | 411,9–419,7 MiB | Gecko |
+| Mailspring 1.26 | 311,4–314,9 MiB | 551,1–551,7 MiB | Chromium |
+| Aerion 0.3.6 | 421,9–437,3 MiB | 660,4–678,0 MiB | WebKitGTK |
 
 Mediciones realizadas en Linux con una cuenta IMAP (860 mensajes), la bandeja de
 entrada abierta y un boletín HTML en pantalla, 60 segundos después de abrir la
-aplicación y con el renderizador por CPU, que es el predeterminado. Se cuentan
-todos los procesos que inicia cada aplicación. La memoria privada es lo que el
-Administrador de tareas de Windows muestra como **Memoria**. En Windows, con 7
-cuentas reales y unos 69.000 mensajes sin leer, el Administrador de tareas
-muestra unos 40 MB con la ventana abierta y unos 4 MB al cerrarla a la bandeja
-del sistema. Consulta [cómo lo medimos y cómo comprobarlo por tu cuenta](../performance.md).
+aplicación y con el renderizador por CPU, que es el predeterminado. Cada rango
+abarca dos mediciones y se cuentan todos los procesos que inicia cada
+aplicación. La memoria privada es lo que el Administrador de tareas de Windows
+muestra como **Memoria**. En Windows, con 7 cuentas reales y unos 69.000
+mensajes sin leer, el Administrador de tareas mostró 37,8 MiB con la ventana
+abierta y 4,2 MiB al cerrarla a la bandeja del sistema. Consulta [cómo lo medimos y cómo comprobarlo por tu cuenta](../performance.md).
 
 ### Comparación con otros clientes
 

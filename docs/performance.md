@@ -96,11 +96,11 @@ Windows builds now also use the segment heap
 memory when they trim ([#191](https://github.com/flectar/mail/pull/191));
 neither has been measured on Windows yet.
 
-The README rounds these to megabytes (1 MiB = 1.049 MB). Its table quotes about
-18 MB of private memory and about 85 MB PSS for Flectar Mail, and the other
-clients to the nearest 10 MB. Its headline rounds Flectar Mail up to about 20 MB,
-which is also what a desktop with a full font set measures (19 MB). For the
-large Windows mailbox it quotes about 40 MB and 4 MB.
+The README's Performance table quotes these figures as measured. Its headline
+and summary round them to about 20 MB of private memory and about 85 MB with
+code and libraries (1 MiB = 1.049 MB): the runs above measured 18.0–18.2 MB
+and 82.9–83.9 MB, and a desktop with a full font set measures 19.2–19.4 MB of
+private memory.
 
 ## What the numbers mean
 
