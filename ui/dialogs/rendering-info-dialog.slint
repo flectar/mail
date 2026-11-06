@@ -7,6 +7,10 @@ import { TypeScale } from "../typography.slint";
 export component RenderingInfoDialog inherits Rectangle {
     in-out property <bool> open: false;
     in property <bool> compact: false;
+    // Mail view keeps a reading pane, and so this dialog, for each layout.
+    // Only the one on screen takes focus, since the window drops keys aimed
+    // at a hidden element.
+    in property <bool> shown: true;
     in property <color> accent;
     in property <color> accent-soft;
     in property <color> border;
@@ -38,10 +42,18 @@ export component RenderingInfoDialog inherits Rectangle {
         }
     }
 
+    function take-focus() {
+        if root.open && root.shown {
+            dialog-focus.focus();
+        }
+    }
+
+    changed shown => { root.take-focus(); }
+
     changed open => {
         if root.open {
             root.selected-action = 2;
-            dialog-focus.focus();
+            root.take-focus();
         }
     }
 
