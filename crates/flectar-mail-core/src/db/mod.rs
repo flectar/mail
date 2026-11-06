@@ -25,7 +25,10 @@ type Job = Box<dyn FnOnce(Result<&mut Connection>) + Send + 'static>;
 
 enum Command {
     Run(Job),
+    /// Close the connection; the next job opens it again.
     Release(oneshot::Sender<()>),
+    /// Free the page cache but keep the connection open.
+    ReleaseMemory(oneshot::Sender<()>),
     Inspect(oneshot::Sender<Result<Option<SqliteCacheUsage>>>),
 }
 
@@ -107,6 +110,15 @@ fn spawn_conn_thread(
                         // Serialized behind earlier work: never close a connection
                         // while a transaction or result is still using it.
                         connection.take();
+                        let _ = done.send(());
+                    }
+                    Command::ReleaseMemory(done) => {
+                        // Between jobs no statement holds a page, so SQLite can
+                        // free the whole cache. It never fails on an open
+                        // connection, and later reads fetch pages from the file.
+                        if let Some(conn) = connection.as_ref() {
+                            let _ = conn.release_memory();
+                        }
                         let _ = done.send(());
                     }
                     Command::Inspect(reply) => {
@@ -357,27 +369,32 @@ impl Db {
         }
     }
 
-    /// Release resident connections without opening an unused product store.
-    /// A subsequent job reopens its connection with the normal profile.
-    pub async fn release_idle_connections(&self) -> Result<()> {
+    /// The connection threads of an opened store: the writer, then the reader
+    /// when it has a thread of its own. A deferred store that was never
+    /// opened has none, so nothing here opens it.
+    fn connection_threads(&self) -> Vec<(&'static str, &mpsc::Sender<Command>)> {
         let db = match &self.lazy {
             Some(store) => match store.opened.get() {
                 Some(db) => db,
-                None => return Ok(()),
+                None => return Vec::new(),
             },
             None => self,
         };
         let writer = db.write_tx.as_ref().unwrap();
         let reader = db.read_tx.as_ref().unwrap();
-        for tx in [
-            Some(writer),
-            (!reader.same_channel(writer)).then_some(reader),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        let mut threads = vec![("writer", writer)];
+        if !reader.same_channel(writer) {
+            threads.push(("reader", reader));
+        }
+        threads
+    }
+
+    /// Run a lifecycle command on every connection thread, in queue order
+    /// behind the jobs already submitted, and wait until each has run it.
+    async fn on_each_connection(&self, command: fn(oneshot::Sender<()>) -> Command) -> Result<()> {
+        for (_, tx) in self.connection_threads() {
             let (done, wait) = oneshot::channel();
-            tx.send(Command::Release(done))
+            tx.send(command(done))
                 .await
                 .map_err(|_| CoreError::Other("db thread gone".into()))?;
             wait.await
@@ -386,27 +403,26 @@ impl Db {
         Ok(())
     }
 
+    /// Release resident connections without opening an unused product store.
+    /// A subsequent job reopens its connection with the normal profile.
+    pub async fn release_idle_connections(&self) -> Result<()> {
+        self.on_each_connection(Command::Release).await
+    }
+
+    /// Free the page cache of each live connection once a burst of work is
+    /// over. Connections stay open and later queries read the pages they need
+    /// back from the file. A connection closed by `release_idle_connections`,
+    /// or a store that was never opened, stays closed.
+    pub async fn release_cache_memory(&self) -> Result<()> {
+        self.on_each_connection(Command::ReleaseMemory).await
+    }
+
     /// Inspect currently live connections without opening a deferred store or
     /// reopening a connection released by `release_idle_connections`.
     /// SQLite reports allocated page-cache bytes, not mapped resident pages.
     pub async fn cache_usage(&self) -> Result<Vec<DbConnectionCacheUsage>> {
-        let db = match &self.lazy {
-            Some(store) => match store.opened.get() {
-                Some(db) => db,
-                None => return Ok(Vec::new()),
-            },
-            None => self,
-        };
-        let writer = db.write_tx.as_ref().unwrap();
-        let reader = db.read_tx.as_ref().unwrap();
         let mut usage = Vec::with_capacity(2);
-        for (role, tx) in [
-            ("writer", Some(writer)),
-            ("reader", (!reader.same_channel(writer)).then_some(reader)),
-        ]
-        .into_iter()
-        .filter_map(|(role, tx)| tx.map(|tx| (role, tx)))
-        {
+        for (role, tx) in self.connection_threads() {
             let (reply, wait) = oneshot::channel();
             tx.send(Command::Inspect(reply))
                 .await
@@ -660,6 +676,59 @@ mod connection_profile_tests {
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].usage.cache_limit_kib, 2_048);
         assert_eq!(usage[0].usage.mmap_limit_bytes, 0);
+    }
+
+    fn scan_cache_probe(conn: &mut rusqlite::Connection) -> crate::error::Result<i64> {
+        Ok(conn.query_row(
+            "SELECT sum(length(hex(body))) FROM cache_probe",
+            [],
+            |row| row.get(0),
+        )?)
+    }
+
+    #[tokio::test]
+    async fn releasing_cache_memory_empties_caches_and_keeps_connections_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let mail = Db::open(&temp.path().join("mail.db")).unwrap();
+        // About 1.5 MiB of rows, one per page, warms both caches.
+        mail.write(|conn| {
+            conn.execute_batch(
+                "CREATE TABLE cache_probe(body BLOB);
+                 WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 512)
+                 INSERT INTO cache_probe SELECT randomblob(3000) FROM n;",
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        mail.read(scan_cache_probe).await.unwrap();
+        let warm = mail.cache_usage().await.unwrap();
+        assert_eq!(warm.len(), 2);
+        assert!(
+            warm.iter()
+                .all(|connection| connection.usage.cache_bytes > 1 << 20),
+            "{warm:?}"
+        );
+
+        mail.release_cache_memory().await.unwrap();
+        let released = mail.cache_usage().await.unwrap();
+        assert_eq!(released.len(), 2, "both connections stay open");
+        assert!(
+            released
+                .iter()
+                .all(|connection| connection.usage.cache_bytes < 64 << 10),
+            "{released:?}"
+        );
+        assert_eq!(mail.read(scan_cache_probe).await.unwrap(), 512 * 6_000);
+
+        // Neither a closed connection nor an unopened store is opened again.
+        mail.release_idle_connections().await.unwrap();
+        mail.release_cache_memory().await.unwrap();
+        assert!(mail.cache_usage().await.unwrap().is_empty());
+        let files = Db::deferred_files(temp.path().join("files.db"));
+        files.release_cache_memory().await.unwrap();
+        assert!(!files.is_open());
+        assert!(!temp.path().join("files.db").exists());
     }
 
     #[tokio::test]

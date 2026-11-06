@@ -2039,6 +2039,14 @@ impl Core {
         self.ui_ready.notify_one();
     }
 
+    /// Free the SQLite page caches of every open store once a burst of work
+    /// (a sync, an import) is over. Stores that were never opened stay closed.
+    pub async fn release_cache_memory(&self) -> Result<()> {
+        self.db.release_cache_memory().await?;
+        self.calendar_db.release_cache_memory().await?;
+        self.files_db.release_cache_memory().await
+    }
+
     /// Finish the rollback for an account whose process stopped after
     /// reserving its database id but before committing credentials. These rows
     /// are excluded from account lists and actor startup.
