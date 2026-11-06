@@ -36,7 +36,7 @@ tracing.workspace = true
 chrono.workspace = true
 
 # email protocols
-async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
 jmap-client = { version = "0.4.2", default-features = false, features = ["async", "ring"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1", "hostname"] }
 # full_encoding pulls in encoding_rs so non-UTF-8 header/body charsets
