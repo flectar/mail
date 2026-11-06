@@ -27,6 +27,10 @@ mod ohos;
 #[cfg(target_env = "ohos")]
 pub use ohos::*;
 
+/// Android and OpenHarmony memory levels, whose mapping every platform tests.
+#[cfg(any(test, target_os = "android", target_env = "ohos"))]
+mod memory_levels;
+
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
 /// and the composer: the platform font directory, and the fallback policy the
 /// host applies to its own UI, so mail content falls back the same way.
