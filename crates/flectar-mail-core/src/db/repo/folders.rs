@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::models::{FolderInfo, MailProtocol, now_ms};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, named_params, params};
 use std::collections::{HashMap, HashSet};
 
 /// Separates the levels of folders that exist only on this device: those
@@ -529,7 +529,7 @@ pub fn mark_missing_on_server(
         conn.execute(
             "UPDATE folders SET missing_on_server = 1, uidvalidity = NULL, uidnext = NULL,
                     highestmodseq = NULL, last_seen_uid = 0, backfill_cursor = NULL,
-                    backfill_done = 0
+                    backfill_done = 0, server_only_unseen = NULL
              WHERE id = ?1",
             params![folder_id],
         )?;
@@ -556,12 +556,22 @@ pub fn lower_last_seen_uid(conn: &Connection, id: i64, uid: i64) -> Result<()> {
     Ok(())
 }
 
-pub fn set_backfill(conn: &Connection, id: i64, cursor: Option<i64>, done: bool) -> Result<()> {
-    conn.execute(
-        "UPDATE folders SET backfill_cursor = ?2, backfill_done = ?3 WHERE id = ?1",
-        params![id, cursor, done as i64],
-    )?;
-    Ok(())
+/// Records how far the folder's history has downloaded. Once all of it has,
+/// the server's last unread count tells what is only on the server; returns
+/// whether that changed.
+pub fn set_backfill(conn: &Connection, id: i64, cursor: Option<i64>, done: bool) -> Result<bool> {
+    changes_server_only(conn, id, || {
+        conn.execute(
+            &format!(
+                "UPDATE folders SET backfill_cursor = :cursor, backfill_done = :done,
+                   server_only_unseen = CASE WHEN backfill_done AND :done THEN server_only_unseen
+                     ELSE {} END
+                 WHERE id = :id",
+                server_only_unseen_sql("server_unseen", ":done")
+            ),
+            named_params! { ":id": id, ":cursor": cursor, ":done": done },
+        )
+    })
 }
 
 /// Re-open historical work after an account's download window changes. Keep
@@ -572,6 +582,16 @@ pub fn reopen_backfill_for_account(conn: &Connection, account_id: i64) -> Result
         params![account_id],
     )?;
     Ok(())
+}
+
+/// Forgets what an account's folders had only on the server, as a new mail
+/// history makes it count other mail; returns whether any had a count.
+pub fn forget_server_only_unseen(conn: &Connection, account_id: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE folders SET server_only_unseen = NULL
+         WHERE account_id = ?1 AND server_only_unseen IS NOT NULL",
+        params![account_id],
+    )? > 0)
 }
 
 /// UIDVALIDITY changed: drop all UID mappings for the folder. Its mail waits
@@ -590,11 +610,169 @@ pub fn reset_uid_mappings(conn: &Connection, id: i64) -> Result<()> {
     )?;
     conn.execute(
         "UPDATE folders SET last_seen_uid = 0, uidnext = NULL, highestmodseq = NULL,
-                            backfill_cursor = NULL, backfill_done = 0
+                            backfill_cursor = NULL, backfill_done = 0,
+                            server_messages = NULL, server_unseen = NULL,
+                            server_only_unseen = NULL
          WHERE id = ?1",
         params![id],
     )?;
     Ok(())
+}
+
+/// What an IMAP server last reported for a folder, as STATUS reports it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ServerStatus {
+    pub uidvalidity: Option<i64>,
+    pub uidnext: Option<i64>,
+    pub messages: Option<i64>,
+    pub unseen: Option<i64>,
+}
+
+/// The last reported status of each of an account's folders, by folder id.
+pub fn server_statuses(conn: &Connection, account_id: i64) -> Result<HashMap<i64, ServerStatus>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, uidvalidity, uidnext, server_messages, server_unseen
+         FROM folders WHERE account_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![account_id], |row| {
+        Ok((
+            row.get(0)?,
+            ServerStatus {
+                uidvalidity: row.get(1)?,
+                uidnext: row.get(2)?,
+                messages: row.get(3)?,
+                unseen: row.get(4)?,
+            },
+        ))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Records the counts the server reported for a folder once a sync has
+/// caught up with them, and how many of its unread messages are kept only
+/// there; returns whether that changed. UIDNEXT and UIDVALIDITY come from
+/// the folder's SELECT, which `set_uid_state` records.
+pub fn set_server_counts(
+    conn: &Connection,
+    id: i64,
+    messages: Option<i64>,
+    unseen: Option<i64>,
+) -> Result<bool> {
+    changes_server_only(conn, id, || {
+        conn.execute(
+            &format!(
+                "UPDATE folders SET server_messages = :messages, server_unseen = :unseen,
+                   server_only_unseen = {}
+                 WHERE id = :id",
+                server_only_unseen_sql(":unseen", "backfill_done")
+            ),
+            named_params! { ":id": id, ":messages": messages, ":unseen": unseen },
+        )
+    })
+}
+
+/// Records how many unread messages a JMAP mailbox or the Gmail Inbox holds
+/// on the server, read once the account's sync has caught up with all of
+/// its mail history; returns whether what is only there changed.
+pub fn set_server_unseen(conn: &Connection, id: i64, unseen: i64) -> Result<bool> {
+    changes_server_only(conn, id, || {
+        conn.execute(
+            &format!(
+                "UPDATE folders SET server_unseen = :unseen, server_only_unseen = {}
+                 WHERE id = :id",
+                server_only_unseen_sql(":unseen", "1")
+            ),
+            named_params! { ":id": id, ":unseen": unseen },
+        )
+    })
+}
+
+/// Runs `update` on folder `id` and tells whether it changed how many of
+/// the folder's unread messages are only on the server.
+fn changes_server_only(
+    conn: &Connection,
+    id: i64,
+    update: impl FnOnce() -> rusqlite::Result<usize>,
+) -> Result<bool> {
+    let read = || {
+        conn.query_row(
+            "SELECT server_only_unseen FROM folders WHERE id = ?1",
+            params![id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .map(Option::flatten)
+    };
+    let before = read()?;
+    update()?;
+    Ok(read()? != before)
+}
+
+/// The folder's unread messages that are only on the server: the server's
+/// unread count `unseen` less those kept here, the folder's own and those
+/// also filed in it. Unknown until `history_complete`, as mail on its way
+/// here would count. While an action that changes counts is on its way to
+/// the server, the two sides disagree about it, so the last value stays:
+/// mail read here and there alike leaves the difference as it was.
+fn server_only_unseen_sql(unseen: &str, history_complete: &str) -> String {
+    // Two counts, each on an index of the folder's own mail: one over every
+    // unread message of the account would be read again for each folder.
+    format!(
+        "CASE WHEN NOT ({history_complete}) THEN NULL
+              WHEN {} THEN server_only_unseen
+              ELSE MAX(0, {unseen}
+                - (SELECT COUNT(*) FROM messages m
+                   WHERE m.account_id = folders.account_id AND m.folder_id = folders.id
+                     AND m.is_read = 0 AND m.is_draft = 0)
+                - (SELECT COUNT(*) FROM message_folders mf
+                   JOIN messages m ON m.id = mf.message_id
+                   WHERE mf.folder_id = folders.id AND m.folder_id <> folders.id
+                     AND m.is_read = 0 AND m.is_draft = 0)) END",
+        super::actions::counts_settling_sql("folders.account_id")
+    )
+}
+
+/// Unread messages of these folders that are only on the server, as the
+/// last sync that caught up with each found them; `None` where no sync
+/// could tell.
+pub fn server_only_unseen(conn: &Connection, ids: &[i64]) -> Result<Option<i64>> {
+    let mut stmt = conn.prepare_cached("SELECT server_only_unseen FROM folders WHERE id = ?1")?;
+    let mut total = None;
+    for id in ids {
+        if let Some(count) = stmt
+            .query_row(params![id], |row| row.get::<_, Option<i64>>(0))
+            .optional()?
+            .flatten()
+        {
+            total = Some(total.unwrap_or(0) + count);
+        }
+    }
+    Ok(total)
+}
+
+/// Records that the user moved mail into a folder at `at` (ms).
+pub fn mark_moved_to(conn: &Connection, id: i64, at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE folders SET moved_to_at = ?2 WHERE id = ?1",
+        params![id, at],
+    )?;
+    Ok(())
+}
+
+/// The folders the user moved or copied mail into most recently, of every
+/// account, newest first.
+pub fn recently_moved_to(conn: &Connection, limit: usize) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id FROM folders
+         WHERE moved_to_at IS NOT NULL
+         ORDER BY moved_to_at DESC, id DESC LIMIT ?1",
+    )?;
+    let ids = stmt
+        .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+            row.get(0)
+        })?
+        .collect::<rusqlite::Result<Vec<i64>>>()?;
+    Ok(ids)
 }
 
 #[cfg(test)]
@@ -631,6 +809,119 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2]
         );
+    }
+
+    #[test]
+    fn unread_mail_only_on_the_server_is_what_this_device_does_not_keep() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path, backfill_done) VALUES (2, 1, 'Projects', 1)",
+            [],
+        )
+        .unwrap();
+        set_backfill(&conn, 1, Some(1), true).unwrap();
+        // Two unread messages kept in the Inbox, one read, and one unread
+        // filed in Projects as well (a JMAP or Gmail message in two).
+        let unread: Vec<i64> = (0..3)
+            .map(|index| testutil::seed_message(&conn, "a@test.dev", &format!("m{index}"), false).1)
+            .collect();
+        conn.execute("UPDATE messages SET is_read = 1 WHERE id = ?1", [unread[2]])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 2)",
+            [unread[0]],
+        )
+        .unwrap();
+
+        set_server_counts(&conn, 1, Some(40), Some(5)).unwrap();
+        set_server_counts(&conn, 2, Some(9), Some(3)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(3));
+        assert_eq!(server_only_unseen(&conn, &[2]).unwrap(), Some(2));
+        assert_eq!(server_only_unseen(&conn, &[1, 2]).unwrap(), Some(5));
+
+        // Mail read here first counts as kept, not missing.
+        set_server_counts(&conn, 1, Some(40), Some(1)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(0));
+        // A server that gave no count tells nothing.
+        set_server_counts(&conn, 2, Some(9), None).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[2]).unwrap(), None);
+        assert_eq!(server_only_unseen(&conn, &[1, 2]).unwrap(), Some(0));
+    }
+
+    #[test]
+    fn unread_mail_only_on_the_server_waits_for_the_history_and_for_actions() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let (_, kept) = testutil::seed_message(&conn, "a@test.dev", "Kept", false);
+        let pending = |kind: &str| {
+            conn.execute(
+                "INSERT INTO pending_actions (account_id, kind, message_id, created_at)
+                 VALUES (1, ?1, ?2, 0)",
+                params![kind, kept],
+            )
+            .unwrap();
+        };
+
+        // While the history downloads, its unread mail is on its way here.
+        set_backfill(&conn, 1, Some(40), false).unwrap();
+        set_server_counts(&conn, 1, Some(40), Some(5)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), None);
+        // Once it is here, the server's last count tells.
+        set_backfill(&conn, 1, Some(1), true).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(4));
+        set_backfill(&conn, 1, Some(1), true).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(4));
+
+        // Read here, with the server not told yet: it still counts it.
+        conn.execute("UPDATE messages SET is_read = 1", []).unwrap();
+        pending("mark_read");
+        set_server_counts(&conn, 1, Some(40), Some(5)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(4));
+        // Told.
+        conn.execute("UPDATE pending_actions SET state = 'done'", [])
+            .unwrap();
+        set_server_counts(&conn, 1, Some(40), Some(4)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(4));
+        // Sending changes no folder's unread mail.
+        pending("send");
+        set_server_counts(&conn, 1, Some(40), Some(3)).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), Some(3));
+
+        // Another mail history counts other mail.
+        forget_server_only_unseen(&conn, 1).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), None);
+        // Downloading it again forgets it too.
+        set_server_counts(&conn, 1, Some(40), Some(3)).unwrap();
+        set_backfill(&conn, 1, Some(40), false).unwrap();
+        assert_eq!(server_only_unseen(&conn, &[1]).unwrap(), None);
+    }
+
+    #[test]
+    fn recent_move_targets_are_newest_first() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username,
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol, settings_json)
+             VALUES (2,'other@test.dev','generic','password','other','h',993,'h',587,0,'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, account_id, path) VALUES
+               (2, 1, 'Receipts'), (3, 1, 'Travel'), (4, 1, 'Never'), (5, 2, 'Other')",
+            [],
+        )
+        .unwrap();
+        for (folder, at) in [(2, 10), (3, 30), (5, 40)] {
+            mark_moved_to(&conn, folder, at).unwrap();
+        }
+
+        assert_eq!(recently_moved_to(&conn, 5).unwrap(), [5, 3, 2]);
+        assert_eq!(recently_moved_to(&conn, 1).unwrap(), [5]);
+        mark_moved_to(&conn, 2, 50).unwrap();
+        assert_eq!(recently_moved_to(&conn, 5).unwrap(), [2, 5, 3]);
     }
 
     #[test]

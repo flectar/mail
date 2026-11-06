@@ -42,6 +42,18 @@ pub struct NewEventInfo {
     pub all_day: bool,
 }
 
+/// What became of a run of mail transfers to other accounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TransferReport {
+    pub copied: u32,
+    pub moved: u32,
+    /// Messages whose target account had them already.
+    pub present: u32,
+    pub failed: u32,
+    /// Why the first transfer that failed did.
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub enum CoreEvent {
     SyncProgress(SyncProgress),
@@ -57,6 +69,13 @@ pub enum CoreEvent {
         action_id: i64,
         state: String,
         error: Option<String>,
+    },
+    /// Mail transfers to other accounts ended, done or failed.
+    TransfersFinished(TransferReport),
+    /// A sync found another number of an account's older unread messages
+    /// that are only on the server.
+    ServerOnlyUnreadChanged {
+        account_id: i64,
     },
     ThreadWoke {
         thread_id: i64,

@@ -173,8 +173,9 @@ pub(super) fn reconcile_removed_account(state: &mut InboxState, account_id: i64)
     state.page = 1;
     state.inbox_count = 0;
     for mailbox in &mut state.unified_mailboxes {
-        mailbox.count.clear();
+        mailbox.count = 0;
     }
+    state.sidebar_badges = Default::default();
     if !state.has_mail() {
         state.messages.clear();
         state.mailboxes.clear();

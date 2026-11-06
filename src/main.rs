@@ -38,6 +38,7 @@ mod mail_work;
 mod mailto_links;
 mod memory;
 mod message_appearance;
+mod move_picker;
 mod notifications;
 pub use notifications::{NewMailNotification, NotificationPublisher};
 mod number_format;
@@ -112,14 +113,15 @@ use flectar_mail_core::models::{
 #[cfg(test)]
 use mail::fixture_messages;
 use mail::{
-    ComposeMessage, ComposeSource, CoreMailSource, MailCursor, MailMessage, MailTarget,
-    MailboxEntry, display_preview,
+    ComposeMessage, ComposeSource, CoreMailSource, MailCursor, MailMessage, MailMetadata,
+    MailTarget, MailboxEntry, SidebarBadges, display_preview,
 };
 use mail_groups::{
     MailGroupState, mail_group_key, mail_list_entry_key, project_mail_list, same_mail_list_entry,
+    server_only_entry,
 };
 use mail_render_projection::*;
-use mail_scope::{Scope, StandardMailbox};
+use mail_scope::{Scope, StandardMailbox, accounts_to_check};
 use mail_view_model::*;
 use renderer::{GpuEmailRenderer, RenderedEmail};
 use renderer_input_controller::register_renderer_input_callbacks;
@@ -627,6 +629,9 @@ struct InboxState {
     mail_groups: MailGroupState,
     mailboxes: Vec<MailboxEntry>,
     unified_mailboxes: Vec<MailboxEntry>,
+    sidebar_badges: SidebarBadges,
+    /// Unread mail only on the server of the scope it was counted for.
+    server_only: Option<(Scope, u32)>,
     mail_work: Option<mail_work::MailWork>,
     collapsed_folder_ids: HashSet<i64>,
     collapsed_sidebar_sections: HashSet<String>,
@@ -709,6 +714,8 @@ struct MailDragItem {
 enum MailDropDestination {
     Action(&'static str),
     Folder(i64),
+    /// A folder of another account.
+    Transfer(i64),
     Label(i64),
     Route(String),
 }
@@ -835,15 +842,12 @@ fn resolve_single_mail_drop(
             return Err("this unified mailbox is not a drop destination".to_owned());
         }
         Scope::Folder(_) | Scope::Account { .. } => {
-            if i64::from(target_account_id) != message.account_id {
-                return Err("messages cannot be moved between accounts".to_owned());
-            }
             let target = state
                 .mailboxes
                 .iter()
                 .find(|mailbox| {
                     !mailbox.is_account
-                        && mailbox.account_id == message.account_id
+                        && mailbox.account_id == i64::from(target_account_id)
                         && mailbox.scope == Some(target_scope)
                         && mailbox.folder_id == i64::from(target_folder_id)
                 })
@@ -851,15 +855,32 @@ fn resolve_single_mail_drop(
             if !target.is_selectable {
                 return Err("this mailbox is a hierarchy container".to_owned());
             }
-            if target.label == message.folder {
-                return Err("message is already in this destination".to_owned());
-            }
             // Custom folders are plain moves even when named like a
             // standard mailbox.
             let standard = match target_scope {
                 Scope::Account { mailbox, .. } => Some(mailbox),
                 _ => None,
             };
+            // Mail moves to another account as Thunderbird moves it: a copy
+            // goes there, and the original goes once the copy is in place.
+            if target.account_id != message.account_id {
+                return match standard {
+                    Some(
+                        StandardMailbox::Sent | StandardMailbox::Drafts | StandardMailbox::Starred,
+                    ) => Err("this mailbox is not a drop destination".to_owned()),
+                    _ if target.folder_id >= 0 => Ok((
+                        MailTarget::of(message)
+                            .ok_or_else(|| "message thread is unavailable".to_owned())?,
+                        MailDropDestination::Transfer(target.folder_id),
+                    )),
+                    _ => Err("mailbox destination is unavailable".to_owned()),
+                };
+            }
+            // Folders are told apart by scope: another folder can have the
+            // name of the one shown.
+            if state.scope.shows_mail_in(target_scope) {
+                return Err("message is already in this destination".to_owned());
+            }
             match standard {
                 Some(StandardMailbox::Starred) if !message.starred => {
                     MailDropDestination::Action("star")
@@ -1161,6 +1182,8 @@ impl InboxState {
             using_core: false,
             mailboxes: Vec::new(),
             unified_mailboxes: Vec::new(),
+            sidebar_badges: SidebarBadges::default(),
+            server_only: None,
             mail_work: None,
             collapsed_folder_ids: HashSet::new(),
             collapsed_sidebar_sections: HashSet::from([
@@ -1255,6 +1278,62 @@ impl InboxState {
             .filter(|account| self.shows_account(account.id))
             .cloned()
             .collect()
+    }
+
+    /// Takes the sidebar's mailboxes and badges from fresh metadata.
+    /// Returns whether the end of the list says something else now.
+    fn set_mail_metadata(&mut self, metadata: MailMetadata) -> bool {
+        let note = self.server_only_note();
+        self.mailboxes = metadata.mailboxes;
+        self.unified_mailboxes = metadata.unified_mailboxes;
+        self.sidebar_badges = metadata.sidebar_badges;
+        self.inbox_count = metadata.inbox_count;
+        self.server_only = Some((metadata.scope, metadata.server_only_unread));
+        self.server_only_note() != note
+    }
+
+    /// How many older unread messages of the list are only on the server,
+    /// which its end mentions once all of its mail is shown: not for
+    /// searches, nor for filters other than unread mail.
+    fn server_only_note(&self) -> u32 {
+        match self.server_only {
+            Some((scope, count))
+                if scope == self.scope
+                    && self.using_core
+                    && self.next_cursor.is_none()
+                    && self.query.trim().is_empty()
+                    && matches!(self.search_filter.as_str(), "All mail" | "Unread") =>
+            {
+                count
+            }
+            _ => 0,
+        }
+    }
+
+    /// The accounts a manual check for new mail covers in the current view:
+    /// the account whose mailbox, folder or label it shows, otherwise the
+    /// shown accounts. `None` stands for every account.
+    fn accounts_in_view(&self) -> Option<Vec<i64>> {
+        let owner = match self.scope {
+            Scope::Account { account_id, .. } => Some(account_id),
+            Scope::Folder(_) => self
+                .mailboxes
+                .iter()
+                .find(|mailbox| mailbox.scope == Some(self.scope))
+                .map(|mailbox| mailbox.account_id),
+            Scope::Label { id, .. } => self
+                .labels
+                .iter()
+                .find(|label| label.id == id)
+                .and_then(|label| label.owner_account_id),
+            Scope::Unified(_) | Scope::Important | Scope::Other => None,
+        };
+        let connected = self
+            .connected_accounts
+            .iter()
+            .map(|account| account.id)
+            .collect::<Vec<_>>();
+        accounts_to_check(owner, &connected, self.profile_accounts.as_deref())
     }
 
     /// Whether there is any mail to show: an account's, or mail kept on this
@@ -2019,6 +2098,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     app.set_sidebar_rows(Rc::clone(&initial_state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(initial_state));
     mail_work::register(&app, &state, &runtime);
+    move_picker::register(&app, &state, &runtime);
     files_controller::register(
         &app,
         &state,
@@ -3404,9 +3484,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 } else if navigate {
                     state.set_scope(metadata.scope);
                 }
-                state.mailboxes = metadata.mailboxes;
-                state.unified_mailboxes = metadata.unified_mailboxes;
-                state.inbox_count = metadata.inbox_count;
+                state.set_mail_metadata(metadata);
                 if let Some(parent_id) = update.reveal_parent_id {
                     state.initialized_sidebar_folders.insert(parent_id);
                     state.collapsed_folder_ids.remove(&parent_id);
@@ -3740,10 +3818,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     let local_mail = metadata.local_mail;
                     let local_mail_changed =
                         local_mail != state.local_mail.map(|local| local.account_id);
-                    state.mailboxes = metadata.mailboxes;
-                    state.unified_mailboxes = metadata.unified_mailboxes;
-                    state.inbox_count = metadata.inbox_count;
+                    let note_changed = state.set_mail_metadata(metadata);
                     drop(state);
+                    if note_changed {
+                        refresh_rows_only(&app, &mail_metadata_state, &mail_metadata_runtime);
+                    }
                     if local_mail_changed {
                         // Its section is named at once; its size follows.
                         apply_local_mail(
@@ -3792,6 +3871,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
         if pending.all_mail_changed || !pending.changed_threads.is_empty() {
             mail_list_refresh_requested_for_core.set(true);
+            mail_metadata_refresh_requested_for_core.set(true);
+        }
+        // The end of the list says how much older unread mail is only on
+        // the server; the badge refresh brings it.
+        if pending.server_only_changed {
             mail_metadata_refresh_requested_for_core.set(true);
         }
         let mail_active = mail_update_app
@@ -3881,6 +3965,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let message = UiMessage::detail("Message action failed: {}", error);
             app.set_render_status(message.clone());
             app.set_sync_status(message);
+        }
+        if let Some(report) = pending.transfers
+            && let Some(app) = mail_update_app.upgrade()
+        {
+            app.set_render_status(move_picker::transfer_message(&report));
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
@@ -4434,11 +4523,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 }
                 StartupUpdate::MailMetadata(result) => match result {
                     Ok(metadata) => {
-                        {
-                            let mut state = startup_state.borrow_mut();
-                            state.mailboxes = metadata.mailboxes;
-                            state.unified_mailboxes = metadata.unified_mailboxes;
-                            state.inbox_count = metadata.inbox_count;
+                        let note_changed = startup_state.borrow_mut().set_mail_metadata(metadata);
+                        if note_changed {
+                            refresh_rows_only(&app, &startup_state, &startup_runtime);
                         }
                         refresh_list_metadata(&app, &startup_state);
                     }
@@ -4830,9 +4917,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 let current_page = {
                     let mut state = ui_task_state.borrow_mut();
                     if let Some(metadata) = removal.metadata.take().filter(|_| state.has_mail()) {
-                        state.mailboxes = metadata.mailboxes;
-                        state.unified_mailboxes = metadata.unified_mailboxes;
-                        state.inbox_count = metadata.inbox_count;
+                        state.set_mail_metadata(metadata);
                     }
                     let current = removal.scope == state.scope && removal.query == state.query;
                     let has_page = removal.page.is_some();
@@ -5397,7 +5482,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let sync_runtime = runtime.clone();
     let sync_progress = Rc::clone(&sync_in_progress);
     let sync_app = app.as_weak();
-    let sync_tx_for_all = sync_tx.clone();
     app.on_drain_sync_updates(move || {
         while let Ok(update) = sync_rx.borrow_mut().try_recv() {
             sync_progress.set(false);
@@ -5415,9 +5499,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                                 core.account_revision() == metadata.account_revision
                             })
                         }) {
-                            state.mailboxes = metadata.mailboxes;
-                            state.unified_mailboxes = metadata.unified_mailboxes;
-                            state.inbox_count = metadata.inbox_count;
+                            state.set_mail_metadata(metadata);
                         }
                     }
                     if let Err(error) =
@@ -5436,78 +5518,63 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         }
     });
 
-    let app_weak = app.as_weak();
-    let state_for_sync = Rc::clone(&state);
-    let runtime_for_sync = runtime.clone();
-    let sync_progress_for_click = Rc::clone(&sync_in_progress);
-    app.on_sync_mail(move || {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if sync_progress_for_click.replace(true) {
-            return;
-        }
-        let (core, scope) = {
-            let state = state_for_sync.borrow();
-            (state.core.clone(), state.scope)
-        };
-        let Some(core) = core else {
-            sync_progress_for_click.set(false);
-            app.set_sync_status(UiMessage::plain(
-                "Local mail data is unavailable; preview data is read-only.",
-            ));
-            return;
-        };
-        app.set_sync_in_progress(true);
-        app.set_sync_status(UiMessage::plain("Synchronizing accounts…"));
-        let sync_tx = sync_tx.clone();
-        runtime_for_sync.spawn(async move {
-            let result = core.sync_now(None).await;
-            let metadata = if result.is_ok() {
-                core.load_mail_metadata(scope).await.ok()
-            } else {
-                None
+    // Manual checks for new mail. The toolbar button and Shift+F5 check every
+    // account, an account's menu that account, and F5 the accounts in view.
+    let start_sync: Rc<dyn Fn(Option<Vec<i64>>)> = {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        let runtime = runtime.clone();
+        let in_progress = Rc::clone(&sync_in_progress);
+        Rc::new(move |accounts: Option<Vec<i64>>| {
+            let Some(app) = app_weak.upgrade() else {
+                return;
             };
-            let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
-        });
-    });
-
-    let app_weak = app.as_weak();
-    let state_for_account_sync = Rc::clone(&state);
-    let runtime_for_account_sync = runtime.clone();
-    let sync_progress_for_account_click = Rc::clone(&sync_in_progress);
-    app.on_sync_account(move |account_id| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if sync_progress_for_account_click.replace(true) {
-            return;
-        }
-        let (core, scope) = {
-            let state = state_for_account_sync.borrow();
-            (state.core.clone(), state.scope)
-        };
-        let Some(core) = core else {
-            sync_progress_for_account_click.set(false);
-            app.set_sync_status(UiMessage::plain(
-                "Local mail data is unavailable; preview data is read-only.",
-            ));
-            return;
-        };
-        app.set_sync_in_progress(true);
-        app.set_sync_status(UiMessage::plain("Synchronizing account…"));
-        let sync_tx = sync_tx_for_all.clone();
-        let account_id = i64::from(account_id);
-        runtime_for_account_sync.spawn(async move {
-            let result = core.sync_now(Some(account_id)).await;
-            let metadata = if result.is_ok() {
-                core.load_mail_metadata(scope).await.ok()
-            } else {
-                None
+            if accounts.as_ref().is_some_and(Vec::is_empty) || in_progress.replace(true) {
+                return;
+            }
+            let (core, scope) = {
+                let state = state.borrow();
+                (state.core.clone(), state.scope)
             };
-            let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+            let Some(core) = core else {
+                in_progress.set(false);
+                app.set_sync_status(UiMessage::plain(
+                    "Local mail data is unavailable; preview data is read-only.",
+                ));
+                return;
+            };
+            app.set_sync_in_progress(true);
+            app.set_sync_status(match accounts.as_deref() {
+                Some([_]) => UiMessage::plain("Synchronizing account…"),
+                _ => UiMessage::plain("Synchronizing accounts…"),
+            });
+            let sync_tx = sync_tx.clone();
+            runtime.spawn(async move {
+                let result = core.sync_accounts(accounts.as_deref()).await;
+                let metadata = if result.is_ok() {
+                    core.load_mail_metadata(scope).await.ok()
+                } else {
+                    None
+                };
+                let _ = sync_tx.send(SyncUpdate { result, metadata }).await;
+            });
+        })
+    };
+    {
+        let start_sync = Rc::clone(&start_sync);
+        app.on_sync_mail(move || start_sync(None));
+    }
+    {
+        let start_sync = Rc::clone(&start_sync);
+        app.on_sync_account(move |account_id| start_sync(Some(vec![i64::from(account_id)])));
+    }
+    {
+        let state = Rc::clone(&state);
+        app.on_check_mail_in_view(move || {
+            let accounts = state.borrow().accounts_in_view();
+            start_sync(accounts);
         });
-    });
+    }
 
     let app_weak = app.as_weak();
     let state_for_check = Rc::clone(&state);
@@ -6463,7 +6530,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             );
         }
         *intent_for_message_compose.borrow_mut() = prepared.intent;
-        app.set_compose_mode(action);
+        app.set_compose_mode(action.clone());
         app.global::<AccountMailPreferences>()
             .invoke_composer_reset();
         app.global::<AccountMailPreferences>()
@@ -6471,6 +6538,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         app.global::<AccountMailPreferences>()
             .invoke_composer_account_changed(account_id);
         app.set_compose_open(true);
+        // A forward, and a message edited as new, carry the original's files.
+        if matches!(action.as_str(), "forward" | "edit_as_new") {
+            attach_original_files(
+                &app,
+                &files_for_message_compose,
+                &session_for_message_compose,
+                &runtime_for_message_compose,
+                core,
+                source.attachments,
+            );
+        }
     });
 
     let app_weak = app.as_weak();

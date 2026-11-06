@@ -1188,7 +1188,9 @@ fn register_composer(
                             }
                             .into(),
                         );
-                        if app.get_compose_mode() == "draft" {
+                        // A draft, and a message edited as new, have
+                        // whatever signature they had.
+                        if matches!(app.get_compose_mode().as_str(), "draft" | "edit_as_new") {
                             *managed.borrow_mut() = None;
                             ui.set_composer_signature_index(0);
                             return;

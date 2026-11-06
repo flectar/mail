@@ -8,6 +8,7 @@
 //! already has, here or in the server's folder, is skipped, so an upload
 //! that stopped part way can be run again.
 
+use super::state::Recorded;
 use super::write::{Incoming, Item, READ_AHEAD, folder_name, read_folders};
 use super::{MailImportProgress, MailImportReport, MailSource, SourceFolder};
 use crate::db::repo;
@@ -42,13 +43,31 @@ struct Target {
     folder_id: i64,
     path: String,
     jmap_id: Option<String>,
-    gmail_label: Option<String>,
+    /// The Gmail labels that put a message in it; none for Archive.
+    gmail_labels: Option<Vec<String>>,
 }
 
 /// What became of one message.
 enum Outcome {
     Uploaded,
     /// The account already has it.
+    Present,
+    /// The server refused it, for the reason given.
+    Refused(String),
+}
+
+/// Connections a run of transfers uploads over, one per account, kept
+/// until the run ends.
+#[derive(Default)]
+pub(crate) struct Uploads {
+    remotes: HashMap<i64, (AccountConfig, Remote)>,
+}
+
+/// What became of a message [`crate::Core::upload_to_folder`] uploaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Uploaded {
+    Copied,
+    /// The account has it already.
     Present,
     /// The server refused it, for the reason given.
     Refused(String),
@@ -67,6 +86,9 @@ enum Remote {
     },
     Gmail {
         uploader: sync::gmail::Uploader,
+        /// Insert the mail as it is, as IMAP APPEND does, rather than
+        /// import it like mail that arrives.
+        insert: bool,
     },
 }
 
@@ -94,6 +116,7 @@ impl crate::Core {
             MailProtocol::Jmap => Remote::Jmap { client: None },
             MailProtocol::Gmail => Remote::Gmail {
                 uploader: sync::gmail::Uploader::new(self.sync_ctx(), config.clone())?,
+                insert: false,
             },
             MailProtocol::Pop3 | MailProtocol::Local => {
                 return Err(CoreError::Other(
@@ -118,7 +141,7 @@ impl crate::Core {
                 jmap::sync::persist_session(&self.sync_ctx(), account_id, client).await?;
                 jmap::sync::sync_mailboxes(&self.sync_ctx(), account_id, client).await?;
             }
-            Remote::Gmail { uploader } => uploader.refresh_labels().await?,
+            Remote::Gmail { uploader, .. } => uploader.refresh_labels().await?,
         }
         let targets = self
             .upload_targets(account_id, &source.folders, &chosen, &parent_folder)
@@ -214,6 +237,105 @@ impl crate::Core {
         Ok(report)
     }
 
+    /// Uploads one message to a folder of an IMAP, JMAP or Gmail account,
+    /// with its date and its read and starred states, unless the account
+    /// has it already. Gmail gets it inserted as it is, as IMAP APPEND
+    /// keeps it, not delivered like arriving mail.
+    pub(crate) async fn upload_to_folder(
+        &self,
+        uploads: &mut Uploads,
+        folder_id: i64,
+        raw: Vec<u8>,
+        seen: bool,
+        flagged: bool,
+        date_ms: Option<i64>,
+    ) -> Result<Uploaded> {
+        let (folder, gmail_label, protocol) = self
+            .db
+            .read(move |conn| {
+                let folder = repo::folders::get(conn, folder_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+                let label =
+                    repo::gmail::provider_label_for_folder(conn, folder.account_id, folder_id)?;
+                let protocol = repo::accounts::protocol(conn, folder.account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
+                Ok((folder, label, protocol))
+            })
+            .await?;
+        let (config, remote) = match uploads.remotes.entry(folder.account_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let config = self.folder_account_config(folder.account_id).await?;
+                let remote = match protocol {
+                    MailProtocol::Imap => Remote::Imap {
+                        session: None,
+                        selected: None,
+                        first_uids: HashMap::new(),
+                    },
+                    MailProtocol::Jmap => Remote::Jmap { client: None },
+                    MailProtocol::Gmail => Remote::Gmail {
+                        uploader: sync::gmail::Uploader::new(self.sync_ctx(), config.clone())?,
+                        insert: true,
+                    },
+                    MailProtocol::Pop3 | MailProtocol::Local => {
+                        return Err(CoreError::Other(
+                            "mail kept on this device is not uploaded".into(),
+                        ));
+                    }
+                };
+                entry.insert((config, remote))
+            }
+        };
+        // Gmail files mail by label, and archived mail has none.
+        let gmail_labels = match folder.role.as_deref() {
+            Some(roles::INBOX) => Some(vec!["INBOX".to_owned()]),
+            Some(roles::SPAM) => Some(vec!["SPAM".to_owned()]),
+            Some(roles::TRASH) => Some(vec!["TRASH".to_owned()]),
+            Some(roles::ARCHIVE | roles::ALL) => Some(Vec::new()),
+            _ => gmail_label.map(|label| vec![label]),
+        };
+        let target = Target {
+            folder_id,
+            path: folder.path,
+            jmap_id: folder.jmap_id,
+            gmail_labels,
+        };
+        let message = Incoming {
+            folder: 0,
+            parsed: sync::ingest::parse_or_text(&raw),
+            raw,
+            stored_at: date_ms,
+            recorded: Recorded {
+                read: Some(seen),
+                starred: flagged,
+                deleted: false,
+            },
+            read: 0,
+        };
+        Ok(
+            match self
+                .upload_message(config, remote, &message, &target)
+                .await?
+            {
+                Outcome::Uploaded => Uploaded::Copied,
+                Outcome::Present => Uploaded::Present,
+                Outcome::Refused(reason) => Uploaded::Refused(reason),
+            },
+        )
+    }
+
+    /// Ends a run of uploads: closes their connections, and has each
+    /// account sync what it got.
+    pub(crate) async fn finish_uploads(&self, uploads: Uploads) -> Result<()> {
+        let mut failure = None;
+        for (account_id, (_, mut remote)) in uploads.remotes {
+            if let Err(error) = self.finish_upload(account_id, &mut remote).await {
+                failure.get_or_insert(error);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
     /// The folders the chosen source folders go into, created where they
     /// don't exist yet: a folder named `parent` at the top of the account,
     /// or in its Inbox where the top is closed, with the source's folders
@@ -284,7 +406,7 @@ impl crate::Core {
                     folder_id: folder.id,
                     path: folder.path,
                     jmap_id: folder.jmap_id,
-                    gmail_label,
+                    gmail_labels: gmail_label.map(|label| vec![label]),
                 },
             );
         }
@@ -385,9 +507,10 @@ impl crate::Core {
                     )
                     .await
                 }
-                Remote::Gmail { uploader } => {
+                Remote::Gmail { uploader, insert } => {
                     gmail_upload(
                         uploader,
+                        *insert,
                         message,
                         target,
                         message_id.as_deref(),
@@ -637,29 +760,35 @@ impl crate::Core {
 
 async fn gmail_upload(
     uploader: &sync::gmail::Uploader,
+    insert: bool,
     message: &Incoming,
     target: &Target,
     message_id: Option<&str>,
     seen: bool,
     flagged: bool,
 ) -> Result<Outcome> {
-    let label = target
-        .gmail_label
-        .as_deref()
+    let labels = target
+        .gmail_labels
+        .as_ref()
         .ok_or_else(|| CoreError::Other(format!("folder {} has no Gmail label", target.path)))?;
     if let Some(message_id) = message_id
         && uploader.has_message(message_id).await?
     {
         return Ok(Outcome::Present);
     }
-    let mut labels = vec![label];
+    let mut labels = labels.iter().map(String::as_str).collect::<Vec<_>>();
     if !seen {
         labels.push("UNREAD");
     }
     if flagged {
         labels.push("STARRED");
     }
-    match uploader.import(&message.raw, &labels).await {
+    let uploaded = if insert {
+        uploader.insert(&message.raw, &labels).await
+    } else {
+        uploader.import(&message.raw, &labels).await
+    };
+    match uploaded {
         Ok(()) => Ok(Outcome::Uploaded),
         Err(CoreError::Other(reason)) => Ok(Outcome::Refused(reason)),
         Err(error) => Err(error),

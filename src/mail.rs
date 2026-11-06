@@ -12,7 +12,7 @@ use flectar_mail_core::{
         MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
         PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
         SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, View,
-        normalized_workspace_list_pane_width,
+        normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -151,7 +151,19 @@ pub struct MailboxEntry {
     pub detail: String,
     pub avatar: String,
     pub is_account: bool,
-    pub count: String,
+    /// The badge: unread conversations or messages of the list the row opens,
+    /// or every draft for Drafts. Zero shows none.
+    pub count: u32,
+}
+
+/// Badges of the sidebar rows that are not mailboxes: labels, categories and
+/// the inbox's Important and Other halves, for the shown accounts.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SidebarBadges {
+    /// Unread per label id.
+    pub labels: std::collections::HashMap<i64, u32>,
+    pub important: u32,
+    pub other: u32,
 }
 
 /// Borrowed compose fields passed together so draft and send operations share
@@ -190,6 +202,8 @@ pub struct ComposeSource {
     pub subject: String,
     pub date: i64,
     pub text_body: String,
+    /// The message's files, for a forward or an edited copy to carry along.
+    pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
 }
 
 #[derive(Clone, Debug)]
@@ -255,8 +269,12 @@ pub struct MailMetadata {
     pub inbox_count: usize,
     pub mailboxes: Vec<MailboxEntry>,
     pub unified_mailboxes: Vec<MailboxEntry>,
+    pub sidebar_badges: SidebarBadges,
     /// The account of local mail, which an import creates.
     pub local_mail: Option<i64>,
+    /// Unread mail of `scope` older than the mail history this device
+    /// keeps, which only the server has.
+    pub server_only_unread: u32,
 }
 
 struct PageLoadContext<'a> {
@@ -612,6 +630,16 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         // Unified totals add up the shown accounts only.
         badges.retain(|counts| profile_shows(profile, counts.account_id));
+        let server_only = server_only_folders(scope, folders);
+        let server_only_unread = if server_only.is_empty() {
+            0
+        } else {
+            self.core
+                .server_only_unread(server_only)
+                .await
+                .map_err(|error| error.to_string())?
+                .map_or(0, badge)
+        };
         Ok(MailMetadata {
             account_revision: self.account_revision(),
             scope,
@@ -621,7 +649,9 @@ impl CoreMailSource {
                 .sum(),
             mailboxes: mailbox_entries_with_counts(accounts, folders, local_mail, &badges),
             unified_mailboxes: unified_mailbox_entries(&badges),
+            sidebar_badges: sidebar_badges(&badges),
             local_mail,
+            server_only_unread,
         })
     }
 
@@ -976,7 +1006,22 @@ impl CoreMailSource {
                 .clone()
                 .filter(|body| !body.trim().is_empty())
                 .unwrap_or_else(|| message.snippet.clone()),
+            // Images shown in the text are part of it, not files.
+            attachments: message
+                .attachments
+                .iter()
+                .filter(|attachment| !attachment.is_inline)
+                .cloned()
+                .collect(),
         })
+    }
+
+    /// Where a message's file is kept here, downloading it first if needed.
+    pub async fn attachment_path(&self, attachment_id: i64) -> Result<String, String> {
+        self.core
+            .get_attachment(attachment_id)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// The account that answers local mail, which is never sent from: the
@@ -1763,6 +1808,47 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// The folders mail was moved or copied into most recently, of every
+    /// account, newest first.
+    pub async fn recent_move_targets(&self, limit: usize) -> Result<Vec<i64>, String> {
+        self.core
+            .recent_move_targets(limit)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Copies or moves mail to a folder of another account. The original of
+    /// a move goes once the copy is in place.
+    pub async fn transfer_to_folder(
+        &self,
+        target: MailTarget,
+        folder_id: i64,
+        is_move: bool,
+    ) -> Result<(), String> {
+        self.core
+            .transfer_mail(target.action_target(), folder_id, is_move)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Files mail in one more folder of its JMAP account.
+    pub async fn copy_to_folder(&self, target: MailTarget, folder_id: i64) -> Result<(), String> {
+        self.core
+            .perform_action(PerformActionArgs {
+                kind: ActionKind::Copy,
+                target: target.action_target(),
+                params: Some(ActionParams {
+                    wake_at: None,
+                    target_folder_id: Some(folder_id),
+                    label_id: None,
+                }),
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Inbox tabs route conversations, so a message's routes its conversation.
     pub async fn route_to_tab(&self, target: MailTarget, tab: String) -> Result<(), String> {
         self.core
@@ -1820,9 +1906,10 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    pub async fn sync_now(&self, account_id: Option<i64>) -> Result<(), String> {
+    /// Checks these accounts for new mail, or every account with `None`.
+    pub async fn sync_accounts(&self, account_ids: Option<&[i64]>) -> Result<(), String> {
         self.core
-            .sync_now(account_id)
+            .sync_accounts(account_ids)
             .await
             .map_err(|error| error.to_string())
     }
@@ -2216,7 +2303,7 @@ fn append_folder_tree<'a>(
             detail: String::new(),
             avatar: String::new(),
             is_account: false,
-            count: String::new(),
+            count: 0,
         });
 
         if let Some(descendants) = descendants {
@@ -2259,7 +2346,7 @@ fn mailbox_entries(
             detail: account.email.clone(),
             avatar: avatar_initials(&account_label),
             is_account: true,
-            count: String::new(),
+            count: 0,
         });
         append_mailboxes(
             &mut entries,
@@ -2294,7 +2381,7 @@ fn mailbox_entries(
             detail: String::new(),
             avatar: String::new(),
             is_account: true,
-            count: String::new(),
+            count: 0,
         });
         append_mailboxes(&mut entries, account_id, "", folders, false, true);
     }
@@ -2431,7 +2518,7 @@ fn append_mailboxes(
                 detail: String::new(),
                 avatar: String::new(),
                 is_account: false,
-                count: String::new(),
+                count: 0,
             });
         }
     };
@@ -2494,29 +2581,39 @@ fn mailbox_entries_with_counts(
     badges: &[MailboxBadgeCounts],
 ) -> Vec<MailboxEntry> {
     let mut entries = mailbox_entries(accounts, folders, local_mail);
+    let mut counts = None::<&MailboxBadgeCounts>;
     for entry in &mut entries {
-        // Badges belong to the standard mailboxes, not to custom folders that
-        // merely share a name with one.
-        let Some(Scope::Account { mailbox, .. }) = entry.scope else {
+        if counts.is_none_or(|counts| counts.account_id != entry.account_id) {
+            counts = badges
+                .iter()
+                .find(|counts| counts.account_id == entry.account_id);
+        }
+        let Some(counts) = counts else {
             continue;
         };
-        let Some(counts) = badges
-            .iter()
-            .find(|counts| counts.account_id == entry.account_id)
-        else {
-            continue;
+        entry.count = match entry.scope {
+            Some(Scope::Account { mailbox, .. }) => mailbox_badge(mailbox, counts),
+            Some(Scope::Folder(folder_id)) => counts
+                .folders
+                .binary_search_by_key(&folder_id, |(id, _)| *id)
+                .map_or(0, |index| badge(counts.folders[index].1)),
+            _ => 0,
         };
-        entry.count = mailbox_badge(mailbox, counts);
     }
     entries
 }
 
 fn unified_mailbox_entries(badges: &[MailboxBadgeCounts]) -> Vec<MailboxEntry> {
+    let sum = |count: fn(&MailboxBadgeCounts) -> i64| badges.iter().map(count).sum();
     let total = MailboxBadgeCounts {
-        account_id: 0,
-        inbox: badges.iter().map(|counts| counts.inbox).sum(),
-        starred: badges.iter().map(|counts| counts.starred).sum(),
-        drafts: badges.iter().map(|counts| counts.drafts).sum(),
+        inbox: sum(|counts| counts.inbox),
+        starred: sum(|counts| counts.starred),
+        drafts: sum(|counts| counts.drafts),
+        sent: sum(|counts| counts.sent),
+        archive: sum(|counts| counts.archive),
+        spam: sum(|counts| counts.spam),
+        trash: sum(|counts| counts.trash),
+        ..Default::default()
     };
     // The unified inbox has a dedicated sidebar row.
     let mailboxes = StandardMailbox::ALL
@@ -2547,21 +2644,78 @@ fn unified_mailbox_entries(badges: &[MailboxBadgeCounts]) -> Vec<MailboxEntry> {
     entries
 }
 
-fn mailbox_badge(mailbox: StandardMailbox, counts: &MailboxBadgeCounts) -> String {
-    let count = match mailbox {
+/// Label, category and Important/Other badges of the shown accounts.
+fn sidebar_badges(badges: &[MailboxBadgeCounts]) -> SidebarBadges {
+    let mut sidebar = SidebarBadges::default();
+    for counts in badges {
+        sidebar.important = sidebar.important.saturating_add(badge(counts.important));
+        sidebar.other = sidebar.other.saturating_add(badge(counts.other));
+        for (label, count) in &counts.labels {
+            let total = sidebar.labels.entry(*label).or_default();
+            *total = total.saturating_add(badge(*count));
+        }
+    }
+    sidebar
+}
+
+fn mailbox_badge(mailbox: StandardMailbox, counts: &MailboxBadgeCounts) -> u32 {
+    badge(match mailbox {
         StandardMailbox::Inbox => counts.inbox,
         StandardMailbox::Starred => counts.starred,
+        StandardMailbox::Sent => counts.sent,
+        StandardMailbox::Archive => counts.archive,
+        StandardMailbox::Spam => counts.spam,
+        StandardMailbox::Trash => counts.trash,
         StandardMailbox::Drafts => counts.drafts,
-        StandardMailbox::Sent
-        | StandardMailbox::Archive
-        | StandardMailbox::Spam
-        | StandardMailbox::Trash => return String::new(),
+    })
+}
+
+fn badge(count: i64) -> u32 {
+    u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX })
+}
+
+/// The folders of `scope` whose unread mail only on the server its list
+/// mentions at its end: inboxes, archives and the user's own folders, where
+/// older unread mail is worth downloading. Sent mail, drafts, spam and trash
+/// are not, and labels and inbox halves span folders.
+fn server_only_folders(scope: Scope, folders: &[FolderInfo]) -> Vec<i64> {
+    let role = |mailbox| match mailbox {
+        StandardMailbox::Inbox => Some(roles::INBOX),
+        StandardMailbox::Archive => Some(roles::ARCHIVE),
+        _ => None,
     };
-    if count > 0 {
-        count.to_string()
-    } else {
-        String::new()
-    }
+    let (account, role) = match scope {
+        Scope::Unified(mailbox) => (None, role(mailbox)),
+        Scope::Account {
+            account_id,
+            mailbox,
+        } => (Some(account_id), role(mailbox)),
+        Scope::Folder(id) => {
+            return folders
+                .iter()
+                .filter(|folder| {
+                    folder.id == id
+                        && folder
+                            .role
+                            .as_deref()
+                            .is_none_or(|role| [roles::INBOX, roles::ARCHIVE].contains(&role))
+                })
+                .map(|folder| folder.id)
+                .collect();
+        }
+        Scope::Important | Scope::Other | Scope::Label { .. } => return Vec::new(),
+    };
+    let Some(role) = role else {
+        return Vec::new();
+    };
+    folders
+        .iter()
+        .filter(|folder| {
+            folder.role.as_deref() == Some(role)
+                && account.is_none_or(|account| folder.account_id == account)
+        })
+        .map(|folder| folder.id)
+        .collect()
 }
 
 struct ScopeResolution {
@@ -3152,16 +3306,18 @@ pub fn fixtures() -> Vec<EmailFixture> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ComposeMessage, MailTarget, compose_args, display_thread_subject, mailbox_entries,
-        markdown_to_html, markdown_to_plain_text, message_summary_to_message,
-        readable_message_html, resolve_scope, summary_to_message, validated_startup_scope,
+        ComposeMessage, MailTarget, SidebarBadges, compose_args, display_thread_subject,
+        mailbox_entries, mailbox_entries_with_counts, markdown_to_html, markdown_to_plain_text,
+        message_summary_to_message, readable_message_html, resolve_scope, server_only_folders,
+        sidebar_badges, summary_to_message, unified_mailbox_entries, validated_startup_scope,
         with_local_mail,
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
-        Account, ActionTarget, Address, AuthKind, FolderInfo, Label, MailProtocol, MessageSummary,
-        Provider, ThreadSummary, View,
+        Account, ActionTarget, Address, AuthKind, FolderInfo, Label, MailProtocol,
+        MailboxBadgeCounts, MessageSummary, Provider, ThreadSummary, View,
     };
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     fn test_account() -> Account {
@@ -3178,6 +3334,161 @@ mod tests {
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
         }
+    }
+
+    #[test]
+    fn only_inboxes_archives_and_own_folders_mention_mail_on_the_server() {
+        let folder = |id, account_id, role: Option<&str>| FolderInfo {
+            id,
+            account_id,
+            parent_id: None,
+            display_name: String::new(),
+            is_jmap: false,
+            path: format!("folder-{id}"),
+            delimiter: Some("/".into()),
+            role: role.map(str::to_owned),
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        };
+        let folders = [
+            folder(1, 1, Some("inbox")),
+            folder(2, 1, Some("archive")),
+            folder(3, 1, Some("sent")),
+            folder(4, 1, None),
+            folder(5, 1, Some("spam")),
+            folder(6, 2, Some("inbox")),
+        ];
+        let account = |account_id, mailbox| Scope::Account {
+            account_id,
+            mailbox,
+        };
+        assert_eq!(server_only_folders(Scope::UNIFIED_INBOX, &folders), [1, 6]);
+        assert_eq!(
+            server_only_folders(account(2, StandardMailbox::Inbox), &folders),
+            [6]
+        );
+        assert_eq!(
+            server_only_folders(account(1, StandardMailbox::Archive), &folders),
+            [2]
+        );
+        assert_eq!(server_only_folders(Scope::Folder(4), &folders), [4]);
+        assert_eq!(server_only_folders(Scope::Folder(1), &folders), [1]);
+        for scope in [
+            Scope::Unified(StandardMailbox::Sent),
+            account(1, StandardMailbox::Spam),
+            Scope::Folder(3),
+            Scope::Folder(5),
+            Scope::Important,
+            Scope::Label {
+                kind: LabelKind::Global,
+                id: 1,
+            },
+        ] {
+            assert!(server_only_folders(scope, &folders).is_empty(), "{scope:?}");
+        }
+    }
+
+    #[test]
+    fn every_mailbox_and_folder_gets_the_badge_of_its_list() {
+        let folder = |id, path: &str, role: Option<&str>| FolderInfo {
+            id,
+            account_id: 1,
+            parent_id: None,
+            display_name: path.into(),
+            is_jmap: false,
+            path: path.into(),
+            delimiter: Some("/".into()),
+            role: role.map(str::to_owned),
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        };
+        let folders = [
+            folder(1, "INBOX", Some("inbox")),
+            folder(2, "Archive", Some("archive")),
+            folder(3, "Projects", None),
+            // A custom folder only shares the Inbox's name.
+            folder(4, "Inbox", None),
+        ];
+        let badges = [
+            MailboxBadgeCounts {
+                account_id: 1,
+                inbox: 4,
+                starred: 2,
+                drafts: 1,
+                sent: 1,
+                archive: 3,
+                spam: 5,
+                trash: 6,
+                important: 3,
+                other: 1,
+                // The Inbox row counts its view, which leaves out snoozes.
+                folders: vec![(1, 9), (2, 3), (3, 2)],
+                labels: vec![(20, 2)],
+            },
+            MailboxBadgeCounts {
+                account_id: 2,
+                inbox: 1,
+                archive: 1,
+                other: 1,
+                labels: vec![(20, 1), (30, 4)],
+                ..Default::default()
+            },
+        ];
+
+        let entries = mailbox_entries_with_counts(&[test_account()], &folders, None, &badges);
+        let count = |scope| {
+            entries
+                .iter()
+                .find(|entry| entry.scope == Some(scope))
+                .unwrap()
+                .count
+        };
+        let standard = |mailbox| Scope::Account {
+            account_id: 1,
+            mailbox,
+        };
+        for (mailbox, expected) in [
+            (StandardMailbox::Inbox, 4),
+            (StandardMailbox::Starred, 2),
+            (StandardMailbox::Sent, 1),
+            (StandardMailbox::Archive, 3),
+            (StandardMailbox::Spam, 5),
+            (StandardMailbox::Trash, 6),
+            (StandardMailbox::Drafts, 1),
+        ] {
+            assert_eq!(count(standard(mailbox)), expected, "{mailbox:?}");
+        }
+        assert_eq!(count(Scope::Folder(3)), 2);
+        assert_eq!(count(Scope::Folder(4)), 0);
+        assert!(
+            entries
+                .iter()
+                .filter(|entry| entry.is_account)
+                .all(|entry| entry.count == 0)
+        );
+
+        let unified = unified_mailbox_entries(&badges);
+        let unified_count = |mailbox| {
+            unified
+                .iter()
+                .find(|entry| entry.scope == Some(Scope::Unified(mailbox)))
+                .unwrap()
+                .count
+        };
+        assert_eq!(unified_count(StandardMailbox::Archive), 4);
+        assert_eq!(unified_count(StandardMailbox::Trash), 6);
+        assert_eq!(
+            sidebar_badges(&badges),
+            SidebarBadges {
+                labels: HashMap::from([(20, 3), (30, 4)]),
+                important: 3,
+                other: 2,
+            }
+        );
     }
 
     #[test]
@@ -3619,7 +3930,7 @@ mod tests {
         assert_eq!(child.scope, Some(Scope::Folder(11)));
         assert_eq!(duplicate_leaf.scope, Some(Scope::Folder(12)));
         assert_eq!(custom_inbox.scope, Some(Scope::Folder(13)));
-        assert!(custom_inbox.count.is_empty());
+        assert_eq!(custom_inbox.count, 0);
     }
 
     #[test]

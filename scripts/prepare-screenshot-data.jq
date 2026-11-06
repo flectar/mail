@@ -98,6 +98,7 @@ def favicon_path(address):
     | .label.expanded = (if .label.expanded == null then true else .label.expanded end)
     | .label.can_create_children = (.label.can_create_children // false)
     | .label.is_global = (.label.is_global // false)
+    | .label.count = (.label.count // "")
   )
 | .mail_labels |= map(
     .account_id = (.account_id // -1)
@@ -108,6 +109,7 @@ def favicon_path(address):
     | .expanded = (if .expanded == null then true else .expanded end)
     | .can_create_children = (.can_create_children // false)
     | .is_global = (.is_global // false)
+    | .count = (.count // "")
   )
 | .mail_label_results |= map(
     .account_id = (.account_id // -1)
@@ -118,6 +120,7 @@ def favicon_path(address):
     | .expanded = (if .expanded == null then true else .expanded end)
     | .can_create_children = (.can_create_children // false)
     | .is_global = (.is_global // false)
+    | .count = (.count // "")
   )
 | (.thread_messages // [] | length) as $thread_count
 | .emails |= map(

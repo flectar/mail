@@ -73,6 +73,8 @@ export struct MailLabelRow {
     applied: bool,
     is_auto: bool,
     is_global: bool,
+    // Unread mail the label's list shows, as the sidebar badge shows it.
+    count: string,
 }
 
 // One visible navigation entry per list row; stable keys also identify sections.

@@ -328,6 +328,7 @@ export component WorkspaceSearchToolbar inherits Rectangle {
     callback filter-selected(string);
     callback leading-clicked;
     callback refresh;
+    out property <bool> search-focused: search-edit.has-focus;
 
     height: LayoutMetrics.control-height;
     background: transparent;

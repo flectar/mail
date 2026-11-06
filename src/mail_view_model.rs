@@ -145,12 +145,12 @@ pub(super) fn apply_background_mail_page(
         let old_counts = state
             .mailboxes
             .iter()
-            .filter_map(|mailbox| Some((mailbox.scope?, mailbox.count.clone())))
+            .filter_map(|mailbox| Some((mailbox.scope?, mailbox.count)))
             .collect::<HashMap<_, _>>();
         let mut mailboxes = mailboxes;
         for mailbox in &mut mailboxes {
             if let Some(count) = mailbox.scope.and_then(|scope| old_counts.get(&scope)) {
-                mailbox.count.clone_from(count);
+                mailbox.count = *count;
             }
         }
 
@@ -483,13 +483,17 @@ pub(super) fn render_current(
             &labels,
             &account_presentation,
         );
-        let list_projection = project_mail_list(
+        let mut list_projection = project_mail_list(
             visible,
             &projected_rows,
             &state.mail_groups,
             query.trim().is_empty() && app.get_group_mail_by_date(),
             Local::now(),
         );
+        let server_only = state.server_only_note();
+        if server_only > 0 {
+            list_projection.push(server_only_entry(server_only));
+        }
         let (previous_email_id, next_email_id) = adjacent_message_ids(visible, selected_id);
         (
             selected_email,
@@ -784,6 +788,7 @@ fn project_label_rows(
                 applied: applied.contains(&label.id),
                 is_auto: label.is_auto,
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
+                count: Default::default(),
             })
         })
         .collect()
@@ -820,6 +825,7 @@ fn applied_label_rows(
                 applied: true,
                 is_auto: label.is_auto,
                 is_global: !label.is_auto && label.owner_account_id.is_none(),
+                count: Default::default(),
             })
         })
         .collect()
@@ -1186,13 +1192,17 @@ pub(super) fn refresh_rows_only(
             &state.labels,
             &state.account_presentation,
         );
-        let list_projection = project_mail_list(
+        let mut list_projection = project_mail_list(
             visible,
             &projected_rows,
             &state.mail_groups,
             state.query.trim().is_empty() && app.get_group_mail_by_date(),
             Local::now(),
         );
+        let server_only = state.server_only_note();
+        if server_only > 0 {
+            list_projection.push(server_only_entry(server_only));
+        }
         (
             selected_id,
             checked_ids,
@@ -1352,7 +1362,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
     state.borrow().queue_warm_start_update();
 }
 
-fn sidebar_badge_text(count: usize) -> String {
+pub(super) fn sidebar_badge_text(count: usize) -> String {
     if count > 0 {
         count.to_string()
     } else {
@@ -1514,7 +1524,7 @@ pub(super) fn schedule_profile_avatar_fetches(
     }
 }
 
-fn contains_emoji(text: &str) -> bool {
+pub(super) fn contains_emoji(text: &str) -> bool {
     use unicode_properties::UnicodeEmoji as _;
 
     text.chars()
@@ -1540,6 +1550,37 @@ pub(super) fn make_mailbox_rows(
         .filter(|mailbox| mailbox.folder_id >= 0)
         .map(|mailbox| (mailbox.folder_id, mailbox.parent_folder_id))
         .collect::<HashMap<_, _>>();
+    // A collapsed row adds what it hides to its own badge, as in Thunderbird:
+    // a folder its subfolders, an account all its folders. Starred lists mail
+    // of other folders and Drafts counts drafts, so neither adds to its
+    // account.
+    let mut hidden = HashMap::<i64, u32>::new();
+    let mut account_totals = HashMap::<i64, u32>::new();
+    for mailbox in mailboxes
+        .iter()
+        .filter(|mailbox| !mailbox.is_account && mailbox.count > 0)
+    {
+        if !matches!(
+            mailbox.scope,
+            Some(Scope::Account {
+                mailbox: StandardMailbox::Starred | StandardMailbox::Drafts,
+                ..
+            })
+        ) {
+            let total = account_totals.entry(mailbox.account_id).or_default();
+            *total = total.saturating_add(mailbox.count);
+        }
+        let mut parent = mailbox.parent_folder_id;
+        // Broken provider data can loop; no real chain is longer than this.
+        for _ in 0..mailboxes.len() {
+            if parent < 0 {
+                break;
+            }
+            let total = hidden.entry(parent).or_default();
+            *total = total.saturating_add(mailbox.count);
+            parent = parents.get(&parent).copied().unwrap_or(-1);
+        }
+    }
     mailboxes
         .iter()
         .filter(|mailbox| {
@@ -1592,7 +1633,20 @@ pub(super) fn make_mailbox_rows(
                     .unwrap_or_default(),
                 has_avatar: avatar.is_some(),
                 is_account: mailbox.is_account,
-                count: mailbox.count.clone().into(),
+                count: sidebar_badge_text(if mailbox.is_account {
+                    account_totals
+                        .get(&mailbox.account_id)
+                        .copied()
+                        .unwrap_or(0)
+                } else if mailbox.has_children && collapsed_folder_ids.contains(&mailbox.folder_id)
+                {
+                    mailbox
+                        .count
+                        .saturating_add(hidden.get(&mailbox.folder_id).copied().unwrap_or(0))
+                } else {
+                    mailbox.count
+                } as usize)
+                .into(),
                 color: custom_color.unwrap_or_default(),
                 has_custom_color: custom_color.is_some(),
             }
@@ -2311,7 +2365,7 @@ mod tests {
             detail: String::new(),
             avatar: String::new(),
             is_account: false,
-            count: String::new(),
+            count: 0,
         }];
         let labels = vec![flectar_mail_core::models::Label {
             id: 7,
@@ -2351,7 +2405,7 @@ mod tests {
             detail: String::new(),
             avatar: String::new(),
             is_account: false,
-            count: String::new(),
+            count: 0,
         };
         let mailboxes = vec![
             folder(10, -1, 0, true, "Projects"),
@@ -2367,6 +2421,66 @@ mod tests {
             vec![10, 20]
         );
         assert!(!rows[0].expanded);
+    }
+
+    #[test]
+    fn collapsed_rows_add_up_the_unread_mail_they_hide() {
+        let entry = |folder_id, parent_folder_id, has_children, scope, count| MailboxEntry {
+            account_id: 1,
+            folder_id,
+            parent_folder_id,
+            depth: usize::from(parent_folder_id >= 0),
+            has_children,
+            is_standard: matches!(scope, Some(Scope::Account { .. })),
+            is_selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+            label: String::new(),
+            scope,
+            context: "Account".into(),
+            detail: String::new(),
+            avatar: String::new(),
+            is_account: scope.is_none(),
+            count,
+        };
+        let standard = |mailbox| {
+            Some(Scope::Account {
+                account_id: 1,
+                mailbox,
+            })
+        };
+        let mailboxes = vec![
+            entry(-1, -1, false, None, 0),
+            entry(1, -1, true, standard(StandardMailbox::Inbox), 4),
+            entry(2, 1, false, Some(Scope::Folder(2)), 1),
+            entry(-1, -1, false, standard(StandardMailbox::Starred), 3),
+            entry(3, -1, false, standard(StandardMailbox::Drafts), 2),
+            entry(4, -1, false, standard(StandardMailbox::Spam), 5),
+            entry(10, -1, true, Some(Scope::Folder(10)), 0),
+            entry(11, 10, true, Some(Scope::Folder(11)), 6),
+            entry(12, 11, false, Some(Scope::Folder(12)), 7),
+        ];
+        let count = |rows: &[MailboxRow], scope: &str| {
+            rows.iter()
+                .find(|row| row.scope == scope)
+                .map(|row| row.count.to_string())
+                .unwrap()
+        };
+
+        let open = make_mailbox_rows(&mailboxes, &HashMap::new(), &[], &HashSet::new());
+        assert_eq!(count(&open, "Folder:10"), "");
+        assert_eq!(count(&open, "Folder:11"), "6");
+        // Starred is a view of other folders and Drafts counts drafts, so the
+        // account adds up Inbox, its subfolder, Spam and the folder tree.
+        assert_eq!(open[0].count, "23");
+
+        let collapsed =
+            make_mailbox_rows(&mailboxes, &HashMap::new(), &[], &HashSet::from([1, 10]));
+        assert_eq!(count(&collapsed, "Account:1:Inbox"), "5");
+        assert_eq!(count(&collapsed, "Folder:10"), "13");
+        assert_eq!(collapsed[0].count, "23");
+        assert!(collapsed.iter().all(|row| row.scope != "Folder:12"));
     }
 
     #[test]

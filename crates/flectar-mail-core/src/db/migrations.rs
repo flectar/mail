@@ -42,6 +42,11 @@ const MIGRATIONS: &[Migration] = &[
     Migration::TableRebuild(include_str!("migrations/023_local_mail.sql")),
     Migration::Plain(include_str!("migrations/024_message_list_indexes.sql")),
     Migration::Plain(include_str!("migrations/025_draft_reply_header.sql")),
+    Migration::Plain(include_str!("migrations/026_unread_message_index.sql")),
+    Migration::Plain(include_str!("migrations/027_folder_server_counts.sql")),
+    Migration::Plain(include_str!("migrations/028_folder_move_recency.sql")),
+    Migration::Plain(include_str!("migrations/029_mail_transfers.sql")),
+    Migration::Plain(include_str!("migrations/030_folder_server_only_unseen.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -350,6 +355,7 @@ mod tests {
             "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
+            "mail_transfers",
             "message_bodies",
             "message_embeddings",
             "message_folders",
@@ -1691,13 +1697,14 @@ mod tests {
     #[test]
     fn newer_profiles_are_rejected_without_mutation() {
         let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", 28).unwrap();
+        let newer = LATEST_VERSION + 1;
+        conn.pragma_update(None, "user_version", newer).unwrap();
         let error = run(&mut conn).unwrap_err().to_string();
         assert!(error.contains("requires a newer application"));
         assert_eq!(
             conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
                 .unwrap(),
-            28
+            newer
         );
         assert!(application_tables(&conn).is_empty());
     }

@@ -303,6 +303,15 @@ async fn fail_action(
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn rollback_failed_for_tests(
+    conn: &mut rusqlite::Connection,
+    failed: &repo::actions::PendingAction,
+    message: &str,
+) {
+    mark_failed_and_rollback(conn, failed, message).unwrap();
+}
+
 fn mark_failed_and_rollback(
     conn: &mut rusqlite::Connection,
     failed: &repo::actions::PendingAction,
@@ -310,6 +319,28 @@ fn mark_failed_and_rollback(
 ) -> Result<Option<i64>> {
     let tx = conn.transaction()?;
     repo::actions::set_state(&tx, failed.id, "failed", Some(message))?;
+    // A copy that failed leaves the mail where it was.
+    if failed.kind == "copy" {
+        let (Some(message_id), Some(target_folder)) =
+            (failed.message_id, failed.payload["targetFolderId"].as_i64())
+        else {
+            tx.commit()?;
+            return Ok(None);
+        };
+        let moved_there = repo::messages::get_row(&tx, message_id)?
+            .is_some_and(|row| row.folder_id == Some(target_folder));
+        if !moved_there {
+            tx.execute(
+                "DELETE FROM message_folders WHERE message_id=?1 AND folder_id=?2",
+                rusqlite::params![message_id, target_folder],
+            )?;
+        }
+        if let Some(thread_id) = failed.thread_id {
+            repo::threads::recompute(&tx, thread_id)?;
+        }
+        tx.commit()?;
+        return Ok(failed.thread_id);
+    }
     if !is_move_kind(&failed.kind) {
         tx.commit()?;
         return Ok(None);
@@ -491,6 +522,7 @@ async fn execute_on_imap(
         "add_label" => keyword_action(ctx, session, action, true).await,
         "remove_label" => keyword_action(ctx, session, action, false).await,
         "append_sent" => append_sent_action(ctx, config, session, action).await,
+        "remove_transferred" => remove_transferred(ctx, config, session, action).await,
         // Local-only kinds recorded for undo history.
         "snooze" | "unsnooze" => Ok(()),
         other => {
@@ -675,6 +707,73 @@ async fn move_action(
         .write(move |conn| repo::messages::set_uid_and_folder(conn, message_id, tfid, None))
         .await?;
     Ok(())
+}
+
+/// Removes the original of a message moved to another account, whose copy
+/// is in place there: flagged deleted and expunged, as Thunderbird and
+/// Evolution remove it. A server that can't expunge one message (no
+/// UIDPLUS) gets it moved to Trash instead, so no other deleted mail goes.
+async fn remove_transferred(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    session: &mut Session,
+    action: &repo::actions::PendingAction,
+) -> Result<()> {
+    let Some(message_id) = action.message_id else {
+        return Ok(());
+    };
+    let row = ctx
+        .db
+        .read(move |conn| repo::messages::get_row(conn, message_id))
+        .await?;
+    let Some(folder_id) = row.as_ref().and_then(|row| row.folder_id) else {
+        // Gone already.
+        return Ok(());
+    };
+    let folder = ctx
+        .db
+        .read(move |conn| repo::folders::get(conn, folder_id))
+        .await?
+        .ok_or_else(|| CoreError::NotFound("the message's folder".into()))?;
+    if folder.account_id != config.id {
+        return Err(CoreError::Other(
+            "the moved message belongs to another account".into(),
+        ));
+    }
+    let selected = imap::select(session, &folder.path).await?;
+    // A UID stands for the message only while the folder's UIDVALIDITY is
+    // the one it was learned under.
+    let known = row
+        .as_ref()
+        .and_then(|row| row.uid)
+        .filter(|_| folder.uidvalidity.is_some() && folder.uidvalidity == selected.uid_validity);
+    let uid = match valid_uid(known) {
+        Some(uid) => Some(uid),
+        None => uid_by_message_id(session, row.and_then(|row| row.message_id).as_deref()).await?,
+    };
+    if let Some(uid) = uid {
+        let uidplus = session
+            .capabilities()
+            .await
+            .map_err(|error| CoreError::Imap(error.to_string()))?
+            .has_str("UIDPLUS");
+        let trash = ctx
+            .db
+            .read({
+                let account_id = config.id;
+                move |conn| repo::folders::by_role(conn, account_id, roles::TRASH)
+            })
+            .await?
+            .filter(|trash| trash.id != folder_id);
+        match (uidplus, trash) {
+            (true, _) => imap::uid_delete_permanently(session, uid).await?,
+            (false, Some(trash)) => imap::uid_move(session, uid, &trash.path).await?,
+            // Flagged deleted, as Thunderbird leaves it until a client
+            // expunges the folder.
+            (false, None) => imap::store_flag(session, uid, "\\Deleted", true).await?,
+        }
+    }
+    crate::sync::finish_permanent_delete(ctx, Some(message_id)).await
 }
 
 async fn append_sent_action(

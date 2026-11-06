@@ -90,6 +90,9 @@
     "folder-add.svg": {
       "source": "folder-plus"
     },
+    "folder-move.svg": {
+      "source": "folder-input"
+    },
     "forward.svg": {
       "source": "forward"
     },
@@ -375,6 +378,10 @@
     "folder": {
       "path": "sources/folder.svg",
       "sha256": "6b4194d406c14d50d81f3024b5ad715e81aea3a12a81d4ee80b98ec4c9a71205"
+    },
+    "folder-input": {
+      "path": "sources/folder-input.svg",
+      "sha256": "565c518d7a199b9a7da9a0b3af742db7e6e6538c5811d3d0b8844cee496d5193"
     },
     "folder-open": {
       "path": "sources/folder-open.svg",

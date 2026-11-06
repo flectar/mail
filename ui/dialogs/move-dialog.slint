@@ -1,0 +1,342 @@
+import { ScrollView } from "std-widgets.slint";
+import { AppTheme, LayoutMetrics, MailIconPalette } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
+
+// One destination in the Move to picker, or a heading above a group of them.
+export struct MoveTargetRow {
+    // What `MovePickerUi.choose` takes; -1 on headings.
+    key: int,
+    // inbox, archive, spam, trash or folder; on headings, recent, folders,
+    // or the account of the rows below: account, device or unified.
+    kind: string,
+    // The name shown, which for standard mailboxes is translated; empty on
+    // headings, which their kind names.
+    label: string,
+    // Where the folder is, where indentation doesn't show it.
+    detail: string,
+    depth: int,
+    label_has_emoji: bool,
+}
+
+// The non-drag way to move mail into a folder (WCAG 2.5.7), and to copy it.
+// Rust lists the destinations when the picker opens and as the search
+// changes; choosing one for a move does what dropping the mail on that
+// sidebar row does.
+export global MovePickerUi {
+    in-out property <bool> open: false;
+    // move or copy.
+    in property <string> mode: "move";
+    in property <[MoveTargetRow]> rows: [];
+    in-out property <string> query: "";
+    // Where focus goes back to once the picker closes: list or reader.
+    in-out property <string> return-to: "list";
+    // Opens the picker to move or copy mail of "row" (a list row, with the
+    // rows checked along with it), "checked" (the checked rows) or "open"
+    // (the open mail).
+    callback request(/* mode */ string, /* source */ string, /* email id */ int);
+    callback search(string);
+    callback choose(/* key */ int);
+
+    // What a row shows, which search matches too: a standard mailbox's or a
+    // heading's translated name, or the folder's own.
+    public pure function display-name(kind: string, label: string) -> string {
+        if kind == "inbox" { return @tr("Inbox"); }
+        if kind == "archive" { return @tr("Archive"); }
+        if kind == "spam" { return @tr("Spam"); }
+        if kind == "trash" { return @tr("Trash"); }
+        if kind == "recent" { return @tr("Recent"); }
+        if kind == "folders" { return @tr("All folders"); }
+        if kind == "device" { return @tr("On this device"); }
+        if kind == "unified" { return @tr("All accounts"); }
+        label
+    }
+}
+
+export component MoveDialog inherits Rectangle {
+    in property <bool> compact: false;
+
+    private property <[MoveTargetRow]> rows: MovePickerUi.rows;
+    private property <length> row-height: root.compact ? LayoutMetrics.touch-target : 34px;
+    private property <length> indent: 16px;
+    private property <int> highlighted: -1;
+    private property <length> scroll-y: 0px;
+    private property <length> list-height: 0px;
+    // The card keeps the size it opens with, so the search field stays put
+    // while the list narrows.
+    private property <int> opened-rows: 0;
+    // Everything on the card but the rows.
+    private property <length> chrome-height: root.compact ? 136px : 124px;
+
+    background: #00000066;
+    forward-focus: search-field;
+    accessible-role: groupbox;
+    accessible-label: MovePickerUi.mode == "copy" ? @tr("Copy to") : @tr("Move to");
+
+    // A heading is always followed by a destination, so one step past it
+    // reaches one.
+    function first-choice() -> int {
+        if root.rows.length == 0 { return -1; }
+        root.rows[0].key >= 0 ? 0 : 1
+    }
+
+    function reset() {
+        root.scroll-y = 0px;
+        root.highlighted = root.first-choice();
+    }
+
+    // Moves the highlight `steps` rows, on past a heading it lands on, and
+    // stops at either end.
+    function move-highlight(steps: int) {
+        if root.rows.length == 0 { return; }
+        let last = root.rows.length - 1;
+        let landed = root.highlighted < 0
+            ? root.first-choice()
+            : max(0, min(last, root.highlighted + steps));
+        // A heading at the top leads into its destinations.
+        let past = root.rows[landed].key >= 0 ? landed
+            : steps < 0 && landed > 0 ? landed - 1
+            : landed + 1;
+        root.highlighted = past > last ? root.highlighted
+            : root.rows[past].key >= 0 ? past
+            : root.first-choice();
+        root.bring-highlight-into-view();
+    }
+
+    function bring-highlight-into-view() {
+        if root.highlighted < 0 { return; }
+        // A heading just above the highlight scrolls in with it.
+        let top = root.highlighted > 0 && root.rows[root.highlighted - 1].key < 0
+            ? root.highlighted - 1 : root.highlighted;
+        let item-y = 4px + top * root.row-height;
+        let item-bottom = 4px + (root.highlighted + 1) * root.row-height;
+        if item-y + root.scroll-y < 0px {
+            root.scroll-y = -item-y;
+        } else if item-bottom + root.scroll-y > root.list-height {
+            root.scroll-y = root.list-height - item-bottom;
+        }
+    }
+
+    function choose-highlighted() {
+        if root.highlighted < 0 || root.highlighted >= root.rows.length { return; }
+        let key = root.rows[root.highlighted].key;
+        if key < 0 { return; }
+        MovePickerUi.open = false;
+        MovePickerUi.choose(key);
+    }
+
+    changed rows => { root.reset(); }
+    init => {
+        root.opened-rows = root.rows.length;
+        root.reset();
+        search-field.focus();
+    }
+
+    // A click outside the card closes the picker.
+    TouchArea {
+        clicked => { MovePickerUi.open = false; }
+    }
+
+    card := Rectangle {
+        width: root.compact ? root.width - 24px : min(440px, root.width - 32px);
+        height: min(root.height - (root.compact ? 48px : 64px),
+            root.chrome-height + max(4, root.opened-rows) * root.row-height);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface-raised;
+        drop-shadow-blur: 18px;
+        drop-shadow-offset-y: 5px;
+        drop-shadow-color: #0000002e;
+        clip: true;
+
+        // Swallows clicks so only the backdrop closes the picker.
+        TouchArea { }
+
+        keys := FocusScope {
+            // Arrows, Return and Escape steer the list while the search
+            // field keeps every other key.
+            capture-key-pressed(event) => {
+                if event.text == Key.DownArrow {
+                    root.move-highlight(1);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.move-highlight(-1);
+                    return accept;
+                }
+                if event.text == Key.PageDown {
+                    root.move-highlight(max(1, floor(root.list-height / root.row-height) - 1));
+                    return accept;
+                }
+                if event.text == Key.PageUp {
+                    root.move-highlight(-max(1, floor(root.list-height / root.row-height) - 1));
+                    return accept;
+                }
+                if event.text == Key.Return {
+                    root.choose-highlighted();
+                    return accept;
+                }
+                if event.text == Key.Escape {
+                    MovePickerUi.open = false;
+                    return accept;
+                }
+                reject
+            }
+
+            VerticalLayout {
+                padding: 12px;
+                padding-bottom: 8px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: MovePickerUi.mode == "copy" ? @tr("Copy to") : @tr("Move to");
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    ToolbarIconButton {
+                        compact: root.compact;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        hover-background: AppTheme.muted-control-bg;
+                        tooltip-text: @tr("Close");
+                        clicked => { MovePickerUi.open = false; }
+                    }
+                }
+
+                search-field := LineEdit {
+                    height: root.compact ? LayoutMetrics.touch-target : 36px;
+                    text <=> MovePickerUi.query;
+                    placeholder-text: @tr("Search folders");
+                    input-label: @tr("Search folders");
+                    show-leading-icon: true;
+                    leading-icon: @image-url("../icons/lucide/outline/search.svg");
+                    leading-icon-color: AppTheme.muted;
+                    edited(value) => { MovePickerUi.search(value); }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+
+                    folder-list := ScrollView {
+                        accessible-role: list;
+                        accessible-label: @tr("Folders");
+                        accessible-item-count: root.rows.length;
+                        content-y <=> root.scroll-y;
+                        content-height: max(self.visible-height, root.rows.length * root.row-height + 8px);
+                        horizontal-scrollbar-policy: always-off;
+                        changed visible-height => { root.list-height = self.visible-height; }
+                        init => { root.list-height = self.visible-height; }
+
+                        for row[index] in root.rows : Rectangle {
+                            x: 0px;
+                            y: 4px + index * root.row-height;
+                            width: folder-list.visible-width;
+                            height: root.row-height;
+                            border-radius: 6px;
+                            background: row.key >= 0 && index == root.highlighted
+                                ? AppTheme.control-bg : transparent;
+
+                            if row.key < 0 : Text {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height - 4px;
+                                text: MovePickerUi.display-name(row.kind, row.label);
+                                color: AppTheme.muted;
+                                font-size: TypeScale.caption;
+                                font-weight: 600;
+                                font-family: row.label_has_emoji ? "Noto Emoji" : "";
+                                vertical-alignment: bottom;
+                                overflow: elide;
+                                accessible-role: none;
+                            }
+
+                            if row.key >= 0 : Rectangle {
+                                property <length> start: 10px + row.depth * root.indent;
+
+                                icon := Image {
+                                    x: parent.start;
+                                    y: (parent.height - self.height) / 2;
+                                    width: LayoutMetrics.icon-size;
+                                    height: LayoutMetrics.icon-size;
+                                    source: row.kind == "inbox" ? @image-url("../icons/lucide/filled/inbox-flectar.svg")
+                                        : row.kind == "archive" ? @image-url("../icons/lucide/filled/archive.svg")
+                                        : row.kind == "spam" ? @image-url("../icons/lucide/filled/alert.svg")
+                                        : row.kind == "trash" ? @image-url("../icons/lucide/filled/trash.svg")
+                                        : @image-url("../icons/lucide/filled/file-directory.svg");
+                                    colorize: row.kind == "inbox" ? MailIconPalette.inbox
+                                        : row.kind == "archive" ? MailIconPalette.archive
+                                        : row.kind == "spam" ? MailIconPalette.spam
+                                        : row.kind == "trash" ? MailIconPalette.trash
+                                        : MailIconPalette.folders;
+                                    image-fit: contain;
+                                    accessible-role: none;
+                                }
+                                name := Text {
+                                    x: icon.x + icon.width + 10px;
+                                    width: min(self.preferred-width, parent.width - self.x - 10px);
+                                    height: parent.height;
+                                    text: row.label;
+                                    color: AppTheme.heading;
+                                    font-size: TypeScale.body;
+                                    font-weight: 500;
+                                    font-family: row.label_has_emoji ? "Noto Emoji" : "";
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    accessible-role: none;
+                                }
+                                Text {
+                                    x: name.x + name.width + 8px;
+                                    width: max(0px, parent.width - self.x - 10px);
+                                    height: parent.height;
+                                    text: row.detail;
+                                    color: AppTheme.muted;
+                                    font-size: TypeScale.secondary;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    accessible-role: none;
+                                }
+                                TouchArea {
+                                    accessible-role: button;
+                                    accessible-label: row.detail == "" ? row.label : row.label + ", " + row.detail;
+                                    accessible-item-index: index;
+                                    accessible-action-default => {
+                                        root.highlighted = index;
+                                        root.choose-highlighted();
+                                    }
+                                    changed has-hover => {
+                                        if self.has-hover { root.highlighted = index; }
+                                    }
+                                    clicked => {
+                                        root.highlighted = index;
+                                        root.choose-highlighted();
+                                    }
+                                    mouse-cursor: pointer;
+                                }
+                            }
+                        }
+                    }
+
+                    if root.rows.length == 0 : Text {
+                        width: parent.width;
+                        height: 64px;
+                        text: @tr("No matching folders");
+                        color: AppTheme.muted;
+                        font-size: TypeScale.body;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

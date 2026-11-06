@@ -47,6 +47,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     in-out property <string> filter-query: "";
     private property <bool> filter-open: root.filter-query != "";
     in property <string> unified-count;
+    in property <bool> sync-in-progress: false;
     in property <string> selected-scope;
     in property <bool> monochrome-icons: false;
     in property <color> background-color;
@@ -65,6 +66,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
     callback select-scope(string);
     callback compose;
     callback manage-accounts;
+    callback sync-account(int);
     callback choose-profile(string);
     callback create-profile();
     callback manage-profiles();
@@ -385,6 +387,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: @tr("Important");
+                        count: entry.mailbox.count;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Important";
                         mail-drop-enabled: true;
@@ -405,6 +408,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: @tr("Other");
+                        count: entry.mailbox.count;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Other";
                         mail-drop-enabled: true;
@@ -425,6 +429,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         y: 0px;
                         width: parent.width;
                         label: entry.label.name;
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         scope: "Category:" + entry.label.id;
@@ -467,6 +472,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         width: parent.width;
                         label: entry.label.name;
                         accessible-name: @tr("Global label {}", entry.label.name);
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent;
                         label-id: entry.label.id;
@@ -517,6 +523,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         avatar-image: entry.mailbox.avatar_image;
                         has-avatar-image: entry.mailbox.has_avatar;
                         has-avatar: !self.local;
+                        count: entry.mailbox.count;
                         icon: @image-url("../icons/lucide/filled/folders.svg");
                         sidebar-background: root.background-color;
                         hover-background: root.hover-background;
@@ -524,7 +531,12 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         muted-color: root.muted-color;
                         icon-color: self.local && !root.monochrome-icons ? MailIconPalette.folders : root.body-color;
                         open: entry.open;
+                        // Mail on this device has no server or settings page.
+                        account-menu: !self.local;
+                        can-check-mail: !root.sync-in-progress;
                         toggled(open) => { root.toggle-section(entry.key, open); }
+                        check-mail => { root.sync-account(entry.mailbox.account_id); }
+                        account-settings => { root.manage-accounts(); }
                     }
 
                     if entry.kind == SidebarRowKind.folder: SidebarItem {
@@ -627,6 +639,7 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         label: entry.label.display_name;
                         label-path: entry.label.name;
                         accessible-name: @tr("{} label, {} account", entry.label.name, entry.label.account_name);
+                        count: entry.label.count;
                         label-has-emoji: entry.label.name_has_emoji;
                         left-padding: SidebarStyle.icon-left + SidebarStyle.branch-indent
                             + entry.label.depth * SidebarStyle.branch-indent;

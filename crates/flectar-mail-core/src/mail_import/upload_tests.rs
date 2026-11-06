@@ -678,14 +678,14 @@ async fn mail_is_imported_into_gmail_with_its_labels() {
         folder_id: 1,
         path: "Local Folders/Inbox".into(),
         jmap_id: None,
-        gmail_label: Some("Label_7".into()),
+        gmail_labels: Some(vec!["Label_7".into()]),
     };
     let upload = |id: &str, subject: &str, seen: bool, flagged: bool| {
         let message = incoming(0, message(id, subject, "").into_bytes(), None, None, 0).unwrap();
         let uploader = &uploader;
         let target = &target;
         let id = format!("{id}@example.org");
-        async move { gmail_upload(uploader, &message, target, Some(&id), seen, flagged).await }
+        async move { gmail_upload(uploader, false, &message, target, Some(&id), seen, flagged).await }
     };
 
     assert!(matches!(
@@ -734,6 +734,89 @@ async fn mail_is_imported_into_gmail_with_its_labels() {
             .target
             .contains("includeSpamTrash=true&q=rfc822msgid%3A%3Ca%40example.org%3E")
     );
+}
+
+#[tokio::test]
+async fn transfers_insert_into_gmail_and_fetch_originals_from_it() {
+    use base64::Engine as _;
+    let original = message("t", "Moved here", "");
+    let encoded = base64::engine::general_purpose::URL_SAFE.encode(&original);
+    let gmail = HttpServer::start(move |request| {
+        let json = "application/json";
+        if request.target.starts_with("/gmail/v1/users/me/messages?") {
+            (200, json, json!({ "resultSizeEstimate": 0 }).to_string())
+        } else if request.target == "/gmail/v1/users/me/messages/a%2Fb?format=raw" {
+            (
+                200,
+                json,
+                json!({ "id": "a/b", "raw": encoded }).to_string(),
+            )
+        } else if request
+            .target
+            .starts_with("/upload/gmail/v1/users/me/messages?")
+        {
+            (200, json, json!({ "id": "9", "threadId": "9" }).to_string())
+        } else {
+            (404, json, "{}".into())
+        }
+    })
+    .await;
+    let (_directory, core, account_id) = account(MailProtocol::Gmail, String::new(), 0).await;
+    let ctx = core.sync_ctx();
+    ctx.tokens
+        .store_initial(
+            account_id,
+            "access".into(),
+            Some(3600),
+            Some("refresh".into()),
+            "client".into(),
+            None,
+        )
+        .await
+        .unwrap();
+    let config = core.folder_account_config(account_id).await.unwrap();
+    let uploader = sync::gmail::Uploader::with_base(ctx, config, &gmail.origin).unwrap();
+
+    // The original comes whole, from Gmail's base64url with its padding.
+    assert_eq!(
+        uploader.raw_message("a/b", 100).await.unwrap(),
+        original.as_bytes()
+    );
+    // Archived mail has no label but its state.
+    let archive = Target {
+        folder_id: 1,
+        path: "Archive".into(),
+        jmap_id: None,
+        gmail_labels: Some(Vec::new()),
+    };
+    let moved = incoming(0, original.clone().into_bytes(), None, None, 0).unwrap();
+    assert!(matches!(
+        gmail_upload(
+            &uploader,
+            true,
+            &moved,
+            &archive,
+            Some("t@example.org"),
+            false,
+            false
+        )
+        .await
+        .unwrap(),
+        Outcome::Uploaded
+    ));
+
+    let requests = gmail.requests();
+    let insert = requests
+        .iter()
+        .find(|request| request.method == "POST")
+        .unwrap();
+    // Inserted as IMAP APPEND keeps mail, not delivered: no spam setting,
+    // and dated by its Date header rather than now.
+    assert_eq!(
+        insert.target,
+        "/upload/gmail/v1/users/me/messages?uploadType=multipart&internalDateSource=dateHeader"
+    );
+    assert!(String::from_utf8_lossy(&insert.body).contains("{\"labelIds\":[\"UNREAD\"]}"));
 }
 
 /// A JMAP server's mailboxes, uploads and mail.

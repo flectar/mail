@@ -105,6 +105,99 @@ pub struct MailImportReport {
 }
 
 impl crate::Core {
+    /// Files one message in a folder kept only on this device, local mail's
+    /// or a POP3 account's, with its date and its read and starred states,
+    /// unless the folder has it already. Returns whether it was filed.
+    pub(crate) async fn store_in_folder(
+        &self,
+        folder_id: i64,
+        raw: Vec<u8>,
+        seen: bool,
+        flagged: bool,
+        date_ms: Option<i64>,
+    ) -> Result<bool> {
+        let (folder, protocol, own) = self
+            .db
+            .read(move |conn| {
+                let folder = repo::folders::get(conn, folder_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("folder {folder_id}")))?;
+                let protocol = repo::accounts::protocol(conn, folder.account_id)?
+                    .ok_or_else(|| CoreError::NotFound(format!("account {}", folder.account_id)))?;
+                let own = repo::sender_identities::own_addresses_of_all(conn)?;
+                Ok((folder, protocol, own))
+            })
+            .await?;
+        let account_id = folder.account_id;
+        let parsed = ingest::parse_or_text(&raw);
+        let key = Key::of(&parsed.headers, date_ms, raw.len());
+        let check = key.clone();
+        if self
+            .db
+            .read(move |conn| check.present(conn, account_id, folder_id))
+            .await?
+        {
+            return Ok(false);
+        }
+        let directory = self.paths.mail_dir(account_id);
+        tokio::fs::create_dir_all(&directory).await?;
+        let path = directory.join(format!("{:032x}{ORIGINAL_SUFFIX}", rand::random::<u128>()));
+        crate::file_io::write_durable(&path, &raw, "transferred message").await?;
+        let stored_path = path.to_string_lossy().into_owned();
+        let role = folder.role;
+        let size = i64::try_from(raw.len()).ok();
+        let committed = self
+            .db
+            .write_durable(move |tx| {
+                if key.present(tx, account_id, folder_id)? {
+                    return Ok(None);
+                }
+                let mut importer = Importer::with_own_addresses(tx, account_id, own)?;
+                let imported = importer.insert(
+                    tx,
+                    &parsed.headers,
+                    &Delivery {
+                        folder_id,
+                        folder_role: role.as_deref(),
+                        uid: None,
+                        received_ms: date_ms,
+                        seen,
+                        flagged,
+                        draft: false,
+                        has_attachments: parsed
+                            .attachments
+                            .iter()
+                            .any(|attachment| !attachment.is_inline),
+                        size,
+                    },
+                )?;
+                ingest::store_body(tx, imported.message_id, &stored_path, &parsed)?;
+                repo::threads::recompute(tx, imported.thread_id)?;
+                // Mail in a POP3 account's Inbox goes in its tabs, as mail
+                // it downloads does.
+                let thread_ids = if protocol == MailProtocol::Pop3 {
+                    importer.finish(tx)?.0
+                } else {
+                    importer.finish_unrouted()
+                };
+                Ok(Some(thread_ids))
+            })
+            .await;
+        match committed {
+            Ok(Some(thread_ids)) => {
+                self.bus.emit(CoreEvent::MailUpdated { thread_ids });
+                Ok(true)
+            }
+            Ok(None) => {
+                let _ = tokio::fs::remove_file(&path).await;
+                Ok(false)
+            }
+            Err(error) => {
+                let _ = tokio::fs::remove_file(&path).await;
+                Err(error)
+            }
+        }
+    }
+
     /// Copy the chosen folders of a source into a destination's folders,
     /// reporting progress as it goes. Setting `stop` ends the import after
     /// the batch being stored.

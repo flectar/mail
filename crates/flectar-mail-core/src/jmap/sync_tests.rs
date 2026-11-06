@@ -110,6 +110,9 @@ struct MockJmap {
     mailboxes: Vec<Value>,
     emails: Vec<Value>,
     changes: Option<Value>,
+    /// What Mailbox/changes answers: its `created` and `updated` ids and
+    /// `hasMoreChanges`, or an `error` type.
+    mailbox_changes: Option<Value>,
     /// Email/get fails with serverFail while this id is requested and the
     /// flag is set.
     fail_on: Option<(&'static str, Arc<AtomicBool>)>,
@@ -126,6 +129,7 @@ impl Default for MockJmap {
             mailboxes: Vec::new(),
             emails: Vec::new(),
             changes: None,
+            mailbox_changes: None,
             fail_on: None,
             missing: Vec::new(),
             // One Email/get object per page.
@@ -394,6 +398,18 @@ impl MockJmap {
                         .collect(),
                 };
                 json!({"accountId": "mail-account", "state": "mailboxes-0", "list": list, "notFound": []})
+            }
+            "Mailbox/changes" => {
+                let changes = self.mailbox_changes.as_ref().unwrap();
+                if let Some(error) = changes.get("error") {
+                    return Err(json!({"type": error}));
+                }
+                json!({
+                    "accountId": "mail-account", "oldState": args["sinceState"],
+                    "newState": "mailboxes-new", "hasMoreChanges": changes["hasMoreChanges"],
+                    "created": changes["created"], "updated": changes["updated"],
+                    "destroyed": [], "updatedProperties": null
+                })
             }
             "Mailbox/query" => {
                 let position = args["position"].as_u64().unwrap_or(0) as usize;
@@ -1476,4 +1492,148 @@ async fn body_fetches_reuse_one_session() {
         .await
         .unwrap();
     mock.task.abort();
+}
+
+/// A mailbox with the unread count the server keeps for it.
+fn counted(id: &str, name: &str, role: Option<&str>, unread: u64) -> Value {
+    let mut mailbox = mailbox(id, name, role);
+    mailbox["unreadEmails"] = json!(unread);
+    mailbox
+}
+
+/// Runs a count sync against a server whose Mailbox/changes answers
+/// `changes`, with the account's mailboxes last read at `state`. Returns the
+/// ids each Mailbox/get asked for and whether Mailbox/changes was asked.
+async fn count_sync(ctx: &SyncCtx, state: &str, changes: Value) -> (Vec<Vec<String>>, bool) {
+    let state = state.to_owned();
+    ctx.db
+        .write(move |conn| {
+            conn.execute(
+                "INSERT INTO jmap_sync_state(account_id, mailbox_state) VALUES (1, ?1)
+                 ON CONFLICT(account_id) DO UPDATE SET mailbox_state = excluded.mailbox_state",
+                [state],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let mock = MockJmap {
+        mailboxes: vec![
+            counted("inbox-remote", "Inbox", Some("inbox"), 4),
+            counted("lists-remote", "Lists", None, 7),
+        ],
+        mailbox_changes: Some(changes),
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    sync_mailbox_counts(ctx, 1, &mock.connected).await.unwrap();
+    let gets = mock
+        .calls("Mailbox/get")
+        .iter()
+        .map(|call| {
+            assert_eq!(call["properties"], json!(["id", "unreadEmails"]));
+            call["ids"]
+                .as_array()
+                .expect("counts are asked by id")
+                .iter()
+                .map(|id| id.as_str().unwrap().to_owned())
+                .collect()
+        })
+        .collect();
+    let asked_changes = !mock.calls("Mailbox/changes").is_empty();
+    mock.task.abort();
+    (gets, asked_changes)
+}
+
+async fn only_on_server(ctx: &SyncCtx) -> (Option<i64>, Option<i64>) {
+    ctx.db
+        .read(|conn| {
+            Ok((
+                repo::folders::server_only_unseen(conn, &[1])?,
+                repo::folders::server_only_unseen(conn, &[2])?,
+            ))
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn counts_are_asked_only_for_mailboxes_that_changed() {
+    let (_dir, ctx, _config) = fixture().await;
+    ctx.db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, account_id, path, jmap_id, backfill_done)
+                 VALUES (2, 1, 'Lists', 'lists-remote', 1)",
+                [],
+            )?;
+            // The Inbox keeps one of its four unread messages here.
+            crate::db::testutil::seed_message(conn, "sender@mail.example", "Kept", false);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let changed = |updated: Value, more: bool| json!({"created": [], "updated": updated, "hasMoreChanges": more});
+    let mut events = ctx.bus.subscribe();
+    let mut told = move || {
+        std::iter::from_fn(|| events.try_recv().ok())
+            .filter(|event| matches!(event, CoreEvent::ServerOnlyUnreadChanged { account_id: 1 }))
+            .count()
+    };
+
+    // First the Inbox alone.
+    let (gets, asked) = count_sync(&ctx, "mailboxes-0", changed(json!([]), false)).await;
+    assert_eq!(
+        (gets, asked),
+        (vec![vec!["inbox-remote".to_owned()]], false)
+    );
+    assert_eq!(only_on_server(&ctx).await, (Some(3), None));
+    assert_eq!(told(), 1);
+    // Nothing changed since: nothing asked.
+    let (gets, asked) = count_sync(&ctx, "mailboxes-0", changed(json!([]), false)).await;
+    assert_eq!((gets.len(), asked), (0, false));
+    assert_eq!(told(), 0);
+    // Then what changed.
+    let (gets, asked) =
+        count_sync(&ctx, "mailboxes-1", changed(json!(["lists-remote"]), false)).await;
+    assert_eq!((gets, asked), (vec![vec!["lists-remote".to_owned()]], true));
+    assert_eq!(only_on_server(&ctx).await, (Some(3), Some(7)));
+
+    // While mail read here is on its way, the counts wait.
+    let action = ctx
+        .db
+        .write(|conn| {
+            conn.execute(
+                "INSERT INTO pending_actions (account_id, kind, created_at) VALUES (1, 'mark_read', 0)",
+                [],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })
+        .await
+        .unwrap();
+    let (gets, asked) =
+        count_sync(&ctx, "mailboxes-2", changed(json!(["inbox-remote"]), false)).await;
+    assert_eq!((gets.len(), asked), (0, false));
+    ctx.db
+        .write(move |conn| {
+            conn.execute("DELETE FROM pending_actions WHERE id = ?1", [action])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    // When the server cannot tell what changed, other counts may be out of
+    // date: only the Inbox's is known again.
+    let (gets, asked) = count_sync(&ctx, "mailboxes-2", changed(json!([]), true)).await;
+    assert_eq!((gets, asked), (vec![vec!["inbox-remote".to_owned()]], true));
+    assert_eq!(only_on_server(&ctx).await, (Some(3), None));
+    let (gets, asked) = count_sync(
+        &ctx,
+        "mailboxes-3",
+        json!({"error": "cannotCalculateChanges"}),
+    )
+    .await;
+    assert_eq!((gets, asked), (vec![vec!["inbox-remote".to_owned()]], true));
+    assert_eq!(only_on_server(&ctx).await, (Some(3), None));
 }

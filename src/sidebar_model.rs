@@ -286,7 +286,7 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
         .filter(|account| account.mail_protocol == MailProtocol::Gmail)
         .filter_map(|account| i32::try_from(account.id).ok())
         .collect::<HashSet<_>>();
-    let rows = if filtering {
+    let mut rows = if filtering {
         make_filtered_sidebar_rows(mailboxes, labels, query, &gmail_account_ids)
     } else {
         make_sidebar_rows(
@@ -306,11 +306,60 @@ pub(super) fn refresh_sidebar_with_motion(state: &Rc<RefCell<InboxState>>, anima
                 .and_then(|local| i32::try_from(local.account_id).ok()),
         )
     };
+    set_label_badges(&mut rows, &state.labels, &state.sidebar_badges);
     // Model notifications can synchronously inspect application state.
     let model = Rc::clone(&state.sidebar_rows);
     let animation = Rc::clone(&state.sidebar_animation);
     drop(state);
     animation.reconcile(&model, rows, animate);
+}
+
+/// Puts the badges of label, category, Important and Other rows on them. A
+/// collapsed nested label adds the labels it hides, as folders do.
+fn set_label_badges(
+    rows: &mut [SidebarRow],
+    labels: &[flectar_mail_core::models::Label],
+    badges: &SidebarBadges,
+) {
+    let own = |id: i64| badges.labels.get(&id).copied().unwrap_or(0);
+    // Nested labels are named by path within their account, as
+    // `account_label_rows` nests them: "Travel/2026" sits under "Travel".
+    let ids = labels
+        .iter()
+        .map(|label| ((label.owner_account_id, label.name.as_str()), label.id))
+        .collect::<HashMap<_, _>>();
+    let mut hidden = HashMap::<i64, u32>::new();
+    for label in labels.iter().filter(|label| own(label.id) > 0) {
+        let mut name = label.name.as_str();
+        while let Some((parent, _)) = name.rsplit_once('/') {
+            let Some(parent_id) = ids.get(&(label.owner_account_id, parent)) else {
+                break;
+            };
+            let total = hidden.entry(*parent_id).or_default();
+            *total = total.saturating_add(own(label.id));
+            name = parent;
+        }
+    }
+    for row in rows {
+        let count = match row.kind {
+            SidebarRowKind::Important => {
+                row.mailbox.count = sidebar_badge_text(badges.important as usize).into();
+                continue;
+            }
+            SidebarRowKind::Other => {
+                row.mailbox.count = sidebar_badge_text(badges.other as usize).into();
+                continue;
+            }
+            SidebarRowKind::Category | SidebarRowKind::GlobalLabel => own(row.label.id.into()),
+            SidebarRowKind::AccountLabel if row.label.has_children && !row.label.expanded => {
+                let id = i64::from(row.label.id);
+                own(id).saturating_add(hidden.get(&id).copied().unwrap_or(0))
+            }
+            SidebarRowKind::AccountLabel => own(row.label.id.into()),
+            _ => continue,
+        };
+        row.label.count = sidebar_badge_text(count as usize).into();
+    }
 }
 
 fn make_filtered_sidebar_rows(
@@ -324,8 +373,10 @@ fn make_filtered_sidebar_rows(
     let query = query.to_lowercase();
     let mut accounts = Vec::new();
     let mut folders: HashMap<i32, Vec<MailboxRow>> = HashMap::new();
-    for mailbox in mailboxes {
+    for mut mailbox in mailboxes {
         if mailbox.is_account {
+            // Search results show accounts open, with their folders' badges.
+            mailbox.count = Default::default();
             accounts.push(mailbox);
         } else if mailbox.label.to_lowercase().contains(&query) {
             folders.entry(mailbox.account_id).or_default().push(mailbox);
@@ -649,12 +700,16 @@ fn account_rows(
             folders.entry(mailbox.account_id).or_default().push(mailbox);
         }
     }
-    for account in accounts {
+    for mut account in accounts {
         let account_id = account.account_id;
         let account_name = account.label.clone();
         let can_create_top_level_mailbox = account.can_create_children;
         let key = format!("account:{account_id}");
         let open = !collapsed.contains(&key);
+        // An open account shows each folder's badge instead of their total.
+        if open {
+            account.count = Default::default();
+        }
         rows.push(SidebarRow {
             mailbox: account,
             ..section(Kind::Account, &key, collapsed)
@@ -760,6 +815,94 @@ mod tests {
 
     fn defaults() -> HashSet<String> {
         HashSet::from(["categories".into(), "global-labels".into()])
+    }
+
+    #[test]
+    fn label_rows_show_their_unread_mail_and_collapsed_ones_what_they_hide() {
+        use flectar_mail_core::models::Label;
+        let label = |id, name: &str, owner_account_id| Label {
+            id,
+            name: name.into(),
+            color: "#6b7280".into(),
+            keyword: name.into(),
+            position: 0,
+            owner_account_id,
+            is_auto: false,
+        };
+        let labels = vec![
+            Label {
+                is_auto: true,
+                ..label(1, "News", None)
+            },
+            label(20, "Work", None),
+            label(30, "Travel", Some(2)),
+            label(31, "Travel/2026", Some(2)),
+            label(32, "Travel/2026/Spring", Some(2)),
+            // Another account's label with the same path is not nested here.
+            label(40, "Travel/2026", Some(3)),
+        ];
+        let badges = SidebarBadges {
+            labels: HashMap::from([(1, 4), (20, 2), (30, 1), (31, 3), (32, 5), (40, 8)]),
+            important: 7,
+            other: 9,
+        };
+        let label_row = |kind, id, has_children, expanded| SidebarRow {
+            label: MailLabelRow {
+                id,
+                has_children,
+                expanded,
+                ..Default::default()
+            },
+            ..row(kind, format!("label:{id}"))
+        };
+        let mut rows = vec![
+            row(Kind::Important, "important"),
+            row(Kind::Other, "other"),
+            label_row(Kind::Category, 1, false, true),
+            label_row(Kind::GlobalLabel, 20, false, true),
+            label_row(Kind::AccountLabel, 30, true, false),
+            label_row(Kind::AccountLabel, 31, true, true),
+        ];
+
+        set_label_badges(&mut rows, &labels, &badges);
+
+        let counts = rows
+            .iter()
+            .map(|row| match row.kind {
+                Kind::Important | Kind::Other => row.mailbox.count.to_string(),
+                _ => row.label.count.to_string(),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(counts, ["7", "9", "4", "2", "9", "3"]);
+    }
+
+    #[test]
+    fn an_account_shows_its_total_only_while_collapsed() {
+        let mut mailboxes = accounts(1, 2);
+        mailboxes[0].count = "5".into();
+        let account_count = |collapsed: &HashSet<String>| {
+            make_sidebar_rows(
+                SidebarLayout::SingleAccount,
+                mailboxes.clone(),
+                Vec::new(),
+                Vec::new(),
+                &HashSet::new(),
+                collapsed,
+                None,
+            )
+            .into_iter()
+            .find(|row| row.kind == Kind::Account)
+            .unwrap()
+            .mailbox
+            .count
+        };
+        assert_eq!(account_count(&HashSet::new()), "");
+        assert_eq!(account_count(&HashSet::from(["account:1".into()])), "5");
+        // Search results show accounts open.
+        let filtered =
+            make_filtered_sidebar_rows(mailboxes.clone(), Vec::new(), "folder", &HashSet::new());
+        assert_eq!(filtered[0].kind, Kind::Account);
+        assert_eq!(filtered[0].mailbox.count, "");
     }
 
     #[test]

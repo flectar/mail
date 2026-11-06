@@ -31,7 +31,7 @@ fn mailbox(scope: Scope, folder_id: i64, label: &str) -> MailboxEntry {
         detail: String::new(),
         avatar: String::new(),
         is_account: false,
-        count: String::new(),
+        count: 0,
     }
 }
 
@@ -125,4 +125,40 @@ fn drops_resolve_by_scope_not_by_mailbox_name() {
         )
         .is_err()
     );
+
+    // Shown in the custom folder, the mail can still go to the Trash
+    // mailbox of the same name.
+    state.set_scope(Scope::Folder(12));
+    state.messages[0].folder = "Trash".into();
+    let drop = |scope, account_id, folder_id| {
+        resolve_single_mail_drop(&state, &item, scope, account_id, folder_id)
+            .map(|(_, destination)| destination)
+    };
+    assert_eq!(
+        drop(account(StandardMailbox::Trash), 1, 11),
+        Ok(MailDropDestination::Action("trash"))
+    );
+    assert!(drop(Scope::Folder(12), 1, 12).is_err());
+
+    // Another account's folder gets a copy, and the original goes once it
+    // is there; its Sent and Starred take no mail.
+    let other = |scope, folder_id, label| MailboxEntry {
+        account_id: 2,
+        ..mailbox(scope, folder_id, label)
+    };
+    let other_sent = Scope::Account {
+        account_id: 2,
+        mailbox: StandardMailbox::Sent,
+    };
+    state.mailboxes.push(other(Scope::Folder(30), 30, "Travel"));
+    state.mailboxes.push(other(other_sent, 31, "Sent"));
+    let drop = |scope, account_id, folder_id| {
+        resolve_single_mail_drop(&state, &item, scope, account_id, folder_id)
+            .map(|(_, destination)| destination)
+    };
+    assert_eq!(
+        drop(Scope::Folder(30), 2, 30),
+        Ok(MailDropDestination::Transfer(30))
+    );
+    assert!(drop(other_sent, 2, 31).is_err());
 }

@@ -133,6 +133,27 @@ impl Scope {
         }
     }
 
+    /// Whether the mail this list shows is in `target` already: the list's
+    /// own mailbox, or the one a unified list or an inbox half shows it from.
+    /// Folders are told apart by scope, since several can have one name.
+    pub(crate) fn shows_mail_in(self, target: Self) -> bool {
+        self == target
+            || matches!(
+                (self, target),
+                (Self::Unified(shown), Self::Account { mailbox, .. }) if shown == mailbox
+            )
+            || matches!(
+                (self, target),
+                (
+                    Self::Important | Self::Other,
+                    Self::Account {
+                        mailbox: StandardMailbox::Inbox,
+                        ..
+                    }
+                )
+            )
+    }
+
     /// The scope the sidebar can show for these accounts. Unified shortcuts
     /// are absent with exactly one account, so they resolve to that account's
     /// own mailbox; the message list is identical. Other scopes and the
@@ -219,6 +240,28 @@ impl FromStr for Scope {
     }
 }
 
+/// The accounts a manual check for new mail covers in a view owned by
+/// `owner`: that account, or for views that span accounts the `shown` ones.
+/// `None` stands for every account. An owner that is not a connected account,
+/// such as mail kept on this device, has no server to check, so its view
+/// counts as spanning accounts.
+pub(crate) fn accounts_to_check(
+    owner: Option<i64>,
+    connected: &[i64],
+    shown: Option<&[i64]>,
+) -> Option<Vec<i64>> {
+    if let Some(account_id) = owner.filter(|id| connected.contains(id)) {
+        return Some(vec![account_id]);
+    }
+    shown.map(|accounts| {
+        accounts
+            .iter()
+            .copied()
+            .filter(|id| connected.contains(id))
+            .collect()
+    })
+}
+
 impl From<Scope> for String {
     fn from(scope: Scope) -> Self {
         scope.to_string()
@@ -255,6 +298,29 @@ impl<'de> serde::Deserialize<'de> for Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mail_shown_is_in_its_own_mailbox_not_in_one_of_the_same_name() {
+        let inbox = |account_id| Scope::Account {
+            account_id,
+            mailbox: StandardMailbox::Inbox,
+        };
+        let archive = Scope::Account {
+            account_id: 1,
+            mailbox: StandardMailbox::Archive,
+        };
+        assert!(Scope::Folder(5).shows_mail_in(Scope::Folder(5)));
+        assert!(!Scope::Folder(5).shows_mail_in(Scope::Folder(6)));
+        assert!(!Scope::Folder(5).shows_mail_in(archive));
+        assert!(!archive.shows_mail_in(Scope::Folder(5)));
+        assert!(Scope::Unified(StandardMailbox::Archive).shows_mail_in(archive));
+        assert!(!Scope::Unified(StandardMailbox::Inbox).shows_mail_in(archive));
+        assert!(Scope::UNIFIED_INBOX.shows_mail_in(inbox(2)));
+        assert!(Scope::Important.shows_mail_in(inbox(1)));
+        assert!(Scope::Other.shows_mail_in(inbox(1)));
+        assert!(!Scope::Important.shows_mail_in(archive));
+        assert!(!inbox(1).shows_mail_in(inbox(2)));
+    }
     use flectar_mail_core::models::{AuthKind, MailProtocol, Provider};
 
     fn account(id: i64) -> Account {
@@ -380,5 +446,29 @@ mod tests {
             assert_eq!(scope.visible_for(&[account(9), account(10)]), scope);
             assert_eq!(expected.visible_for(&[account(9)]), expected);
         }
+    }
+
+    #[test]
+    fn a_manual_check_covers_the_account_in_view_or_the_shown_ones() {
+        let connected = [1, 2, 3];
+        // An account's own folder, label or mailbox checks that account.
+        assert_eq!(accounts_to_check(Some(2), &connected, None), Some(vec![2]));
+        assert_eq!(
+            accounts_to_check(Some(2), &connected, Some(&[1, 3])),
+            Some(vec![2])
+        );
+        // Unified views check every account, or the active profile's.
+        assert_eq!(accounts_to_check(None, &connected, None), None);
+        assert_eq!(
+            accounts_to_check(None, &connected, Some(&[1, 3])),
+            Some(vec![1, 3])
+        );
+        // Mail on this device has no server: its folders check what the
+        // unified views would, and a profile never names a removed account.
+        assert_eq!(accounts_to_check(Some(9), &connected, None), None);
+        assert_eq!(
+            accounts_to_check(Some(9), &connected, Some(&[3, 4])),
+            Some(vec![3])
+        );
     }
 }

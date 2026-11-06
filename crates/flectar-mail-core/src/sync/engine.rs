@@ -10,6 +10,11 @@
 //! therefore finish in seconds and the actor is back in IDLE almost
 //! immediately, so new mail keeps arriving fast even during a huge backfill.
 //!
+//! Each cycle first asks the server for every folder's STATUS, in one
+//! LIST-STATUS command where offered, and opens only the folders whose counts
+//! changed since they were last synced; every fifth cycle still opens them
+//! all, since STATUS does not report stars or labels.
+//!
 //! On servers that support it the actor waits in IMAP IDLE between cycles, so
 //! new inbox mail wakes it within seconds; the user-selected periodic cycle is
 //! still a correctness backstop. Servers without IDLE use that same cadence. Either
@@ -27,6 +32,7 @@ use crate::models::*;
 use crate::oauth::tokens::TokenProvider;
 use crate::queue;
 use rusqlite::OptionalExtension;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -92,6 +98,28 @@ struct InboxBaseline {
 struct CycleMode {
     foreground_only: bool,
     immediate_follow_up: bool,
+    /// Whether one LIST reports every folder's STATUS on this connection.
+    list_status: bool,
+    /// What the server pushed for the Inbox during IDLE since the last cycle.
+    inbox_pushed: PushedChanges,
+}
+
+/// Changes the server reported for the selected Inbox during IDLE. The next
+/// cycle checks for them at once instead of at its next full pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PushedChanges {
+    flags: bool,
+    removals: bool,
+}
+
+impl PushedChanges {
+    fn add(&mut self, change: imap::MailboxChange) {
+        match change {
+            imap::MailboxChange::Flags => self.flags = true,
+            imap::MailboxChange::Removal => self.removals = true,
+            imap::MailboxChange::Arrival => {}
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -249,6 +277,23 @@ impl AccountHandle {
         .map_err(|_| CoreError::Imap("attachment request timed out".into()))?
         .map_err(|_| CoreError::Other("attachment reader stopped".into()))?
         .map_err(CoreError::Other)
+    }
+}
+
+#[cfg(test)]
+impl AccountHandle {
+    /// A handle whose commands go to `tx`, with no worker behind it.
+    pub(crate) fn for_test(account_id: i64, tx: mpsc::Sender<SyncCmd>) -> Self {
+        let (body_tx, _) = mpsc::channel(1);
+        Self {
+            account_id,
+            tx,
+            body_tx,
+            send_tx: None,
+            restore_tx: None,
+            settings_tx: None,
+            tasks: Vec::new(),
+        }
     }
 }
 
@@ -851,9 +896,10 @@ async fn run_actor(
     crate::events::sync_diagnostic("imap_worker", Some(account_id), "started");
     tracing::debug!(account_id, "sync actor started");
     let mut session: Option<Session> = None;
-    // Whether the current connection supports IMAP IDLE (push). Re-probed on
+    // What the current connection offers, IDLE (push) among it. Re-probed on
     // every reconnect; `None` until the first successful connect.
-    let mut supports_idle: Option<bool> = None;
+    let mut capabilities: Option<imap::ServerCapabilities> = None;
+    let mut inbox_pushed = PushedChanges::default();
     let mut backoff_secs: u64 = 1;
     let mut cycle: u64 = 0;
     let mut immediate_follow_up = false;
@@ -868,14 +914,16 @@ async fn run_actor(
         if session.is_none() {
             match connect(&ctx, &config).await {
                 Ok(mut s) => {
-                    // Probe IDLE support once per connection; on error assume
-                    // no push and fall back to polling.
-                    supports_idle = Some(imap::supports_idle(&mut s).await.unwrap_or(false));
+                    // Probe the capabilities once per connection; on error
+                    // assume neither push nor LIST-STATUS.
+                    let offered = imap::capabilities(&mut s).await.unwrap_or_default();
+                    capabilities = Some(offered);
                     tracing::info!(
                         account_id,
-                        idle = supports_idle == Some(true),
+                        idle = offered.idle,
+                        list_status = offered.list_status,
                         "receive: connected; IDLE push {}",
-                        if supports_idle == Some(true) {
+                        if offered.idle {
                             "enabled"
                         } else {
                             "unavailable, polling"
@@ -975,6 +1023,8 @@ async fn run_actor(
             CycleMode {
                 foreground_only,
                 immediate_follow_up,
+                list_status: capabilities.is_some_and(|offered| offered.list_status),
+                inbox_pushed,
             },
         )
         .await;
@@ -992,6 +1042,7 @@ async fn run_actor(
             Ok(work_remaining) => {
                 session = Some(s);
                 cycle += 1;
+                inbox_pushed = PushedChanges::default();
                 immediate_follow_up = work_remaining;
                 // Historical content is explicitly background work. It may
                 // continue for hours without keeping the foreground account
@@ -1052,7 +1103,7 @@ async fn run_actor(
         // 3. Wait for new mail (IDLE), the next cycle, or an immediate command.
         // The backfill pool drains bodies on its own connections, so the actor
         // is free to IDLE even while thousands of bodies are still downloading.
-        let use_idle = supports_idle == Some(true) && session.is_some();
+        let use_idle = capabilities.is_some_and(|offered| offered.idle) && session.is_some();
 
         if use_idle {
             // After a cycle the selected mailbox may be sent/drafts/etc, and
@@ -1065,7 +1116,7 @@ async fn run_actor(
             match inbox {
                 Ok(Some(inbox)) => {
                     let Some(mut s) = session.take() else {
-                        supports_idle = None;
+                        capabilities = None;
                         continue;
                     };
                     match imap::select(&mut s, &inbox.path).await {
@@ -1088,13 +1139,15 @@ async fn run_actor(
                                 Ok((s, outcome)) => {
                                     session = Some(s);
                                     match outcome {
-                                        // New mail pushed by the server: fall
+                                        // A change pushed by the server: fall
                                         // through, next iteration syncs now.
-                                        imap::IdleOutcome::Activity => {
+                                        imap::IdleOutcome::Activity(change) => {
                                             tracing::info!(
                                                 account_id,
+                                                ?change,
                                                 "receive: IDLE signaled activity, syncing now",
                                             );
+                                            inbox_pushed.add(change);
                                         }
                                         // Backstop timeout or a sync/action
                                         // nudge: next iteration runs a cycle.
@@ -1134,7 +1187,7 @@ async fn run_actor(
                                     // Session was consumed by idle_wait; drop
                                     // IDLE state and reconnect next iteration.
                                     tracing::warn!(account_id, "idle failed: {e}");
-                                    supports_idle = None;
+                                    capabilities = None;
                                     ctx.bus.emit(CoreEvent::NetworkState { online: false });
                                 }
                             }
@@ -1142,7 +1195,7 @@ async fn run_actor(
                         Err(e) => {
                             tracing::warn!(account_id, "select inbox for idle failed: {e}");
                             imap::logout(s).await;
-                            supports_idle = None;
+                            capabilities = None;
                         }
                     }
                 }
@@ -1401,6 +1454,8 @@ async fn run_cycle(
     let CycleMode {
         foreground_only,
         immediate_follow_up,
+        list_status,
+        inbox_pushed,
     } = mode;
     let account_id = config.id;
 
@@ -1431,20 +1486,48 @@ async fn run_cycle(
     // ensures a large mutation queue cannot starve newly arrived mail.
     let action_slice = queue::execute_due(ctx, config, session).await?;
 
+    // Every fifth cycle re-checks read state and removals in every folder:
+    // STATUS does not report stars, labels, or a message read while another
+    // was marked unread. In between, a folder is opened only when the server
+    // reports a change, and re-checked for whatever of it new mail does not
+    // explain. A manual check opens the Inbox, so it needs no report.
+    let full_pass = !immediate_follow_up && cycle > 0 && cycle.is_multiple_of(5);
+    let (reported, known) = if foreground_only {
+        (HashMap::new(), HashMap::new())
+    } else {
+        let reported = report_folders(session, &ordered, list_status).await;
+        let known = ctx
+            .db
+            .read(move |conn| repo::folders::server_statuses(conn, account_id))
+            .await?;
+        (reported, known)
+    };
+    let check = |folder: &Folder, full: bool| FolderCheck {
+        flags: full,
+        removals: full,
+        reported: reported.get(&folder.path).copied(),
+        known: known.get(&folder.id).copied(),
+    };
+
     let mut inbox_forward_remaining = false;
-    if let Some(inbox) = ordered
+    let inbox = ordered
         .iter()
         .copied()
-        .find(|f| f.role.as_deref() == Some(roles::INBOX))
-    {
+        .find(|f| f.role.as_deref() == Some(roles::INBOX));
+    if let Some(inbox) = inbox {
+        // Reload must also reconcile existing Inbox messages, even when the
+        // next full pass is several cycles away, and so must changes the
+        // server pushed during IDLE.
+        let full = foreground_only || full_pass;
+        let mut inbox_check = check(inbox, full);
+        inbox_check.flags |= inbox_pushed.flags;
+        inbox_check.removals |= inbox_pushed.removals;
         inbox_forward_remaining = sync_folder(
             ctx,
             config,
             session,
             inbox,
-            // Reload must also reconcile existing Inbox messages, even when
-            // the next scheduled flag/expunge pass is several cycles away.
-            foreground_only || (!immediate_follow_up && cycle > 0 && cycle.is_multiple_of(5)),
+            inbox_check,
             hist_tx,
             inbox_baseline,
         )
@@ -1457,6 +1540,7 @@ async fn run_cycle(
         return Ok(true);
     }
 
+    let mut left_inbox = false;
     for folder in ordered {
         if folder.role.as_deref() == Some(roles::INBOX) {
             continue;
@@ -1465,15 +1549,31 @@ async fn run_cycle(
         if folder.role.as_deref() == Some(roles::ALL) {
             continue;
         }
-        // Non-inbox folders get new-mail checks every cycle but heavy
-        // reconciliation (flags/expunge) only every 5th cycle.
-        let heavy = !immediate_follow_up && cycle > 0 && cycle.is_multiple_of(5);
-        if let Err(e) =
-            sync_folder(ctx, config, session, folder, heavy, hist_tx, inbox_baseline).await
+        let folder_check = check(folder, full_pass);
+        if !full_pass && folder_check.unchanged() {
+            continue;
+        }
+        if let Err(e) = sync_folder(
+            ctx,
+            config,
+            session,
+            folder,
+            folder_check,
+            hist_tx,
+            inbox_baseline,
+        )
+        .await
         {
             tracing::warn!(folder = %folder.path, "folder sync failed: {e}");
             return Err(e); // connection likely broken; reconnect
         }
+        left_inbox = true;
+    }
+    if !list_status
+        && left_inbox
+        && let Some(inbox) = inbox
+    {
+        count_inbox(ctx, session, inbox).await?;
     }
 
     // GC old finished actions (keep 7 days).
@@ -1483,6 +1583,141 @@ async fn run_cycle(
         .await;
 
     Ok(false)
+}
+
+/// Without LIST-STATUS nothing reports the Inbox's counts: STATUS should not
+/// ask the selected mailbox (RFC 9051 6.3.11), which the Inbox is from IDLE
+/// until another folder is opened. Once one is, ask, and keep the answer if
+/// nothing arrived since the Inbox's sync, which recorded UIDNEXT. A server
+/// whose SELECT reports no UIDNEXT leaves no way to tell, so it is not asked.
+async fn count_inbox(ctx: &SyncCtx, session: &mut Session, inbox: &Folder) -> Result<()> {
+    let id = inbox.id;
+    let synced = ctx
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT uidvalidity, uidnext FROM folders WHERE id = ?1",
+                rusqlite::params![id],
+                |row| Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?)),
+            )?)
+        })
+        .await?;
+    let (Some(uid_validity), Some(uid_next)) = synced else {
+        return Ok(());
+    };
+    let status = match imap::status(session, &inbox.path).await {
+        Ok(status) => status,
+        Err(error) => {
+            tracing::debug!(folder = %inbox.path, "Inbox STATUS failed: {error}");
+            return Ok(());
+        }
+    };
+    if status.uid_validity.map(i64::from) != Some(uid_validity)
+        || status.uid_next.map(i64::from) != Some(uid_next)
+    {
+        return Ok(());
+    }
+    let changed = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_server_counts(
+                conn,
+                id,
+                Some(i64::from(status.messages)),
+                status.unseen.map(i64::from),
+            )
+        })
+        .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+            account_id: inbox.account_id,
+        });
+    }
+    Ok(())
+}
+
+/// The STATUS the server reports for each folder, by path. LIST-STATUS
+/// answers for every folder in one command. Without it, STATUS asks each
+/// folder but the Inbox: RFC 9051 asks clients not to use STATUS on the
+/// selected mailbox, which IDLE keeps the Inbox, and every cycle opens the
+/// Inbox anyway. A folder without a report is synced as before.
+async fn report_folders(
+    session: &mut Session,
+    folders: &[&Folder],
+    list_status: bool,
+) -> HashMap<String, imap::MailboxStatus> {
+    if list_status {
+        match imap::list_status(session).await {
+            Ok(reported) => return reported,
+            Err(error) => tracing::warn!("LIST-STATUS failed; asking each folder: {error}"),
+        }
+    }
+    let mut reported = HashMap::new();
+    for folder in folders {
+        if matches!(folder.role.as_deref(), Some(roles::INBOX | roles::ALL)) {
+            continue;
+        }
+        match imap::status(session, &folder.path).await {
+            Ok(status) => {
+                reported.insert(folder.path.clone(), status);
+            }
+            // The folder's own sync reports a broken connection.
+            Err(error) => tracing::debug!(folder = %folder.path, "STATUS failed: {error}"),
+        }
+    }
+    reported
+}
+
+/// What a folder sync re-checks besides new mail.
+#[derive(Clone, Copy, Debug, Default)]
+struct FolderCheck {
+    /// Read state and stars of the recent window.
+    flags: bool,
+    /// Messages removed from the folder.
+    removals: bool,
+    /// What the server reports for the folder now.
+    reported: Option<imap::MailboxStatus>,
+    /// What it reported when the folder was last synced.
+    known: Option<repo::folders::ServerStatus>,
+}
+
+impl FolderCheck {
+    /// Whether the server reports exactly what it did at the last sync:
+    /// nothing arrived, left, or was read or marked unread elsewhere.
+    fn unchanged(&self) -> bool {
+        let (Some(now), Some(known)) = (self.reported, self.known) else {
+            return false;
+        };
+        known.uidvalidity.is_some()
+            && known.uidvalidity == now.uid_validity.map(i64::from)
+            && known.uidnext.is_some()
+            && known.uidnext == now.uid_next.map(i64::from)
+            && known.messages == Some(i64::from(now.messages))
+            && known.unseen.is_some()
+            && known.unseen == now.unseen.map(i64::from)
+    }
+
+    /// Which of read state and removals to re-check once `arrivals` new
+    /// messages, `unseen_arrivals` of them unread, were fetched: those asked
+    /// for, and whatever part of a reported change the arrivals don't
+    /// explain. A folder still catching up is compared once it has.
+    fn reconcile(&self, arrivals: u32, unseen_arrivals: u32, caught_up: bool) -> (bool, bool) {
+        let baseline = self
+            .known
+            .and_then(|known| Some((known.messages?, known.unseen?)));
+        let (Some((messages, unseen)), Some(now), true) = (baseline, self.reported, caught_up)
+        else {
+            return (self.flags, self.removals);
+        };
+        let unseen_explained = now
+            .unseen
+            .is_some_and(|now| unseen + i64::from(unseen_arrivals) == i64::from(now));
+        let messages_explained = messages + i64::from(arrivals) == i64::from(now.messages);
+        (
+            self.flags || !unseen_explained,
+            self.removals || !messages_explained,
+        )
+    }
 }
 
 pub(crate) async fn discover_folders(
@@ -1583,13 +1818,21 @@ async fn sync_folder(
     config: &AccountConfig,
     session: &mut Session,
     folder: &Folder,
-    heavy: bool,
+    mut check: FolderCheck,
     hist_tx: &mpsc::Sender<()>,
     inbox_baseline: &mut Option<InboxBaseline>,
 ) -> Result<bool> {
     let account_id = config.id;
     let selected = imap::select(session, &folder.path).await?;
     let is_inbox = folder.role.as_deref() == Some(roles::INBOX);
+    // A report from before the server renumbered the folder describes other
+    // messages.
+    if check
+        .reported
+        .is_some_and(|now| now.uid_validity.map(i64::from) != selected.uid_validity)
+    {
+        check.reported = None;
+    }
 
     // UIDVALIDITY handling.
     if let (Some(stored), Some(remote)) = (folder.uidvalidity, selected.uid_validity)
@@ -1603,6 +1846,8 @@ async fn sync_folder(
         if is_inbox {
             *inbox_baseline = None;
         }
+        // The old counts described the old numbering.
+        check.known = None;
     }
 
     {
@@ -1638,6 +1883,7 @@ async fn sync_folder(
     }
 
     let mut forward_remaining = false;
+    let (mut arrivals, mut unseen_arrivals) = (0_u32, 0_u32);
     if initialize_history {
         // Snapshot the server high-water immediately. The dedicated history
         // worker then walks downward from that point, while this actor owns all
@@ -1682,6 +1928,9 @@ async fn sync_folder(
                 .into_iter()
                 .filter(|h| h.uid > last_seen && h.uid <= scanned_through)
                 .collect();
+            arrivals = u32::try_from(new.len()).unwrap_or(u32::MAX);
+            unseen_arrivals =
+                u32::try_from(new.iter().filter(|h| !h.flags.seen).count()).unwrap_or(u32::MAX);
             if !new.is_empty() {
                 tracing::info!(
                     account_id,
@@ -1742,14 +1991,37 @@ async fn sync_folder(
                 })
                 .await?;
         }
-        if heavy {
+        let (flags, removals) = check.reconcile(arrivals, unseen_arrivals, !forward_remaining);
+        if flags {
             reconcile_flags(ctx, session, &fresh_folder).await?;
+        }
+        if removals {
             reconcile_mailbox(ctx, config, session, &fresh_folder).await?;
         }
         // Historical backfill (extending the window downward) also runs on the
         // history connection; just make sure it's awake.
         if !fresh_folder.backfill_done {
             let _ = hist_tx.try_send(());
+        }
+    }
+    // The server's counts become the folder's baseline once the sync has
+    // caught up with them, so a later cycle can tell they have not changed.
+    if let Some(now) = check.reported.filter(|_| !forward_remaining) {
+        let fid = folder.id;
+        let changed = ctx
+            .db
+            .write(move |conn| {
+                repo::folders::set_server_counts(
+                    conn,
+                    fid,
+                    Some(i64::from(now.messages)),
+                    now.unseen.map(i64::from),
+                )
+            })
+            .await?;
+        if changed {
+            ctx.bus
+                .emit(CoreEvent::ServerOnlyUnreadChanged { account_id });
         }
     }
     Ok(forward_remaining)
@@ -2199,9 +2471,14 @@ async fn bounded_history_backfill(
         .backfill_cursor
         .map_or(bounded_min_uid, |existing| existing.min(bounded_min_uid));
     let fid = folder.id;
-    ctx.db
+    let changed = ctx
+        .db
         .write(move |conn| repo::folders::set_backfill(conn, fid, Some(min_uid), complete))
         .await?;
+    if changed {
+        ctx.bus
+            .emit(CoreEvent::ServerOnlyUnreadChanged { account_id });
+    }
     let already_present = total.saturating_sub(missing.len() as u64);
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id,
@@ -2225,9 +2502,15 @@ async fn extend_history(
     };
     if cursor <= 1 {
         let fid = folder.id;
-        ctx.db
+        let changed = ctx
+            .db
             .write(move |conn| repo::folders::set_backfill(conn, fid, Some(1), true))
             .await?;
+        if changed {
+            ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+                account_id: config.id,
+            });
+        }
         return Ok(());
     }
     let hi = (cursor - 1).max(1) as u32;
@@ -2241,11 +2524,17 @@ async fn extend_history(
     }
     let fid = folder.id;
     let new_cursor = lo as i64;
-    ctx.db
+    let changed = ctx
+        .db
         .write(move |conn| {
             repo::folders::set_backfill(conn, fid, Some(new_cursor), new_cursor <= 1)
         })
         .await?;
+    if changed {
+        ctx.bus.emit(CoreEvent::ServerOnlyUnreadChanged {
+            account_id: config.id,
+        });
+    }
     ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
         account_id: config.id,
         folder: folder.path.clone(),
