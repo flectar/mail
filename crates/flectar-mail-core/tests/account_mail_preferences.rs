@@ -103,6 +103,7 @@ async fn protected_drafts_stay_local_and_queued_policy_cannot_downgrade() {
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: vec![],
         })
         .await

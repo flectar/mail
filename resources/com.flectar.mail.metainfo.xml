@@ -53,6 +53,7 @@
   </screenshots>
   <provides>
     <binary>flectar-mail</binary>
+    <mediatype>x-scheme-handler/mailto</mediatype>
   </provides>
   <releases>
     <!-- Packaging stamps the first release with the Cargo version and build date. -->

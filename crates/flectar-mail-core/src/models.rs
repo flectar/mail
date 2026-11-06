@@ -1341,6 +1341,11 @@ pub struct SaveDraftArgs {
     pub body_html: Option<String>,
     pub mode: String,
     pub in_reply_to_message_id: Option<i64>,
+    /// The Message-ID a reply answers when that message is not stored here,
+    /// as a mailto link's In-Reply-To names it. Kept only for a new draft
+    /// without `in_reply_to_message_id`.
+    #[serde(default)]
+    pub in_reply_to_header: Option<String>,
     #[serde(default)]
     pub attachments: Vec<DraftAttachmentIn>,
 }
