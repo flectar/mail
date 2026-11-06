@@ -310,6 +310,9 @@ export global I18n {
         if (key == "The message you were writing was saved to Drafts.") { return @tr("The message you were writing was saved to Drafts."); }
         if (key == "Files from links are never attached for you. Attach them yourself if you trust them: {}") { return @tr("Files from links are never attached for you. Attach them yourself if you trust them: {}", argument); }
         if (key == "Copied HTML source") { return @tr("Copied HTML source"); }
+        if (key == "Copied HTML source. Paste it into the issue.") { return @tr("Copied HTML source. Paste it into the issue."); }
+        if (key == "Saved HTML source. Attach the file to the issue.") { return @tr("Saved HTML source. Attach the file to the issue."); }
+        if (key == "Could not save HTML source: {}") { return @tr("Could not save HTML source: {}", argument); }
         if (key == "Copied selected text") { return @tr("Copied selected text"); }
         if (key == "Copied email text") { return @tr("Copied email text"); }
         if (key == "Copied link") { return @tr("Copied link"); }
@@ -747,6 +750,7 @@ export component AppWindow inherits Window {
     callback cancel_storage_usage();
     callback open_email_link(string);
     callback copy_email_status(string);
+    callback report_rendering_issue();
     callback email-pointer-event(float, float, string, bool, bool, bool, bool);
     callback email-scroll(float, float);
     callback email-key-event(string, bool, bool, bool, bool, bool, bool);
@@ -1653,6 +1657,7 @@ export component AppWindow inherits Window {
             open_compose => { root.open_compose(); }
             open_email_link(url) => { root.open_email_link(url); }
             copy_email_status(status) => { root.copy_email_status(status); }
+            report_rendering_issue => { root.report_rendering_issue(); }
             email-pointer-event(x, y, kind, control, shift, alt, meta) => {
                 root.email-pointer-event(x, y, kind, control, shift, alt, meta);
             }

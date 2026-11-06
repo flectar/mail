@@ -69,6 +69,13 @@ public final class NativeCallbacksTest {
     }
 
     @Test
+    public void trimMemoryCallbackResolves() throws Throwable {
+        // TRIM_MEMORY_RUNNING_MODERATE (5) asks for nothing, so the callback
+        // only maps the level and never reaches the UI event loop.
+        invoke("nativeTrimMemory", new Class<?>[]{int.class, int.class}, 5, 34);
+    }
+
+    @Test
     public void everyNativeDeclarationHasACallbackTest() {
         Set<String> declarations = new HashSet<>();
         for (Method method : FlectarActivity.class.getDeclaredMethods()) {
@@ -83,6 +90,7 @@ public final class NativeCallbacksTest {
         tested.add("nativeDocumentResult");
         tested.add("nativeDocumentsResult");
         tested.add("nativeSuspendPdfPreview");
+        tested.add("nativeTrimMemory");
         assertEquals("Add a JNI invocation test when adding a native callback", tested, declarations);
     }
 }
