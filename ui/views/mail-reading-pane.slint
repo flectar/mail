@@ -284,6 +284,8 @@ export component MailReadingPane inherits FocusScope {
     enabled: false;
     in property <bool> compact: false;
     in property <bool> full-width: false;
+    // Whether this pane is on screen. Mail view keeps one pane per layout.
+    in property <bool> shown: true;
     private property <bool> attachment-menu-mode: root.height < 500px;
     in property <bool> show-avatars: true;
     // The title wrap width comes from the containing window, not this pane's
@@ -2044,6 +2046,7 @@ export component MailReadingPane inherits FocusScope {
 
                 RenderingInfoDialog {
                     open <=> root.rendering_info_open;
+                    shown: root.shown;
                     compact: root.compact;
                     x: 0px;
                     y: 0px;
