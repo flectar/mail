@@ -39,9 +39,28 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
+; Tell Windows about the mail link handler below on install and uninstall.
+ChangesAssociations=yes
 
 [Files]
 Source: "..\..\target\package\windows\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Offered as the default email app in Settings > Apps > Default apps. Only
+; the user can make it the default, so the shared mailto key is left alone.
+; The link is the whole command line after the option, as
+; src/mailto_links.rs requires. src/default_email_app.rs writes the same
+; layout under other names for the portable build.
+[Registry]
+Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto"; ValueType: string; ValueName: ""; ValueData: "Flectar Mail email link"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto"; ValueType: string; ValueName: "FriendlyTypeName"; ValueData: "Flectar Mail email link"
+Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\flectar-mail.exe"",0"
+Root: HKA; Subkey: "Software\Classes\FlectarMail.Url.mailto\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\flectar-mail.exe"" --mailto ""%1"""
+Root: HKA; Subkey: "Software\Clients\Mail\Flectar Mail"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Clients\Mail\Flectar Mail\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Flectar Mail"
+Root: HKA; Subkey: "Software\Clients\Mail\Flectar Mail\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Native, offline-first email client"
+Root: HKA; Subkey: "Software\Clients\Mail\Flectar Mail\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: """{app}\flectar-mail.exe"",0"
+Root: HKA; Subkey: "Software\Clients\Mail\Flectar Mail\Capabilities\URLAssociations"; ValueType: string; ValueName: "mailto"; ValueData: "FlectarMail.Url.mailto"
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Flectar Mail"; ValueData: "Software\Clients\Mail\Flectar Mail\Capabilities"; Flags: uninsdeletevalue
 
 [Icons]
 Name: "{userprograms}\Flectar Mail"; Filename: "{app}\flectar-mail.exe"

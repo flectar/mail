@@ -1,0 +1,15 @@
+// The "Default email app" row in Settings. src/default_email_app.rs reads
+// and changes the system's choice and fills this in.
+
+export global DefaultEmailApp {
+    // "" hides the row. "default" or "not-default"; "system-settings" when
+    // only the system settings can tell and change it (Flatpak);
+    // "not-installed" for an AppImage that is not in the applications menu.
+    in property <string> status;
+    // A portable Windows copy registered itself and can undo that.
+    in property <bool> removable;
+    // A change is being applied or waits for the user's confirmation.
+    in property <bool> busy;
+    callback make-default();
+    callback remove();
+}

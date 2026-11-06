@@ -13,17 +13,48 @@
 //!   launcher's busy cursor; focus is then requested as usual.
 
 use slint::winit_030::winit;
-use std::error::Error;
+use std::{error::Error, sync::OnceLock};
 use winit::raw_window_handle::{
     HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
 
+/// Where launchers put the token: Wayland, then X11 startup notification.
+const TOKEN_VARIABLES: [&str; 2] = ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"];
+
+/// The token this process was launched with, and the variable it came in.
+static LAUNCH_TOKEN: OnceLock<Option<(&'static str, String)>> = OnceLock::new();
+
+/// Keep the launcher's token and remove it from the environment, as the
+/// xdg-activation and startup-notification specifications ask: a browser or
+/// any other program started later must not inherit a token that was meant
+/// for this launch.
+///
+/// # Safety
+///
+/// Changes the environment: no other thread may be running.
+pub(crate) unsafe fn take_launch_token() {
+    let token = TOKEN_VARIABLES.into_iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .filter(|token| !token.is_empty())
+            .map(|token| (name, token))
+    });
+    for name in TOKEN_VARIABLES {
+        // SAFETY: the caller guarantees no other thread is running.
+        unsafe { std::env::remove_var(name) };
+    }
+    let _ = LAUNCH_TOKEN.set(token);
+}
+
 /// The token this process was launched with, if any.
 pub(crate) fn launch_token() -> Option<String> {
-    ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"]
-        .into_iter()
-        .find_map(|name| std::env::var(name).ok())
-        .filter(|token| !token.is_empty())
+    Some(LAUNCH_TOKEN.get()?.as_ref()?.1.clone())
+}
+
+/// The launch token as the environment variable it arrived in, for a process
+/// that replaces this one.
+pub(crate) fn launch_token_variable() -> Option<(&'static str, String)> {
+    LAUNCH_TOKEN.get()?.clone()
 }
 
 /// Use `token` for the window. Returns true when the compositor was asked to

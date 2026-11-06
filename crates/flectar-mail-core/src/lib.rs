@@ -23,6 +23,7 @@ pub mod imap;
 pub mod jmap;
 pub mod mail_import;
 pub mod mail_security;
+pub mod mailto;
 mod mbox;
 pub mod migration;
 pub mod mime;
@@ -97,6 +98,13 @@ mod inline_cid_rewrite_tests {
             );
         }
     }
+}
+
+/// A draft's stored reply Message-ID: one valid id, without angle brackets,
+/// as the `message_id` column keeps them.
+fn reply_header(value: &str) -> Option<String> {
+    let id = mailto::message_id(value)?;
+    Some(id.trim_matches(['<', '>']).to_owned())
 }
 
 fn send_start_expired(now: i64, observed_at: i64, not_before: Option<i64>) -> bool {
@@ -360,6 +368,47 @@ fn explain_imap_sign_in(args: &AddPasswordAccountArgs, error: CoreError) -> Core
     }
 }
 
+/// The other common form of a mail username: the full address when the
+/// username is something else, or the part before the @ when it is the
+/// address. Thunderbird's account setup tries both before giving up
+/// (ConfigVerifier.tryNextLogon, AccountConfig.guessConfigFromEmail).
+fn alternative_username(email: &str, username: &str) -> Option<String> {
+    if !username.eq_ignore_ascii_case(email) {
+        return Some(email.to_owned());
+    }
+    let (local, _) = email.rsplit_once('@')?;
+    (!local.is_empty()).then(|| local.to_owned())
+}
+
+/// Sign in with the username as given and, when the server rejects it, once
+/// more with its other common form. `args` keeps the username that worked.
+async fn with_username_fallback<T>(
+    args: &mut AddPasswordAccountArgs,
+    sign_in: impl AsyncFn(&AddPasswordAccountArgs) -> Result<T>,
+) -> Result<T> {
+    let rejected = match sign_in(args).await {
+        Err(CoreError::Auth(rejected)) => rejected,
+        result => return result,
+    };
+    let Some(alternative) = alternative_username(&args.email, &args.username) else {
+        return Err(CoreError::Auth(rejected));
+    };
+    let given = std::mem::replace(&mut args.username, alternative);
+    match sign_in(args).await {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let alternative = std::mem::replace(&mut args.username, given);
+            Err(CoreError::Auth(match error {
+                CoreError::Auth(_) => {
+                    format!("{rejected}. The username {alternative} didn't work either")
+                }
+                // The first answer is the one about the credentials.
+                _ => rejected,
+            }))
+        }
+    }
+}
+
 /// An iCloud address (@icloud.com, @me.com, @mac.com) or Apple's mail
 /// server, which also hosts custom-domain iCloud addresses.
 fn is_apple_mailbox(email: &str, host: &str) -> bool {
@@ -401,6 +450,99 @@ fn normalize_account_password(value: String) -> String {
         .chars()
         .filter(|character| !matches!(character, '\r' | '\n'))
         .collect()
+}
+
+#[cfg(test)]
+mod username_fallback_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    fn args(username: &str) -> AddPasswordAccountArgs {
+        AddPasswordAccountArgs {
+            email: "jane@example.com".into(),
+            display_name: None,
+            username: username.into(),
+            password: "secret".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            incoming_host: "mail.example.com".into(),
+            incoming_port: 993,
+            smtp_host: "mail.example.com".into(),
+            smtp_port: 465,
+            connection: MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Tls,
+            ),
+        }
+    }
+
+    #[test]
+    fn the_other_form_of_the_username() {
+        let other = |username| alternative_username("jane@example.com", username);
+        assert_eq!(other("jane@example.com").as_deref(), Some("jane"));
+        assert_eq!(other("Jane@Example.com").as_deref(), Some("jane"));
+        assert_eq!(other("jdoe").as_deref(), Some("jane@example.com"));
+    }
+
+    /// A stand-in server that accepts only `accepted` and lists every
+    /// username it was asked to check.
+    async fn sign_in_as(
+        username: &str,
+        accepted: Option<&str>,
+    ) -> (Result<()>, String, Vec<String>) {
+        let tried = Mutex::new(Vec::new());
+        let mut args = args(username);
+        let result = with_username_fallback(&mut args, async |args: &AddPasswordAccountArgs| {
+            tried.lock().unwrap().push(args.username.clone());
+            if Some(args.username.as_str()) == accepted {
+                Ok(())
+            } else {
+                Err(CoreError::Auth(format!("rejected {}", args.username)))
+            }
+        })
+        .await;
+        (result, args.username, tried.into_inner().unwrap())
+    }
+
+    #[tokio::test]
+    async fn the_other_username_is_kept_when_it_works() {
+        let (result, kept, tried) = sign_in_as("jane@example.com", Some("jane")).await;
+        result.unwrap();
+        assert_eq!(kept, "jane");
+        assert_eq!(tried, ["jane@example.com", "jane"]);
+
+        let (result, kept, tried) = sign_in_as("jdoe", Some("jane@example.com")).await;
+        result.unwrap();
+        assert_eq!(kept, "jane@example.com");
+        assert_eq!(tried, ["jdoe", "jane@example.com"]);
+    }
+
+    #[tokio::test]
+    async fn both_rejections_are_reported_and_the_username_is_restored() {
+        let (result, kept, tried) = sign_in_as("jane@example.com", None).await;
+        let error = result.unwrap_err();
+        assert!(matches!(error, CoreError::Auth(_)));
+        assert_eq!(
+            error.to_string(),
+            "auth failed: rejected jane@example.com. The username jane didn't work either"
+        );
+        assert_eq!(kept, "jane@example.com");
+        assert_eq!(tried, ["jane@example.com", "jane"]);
+    }
+
+    #[tokio::test]
+    async fn only_a_rejection_tries_the_other_username() {
+        let tried = Mutex::new(0);
+        let mut args = args("jane@example.com");
+        let error = with_username_fallback(&mut args, async |_: &AddPasswordAccountArgs| {
+            *tried.lock().unwrap() += 1;
+            Err::<(), _>(CoreError::Imap("connection refused".into()))
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(error, CoreError::Imap(_)));
+        assert_eq!(*tried.lock().unwrap(), 1);
+    }
 }
 
 #[cfg(test)]
@@ -1557,11 +1699,11 @@ impl Core {
             .map(|_| ())
             .map_err(|error| error.to_client_json()),
             MailProtocol::Imap => self
-                .check_imap_smtp(&args)
+                .check_imap_smtp(&mut args)
                 .await
                 .map_err(|error| error.to_string()),
             MailProtocol::Pop3 => self
-                .check_pop3_smtp(&args)
+                .check_pop3_smtp(&mut args)
                 .await
                 .map(drop)
                 .map_err(|error| error.to_string()),
@@ -1580,17 +1722,20 @@ impl Core {
         }
     }
 
-    async fn check_imap_smtp(&self, args: &AddPasswordAccountArgs) -> Result<()> {
-        let creds = imap::ImapCredentials::Password {
-            user: args.username.clone(),
-            password: args.password.clone(),
-        };
-        let mut session = imap::connect_with_settings(
-            &args.incoming_host,
-            args.incoming_port,
-            creds,
-            &args.connection,
-        )
+    async fn check_imap_smtp(&self, args: &mut AddPasswordAccountArgs) -> Result<()> {
+        let mut session = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
+            let creds = imap::ImapCredentials::Password {
+                user: args.username.clone(),
+                password: args.password.clone(),
+            };
+            imap::connect_with_settings(
+                &args.incoming_host,
+                args.incoming_port,
+                creds,
+                &args.connection,
+            )
+            .await
+        })
         .await
         .map_err(|error| explain_imap_sign_in(args, error))?;
         let mailbox_result = imap::select(&mut session, "INBOX").await.map(|_| ());
@@ -1601,8 +1746,14 @@ impl Core {
 
     /// Returns what the POP3 server announced, which the first sync has to
     /// respect.
-    async fn check_pop3_smtp(&self, args: &AddPasswordAccountArgs) -> Result<sync::pop3::Probe> {
-        let probe = sync::pop3::probe(&password_account_config(args), &args.password).await?;
+    async fn check_pop3_smtp(
+        &self,
+        args: &mut AddPasswordAccountArgs,
+    ) -> Result<sync::pop3::Probe> {
+        let probe = with_username_fallback(args, async |args: &AddPasswordAccountArgs| {
+            sync::pop3::probe(&password_account_config(args), &args.password).await
+        })
+        .await?;
         check_smtp(args).await?;
         Ok(probe)
     }
@@ -1709,11 +1860,11 @@ impl Core {
                 .account_id,
             ),
             MailProtocol::Imap => {
-                self.check_imap_smtp(&args).await?;
+                self.check_imap_smtp(&mut args).await?;
                 None
             }
             MailProtocol::Pop3 => {
-                pop3_probe = Some(self.check_pop3_smtp(&args).await?);
+                pop3_probe = Some(self.check_pop3_smtp(&mut args).await?);
                 None
             }
             MailProtocol::Gmail => return Err(gmail_needs_google_sign_in()),
@@ -3348,6 +3499,25 @@ impl Core {
         Ok(detail)
     }
 
+    /// The stored message of `account_id` with this RFC Message-ID (with or
+    /// without angle brackets), so a mailto link's In-Reply-To can thread the
+    /// reply it starts.
+    pub async fn message_by_header_id(
+        &self,
+        account_id: i64,
+        message_id: &str,
+    ) -> Result<Option<i64>> {
+        let message_id = message_id.trim().trim_matches(['<', '>']).to_owned();
+        if message_id.is_empty() {
+            return Ok(None);
+        }
+        self.db
+            .read(move |conn| {
+                Ok(repo::messages::by_message_id(conn, account_id, &message_id)?.map(|row| row.id))
+            })
+            .await
+    }
+
     /// Newest message of `thread_id` that can be unsubscribed from, or None
     /// when the thread genuinely offers no list unsubscribe.
     ///
@@ -4685,10 +4855,21 @@ impl Core {
                             sender_verification: Default::default(),
                         };
                         let id = repo::messages::insert(&tx, &nm, tid)?;
+                        let in_reply_to_header = args
+                            .in_reply_to_message_id
+                            .is_none()
+                            .then(|| args.in_reply_to_header.as_deref().and_then(reply_header))
+                            .flatten();
                         tx.execute(
-                            "INSERT INTO drafts_meta (message_id, mode, in_reply_to_message_id)
-                             VALUES (?1, ?2, ?3)",
-                            rusqlite::params![id, args.mode, args.in_reply_to_message_id],
+                            "INSERT INTO drafts_meta
+                                    (message_id, mode, in_reply_to_message_id, in_reply_to_header)
+                             VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![
+                                id,
+                                args.mode,
+                                args.in_reply_to_message_id,
+                                in_reply_to_header
+                            ],
                         )?;
                         id
                     }
@@ -4808,7 +4989,7 @@ impl Core {
                                 m.to_json, m.cc_json, m.bcc_json, m.subject,
                                 COALESCE(b.text_body, ''), b.html_body,
                                 COALESCE(dm.mode, 'new'), dm.in_reply_to_message_id,
-                                m.is_draft
+                                m.is_draft, dm.in_reply_to_header
                          FROM messages m
                          LEFT JOIN message_bodies b ON b.message_id = m.id
                          LEFT JOIN drafts_meta dm ON dm.message_id = m.id
@@ -4834,6 +5015,7 @@ impl Core {
                                     body_html: row.get(8)?,
                                     mode: row.get(9)?,
                                     in_reply_to_message_id: row.get(10)?,
+                                    in_reply_to_header: row.get(12)?,
                                     attachments: Vec::new(),
                                 },
                                 is_draft,
@@ -6789,6 +6971,7 @@ impl Core {
                 body_html: None,
                 mode: "new".into(),
                 in_reply_to_message_id: None,
+                in_reply_to_header: None,
                 attachments: vec![DraftAttachmentIn {
                     file_path: tmp_path.to_string_lossy().into_owned(),
                     filename: "invite.ics".into(),
@@ -10383,6 +10566,134 @@ mod startup_connection_tests {
 }
 
 #[cfg(test)]
+mod message_by_header_id_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn finds_the_account_message_with_or_without_brackets() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let id = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "list@test.dev", "Topic", false);
+                conn.execute(
+                    "UPDATE messages SET message_id = 'abc.123@mail.test' WHERE id = ?1",
+                    [id],
+                )?;
+                Ok(id)
+            })
+            .await
+            .unwrap();
+
+        for header in [
+            "<abc.123@mail.test>",
+            "abc.123@mail.test",
+            " <abc.123@mail.test> ",
+        ] {
+            assert_eq!(
+                core.message_by_header_id(1, header).await.unwrap(),
+                Some(id)
+            );
+        }
+        assert_eq!(
+            core.message_by_header_id(2, "<abc.123@mail.test>")
+                .await
+                .unwrap(),
+            None,
+            "another account's message must not be found"
+        );
+        assert_eq!(core.message_by_header_id(1, "<>").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn a_reply_to_an_unstored_message_keeps_its_message_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        let parent = core
+            .db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                let (_, id) = db::testutil::seed_message(conn, "list@test.dev", "Topic", false);
+                Ok(id)
+            })
+            .await
+            .unwrap();
+        let draft = |in_reply_to_message_id, header: &str| SaveDraftArgs {
+            draft_id: None,
+            account_id: 1,
+            from: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Re: Topic".into(),
+            body_text: "body".into(),
+            body_html: None,
+            mode: "reply".into(),
+            in_reply_to_message_id,
+            in_reply_to_header: Some(header.into()),
+            attachments: Vec::new(),
+        };
+        let headers = |id| {
+            let core = &core;
+            async move {
+                core.db
+                    .read(move |conn| repo::messages::draft_reply_headers(conn, id))
+                    .await
+                    .unwrap()
+            }
+        };
+
+        let unstored = core
+            .save_draft(draft(None, "<1.2@lists.test>"))
+            .await
+            .unwrap();
+        assert_eq!(
+            core.get_draft(unstored)
+                .await
+                .unwrap()
+                .in_reply_to_header
+                .as_deref(),
+            Some("1.2@lists.test")
+        );
+        assert_eq!(
+            headers(unstored).await,
+            (
+                vec!["1.2@lists.test".to_owned()],
+                Some("1.2@lists.test".to_owned())
+            )
+        );
+        // A stored parent supplies the headers; the id is not kept.
+        let stored = core
+            .save_draft(draft(Some(parent), "<1.2@lists.test>"))
+            .await
+            .unwrap();
+        assert_eq!(
+            core.get_draft(stored).await.unwrap().in_reply_to_header,
+            None
+        );
+        let parent_header = core
+            .db
+            .read(move |conn| Ok(repo::messages::get_row(conn, parent)?.unwrap().message_id))
+            .await
+            .unwrap();
+        assert!(parent_header.is_some());
+        assert_eq!(headers(stored).await.1, parent_header);
+        // Anything that is not one message id is dropped.
+        let invalid = core
+            .save_draft(draft(None, "<a b@c>\r\nBcc: x@y"))
+            .await
+            .unwrap();
+        assert_eq!(headers(invalid).await, (Vec::new(), None));
+    }
+}
+
+#[cfg(test)]
 mod draft_staging_tests {
     use super::*;
 
@@ -10444,6 +10755,7 @@ mod draft_staging_tests {
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: vec![DraftAttachmentIn {
                 file_path: source.to_string_lossy().into_owned(),
                 filename: filename.into(),
@@ -10499,6 +10811,7 @@ mod draft_staging_tests {
             body_html: None,
             mode: "reply".into(),
             in_reply_to_message_id: Some(parent),
+            in_reply_to_header: None,
             attachments: Vec::new(),
         };
         let thread_of = |message_id: i64| {

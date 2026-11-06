@@ -195,6 +195,16 @@ impl RichComposeDocument {
         usage
     }
 
+    /// Set the text a message starts with: a reply's quote, a reopened draft,
+    /// a mail link's body. Undo stops here instead of removing it.
+    pub fn load(&mut self, text: &str, anchor: i32, cursor: i32) -> ComposeSelection {
+        let selection = self.synchronize(text, anchor, cursor);
+        self.undo.clear();
+        self.redo.clear();
+        self.typing_group_active = false;
+        selection
+    }
+
     pub fn synchronize(&mut self, new_text: &str, anchor: i32, cursor: i32) -> ComposeSelection {
         self.synchronize_key_edit(new_text, anchor, cursor, "")
     }
@@ -1345,6 +1355,18 @@ fn to_i32(value: usize) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loaded_text_is_where_undo_stops() {
+        let mut document = RichComposeDocument::default();
+        document.load("Quoted reply", 0, 0);
+        assert_eq!(document.history("undo"), None);
+        assert_eq!(document.text(), "Quoted reply");
+        document.synchronize_key_edit("Hi\nQuoted reply", 3, 3, "\n");
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), "Quoted reply");
+        assert_eq!(document.history("undo"), None);
+    }
+
     use super::*;
 
     fn assert_style_coverage(document: &RichComposeDocument) {

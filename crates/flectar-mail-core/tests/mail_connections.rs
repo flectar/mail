@@ -157,10 +157,22 @@ async fn imap_server_with_certificate(
         if !starttls {
             stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
         }
-        let login = line(&mut stream).await;
-        if login.is_empty() {
+        // The greeting announced nothing, and after STARTTLS the client must
+        // ask again anyway (RFC 9051 6.2.1).
+        let command = line(&mut stream).await;
+        if command.is_empty() {
             return;
         }
+        assert!(
+            command.contains(" CAPABILITY"),
+            "unexpected command: {command:?}"
+        );
+        let tag = command.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* CAPABILITY IMAP4rev1 ID\r\n{tag} OK capability\r\n").as_bytes())
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "));
         let tag = login.split_whitespace().next().unwrap();
         stream
@@ -287,6 +299,93 @@ async fn imap_without_encryption_signs_in_over_plain_tcp() {
     task.await.unwrap();
 }
 
+/// imap-proto before 0.17 could not parse UTF-8 in status text, so a
+/// greeting or a refusal written in another language broke the connection.
+#[tokio::test]
+async fn imap_reads_status_text_in_any_language() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream
+            .write_all("* OK Serveur prêt – bienvenue\r\n".as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+        let login = line(&mut stream).await;
+        assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [AUTHENTICATIONFAILED] Échec de l'authentification\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Auth(_)),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("Échec de l'authentification"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
+/// A server that can't check passwords right now hasn't rejected one, so the
+/// account keeps retrying instead of asking for the password again.
+#[tokio::test]
+async fn imap_temporary_sign_in_failure_is_not_a_rejected_password() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1").await;
+        let login = line(&mut stream).await;
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [UNAVAILABLE] Temporary authentication failure.\r\n").as_bytes(),
+            )
+            .await
+            .unwrap();
+    });
+    let error = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::None),
+    )
+    .await
+    .err()
+    .unwrap();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Imap(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("127.0.0.1 can't check sign-ins right now"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn imap_never_sends_a_password_the_server_refuses_unencrypted() {
     let (port, task) = plaintext_imap_server(true).await;
@@ -353,6 +452,115 @@ async fn smtp_without_encryption_signs_in_over_plain_tcp() {
     task.await.unwrap();
 }
 
+/// An unencrypted SMTP server that answers AUTH with `reply`, and when that
+/// signs in, answers MAIL FROM with `sender_reply`.
+async fn smtp_sign_in_server(
+    reply: &'static str,
+    sender_reply: &'static str,
+) -> (u16, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tcp);
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        assert!(line(&mut stream).await.starts_with("AUTH PLAIN "));
+        stream
+            .write_all(format!("{reply}\r\n").as_bytes())
+            .await
+            .unwrap();
+        if reply.starts_with("235") {
+            assert!(line(&mut stream).await.starts_with("MAIL FROM:"));
+            stream
+                .write_all(format!("{sender_reply}\r\n").as_bytes())
+                .await
+                .unwrap();
+        }
+        // The client hangs up, with or without QUIT.
+        while !line_or_eof(&mut stream).await.is_empty() {
+            stream.write_all(b"221 Goodbye\r\n").await.ok();
+        }
+    });
+    (port, task)
+}
+
+async fn line_or_eof<S: tokio::io::AsyncRead + Unpin>(stream: &mut BufReader<S>) -> String {
+    let mut line = String::new();
+    stream.read_line(&mut line).await.unwrap_or(0);
+    line
+}
+
+#[tokio::test]
+async fn smtp_rejected_password_names_the_server_and_username() {
+    let (port, task) =
+        smtp_sign_in_server("535 5.7.8 Authentication credentials invalid", "").await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("wrong".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Auth(_)),
+        "{error}"
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("127.0.0.1 rejected the username bridge-user or its password"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
+/// RFC 4954's temporary failure says nothing about the password.
+#[tokio::test]
+async fn smtp_temporary_sign_in_failure_is_not_a_rejected_password() {
+    let (port, task) = smtp_sign_in_server("454 4.7.0 Temporary authentication failure", "").await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::test_connection(&config, &smtp::SmtpAuth::Password("secret".into()))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Smtp(_)),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("can't check sign-ins right now"),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
+/// A sender refused after sign-in, even in words about authentication, is
+/// not a wrong password and must not pause the account for one.
+#[tokio::test]
+async fn smtp_refusal_after_sign_in_is_not_a_rejected_password() {
+    let (port, task) = smtp_sign_in_server(
+        "235 Authenticated",
+        "553 5.7.1 Sender address rejected: not owned by authenticated user",
+    )
+    .await;
+    let config = smtp_config(port, ConnectionSecurity::None, CERT);
+    let error = smtp::send_raw(
+        &config,
+        &smtp::SmtpAuth::Password("secret".into()),
+        "someone@example.com",
+        &["recipient@example.com".into()],
+        b"Subject: Hello\r\n\r\nHi\r\n",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(error, flectar_mail_core::error::CoreError::Smtp(_)),
+        "{error}"
+    );
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn smtp_never_sends_a_password_the_server_does_not_accept_unencrypted() {
     let (port, task) = plaintext_smtp_server(false).await;
@@ -401,6 +609,58 @@ async fn imap_implicit_tls_on_custom_port() {
     imap::logout(session).await;
     task.await.unwrap();
 }
+/// AUTHENTICATE PLAIN over implicit TLS, offered in the greeting, so no
+/// CAPABILITY command goes out before signing in.
+#[tokio::test]
+async fn imap_signs_in_with_sasl_plain_when_offered() {
+    use base64::Engine as _;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
+        let mut stream = BufReader::new(tls);
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1 SASL-IR AUTH=PLAIN ID] ready\r\n")
+            .await
+            .unwrap();
+        let command = line(&mut stream).await;
+        assert!(
+            command.ends_with(" AUTHENTICATE PLAIN\r\n"),
+            "unexpected command: {command:?}"
+        );
+        let tag = command.split_whitespace().next().unwrap();
+        stream.write_all(b"+ \r\n").await.unwrap();
+        let credentials = base64::engine::general_purpose::STANDARD
+            .decode(line(&mut stream).await.trim_end())
+            .unwrap();
+        assert_eq!(credentials, b"\0bridge-user\0bridge-password");
+        stream
+            .write_all(format!("{tag} OK signed in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    let session = imap::connect_with_settings(
+        "127.0.0.1",
+        port,
+        credentials(),
+        &settings(ConnectionSecurity::Tls),
+    )
+    .await
+    .unwrap();
+    imap::logout(session).await;
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn rejected_starttls_never_sends_credentials() {
     let (port, task) = imap_server(true, true).await;
@@ -437,7 +697,10 @@ async fn imap_incremental_search_handles_sparse_uids_and_reversed_star_ranges() 
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -536,7 +799,10 @@ async fn imap_move_server(fixture: ImapMoveFixture) -> (u16, tokio::task::JoinHa
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -724,7 +990,10 @@ async fn trash_server(fixture: TrashFixture) -> (u16, tokio::task::JoinHandle<()
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
@@ -1138,6 +1407,7 @@ async fn smtp_sent_policy(provider: Provider, policy: SentCopyPolicy, expected_a
             body_html: None,
             mode: "new".into(),
             in_reply_to_message_id: None,
+            in_reply_to_header: None,
             attachments: Vec::new(),
         })
         .await
@@ -1384,6 +1654,120 @@ async fn smtp_failure_prevents_saving_account() {
     smtp_task.await.unwrap();
 }
 
+/// Like Thunderbird's account setup, a rejected sign-in is tried once more
+/// with the other common username form. The one that worked is saved and
+/// used for sending too.
+#[tokio::test]
+async fn account_setup_tries_the_part_before_the_at_as_username() {
+    use base64::Engine as _;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let incoming_port = listener.local_addr().unwrap().port();
+    let imap_task = tokio::spawn(async move {
+        // The full address is rejected...
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
+        assert!(
+            login.contains(r#" LOGIN "jane@example.com" "#),
+            "unexpected command: {login:?}"
+        );
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(
+                format!("{tag} NO [AUTHENTICATIONFAILED] Authentication failed.\r\n").as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        // ...and the part before the @ works.
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] ready\r\n")
+            .await
+            .unwrap();
+        let login = line(&mut stream).await;
+        assert!(
+            login.contains(r#" LOGIN "jane" "#),
+            "unexpected command: {login:?}"
+        );
+        let tag = login.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("{tag} OK logged in\r\n").as_bytes())
+            .await
+            .unwrap();
+        advertise_capabilities(&mut stream, "IMAP4rev1 ID").await;
+        accept_client_identification(&mut stream).await;
+        let select = line(&mut stream).await;
+        accept_inbox_select(&mut stream, &select).await;
+        let logout = line(&mut stream).await;
+        assert!(logout.contains(" LOGOUT"), "unexpected command: {logout:?}");
+        let tag = logout.split_whitespace().next().unwrap();
+        stream
+            .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+            .await
+            .unwrap();
+    });
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_task = tokio::spawn(async move {
+        let (tcp, _) = smtp_listener.accept().await.unwrap();
+        let mut stream = BufReader::new(acceptor_for(CERT).accept(tcp).await.unwrap());
+        stream.write_all(b"220 localhost ESMTP\r\n").await.unwrap();
+        assert!(line(&mut stream).await.starts_with("EHLO "));
+        stream
+            .write_all(b"250-localhost\r\n250 AUTH PLAIN\r\n")
+            .await
+            .unwrap();
+        let auth = line(&mut stream).await;
+        let credentials = base64::engine::general_purpose::STANDARD
+            .decode(auth.trim_end().strip_prefix("AUTH PLAIN ").unwrap())
+            .unwrap();
+        assert_eq!(credentials, b"\0jane\0secret");
+        stream.write_all(b"235 Authenticated\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "NOOP\r\n");
+        stream.write_all(b"250 OK\r\n").await.unwrap();
+        assert_eq!(line(&mut stream).await, "QUIT\r\n");
+        stream.write_all(b"221 Goodbye\r\n").await.unwrap();
+    });
+
+    let temp = tempfile::tempdir().unwrap();
+    let core = Core::start_mail_ui_with_credentials(
+        Paths::for_tests(temp.path()),
+        Arc::new(DevelopmentFileCredentialStore::new(
+            temp.path().join("credentials.json"),
+        )),
+    )
+    .await
+    .unwrap();
+    core.add_account_password(AddPasswordAccountArgs {
+        email: "jane@example.com".into(),
+        display_name: None,
+        // Left empty, so the sign-in starts with the address.
+        username: String::new(),
+        password: "secret".into(),
+        mail_protocol: MailProtocol::Imap,
+        jmap_url: String::new(),
+        incoming_host: "127.0.0.1".into(),
+        incoming_port,
+        smtp_host: "127.0.0.1".into(),
+        smtp_port,
+        connection: settings(ConnectionSecurity::Tls),
+    })
+    .await
+    .unwrap();
+    imap_task.await.unwrap();
+    smtp_task.await.unwrap();
+    assert_eq!(
+        core.list_account_configs().await.unwrap()[0].username,
+        "jane"
+    );
+}
+
 #[tokio::test]
 async fn imap_mailbox_failure_prevents_saving_account() {
     use flectar_mail_core::{
@@ -1395,7 +1779,10 @@ async fn imap_mailbox_failure_prevents_saving_account() {
         let (tcp, _) = listener.accept().await.unwrap();
         let tls = acceptor_for(CERT).accept(tcp).await.unwrap();
         let mut stream = BufReader::new(tls);
-        stream.write_all(b"* OK test IMAP ready\r\n").await.unwrap();
+        stream
+            .write_all(b"* OK [CAPABILITY IMAP4rev1] test IMAP ready\r\n")
+            .await
+            .unwrap();
 
         let login = line(&mut stream).await;
         assert!(login.contains(" LOGIN "), "unexpected command: {login:?}");
