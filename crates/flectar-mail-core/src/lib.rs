@@ -1586,11 +1586,15 @@ impl Core {
 
                 config.settings.mail_history = mail_history;
                 repo::accounts::set_settings(&transaction, account_id, &config.settings)?;
+                // What is only on the server is counted again once the new
+                // history is here.
+                repo::folders::forget_server_only_unseen(&transaction, account_id)?;
                 match config.mail_protocol {
                     MailProtocol::Gmail => repo::gmail::expire_history(&transaction, account_id)?,
                     MailProtocol::Jmap => {
                         transaction.execute(
-                            "UPDATE jmap_sync_state SET email_state = NULL WHERE account_id = ?1",
+                            "UPDATE jmap_sync_state SET email_state = NULL, count_state = NULL
+                             WHERE account_id = ?1",
                             rusqlite::params![account_id],
                         )?;
                     }
@@ -3983,6 +3987,15 @@ impl Core {
     pub async fn recent_move_targets(&self, limit: usize) -> Result<Vec<i64>> {
         self.db
             .read(move |conn| repo::folders::recently_moved_to(conn, limit))
+            .await
+    }
+
+    /// How many unread messages of these folders are only on the server,
+    /// older than the mail history this device keeps; `None` while no sync
+    /// could tell for any of them.
+    pub async fn server_only_unread(&self, folder_ids: Vec<i64>) -> Result<Option<i64>> {
+        self.db
+            .read(move |conn| repo::folders::server_only_unseen(conn, &folder_ids))
             .await
     }
 

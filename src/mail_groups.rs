@@ -182,6 +182,22 @@ pub(super) fn project_mail_list<M: std::borrow::Borrow<MailMessage>>(
     entries
 }
 
+/// Ends a list whose older unread mail is only on the server, saying how
+/// much. It is a header, which keyboard navigation passes over.
+pub(super) fn server_only_entry(count: u32) -> MailListEntry {
+    MailListEntry {
+        is_header: true,
+        group_key: "server-only".into(),
+        group_kind: "server-only".into(),
+        group_count: i32::try_from(count).unwrap_or(i32::MAX),
+        expanded: false,
+        show_row: false,
+        reveal_row: false,
+        email_index: -1,
+        email: EmailRow::default(),
+    }
+}
+
 fn message_entry(
     row: &EmailRow,
     index: usize,

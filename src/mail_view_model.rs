@@ -483,13 +483,17 @@ pub(super) fn render_current(
             &labels,
             &account_presentation,
         );
-        let list_projection = project_mail_list(
+        let mut list_projection = project_mail_list(
             visible,
             &projected_rows,
             &state.mail_groups,
             query.trim().is_empty() && app.get_group_mail_by_date(),
             Local::now(),
         );
+        let server_only = state.server_only_note();
+        if server_only > 0 {
+            list_projection.push(server_only_entry(server_only));
+        }
         let (previous_email_id, next_email_id) = adjacent_message_ids(visible, selected_id);
         (
             selected_email,
@@ -1188,13 +1192,17 @@ pub(super) fn refresh_rows_only(
             &state.labels,
             &state.account_presentation,
         );
-        let list_projection = project_mail_list(
+        let mut list_projection = project_mail_list(
             visible,
             &projected_rows,
             &state.mail_groups,
             state.query.trim().is_empty() && app.get_group_mail_by_date(),
             Local::now(),
         );
+        let server_only = state.server_only_note();
+        if server_only > 0 {
+            list_projection.push(server_only_entry(server_only));
+        }
         (
             selected_id,
             checked_ids,

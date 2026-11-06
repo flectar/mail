@@ -12,7 +12,7 @@ use flectar_mail_core::{
         MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
         PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
         SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, View,
-        normalized_workspace_list_pane_width,
+        normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -272,6 +272,9 @@ pub struct MailMetadata {
     pub sidebar_badges: SidebarBadges,
     /// The account of local mail, which an import creates.
     pub local_mail: Option<i64>,
+    /// Unread mail of `scope` older than the mail history this device
+    /// keeps, which only the server has.
+    pub server_only_unread: u32,
 }
 
 struct PageLoadContext<'a> {
@@ -627,6 +630,16 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())?;
         // Unified totals add up the shown accounts only.
         badges.retain(|counts| profile_shows(profile, counts.account_id));
+        let server_only = server_only_folders(scope, folders);
+        let server_only_unread = if server_only.is_empty() {
+            0
+        } else {
+            self.core
+                .server_only_unread(server_only)
+                .await
+                .map_err(|error| error.to_string())?
+                .map_or(0, badge)
+        };
         Ok(MailMetadata {
             account_revision: self.account_revision(),
             scope,
@@ -638,6 +651,7 @@ impl CoreMailSource {
             unified_mailboxes: unified_mailbox_entries(&badges),
             sidebar_badges: sidebar_badges(&badges),
             local_mail,
+            server_only_unread,
         })
     }
 
@@ -2660,6 +2674,50 @@ fn badge(count: i64) -> u32 {
     u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX })
 }
 
+/// The folders of `scope` whose unread mail only on the server its list
+/// mentions at its end: inboxes, archives and the user's own folders, where
+/// older unread mail is worth downloading. Sent mail, drafts, spam and trash
+/// are not, and labels and inbox halves span folders.
+fn server_only_folders(scope: Scope, folders: &[FolderInfo]) -> Vec<i64> {
+    let role = |mailbox| match mailbox {
+        StandardMailbox::Inbox => Some(roles::INBOX),
+        StandardMailbox::Archive => Some(roles::ARCHIVE),
+        _ => None,
+    };
+    let (account, role) = match scope {
+        Scope::Unified(mailbox) => (None, role(mailbox)),
+        Scope::Account {
+            account_id,
+            mailbox,
+        } => (Some(account_id), role(mailbox)),
+        Scope::Folder(id) => {
+            return folders
+                .iter()
+                .filter(|folder| {
+                    folder.id == id
+                        && folder
+                            .role
+                            .as_deref()
+                            .is_none_or(|role| [roles::INBOX, roles::ARCHIVE].contains(&role))
+                })
+                .map(|folder| folder.id)
+                .collect();
+        }
+        Scope::Important | Scope::Other | Scope::Label { .. } => return Vec::new(),
+    };
+    let Some(role) = role else {
+        return Vec::new();
+    };
+    folders
+        .iter()
+        .filter(|folder| {
+            folder.role.as_deref() == Some(role)
+                && account.is_none_or(|account| folder.account_id == account)
+        })
+        .map(|folder| folder.id)
+        .collect()
+}
+
 struct ScopeResolution {
     account_id: Option<i64>,
     folder_id: Option<i64>,
@@ -3250,8 +3308,9 @@ mod tests {
     use super::{
         ComposeMessage, MailTarget, SidebarBadges, compose_args, display_thread_subject,
         mailbox_entries, mailbox_entries_with_counts, markdown_to_html, markdown_to_plain_text,
-        message_summary_to_message, readable_message_html, resolve_scope, sidebar_badges,
-        summary_to_message, unified_mailbox_entries, validated_startup_scope, with_local_mail,
+        message_summary_to_message, readable_message_html, resolve_scope, server_only_folders,
+        sidebar_badges, summary_to_message, unified_mailbox_entries, validated_startup_scope,
+        with_local_mail,
     };
     use crate::mail_scope::{LabelKind, Scope, StandardMailbox};
     use flectar_mail_core::models::{
@@ -3274,6 +3333,60 @@ mod tests {
             sync_error: None,
             can_create_top_level_mailbox: true,
             server_keeps_mail_days: None,
+        }
+    }
+
+    #[test]
+    fn only_inboxes_archives_and_own_folders_mention_mail_on_the_server() {
+        let folder = |id, account_id, role: Option<&str>| FolderInfo {
+            id,
+            account_id,
+            parent_id: None,
+            display_name: String::new(),
+            is_jmap: false,
+            path: format!("folder-{id}"),
+            delimiter: Some("/".into()),
+            role: role.map(str::to_owned),
+            selectable: true,
+            can_create_children: true,
+            can_rename: true,
+            can_delete: true,
+        };
+        let folders = [
+            folder(1, 1, Some("inbox")),
+            folder(2, 1, Some("archive")),
+            folder(3, 1, Some("sent")),
+            folder(4, 1, None),
+            folder(5, 1, Some("spam")),
+            folder(6, 2, Some("inbox")),
+        ];
+        let account = |account_id, mailbox| Scope::Account {
+            account_id,
+            mailbox,
+        };
+        assert_eq!(server_only_folders(Scope::UNIFIED_INBOX, &folders), [1, 6]);
+        assert_eq!(
+            server_only_folders(account(2, StandardMailbox::Inbox), &folders),
+            [6]
+        );
+        assert_eq!(
+            server_only_folders(account(1, StandardMailbox::Archive), &folders),
+            [2]
+        );
+        assert_eq!(server_only_folders(Scope::Folder(4), &folders), [4]);
+        assert_eq!(server_only_folders(Scope::Folder(1), &folders), [1]);
+        for scope in [
+            Scope::Unified(StandardMailbox::Sent),
+            account(1, StandardMailbox::Spam),
+            Scope::Folder(3),
+            Scope::Folder(5),
+            Scope::Important,
+            Scope::Label {
+                kind: LabelKind::Global,
+                id: 1,
+            },
+        ] {
+            assert!(server_only_folders(scope, &folders).is_empty(), "{scope:?}");
         }
     }
 

@@ -72,6 +72,11 @@ pub enum CoreEvent {
     },
     /// Mail transfers to other accounts ended, done or failed.
     TransfersFinished(TransferReport),
+    /// A sync found another number of an account's older unread messages
+    /// that are only on the server.
+    ServerOnlyUnreadChanged {
+        account_id: i64,
+    },
     ThreadWoke {
         thread_id: i64,
     },

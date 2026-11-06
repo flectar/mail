@@ -359,6 +359,28 @@ pub fn last_undoable(conn: &Connection, since_ms: i64) -> Result<Option<PendingA
     Ok(stmt.query_row(params![since_ms], from_row).optional()?)
 }
 
+/// Whether an action that changes which mail a folder holds, or whether it
+/// is read, is still on its way to the server for `account` (an SQL
+/// expression): until it arrives, this device and the server count apart.
+pub(crate) fn counts_settling_sql(account: &str) -> String {
+    format!(
+        "EXISTS (SELECT 1 FROM pending_actions a
+                 WHERE a.account_id = {account} AND a.state IN ('pending', 'inflight')
+                   AND a.kind IN ('mark_read', 'mark_unread', 'archive', 'unarchive', 'trash',
+                                  'delete_permanently', 'spam', 'not_spam', 'move', 'copy',
+                                  'empty_trash', 'remove_transferred'))"
+    )
+}
+
+/// See `counts_settling_sql`.
+pub fn counts_settling(conn: &Connection, account_id: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        &format!("SELECT {}", counts_settling_sql("?1")),
+        params![account_id],
+        |row| row.get(0),
+    )?)
+}
+
 /// Is there any pending action referencing this message (local intent wins over remote flags)?
 pub fn has_pending_for_message(conn: &Connection, message_id: i64) -> Result<bool> {
     let n: i64 = conn.query_row(
