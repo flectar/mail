@@ -217,6 +217,10 @@ pub(crate) fn restart_cpu(error: &dyn std::error::Error) -> Result<(), Box<dyn s
                 .filter(|argument| argument != crate::autostart::BACKGROUND_ARGUMENT),
         )
         .env(GPU_FALLBACK, "1");
+    // This process took the launcher's token out of the environment.
+    if let Some((variable, token)) = crate::window_chrome::launch_activation_variable() {
+        command.env(variable, token);
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;

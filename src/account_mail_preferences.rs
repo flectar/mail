@@ -1043,7 +1043,7 @@ fn register_composer(
 ) {
     // Only replace the exact unedited block we inserted. User edits are never
     // discarded when switching identity or selecting a different signature.
-    let inserted = Rc::new(RefCell::new(None::<String>));
+    let inserted = MANAGED_SIGNATURE.with(Rc::clone);
     let available = Rc::new(RefCell::new(Vec::<Signature>::new()));
     let ui = app.global::<AccountMailPreferences>();
     let reset = inserted.clone();
@@ -1264,6 +1264,18 @@ fn register_composer(
         apply_rich_compose(&app, &document, selection, &mut editor.borrow_mut());
         app.global::<AccountMailPreferences>().set_composer_signature_index(index);
     });
+}
+
+thread_local! {
+    /// The signature block the composer inserted and the user has not edited.
+    static MANAGED_SIGNATURE: Rc<RefCell<Option<String>>> = Rc::default();
+}
+
+/// Whether `body` holds nothing but the signature the composer inserted, so a
+/// message the user has not started counts as blank.
+pub(super) fn only_inserted_signature(body: &str) -> bool {
+    let managed = MANAGED_SIGNATURE.with(|managed| managed.borrow().clone());
+    remove_managed_signature(body, managed.as_deref()).is_ok_and(|rest| rest.trim().is_empty())
 }
 
 fn remove_managed_signature(body: &str, managed: Option<&str>) -> Result<String, ()> {

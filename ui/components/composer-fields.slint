@@ -295,6 +295,10 @@ export component ComposerRecipients inherits Rectangle {
     callback contact-selected(int);
     private property <bool> show-cc: root.cc != "";
     private property <bool> show-bcc: root.bcc != "";
+    // Recipients filled in for the user, such as from a mail link, always
+    // show, even in a row that was toggled off.
+    changed cc => { if (root.cc != "") { root.show-cc = true; } }
+    changed bcc => { if (root.bcc != "") { root.show-bcc = true; } }
     private property <bool> suggestions-dismissed: false;
     // Suggestion rows hold a name and an address that grow with the platform font.
     private property <length> suggestion-pitch: 13px + max(18px, suggestion-name-probe.preferred-height)
