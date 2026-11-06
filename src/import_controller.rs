@@ -831,7 +831,7 @@ fn refresh_accounts(
     app: &AppWindow,
     core: &CoreMailSource,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     match runtime.block_on(core.load_settings()) {
         Ok(settings) => {
@@ -873,7 +873,7 @@ pub(super) fn register_import_callbacks(
     app: &AppWindow,
     documents: &std::sync::Arc<dyn documents::DocumentProvider>,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     let session = Rc::new(RefCell::new(ImportSession::default()));
     app.global::<AccountImport>()
@@ -887,7 +887,7 @@ pub(super) fn register_import_callbacks(
         let app = app.as_weak();
         let session = Rc::clone(&session);
         let state = Rc::clone(state);
-        let runtime = Rc::clone(runtime);
+        let runtime = runtime.clone();
         Rc::new(
             move |read: SourceReader,
                   label: String,
@@ -945,7 +945,7 @@ pub(super) fn register_import_callbacks(
                 let app_weak = app.as_weak();
                 let session = Rc::clone(&session);
                 let state = Rc::clone(&state);
-                let runtime_for_restore = Rc::clone(&runtime);
+                let runtime_for_restore = runtime.clone();
                 documents::run_request(&runtime, request, move |result| {
                     let Some(app) = app_weak.upgrade() else {
                         return;
@@ -1039,7 +1039,7 @@ pub(super) fn register_import_callbacks(
 
     let app_weak = app.as_weak();
     let open_session = Rc::clone(&session);
-    let open_runtime = Rc::clone(runtime);
+    let open_runtime = runtime.clone();
     app.on_import_accounts(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -1106,7 +1106,7 @@ pub(super) fn register_import_callbacks(
 
     let app_weak = app.as_weak();
     let file_documents = documents.clone();
-    let file_runtime = Rc::clone(runtime);
+    let file_runtime = runtime.clone();
     let file_inspect = Rc::clone(&inspect);
     let file_session = Rc::clone(&session);
     app.global::<AccountImport>().on_choose_file(move || {
@@ -1166,7 +1166,7 @@ pub(super) fn register_import_callbacks(
     #[cfg(desktop)]
     {
         let app_weak = app.as_weak();
-        let folder_runtime = Rc::clone(runtime);
+        let folder_runtime = runtime.clone();
         let folder_inspect = Rc::clone(&inspect);
         let folder_session = Rc::clone(&session);
         app.global::<AccountImport>().on_choose_folder(move || {
@@ -1337,7 +1337,7 @@ pub(super) fn register_import_callbacks(
     let app_weak = app.as_weak();
     let confirm_session = Rc::clone(&session);
     let confirm_state = Rc::clone(state);
-    let confirm_runtime = Rc::clone(runtime);
+    let confirm_runtime = runtime.clone();
     app.global::<AccountImport>().on_confirm(move || {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -1428,7 +1428,7 @@ pub(super) fn register_import_callbacks(
         let app_weak = app.as_weak();
         let session = Rc::clone(&confirm_session);
         let state = Rc::clone(&confirm_state);
-        let runtime = Rc::clone(&confirm_runtime);
+        let runtime = confirm_runtime.clone();
         documents::run_request(&confirm_runtime, request, move |result| {
             let Some(app) = app_weak.upgrade() else {
                 return;

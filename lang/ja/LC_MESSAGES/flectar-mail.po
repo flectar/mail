@@ -3,14 +3,16 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2026-11-05 10:09+0000\n"
+"Last-Translator: Yusuke Miyajima <miyayuu.since2018@gmail.com>\n"
+"Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
+"mail/ja/>\n"
 "Language: ja\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Weblate 2026.9.1\n"
 
 #: ui/app-icon.slint:19
 msgid "Orange"
@@ -42,277 +44,277 @@ msgstr ""
 #: ui/app.slint:97
 msgctxt "abbreviated month in a date"
 msgid "Jan"
-msgstr ""
+msgstr "1月"
 
 #: ui/app.slint:98
 msgctxt "abbreviated month in a date"
 msgid "Feb"
-msgstr ""
+msgstr "2月"
 
 #: ui/app.slint:99
 msgctxt "abbreviated month in a date"
 msgid "Mar"
-msgstr ""
+msgstr "3月"
 
 #: ui/app.slint:100
 msgctxt "abbreviated month in a date"
 msgid "Apr"
-msgstr ""
+msgstr "4月"
 
 #: ui/app.slint:101
 msgctxt "abbreviated month in a date"
 msgid "May"
-msgstr ""
+msgstr "5月"
 
 #: ui/app.slint:102
 msgctxt "abbreviated month in a date"
 msgid "Jun"
-msgstr ""
+msgstr "6月"
 
 #: ui/app.slint:103
 msgctxt "abbreviated month in a date"
 msgid "Jul"
-msgstr ""
+msgstr "7月"
 
 #: ui/app.slint:104
 msgctxt "abbreviated month in a date"
 msgid "Aug"
-msgstr ""
+msgstr "8月"
 
 #: ui/app.slint:105
 msgctxt "abbreviated month in a date"
 msgid "Sep"
-msgstr ""
+msgstr "9月"
 
 #: ui/app.slint:106
 msgctxt "abbreviated month in a date"
 msgid "Oct"
-msgstr ""
+msgstr "10月"
 
 #: ui/app.slint:107
 msgctxt "abbreviated month in a date"
 msgid "Nov"
-msgstr ""
+msgstr "11月"
 
 #: ui/app.slint:108
 msgctxt "abbreviated month in a date"
 msgid "Dec"
-msgstr ""
+msgstr "12月"
 
 #: ui/app.slint:111
 msgctxt "month in a date"
 msgid "January"
-msgstr ""
+msgstr "1月"
 
 #: ui/app.slint:112
 msgctxt "month in a date"
 msgid "February"
-msgstr ""
+msgstr "2月"
 
 #: ui/app.slint:113
 msgctxt "month in a date"
 msgid "March"
-msgstr ""
+msgstr "3月"
 
 #: ui/app.slint:114
 msgctxt "month in a date"
 msgid "April"
-msgstr ""
+msgstr "4月"
 
 #: ui/app.slint:115
 msgctxt "month in a date"
 msgid "May"
-msgstr ""
+msgstr "5月"
 
 #: ui/app.slint:116
 msgctxt "month in a date"
 msgid "June"
-msgstr ""
+msgstr "6月"
 
 #: ui/app.slint:117
 msgctxt "month in a date"
 msgid "July"
-msgstr ""
+msgstr "7月"
 
 #: ui/app.slint:118
 msgctxt "month in a date"
 msgid "August"
-msgstr ""
+msgstr "8月"
 
 #: ui/app.slint:119
 msgctxt "month in a date"
 msgid "September"
-msgstr ""
+msgstr "9月"
 
 #: ui/app.slint:120
 msgctxt "month in a date"
 msgid "October"
-msgstr ""
+msgstr "10月"
 
 #: ui/app.slint:121
 msgctxt "month in a date"
 msgid "November"
-msgstr ""
+msgstr "11月"
 
 #: ui/app.slint:122
 msgctxt "month in a date"
 msgid "December"
-msgstr ""
+msgstr "12月"
 
 #: ui/app.slint:124
 msgctxt "month on its own"
 msgid "January"
-msgstr ""
+msgstr "1月"
 
 #: ui/app.slint:125
 msgctxt "month on its own"
 msgid "February"
-msgstr ""
+msgstr "2月"
 
 #: ui/app.slint:126
 msgctxt "month on its own"
 msgid "March"
-msgstr ""
+msgstr "3月"
 
 #: ui/app.slint:127
 msgctxt "month on its own"
 msgid "April"
-msgstr ""
+msgstr "4月"
 
 #: ui/app.slint:128
 msgctxt "month on its own"
 msgid "May"
-msgstr ""
+msgstr "5月"
 
 #: ui/app.slint:129
 msgctxt "month on its own"
 msgid "June"
-msgstr ""
+msgstr "6月"
 
 #: ui/app.slint:130
 msgctxt "month on its own"
 msgid "July"
-msgstr ""
+msgstr "7月"
 
 #: ui/app.slint:131
 msgctxt "month on its own"
 msgid "August"
-msgstr ""
+msgstr "8月"
 
 #: ui/app.slint:132
 msgctxt "month on its own"
 msgid "September"
-msgstr ""
+msgstr "9月"
 
 #: ui/app.slint:133
 msgctxt "month on its own"
 msgid "October"
-msgstr ""
+msgstr "10月"
 
 #: ui/app.slint:134
 msgctxt "month on its own"
 msgid "November"
-msgstr ""
+msgstr "11月"
 
 #: ui/app.slint:135
 msgctxt "month on its own"
 msgid "December"
-msgstr ""
+msgstr "12月"
 
 #: ui/app.slint:140 ui/components/calendar.slint:691
 msgid "Mon"
-msgstr ""
+msgstr "月"
 
 #: ui/app.slint:140
 msgid "Monday"
-msgstr ""
+msgstr "月曜日"
 
 #: ui/app.slint:141 ui/components/calendar.slint:691
 msgid "Tue"
-msgstr ""
+msgstr "火"
 
 #: ui/app.slint:141
 msgid "Tuesday"
-msgstr ""
+msgstr "火曜日"
 
 #: ui/app.slint:142 ui/components/calendar.slint:691
 msgid "Wed"
-msgstr ""
+msgstr "水"
 
 #: ui/app.slint:142
 msgid "Wednesday"
-msgstr ""
+msgstr "水曜日"
 
 #: ui/app.slint:143 ui/components/calendar.slint:691
 msgid "Thu"
-msgstr ""
+msgstr "木"
 
 #: ui/app.slint:143
 msgid "Thursday"
-msgstr ""
+msgstr "木曜日"
 
 #: ui/app.slint:144 ui/components/calendar.slint:691
 msgid "Fri"
-msgstr ""
+msgstr "金"
 
 #: ui/app.slint:144
 msgid "Friday"
-msgstr ""
+msgstr "金曜日"
 
 #: ui/app.slint:145 ui/components/calendar.slint:691
 msgid "Sat"
-msgstr ""
+msgstr "土"
 
 #: ui/app.slint:145
 msgid "Saturday"
-msgstr ""
+msgstr "土曜日"
 
 #: ui/app.slint:146 ui/components/calendar.slint:691
 msgid "Sun"
-msgstr ""
+msgstr "日"
 
 #: ui/app.slint:146
 msgid "Sunday"
-msgstr ""
+msgstr "日曜日"
 
 #: ui/app.slint:150
 msgctxt "time of day"
 msgid "PM"
-msgstr ""
+msgstr "午後"
 
 #: ui/app.slint:150
 msgctxt "time of day"
 msgid "AM"
-msgstr ""
+msgstr "午前"
 
 #: ui/app.slint:153 ui/views/mail-list-pane.slint:603
 msgid "Yesterday"
-msgstr ""
+msgstr "昨日"
 
 #: ui/app.slint:156
 msgctxt "date pattern (CLDR): day and month of recent mail in lists"
 msgid "MMM d"
-msgstr ""
+msgstr "M/d"
 
 #: ui/app.slint:157
 msgctxt "date pattern (CLDR): date of older mail in lists, keep it short"
 msgid "MMM d, y"
-msgstr ""
+msgstr "y/M/d"
 
 #: ui/app.slint:158
 msgctxt "date pattern (CLDR): a date on its own"
 msgid "MMM d, y"
-msgstr ""
+msgstr "y/M/d"
 
 #: ui/app.slint:159
 msgctxt "date pattern (CLDR): a date with its weekday"
 msgid "EEE, MMM d, y"
-msgstr ""
+msgstr "y/M/d（EEE）"
 
 #: ui/app.slint:160
 msgctxt "date pattern (CLDR): day heading in the agenda"
 msgid "EEEE, MMMM d"
-msgstr ""
+msgstr "M月d日 EEEE"
 
 #: ui/app.slint:161
 msgctxt "date pattern (CLDR): month heading, LLLL is the month name on its own"
@@ -393,7 +395,6 @@ msgstr ""
 msgid "{n} interaction"
 msgid_plural "{n} interactions"
 msgstr[0] ""
-msgstr[1] ""
 
 #: ui/app.slint:183
 msgid "Last contacted {}"
@@ -2275,7 +2276,6 @@ msgstr ""
 msgid "{n} event"
 msgid_plural "{n} events"
 msgstr[0] ""
-msgstr[1] ""
 
 #: ui/components/calendar-agenda.slint:237
 msgid "Cancelled"
@@ -2547,7 +2547,7 @@ msgstr ""
 
 #: ui/components/composer-actions.slint:266
 msgid "Save draft"
-msgstr ""
+msgstr "下書きに保存"
 
 #: ui/components/composer-actions.slint:279
 msgid "Discard"
@@ -2606,7 +2606,7 @@ msgstr ""
 
 #: ui/components/composer-fields.slint:42
 msgid "Edit draft"
-msgstr ""
+msgstr "下書きを編集"
 
 #: ui/components/composer-fields.slint:43
 msgid "New message"
@@ -2987,11 +2987,11 @@ msgstr ""
 
 #: ui/components/profile-switcher.slint:126 ui/views/files-view.slint:39
 msgid "All accounts"
-msgstr ""
+msgstr "すべてのアカウント"
 
 #: ui/components/profile-switcher.slint:196
 msgid "Profile"
-msgstr ""
+msgstr "プロファイル"
 
 #: ui/components/profile-switcher.slint:295
 msgid "Edit profiles…"
@@ -3007,35 +3007,35 @@ msgstr ""
 
 #: ui/components/sidebar-controls.slint:171
 msgid "Collapse label"
-msgstr ""
+msgstr "ラベルを折りたたむ"
 
 #: ui/components/sidebar-controls.slint:171
 msgid "Expand label"
-msgstr ""
+msgstr "ラベルを展開"
 
 #: ui/components/sidebar-controls.slint:172
 msgid "Collapse folder"
-msgstr ""
+msgstr "フォルダーを折りたたむ"
 
 #: ui/components/sidebar-controls.slint:172
 msgid "Expand folder"
-msgstr ""
+msgstr "フォルダーを展開"
 
 #: ui/components/sidebar-controls.slint:187
 msgid "New subfolder"
-msgstr ""
+msgstr "新しいフォルダー"
 
 #: ui/components/sidebar-controls.slint:193 ui/dialogs/folder-dialog.slint:29
 msgid "Rename folder"
-msgstr ""
+msgstr "フォルダー名を変更"
 
 #: ui/components/sidebar-controls.slint:199
 msgid "Delete folder"
-msgstr ""
+msgstr "フォルダーを削除"
 
 #: ui/components/sidebar-controls.slint:212
 msgid "Empty Trash…"
-msgstr ""
+msgstr "ゴミ箱を空にする…"
 
 #: ui/components/sidebar-controls.slint:224
 msgid "New nested label"
@@ -3059,11 +3059,11 @@ msgstr ""
 
 #: ui/components/sidebar.slint:117 ui/views/mail-list-pane.slint:1430
 msgid "New email"
-msgstr ""
+msgstr "新しいメール"
 
 #: ui/components/sidebar.slint:117
 msgid "Add an account"
-msgstr ""
+msgstr "アカウントを追加"
 
 #: ui/components/sidebar.slint:171 ui/components/sidebar.slint:180
 #: ui/components/sidebar.slint:200
@@ -3076,35 +3076,35 @@ msgstr ""
 
 #: ui/components/sidebar.slint:233
 msgid "Add account"
-msgstr ""
+msgstr "アカウントを追加"
 
 #: ui/components/sidebar.slint:282
 msgid "ALL ACCOUNTS"
-msgstr ""
+msgstr "すべてのアカウント"
 
 #: ui/components/sidebar.slint:291
 msgid "All Inboxes"
-msgstr ""
+msgstr "すべての受信トレイ"
 
 #: ui/components/sidebar.slint:307
 msgid "Inbox"
-msgstr ""
+msgstr "受信トレイ"
 
 #: ui/components/sidebar.slint:369
 msgid "Categories"
-msgstr ""
+msgstr "カテゴリー"
 
 #: ui/components/sidebar.slint:387
 msgid "Important"
-msgstr ""
+msgstr "重要"
 
 #: ui/components/sidebar.slint:407 ui/dialogs/settings-dialog.slint:271
 msgid "Other"
-msgstr ""
+msgstr "その他"
 
 #: ui/components/sidebar.slint:450 ui/components/sidebar.slint:609
 msgid "Labels"
-msgstr ""
+msgstr "ラベル"
 
 #: ui/components/sidebar.slint:469
 msgid "Global label {}"
@@ -3112,7 +3112,7 @@ msgstr ""
 
 #: ui/components/sidebar.slint:501 ui/views/contacts-view.slint:221
 msgid "ACCOUNTS"
-msgstr ""
+msgstr "アカウント"
 
 #: ui/components/sidebar.slint:629
 msgid "{} label, {} account"
@@ -3121,11 +3121,11 @@ msgstr ""
 #: ui/components/sidebar.slint:671 ui/dialogs/folder-dialog.slint:27
 #: ui/views/files-view.slint:354 ui/views/files-view.slint:578
 msgid "New folder"
-msgstr ""
+msgstr "新しいフォルダー"
 
 #: ui/components/sidebar.slint:688 ui/dialogs/folder-dialog.slint:26
 msgid "New label"
-msgstr ""
+msgstr "新しいラベル"
 
 #: ui/components/sidebar.slint:708
 msgid "No folders found"
@@ -3142,47 +3142,47 @@ msgstr[0] ""
 
 #: ui/components/tab-overview.slint:68 ui/views/files-view.slint:399
 msgid "Files"
-msgstr ""
+msgstr "ファイル"
 
 #: ui/components/tab-overview.slint:69 ui/dialogs/settings-dialog.slint:1579
 #: ui/dialogs/settings-dialog.slint:2645 ui/views/contacts-view.slint:249
 msgid "Contacts"
-msgstr ""
+msgstr "アドレス帳"
 
 #: ui/components/tab-overview.slint:70
 msgid "Settings"
-msgstr ""
+msgstr "設定"
 
 #: ui/components/tab-overview.slint:71 ui/dialogs/settings-dialog.slint:2391
 msgid "Mail"
-msgstr ""
+msgstr "メール"
 
 #: ui/components/tab-overview.slint:143
 msgid "Close tab"
-msgstr ""
+msgstr "タブを閉じる"
 
 #: ui/components/tab-overview.slint:198 ui/components/tab-overview.slint:222
 #: ui/dialogs/settings-dialog.slint:2411
 msgid "Tabs"
-msgstr ""
+msgstr "タブ"
 
 #: ui/components/tab-overview.slint:261 ui/dialogs/import-dialog.slint:333
 #: ui/views/onboarding-view.slint:427
 msgid "Back"
-msgstr ""
+msgstr "戻る"
 
 #: ui/components/tab-overview.slint:271
 msgid "{n} tab"
 msgid_plural "{n} tabs"
-msgstr[0] ""
+msgstr[0] "{n}個のタブ"
 
 #: ui/components/tab-overview.slint:293
 msgid "Reopen closed tab"
-msgstr ""
+msgstr "閉じたタブを開く"
 
 #: ui/components/tab-overview.slint:302
 msgid "New tab"
-msgstr ""
+msgstr "新しいタブ"
 
 #: ui/components/theme-editor.slint:232
 msgid "Color saturation and brightness"
@@ -3405,15 +3405,15 @@ msgstr ""
 
 #: ui/dialogs/calendar-details-dialog.slint:177
 msgid "WHEN"
-msgstr ""
+msgstr "日時"
 
 #: ui/dialogs/calendar-details-dialog.slint:178
 msgid "CALENDAR"
-msgstr ""
+msgstr "カレンダー"
 
 #: ui/dialogs/calendar-details-dialog.slint:179
 msgid "ACCOUNT"
-msgstr ""
+msgstr "アカウント"
 
 #: ui/dialogs/calendar-details-dialog.slint:180
 msgid "LOCATION"
@@ -3429,11 +3429,11 @@ msgstr ""
 
 #: ui/dialogs/calendar-details-dialog.slint:183
 msgid "SYNC"
-msgstr ""
+msgstr "同期"
 
 #: ui/dialogs/calendar-details-dialog.slint:184
 msgid "STATUS"
-msgstr ""
+msgstr "ステータス"
 
 #: ui/dialogs/calendar-details-dialog.slint:185
 msgid "MY RESPONSE"
@@ -3465,23 +3465,23 @@ msgstr ""
 
 #: ui/dialogs/calendar-event-dialog.slint:51
 msgid "Edit event"
-msgstr ""
+msgstr "予定を編集"
 
 #: ui/dialogs/calendar-event-dialog.slint:52
 msgid "TITLE"
-msgstr ""
+msgstr "タイトル"
 
 #: ui/dialogs/calendar-event-dialog.slint:53
 msgid "Event title"
-msgstr ""
+msgstr "予定のタイトル"
 
 #: ui/dialogs/calendar-event-dialog.slint:54
 msgid "DATE"
-msgstr ""
+msgstr "日付"
 
 #: ui/dialogs/calendar-event-dialog.slint:55
 msgid "START TIME"
-msgstr ""
+msgstr "開始時刻"
 
 #: ui/dialogs/calendar-event-dialog.slint:56 ui/views/contacts-view.slint:785
 msgid "YYYY-MM-DD"
@@ -3931,9 +3931,9 @@ msgstr ""
 #: ui/dialogs/import-dialog.slint:575
 msgid ""
 "Supported: Thunderbird for Android and K-9 Mail settings (.k9s), Thunderbird "
-"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups (."
-"json), and mail saved as .mbox or .eml files, in maildir folders, or in ZIP "
-"archives of them."
+"profile exports (.zip), profile folders and prefs.js, Flectar Mail backups "
+"(.json), and mail saved as .mbox or .eml files, in maildir folders, or in "
+"ZIP archives of them."
 msgstr ""
 
 #: ui/dialogs/import-dialog.slint:576
@@ -4463,7 +4463,7 @@ msgstr ""
 #: ui/dialogs/settings-dialog.slint:1024 ui/dialogs/settings-dialog.slint:1054
 #: ui/dialogs/settings-dialog.slint:2714
 msgid "General"
-msgstr ""
+msgstr "一般"
 
 #: ui/dialogs/settings-dialog.slint:1025 ui/dialogs/settings-dialog.slint:1729
 #: ui/dialogs/settings-dialog.slint:2715 ui/dialogs/settings-dialog.slint:3160
@@ -6406,7 +6406,6 @@ msgstr[0] ""
 msgid "{n} message"
 msgid_plural "{n} messages"
 msgstr[0] ""
-msgstr[1] ""
 
 #: ui/views/mail-list-pane.slint:604
 msgid "This week"
@@ -6438,11 +6437,11 @@ msgstr ""
 
 #: ui/views/mail-list-pane.slint:646
 msgid "Unread"
-msgstr ""
+msgstr "未読"
 
 #: ui/views/mail-list-pane.slint:647
 msgid "Starred"
-msgstr ""
+msgstr "スター付き"
 
 #: ui/views/mail-list-pane.slint:648 ui/views/mail-list-pane.slint:895
 msgid "Has attachments"

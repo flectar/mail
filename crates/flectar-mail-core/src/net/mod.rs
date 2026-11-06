@@ -1,7 +1,12 @@
 //! Connections shared by the mail protocols: TCP setup, the stream that
 //! carries a session before and after TLS, and each account's TLS trust.
 
+mod connect;
 pub mod tls;
+
+#[cfg(test)]
+pub(crate) use connect::closed_loopback_port;
+pub use connect::connect_tcp;
 
 use std::io;
 use std::net::SocketAddr;
@@ -87,13 +92,4 @@ impl AsyncWrite for MailStream {
             Self::Tls(stream) => Pin::new(stream.as_mut()).poll_shutdown(context),
         }
     }
-}
-
-/// Open a TCP connection for a mail protocol. Nagle's algorithm only delays
-/// their short request/response exchanges, so it is disabled when the
-/// platform allows.
-pub async fn connect_tcp(host: &str, port: u16) -> io::Result<TcpStream> {
-    let stream = TcpStream::connect((host, port)).await?;
-    stream.set_nodelay(true).ok();
-    Ok(stream)
 }

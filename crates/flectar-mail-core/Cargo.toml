@@ -117,5 +117,10 @@ keyring = { version = "3", features = ["sync-secret-service", "apple-native", "w
 [target.'cfg(all(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")))'.dependencies]
 dbus-secret-service = "4"
 
+# connect_tcp turns off SYN resends for loopback connections and checks the
+# Windows build first.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Wdk_System_SystemServices", "Win32_Networking_WinSock", "Win32_System_IO", "Win32_System_SystemInformation"] }
+
 [target.'cfg(all(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"), not(target_env = "ohos")))'.dev-dependencies]
 dbus = "0.9"
