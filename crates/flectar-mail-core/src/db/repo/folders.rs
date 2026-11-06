@@ -652,19 +652,18 @@ pub fn mark_moved_to(conn: &Connection, id: i64, at: i64) -> Result<()> {
     Ok(())
 }
 
-/// The account's folders the user moved mail into most recently, newest
-/// first.
-pub fn recently_moved_to(conn: &Connection, account_id: i64, limit: usize) -> Result<Vec<i64>> {
+/// The folders the user moved or copied mail into most recently, of every
+/// account, newest first.
+pub fn recently_moved_to(conn: &Connection, limit: usize) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare_cached(
         "SELECT id FROM folders
-         WHERE account_id = ?1 AND moved_to_at IS NOT NULL
-         ORDER BY moved_to_at DESC, id DESC LIMIT ?2",
+         WHERE moved_to_at IS NOT NULL
+         ORDER BY moved_to_at DESC, id DESC LIMIT ?1",
     )?;
     let ids = stmt
-        .query_map(
-            params![account_id, i64::try_from(limit).unwrap_or(i64::MAX)],
-            |row| row.get(0),
-        )?
+        .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
+            row.get(0)
+        })?
         .collect::<rusqlite::Result<Vec<i64>>>()?;
     Ok(ids)
 }
@@ -706,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_move_targets_are_the_accounts_newest_first() {
+    fn recent_move_targets_are_newest_first() {
         let conn = testutil::conn();
         testutil::seed_account(&conn);
         conn.execute(
@@ -726,11 +725,10 @@ mod tests {
             mark_moved_to(&conn, folder, at).unwrap();
         }
 
-        assert_eq!(recently_moved_to(&conn, 1, 5).unwrap(), [3, 2]);
-        assert_eq!(recently_moved_to(&conn, 1, 1).unwrap(), [3]);
+        assert_eq!(recently_moved_to(&conn, 5).unwrap(), [5, 3, 2]);
+        assert_eq!(recently_moved_to(&conn, 1).unwrap(), [5]);
         mark_moved_to(&conn, 2, 50).unwrap();
-        assert_eq!(recently_moved_to(&conn, 1, 5).unwrap(), [2, 3]);
-        assert_eq!(recently_moved_to(&conn, 2, 5).unwrap(), [5]);
+        assert_eq!(recently_moved_to(&conn, 5).unwrap(), [2, 5, 3]);
     }
 
     #[test]

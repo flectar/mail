@@ -1775,14 +1775,11 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    /// The account's folders mail was moved into most recently, newest first.
-    pub async fn recent_move_targets(
-        &self,
-        account_id: i64,
-        limit: usize,
-    ) -> Result<Vec<i64>, String> {
+    /// The folders mail was moved or copied into most recently, of every
+    /// account, newest first.
+    pub async fn recent_move_targets(&self, limit: usize) -> Result<Vec<i64>, String> {
         self.core
-            .recent_move_targets(account_id, limit)
+            .recent_move_targets(limit)
             .await
             .map_err(|error| error.to_string())
     }

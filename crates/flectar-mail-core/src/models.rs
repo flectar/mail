@@ -1222,6 +1222,9 @@ pub enum ActionKind {
     Spam,
     NotSpam,
     Move,
+    /// Files mail in one more folder of its account, where a message can be
+    /// in several (JMAP).
+    Copy,
     Snooze,
     Unsnooze,
     AddLabel,
@@ -1253,6 +1256,7 @@ impl ActionKind {
             ActionKind::Spam => "spam",
             ActionKind::NotSpam => "not_spam",
             ActionKind::Move => "move",
+            ActionKind::Copy => "copy",
             ActionKind::Snooze => "snooze",
             ActionKind::Unsnooze => "unsnooze",
             ActionKind::AddLabel => "add_label",
@@ -1273,6 +1277,7 @@ impl ActionKind {
             "spam" => ActionKind::Spam,
             "not_spam" => ActionKind::NotSpam,
             "move" => ActionKind::Move,
+            "copy" => ActionKind::Copy,
             "snooze" => ActionKind::Snooze,
             "unsnooze" => ActionKind::Unsnooze,
             "add_label" => ActionKind::AddLabel,
@@ -2460,6 +2465,7 @@ mod tests {
             ActionKind::Spam,
             ActionKind::NotSpam,
             ActionKind::Move,
+            ActionKind::Copy,
             ActionKind::Snooze,
             ActionKind::Unsnooze,
             ActionKind::AddLabel,

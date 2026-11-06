@@ -94,6 +94,12 @@ impl Paths {
         self.mail_root().join(account_id.to_string())
     }
 
+    /// Directory for the raw messages being copied or moved to another
+    /// account.
+    pub fn transfers_dir(&self) -> PathBuf {
+        self.data_dir.join("transfers")
+    }
+
     /// Directory for extracted attachment files.
     pub fn attachments_dir(&self, account_id: i64) -> PathBuf {
         self.cache_dir

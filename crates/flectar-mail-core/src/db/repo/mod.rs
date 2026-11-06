@@ -24,6 +24,7 @@ pub mod snoozes;
 pub mod splits;
 pub mod sync_failures;
 pub mod threads;
+pub mod transfers;
 
 use crate::models::{Address, AuthKind, CalendarConnectionKind, MailProtocol, Provider};
 use rusqlite::ToSql;

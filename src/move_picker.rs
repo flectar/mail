@@ -273,10 +273,10 @@ pub(super) fn register(
             app.set_render_status(UiMessage::plain("No other folder to move this mail to."));
             return;
         }
-        // Recent folders are one account's.
+        // Recent folders are those of the mail's one account.
         let recent = match account_ids.as_slice() {
-            [account_id] => request_runtime
-                .block_on(core.recent_move_targets(*account_id, 2 * RECENT_TARGETS))
+            [_] => request_runtime
+                .block_on(core.recent_move_targets(4 * RECENT_TARGETS))
                 .unwrap_or_default(),
             _ => Vec::new(),
         };
