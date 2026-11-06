@@ -267,7 +267,7 @@ fn prefixed_subject(subject: &str, prefix: &str) -> String {
 pub(super) fn perform_selected_action(
     _app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    _runtime: &tokio::runtime::Runtime,
+    _runtime: &tokio::runtime::Handle,
     action: &str,
 ) -> Result<(), String> {
     let (selected_id, target, core, using_core) = {

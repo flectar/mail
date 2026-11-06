@@ -61,7 +61,7 @@ pub(crate) fn launch_links(
 #[derive(Clone)]
 pub(super) struct Composer {
     pub(super) state: Rc<RefCell<InboxState>>,
-    pub(super) runtime: Rc<tokio::runtime::Runtime>,
+    pub(super) runtime: tokio::runtime::Handle,
     pub(super) intent: Rc<RefCell<ComposeIntent>>,
     pub(super) document: Rc<RefCell<RichComposeDocument>>,
     pub(super) editor: Rc<RefCell<LazyComposeEditor>>,

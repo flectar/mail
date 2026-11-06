@@ -405,7 +405,7 @@ pub(super) fn apply_local_mail(
 pub(super) fn refresh_local_mail(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
 ) {
     let (core, reload) = {
         let mut state = state.borrow_mut();
@@ -436,7 +436,7 @@ pub(super) fn refresh_local_mail(
 pub(super) fn update_connected_accounts(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     accounts: Vec<Account>,
     configs: Vec<AccountConfig>,
 ) {

@@ -34,12 +34,10 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.set_active_view("mail".into());
     app.window().set_size(slint::PhysicalSize::new(1280, 900));
     app.show().unwrap();
-    let runtime = Rc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap(),
-    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let (fav, _) = bounded_ui_channel();
     let (avatars, _) = bounded_ui_channel();
@@ -50,7 +48,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
         false,
         false,
-        WarmStartCacheWriter::spawn(&runtime, dir.path().join("warm.json")),
+        WarmStartCacheWriter::spawn(runtime.handle(), dir.path().join("warm.json")),
     );
     state.messages = mail::fixture_messages();
     state.messages.truncate(2);
@@ -103,12 +101,12 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     app.set_emails(state.email_rows.clone().into());
     app.set_sidebar_rows(Rc::clone(&state.sidebar_rows).into());
     let state = Rc::new(RefCell::new(state));
-    register_settings_preference_callbacks(&app, &state, &runtime);
-    render_current(&app, &state, &runtime).unwrap();
+    register_settings_preference_callbacks(&app, &state, runtime.handle());
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert_eq!(requests.borrow().last(), Some(&ids[0]));
     let sidebar = app.get_sidebar_rows();
     assert!(sidebar.row_count() > 0);
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert_eq!(
         sidebar,
         app.get_sidebar_rows(),
@@ -117,7 +115,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     // Archive removes the current row, and render_current chooses the next.
     app.global::<MessageColors>().set_original(true);
     state.borrow_mut().messages.remove(0);
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert!(
         !app.global::<MessageColors>().get_original(),
         "original colors apply only to the current message"
@@ -388,7 +386,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         state.messages[0].body_pending = false;
     }
     app.global::<EmailReader>().set_reader_mode(false);
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     draw("html-before-reader", 1280, 900);
     let long_html_aspect = app.get_email_content_aspect();
     assert!(
@@ -445,7 +443,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         "Switching back must restore the HTML scroll range"
     );
     state.borrow_mut().messages[0].html = original_html;
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     app.global::<EmailReader>().set_reader_mode(true);
     app.invoke_select_email_text();
     assert!(app.get_has_selection());
@@ -467,12 +465,12 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
             is_inline: false,
         },
     ];
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 2);
     // A structural rejection while the reader is open must never leave the
     // previous message's accessible content visible over the fallback.
     state.borrow_mut().messages[0].html = Some("<span>x</span>".repeat(16_000));
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert!(app.get_text_mode());
     assert!(!app.global::<EmailReader>().get_available());
     assert!(!app.get_has_selection());
@@ -635,7 +633,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     );
 
     state.borrow_mut().messages.clear();
-    render_current(&app, &state, &runtime).unwrap();
+    render_current(&app, &state, runtime.handle()).unwrap();
     assert_eq!(app.global::<MailAttachments>().get_rows().row_count(), 0);
     assert_eq!(app.global::<EmailReader>().get_message_id(), -1);
     assert!(app.global::<EmailReader>().get_notice().is_empty());
@@ -770,14 +768,14 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
     ));
     assert!(directory.borrow().contacts.is_empty());
     app.set_active_view("mail".into());
-    mailto_links_open_without_losing_the_draft(&app, &state, &runtime);
+    mailto_links_open_without_losing_the_draft(&app, &state, runtime.handle());
     app.hide().unwrap();
 }
 
 fn mailto_links_open_without_losing_the_draft(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
 ) {
     state.borrow_mut().connected_accounts = vec![Account {
         id: 1,
@@ -824,7 +822,7 @@ fn mailto_links_open_without_losing_the_draft(
         app,
         mailto_links::Composer {
             state: Rc::clone(state),
-            runtime: Rc::clone(runtime),
+            runtime: runtime.clone(),
             intent: Rc::new(RefCell::new(ComposeIntent::default())),
             document: Rc::new(RefCell::new(RichComposeDocument::default())),
             editor: Rc::new(RefCell::new(LazyComposeEditor::default())),
@@ -915,7 +913,7 @@ impl SoftwareReader {
             UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
             false,
             false,
-            WarmStartCacheWriter::spawn(&runtime, cache.path().join("warm.json")),
+            WarmStartCacheWriter::spawn(runtime.handle(), cache.path().join("warm.json")),
         );
         state.messages = messages;
         state.mailboxes = fixture_mailboxes(&state.messages);
@@ -941,7 +939,7 @@ impl SoftwareReader {
 
     /// Project the selected conversation, then draw it.
     fn render(&self) {
-        render_current(&self.app, &self.state, &self.runtime).unwrap();
+        render_current(&self.app, &self.state, self.runtime.handle()).unwrap();
         self.paint();
     }
 
@@ -1102,7 +1100,7 @@ fn long_quoted_conversations_paint_with_the_software_renderer() {
     );
     view.scroll_through();
     // An earlier reply is tall as well, and the newer headers follow it.
-    select_thread_message(&view.app, &view.state, &view.runtime, 40).unwrap();
+    select_thread_message(&view.app, &view.state, view.runtime.handle(), 40).unwrap();
     view.paint();
     assert!(view.body_height() > f32::from(i16::MAX));
     view.scroll_through();

@@ -151,12 +151,12 @@ pub(crate) fn window_focused(app: &AppWindow) {
 
 impl DefaultEmailAppRow {
     /// Show the row where the platform supports it, with its current state.
-    pub(crate) fn register(app: &AppWindow, runtime: &tokio::runtime::Runtime) -> Option<Self> {
+    pub(crate) fn register(app: &AppWindow, runtime: &tokio::runtime::Handle) -> Option<Self> {
         if !platform::supported() {
             return None;
         }
         let row = Self {
-            runtime: runtime.handle().clone(),
+            runtime: runtime.clone(),
             lock: Arc::default(),
             awaiting_system: Arc::default(),
         };

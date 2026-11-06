@@ -384,8 +384,8 @@ msgstr ""
 msgid "New address-book entry"
 msgstr ""
 
-#: ui/app.slint:180 ui/app.slint:1046 ui/components/composer-fields.slint:66
-#: ui/app.slint:180 ui/app.slint:1046 ui/components/composer-fields.slint:66 ui/dialogs/compose-dialog.slint:37
+#: ui/app.slint:180 ui/app.slint:1048 ui/components/composer-fields.slint:66
+#: ui/app.slint:180 ui/app.slint:1048 ui/components/composer-fields.slint:66 ui/dialogs/compose-dialog.slint:37
 msgid "No connected account"
 msgstr ""
 
@@ -1776,69 +1776,69 @@ msgstr ""
 msgid "Flectar Mail"
 msgstr ""
 
-#: ui/app.slint:1279 ui/app.slint:1292
+#: ui/app.slint:1281 ui/app.slint:1294
 msgid "Global Labels (local only)"
 msgstr ""
 
-#: ui/app.slint:2231
+#: ui/app.slint:2233
 msgid "Empty Trash?"
 msgstr ""
 
-#: ui/app.slint:2231 ui/views/files-view.slint:578
+#: ui/app.slint:2233 ui/views/files-view.slint:578
 msgid "Delete permanently?"
 msgstr ""
 
-#: ui/app.slint:2235
+#: ui/app.slint:2237
 msgid "Permanently delete all messages in Trash across every connected account?"
 msgstr ""
 
-#: ui/app.slint:2236
+#: ui/app.slint:2238
 msgid "Permanently delete all messages in this account’s Trash?"
 msgstr ""
 
-#: ui/app.slint:2238
+#: ui/app.slint:2240
 msgid "Permanently delete the selected conversations from Trash?"
 msgstr ""
 
-#: ui/app.slint:2239
+#: ui/app.slint:2241
 msgid "Permanently delete this conversation from Trash?"
 msgstr ""
 
-#: ui/app.slint:2240 ui/components/calendar.slint:947
-#: ui/app.slint:2240 ui/components/calendar.slint:947
+#: ui/app.slint:2242 ui/components/calendar.slint:947
+#: ui/app.slint:2242 ui/components/calendar.slint:947
 msgid "This action cannot be undone."
 msgstr ""
 
-#: ui/app.slint:2241
+#: ui/app.slint:2243
 msgid "Empty Trash"
 msgstr ""
 
-#: ui/app.slint:2241 ui/views/files-view.slint:660
-#: ui/app.slint:2241 ui/views/files-view.slint:660
+#: ui/app.slint:2243 ui/views/files-view.slint:660
+#: ui/app.slint:2243 ui/views/files-view.slint:660
 msgid "Delete permanently"
 msgstr ""
 
-#: ui/app.slint:2415
+#: ui/app.slint:2417
 msgid "Mailbox startup failed"
 msgstr ""
 
-#: ui/app.slint:2421
+#: ui/app.slint:2423
 msgid "Flectar Mail could not open local storage"
 msgstr ""
 
-#: ui/app.slint:2434
+#: ui/app.slint:2436
 msgid "Diagnostic ID: {}"
 msgstr ""
 
-#: ui/app.slint:2437
+#: ui/app.slint:2439
 msgid "Diagnostic ID {}"
 msgstr ""
 
-#: ui/app.slint:2442
+#: ui/app.slint:2444
 msgid "Retry"
 msgstr ""
 
-#: ui/app.slint:2450 ui/components/copyable-diagnostic.slint:43
+#: ui/app.slint:2452 ui/components/copyable-diagnostic.slint:43
 msgid "Copy diagnostics"
 msgstr ""
 
@@ -2747,20 +2747,28 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
-#: ui/components/controls.slint:185
+#: ui/components/controls.slint:108
 msgid "On"
 msgstr ""
 
-#: ui/components/controls.slint:185 ui/dialogs/settings-dialog.slint:655
+#: ui/components/controls.slint:108 ui/dialogs/settings-dialog.slint:655
 msgid "Off"
 msgstr ""
 
-#: ui/components/controls.slint:233 ui/views/mail-list-pane.slint:694
+#: ui/components/controls.slint:156 ui/views/mail-list-pane.slint:694
 msgid "Clear selection"
 msgstr ""
 
-#: ui/components/controls.slint:233
+#: ui/components/controls.slint:156
 msgid "Select"
+msgstr ""
+
+#: ui/components/controls.slint:487
+msgid "Hide password"
+msgstr ""
+
+#: ui/components/controls.slint:487
+msgid "Show password"
 msgstr ""
 
 #: ui/components/document-preview.slint:17

@@ -16,7 +16,7 @@ use crate::mailto_links::MAX_LAUNCH_LINKS;
 use flectar_mail_core::mailto;
 use sha2::{Digest, Sha256};
 use std::{io, path::Path, sync::Arc, time::Duration};
-use tokio::{io::AsyncReadExt, runtime::Runtime, task::JoinHandle};
+use tokio::{io::AsyncReadExt, runtime::Handle, task::JoinHandle};
 
 /// The only request: show and focus the main window. The first line may add
 /// the launcher's activation token so the compositor lets the window take
@@ -67,7 +67,7 @@ type ShowCallback = Arc<dyn Fn(Activation) + Send + Sync>;
 
 pub(crate) struct Primary {
     endpoint: imp::Endpoint,
-    server: Option<(tokio::runtime::Handle, JoinHandle<()>)>,
+    server: Option<(Handle, JoinHandle<()>)>,
 }
 
 impl Primary {
@@ -76,13 +76,13 @@ impl Primary {
     /// itself.
     pub(crate) fn serve(
         &mut self,
-        runtime: &Runtime,
+        runtime: &Handle,
         show: impl Fn(Activation) + Send + Sync + 'static,
     ) {
         let show: ShowCallback = Arc::new(show);
         let _context = runtime.enter();
         if let Some(task) = self.endpoint.serve(show) {
-            self.server = Some((runtime.handle().clone(), task));
+            self.server = Some((runtime.clone(), task));
         }
     }
 }
@@ -100,11 +100,7 @@ impl Drop for Primary {
 
 /// Claim the profile in `data_dir`, or hand `request` to the process that
 /// already owns it.
-pub(crate) fn acquire(
-    runtime: &Runtime,
-    data_dir: &Path,
-    request: Request,
-) -> io::Result<Acquired> {
+pub(crate) fn acquire(runtime: &Handle, data_dir: &Path, request: Request) -> io::Result<Acquired> {
     std::fs::create_dir_all(data_dir)?;
     let _context = runtime.enter();
     let mut retried = false;
@@ -458,7 +454,7 @@ mod imp {
 mod tests {
     use super::*;
 
-    fn runtime() -> Runtime {
+    fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
@@ -482,17 +478,22 @@ mod tests {
         let runtime = runtime();
         let directory = tempfile::tempdir().unwrap();
         let Acquired::Primary(mut primary) =
-            acquire(&runtime, directory.path(), show(None)).unwrap()
+            acquire(runtime.handle(), directory.path(), show(None)).unwrap()
         else {
             panic!("the first launch must own the profile");
         };
         let (shown_tx, shown_rx) = std::sync::mpsc::channel();
-        primary.serve(&runtime, move |activation| {
+        primary.serve(runtime.handle(), move |activation| {
             shown_tx.send(activation).unwrap()
         });
 
         assert!(matches!(
-            acquire(&runtime, directory.path(), show(Some("launcher-token_1"))).unwrap(),
+            acquire(
+                runtime.handle(),
+                directory.path(),
+                show(Some("launcher-token_1"))
+            )
+            .unwrap(),
             Acquired::Forwarded
         ));
         assert_eq!(
@@ -507,7 +508,7 @@ mod tests {
         );
         let request = Request::Show(activation(None, &[&link, "mailto:"]));
         assert!(matches!(
-            acquire(&runtime, directory.path(), request).unwrap(),
+            acquire(runtime.handle(), directory.path(), request).unwrap(),
             Acquired::Forwarded
         ));
         assert_eq!(
@@ -516,7 +517,7 @@ mod tests {
         );
 
         assert!(matches!(
-            acquire(&runtime, directory.path(), Request::Nothing).unwrap(),
+            acquire(runtime.handle(), directory.path(), Request::Nothing).unwrap(),
             Acquired::Forwarded
         ));
         assert!(
@@ -526,7 +527,7 @@ mod tests {
 
         drop(primary);
         assert!(matches!(
-            acquire(&runtime, directory.path(), show(None)).unwrap(),
+            acquire(runtime.handle(), directory.path(), show(None)).unwrap(),
             Acquired::Primary(_)
         ));
     }
@@ -537,12 +538,13 @@ mod tests {
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
         assert_ne!(profile_key(first.path()), profile_key(second.path()));
-        let Acquired::Primary(_first) = acquire(&runtime, first.path(), show(None)).unwrap()
+        let Acquired::Primary(_first) =
+            acquire(runtime.handle(), first.path(), show(None)).unwrap()
         else {
             panic!("first profile");
         };
         assert!(matches!(
-            acquire(&runtime, second.path(), show(None)).unwrap(),
+            acquire(runtime.handle(), second.path(), show(None)).unwrap(),
             Acquired::Primary(_)
         ));
     }

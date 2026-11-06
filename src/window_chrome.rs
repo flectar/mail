@@ -110,7 +110,7 @@ pub(crate) fn prepare(startup: WindowFrame) {
     windows::prepare(startup);
 }
 
-pub(crate) fn register(app: &AppWindow, runtime: &tokio::runtime::Runtime) {
+pub(crate) fn register(app: &AppWindow, runtime: &tokio::runtime::Handle) {
     let chrome = app.global::<WindowChrome>();
     chrome.set_platform(PLATFORM.into());
 

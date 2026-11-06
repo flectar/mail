@@ -343,19 +343,19 @@ dependencies = [
 
 [[package]]
 name = "async-imap"
-version = "0.11.3"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a6728e0f7931b36d725ac234fcb02539e9f7888dbeaaa8a18d9ea5792181570"
+checksum = "f97b87216c9f0ccc63c516263169085fa34bba25633f6d96c6a9b9ca1fd5f70a"
 dependencies = [
  "async-channel 2.5.0",
  "async-compression",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
- "futures",
+ "futures-util",
  "imap-proto",
  "log",
- "nom 7.1.3",
+ "nom 8.0.0",
  "pin-project",
  "pin-utils",
  "self_cell",
@@ -1892,6 +1892,7 @@ dependencies = [
  "tracing",
  "url",
  "webpki-roots",
+ "windows-sys 0.61.2",
  "zip",
 ]
 
@@ -3281,11 +3282,11 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "imap-proto"
-version = "0.16.7"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25f6af35c6a517aea5c72314abe90134980d2ae6a763809b50c208b3e429d71f"
+checksum = "5ccf963d57074747b455398a1763d174da80bcaba6f51e3671a82252b531a68b"
 dependencies = [
- "nom 7.1.3",
+ "nom 8.0.0",
 ]
 
 [[package]]

@@ -2,84 +2,7 @@ import { ScrollView } from "std-widgets.slint";
 import { AppTheme, LayoutMetrics, ThemeUtilities } from "../design-system.slint";
 import { FocusVisibleScope } from "focus-visible-scope.slint";
 import { TypeScale } from "../typography.slint";
-
-export component LineEdit inherits Rectangle {
-    in-out property <string> text;
-    in property <string> placeholder-text;
-    in property <string> input-label;
-    in property <InputType> input-type: InputType.text;
-    in property <bool> enabled: true;
-    in property <bool> read-only: false;
-    in property <bool> invalid: false;
-    in property <bool> show-leading-icon: false;
-    in property <image> leading-icon;
-    in property <color> leading-icon-color: AppTheme.secondary;
-    in property <length> trailing-content-width: 0px;
-    private property <length> text-inset: root.show-leading-icon ? 40px : 12px;
-    callback edited(string);
-    callback accepted(string);
-    callback select-all;
-    callback copy;
-    out property <bool> has-focus: editor.has-focus;
-    forward-focus: editor;
-
-    height: 36px;
-    min-width: 80px;
-    border-radius: LayoutMetrics.corner-radius - 2px;
-    border-width: 1px;
-    border-color: root.invalid ? AppTheme.destructive
-        : editor.has-focus ? AppTheme.accent : AppTheme.input-border;
-    background: AppTheme.input-bg;
-    opacity: root.enabled ? 1 : 0.5;
-
-    Text {
-        x: root.text-inset;
-        width: max(0px, parent.width - root.text-inset - 12px - root.trailing-content-width);
-        height: parent.height;
-        visible: root.text == "";
-        text: root.placeholder-text;
-        color: AppTheme.placeholder;
-        font-size: TypeScale.body;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-
-    editor := TextInput {
-        x: root.text-inset;
-        width: max(0px, parent.width - root.text-inset - 12px - root.trailing-content-width);
-        height: parent.height;
-        text <=> root.text;
-        color: AppTheme.heading;
-        selection-background-color: AppTheme.accent;
-        selection-foreground-color: white;
-        font-size: TypeScale.body;
-        single-line: true;
-        vertical-alignment: center;
-        input-type: root.input-type;
-        accessible-label: root.input-label;
-        enabled: root.enabled;
-        read-only: root.read-only;
-        edited => {
-            root.text = self.text;
-            root.edited(self.text);
-        }
-        accepted => { root.accepted(self.text); }
-    }
-
-    if root.show-leading-icon : Image {
-        x: 20px - self.width / 2;
-        y: (parent.height - self.height) / 2;
-        width: LayoutMetrics.icon-size;
-        height: LayoutMetrics.icon-size;
-        source: root.leading-icon;
-        colorize: root.leading-icon-color;
-        image-fit: contain;
-        accessible-role: none;
-    }
-
-    select-all => { editor.select-all(); }
-    copy => { editor.copy(); }
-}
+import { WindowChrome } from "../window-chrome.slint";
 
 export component TextEdit inherits Rectangle {
     in-out property <string> text;
@@ -462,6 +385,120 @@ export component IconButton inherits Rectangle {
 
 // Primary actions that replace a collapsed workspace sidebar float above the
 // list surface. Keeping the geometry here makes mail and contacts identical.
+export component LineEdit inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder-text;
+    in property <string> input-label;
+    in property <InputType> input-type: InputType.text;
+    in property <bool> enabled: true;
+    in property <bool> read-only: false;
+    in property <bool> invalid: false;
+    in property <bool> show-leading-icon: false;
+    in property <image> leading-icon;
+    in property <color> leading-icon-color: AppTheme.secondary;
+    in property <length> trailing-content-width: 0px;
+    private property <length> text-inset: root.show-leading-icon ? 40px : 12px;
+    // Password fields can be shown while typing (NIST SP 800-63B-4
+    // 3.1.1.2), on desktop only: a shown password is plain text to the input
+    // method, and phone keyboards learn what is typed as plain text.
+    private property <bool> can-reveal: root.input-type == InputType.password
+        && WindowChrome.platform != "";
+    private property <bool> revealed: false;
+    private property <length> text-end-inset: root.can-reveal ? 36px : 12px;
+    callback edited(string);
+    callback accepted(string);
+    callback select-all;
+    callback copy;
+    out property <bool> has-focus: editor.has-focus;
+    forward-focus: editor;
+
+    // Hide the password again once the field is cleared, as when a form
+    // resets.
+    changed text => {
+        if root.text == "" {
+            root.revealed = false;
+        }
+    }
+
+    height: 36px;
+    min-width: 80px;
+    border-radius: LayoutMetrics.corner-radius - 2px;
+    border-width: 1px;
+    border-color: root.invalid ? AppTheme.destructive
+        : editor.has-focus ? AppTheme.accent : AppTheme.input-border;
+    background: AppTheme.input-bg;
+    opacity: root.enabled ? 1 : 0.5;
+
+    Text {
+        x: root.text-inset;
+        width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
+        height: parent.height;
+        visible: root.text == "";
+        text: root.placeholder-text;
+        color: AppTheme.placeholder;
+        font-size: TypeScale.body;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    editor := TextInput {
+        x: root.text-inset;
+        width: max(0px, parent.width - root.text-inset - root.text-end-inset - root.trailing-content-width);
+        height: parent.height;
+        text <=> root.text;
+        color: AppTheme.heading;
+        selection-background-color: AppTheme.accent;
+        selection-foreground-color: white;
+        font-size: TypeScale.body;
+        single-line: true;
+        vertical-alignment: center;
+        input-type: root.revealed ? InputType.text : root.input-type;
+        accessible-label: root.input-label;
+        enabled: root.enabled;
+        read-only: root.read-only;
+        edited => {
+            root.text = self.text;
+            root.edited(self.text);
+        }
+        accepted => { root.accepted(self.text); }
+    }
+
+    if root.show-leading-icon : Image {
+        x: 20px - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: root.leading-icon;
+        colorize: root.leading-icon-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+
+    if root.can-reveal : IconButton {
+        x: parent.width - root.trailing-content-width - self.width - 2px;
+        y: (parent.height - self.height) / 2;
+        icon: root.revealed ? @image-url("../icons/lucide/outline/eye-off.svg") : @image-url("../icons/lucide/outline/eye.svg");
+        icon-size: 16px;
+        icon-color: AppTheme.secondary;
+        ghost: true;
+        hover-background: AppTheme.muted-control-bg;
+        active-background: AppTheme.muted-control-bg;
+        interactive: root.enabled;
+        tooltip-text: root.revealed ? @tr("Hide password") : @tr("Show password");
+        clicked => {
+            root.revealed = !root.revealed;
+            // A click goes back to typing; from the keyboard, focus stays
+            // so the new state is announced.
+            if !self.focus-visible {
+                editor.focus();
+            }
+        }
+    }
+
+    select-all => { editor.select-all(); }
+    copy => { editor.copy(); }
+}
+
 export component FloatingActionButton inherits IconButton {
     width: LayoutMetrics.touch-target + 8px;
     height: LayoutMetrics.touch-target + 8px;

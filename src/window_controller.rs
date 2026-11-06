@@ -256,7 +256,7 @@ pub(crate) fn reported_minimized() -> bool {
 /// back. Linux needs a StatusNotifier host, which some desktops (GNOME without
 /// an extension) do not provide; Windows and macOS always have one.
 #[cfg(desktop)]
-pub(super) fn tray_host_available(runtime: &tokio::runtime::Runtime) -> bool {
+pub(super) fn tray_host_available(runtime: &tokio::runtime::Handle) -> bool {
     if cfg!(feature = "flatpak") {
         return false;
     }
@@ -331,7 +331,7 @@ pub(super) fn register_window_preference_callbacks(
     app: &AppWindow,
     tray: Option<&FlectarTray>,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &Rc<tokio::runtime::Runtime>,
+    runtime: &tokio::runtime::Handle,
     ui_task_tx: &UiSender<UiTaskUpdate>,
 ) {
     let app_weak = app.as_weak();
@@ -361,7 +361,7 @@ pub(super) fn register_window_preference_callbacks(
 
     let app_weak = app.as_weak();
     let state_for_frame = Rc::clone(state);
-    let runtime_for_frame = Rc::clone(runtime);
+    let runtime_for_frame = runtime.clone();
     app.global::<WindowChrome>().on_choose(move |integrated| {
         let Some(app) = app_weak.upgrade() else {
             return;
@@ -390,7 +390,7 @@ pub(super) fn register_window_preference_callbacks(
     let app_weak = app.as_weak();
     let tray_for_close_setting = tray.map(FlectarTray::as_weak);
     let state_for_close_setting = Rc::clone(state);
-    let runtime_for_close_setting = Rc::clone(runtime);
+    let runtime_for_close_setting = runtime.clone();
     let ui_task_tx_for_close_setting = ui_task_tx.clone();
     app.on_set_close_to_tray(move |enabled| {
         let Some(app) = app_weak.upgrade() else {
@@ -473,10 +473,10 @@ struct LaunchAtLogin {
 
 #[cfg(desktop)]
 impl LaunchAtLogin {
-    fn register(app: &AppWindow, runtime: &tokio::runtime::Runtime) -> Self {
+    fn register(app: &AppWindow, runtime: &tokio::runtime::Handle) -> Self {
         let this = Self {
             supported: crate::autostart::supported(),
-            runtime: runtime.handle().clone(),
+            runtime: runtime.clone(),
             lock: Arc::default(),
             requests: Arc::default(),
         };
