@@ -43,6 +43,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/024_message_list_indexes.sql")),
     Migration::Plain(include_str!("migrations/025_draft_reply_header.sql")),
     Migration::Plain(include_str!("migrations/026_unread_message_index.sql")),
+    Migration::Plain(include_str!("migrations/027_folder_server_counts.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

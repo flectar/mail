@@ -522,7 +522,68 @@ async fn full_sync_triage_and_search() {
     let contacts = core.list_contacts("gra".into(), None, 5).await.unwrap();
     assert!(contacts.iter().any(|c| c.email == "grace@example.com"));
 
+    // 12. Read elsewhere: mail that another client files and later reads in
+    // a folder other than the Inbox is read here after the next check, not
+    // only at the fifth cycle's full pass. The server reports that the
+    // folder's unread count fell, so the check reads its flags again.
+    let second_client = || async {
+        let creds = flectar_mail_core::imap::ImapCredentials::Password {
+            user: "testuser".into(),
+            password: "pass".into(),
+        };
+        flectar_mail_core::imap::connect("127.0.0.1", 10993, creds)
+            .await
+            .expect("second client connect")
+    };
+    {
+        let mut s = second_client().await;
+        let raw = format!(
+            "Message-ID: <filed@example.com>\r\nFrom: Heidi <heidi@example.com>\r\n\
+             To: Test User <testuser@example.com>\r\nSubject: Filed elsewhere\r\nDate: {}\r\n\
+             Content-Type: text/plain; charset=utf-8\r\n\r\nFiled by a rule.\r\n",
+            chrono::Utc::now().to_rfc2822()
+        );
+        flectar_mail_core::imap::append(&mut s, "Archive", raw.as_bytes(), false)
+            .await
+            .expect("file in Archive");
+        flectar_mail_core::imap::logout(s).await;
+    }
+    let filed_unread = || async {
+        core.list_threads(View::All, None, None, None, None, (None, 50))
+            .await
+            .ok()?
+            .threads
+            .into_iter()
+            .find(|thread| thread.subject == "Filed elsewhere")
+            .map(|thread| thread.unread_count > 0)
+    };
+    core.sync_accounts(None).await.unwrap();
+    wait_for("filed message", Duration::from_secs(30), || async {
+        filed_unread().await.filter(|unread| *unread).map(|_| ())
+    })
+    .await;
+    {
+        let mut s = second_client().await;
+        flectar_mail_core::imap::select(&mut s, "Archive")
+            .await
+            .expect("select Archive");
+        let uids =
+            flectar_mail_core::imap::uid_search_header(&mut s, "Message-ID", "<filed@example.com>")
+                .await
+                .expect("find the filed message");
+        assert_eq!(uids.len(), 1);
+        flectar_mail_core::imap::store_flag(&mut s, uids[0], "\\Seen", true)
+            .await
+            .expect("read elsewhere");
+        flectar_mail_core::imap::logout(s).await;
+    }
+    core.sync_accounts(None).await.unwrap();
+    wait_for("read elsewhere", Duration::from_secs(30), || async {
+        filed_unread().await.filter(|unread| !unread).map(|_| ())
+    })
+    .await;
+
     eprintln!(
-        "e2e OK: sync, threading, splits, bodies, FTS, archive+undo, snooze, contacts, remote replay, IDLE push"
+        "e2e OK: sync, threading, splits, bodies, FTS, archive+undo, snooze, contacts, remote replay, IDLE push, read elsewhere"
     );
 }
