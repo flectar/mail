@@ -350,6 +350,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
+        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -368,6 +369,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
+        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
@@ -387,6 +389,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
+        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     private property <[ActionMenuEntry]> local-action-menu-no-print: [
@@ -403,6 +406,7 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
+        { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: root.trash_view ? "delete_permanently" : "trash", title: root.trash_view ? @tr("Delete permanently…") : @tr("Move to trash"), icon: @image-url("../icons/lucide/outline/trash.svg"), destructive: true },
     ];
     // The reader toolbar drops actions that the More menu also offers when
@@ -568,7 +572,15 @@ export component MailReadingPane inherits FocusScope {
         enabled: root.message-keys && !root.selected_is_draft && !EmailReader.find-open;
         activated => {
             MovePickerUi.return-to = "reader";
-            MovePickerUi.request("open", -1);
+            MovePickerUi.request("move", "open", -1);
+        }
+    }
+    KeyBinding {
+        keys: Shortcuts.copy-to;
+        enabled: root.message-keys && !root.selected_is_draft && !EmailReader.find-open;
+        activated => {
+            MovePickerUi.return-to = "reader";
+            MovePickerUi.request("copy", "open", -1);
         }
     }
 
@@ -1067,9 +1079,9 @@ export component MailReadingPane inherits FocusScope {
                                         MessageColors.original = !MessageColors.original;
                                     } else if action == "read" {
                                         root.message_action(root.selected_unread ? "mark_read" : "mark_unread");
-                                    } else if action == "move" {
+                                    } else if action == "move" || action == "copy" {
                                         MovePickerUi.return-to = "reader";
-                                        MovePickerUi.request("open", -1);
+                                        MovePickerUi.request(action, "open", -1);
                                     } else {
                                         root.message_action(action);
                                     }

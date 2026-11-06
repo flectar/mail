@@ -7,7 +7,8 @@ import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
 export struct MoveTargetRow {
     // What `MovePickerUi.choose` takes; -1 on headings.
     key: int,
-    // inbox, archive, spam, trash or folder; on headings, recent or folders.
+    // inbox, archive, spam, trash or folder; on headings, recent, folders,
+    // or the account of the rows below: account, device or unified.
     kind: string,
     // The name shown, which for standard mailboxes is translated; empty on
     // headings, which their kind names.
@@ -18,18 +19,22 @@ export struct MoveTargetRow {
     label_has_emoji: bool,
 }
 
-// The non-drag way to move mail into a folder (WCAG 2.5.7). Rust lists the
-// destinations when the picker opens and as the search changes; choosing
-// one does what dropping the mail on that sidebar row does.
+// The non-drag way to move mail into a folder (WCAG 2.5.7), and to copy it.
+// Rust lists the destinations when the picker opens and as the search
+// changes; choosing one for a move does what dropping the mail on that
+// sidebar row does.
 export global MovePickerUi {
     in-out property <bool> open: false;
+    // move or copy.
+    in property <string> mode: "move";
     in property <[MoveTargetRow]> rows: [];
     in-out property <string> query: "";
     // Where focus goes back to once the picker closes: list or reader.
     in-out property <string> return-to: "list";
-    // Opens the picker for "row" (a list row, with the rows checked along
-    // with it), "checked" (the checked rows) or "open" (the open mail).
-    callback request(/* source */ string, /* email id */ int);
+    // Opens the picker to move or copy mail of "row" (a list row, with the
+    // rows checked along with it), "checked" (the checked rows) or "open"
+    // (the open mail).
+    callback request(/* mode */ string, /* source */ string, /* email id */ int);
     callback search(string);
     callback choose(/* key */ int);
 
@@ -42,6 +47,8 @@ export global MovePickerUi {
         if kind == "trash" { return @tr("Trash"); }
         if kind == "recent" { return @tr("Recent"); }
         if kind == "folders" { return @tr("All folders"); }
+        if kind == "device" { return @tr("On this device"); }
+        if kind == "unified" { return @tr("All accounts"); }
         label
     }
 }
@@ -64,7 +71,7 @@ export component MoveDialog inherits Rectangle {
     background: #00000066;
     forward-focus: search-field;
     accessible-role: groupbox;
-    accessible-label: @tr("Move to");
+    accessible-label: MovePickerUi.mode == "copy" ? @tr("Copy to") : @tr("Move to");
 
     // A heading is always followed by a destination, so one step past it
     // reaches one.
@@ -188,7 +195,7 @@ export component MoveDialog inherits Rectangle {
                     spacing: 8px;
 
                     Text {
-                        text: @tr("Move to");
+                        text: MovePickerUi.mode == "copy" ? @tr("Copy to") : @tr("Move to");
                         color: AppTheme.title;
                         font-size: TypeScale.heading;
                         font-weight: 700;
@@ -243,10 +250,11 @@ export component MoveDialog inherits Rectangle {
                                 x: 10px;
                                 width: parent.width - 20px;
                                 height: parent.height - 4px;
-                                text: MovePickerUi.display-name(row.kind, "");
+                                text: MovePickerUi.display-name(row.kind, row.label);
                                 color: AppTheme.muted;
                                 font-size: TypeScale.caption;
                                 font-weight: 600;
+                                font-family: row.label_has_emoji ? "Noto Emoji" : "";
                                 vertical-alignment: bottom;
                                 overflow: elide;
                                 accessible-role: none;

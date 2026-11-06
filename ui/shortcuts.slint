@@ -11,8 +11,10 @@ export global Shortcuts {
     out property <keys> spam: @keys(J);
     // Mac keyboards label Backspace "delete", and Apple Mail trashes with it.
     out property <keys> trash: KeyboardKeys.apple ? @keys(Backspace) : @keys(Delete);
-    // Outlook's and Evolution's key for moving mail to a folder.
+    // Outlook's and Evolution's keys for moving and copying mail to a
+    // folder.
     out property <keys> move-to: @keys(Control + Shift + V);
+    out property <keys> copy-to: @keys(Control + Shift + Y);
 
     // Thunderbird's keys: F5 checks the accounts in view, Shift+F5 every
     // account. Apple Mail checks every account with Shift-Command-N.

@@ -1337,6 +1337,68 @@ impl Uploader {
     /// Import a raw message with these labels. Its date stays the one in its
     /// Date header, and the spam filter leaves it alone.
     pub(crate) async fn import(&self, raw: &[u8], label_ids: &[&str]) -> Result<()> {
+        self.upload(
+            "messages/import?uploadType=multipart&internalDateSource=dateHeader\
+             &neverMarkSpam=true&processForCalendar=false",
+            raw,
+            label_ids,
+        )
+        .await
+    }
+
+    /// Insert a raw message with these labels, as IMAP APPEND does: Gmail
+    /// keeps it as it is, without the scanning and sorting of mail that
+    /// arrives. Its date stays the one in its Date header.
+    pub(crate) async fn insert(&self, raw: &[u8], label_ids: &[&str]) -> Result<()> {
+        self.upload(
+            "messages?uploadType=multipart&internalDateSource=dateHeader",
+            raw,
+            label_ids,
+        )
+        .await
+    }
+
+    /// A message's original bytes. `size` is about how many there are.
+    pub(crate) async fn raw_message(
+        &self,
+        provider_message_id: &str,
+        size: u64,
+    ) -> Result<Vec<u8>> {
+        let url = format!(
+            "{}/messages/{}?format=raw",
+            self.base,
+            urlencode(provider_message_id)
+        );
+        for attempt in 0..2 {
+            let token = self.api.token().await?;
+            let response = self
+                .api
+                .http
+                .get(&url)
+                .bearer_auth(token)
+                // A large message gets time to arrive, as base64, at 64 KiB/s.
+                .timeout(HTTP_TIMEOUT.max(Duration::from_secs(size * 4 / 3 / (64 * 1024))))
+                .send()
+                .await
+                .map_err(network_error)?;
+            let result = google_json(response).await;
+            if attempt == 0 && matches!(&result, Err(CoreError::NeedsReauth)) {
+                self.api.ctx.tokens.invalidate(self.api.account.id).await;
+                continue;
+            }
+            let value = result?;
+            let raw = value
+                .get("raw")
+                .and_then(Value::as_str)
+                .ok_or_else(|| CoreError::NotFound("the Gmail message's original".into()))?;
+            return decode_gmail_data(raw);
+        }
+        Err(CoreError::NeedsReauth)
+    }
+
+    /// Upload a raw message with these labels to `endpoint`, a path under
+    /// the upload API with its query.
+    async fn upload(&self, endpoint: &str, raw: &[u8], label_ids: &[&str]) -> Result<()> {
         let boundary = format!("flectar-{:032x}", rand::random::<u128>());
         let metadata = json!({ "labelIds": label_ids });
         let mut body = Vec::with_capacity(raw.len() + 512);
@@ -1349,11 +1411,7 @@ impl Uploader {
         );
         body.extend_from_slice(raw);
         body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        let url = format!(
-            "{}/messages/import?uploadType=multipart&internalDateSource=dateHeader\
-             &neverMarkSpam=true&processForCalendar=false",
-            self.upload_base
-        );
+        let url = format!("{}/{endpoint}", self.upload_base);
         // A large message gets time to upload at 64 KiB/s.
         let timeout = HTTP_TIMEOUT.max(Duration::from_secs(raw.len() as u64 / (64 * 1024)));
         for attempt in 0..2 {

@@ -1739,7 +1739,9 @@ async fn execute_action(
             }
             crate::sync::finish_empty_trash(ctx, config.id, snapshot_ids).await
         }
-        "delete_permanently" => {
+        // The original of a message moved to another account goes once
+        // the copy is in place, as RFC 8620 (5.4) moves between accounts.
+        "delete_permanently" | "remove_transferred" => {
             if let Some(message_id) = action.message_id
                 && crate::sync::is_local_only_draft(ctx, message_id).await?
             {
@@ -1782,7 +1784,9 @@ async fn execute_action(
             )
             .await
         }
-        "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" => {
+        // A move and a copy both leave the Email in the mailboxes it is in
+        // here.
+        "archive" | "unarchive" | "trash" | "spam" | "not_spam" | "move" | "copy" => {
             let Some(remote_id) = linked_or_retry(&remote_id)? else {
                 return Ok(());
             };
@@ -2682,7 +2686,10 @@ async fn fetch_body(
     Ok(())
 }
 
-async fn download_message_bounded(c: &ConnectedClient, blob_id: &str) -> Result<Vec<u8>> {
+pub(crate) async fn download_message_bounded(
+    c: &ConnectedClient,
+    blob_id: &str,
+) -> Result<Vec<u8>> {
     use jmap_client::blob::URLParameter;
     use jmap_client::core::session::URLPart;
     use reqwest::header::CONTENT_LENGTH;

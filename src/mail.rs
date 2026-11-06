@@ -1777,15 +1777,44 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
-    /// The account's folders mail was moved into most recently, newest first.
-    pub async fn recent_move_targets(
-        &self,
-        account_id: i64,
-        limit: usize,
-    ) -> Result<Vec<i64>, String> {
+    /// The folders mail was moved or copied into most recently, of every
+    /// account, newest first.
+    pub async fn recent_move_targets(&self, limit: usize) -> Result<Vec<i64>, String> {
         self.core
-            .recent_move_targets(account_id, limit)
+            .recent_move_targets(limit)
             .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Copies or moves mail to a folder of another account. The original of
+    /// a move goes once the copy is in place.
+    pub async fn transfer_to_folder(
+        &self,
+        target: MailTarget,
+        folder_id: i64,
+        is_move: bool,
+    ) -> Result<(), String> {
+        self.core
+            .transfer_mail(target.action_target(), folder_id, is_move)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Files mail in one more folder of its JMAP account.
+    pub async fn copy_to_folder(&self, target: MailTarget, folder_id: i64) -> Result<(), String> {
+        self.core
+            .perform_action(PerformActionArgs {
+                kind: ActionKind::Copy,
+                target: target.action_target(),
+                params: Some(ActionParams {
+                    wake_at: None,
+                    target_folder_id: Some(folder_id),
+                    label_id: None,
+                }),
+            })
+            .await
+            .map(|_| ())
             .map_err(|error| error.to_string())
     }
 

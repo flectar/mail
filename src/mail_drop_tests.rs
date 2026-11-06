@@ -139,4 +139,26 @@ fn drops_resolve_by_scope_not_by_mailbox_name() {
         Ok(MailDropDestination::Action("trash"))
     );
     assert!(drop(Scope::Folder(12), 1, 12).is_err());
+
+    // Another account's folder gets a copy, and the original goes once it
+    // is there; its Sent and Starred take no mail.
+    let other = |scope, folder_id, label| MailboxEntry {
+        account_id: 2,
+        ..mailbox(scope, folder_id, label)
+    };
+    let other_sent = Scope::Account {
+        account_id: 2,
+        mailbox: StandardMailbox::Sent,
+    };
+    state.mailboxes.push(other(Scope::Folder(30), 30, "Travel"));
+    state.mailboxes.push(other(other_sent, 31, "Sent"));
+    let drop = |scope, account_id, folder_id| {
+        resolve_single_mail_drop(&state, &item, scope, account_id, folder_id)
+            .map(|(_, destination)| destination)
+    };
+    assert_eq!(
+        drop(Scope::Folder(30), 2, 30),
+        Ok(MailDropDestination::Transfer(30))
+    );
+    assert!(drop(other_sent, 2, 31).is_err());
 }

@@ -45,6 +45,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/026_unread_message_index.sql")),
     Migration::Plain(include_str!("migrations/027_folder_server_counts.sql")),
     Migration::Plain(include_str!("migrations/028_folder_move_recency.sql")),
+    Migration::Plain(include_str!("migrations/029_mail_transfers.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -353,6 +354,7 @@ mod tests {
             "jmap_full_sync_stored",
             "jmap_sync_state",
             "labels",
+            "mail_transfers",
             "message_bodies",
             "message_embeddings",
             "message_folders",

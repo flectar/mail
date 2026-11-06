@@ -39,6 +39,7 @@ pub mod sender_identities;
 pub mod signatures;
 pub mod smtp;
 pub mod sync;
+mod transfer;
 pub mod unsubscribe;
 pub mod verification_code;
 
@@ -822,6 +823,8 @@ pub struct Core {
     /// Serializes AI routing passes so the background router and an inline
     /// re-sort never classify the same 'pending' threads twice.
     ai_router_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Wakes the loop that copies and moves mail to other accounts.
+    transfers: Arc<tokio::sync::Notify>,
 }
 
 impl Core {
@@ -917,6 +920,7 @@ impl Core {
             oauth_cancel: Arc::new(tokio::sync::Notify::new()),
             ui_ready: Arc::new(tokio::sync::Notify::new()),
             ai_router_lock: Arc::new(tokio::sync::Mutex::new(())),
+            transfers: Arc::new(tokio::sync::Notify::new()),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1158,6 +1162,13 @@ impl Core {
         {
             let c = core.clone();
             tokio::spawn(async move { c.code_body_loop().await });
+        }
+
+        // Copies and moves of mail to other accounts, including those a
+        // restart interrupted.
+        {
+            let c = core.clone();
+            tokio::spawn(async move { c.transfer_loop().await });
         }
 
         Ok(core)
@@ -3967,11 +3978,11 @@ impl Core {
             .await
     }
 
-    /// The account's folders the user moved mail into most recently, newest
-    /// first, for the Move to picker.
-    pub async fn recent_move_targets(&self, account_id: i64, limit: usize) -> Result<Vec<i64>> {
+    /// The folders the user moved or copied mail into most recently, of
+    /// every account, newest first, for the Move to picker.
+    pub async fn recent_move_targets(&self, limit: usize) -> Result<Vec<i64>> {
         self.db
-            .read(move |conn| repo::folders::recently_moved_to(conn, account_id, limit))
+            .read(move |conn| repo::folders::recently_moved_to(conn, limit))
             .await
     }
 
@@ -9653,6 +9664,50 @@ fn apply_thread_action(
                 repo::folders::mark_moved_to(&tx, target, now_ms())?;
             }
         }
+        ActionKind::Copy => {
+            let target = params
+                .and_then(|p| p.target_folder_id)
+                .ok_or_else(|| CoreError::Other("copy requires targetFolderId".into()))?;
+            let target_folder = repo::folders::get(&tx, target)?
+                .ok_or_else(|| CoreError::NotFound(format!("folder {target}")))?;
+            if target_folder.account_id != account_id {
+                return Err(CoreError::Other(
+                    "mail is copied to another account by a transfer".into(),
+                ));
+            }
+            // Elsewhere a copy would be a second message of the same
+            // Message-ID, which an account here shows once.
+            if mail_protocol != MailProtocol::Jmap {
+                return Err(CoreError::Other(
+                    "this account keeps each message in one folder".into(),
+                ));
+            }
+            for (id, f, _u, _r, _s, _role) in &msgs {
+                if *f == Some(target) {
+                    continue;
+                }
+                let added = tx.execute(
+                    "INSERT OR IGNORE INTO message_folders (message_id, folder_id)
+                     VALUES (?1, ?2)",
+                    rusqlite::params![id, target],
+                )? > 0;
+                if added {
+                    let aid = repo::actions::enqueue(
+                        &tx,
+                        account_id,
+                        "copy",
+                        Some(*id),
+                        Some(thread_id),
+                        &scoped(serde_json::json!({ "targetFolderId": target })),
+                        None,
+                    )?;
+                    out.push((aid, account_id));
+                }
+            }
+            if !out.is_empty() {
+                repo::folders::mark_moved_to(&tx, target, now_ms())?;
+            }
+        }
         ActionKind::Snooze => {
             let wake_at = params
                 .and_then(|p| p.wake_at)
@@ -10314,7 +10369,7 @@ mod move_action_validation_tests {
         };
 
         assert_eq!(move_to(&mut conn, 2), 1);
-        assert_eq!(repo::folders::recently_moved_to(&conn, 1, 5).unwrap(), [2]);
+        assert_eq!(repo::folders::recently_moved_to(&conn, 5).unwrap(), [2]);
 
         // A move that finds the mail already there changes nothing.
         repo::folders::mark_moved_to(&conn, 2, 7).unwrap();
@@ -10324,7 +10379,7 @@ mod move_action_validation_tests {
         // Archiving moves mail without the user picking a folder.
         apply_thread_action(&mut conn, thread_id, None, ActionKind::Archive, None).unwrap();
         assert_eq!(moved_to_at(&conn, 3), None);
-        assert_eq!(repo::folders::recently_moved_to(&conn, 1, 5).unwrap(), [2]);
+        assert_eq!(repo::folders::recently_moved_to(&conn, 5).unwrap(), [2]);
     }
 
     #[test]
@@ -11770,6 +11825,60 @@ mod move_undo_tests {
             .unwrap();
         assert_eq!(folder, 1);
         assert_eq!(mailboxes(&conn, message_id), [1]);
+    }
+
+    #[test]
+    fn a_copy_files_jmap_mail_in_one_more_mailbox_and_fails_back() {
+        let mut conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute_batch(
+            "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1;
+             UPDATE folders SET jmap_id = 'inbox' WHERE id = 1;
+             INSERT INTO folders (id, account_id, path, jmap_id)
+               VALUES (2, 1, 'Receipts', 'receipts');",
+        )
+        .unwrap();
+        let (thread_id, message_id) =
+            testutil::seed_message(&conn, "a@example.com", "Order", false);
+        conn.execute(
+            "INSERT INTO message_folders (message_id, folder_id) VALUES (?1, 1)",
+            [message_id],
+        )
+        .unwrap();
+        let copy = |conn: &mut rusqlite::Connection, folder: i64| {
+            apply_thread_action(
+                conn,
+                thread_id,
+                None,
+                ActionKind::Copy,
+                Some(&ActionParams {
+                    wake_at: None,
+                    target_folder_id: Some(folder),
+                    label_id: None,
+                }),
+            )
+        };
+
+        let queued = copy(&mut conn, 2).unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(mailboxes(&conn, message_id), [1, 2]);
+        let row = repo::messages::get_row(&conn, message_id).unwrap().unwrap();
+        assert_eq!(row.folder_id, Some(1), "the message stays where it was");
+        assert_eq!(copy(&mut conn, 2).unwrap().len(), 0, "already there");
+
+        // The server refusing the copy takes it back.
+        let action = repo::actions::get(&conn, queued[0].0).unwrap().unwrap();
+        assert_eq!(action.kind, "copy");
+        crate::queue::rollback_failed_for_tests(&mut conn, &action, "refused");
+        assert_eq!(mailboxes(&conn, message_id), [1]);
+
+        // An IMAP account keeps a message in one folder.
+        conn.execute(
+            "UPDATE accounts SET mail_protocol = 'imap' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        assert!(copy(&mut conn, 2).is_err());
     }
 }
 

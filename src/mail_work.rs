@@ -44,8 +44,27 @@ pub(super) enum Operation {
     EmptyTrash(Option<i64>),
     Drop(MailDropDestination),
     Label(i64, bool),
+    /// Files mail in one more folder: another of its own account's, where
+    /// a message can be in several (JMAP), or a copy in another account's.
+    Copy {
+        folder_id: i64,
+        other_account: bool,
+    },
 }
 impl Operation {
+    /// Whether it starts moving (`true`) or copying mail to another
+    /// account, which goes on after it returns.
+    fn starts_transfer(&self) -> Option<bool> {
+        match self {
+            Self::Drop(MailDropDestination::Transfer(_)) => Some(true),
+            Self::Copy {
+                other_account: true,
+                ..
+            } => Some(false),
+            _ => None,
+        }
+    }
+
     fn queues_permanent_deletion(&self) -> bool {
         match self {
             Self::EmptyTrash(_) => true,
@@ -75,6 +94,17 @@ impl Operation {
                 core.perform_message_action(target, a).await
             }
             Self::Drop(MailDropDestination::Folder(id)) => core.move_to_folder(target, *id).await,
+            Self::Drop(MailDropDestination::Transfer(id)) => {
+                core.transfer_to_folder(target, *id, true).await
+            }
+            Self::Copy {
+                folder_id,
+                other_account: true,
+            } => core.transfer_to_folder(target, *folder_id, false).await,
+            Self::Copy {
+                folder_id,
+                other_account: false,
+            } => core.copy_to_folder(target, *folder_id).await,
             Self::Drop(MailDropDestination::Label(id)) => {
                 core.perform_label_action(target, *id, true).await
             }
@@ -96,6 +126,9 @@ struct ActionResult {
     moved: Vec<i32>,
     error: Option<String>,
     deletion_queued: bool,
+    /// Mail started on its way to another account, moving (`true`) or
+    /// being copied.
+    transfer_started: Option<bool>,
 }
 
 pub(super) fn register(
@@ -279,6 +312,13 @@ pub(super) fn register(
                 Some(error) => {
                     app.set_render_status(UiMessage::detail("Message action failed: {}", error))
                 }
+                // What became of it is told once the other account has it.
+                None if result.transfer_started == Some(true) => {
+                    app.set_render_status(UiMessage::plain("Moving mail to the other account…"))
+                }
+                None if result.transfer_started == Some(false) => {
+                    app.set_render_status(UiMessage::plain("Copying mail to the other account…"))
+                }
                 None if result.deletion_queued => app.set_render_status(UiMessage::plain(
                     "Permanent deletion queued. Mail will disappear after the server confirms.",
                 )),
@@ -447,14 +487,17 @@ where
         moved: vec![],
         error: None,
         deletion_queued: false,
+        transfer_started: None,
     };
     for (id, target, operation) in operations {
         let deletion = operation.queues_permanent_deletion();
+        let transfer = operation.starts_transfer();
         result.ids.push(id);
         let moves = operation.moves();
         match perform(target, operation).await {
             Ok(()) => {
                 result.deletion_queued |= deletion;
+                result.transfer_started = result.transfer_started.or(transfer);
                 result.completed.push(id);
                 if moves {
                     result.moved.push(id);
