@@ -324,7 +324,7 @@ pub(super) fn register_renderer_input_callbacks(
         }
     });
 }
-fn copy_text(app: &AppWindow, text: String) {
+pub(super) fn copy_text(app: &AppWindow, text: String) {
     app.set_clipboard_request(text.into());
     app.set_clipboard_request_id(app.get_clipboard_request_id().wrapping_add(1));
 }
