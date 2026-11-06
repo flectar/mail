@@ -30,6 +30,28 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Free runner disk space
+        # This job peaks at about 33 GiB of disk. Linux runners only promise
+        # 14 GB, and some now have a 72 GB disk instead of 145 GB, which leaves
+        # too little (actions/runner-images#15238). On those, delete
+        # preinstalled SDKs, browsers and Docker images the job never uses.
+        shell: bash
+        run: |
+          df -h /
+          if (( $(df -k --output=avail / | tail -1) < 50 * 1024 * 1024 )); then
+            sudo rm -rf \
+              /usr/local/lib/android \
+              /usr/share/dotnet \
+              /usr/local/.ghcup \
+              /usr/share/swift \
+              "${RUNNER_TOOL_CACHE:?}/CodeQL" \
+              /usr/local/share/powershell \
+              /opt/microsoft \
+              /usr/local/julia* \
+              /usr/local/share/chromium
+            sudo docker image prune --all --force > /dev/null
+            df -h /
+          fi
       - name: Install native build dependencies
         run: |
           sudo apt-get update
