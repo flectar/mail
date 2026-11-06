@@ -285,7 +285,7 @@ pub(crate) fn core_calendar_event(event: CalendarEvent) -> LocalCalendarEvent {
 
 pub(crate) fn refresh_calendar_events(
     core: &crate::mail::CoreMailSource,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     state: &mut LocalCalendarState,
     accounts: &[Account],
 ) -> Result<(), String> {

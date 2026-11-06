@@ -355,7 +355,7 @@ impl WarmStartSnapshot {
 pub(crate) fn apply_warm_start_snapshot(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     snapshot: WarmStartSnapshot,
 ) {
     // The cache contains account summaries, not connection settings. Project
@@ -434,7 +434,7 @@ pub(crate) struct WarmStartCacheWriter {
 }
 
 impl WarmStartCacheWriter {
-    pub(crate) fn spawn(runtime: &tokio::runtime::Runtime, path: PathBuf) -> Self {
+    pub(crate) fn spawn(runtime: &tokio::runtime::Handle, path: PathBuf) -> Self {
         // A cache file is a projection, not a journal. `watch` retains exactly
         // the newest command while a slow disk write is in flight, placing a
         // hard one-snapshot bound on queued memory.
@@ -696,7 +696,7 @@ pub(crate) async fn load_startup_calendar_snapshot(
 }
 
 pub(crate) fn spawn_core_event_listener(
-    runtime: &tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Handle,
     core: CoreMailSource,
     pending: Arc<Mutex<PendingCoreUpdates>>,
     wake: UiWake,
@@ -919,7 +919,7 @@ mod warm_start_tests {
                 crate::UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
                 false,
                 false,
-                WarmStartCacheWriter::spawn(&runtime, cache.path().join("warm.json")),
+                WarmStartCacheWriter::spawn(runtime.handle(), cache.path().join("warm.json")),
             );
             app.set_emails(state.email_rows.clone().into());
             app.set_mail_list_entries(state.mail_list_entries.clone().into());
@@ -938,7 +938,7 @@ mod warm_start_tests {
             apply_warm_start_snapshot(
                 &self.app,
                 &self.state,
-                &self.runtime,
+                self.runtime.handle(),
                 single_account_snapshot(),
             );
         }

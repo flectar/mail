@@ -275,10 +275,12 @@ jobs:
         run: cargo install cargo-audit --locked --version 0.22.2
       - name: Audit the locked dependency graph
         # The first four exceptions are unmaintained notices in optional/build
-        # or Slint/Blitz typography dependencies. The last three cover crates
+        # or Slint/Blitz typography dependencies. The next three cover crates
         # folded into zbus 6: remove them when Slint, ashpd, and ksni migrate
-        # from zbus 5. These are maintenance notices, not vulnerability waivers.
-        # Deny every other warning and all known vulnerabilities.
+        # from zbus 5. The last is pin-utils, which async-imap and Slint's
+        # spin_on still use: remove it when both drop it. These are maintenance
+        # notices, not vulnerability waivers. Deny every other warning and all
+        # known vulnerabilities.
         run: |
           lockfiles="Cargo.lock platform/android/Cargo.lock"
           # Tier 3 ports are audited daily and when their own workflow runs,
@@ -294,5 +296,6 @@ jobs:
               --ignore RUSTSEC-2026-0192 \
               --ignore RUSTSEC-2026-0370 \
               --ignore RUSTSEC-2026-0371 \
-              --ignore RUSTSEC-2026-0372
+              --ignore RUSTSEC-2026-0372 \
+              --ignore RUSTSEC-2026-0441
           done

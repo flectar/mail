@@ -61,11 +61,11 @@ fn schedule_scroll_frame(
         return;
     }
     let weak = app.as_weak();
-    let renderer = renderer.clone();
+    let renderer = Rc::downgrade(renderer);
     let pending = pending.clone();
     Timer::single_shot(Duration::from_millis(16), move || {
         pending.set(false);
-        if let Some(app) = weak.upgrade() {
+        if let (Some(app), Some(renderer)) = (weak.upgrade(), renderer.upgrade()) {
             repaint_reader_inner(&app, &renderer, gpu, true);
             if !gpu && renderer.borrow().needs_repaint() {
                 schedule_scroll_frame(&app, &renderer, gpu, &pending);
@@ -88,11 +88,11 @@ pub(super) fn register_renderer_input_callbacks(
             return;
         }
         let weak = weak.clone();
-        let renderer = appearance_renderer.clone();
+        let renderer = Rc::downgrade(&appearance_renderer);
         let pending = appearance_pending.clone();
         Timer::single_shot(Duration::ZERO, move || {
             pending.set(false);
-            let Some(app) = weak.upgrade() else {
+            let (Some(app), Some(renderer)) = (weak.upgrade(), renderer.upgrade()) else {
                 return;
             };
             let colors = crate::message_appearance::EmailAppearance::from_app(&app);
@@ -167,11 +167,11 @@ pub(super) fn register_renderer_input_callbacks(
         }
         if changed && !pending.replace(true) {
             let weak = app.as_weak();
-            let r = r.clone();
+            let r = Rc::downgrade(&r);
             let pending = pending.clone();
             Timer::single_shot(Duration::from_millis(16), move || {
                 pending.set(false);
-                if let Some(app) = weak.upgrade() {
+                if let (Some(app), Some(r)) = (weak.upgrade(), r.upgrade()) {
                     repaint_reader(&app, &r, gpu);
                 }
             });
