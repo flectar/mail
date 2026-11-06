@@ -1784,6 +1784,38 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Copies or moves mail to a folder of another account. The original of
+    /// a move goes once the copy is in place.
+    pub async fn transfer_to_folder(
+        &self,
+        target: MailTarget,
+        folder_id: i64,
+        is_move: bool,
+    ) -> Result<(), String> {
+        self.core
+            .transfer_mail(target.action_target(), folder_id, is_move)
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
+    /// Files mail in one more folder of its JMAP account.
+    pub async fn copy_to_folder(&self, target: MailTarget, folder_id: i64) -> Result<(), String> {
+        self.core
+            .perform_action(PerformActionArgs {
+                kind: ActionKind::Copy,
+                target: target.action_target(),
+                params: Some(ActionParams {
+                    wake_at: None,
+                    target_folder_id: Some(folder_id),
+                    label_id: None,
+                }),
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Inbox tabs route conversations, so a message's routes its conversation.
     pub async fn route_to_tab(&self, target: MailTarget, tab: String) -> Result<(), String> {
         self.core

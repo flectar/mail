@@ -496,6 +496,15 @@ export global I18n {
         if (key == "Label deleted.") { return @tr("Label deleted."); }
         if (key == "No other folder to move this mail to.") { return @tr("No other folder to move this mail to."); }
         if (key == "Could not move mail: {}") { return @tr("Could not move mail: {}", argument); }
+        if (key == "No folder to copy this mail to.") { return @tr("No folder to copy this mail to."); }
+        if (key == "Could not copy mail: {}") { return @tr("Could not copy mail: {}", argument); }
+        if (key == "Moving mail to the other account…") { return @tr("Moving mail to the other account…"); }
+        if (key == "Copying mail to the other account…") { return @tr("Copying mail to the other account…"); }
+        if (key == "Moved {} messages to the other account.") { return @tr("Moved one message to the other account." | "Moved {0} messages to the other account." % round(argument.to-float()), argument); }
+        if (key == "Copied {} messages to the other account.") { return @tr("Copied one message to the other account." | "Copied {0} messages to the other account." % round(argument.to-float()), argument); }
+        if (key == "Moved or copied {} messages to the other account.") { return @tr("Moved or copied one message to the other account." | "Moved or copied {0} messages to the other account." % round(argument.to-float()), argument); }
+        if (key == "The other account had {} messages already.") { return @tr("The other account had that message already." | "The other account had those {0} messages already." % round(argument.to-float()), argument); }
+        if (key == "Could not move or copy {} messages: {}") { return @tr("Could not move or copy one message: {1}" | "Could not move or copy {0} messages: {1}" % round(argument.to-float()), argument, second-argument); }
         if (key == "Could not update label: {}") { return @tr("Could not update label: {}", argument); }
         if (key == "Could not save label: {}") { return @tr("Could not save label: {}", argument); }
         if (key == "Could not delete label: {}") { return @tr("Could not delete label: {}", argument); }

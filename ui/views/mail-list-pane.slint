@@ -456,14 +456,19 @@ export component MailListPane inherits FocusScope {
         keys: Shortcuts.move-to;
         // Not while typing: text fields elsewhere paste plain text with it.
         enabled: !search-toolbar.search-focused;
-        activated => { root.move-messages(); }
+        activated => { root.pick-folder("move"); }
+    }
+    KeyBinding {
+        keys: Shortcuts.copy-to;
+        enabled: !search-toolbar.search-focused;
+        activated => { root.pick-folder("copy"); }
     }
 
-    // Move to opens for what the other shortcuts act on.
-    function move-messages() {
+    // Move to and Copy to open for what the other shortcuts act on.
+    function pick-folder(mode: string) {
         if root.selection-mode {
             MovePickerUi.return-to = "list";
-            MovePickerUi.request("checked", -1);
+            MovePickerUi.request(mode, "checked", -1);
             return;
         }
         let target = MailListNavigation.target(root.list_entries, root.keyboard-email-id, "current", 1);
@@ -471,7 +476,7 @@ export component MailListPane inherits FocusScope {
         let at-cursor = list-keyboard.has-focus && target.id == root.keyboard-email-id;
         if !at-cursor && !root.list_entries[target.entry_index].email.selected { return; }
         MovePickerUi.return-to = "list";
-        MovePickerUi.request("row", target.id);
+        MovePickerUi.request(mode, "row", target.id);
     }
 
     function pointer-focus(id: int) {
@@ -781,7 +786,14 @@ export component MailListPane inherits FocusScope {
                                         title: @tr("Move to…");
                                         activated => {
                                             MovePickerUi.return-to = "list";
-                                            MovePickerUi.request("checked", -1);
+                                            MovePickerUi.request("move", "checked", -1);
+                                        }
+                                    }
+                                    MenuItem {
+                                        title: @tr("Copy to…");
+                                        activated => {
+                                            MovePickerUi.return-to = "list";
+                                            MovePickerUi.request("copy", "checked", -1);
                                         }
                                     }
                                     MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
@@ -1379,7 +1391,14 @@ export component MailListPane inherits FocusScope {
                                                 title: @tr("Move to…");
                                                 activated => {
                                                     MovePickerUi.return-to = "list";
-                                                    MovePickerUi.request("row", mail-data.id);
+                                                    MovePickerUi.request("move", "row", mail-data.id);
+                                                }
+                                            }
+                                            MenuItem {
+                                                title: @tr("Copy to…");
+                                                activated => {
+                                                    MovePickerUi.return-to = "list";
+                                                    MovePickerUi.request("copy", "row", mail-data.id);
                                                 }
                                             }
                                             if !mail-row.local-mail : MenuItem { title: @tr("Move to spam"); activated => { root.message_action_for_email(mail-data.id, "spam"); } }

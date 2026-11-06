@@ -18,7 +18,7 @@ use crate::{
 };
 use flectar_mail_core::{
     config::Paths,
-    events::CoreEvent,
+    events::{CoreEvent, TransferReport},
     models::{
         Account, AccountConfig, CalendarConnection, CardDavConnection, MailGrouping, MessageCursor,
         Settings, ThreadCursor, normalized_workspace_list_pane_width,
@@ -584,6 +584,8 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) all_mail_changed: bool,
     pub(crate) account_states: HashMap<i64, (String, Option<String>)>,
     pub(crate) action_error: Option<String>,
+    /// What became of the latest mail copied or moved to other accounts.
+    pub(crate) transfers: Option<TransferReport>,
     pub(crate) calendar_changed: bool,
     pub(crate) contacts_changed: bool,
 }
@@ -736,6 +738,13 @@ pub(crate) fn spawn_core_event_listener(
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .action_error = Some(error);
+                    true
+                }
+                Ok(CoreEvent::TransfersFinished(report)) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .transfers = Some(report);
                     true
                 }
                 Ok(CoreEvent::CalendarUpdated { .. })

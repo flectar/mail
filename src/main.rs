@@ -706,6 +706,8 @@ struct MailDragItem {
 enum MailDropDestination {
     Action(&'static str),
     Folder(i64),
+    /// A folder of another account.
+    Transfer(i64),
     Label(i64),
     Route(String),
 }
@@ -832,15 +834,12 @@ fn resolve_single_mail_drop(
             return Err("this unified mailbox is not a drop destination".to_owned());
         }
         Scope::Folder(_) | Scope::Account { .. } => {
-            if i64::from(target_account_id) != message.account_id {
-                return Err("messages cannot be moved between accounts".to_owned());
-            }
             let target = state
                 .mailboxes
                 .iter()
                 .find(|mailbox| {
                     !mailbox.is_account
-                        && mailbox.account_id == message.account_id
+                        && mailbox.account_id == i64::from(target_account_id)
                         && mailbox.scope == Some(target_scope)
                         && mailbox.folder_id == i64::from(target_folder_id)
                 })
@@ -848,17 +847,32 @@ fn resolve_single_mail_drop(
             if !target.is_selectable {
                 return Err("this mailbox is a hierarchy container".to_owned());
             }
-            // Folders are told apart by scope: another folder can have the
-            // name of the one shown.
-            if state.scope.shows_mail_in(target_scope) {
-                return Err("message is already in this destination".to_owned());
-            }
             // Custom folders are plain moves even when named like a
             // standard mailbox.
             let standard = match target_scope {
                 Scope::Account { mailbox, .. } => Some(mailbox),
                 _ => None,
             };
+            // Mail moves to another account as Thunderbird moves it: a copy
+            // goes there, and the original goes once the copy is in place.
+            if target.account_id != message.account_id {
+                return match standard {
+                    Some(
+                        StandardMailbox::Sent | StandardMailbox::Drafts | StandardMailbox::Starred,
+                    ) => Err("this mailbox is not a drop destination".to_owned()),
+                    _ if target.folder_id >= 0 => Ok((
+                        MailTarget::of(message)
+                            .ok_or_else(|| "message thread is unavailable".to_owned())?,
+                        MailDropDestination::Transfer(target.folder_id),
+                    )),
+                    _ => Err("mailbox destination is unavailable".to_owned()),
+                };
+            }
+            // Folders are told apart by scope: another folder can have the
+            // name of the one shown.
+            if state.scope.shows_mail_in(target_scope) {
+                return Err("message is already in this destination".to_owned());
+            }
             match standard {
                 Some(StandardMailbox::Starred) if !message.starred => {
                     MailDropDestination::Action("star")
@@ -3868,6 +3882,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             let message = UiMessage::detail("Message action failed: {}", error);
             app.set_render_status(message.clone());
             app.set_sync_status(message);
+        }
+        if let Some(report) = pending.transfers
+            && let Some(app) = mail_update_app.upgrade()
+        {
+            app.set_render_status(move_picker::transfer_message(&report));
         }
         if pending.calendar_changed
             && let Some(app) = mail_update_app.upgrade()
