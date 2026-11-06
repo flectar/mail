@@ -78,6 +78,12 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "h
 quick-xml = { version = "0.42", features = ["encoding"] }
 async-trait = "0.1"
 
+# Flectar Sync (issue #39): end-to-end encrypted sync of the app's setup
+# between the user's devices. See flectar/mail-sync.
+flectar-mail-sync-client = { git = "https://github.com/flectar/mail-sync", rev = "7e552729617a9671fe31fc22854c65d694fc3068" }
+# Names this device in the list of synced devices.
+hostname = "0.4"
+
 # misc
 ammonia = "4.1.8"
 deunicode = "1"

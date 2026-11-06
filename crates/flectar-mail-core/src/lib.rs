@@ -10,6 +10,7 @@ pub mod calendar;
 pub mod carddav;
 pub mod config;
 pub mod db;
+pub mod device_sync;
 pub mod embed;
 pub mod error;
 pub mod events;
@@ -825,6 +826,9 @@ pub struct Core {
     ai_router_lock: Arc<tokio::sync::Mutex<()>>,
     /// Wakes the loop that copies and moves mail to other accounts.
     transfers: Arc<tokio::sync::Notify>,
+    /// Flectar Sync: this device's setup kept the same on the user's other
+    /// devices.
+    device_sync: Arc<device_sync::Service>,
 }
 
 impl Core {
@@ -921,6 +925,7 @@ impl Core {
             ui_ready: Arc::new(tokio::sync::Notify::new()),
             ai_router_lock: Arc::new(tokio::sync::Mutex::new(())),
             transfers: Arc::new(tokio::sync::Notify::new()),
+            device_sync: Arc::new(device_sync::Service::new()),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1169,6 +1174,12 @@ impl Core {
         {
             let c = core.clone();
             tokio::spawn(async move { c.transfer_loop().await });
+        }
+
+        // Flectar Sync, when this device has it on.
+        {
+            let c = core.clone();
+            tokio::spawn(async move { c.device_sync_loop().await });
         }
 
         Ok(core)
@@ -2839,6 +2850,10 @@ impl Core {
                 Ok(())
             })
             .await?;
+        // This device stops syncing; the group goes on without it.
+        if let Err(error) = self.device_sync_turn_off().await {
+            tracing::warn!(%error, "could not turn Flectar Sync off");
+        }
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;
         let _ = tokio::fs::remove_dir_all(self.paths.draft_attachments_dir()).await;
