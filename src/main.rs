@@ -8149,25 +8149,32 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     // Memory pressure from the system: free what the screen doesn't need and
     // is cheap to rebuild, then the database caches, then free heap pages.
+    // The handler lives in a thread-local past this function, so like pending
+    // timers it holds the app's state weakly.
     let pressure_app = app.as_weak();
-    let pressure_renderer = email_renderer.clone();
-    let pressure_editor = compose_editor.clone();
-    let pressure_state = state.clone();
+    let pressure_renderer = Rc::downgrade(&email_renderer);
+    let pressure_editor = Rc::downgrade(&compose_editor);
+    let pressure_state = Rc::downgrade(&state);
     let pressure_runtime = runtime.clone();
     memory::on_memory_pressure(move |level| {
-        let Some(app) = pressure_app.upgrade() else {
+        let (Some(app), Some(renderer), Some(editor), Some(state)) = (
+            pressure_app.upgrade(),
+            pressure_renderer.upgrade(),
+            pressure_editor.upgrade(),
+            pressure_state.upgrade(),
+        ) else {
             return;
         };
         let until = std::time::Instant::now() + memory::PRESSURE_WINDOW;
-        if pressure_renderer.borrow_mut().release_caches(until) {
-            let tiles = pressure_renderer.borrow().retained_tiles();
+        if renderer.borrow_mut().release_caches(until) {
+            let tiles = renderer.borrow().retained_tiles();
             mail_render_projection::retain_email_tiles(&app, tiles);
         }
         if !app.get_compose_open() {
-            pressure_editor.borrow_mut().release();
+            editor.borrow_mut().release();
         }
         mail_view_model::release_sender_images();
-        let core = pressure_state.borrow().core.clone();
+        let core = state.borrow().core.clone();
         pressure_runtime.spawn(async move {
             if let Some(core) = core {
                 let _ = core.file_core().release_cache_memory().await;
