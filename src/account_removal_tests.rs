@@ -57,12 +57,10 @@ fn account_removal_clears_deleted_models_and_preserves_surviving_selection() {
     slint::platform::set_platform(Box::new(Headless(window))).unwrap();
     let app = AppWindow::new().unwrap();
     app.set_startup_ready(true);
-    let runtime = Rc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap(),
-    );
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let account_inbox = Scope::Account {
         account_id: 1,
@@ -91,7 +89,10 @@ fn account_removal_clears_deleted_models_and_preserves_surviving_selection() {
             UiSender::new(avatars, UiWake::new(app.as_weak(), |_| {})),
             false,
             false,
-            WarmStartCacheWriter::spawn(&runtime, dir.path().join(format!("warm-{removed}.json"))),
+            WarmStartCacheWriter::spawn(
+                runtime.handle(),
+                dir.path().join(format!("warm-{removed}.json")),
+            ),
         );
         state.using_core = true;
         state.connected_accounts = vec![account(1), account(2)];
@@ -115,7 +116,7 @@ fn account_removal_clears_deleted_models_and_preserves_surviving_selection() {
         state.page = 3;
         let first_id = state.messages[0].id;
         let state = Rc::new(RefCell::new(state));
-        mail_work::register(&app, &state, &runtime);
+        mail_work::register(&app, &state, runtime.handle());
         refresh_connected_accounts(&app, &state);
         assert_eq!(app.get_connected_accounts().row_count(), 2);
         let old_generation = mail_work::generation(&state.borrow());
@@ -179,7 +180,7 @@ fn account_removal_clears_deleted_models_and_preserves_surviving_selection() {
         // models that drive onboarding, compose and the mail workspace.
         reconcile_removed_account(&mut state.borrow_mut(), 3 - removed);
         refresh_connected_accounts(&app, &state);
-        render_current(&app, &state, &runtime).unwrap();
+        render_current(&app, &state, runtime.handle()).unwrap();
         assert_eq!(app.get_connected_accounts().row_count(), 0);
         assert_eq!(app.get_compose_account_id(), -1);
         assert_eq!(state.borrow().email_rows.row_count(), 0);

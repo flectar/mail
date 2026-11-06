@@ -110,7 +110,7 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::default();
 }
 
-pub(super) fn register(app: &AppWindow, runtime: &tokio::runtime::Runtime) {
+pub(super) fn register(app: &AppWindow, runtime: &tokio::runtime::Handle) {
     let weak = app.as_weak();
     runtime.spawn(async move {
         let Ok(Ok(settings)) =

@@ -1199,12 +1199,11 @@ pub(crate) mod tests {
         ));
         held.abort();
 
-        // Nothing listens on a port that was just released. Windows retries a
-        // refused connection for about two seconds before reporting it, longer
-        // than the client's 200 ms timeout, so this request overrides it.
-        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let closed_url = format!("http://{}/jmap/", closed.local_addr().unwrap());
-        drop(closed);
+        // Nothing listens on this port. Windows retries a refused connection
+        // for about two seconds before reporting it, longer than the client's
+        // 200 ms timeout, so this request overrides it.
+        let (port, _port_in_use) = crate::net::closed_loopback_port().await;
+        let closed_url = format!("http://127.0.0.1:{port}/jmap/");
         let error = http
             .post(&closed_url)
             .timeout(std::time::Duration::from_secs(10))
