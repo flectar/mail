@@ -162,7 +162,8 @@ handled (and asserted) in the script, do not "simplify" them away:
   same module through the XComponent UI input callback (Slint's flickables
   then scroll without any application-side change).
 - **Privacy**: Flectar publishes the app-specific policy at
-  `https://flectar.com/mail/privacy/`; the in-app link and consent flow are
+  `https://flectar.com/mail/privacy/`. The shared app links it from the
+  welcome screen and Settings > About, in the UI language; a consent flow is
   tracked separately from this port.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL

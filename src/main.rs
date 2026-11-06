@@ -1111,6 +1111,18 @@ fn bundled_language_for_locale(locale: &str) -> Option<&'static str> {
     (!is_traditional).then_some("zh_Hans")
 }
 
+/// The app's privacy policy on flectar.com, in the UI language when the site
+/// has that translation and in English otherwise.
+fn privacy_policy_url(language: &str) -> &'static str {
+    match language {
+        "es" => "https://flectar.com/es/mail/privacy/",
+        "ru" => "https://flectar.com/ru/mail/privacy/",
+        "tr" => "https://flectar.com/tr/mail/privacy/",
+        "zh_Hans" => "https://flectar.com/zh-hans/mail/privacy/",
+        _ => "https://flectar.com/mail/privacy/",
+    }
+}
+
 fn apply_language(app: &AppWindow, preference: &str) {
     let language_mode = normalized_language_preference(preference);
     let system_locale = sys_locale::get_locale();
@@ -1126,6 +1138,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
         eprintln!("could not select {selected} translation: {error}");
     }
     app.set_language_mode(language_mode.into());
+    app.set_privacy_policy_url(privacy_policy_url(selected).into());
     date_format::reload(app);
 }
 
@@ -8600,6 +8613,21 @@ mod tests {
             ("en_US", None),
         ] {
             assert_eq!(bundled_language_for_locale(locale), expected, "{locale}");
+        }
+    }
+
+    #[test]
+    fn privacy_policy_opens_in_the_ui_language() {
+        for (language, url) in [
+            ("en", "https://flectar.com/mail/privacy/"),
+            ("es", "https://flectar.com/es/mail/privacy/"),
+            ("ru", "https://flectar.com/ru/mail/privacy/"),
+            ("tr", "https://flectar.com/tr/mail/privacy/"),
+            ("zh_Hans", "https://flectar.com/zh-hans/mail/privacy/"),
+            // A catalog the site has no translated policy for.
+            ("de", "https://flectar.com/mail/privacy/"),
+        ] {
+            assert_eq!(privacy_policy_url(language), url, "{language}");
         }
     }
 

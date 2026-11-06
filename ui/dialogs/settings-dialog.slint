@@ -458,6 +458,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> oauth_settings_saving: false;
     in property <string> sync_status: "";
     in property <string> app-version: "";
+    in property <string> privacy-policy-url;
     in property <bool> storage_loading: false;
     in property <bool> storage_loaded: false;
     in property <string> storage_total: "";
@@ -726,7 +727,7 @@ export component SettingsDialog inherits Rectangle {
             ? @tr("storage data usage mail attachments files databases backup snapshot import export delete")
             : section == "Services"
             ? @tr("services flectar base account sign in subscription paid sync devices business email custom domain mailbox")
-            : @tr("about version credits contributors license flectar");
+            : @tr("about version credits contributors license flectar") + " " + @tr("Privacy policy");
         return root.settings-search-matches(terms, root.settings-search-query);
     }
 
@@ -2672,6 +2673,30 @@ export component SettingsDialog inherits Rectangle {
                                         muted-text: root.faint-text;
                                         hover-background: root.accent-soft;
                                         clicked => { root.open-link("https://github.com/flectar/mail/graphs/contributors"); }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                height: privacy-links.y + privacy-links.height + 10px;
+                                vertical-stretch: 0;
+                                privacy-card := SettingsCard { title: @tr("Privacy"); description: @tr("How Flectar Mail handles your data."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
+                                privacy-links := VerticalBox {
+                                    x: 20px;
+                                    y: privacy-card.content-y + 8px;
+                                    width: parent.width - 40px;
+                                    height: self.preferred-height;
+                                    padding-bottom: 0px;
+                                    spacing: 0px;
+                                    SettingsLinkRow {
+                                        text: @tr("Privacy policy");
+                                        description: @tr("Read it on flectar.com");
+                                        icon: @image-url("../icons/lucide/outline/shield.svg");
+                                        accent: root.accent;
+                                        body-text: root.body-text;
+                                        muted-text: root.faint-text;
+                                        hover-background: root.accent-soft;
+                                        clicked => { root.open-link(root.privacy-policy-url); }
                                     }
                                 }
                             }

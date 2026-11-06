@@ -171,6 +171,9 @@
     "share.svg": {
       "source": "share-2"
     },
+    "shield.svg": {
+      "source": "shield"
+    },
     "sidebar-collapse.svg": {
       "source": "panel-left-close"
     },
@@ -516,6 +519,10 @@
     "share-2": {
       "path": "sources/share-2.svg",
       "sha256": "79044911436f7f4ce4741ad86a207cdd8407ad4763a5e41df170edc2a73ae4ae"
+    },
+    "shield": {
+      "path": "sources/shield.svg",
+      "sha256": "f2fd5ad159c52fe8e17b28b535ae1e74b4ef4a637c4fe12112235dc64528460f"
     },
     "sliders-horizontal": {
       "path": "sources/sliders-horizontal.svg",

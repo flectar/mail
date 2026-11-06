@@ -511,6 +511,69 @@ export component FloatingActionButton inherits IconButton {
     drop-shadow-color: #00000040;
 }
 
+// A short link to a web page, such as a footer link. Links open in the
+// browser, so the label ends in the external link icon SettingsLinkRow uses.
+// The link keeps the shared touch target; only the pill around it is drawn.
+export component TextLink inherits Rectangle {
+    in property <string> text;
+    out property <bool> focus-visible: keyboard.focus-visible;
+    callback clicked;
+
+    width: pill.width;
+    height: max(LayoutMetrics.touch-target, pill.height);
+    forward-focus: keyboard;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+
+    pill := Rectangle {
+        y: (parent.height - self.height) / 2;
+        width: content.preferred-width;
+        height: content.preferred-height;
+        border-radius: LayoutMetrics.corner-radius - 2px;
+        border-width: keyboard.focus-visible ? 2px : 0px;
+        border-color: AppTheme.accent;
+        background: link-area.has-hover ? AppTheme.accent-soft : transparent;
+        animate background { duration: 120ms; easing: ease-out; }
+
+        content := HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            padding-top: 4px;
+            padding-bottom: 4px;
+            spacing: 4px;
+            Text {
+                text: root.text;
+                color: AppTheme.accent;
+                font-size: TypeScale.caption;
+                font-weight: 500;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+            Image {
+                width: 12px;
+                height: 12px;
+                source: @image-url("../icons/lucide/outline/external-link.svg");
+                colorize: AppTheme.accent;
+                image-fit: contain;
+                accessible-role: none;
+            }
+        }
+    }
+
+    keyboard := FocusVisibleScope {
+        accessible-role: none;
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space { root.clicked(); return accept; }
+            reject
+        }
+    }
+    link-area := TouchArea {
+        clicked => { keyboard.focus(); keyboard.pointer-activated(); root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
 // Canonical app-bar action geometry. Toolbars opt into this component instead
 // of choosing 32/40/44px independently on every screen.
 export component ToolbarIconButton inherits IconButton {

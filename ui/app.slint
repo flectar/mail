@@ -1136,6 +1136,8 @@ export component AppWindow inherits Window {
     in property <bool> print_supported: true;
     in property <bool> document_apis_supported: true;
     in property <string> app-version: "";
+    // The host switches this to the UI language's translation of the policy.
+    in property <string> privacy-policy-url: "https://flectar.com/mail/privacy/";
 
     // Neutral, low-chrome surfaces keep the message content visually primary.
     // Interactive controls come from Slint's desktop widget set.
@@ -1928,6 +1930,7 @@ export component AppWindow inherits Window {
             oauth_settings_saving: root.oauth_settings_saving;
             sync_status: root.sync_status;
             app-version: root.app-version;
+            privacy-policy-url: root.privacy-policy-url;
             storage_loading: root.storage_loading;
             storage_loaded: root.storage_loaded;
             storage_total: root.storage_total;
@@ -2383,6 +2386,8 @@ export component AppWindow inherits Window {
         }
         cancel-oauth => { root.cancel_oauth(); }
         import-accounts => { root.import_accounts(); }
+        privacy-policy-url: root.privacy-policy-url;
+        open-link(url) => { root.open_email_link(url); }
     }
 
     // Keep the progressively painted shell inert until its callbacks have a

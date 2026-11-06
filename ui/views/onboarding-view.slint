@@ -5,7 +5,7 @@ import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "../components/button.slint";
 import { CopyableDiagnostic } from "../components/copyable-diagnostic.slint";
-import { LineEdit } from "../components/controls.slint";
+import { LineEdit, TextLink } from "../components/controls.slint";
 import { OnScreenSurface } from "../components/on-screen-surface.slint";
 import { ProviderButton } from "../components/provider-button.slint";
 import { OAuthSetupDialog } from "../dialogs/oauth-setup-dialog.slint";
@@ -60,6 +60,8 @@ export component OnboardingView inherits Rectangle {
     callback start-oauth(string);
     callback cancel-oauth();
     callback import-accounts();
+    in property <string> privacy-policy-url;
+    callback open-link(string);
 
     private property <bool> account-form-valid: root.account-email != ""
         && root.account-password != ""
@@ -441,6 +443,17 @@ export component OnboardingView inherits Rectangle {
                 vertical-alignment: center;
                 wrap: word-wrap; height: self.preferred-height;
             }
+            }
+
+            // Settings, which links the policy too, opens only once an account
+            // exists.
+            if root.startup-ready : HorizontalLayout {
+                alignment: center;
+                padding-top: 12px;
+                TextLink {
+                    text: @tr("Privacy policy");
+                    clicked => { root.open-link(root.privacy-policy-url); }
+                }
             }
         }
     }
