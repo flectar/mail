@@ -525,6 +525,7 @@ export component MailReadingPane inherits FocusScope {
     callback open_message_in_browser();
     callback open_email_link(string);
     callback copy_email_status(string);
+    callback report_rendering_issue();
     callback email-pointer-event(float, float, string, bool, bool, bool, bool);
     callback email-scroll(float, float);
     callback email-key-event(string, bool, bool, bool, bool, bool, bool);
@@ -2065,8 +2066,6 @@ export component MailReadingPane inherits FocusScope {
                         clipboard-source.copy();
                         root.copy_email_status("Copied HTML source");
                     }
-                    report-issue => {
-                        root.open_email_link("https://github.com/flectar/mail/issues/new?title=Email%20rendering%20issue&body=%23%23%20What%20looked%20wrong%3F%0A%0A%23%23%20Email%20HTML%20source%0A%3C!--%20Remove%20private%20information%20before%20pasting.%20--%3E%0A");
-                    }
+                    report-issue => { root.report_rendering_issue(); }
                 }
 }
