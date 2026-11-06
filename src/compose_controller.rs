@@ -537,6 +537,94 @@ pub(super) fn complete_compose_recipient(
     }
 }
 
+/// The original's files once fetched: each one's path, name and size, or
+/// why it could not be had.
+type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
+
+/// Attaches a forwarded message's files once they are here, the
+/// way the attachment picker adds files, unless the composer was sent,
+/// discarded or replaced meanwhile.
+pub(super) fn attach_original_files(
+    app: &AppWindow,
+    files: &Rc<RefCell<Vec<ComposeFile>>>,
+    session: &Rc<Cell<u64>>,
+    runtime: &tokio::runtime::Handle,
+    core: CoreMailSource,
+    attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
+) {
+    if attachments.is_empty() {
+        return;
+    }
+    let started_in = session.get();
+    app.set_compose_notice(UiMessage::plain("Attaching the original's files…"));
+    app.set_compose_notice_is_error(false);
+    let request: documents::DocumentFuture<FetchedFiles> = Box::pin(async move {
+        let mut fetched = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            let name = attachment
+                .filename
+                .clone()
+                .unwrap_or_else(|| "attachment".into());
+            fetched.push(match core.attachment_path(attachment.id).await {
+                Ok(path) => {
+                    let size = tokio::fs::metadata(&path)
+                        .await
+                        .map(|metadata| metadata.len())
+                        .unwrap_or_default();
+                    Ok((PathBuf::from(path), name, size))
+                }
+                Err(error) => Err(format!("{name}: {error}")),
+            });
+        }
+        Ok(fetched)
+    });
+    let app_weak = app.as_weak();
+    let files = Rc::clone(files);
+    let session = Rc::clone(session);
+    documents::run_request(runtime, request, move |fetched| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        if session.get() != started_in {
+            return;
+        }
+        let mut compose_files = files.borrow_mut();
+        let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
+        let mut failure = None;
+        let mut too_large = false;
+        for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
+            match file {
+                Ok((path, filename, size)) => {
+                    if total_size.saturating_add(size) > MAX_COMPOSE_ATTACHMENT_BYTES {
+                        too_large = true;
+                        continue;
+                    }
+                    total_size += size;
+                    compose_files.push(ComposeFile {
+                        path,
+                        filename,
+                        size,
+                        _import: None,
+                    });
+                }
+                Err(error) => {
+                    failure.get_or_insert(error);
+                }
+            }
+        }
+        apply_compose_files(&app, &compose_files);
+        let notice = match failure {
+            Some(error) => UiMessage::detail("Could not attach the original's files: {}", error),
+            None if too_large => UiMessage::plain(
+                "Some of the original's files are over the 25 MB limit for attachments.",
+            ),
+            None => UiMessage::EMPTY,
+        };
+        app.set_compose_notice_is_error(notice != UiMessage::EMPTY);
+        app.set_compose_notice(notice);
+    });
+}
+
 pub(super) fn clear_compose(
     app: &AppWindow,
     files: &Rc<RefCell<Vec<ComposeFile>>>,
@@ -625,6 +713,7 @@ mod tests {
             subject: "Launch plan".to_owned(),
             date: 1_777_000_000_000,
             text_body: "First line\nSecond line".to_owned(),
+            attachments: Vec::new(),
         }
     }
 
