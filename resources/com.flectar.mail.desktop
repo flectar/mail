@@ -2,15 +2,22 @@
 Name=Flectar Mail
 GenericName=Email Client
 Comment=Native email client built with Slint and Blitz
-Exec=flectar-mail
+Exec=flectar-mail %U
 Icon=com.flectar.mail
 Type=Application
 Categories=Office;Email;
 Keywords=Mail;Email;IMAP;Gmail;Outlook;Calendar;
+# Offered as the default email app: mailto: links open a new message.
+MimeType=x-scheme-handler/mailto;
 Terminal=false
 StartupNotify=true
+Actions=new-email;
 X-AppImage-Name=Flectar Mail
 # Packaging replaces these with the Cargo.toml version and the executable's
 # architecture.
 X-AppImage-Version=0.1.0-alpha.4
 X-AppImage-Arch=x86_64
+
+[Desktop Action new-email]
+Name=New email
+Exec=flectar-mail mailto:

@@ -44,14 +44,22 @@ integrate_appimage() {
   install -d "$desktop_dir"
 
   # A Wayland compositor resolves the xdg app-id from this exact desktop-file
-  # basename. Point Exec at the installed AppImage without changing that ID.
+  # basename. Point Exec at the installed AppImage without changing that ID,
+  # and keep the arguments: %U delivers mail links, and the New email action
+  # passes an empty one.
   desktop_exec=${installed_appimage//\\/\\\\}
   desktop_exec=${desktop_exec//\"/\\\"}
   desktop_exec=${desktop_exec//\`/\\\`}
   desktop_exec=${desktop_exec//\$/\\\$}
+  local command arguments
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == Exec=* ]]; then
-      printf 'Exec="%s"\n' "$desktop_exec"
+      command=${line#Exec=}
+      arguments=
+      if [[ "$command" == *" "* ]]; then
+        arguments=" ${command#* }"
+      fi
+      printf 'Exec="%s"%s\n' "$desktop_exec" "$arguments"
     else
       printf '%s\n' "$line"
     fi

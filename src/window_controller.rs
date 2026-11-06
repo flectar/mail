@@ -313,16 +313,21 @@ pub(super) fn register_window_preference_callbacks(
             app.set_settings_open(!app.get_settings_open());
         }
     });
-    // The entry can also change in the system's own startup settings, so
-    // read it again whenever Settings appears: from the rail, a tab or a
-    // shortcut into a settings page.
+    // The startup entry and the default email app can also change in the
+    // system's own settings, so read them again whenever Settings appears:
+    // from the rail, a tab or a shortcut into a settings page.
     #[cfg(desktop)]
     {
         let launch_at_login = LaunchAtLogin::register(app, runtime);
+        let default_email_app =
+            crate::default_email_app::DefaultEmailAppRow::register(app, runtime);
         let app_weak = app.as_weak();
         app.on_settings_shown(move || {
             if let Some(app) = app_weak.upgrade() {
                 launch_at_login.refresh(&app, false);
+                if let Some(default_email_app) = &default_email_app {
+                    default_email_app.refresh(&app);
+                }
             }
         });
     }
