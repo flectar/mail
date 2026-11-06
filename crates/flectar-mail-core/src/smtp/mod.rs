@@ -191,11 +191,39 @@ fn expect_smtp_status(response: &str, expected: &str, stage: &str) -> Result<()>
 /// TLS is negotiated before lettre sees the connection, so its errors are
 /// protocol and sign-in failures.
 fn map_smtp_error(cfg: &AccountConfig, error: lettre::transport::smtp::Error) -> CoreError {
-    let message = error.to_string();
-    if message.contains("535") || message.to_ascii_lowercase().contains("auth") {
-        CoreError::Auth(format!("smtp auth: {message}"))
-    } else {
-        CoreError::Smtp(format!("{}:{}: {message}", cfg.smtp_host, cfg.smtp_port))
+    CoreError::Smtp(format!("{}:{}: {error}", cfg.smtp_host, cfg.smtp_port))
+}
+
+/// A failed AUTH. Only this reply can reject credentials, and only with 535
+/// (RFC 4954), the one reply K-9 Mail also treats as a wrong password. 454 is
+/// a temporary failure, and 534 and 538 ask for a stronger mechanism or an
+/// encrypted connection. Replies after sign-in, such as a refused sender,
+/// are never about the password.
+fn map_smtp_sign_in_error(
+    cfg: &AccountConfig,
+    auth: &SmtpAuth,
+    error: lettre::transport::smtp::Error,
+) -> CoreError {
+    let (host, port, user) = (&cfg.smtp_host, cfg.smtp_port, &cfg.username);
+    match error.status().map(u16::from) {
+        Some(535) => CoreError::Auth(match auth {
+            SmtpAuth::Password(_) => {
+                format!("{host} rejected the username {user} or its password ({error})")
+            }
+            SmtpAuth::XOAuth2(_) => {
+                format!("{host} rejected the OAuth sign-in for {user} ({error})")
+            }
+        }),
+        Some(534) => CoreError::Smtp(format!(
+            "{host}:{port} requires a stronger sign-in method than this account uses ({error})"
+        )),
+        Some(538) => CoreError::Smtp(format!(
+            "{host}:{port} accepts this sign-in only over an encrypted connection ({error}). Choose STARTTLS or SSL/TLS."
+        )),
+        Some(_) if error.is_transient() => CoreError::Smtp(format!(
+            "{host}:{port} can't check sign-ins right now ({error})"
+        )),
+        _ => map_smtp_error(cfg, error),
     }
 }
 
@@ -304,7 +332,7 @@ async fn connect(cfg: &AccountConfig, auth: &SmtpAuth) -> Result<AsyncSmtpConnec
         connection
             .auth(&mechanisms, &credentials)
             .await
-            .map_err(|error| map_smtp_error(cfg, error))?;
+            .map_err(|error| map_smtp_sign_in_error(cfg, auth, error))?;
         Ok(connection)
     };
 
