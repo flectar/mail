@@ -2642,10 +2642,9 @@ export component SettingsDialog inherits Rectangle {
                             }
 
                             Rectangle {
-                                height: credits-links.y + credits-links.height + (root.compact ? 10px : 0px);
+                                height: credits-links.y + credits-links.height + 10px;
                                 vertical-stretch: 0;
                                 credits-card := SettingsCard { title: @tr("Credits"); description: @tr("Built by Flectar with help from the open-source community."); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
-                                // The last link's hover surface ends at the card edge.
                                 credits-links := VerticalBox {
                                     x: 20px;
                                     y: credits-card.content-y + 8px;

@@ -63,6 +63,9 @@
     "download.svg": {
       "source": "download"
     },
+    "external-link.svg": {
+      "source": "external-link"
+    },
     "eye.svg": {
       "source": "eye"
     },
@@ -305,6 +308,10 @@
     "ellipsis": {
       "path": "sources/ellipsis.svg",
       "sha256": "98a57ae67ca5f122d5cd517332f52b78ce7e685801b954c9d8c02f1a7ab8d939"
+    },
+    "external-link": {
+      "path": "sources/external-link.svg",
+      "sha256": "d53efae83941d0b82bd9a0763f8e703767f45fc880625aa06614cf71bf89045d"
     },
     "eye": {
       "path": "sources/eye.svg",

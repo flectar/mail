@@ -285,15 +285,15 @@ export component SettingsLinkRow inherits Rectangle {
         link-title := Text { height: max(18px, self.preferred-height); text: root.text; color: root.body-text; font-size: TypeScale.body; font-weight: 600; overflow: elide; }
         link-description := Text { height: max(16px, self.preferred-height); text: root.description; color: root.muted-text; font-size: TypeScale.caption; overflow: elide; }
     }
-    Text {
-        x: parent.width - 28px;
-        width: 18px;
-        height: parent.height;
-        text: "↗";
-        color: root.accent;
-        font-size: TypeScale.body;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    Image {
+        x: parent.width - 27px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        source: @image-url("../icons/lucide/outline/external-link.svg");
+        colorize: root.accent;
+        image-fit: contain;
+        accessible-role: none;
     }
     keyboard := FocusVisibleScope {
         accessible-role: none;
