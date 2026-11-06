@@ -136,6 +136,7 @@ async fn reply_send_reaches_smtp_and_sent_folder() {
             body_html: Some("Reviewed - the revenue section looks <b>solid</b>. Ship it.".into()),
             mode: "reply".into(),
             in_reply_to_message_id: Some(parent.id),
+            in_reply_to_header: None,
             attachments: vec![],
         })
         .await

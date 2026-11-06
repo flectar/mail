@@ -2161,6 +2161,7 @@ dependencies = [
  "blitz-html",
  "blitz-paint",
  "blitz-traits",
+ "block2 0.6.2",
  "cc",
  "cfg_aliases",
  "chrono",
