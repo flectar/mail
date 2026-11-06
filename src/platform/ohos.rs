@@ -30,6 +30,21 @@ pub fn configure_pdfium(directory: PathBuf) -> Result<(), String> {
         .map_err(|_| "PDF library already configured.".into())
 }
 
+/// `onMemoryLevel` from the ability, forwarded by the page.
+pub fn memory_level(level: i32) {
+    if let Some(pressure) = super::memory_levels::ohos_memory_level(level) {
+        crate::memory::memory_pressure(pressure);
+    }
+}
+
+/// The ability forwards memory levels as they arrive; there is nothing to
+/// subscribe to.
+pub(crate) fn watch_memory_pressure() {}
+
+/// OpenHarmony's C library stubs `mallopt` and has no `malloc_trim`, so only
+/// the app's own caches can be released.
+pub(crate) fn purge_allocator(_urgent: bool) {}
+
 pub(crate) fn pdfium_library() -> Result<PathBuf, String> {
     PDFIUM_LIBRARY
         .get()

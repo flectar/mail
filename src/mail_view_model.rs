@@ -1065,12 +1065,19 @@ fn label_summary(ids: &[i64], labels: &[flectar_mail_core::models::Label]) -> St
         .join(" · ")
 }
 
+type SenderImage = (std::sync::Weak<[u8]>, u32, u32, Image, usize);
+thread_local! { static SENDER_IMAGES: RefCell<std::collections::VecDeque<SenderImage>> = const { RefCell::new(std::collections::VecDeque::new()) }; }
+
+/// Under memory pressure: drop the cached sender images. Rows on screen keep
+/// theirs, and the next selection builds them again from the icon pixels.
+pub(super) fn release_sender_images() {
+    SENDER_IMAGES.with_borrow_mut(|images| images.clear());
+}
+
 pub(super) fn slint_image(icon: &FaviconImage) -> Image {
     // Cloning source RGBA and reconstructing Slint images on every selection
     // invalidates otherwise identical model rows and repeats texture uploads.
-    type Entry = (std::sync::Weak<[u8]>, u32, u32, Image, usize);
-    thread_local! { static IMAGES: RefCell<std::collections::VecDeque<Entry>> = const { RefCell::new(std::collections::VecDeque::new()) }; }
-    IMAGES.with(|cache| {
+    SENDER_IMAGES.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache.retain(|entry| entry.0.strong_count() > 0);
         if let Some(index) = cache.iter().position(|entry| {

@@ -9,6 +9,7 @@ use std::{ffi::CStr, path::PathBuf, sync::Arc};
 
 unsafe extern "C" {
     fn install_pdf_lifecycle_observers();
+    fn install_memory_pressure_observers();
     fn flectar_set_app_icon(name: *const std::ffi::c_char);
 }
 
@@ -21,6 +22,27 @@ pub(crate) const NAME: &str = "ios";
 extern "C" fn flectar_suspend_pdf_preview() {
     crate::suspend_file_preview();
 }
+
+/// Called by MemoryPressure.m: `critical` for a memory warning, otherwise the
+/// app moved to the background.
+#[unsafe(no_mangle)]
+extern "C" fn flectar_memory_pressure(critical: bool) {
+    crate::memory::memory_pressure(if critical {
+        crate::memory::MemoryPressure::Critical
+    } else {
+        crate::memory::MemoryPressure::Moderate
+    });
+}
+
+pub(crate) fn watch_memory_pressure() {
+    // SAFETY: installs NSNotificationCenter observers that live for the
+    // process; the Objective-C side takes no arguments.
+    unsafe { install_memory_pressure_observers() };
+}
+
+/// libmalloc on iOS returns freed pages to the system on its own, and its
+/// pressure-relief call does nothing there.
+pub(crate) fn purge_allocator(_urgent: bool) {}
 
 /// Build the platform context for the process launcher in src/desktop.rs.
 pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::error::CoreError> {
