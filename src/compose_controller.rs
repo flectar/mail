@@ -665,6 +665,9 @@ pub(super) fn clear_compose(
     files.borrow_mut().clear();
     // A picker still open for this composer must not attach to the next one.
     session.set(session.get().wrapping_add(1));
+    // Nor does its reply reminder carry over.
+    app.global::<ReminderUi>()
+        .set_compose_remind_time(Default::default());
     app.global::<AccountMailPreferences>()
         .invoke_composer_reset();
     document.borrow_mut().reset();

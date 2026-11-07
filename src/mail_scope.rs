@@ -90,6 +90,10 @@ pub(crate) enum Scope {
     Important,
     /// Gmail-style split inbox, remaining half.
     Other,
+    /// Snoozed conversations of every account, until they come back.
+    Snoozed,
+    /// Drafts of every account waiting to be sent at a time the user chose.
+    Scheduled,
     Label { kind: LabelKind, id: i64 },
     /// A provider folder outside the standard mailboxes.
     Folder(i64),
@@ -129,7 +133,12 @@ impl Scope {
                 kind: LabelKind::Account,
                 ..
             } => Self::UNIFIED_INBOX,
-            Self::Unified(_) | Self::Important | Self::Other | Self::Label { .. } => self,
+            Self::Unified(_)
+            | Self::Important
+            | Self::Other
+            | Self::Snoozed
+            | Self::Scheduled
+            | Self::Label { .. } => self,
         }
     }
 
@@ -180,6 +189,8 @@ impl fmt::Display for Scope {
             Self::Unified(mailbox) => write!(formatter, "{UNIFIED_PREFIX}{}", mailbox.label()),
             Self::Important => formatter.write_str("Important"),
             Self::Other => formatter.write_str("Other"),
+            Self::Snoozed => formatter.write_str("Snoozed"),
+            Self::Scheduled => formatter.write_str("Scheduled"),
             Self::Label { kind, id } => write!(formatter, "{}:{id}", kind.prefix()),
             Self::Folder(id) => write!(formatter, "{FOLDER_PREFIX}{id}"),
             Self::Account {
@@ -235,6 +246,8 @@ impl FromStr for Scope {
         match key {
             "Important" => Ok(Self::Important),
             "Other" => Ok(Self::Other),
+            "Snoozed" => Ok(Self::Snoozed),
+            "Scheduled" => Ok(Self::Scheduled),
             _ => Err(error()),
         }
     }
@@ -340,7 +353,13 @@ mod tests {
     }
 
     fn every_scope() -> Vec<Scope> {
-        let mut scopes = vec![Scope::Important, Scope::Other, Scope::Folder(-3)];
+        let mut scopes = vec![
+            Scope::Important,
+            Scope::Other,
+            Scope::Snoozed,
+            Scope::Scheduled,
+            Scope::Folder(-3),
+        ];
         for mailbox in StandardMailbox::ALL {
             scopes.push(Scope::Unified(mailbox));
             scopes.push(Scope::Account {

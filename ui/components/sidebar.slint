@@ -363,6 +363,42 @@ export component MailSidebar inherits CollapsibleWorkspaceSidebar {
                         empty-trash(account-id) => { root.request-empty-trash(account-id); }
                     }
 
+                    if entry.kind == SidebarRowKind.snoozed: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Snoozed");
+                        scope: "Snoozed";
+                        icon: @image-url("../icons/lucide/filled/alarm-clock.svg");
+                        selected: root.selected-scope == "Snoozed";
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons ? (root.selected-scope == "Snoozed" ? root.accent-color : root.muted-color) : MailIconPalette.snoozed;
+                        clicked(scope) => { root.select-scope(scope); }
+                    }
+
+                    if entry.kind == SidebarRowKind.scheduled: SidebarItem {
+                        x: 0px;
+                        interactive: entry.show_row;
+                        y: 0px;
+                        width: parent.width;
+                        label: @tr("Scheduled");
+                        scope: "Scheduled";
+                        icon: @image-url("../icons/lucide/filled/clock.svg");
+                        selected: root.selected-scope == "Scheduled";
+                        sidebar-background: root.background-color;
+                        selection-background: root.selection-background;
+                        accent-color: root.accent-color;
+                        body-color: root.body-color;
+                        muted-color: root.muted-color;
+                        icon-color: root.monochrome-icons ? (root.selected-scope == "Scheduled" ? root.accent-color : root.muted-color) : MailIconPalette.scheduled;
+                        clicked(scope) => { root.select-scope(scope); }
+                    }
+
                     if entry.kind == SidebarRowKind.categories-section: SidebarSectionHeader {
                         x: 0px;
                         interactive: entry.show_row;

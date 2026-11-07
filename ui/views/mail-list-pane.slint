@@ -17,6 +17,7 @@ import { Shortcuts } from "../shortcuts.slint";
 import { LocalMailUi } from "../local-mail.slint";
 import { ImportActivity } from "../dialogs/import-dialog.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
+import { SnoozeUi } from "../dialogs/when-dialog.slint";
 
 // A chip on a message-list row that acts on what it shows instead of
 // opening the message. Other buttons act on the row, as anywhere else on it.
@@ -845,6 +846,16 @@ export component MailListPane inherits FocusScope {
                                             MovePickerUi.request("copy", "checked", -1);
                                         }
                                     }
+                                    MenuItem {
+                                        title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…");
+                                        activated => {
+                                            if SnoozeUi.view {
+                                                SnoozeUi.unsnooze("checked", -1);
+                                            } else {
+                                                SnoozeUi.request("checked", -1);
+                                            }
+                                        }
+                                    }
                                     MenuItem { title: @tr("Mark as read"); activated => { root.bulk_message_action("mark_read"); } }
                                     MenuItem { title: @tr("Mark as unread"); activated => { root.bulk_message_action("mark_unread"); } }
                                     MenuItem { title: @tr("Star message"); activated => { root.bulk_message_action("star"); } }
@@ -983,7 +994,8 @@ export component MailListPane inherits FocusScope {
                                         + (mail-data.verification_code == "" ? ""
                                             : ", " + @tr("Verification code {}", mail-data.verification_code_spelled))
                                         + (mail-data.has_attachments ? ", " + @tr("Has attachments") : "")
-                                        + (mail-data.has_replied ? ", " + @tr("Replied") : "");
+                                        + (mail-data.has_replied ? ", " + @tr("Replied") : "")
+                                        + (mail-data.reply_due ? ", " + @tr("No reply yet") : "");
                                     accessible-id: "mail-row-" + mail-data.id;
                                     accessible-item-index: entry.email_index;
                                     accessible-item-selectable: true;
@@ -1131,7 +1143,9 @@ export component MailListPane inherits FocusScope {
                                                 sender-time := Text {
                                                     x: parent.width - self.width;
                                                     y: 0px;
-                                                    width: min(72px, self.preferred-width);
+                                                    // Room for when snoozed mail comes back or a
+                                                    // scheduled draft goes out: "Nov 13 at 8:00 AM".
+                                                    width: min(112px, self.preferred-width);
                                                     height: root.dense ? 44px : root.sender-line;
                                                     text: mail-data.time;
                                                     color: root.muted-text;
@@ -1299,6 +1313,41 @@ export component MailListPane inherits FocusScope {
                                                         spacing: 0px;
                                                         cross-axis-alignment: center;
 
+                                                        // Back because nobody replied in time.
+                                                        HorizontalLayout {
+                                                            padding-right: mail-data.reply_due ? 4px : 0px;
+                                                            cross-axis-alignment: center;
+
+                                                            if mail-data.reply_due : Rectangle {
+                                                                height: 20px;
+                                                                border-radius: 10px;
+                                                                background: root.accent-soft;
+                                                                accessible-role: none;
+
+                                                                HorizontalLayout {
+                                                                    padding-left: 7px;
+                                                                    padding-right: 8px;
+                                                                    spacing: 4px;
+                                                                    cross-axis-alignment: center;
+                                                                    Image {
+                                                                        width: 12px;
+                                                                        height: 12px;
+                                                                        source: @image-url("../icons/lucide/filled/bell.svg");
+                                                                        colorize: root.accent;
+                                                                        image-fit: contain;
+                                                                        accessible-role: none;
+                                                                    }
+                                                                    Text {
+                                                                        text: @tr("No reply");
+                                                                        color: root.accent;
+                                                                        font-size: TypeScale.caption;
+                                                                        font-weight: 700;
+                                                                        vertical-alignment: center;
+                                                                        accessible-role: none;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                         HorizontalLayout {
                                                             padding-right: mail-row.shows-code ? 4px : 0px;
                                                             cross-axis-alignment: center;
@@ -1436,6 +1485,16 @@ export component MailListPane inherits FocusScope {
                                             MenuItem { title: mail-data.unread ? @tr("Mark as read") : @tr("Mark as unread"); activated => { root.message_action_for_email(mail-data.id, mail-data.unread ? "mark_read" : "mark_unread"); } }
                                             // Local mail has no archive or spam.
                                             if !mail-row.local-mail : MenuItem { title: @tr("Archive"); activated => { root.message_action_for_email(mail-data.id, "archive"); } }
+                                            MenuItem {
+                                                title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…");
+                                                activated => {
+                                                    if SnoozeUi.view {
+                                                        SnoozeUi.unsnooze("row", mail-data.id);
+                                                    } else {
+                                                        SnoozeUi.request("row", mail-data.id);
+                                                    }
+                                                }
+                                            }
                                             MenuItem {
                                                 title: @tr("Move to…");
                                                 activated => {

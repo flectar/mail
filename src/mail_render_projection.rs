@@ -117,6 +117,13 @@ pub(super) fn email_viewport_size(app: &AppWindow) -> (u32, u32) {
 /// Remove every actionable part of the previous body on empty/error transitions.
 /// Source and fallback text are owned by the caller and remain readable.
 pub(super) fn clear_reader_projection(app: &AppWindow) {
+    let send_later = app.global::<SendLaterUi>();
+    send_later.set_open_send_time(Default::default());
+    send_later.set_open_send_error(Default::default());
+    let reminder = app.global::<ReminderUi>();
+    reminder.set_open_remind_time(Default::default());
+    reminder.set_open_due(false);
+    reminder.set_can_remind(false);
     app.global::<MessageColors>().set_original(false);
     app.global::<AccountMailPreferences>().invoke_close_reader();
     let reader = app.global::<EmailReader>();
@@ -152,7 +159,19 @@ pub(super) fn apply_email(
     app.set_selected_time(message_time(email.date_ms, &Local::now()).into());
     app.set_selected_to(email.to.clone().into());
     app.set_selected_label(email.label.clone().into());
-    app.set_selected_is_draft(email.folder == "Drafts" || email.label == "DRAFT");
+    app.set_selected_is_draft(
+        email.folder == "Drafts" || email.folder == "Scheduled" || email.label == "DRAFT",
+    );
+    // In the Scheduled view: when the draft goes out, or why it did not.
+    let send_later = app.global::<SendLaterUi>();
+    send_later.set_open_send_time(
+        email
+            .send_at
+            .map(|at| mail_view_model::upcoming_time(at, &Local::now()))
+            .unwrap_or_default()
+            .into(),
+    );
+    send_later.set_open_send_error(email.send_error.clone().unwrap_or_default().into());
     app.set_selected_initials(email.initials.clone().into());
     app.set_selected_starred(email.starred);
     app.set_selected_unread(email.unread);

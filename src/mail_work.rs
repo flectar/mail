@@ -50,6 +50,9 @@ pub(super) enum Operation {
         folder_id: i64,
         other_account: bool,
     },
+    /// Snoozes the conversation until a time (ms since the epoch), or ends
+    /// its snooze.
+    Snooze(Option<i64>),
 }
 impl Operation {
     /// Whether it starts moving (`true`) or copying mail to another
@@ -80,6 +83,8 @@ impl Operation {
                 "archive" | "spam" | "trash" | "not_spam" | "unarchive"
             ),
             Self::EmptyTrash(_) => false,
+            // Snoozed mail leaves the inbox; unsnoozed mail leaves Snoozed.
+            Self::Snooze(_) => true,
             Self::Drop(MailDropDestination::Folder(_)) => true,
             Self::Drop(MailDropDestination::Action(a)) => Self::Action((*a).into()).moves(),
             _ => false,
@@ -111,6 +116,7 @@ impl Operation {
             Self::Drop(MailDropDestination::Route(tab)) => {
                 core.route_to_tab(target, tab.clone()).await
             }
+            Self::Snooze(wake_at) => core.snooze(target, *wake_at).await,
         }
     }
 }

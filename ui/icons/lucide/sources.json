@@ -1,5 +1,8 @@
 {
   "outlines": {
+    "alarm-clock.svg": {
+      "source": "alarm-clock"
+    },
     "alert.svg": {
       "source": "triangle-alert"
     },
@@ -8,6 +11,9 @@
     },
     "arrow-left.svg": {
       "source": "arrow-left"
+    },
+    "bell.svg": {
+      "source": "bell"
     },
     "bold.svg": {
       "source": "bold"
@@ -38,6 +44,9 @@
     },
     "chevron-up.svg": {
       "source": "chevron-up"
+    },
+    "clock.svg": {
+      "source": "clock"
     },
     "code.svg": {
       "source": "code-xml"
@@ -212,6 +221,10 @@
     }
   },
   "sources": {
+    "alarm-clock": {
+      "path": "sources/alarm-clock.svg",
+      "sha256": "901741da7decdfddfd35e3bb55939b7dde33407a90b3df6ad87584476c0cbbc1"
+    },
     "app-window": {
       "path": "sources/app-window.svg",
       "sha256": "54dd72c452605d058e4ea053f5ca479e03c97a101aca0c7257dbd737ca8e0ae0"
@@ -275,6 +288,10 @@
     "circle-user-round": {
       "path": "sources/circle-user-round.svg",
       "sha256": "820f25212c6bdad7af60a9a05f4d0c1f926bc70ee5819b1495897b2ba3db65bd"
+    },
+    "clock": {
+      "path": "sources/clock.svg",
+      "sha256": "35d53f97cd90c61d03dc44dc3066e18459b40452710252005e0680d8e7743c17"
     },
     "cloud": {
       "path": "sources/cloud.svg",

@@ -1,0 +1,334 @@
+import { AppTheme, LayoutMetrics } from "../design-system.slint";
+import { TypeScale } from "../typography.slint";
+import { Button } from "../components/button.slint";
+import { LineEdit, ToolbarIconButton } from "../components/controls.slint";
+
+// One preset time in the time picker.
+export struct WhenChoice {
+    // later-today, tomorrow, weekend or next-week for a snooze;
+    // tomorrow-morning, tomorrow-afternoon or monday-morning for a send;
+    // tomorrow, in-3-days or in-a-week for a reply reminder, and none to
+    // drop the one set.
+    kind: string,
+    // When it is, as the row shows it, such as "Sat, Nov 8, 8:00".
+    when: string,
+}
+
+// The time picker Snooze, Schedule send and reply reminders share. Rust
+// works out the preset times when it opens.
+export global WhenUi {
+    in-out property <bool> open: false;
+    // What the time is for: "snooze", "send" or "remind".
+    in property <string> purpose: "snooze";
+    in property <[WhenChoice]> choices: [];
+    // "Pick date and time", prefilled with tomorrow morning.
+    in-out property <string> date;
+    in-out property <string> time;
+    in property <string> time-placeholder;
+    // Why the picked date and time were refused: "invalid" or "past", or
+    // empty.
+    in-out property <string> error;
+    callback choose(/* index */ int);
+    callback choose-custom(/* date */ string, /* time */ string);
+
+    public pure function label(kind: string) -> string {
+        if kind == "later-today" { return @tr("Later today"); }
+        if kind == "tomorrow" { return @tr("Tomorrow"); }
+        if kind == "weekend" { return @tr("This weekend"); }
+        if kind == "next-week" { return @tr("Next week"); }
+        if kind == "tomorrow-morning" { return @tr("Tomorrow morning"); }
+        if kind == "tomorrow-afternoon" { return @tr("Tomorrow afternoon"); }
+        if kind == "monday-morning" { return @tr("Monday morning"); }
+        if kind == "in-3-days" { return @tr("In 3 days"); }
+        if kind == "in-a-week" { return @tr("In a week"); }
+        if kind == "none" { return @tr("Don't remind me"); }
+        kind
+    }
+}
+
+// Snooze: mail leaves the inbox until a time, on every device with Flectar
+// Mail Sync.
+export global SnoozeUi {
+    // The Snoozed view is shown: its mail offers Unsnooze instead.
+    in property <bool> view: false;
+    // Opens the picker for "row" (a list row, with the rows checked along
+    // with it), "checked" (the checked rows) or "open" (the open mail).
+    callback request(/* source */ string, /* email id */ int);
+    // Brings snoozed mail of "row", "checked" or "open" back now.
+    callback unsnooze(/* source */ string, /* email id */ int);
+}
+
+// Send later: a message waits until a time, then goes out, from any of the
+// user's devices with Flectar Mail Sync.
+export global SendLaterUi {
+    // When the open draft goes out, as shown, or empty when it is not
+    // scheduled.
+    in property <string> open-send-time;
+    // The open draft's send failed: why.
+    in property <string> open-send-error;
+    // Schedule the message in the composer.
+    callback schedule-compose();
+    // The open scheduled draft: pick another time, send it now, or make it
+    // a plain draft again.
+    callback change-time();
+    callback send-now();
+    callback cancel();
+}
+
+// "Remind me if no reply": unless someone replies by a time the user chose,
+// the conversation comes back to the top of the inbox, on every device with
+// Flectar Mail Sync.
+export global ReminderUi {
+    // When the composer's message reminds the user, as shown, or empty.
+    in property <string> compose-remind-time;
+    // The open conversation's reminder, as shown, or empty; whether its time
+    // came with no reply; and whether it has mail the user sent, which a
+    // reminder can wait on.
+    in property <string> open-remind-time;
+    in property <bool> open-due;
+    in property <bool> can-remind;
+    // Pick when the composer's message reminds the user.
+    callback remind-compose();
+    // Pick when the open conversation reminds the user.
+    callback remind-open();
+    // End the open conversation's reminder: done waiting, or no longer
+    // wanted.
+    callback dismiss();
+}
+
+export component WhenDialog inherits Rectangle {
+    in property <bool> compact: false;
+
+    private property <int> highlighted: 0;
+    private property <length> row-height: root.compact ? LayoutMetrics.touch-target : 36px;
+    private property <bool> sending: WhenUi.purpose == "send";
+    private property <bool> reminding: WhenUi.purpose == "remind";
+    private property <string> title: root.sending ? @tr("Schedule send")
+        : root.reminding ? @tr("Remind me if no reply")
+        : @tr("Snooze until");
+    private property <string> confirm: root.sending ? @tr("Schedule")
+        : root.reminding ? @tr("Remind me")
+        : @tr("Snooze");
+    private property <image> row-icon: root.sending ? @image-url("../icons/lucide/outline/clock.svg")
+        : root.reminding ? @image-url("../icons/lucide/outline/bell.svg")
+        : @image-url("../icons/lucide/outline/alarm-clock.svg");
+
+    background: #00000066;
+    forward-focus: keys;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    function choose-highlighted() {
+        if root.highlighted < 0 || root.highlighted >= WhenUi.choices.length { return; }
+        WhenUi.open = false;
+        WhenUi.choose(root.highlighted);
+    }
+
+    function pick() {
+        WhenUi.choose-custom(WhenUi.date, WhenUi.time);
+    }
+
+    init => {
+        root.highlighted = 0;
+        keys.focus();
+    }
+
+    // A click outside the card closes the picker.
+    TouchArea {
+        clicked => { WhenUi.open = false; }
+    }
+
+    card := Rectangle {
+        width: root.compact ? root.width - 24px : min(400px, root.width - 32px);
+        height: min(root.height - (root.compact ? 48px : 64px), layout.preferred-height);
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        background: AppTheme.surface-raised;
+        drop-shadow-blur: 18px;
+        drop-shadow-offset-y: 5px;
+        drop-shadow-color: #0000002e;
+        clip: true;
+
+        // Swallows clicks so only the backdrop closes the picker.
+        TouchArea { }
+
+        keys := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.DownArrow {
+                    root.highlighted = min(WhenUi.choices.length - 1, root.highlighted + 1);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.highlighted = max(0, root.highlighted - 1);
+                    return accept;
+                }
+                if event.text == Key.Return {
+                    root.choose-highlighted();
+                    return accept;
+                }
+                if event.text == Key.Escape {
+                    WhenUi.open = false;
+                    return accept;
+                }
+                reject
+            }
+
+            layout := VerticalLayout {
+                padding: 12px;
+                padding-bottom: 14px;
+                spacing: 10px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: root.title;
+                        color: AppTheme.title;
+                        font-size: TypeScale.heading;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    ToolbarIconButton {
+                        compact: root.compact;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: AppTheme.secondary;
+                        hover-background: AppTheme.muted-control-bg;
+                        tooltip-text: @tr("Close");
+                        clicked => { WhenUi.open = false; }
+                    }
+                }
+
+                VerticalLayout {
+                    accessible-role: list;
+                    accessible-label: root.title;
+                    for choice[index] in WhenUi.choices : Rectangle {
+                        height: root.row-height;
+                        border-radius: 6px;
+                        background: index == root.highlighted ? AppTheme.control-bg : transparent;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            Image {
+                                width: LayoutMetrics.icon-size;
+                                source: choice.kind == "none" ? @image-url("../icons/lucide/outline/x.svg") : root.row-icon;
+                                colorize: AppTheme.secondary;
+                                image-fit: contain;
+                                accessible-role: none;
+                            }
+                            Text {
+                                text: WhenUi.label(choice.kind);
+                                color: AppTheme.heading;
+                                font-size: TypeScale.body;
+                                font-weight: 500;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                                accessible-role: none;
+                            }
+                            Text {
+                                text: choice.when;
+                                color: AppTheme.muted;
+                                font-size: TypeScale.secondary;
+                                vertical-alignment: center;
+                                accessible-role: none;
+                            }
+                        }
+                        TouchArea {
+                            accessible-role: button;
+                            accessible-label: WhenUi.label(choice.kind) + ", " + choice.when;
+                            accessible-item-index: index;
+                            accessible-action-default => {
+                                root.highlighted = index;
+                                root.choose-highlighted();
+                            }
+                            changed has-hover => {
+                                if self.has-hover { root.highlighted = index; }
+                            }
+                            clicked => {
+                                root.highlighted = index;
+                                root.choose-highlighted();
+                            }
+                            mouse-cursor: pointer;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    background: AppTheme.border-subtle;
+                }
+
+                Text {
+                    text: @tr("Pick date and time");
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.caption;
+                    font-weight: 600;
+                }
+
+                if !root.compact : HorizontalLayout {
+                    spacing: 8px;
+                    LineEdit {
+                        height: 36px;
+                        text <=> WhenUi.date;
+                        placeholder-text: "YYYY-MM-DD";
+                        input-label: @tr("Date");
+                        accepted => { root.pick(); }
+                    }
+                    LineEdit {
+                        width: 110px;
+                        height: 36px;
+                        text <=> WhenUi.time;
+                        placeholder-text: WhenUi.time-placeholder;
+                        input-label: @tr("Time");
+                        accepted => { root.pick(); }
+                    }
+                    Button {
+                        height: 36px;
+                        text: root.confirm;
+                        primary: true;
+                        clicked => { root.pick(); }
+                    }
+                }
+
+                if root.compact : VerticalLayout {
+                    spacing: 8px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        LineEdit {
+                            height: LayoutMetrics.touch-target;
+                            text <=> WhenUi.date;
+                            placeholder-text: "YYYY-MM-DD";
+                            input-label: @tr("Date");
+                        }
+                        LineEdit {
+                            width: 110px;
+                            height: LayoutMetrics.touch-target;
+                            text <=> WhenUi.time;
+                            placeholder-text: WhenUi.time-placeholder;
+                            input-label: @tr("Time");
+                        }
+                    }
+                    Button {
+                        height: LayoutMetrics.touch-target;
+                        text: root.confirm;
+                        primary: true;
+                        clicked => { root.pick(); }
+                    }
+                }
+
+                if WhenUi.error != "" : Text {
+                    text: WhenUi.error == "past" ? @tr("Choose a time in the future.")
+                        : @tr("Enter the date as YYYY-MM-DD and a time, such as {}.", WhenUi.time-placeholder);
+                    color: AppTheme.destructive;
+                    font-size: TypeScale.caption;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

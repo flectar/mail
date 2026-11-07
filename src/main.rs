@@ -77,6 +77,7 @@ mod tabs;
 mod theme;
 mod ui_dispatch;
 mod ui_message;
+mod when_picker;
 mod window_chrome;
 mod window_controller;
 
@@ -842,6 +843,14 @@ fn resolve_single_mail_drop(
         Scope::Unified(_) => {
             return Err("this unified mailbox is not a drop destination".to_owned());
         }
+        // Snoozing needs a time, which Snooze asks for.
+        Scope::Snoozed => {
+            return Err("Snoozed is not a drop destination".to_owned());
+        }
+        // Only a draft can be scheduled, from the composer.
+        Scope::Scheduled => {
+            return Err("Scheduled is not a drop destination".to_owned());
+        }
         Scope::Folder(_) | Scope::Account { .. } => {
             let target = state
                 .mailboxes
@@ -1314,7 +1323,11 @@ impl InboxState {
                 .iter()
                 .find(|label| label.id == id)
                 .and_then(|label| label.owner_account_id),
-            Scope::Unified(_) | Scope::Important | Scope::Other => None,
+            Scope::Unified(_)
+            | Scope::Important
+            | Scope::Other
+            | Scope::Snoozed
+            | Scope::Scheduled => None,
         };
         let connected = self
             .connected_accounts
@@ -1335,7 +1348,11 @@ impl InboxState {
     /// inbox if they are not.
     fn shows_scope(&self, scope: Scope) -> bool {
         match scope {
-            Scope::Unified(_) | Scope::Important | Scope::Other => true,
+            Scope::Unified(_)
+            | Scope::Important
+            | Scope::Other
+            | Scope::Snoozed
+            | Scope::Scheduled => true,
             Scope::Account { account_id, .. } => self.shows_account(account_id),
             Scope::Folder(_) => self
                 .mailboxes
@@ -5986,6 +6003,10 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     ));
     let compose_intent = Rc::new(RefCell::new(ComposeIntent::default()));
     let compose_send_action = Rc::new(Cell::new(None::<i64>));
+    // When the composer's message goes out, once Schedule send picked a
+    // time, and when it reminds the user; taken by the next send.
+    let compose_times = when_picker::ComposeTimes::new();
+    when_picker::register(&app, &state, &runtime, &compose_times);
     let (compose_send_raw_tx, compose_send_rx) = bounded_ui_channel::<ComposeSendUpdate>();
     let compose_send_tx = UiSender::new(
         compose_send_raw_tx,
@@ -6290,8 +6311,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
         };
 
         if action.as_str() == "edit_draft" {
-            if row.folder != "Drafts" && row.label != "DRAFT" {
+            if row.folder != "Drafts" && row.folder != "Scheduled" && row.label != "DRAFT" {
                 app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
+                return;
+            }
+            // Editing a scheduled draft cancels its send first, as in Gmail.
+            if row.send_at.is_some()
+                && let Err(error) =
+                    runtime_for_message_compose.block_on(core.cancel_scheduled_row(&row))
+            {
+                app.set_render_status(UiMessage::detail("Could not cancel the send: {}", error));
                 return;
             }
             let draft = match runtime_for_message_compose.block_on(core.load_draft(&row)) {
@@ -6899,7 +6928,9 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let intent_for_save = Rc::clone(&compose_intent);
     let send_action_for_save = Rc::clone(&compose_send_action);
     let send_updates_for_save = compose_send_tx.clone();
+    let times_for_save = compose_times.clone();
     app.on_save_compose(move |account_id, to, cc, bcc, subject, body, send| {
+        let send_at = times_for_save.send_at.take().filter(|_| send);
         let Some(app) = app_weak.upgrade() else {
             return;
         };
@@ -6953,22 +6984,78 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             app.set_compose_notice_is_error(true);
             return;
         }
+        if let Some(send_at) = send_at {
+            let scheduled = runtime_for_compose.block_on(core.schedule_new_message(
+                ComposeMessage {
+                    draft_id: intent.draft_id,
+                    account_id: i64::from(account_id),
+                    sender_email: Some(sender_email.as_str()),
+                    to: to.as_str(),
+                    cc: cc.as_str(),
+                    bcc: bcc.as_str(),
+                    subject: subject.as_str(),
+                    body: body.as_str(),
+                    body_html: body_html.as_deref(),
+                    attachments: &attachments,
+                    mode: intent.mode.as_str(),
+                    in_reply_to_message_id: intent.in_reply_to_message_id,
+                    in_reply_to_header: intent.in_reply_to_header.as_deref(),
+                },
+                send_at,
+                times_for_save.remind_at(&app),
+            ));
+            match scheduled {
+                Ok(_) => {
+                    clear_compose(
+                        &app,
+                        &files_for_save,
+                        &session_for_save,
+                        &document_for_save,
+                        &editor_for_save,
+                        &contacts_for_save,
+                    );
+                    *intent_for_save.borrow_mut() = ComposeIntent::default();
+                    app.set_sync_status(UiMessage::detail(
+                        "Scheduled to send {}",
+                        mail_view_model::upcoming_time(send_at, &chrono::Local::now()),
+                    ));
+                    let _ = refresh_from_source(
+                        &app,
+                        &state_for_compose,
+                        &runtime_for_compose,
+                        true,
+                        &[],
+                    );
+                    mailto_links::open_pending_soon(&app);
+                }
+                Err(error) => {
+                    let message = UiMessage::detail("Could not schedule the message: {}", error);
+                    app.set_compose_notice(message.clone());
+                    app.set_compose_notice_is_error(true);
+                    app.set_sync_status(message);
+                }
+            }
+            return;
+        }
         if send {
-            match runtime_for_compose.block_on(core.send_new_message(ComposeMessage {
-                draft_id: intent.draft_id,
-                account_id: i64::from(account_id),
-                sender_email: Some(sender_email.as_str()),
-                to: to.as_str(),
-                cc: cc.as_str(),
-                bcc: bcc.as_str(),
-                subject: subject.as_str(),
-                body: body.as_str(),
-                body_html: body_html.as_deref(),
-                attachments: &attachments,
-                mode: intent.mode.as_str(),
-                in_reply_to_message_id: intent.in_reply_to_message_id,
-                in_reply_to_header: intent.in_reply_to_header.as_deref(),
-            })) {
+            match runtime_for_compose.block_on(core.send_new_message(
+                ComposeMessage {
+                    draft_id: intent.draft_id,
+                    account_id: i64::from(account_id),
+                    sender_email: Some(sender_email.as_str()),
+                    to: to.as_str(),
+                    cc: cc.as_str(),
+                    bcc: bcc.as_str(),
+                    subject: subject.as_str(),
+                    body: body.as_str(),
+                    body_html: body_html.as_deref(),
+                    attachments: &attachments,
+                    mode: intent.mode.as_str(),
+                    in_reply_to_message_id: intent.in_reply_to_message_id,
+                    in_reply_to_header: intent.in_reply_to_header.as_deref(),
+                },
+                times_for_save.remind_at(&app),
+            )) {
                 Ok(queued) => {
                     // Keep the exact saved draft attached to this composer so
                     // a failed submission can be edited and retried in place.

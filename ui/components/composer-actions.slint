@@ -4,6 +4,7 @@ import { Button } from "button.slint";
 import { IconButton } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
+import { ReminderUi, SendLaterUi } from "../dialogs/when-dialog.slint";
 
 export component ComposerToolbar inherits Rectangle {
     in property <bool> compact: false;
@@ -64,6 +65,18 @@ export component ComposerToolbar inherits Rectangle {
             Rectangle { width: 1px; height: 18px; background: root.subtle-border-color; }
 
             IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
+            // "Remind me if no reply", for the message being written.
+            IconButton {
+                icon: ReminderUi.compose-remind-time != "" ? @image-url("../icons/lucide/filled/bell.svg") : @image-url("../icons/lucide/outline/bell.svg");
+                icon-color: ReminderUi.compose-remind-time != "" ? root.accent-color : root.secondary-color;
+                active: ReminderUi.compose-remind-time != "";
+                hover-background: root.control-hover-color;
+                active-background: root.accent-background;
+                tooltip-text: ReminderUi.compose-remind-time != ""
+                    ? @tr("Reminds you {} if nobody replies", ReminderUi.compose-remind-time)
+                    : @tr("Remind me if no reply");
+                clicked => { ReminderUi.remind-compose(); }
+            }
 
             Rectangle { horizontal-stretch: 1; }
 
@@ -223,7 +236,8 @@ export component ComposerFooter inherits Rectangle {
             send-button := Button {
                 x: root.compact ? 8px : 12px;
                 y: 10px;
-                width: max(root.compact ? 96px : 106px, self.content-width);
+                // Phones keep room for Schedule send and Attach beside it.
+                width: max(root.compact ? 84px : 106px, self.content-width);
                 height: 34px;
                 text: root.sending ? @tr("Sending…") : @tr("Send");
                 icon: @image-url("../icons/lucide/filled/paper-airplane.svg");
@@ -233,9 +247,23 @@ export component ComposerFooter inherits Rectangle {
                 clicked => { root.submit(true); }
             }
 
+            // Send later: pick when the message goes out.
+            schedule-button := IconButton {
+                x: send-button.x + send-button.width + (root.compact ? 4px : 6px);
+                y: root.compact ? 5px : 11px;
+                width: root.compact ? 44px : 32px;
+                height: root.compact ? 44px : 32px;
+                icon: @image-url("../icons/lucide/outline/clock.svg");
+                icon-color: root.secondary-color;
+                hover-background: root.control-hover-color;
+                interactive: root.can-send && !root.sending;
+                tooltip-text: @tr("Schedule send");
+                clicked => { SendLaterUi.schedule-compose(); }
+            }
+
             attach-button := IconButton {
                 visible: root.attachment-picker-supported;
-                x: send-button.x + send-button.width + (root.compact ? 4px : 8px);
+                x: schedule-button.x + schedule-button.width + (root.compact ? 4px : 8px);
                 y: root.compact ? 5px : 11px;
                 width: root.compact ? 44px : 32px;
                 height: root.compact ? 44px : 32px;
@@ -261,7 +289,7 @@ export component ComposerFooter inherits Rectangle {
             save-draft := Button {
                 x: parent.width - (root.compact ? 54px : 90px) - self.width;
                 y: 11px;
-                width: max(root.compact ? 104px : 112px, self.content-width);
+                width: max(root.compact ? 0px : 112px, self.content-width);
                 height: 32px;
                 text: @tr("Save draft");
                 enabled: root.has-content;

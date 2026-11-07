@@ -14,6 +14,7 @@ import { LabelChip } from "../components/label-chip.slint";
 import { LoadingSkeletonBlock } from "../components/loading-skeleton.slint";
 import { RenderingInfoDialog } from "../dialogs/rendering-info-dialog.slint";
 import { MovePickerUi } from "../dialogs/move-dialog.slint";
+import { ReminderUi, SendLaterUi, SnoozeUi } from "../dialogs/when-dialog.slint";
 import { TypeScale } from "../typography.slint";
 import { AppTheme, LayoutMetrics, MailIconPalette, MotionSettings } from "../design-system.slint";
 import { MessageColors } from "../message-colors.slint";
@@ -321,6 +322,31 @@ export component MailReadingPane inherits FocusScope {
     in property <bool> selected_starred: false;
     in property <bool> selected_unread: false;
     in property <bool> selected_is_draft: false;
+    // The open draft waits to go out at a time the user chose.
+    private property <bool> scheduled: root.selected_is_draft && SendLaterUi.open-send-time != "";
+    // The open conversation waits for a reply the user asked to be reminded
+    // of.
+    private property <bool> reminding: !root.scheduled && ReminderUi.open-remind-time != "";
+    // What the open scheduled draft or reply reminder is waiting for. Beside
+    // the message actions on wide layouts; on phones, on a line above them.
+    private property <string> waiting-text: root.scheduled
+        ? (SendLaterUi.open-send-error != ""
+            ? @tr("Not sent: {}", SendLaterUi.open-send-error)
+            : @tr("Sends {}", SendLaterUi.open-send-time))
+        : root.reminding
+            ? (ReminderUi.open-due
+                ? @tr("No reply yet")
+                // Beside Cancel reminder, the time is what a wide layout
+                // has room for.
+                : root.compact
+                    ? @tr("Reminds you {} if nobody replies", ReminderUi.open-remind-time)
+                    : @tr("Reminds you {}", ReminderUi.open-remind-time))
+            : "";
+    private property <color> waiting-color: root.scheduled && SendLaterUi.open-send-error != "" ? AppTheme.destructive
+        : root.reminding && ReminderUi.open-due ? AppTheme.accent
+        : root.secondary-text;
+    private property <bool> waiting-line: root.compact && root.waiting-text != "";
+    private property <length> waiting-line-height: root.waiting-line ? 30px : 0px;
     in property <bool> trash_view: false;
     callback request_empty_trash();
     in property <string> selected_sender_verification: "";
@@ -350,6 +376,8 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
+        { id: SnoozeUi.view ? "unsnooze" : "snooze", title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…"), icon: @image-url("../icons/lucide/outline/alarm-clock.svg") },
+        { id: "remind", title: ReminderUi.open-remind-time != "" ? @tr("Change reminder…") : @tr("Remind me if no reply…"), icon: @image-url("../icons/lucide/outline/bell.svg"), disabled: !ReminderUi.can-remind },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
@@ -370,6 +398,8 @@ export component MailReadingPane inherits FocusScope {
         { id: "original_colors", title: MessageColors.original ? @tr("Use message appearance") : @tr("Show original colors"), icon: @image-url("../icons/lucide/outline/contrast.svg") },
         { id: "read", title: root.selected_unread ? @tr("Mark as read") : @tr("Mark as unread"), icon: root.selected_unread ? @image-url("../icons/lucide/outline/mail-open.svg") : @image-url("../icons/lucide/outline/mail.svg") },
         { id: "archive", title: @tr("Archive"), icon: @image-url("../icons/lucide/outline/archive.svg") },
+        { id: SnoozeUi.view ? "unsnooze" : "snooze", title: SnoozeUi.view ? @tr("Unsnooze") : @tr("Snooze…"), icon: @image-url("../icons/lucide/outline/alarm-clock.svg") },
+        { id: "remind", title: ReminderUi.open-remind-time != "" ? @tr("Change reminder…") : @tr("Remind me if no reply…"), icon: @image-url("../icons/lucide/outline/bell.svg"), disabled: !ReminderUi.can-remind },
         { id: "move", title: @tr("Move to…"), icon: @image-url("../icons/lucide/outline/folder-move.svg") },
         { id: "copy", title: @tr("Copy to…"), icon: @image-url("../icons/lucide/outline/copy.svg") },
         { id: "spam", title: @tr("Move to spam"), icon: @image-url("../icons/lucide/outline/alert.svg") },
@@ -484,7 +514,8 @@ export component MailReadingPane inherits FocusScope {
         : root.rendered-email-height;
     private property <length> attachment-flow-y: root.message-body-content-height;
     private property <length> message-actions-padding: root.compact ? 4px : 5px;
-    private property <length> message-actions-height: root.toolbar-button + 2 * root.message-actions-padding;
+    private property <length> message-actions-height: root.toolbar-button + 2 * root.message-actions-padding
+        + root.waiting-line-height;
     private property <length> message-bottom-padding: root.compact ? 10px : 12px;
     // Header lines keep their 12px design and grow with the platform font.
     private property <length> thread-sender-height: max(23px, thread-sender-probe.preferred-height);
@@ -1063,6 +1094,18 @@ export component MailReadingPane inherits FocusScope {
                                         ? root.message-action-menu
                                         : root.message-action-menu-no-print;
                                 activated(action) => {
+                                    if action == "snooze" {
+                                        SnoozeUi.request("open", -1);
+                                        return;
+                                    }
+                                    if action == "unsnooze" {
+                                        SnoozeUi.unsnooze("open", -1);
+                                        return;
+                                    }
+                                    if action == "remind" {
+                                        ReminderUi.remind-open();
+                                        return;
+                                    }
                                     if action == "edit_draft" || action == "reply" || action == "reply_all" || action == "forward" || action == "edit_as_new" {
                                         root.compose_message_action(action);
                                     } else if action == "star" {
@@ -1881,7 +1924,22 @@ export component MailReadingPane inherits FocusScope {
                                         background: root.border-subtle;
                                     }
 
+                                    if root.waiting-line : Text {
+                                        x: 14px;
+                                        y: 9px;
+                                        width: parent.width - 28px;
+                                        height: root.waiting-line-height - 9px;
+                                        text: root.waiting-text;
+                                        color: root.waiting-color;
+                                        font-size: TypeScale.secondary;
+                                        font-weight: root.reminding && ReminderUi.open-due ? 600 : 400;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+
                                     HorizontalBox {
+                                        y: root.waiting-line-height;
+                                        height: parent.height - root.waiting-line-height;
                                         padding-top: root.message-actions-padding;
                                         padding-right: 10px;
                                         padding-bottom: root.message-actions-padding;
@@ -1914,12 +1972,63 @@ export component MailReadingPane inherits FocusScope {
                                             accessible-id: "message-forward-button";
                                             clicked => { root.compose_message_action("forward"); }
                                         }
-                                        if root.selected_is_draft : ReaderControl {
+                                        if root.selected_is_draft && !root.scheduled : ReaderControl {
                                             compact: root.compact;
                                             interactive: root.has_selected;
                                             icon: @image-url("../icons/lucide/filled/compose.svg");
                                             tooltip-text: @tr("Continue editing");
                                             clicked => { root.compose_message_action("edit_draft"); }
+                                        }
+                                        // A scheduled draft goes out by itself; editing it
+                                        // starts with Cancel send, as in Gmail.
+                                        if root.scheduled : ReaderControl {
+                                            compact: root.compact;
+                                            interactive: root.has_selected;
+                                            icon: @image-url("../icons/lucide/outline/paper-airplane.svg");
+                                            tooltip-text: @tr("Send now");
+                                            clicked => { SendLaterUi.send-now(); }
+                                        }
+                                        if root.scheduled : ReaderControl {
+                                            compact: root.compact;
+                                            interactive: root.has_selected;
+                                            icon: @image-url("../icons/lucide/outline/clock.svg");
+                                            tooltip-text: @tr("Change time");
+                                            clicked => { SendLaterUi.change-time(); }
+                                        }
+                                        // Spelled out, as in Gmail: an x alone reads as
+                                        // closing the message.
+                                        if root.scheduled : Button {
+                                            width: self.content-width;
+                                            height: root.compact ? 36px : 30px;
+                                            text: @tr("Cancel send");
+                                            enabled: root.has_selected;
+                                            clicked => { SendLaterUi.cancel(); }
+                                        }
+                                        if root.scheduled && !root.waiting-line : Text {
+                                            text: root.waiting-text;
+                                            color: root.waiting-color;
+                                            font-size: TypeScale.secondary;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
+                                        }
+                                        // "Remind me if no reply": waiting for its time,
+                                        // or back because nobody replied.
+                                        if root.reminding : Button {
+                                            width: self.content-width;
+                                            height: root.compact ? 36px : 30px;
+                                            text: ReminderUi.open-due ? @tr("Dismiss") : @tr("Cancel reminder");
+                                            enabled: root.has_selected;
+                                            clicked => { ReminderUi.dismiss(); }
+                                        }
+                                        if root.reminding && !root.waiting-line : Text {
+                                            text: root.waiting-text;
+                                            color: root.waiting-color;
+                                            font-size: TypeScale.secondary;
+                                            font-weight: ReminderUi.open-due ? 600 : 400;
+                                            vertical-alignment: center;
+                                            horizontal-stretch: 1;
+                                            overflow: elide;
                                         }
 
                                         Rectangle { horizontal-stretch: 1; }

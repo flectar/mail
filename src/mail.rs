@@ -11,8 +11,8 @@ use flectar_mail_core::{
         DraftAttachmentIn, FolderInfo, Label, MailGrouping, MailHistory, MailProfile, MailProtocol,
         MailboxBadgeCounts, MessageCursor, MessageDetail, MessageSearchCursor, MessageSummary,
         PerformActionArgs, PortableAccountConfig, Provider, QueueSendArgs, QueueSendResult,
-        SaveDraftArgs, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary, View,
-        normalized_workspace_list_pane_width, roles,
+        SaveDraftArgs, ScheduledSend, SearchCursor, Settings, Snippet, ThreadCursor, ThreadSummary,
+        View, normalized_workspace_list_pane_width, roles,
     },
 };
 #[cfg(test)]
@@ -64,6 +64,16 @@ pub struct MailMessage {
     /// Milliseconds since the Unix epoch. Views format it when they project
     /// the message, so the text follows the current language.
     pub date_ms: i64,
+    /// When a snoozed conversation comes back, in ms since the epoch.
+    pub snoozed_until: Option<i64>,
+    /// When a scheduled draft goes out, in ms since the epoch.
+    pub send_at: Option<i64>,
+    /// Why a scheduled draft could not go out.
+    pub send_error: Option<String>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply.
+    pub reply_reminder_due: bool,
     pub to: String,
     pub label: String,
     pub unread: bool,
@@ -110,6 +120,11 @@ impl MailMessage {
             preview: email.preview.to_owned(),
             date_ms: (chrono::Local::now() - chrono::Duration::days(i64::from(email.id - 1)))
                 .timestamp_millis(),
+            snoozed_until: None,
+            send_at: None,
+            send_error: None,
+            reply_reminder_at: None,
+            reply_reminder_due: false,
             to: email.to.to_owned(),
             label: email.label.to_owned(),
             unread: email.unread,
@@ -725,6 +740,15 @@ impl CoreMailSource {
         // accounts; an account's own mailboxes need no more than its id.
         let profile_accounts = profile.filter(|_| resolved.account_id.is_none());
 
+        // The Scheduled view shows when each draft goes out.
+        let sends = if resolved.view == View::Scheduled {
+            self.core
+                .scheduled_sends()
+                .await
+                .map_err(|error| error.to_string())?
+        } else {
+            Vec::new()
+        };
         if self.grouping() == MailGrouping::Messages {
             let (rows, next_cursor) = self
                 .load_message_rows(&resolved, profile_accounts, query, cursor, limit)
@@ -734,6 +758,7 @@ impl CoreMailSource {
                 .filter_map(|row| {
                     message_summary_to_message(row, accounts, resolved.title.as_str())
                 })
+                .map(|message| shown_times(message, resolved.view, &sends))
                 .collect();
             return Ok(MailPage {
                 account_revision: self.account_revision(),
@@ -816,6 +841,7 @@ impl CoreMailSource {
         let messages = threads
             .into_iter()
             .filter_map(|thread| summary_to_message(thread, accounts, resolved.title.as_str()))
+            .map(|message| shown_times(message, resolved.view, &sends))
             .collect();
 
         Ok(MailPage {
@@ -1079,6 +1105,63 @@ impl CoreMailSource {
             .first()
             .cloned()
             .ok_or_else(|| "no account can send mail".to_owned())
+    }
+
+    /// The scheduled send of a row's draft, if it waits for one.
+    pub async fn scheduled_send_of(
+        &self,
+        row: &MailMessage,
+    ) -> Result<Option<ScheduledSend>, String> {
+        let sends = self
+            .core
+            .scheduled_sends()
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(sends
+            .into_iter()
+            .filter(|send| match row.message_id {
+                Some(draft) => send.draft_id == draft,
+                None => send.thread_id.is_some() && send.thread_id == row.thread_id,
+            })
+            .min_by_key(|send| send.send_at))
+    }
+
+    /// Stop a row's scheduled send; its draft stays. Returns whether one
+    /// waited.
+    pub async fn cancel_scheduled_row(&self, row: &MailMessage) -> Result<bool, String> {
+        let Some(send) = self.scheduled_send_of(row).await? else {
+            return Ok(false);
+        };
+        self.core
+            .cancel_scheduled_send(send.draft_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Send a row's scheduled draft now. Returns whether one waited.
+    pub async fn send_scheduled_row_now(&self, row: &MailMessage) -> Result<bool, String> {
+        let Some(send) = self.scheduled_send_of(row).await? else {
+            return Ok(false);
+        };
+        self.core
+            .send_now(send.action_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Move a row's scheduled draft to `send_at`.
+    pub async fn reschedule_row(&self, row: &MailMessage, send_at: i64) -> Result<(), String> {
+        let send = self
+            .scheduled_send_of(row)
+            .await?
+            .ok_or_else(|| "this message is not scheduled".to_owned())?;
+        self.queue_send(QueueSendArgs {
+            draft_id: send.draft_id,
+            send_at: Some(send_at),
+            remind_at: None,
+        })
+        .await
+        .map(|_| ())
     }
 
     pub async fn load_draft(&self, row: &MailMessage) -> Result<SaveDraftArgs, String> {
@@ -1811,6 +1894,58 @@ impl CoreMailSource {
             .map_err(|error| error.to_string())
     }
 
+    /// Remind the user at `remind_at` (ms since the epoch) unless someone
+    /// replies to what they sent in a row's conversation, on every device
+    /// with Flectar Mail Sync.
+    pub async fn set_reply_reminder(
+        &self,
+        row: &MailMessage,
+        remind_at: i64,
+    ) -> Result<(), String> {
+        let thread_id = row
+            .thread_id
+            .ok_or_else(|| "this message is not in a conversation".to_owned())?;
+        // A message listed on its own waits for replies to itself.
+        let message_id = row.message_id.filter(|_| row.is_outgoing);
+        self.core
+            .set_reply_reminder(thread_id, message_id, remind_at)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// End the reply reminders of a row's conversation.
+    pub async fn dismiss_reply_reminder(&self, row: &MailMessage) -> Result<(), String> {
+        let thread_id = row
+            .thread_id
+            .ok_or_else(|| "this message is not in a conversation".to_owned())?;
+        self.core
+            .dismiss_reply_reminder(thread_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Snooze the conversation until `wake_at` (ms since the epoch), on
+    /// every device with Flectar Mail Sync; `None` ends its snooze.
+    pub async fn snooze(&self, target: MailTarget, wake_at: Option<i64>) -> Result<(), String> {
+        self.core
+            .perform_action(PerformActionArgs {
+                kind: if wake_at.is_some() {
+                    ActionKind::Snooze
+                } else {
+                    ActionKind::Unsnooze
+                },
+                target: target.action_target(),
+                params: wake_at.map(|wake_at| ActionParams {
+                    wake_at: Some(wake_at),
+                    target_folder_id: None,
+                    label_id: None,
+                }),
+            })
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub async fn move_to_folder(
         &self,
         target: MailTarget,
@@ -2145,16 +2280,36 @@ impl CoreMailSource {
         self.save_draft(compose_args(message, false)?).await
     }
 
+    /// Save the composer's message and send it at `send_at`; `remind_at`
+    /// reminds the user unless someone replies by then.
+    pub async fn schedule_new_message(
+        &self,
+        message: ComposeMessage<'_>,
+        send_at: i64,
+        remind_at: Option<i64>,
+    ) -> Result<QueueSendResult, String> {
+        let draft_id = self.save_draft(compose_args(message, true)?).await?;
+        self.queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(send_at),
+            remind_at,
+        })
+        .await
+    }
+
+    /// Save the composer's message and send it; `remind_at` reminds the user
+    /// unless someone replies by then.
     pub async fn send_new_message(
         &self,
         message: ComposeMessage<'_>,
+        remind_at: Option<i64>,
     ) -> Result<QueueSendResult, String> {
         let draft_id = self.save_draft(compose_args(message, true)?).await?;
         let queued = self
             .queue_send(QueueSendArgs {
                 draft_id,
                 send_at: None,
-                remind_at: None,
+                remind_at,
             })
             .await?;
         self.core
@@ -2727,7 +2882,13 @@ fn server_only_folders(scope: Scope, folders: &[FolderInfo]) -> Vec<i64> {
                 .map(|folder| folder.id)
                 .collect();
         }
-        Scope::Important | Scope::Other | Scope::Label { .. } => return Vec::new(),
+        Scope::Important
+        | Scope::Other
+        | Scope::Snoozed
+        | Scope::Scheduled
+        | Scope::Label { .. } => {
+            return Vec::new();
+        }
     };
     let Some(role) = role else {
         return Vec::new();
@@ -2770,6 +2931,8 @@ fn resolve_scope(scope: Scope, folders: &[FolderInfo], labels: &[Label]) -> Scop
             split_id: Some(-2),
             ..unfiltered(View::Inbox, "Other")
         },
+        Scope::Snoozed => unfiltered(View::Snoozed, "Snoozed"),
+        Scope::Scheduled => unfiltered(View::Scheduled, "Scheduled"),
         Scope::Label { id, .. } => match labels.iter().find(|label| label.id == id) {
             Some(label) => ScopeResolution {
                 account_id: label.owner_account_id,
@@ -2815,7 +2978,9 @@ fn validated_startup_scope(
     labels: &[Label],
 ) -> Scope {
     let scope = match preferred {
-        Scope::Unified(_) | Scope::Important | Scope::Other => Some(preferred),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            Some(preferred)
+        }
         // A label can move between sections, e.g. when it becomes automatic.
         Scope::Label { id, .. } => labels
             .iter()
@@ -2834,6 +2999,27 @@ fn validated_startup_scope(
             .then_some(preferred),
     };
     scope.unwrap_or(Scope::UNIFIED_INBOX).visible_for(accounts)
+}
+
+/// Rows show when snoozed mail comes back only in the Snoozed view, and when
+/// a draft goes out only in the Scheduled view; other views show their usual
+/// dates.
+fn shown_times(mut message: MailMessage, view: View, sends: &[ScheduledSend]) -> MailMessage {
+    if view != View::Snoozed {
+        message.snoozed_until = None;
+    }
+    let send = sends
+        .iter()
+        .filter(|send| match message.message_id {
+            Some(draft) => send.draft_id == draft,
+            None => send.thread_id.is_some() && send.thread_id == message.thread_id,
+        })
+        .min_by_key(|send| send.send_at);
+    message.send_at = send.map(|send| send.send_at);
+    message.send_error = send
+        .filter(|send| send.state == "failed")
+        .map(|send| send.error.clone().unwrap_or_default());
+    message
 }
 
 fn summary_to_message(
@@ -2882,6 +3068,11 @@ fn summary_to_message(
         subject: display_thread_subject(&thread.subject),
         preview: thread.snippet,
         date_ms: thread.last_message_at,
+        snoozed_until: thread.snoozed_until,
+        send_at: None,
+        send_error: None,
+        reply_reminder_at: thread.reply_reminder_at,
+        reply_reminder_due: thread.reply_reminder_due,
         to: String::new(),
         label: if thread.unread_count > 0 {
             "UNREAD".to_owned()
@@ -2981,6 +3172,11 @@ fn message_summary_to_message(
         subject: message.subject.trim().to_owned(),
         preview: message.snippet,
         date_ms: message.date,
+        snoozed_until: message.snoozed_until,
+        send_at: None,
+        send_error: None,
+        reply_reminder_at: message.reply_reminder_at,
+        reply_reminder_due: message.reply_reminder_due,
         to: message
             .to
             .first()
@@ -3081,6 +3277,11 @@ fn detail_to_message(row: &MailMessage, message: &MessageDetail, body_loaded: bo
         subject: message.subject.clone(),
         preview: message.snippet.clone(),
         date_ms: message.date,
+        snoozed_until: row.snoozed_until,
+        send_at: None,
+        send_error: None,
+        reply_reminder_at: row.reply_reminder_at,
+        reply_reminder_due: row.reply_reminder_due,
         to: message
             .to
             .first()

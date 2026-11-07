@@ -622,6 +622,17 @@ fn make_sidebar_rows(
             let (local, mut rows): (Vec<_>, Vec<_>) = accounts
                 .into_iter()
                 .partition(|row| Some(row.mailbox.account_id) == local_mail);
+            // Snoozed follows the account's Starred and Scheduled its Sent,
+            // as in the unified list.
+            let after = |rows: &[SidebarRow], suffix: &str| {
+                rows.iter()
+                    .position(|row| row.mailbox.scope.ends_with(suffix))
+                    .map(|found| found + 1)
+            };
+            let snoozed = after(&rows, ":Starred").unwrap_or(0);
+            rows.insert(snoozed, row(SidebarRowKind::Snoozed, "snoozed"));
+            let scheduled = after(&rows, ":Sent").unwrap_or(snoozed + 1);
+            rows.insert(scheduled, row(SidebarRowKind::Scheduled, "scheduled"));
             rows.extend(shared);
             rows.extend(local);
             rows
@@ -635,11 +646,21 @@ fn unified_rows(unified: Vec<MailboxRow>) -> Vec<SidebarRow> {
         row(Kind::UnifiedHeading, "unified-heading"),
         row(Kind::UnifiedInbox, "unified-inbox"),
     ];
-    rows.extend(unified.into_iter().map(|mailbox| SidebarRow {
-        key: format!("unified:{}", mailbox.scope).into(),
-        mailbox,
-        ..row(Kind::UnifiedMailbox, "")
-    }));
+    for mailbox in unified {
+        let follower = match mailbox.scope.as_str() {
+            // Snoozed mail of every account after Starred, and mail waiting
+            // to be sent after Sent, as in Gmail.
+            "Unified Starred" => Some(row(Kind::Snoozed, "snoozed")),
+            "Unified Sent" => Some(row(Kind::Scheduled, "scheduled")),
+            _ => None,
+        };
+        rows.push(SidebarRow {
+            key: format!("unified:{}", mailbox.scope).into(),
+            mailbox,
+            ..row(Kind::UnifiedMailbox, "")
+        });
+        rows.extend(follower);
+    }
     rows
 }
 

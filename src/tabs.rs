@@ -1603,7 +1603,9 @@ fn sync_rows(model: &VecModel<TabRow>, rows: impl Iterator<Item = TabRow>) {
 /// profile leaves out is not shown either.
 fn available_scope(scope: Scope, state: &InboxState) -> Option<Scope> {
     match scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => Some(scope),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            Some(scope)
+        }
         // A label can move between sections, e.g. when it becomes automatic.
         Scope::Label { id, .. } => state
             .labels

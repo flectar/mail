@@ -350,7 +350,7 @@ struct MovePicker {
 
 /// The mail the picker acts on: a list row and the rows checked along with
 /// it, the checked rows, or the open conversation.
-fn picker_ids(state: &InboxState, source: &str, id: i32) -> Vec<i32> {
+pub(super) fn picker_ids(state: &InboxState, source: &str, id: i32) -> Vec<i32> {
     match source {
         "row" => mail_operation_ids(&state.messages, &state.checked_ids, id),
         "checked" => state
