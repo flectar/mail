@@ -2928,6 +2928,7 @@ enum BodyChunkError {
 fn classify_body_chunk_error(error: CoreError) -> BodyChunkError {
     match error {
         error @ (CoreError::Imap(_)
+        | CoreError::ImapRefused(_)
         | CoreError::ImapParse(_)
         | CoreError::Network(_)
         | CoreError::ResponseTooLarge { .. }

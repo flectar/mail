@@ -582,6 +582,7 @@ impl crate::Core {
         }
         match imap::append_message(session, &target.path, &message.raw, options).await {
             Ok(_) => Ok(Outcome::Uploaded),
+            Err(CoreError::ImapRefused(reason)) => Ok(Outcome::Refused(reason)),
             Err(CoreError::Imap(reason)) if !queue::is_connection_failure(&reason) => {
                 Ok(Outcome::Refused(reason))
             }

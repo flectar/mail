@@ -66,27 +66,34 @@ struct SignInTarget<'a> {
     encrypted: bool,
 }
 
-/// A server's NO or BAD reply to a sign-in.
+/// A server's tagged NO or BAD reply to a command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ServerReply {
     /// BAD (the command wasn't understood) rather than NO.
     bad: bool,
-    /// The response code in upper case: AUTHENTICATIONFAILED, UNAVAILABLE
-    /// and the other RFC 5530 codes, or ALERT (RFC 9051 7.1).
+    /// The response code in upper case: AUTHENTICATIONFAILED, NONEXISTENT
+    /// and the other RFC 5530 codes, or one imap-proto parses, such as ALERT
+    /// or TRYCREATE (RFC 9051 7.1).
     code: Option<String>,
     /// The server's text.
     text: String,
 }
 
 impl ServerReply {
-    /// async-imap hands a tagged NO or BAD on only as the text
-    /// `code: {code:?}, info: {information:?}` (async-imap 0.12,
-    /// `Connection::check_status_ok`). imap-proto parses ALERT itself and
-    /// leaves the RFC 5530 codes at the start of the text. Read the fields
-    /// directly once async-imap exposes them (chatmail/async-imap#157).
+    /// async-imap hands a tagged NO or BAD on only as text (async-imap
+    /// 0.12): `code: {code:?}, info: {information:?}` from
+    /// `Connection::check_status_ok`, and `outcome: {outcome:?}` from
+    /// SELECT, EXAMINE and STATUS (`parse_mailbox`, `parse_status`).
+    /// imap-proto parses ALERT itself and leaves the RFC 5530 codes at the
+    /// start of the text. Read the fields directly once async-imap exposes
+    /// them (chatmail/async-imap#157).
     fn from_async_imap(formatted: &str, bad: bool) -> Self {
-        let parsed = formatted.split_once(", info: ").and_then(|(code, info)| {
-            let code = code.strip_prefix("code: ")?;
+        let fields = formatted
+            .strip_prefix("outcome: Outcome { code: ")
+            .and_then(|outcome| outcome.strip_suffix(" }"))
+            .and_then(|outcome| outcome.split_once(", information: "))
+            .or_else(|| formatted.strip_prefix("code: ")?.split_once(", info: "));
+        let parsed = fields.and_then(|(code, info)| {
             let text = match info {
                 "None" => String::new(),
                 quoted => read_debug_str(quoted.strip_prefix("Some(")?.strip_suffix(')')?)?,
@@ -101,12 +108,21 @@ impl ServerReply {
             };
         };
         let code = match code.strip_prefix("Some(") {
-            Some(name) => Some(
-                name.chars()
-                    .take_while(char::is_ascii_alphanumeric)
-                    .collect::<String>()
-                    .to_ascii_uppercase(),
-            ),
+            Some(name) => Some(response_code_name(name)),
+            None => leading_response_code(&text),
+        };
+        Self { bad, code, text }
+    }
+
+    /// The reply in a tagged response read without async-imap's help.
+    fn from_outcome(bad: bool, outcome: &async_imap::imap_proto::Outcome<'_>) -> Self {
+        let text = outcome
+            .information
+            .as_deref()
+            .unwrap_or_default()
+            .to_owned();
+        let code = match &outcome.code {
+            Some(code) => Some(response_code_name(&format!("{code:?}"))),
             None => leading_response_code(&text),
         };
         Self { bad, code, text }
@@ -122,6 +138,51 @@ impl ServerReply {
             text => format!(" (unverified reply over an unencrypted connection: {text})"),
         }
     }
+}
+
+/// The reply as the server wrote it, such as
+/// `NO [NONEXISTENT] Unknown Mailbox: Old (Failure)`.
+impl std::fmt::Display for ServerReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.bad { "BAD" } else { "NO" })?;
+        let text = self.text.trim();
+        // imap-proto takes the codes it knows out of the text.
+        if let Some(code) = &self.code
+            && leading_response_code(text).is_none()
+        {
+            write!(f, " [{code}]")?;
+        }
+        if !text.is_empty() {
+            write!(f, " {text}")?;
+        }
+        Ok(())
+    }
+}
+
+/// The name of a response code imap-proto parsed, from its `{:?}` form:
+/// TRYCREATE from `TryCreate`, UIDNEXT from `UidNext(5)`.
+fn response_code_name(debug: &str) -> String {
+    debug
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+/// The error for a command async-imap reports as failed. A tagged NO or BAD
+/// turns down only that command and leaves the connection in step for the
+/// next one; anything else may have left it mid-response.
+pub(crate) fn command_error(error: async_imap::error::Error) -> CoreError {
+    use async_imap::error::Error;
+    match error {
+        Error::No(formatted) => refusal(ServerReply::from_async_imap(&formatted, false)),
+        Error::Bad(formatted) => refusal(ServerReply::from_async_imap(&formatted, true)),
+        error => CoreError::Imap(error.to_string()),
+    }
+}
+
+fn refusal(reply: ServerReply) -> CoreError {
+    CoreError::ImapRefused(reply.to_string())
 }
 
 /// The response code at the start of a reply's text, such as UNAVAILABLE in
@@ -771,9 +832,9 @@ async fn list_folders_inner(session: &mut Session) -> Result<Vec<RemoteFolder>> 
         let mut stream = session
             .list(Some(""), Some("*"))
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         while let Some(item) = stream.next().await {
-            let name = item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            let name = item.map_err(command_error)?;
             let attributes = name
                 .attributes()
                 .iter()
@@ -801,10 +862,7 @@ pub async fn select(session: &mut Session, folder: &str) -> Result<SelectedFolde
 }
 
 async fn select_inner(session: &mut Session, folder: &str) -> Result<SelectedFolder> {
-    let mb = session
-        .select(folder)
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let mb = session.select(folder).await.map_err(command_error)?;
     Ok(SelectedFolder {
         uid_validity: mb.uid_validity.map(|v| v as i64),
         uid_next: mb.uid_next.map(|v| v as i64),
@@ -875,9 +933,9 @@ async fn fetch_headers_inner(session: &mut Session, uid_set: &str) -> Result<Vec
         let mut stream = session
             .uid_fetch(uid_set, &query)
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         while let Some(item) = stream.next().await {
-            let fetch = item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            let fetch = item.map_err(command_error)?;
             let Some(uid) = fetch.uid else { continue };
             let mime_plan = fetch.bodystructure().map(mime::plan_bodystructure);
             out.push(FetchedHeader {
@@ -925,7 +983,7 @@ fn selective_fetch_error(error: async_imap::error::Error) -> CoreError {
         {
             unparsed_selective_fetch()
         }
-        error => CoreError::Imap(error.to_string()),
+        error => command_error(error),
     }
 }
 
@@ -957,9 +1015,9 @@ async fn selective_fetch(
             } if *received == tag => {
                 return match status {
                     Status::Ok => Ok(()),
-                    _ => Err(CoreError::Imap(format!(
-                        "FETCH rejected: {status:?}, {:?}, {:?}",
-                        outcome.code, outcome.information
+                    _ => Err(refusal(ServerReply::from_outcome(
+                        *status == Status::Bad,
+                        outcome,
                     ))),
                 };
             }
@@ -1229,9 +1287,9 @@ async fn fetch_flags_inner(
         let mut stream = session
             .uid_fetch(uid_set, "(UID FLAGS)")
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         while let Some(item) = stream.next().await {
-            let fetch = item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            let fetch = item.map_err(command_error)?;
             if let Some(uid) = fetch.uid {
                 out.push((uid, flags_of(&fetch)));
             }
@@ -1256,9 +1314,9 @@ async fn fetch_full_inner(session: &mut Session, uid: u32) -> Result<Option<Vec<
         let mut stream = session
             .uid_fetch(uid.to_string(), "(UID BODY.PEEK[])")
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         while let Some(item) = stream.next().await {
-            let fetch = item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            let fetch = item.map_err(command_error)?;
             if let Some(b) = fetch.body() {
                 body = Some(b.to_vec());
             }
@@ -1288,9 +1346,9 @@ async fn fetch_full_batch_inner(
         let mut stream = session
             .uid_fetch(uid_set, "(UID BODY.PEEK[])")
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         while let Some(item) = stream.next().await {
-            let fetch = item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            let fetch = item.map_err(command_error)?;
             if let (Some(uid), Some(b)) = (fetch.uid, fetch.body()) {
                 out.push((uid, b.to_vec()));
             }
@@ -1310,10 +1368,7 @@ pub async fn uid_search_all(session: &mut Session) -> Result<Vec<u32>> {
 }
 
 async fn uid_search_all_inner(session: &mut Session) -> Result<Vec<u32>> {
-    let set = session
-        .uid_search("ALL")
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let set = session.uid_search("ALL").await.map_err(command_error)?;
     let mut v: Vec<u32> = set.into_iter().collect();
     v.sort_unstable();
     Ok(v)
@@ -1325,7 +1380,7 @@ pub async fn uid_search_undeleted(session: &mut Session) -> Result<Vec<u32>> {
         let set = session
             .uid_search("UNDELETED")
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         let mut uids: Vec<u32> = set.into_iter().collect();
         uids.sort_unstable();
         Ok(uids)
@@ -1352,10 +1407,7 @@ pub async fn uid_search_header(
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     let query = format!("HEADER {header} \"{escaped}\"");
     with_deadline("UID SEARCH header", METADATA_TIMEOUT, async move {
-        let set = session
-            .uid_search(&query)
-            .await
-            .map_err(|error| CoreError::Imap(error.to_string()))?;
+        let set = session.uid_search(&query).await.map_err(command_error)?;
         let mut uids: Vec<u32> = set.into_iter().collect();
         uids.sort_unstable();
         uids.dedup();
@@ -1386,10 +1438,7 @@ pub async fn uid_search_after(session: &mut Session, last_seen: u32) -> Result<V
 
 async fn uid_search_after_inner(session: &mut Session, last_seen: u32) -> Result<Vec<u32>> {
     let query = format!("UID {}:* UNDELETED", last_seen + 1);
-    let set = session
-        .uid_search(&query)
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let set = session.uid_search(&query).await.map_err(command_error)?;
     let mut uids: Vec<u32> = set.into_iter().filter(|uid| *uid > last_seen).collect();
     uids.sort_unstable();
     uids.dedup();
@@ -1411,10 +1460,7 @@ async fn uid_search_since_inner(
 ) -> Result<Vec<u32>> {
     // IMAP date format: 1-Jan-2024
     let q = format!("SINCE {} UNDELETED", date.format("%-d-%b-%Y"));
-    let set = session
-        .uid_search(&q)
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let set = session.uid_search(&q).await.map_err(command_error)?;
     let mut v: Vec<u32> = set.into_iter().collect();
     v.sort_unstable();
     Ok(v)
@@ -1447,9 +1493,9 @@ async fn store_flag_set_inner(
     let mut stream = session
         .uid_store(uid_set, format!("{op} ({flag})"))
         .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+        .map_err(command_error)?;
     while let Some(item) = stream.next().await {
-        item.map_err(|e| CoreError::Imap(e.to_string()))?;
+        item.map_err(command_error)?;
     }
     Ok(())
 }
@@ -1474,10 +1520,7 @@ async fn uid_move_inner(session: &mut Session, uid: u32, target: &str) -> Result
         return Err(CoreError::Imap("IMAP UID must be greater than zero".into()));
     }
 
-    let capabilities = session
-        .capabilities()
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let capabilities = session.capabilities().await.map_err(command_error)?;
     if capabilities.has_str("MOVE") {
         // A failed RFC 6851 MOVE may already have moved this UID. Falling back
         // after such a failure can duplicate the message, so propagate it and
@@ -1485,23 +1528,23 @@ async fn uid_move_inner(session: &mut Session, uid: u32, target: &str) -> Result
         return session
             .uid_mv(uid.to_string(), target)
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()));
+            .map_err(command_error);
     }
 
     session
         .uid_copy(uid.to_string(), target)
         .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+        .map_err(command_error)?;
     store_flag_set_inner(session, &uid.to_string(), "\\Deleted", true).await?;
 
     if capabilities.has_str("UIDPLUS") {
         let stream = session
             .uid_expunge(uid.to_string())
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         futures::pin_mut!(stream);
         while let Some(item) = stream.next().await {
-            item.map_err(|e| CoreError::Imap(e.to_string()))?;
+            item.map_err(command_error)?;
         }
         return Ok(());
     }
@@ -1638,12 +1681,10 @@ async fn append_inner(
                 outcome,
             } if *received == tag => {
                 if *status != Status::Ok {
-                    let reason = outcome.information.as_deref().unwrap_or_default().trim();
-                    return Err(CoreError::Imap(if reason.is_empty() {
-                        format!("{status:?}: APPEND rejected")
-                    } else {
-                        format!("{status:?}: APPEND rejected: {reason}")
-                    }));
+                    return Err(refusal(ServerReply::from_outcome(
+                        *status == Status::Bad,
+                        outcome,
+                    )));
                 }
                 if !sent_literal {
                     return Err(CoreError::Imap(
@@ -1691,29 +1732,20 @@ pub async fn create_folder(session: &mut Session, name: &str) -> Result<()> {
 
 pub async fn rename_folder(session: &mut Session, from: &str, to: &str) -> Result<()> {
     with_deadline("RENAME", METADATA_TIMEOUT, async {
-        session
-            .rename(from, to)
-            .await
-            .map_err(|error| CoreError::Imap(error.to_string()))
+        session.rename(from, to).await.map_err(command_error)
     })
     .await
 }
 
 pub async fn delete_folder(session: &mut Session, name: &str) -> Result<()> {
     with_deadline("DELETE", METADATA_TIMEOUT, async {
-        session
-            .delete(name)
-            .await
-            .map_err(|error| CoreError::Imap(error.to_string()))
+        session.delete(name).await.map_err(command_error)
     })
     .await
 }
 
 async fn create_folder_inner(session: &mut Session, name: &str) -> Result<()> {
-    session
-        .create(name)
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))
+    session.create(name).await.map_err(command_error)
 }
 
 /// Expunge all \Deleted messages in the selected folder.
@@ -1729,7 +1761,7 @@ pub async fn uid_delete_permanently(session: &mut Session, uid: u32) -> Result<(
             return Err(CoreError::Imap("IMAP UID must be greater than zero".into()));
         }
         let capabilities = session.capabilities().await
-            .map_err(|error| CoreError::Imap(error.to_string()))?;
+            .map_err(command_error)?;
         if !capabilities.has_str("UIDPLUS") {
             return Err(CoreError::Imap(
                 "this IMAP server does not support safe permanent deletion of individual messages (UIDPLUS)".into(),
@@ -1737,10 +1769,10 @@ pub async fn uid_delete_permanently(session: &mut Session, uid: u32) -> Result<(
         }
         store_flag_inner(session, uid, "\\Deleted", true).await?;
         let stream = session.uid_expunge(uid.to_string()).await
-            .map_err(|error| CoreError::Imap(error.to_string()))?;
+            .map_err(command_error)?;
         futures::pin_mut!(stream);
         while let Some(item) = stream.next().await {
-            item.map_err(|error| CoreError::Imap(error.to_string()))?;
+            item.map_err(command_error)?;
         }
         Ok(())
     }).await
@@ -1760,13 +1792,10 @@ pub async fn empty_selected_trash(session: &mut Session) -> Result<()> {
 }
 
 async fn expunge_all_inner(session: &mut Session) -> Result<()> {
-    let stream = session
-        .expunge()
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let stream = session.expunge().await.map_err(command_error)?;
     futures::pin_mut!(stream);
     while let Some(item) = stream.next().await {
-        item.map_err(|e| CoreError::Imap(e.to_string()))?;
+        item.map_err(command_error)?;
     }
     Ok(())
 }
@@ -1776,10 +1805,7 @@ pub async fn noop(session: &mut Session) -> Result<()> {
 }
 
 async fn noop_inner(session: &mut Session) -> Result<()> {
-    session
-        .noop()
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))
+    session.noop().await.map_err(command_error)
 }
 
 pub async fn logout(mut session: Session) {
@@ -1805,10 +1831,7 @@ pub async fn capabilities(session: &mut Session) -> Result<ServerCapabilities> {
 }
 
 async fn capabilities_inner(session: &mut Session) -> Result<ServerCapabilities> {
-    let caps = session
-        .capabilities()
-        .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+    let caps = session.capabilities().await.map_err(command_error)?;
     Ok(ServerCapabilities {
         idle: caps.has_str("IDLE"),
         // IMAP4rev2 includes LIST-STATUS, but a server that also speaks
@@ -1853,7 +1876,7 @@ pub async fn status(session: &mut Session, folder: &str) -> Result<MailboxStatus
         let mailbox = session
             .status(folder, STATUS_ITEMS)
             .await
-            .map_err(|e| CoreError::Imap(e.to_string()))?;
+            .map_err(command_error)?;
         Ok(MailboxStatus {
             messages: mailbox.exists,
             uid_next: mailbox.uid_next,
@@ -1876,7 +1899,7 @@ async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, Mail
     let tag = session
         .run_command(format!("LIST \"\" \"*\" RETURN (STATUS {STATUS_ITEMS})"))
         .await
-        .map_err(|e| CoreError::Imap(e.to_string()))?;
+        .map_err(command_error)?;
     let mut statuses = HashMap::new();
     loop {
         let response = session
@@ -1892,9 +1915,9 @@ async fn list_status_inner(session: &mut Session) -> Result<HashMap<String, Mail
             } if *done == tag => {
                 return match status {
                     Status::Ok => Ok(statuses),
-                    _ => Err(CoreError::Imap(format!(
-                        "LIST-STATUS failed: {}",
-                        outcome.information.as_deref().unwrap_or("no reason given")
+                    _ => Err(refusal(ServerReply::from_outcome(
+                        *status == Status::Bad,
+                        outcome,
                     ))),
                 };
             }
@@ -2020,7 +2043,8 @@ pub fn uid_set(uids: &[u32]) -> String {
 mod tests {
     use super::{
         MIME_PLAN_QUERY, PLAIN_UNUSABLE, ServerReply, SignInCapabilities, SignInFailure,
-        SignInTarget, normalized_uid_set, plain_unusable_key, section_fetch_query, section_paths,
+        SignInTarget, command_error, normalized_uid_set, plain_unusable_key, section_fetch_query,
+        section_paths,
     };
     use crate::error::CoreError;
     use base64::Engine as _;
@@ -2172,6 +2196,67 @@ mod tests {
         assert!(matches!(
             SignInFailure::from_imap(error),
             SignInFailure::Transport(_)
+        ));
+    }
+
+    /// What async-imap's own SELECT returns for a server's reply. It writes
+    /// a refused SELECT, EXAMINE or STATUS unlike a refused LOGIN.
+    async fn refused_select(reply: &'static str) -> async_imap::error::Error {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (client, server) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            let (read, mut write) = tokio::io::split(server);
+            let mut read = BufReader::new(read);
+            let mut command = String::new();
+            for answer in ["OK signed in", reply] {
+                command.clear();
+                read.read_line(&mut command).await.unwrap();
+                let tag = command.split_whitespace().next().unwrap().to_owned();
+                write
+                    .write_all(format!("{tag} {answer}\r\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            // Stay connected until the client is done with the reply.
+            read.read_line(&mut command).await.unwrap();
+        });
+        let Ok(mut session) = async_imap::Client::new(client)
+            .login("user", "password")
+            .await
+        else {
+            panic!("the server refused the sign-in");
+        };
+        let Err(error) = session.select("Gone").await else {
+            panic!("the server opened the folder");
+        };
+        drop(session);
+        server.await.unwrap();
+        error
+    }
+
+    #[tokio::test]
+    async fn a_refusal_keeps_the_server_reply_and_is_not_a_broken_connection() {
+        for server in [
+            // Gmail, once a label is renamed or deleted (issue #215).
+            "NO [NONEXISTENT] Unknown Mailbox: Gone (now in authenticated state) (Failure)",
+            // imap-proto takes the codes it knows out of the text.
+            "NO [TRYCREATE] Mailbox doesn't exist: Gone",
+            "NO Mailbox does not exist",
+            "BAD Error in IMAP command SELECT: Invalid mailbox name",
+            "NO [NONEXISTENT] Ordner \"Gelöscht\" fehlt \\o/",
+        ] {
+            match command_error(refused_select(server).await) {
+                CoreError::ImapRefused(reply) => assert_eq!(reply, server),
+                other => panic!("{server}: {other:?}"),
+            }
+        }
+        match command_error(refused_login("NO [UNAVAILABLE] Try again later").await) {
+            CoreError::ImapRefused(reply) => assert_eq!(reply, "NO [UNAVAILABLE] Try again later"),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            command_error(async_imap::error::Error::ConnectionLost),
+            CoreError::Imap(_)
         ));
     }
 

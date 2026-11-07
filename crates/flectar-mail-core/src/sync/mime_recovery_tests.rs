@@ -476,7 +476,7 @@ async fn rejected_fetch_does_not_trigger_compatibility_fallback() {
     let (f, mut session) = fixture(Behavior::Denied).await;
     let result = open_second(&f, &mut session).await;
     assert!(
-        matches!(result, Err(CoreError::Imap(_))),
+        matches!(result, Err(CoreError::ImapRefused(_))),
         "{result:?}: {:?}",
         f.commands.lock().unwrap()
     );
