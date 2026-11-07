@@ -1718,8 +1718,8 @@ fn only_a_folder_refused_anew_calls_for_the_folder_list() {
 }
 
 /// The folders the body worker selects for empty batches from `batches`,
-/// one after another on one connection. The server has made Reset afresh
-/// since its mail was queued.
+/// one after another on one connection. The server refuses Gone, and has
+/// made Reset afresh since its mail was queued.
 async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -1729,6 +1729,9 @@ async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
         match fields[1] {
             "LOGIN" => format!("{tag} OK logged in\r\n"),
             "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" if command.contains("\"Gone\"") => {
+                format!("{tag} NO [NONEXISTENT] Unknown Mailbox: Gone\r\n")
+            }
             "SELECT" => {
                 let uid_validity = if command.contains("\"Reset\"") { 9 } else { 7 };
                 format!(
@@ -1746,7 +1749,7 @@ async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
         .db
         .write(move |conn| {
             let mut folders = HashMap::new();
-            for name in ["Lists", "Reset"] {
+            for name in ["Lists", "Gone", "Reset"] {
                 folders.insert(name, synced_folder(conn, account_id, name, 10, 3, 0)?);
             }
             repo::folders::set_uid_state(conn, folders["Reset"], Some(8), Some(10), None)?;
@@ -1776,6 +1779,17 @@ async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// The body worker skips a batch from a folder the server turns down,
+/// rather than splitting it over new connections, and the next batch
+/// selects its folder again.
+#[tokio::test]
+async fn a_body_batch_from_a_refused_folder_is_skipped() {
+    assert_eq!(
+        body_batch_selects(&["Lists", "Gone", "Lists"]).await,
+        ["Lists", "Gone", "Lists"]
+    );
+}
+
 /// After opening a folder to find its UIDVALIDITY changed, the next batch
 /// of the folder open before selects it again instead of reading its UIDs
 /// in the other folder.
@@ -1785,4 +1799,69 @@ async fn a_body_batch_after_a_new_uidvalidity_selects_its_folder_again() {
         body_batch_selects(&["Lists", "Reset", "Lists"]).await,
         ["Lists", "Reset", "Lists"]
     );
+}
+
+/// History downloads go on past a folder the server turns down, on the same
+/// connection.
+#[tokio::test]
+async fn history_backfill_goes_on_past_a_refused_folder() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" if command.contains("\"Gone\"") => {
+                format!("{tag} NO [NONEXISTENT] Unknown Mailbox: Gone\r\n")
+            }
+            "SELECT" => format!(
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                 * OK [UIDNEXT 10] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    // Both still need their history; Gone comes first.
+    ctx.db
+        .write(move |conn| {
+            repo::folders::upsert(conn, account_id, "Gone", Some("/"), None)?;
+            repo::folders::upsert(conn, account_id, "Projects", Some("/"), None)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (nudge, rx) = mpsc::channel(1);
+    let (pool_tx, _pool_rx) = mpsc::channel(1);
+    let (_settings, settings_rx) = watch::channel(config.settings.clone());
+    let worker = tokio::spawn(run_history_backfill(
+        ctx.clone(),
+        config.clone(),
+        rx,
+        pool_tx,
+        settings_rx,
+    ));
+    nudge.send(()).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), server)
+        .await
+        .expect("the history worker never signed out")
+        .unwrap();
+    drop(nudge);
+    tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+        .await
+        .expect("the history worker didn't stop")
+        .unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    assert_eq!(selected_folders(&commands), ["Gone", "Projects"]);
+    let sign_ins = commands
+        .iter()
+        .filter(|command| command.contains(" LOGIN "))
+        .count();
+    assert_eq!(sign_ins, 1, "{commands:?}");
 }

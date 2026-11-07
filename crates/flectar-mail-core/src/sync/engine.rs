@@ -2201,6 +2201,8 @@ async fn run_history_backfill(
         // headers by one step - a full (resumable) initial backfill, or one
         // HISTORY_CHUNK extension - until nothing is left or the connection
         // breaks. One step per pass keeps folders progressing evenly.
+        // Folders the server turns down wait for the next tick.
+        let mut refused = HashSet::new();
         'work: loop {
             if settings_rx.has_changed().unwrap_or(true) {
                 break 'work;
@@ -2234,7 +2236,7 @@ async fn run_history_backfill(
             });
 
             for folder in ordered {
-                if folder.role.as_deref() == Some(roles::ALL) {
+                if folder.role.as_deref() == Some(roles::ALL) || refused.contains(&folder.id) {
                     continue;
                 }
                 if folder.backfill_cursor.is_some() && folder.backfill_done {
@@ -2284,6 +2286,17 @@ async fn run_history_backfill(
                         if did_step {
                             let _ = pool_tx.try_send(());
                         }
+                    }
+                    // This folder alone is turned down, such as one renamed
+                    // or deleted on the server; the main actor reads the
+                    // folder list again. The connection serves the rest.
+                    Err(CoreError::ImapRefused(reply)) => {
+                        tracing::warn!(
+                            account_id,
+                            folder = %folder.path,
+                            "history backfill: folder refused: {reply}",
+                        );
+                        refused.insert(folder.id);
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -2467,8 +2480,33 @@ async fn retry_one_header_failure(
     let s = session
         .as_mut()
         .ok_or_else(|| CoreError::Other("header retry lost its IMAP session".into()))?;
-    imap::select(s, &folder.path).await?;
-    let headers = imap::fetch_headers(s, &uid.to_string()).await?;
+    let fetched = async {
+        imap::select(s, &folder.path).await?;
+        imap::fetch_headers(s, &uid.to_string()).await
+    }
+    .await;
+    let headers = match fetched {
+        Ok(headers) => headers,
+        // Turned down, such as a folder deleted on the server: try again
+        // later, by when the folder list may no longer have the folder.
+        Err(CoreError::ImapRefused(reply)) => {
+            let retry_at = now_ms() + 5 * 60_000;
+            ctx.db
+                .write(move |conn| {
+                    repo::sync_failures::record_header(
+                        conn,
+                        folder_id,
+                        uid,
+                        Some(retry_at),
+                        &reply,
+                    )?;
+                    Ok(())
+                })
+                .await?;
+            return Ok(true);
+        }
+        Err(error) => return Err(error),
+    };
     if headers.is_empty() {
         let error = "server no longer returns this UID";
         let retry_at = now_ms() + 5 * 60_000;
@@ -3763,9 +3801,21 @@ async fn fetch_body_chunk(
         // (RFC 9051 6.3.2). Until it opens the chunk's folder, no chunk may
         // skip its own SELECT.
         *selected = None;
-        let mailbox = imap::select(session, &chunk.folder_name)
-            .await
-            .map_err(BodyChunkError::Reconnect)?;
+        let mailbox = match imap::select(session, &chunk.folder_name).await {
+            Ok(mailbox) => mailbox,
+            // Turned down, such as a folder renamed or deleted on the server:
+            // none of the chunk can be read, and splitting it won't change
+            // that. The main actor reads the folder list again.
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::warn!(
+                    folder_id = chunk.folder_id,
+                    folder = %chunk.folder_name,
+                    "body backfill: folder refused; skipping queued rows: {reply}"
+                );
+                return Ok(0);
+            }
+            Err(error) => return Err(BodyChunkError::Reconnect(error)),
+        };
         if mailbox.uid_validity != chunk.uid_validity {
             tracing::warn!(
                 folder_id = chunk.folder_id,
