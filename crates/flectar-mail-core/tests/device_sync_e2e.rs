@@ -182,6 +182,16 @@ async fn two_devices_share_accounts_and_preferences() {
     // A per-device preference, which must not travel.
     settings.close_to_tray = true;
     laptop.set_settings(settings).await.unwrap();
+    laptop
+        .save_snippet(
+            None,
+            "Thanks".into(),
+            Some("ty".into()),
+            None,
+            "Thanks for your message!".into(),
+        )
+        .await
+        .unwrap();
     let words = laptop
         .device_sync_turn_on(Some(server.url.clone()))
         .await
@@ -249,6 +259,9 @@ async fn two_devices_share_accounts_and_preferences() {
     assert!(!synced.show_avatars);
     assert!(!synced.close_to_tray, "per-device preferences stay");
     assert_eq!(phone.device_sync_status().devices.len(), 2);
+    let templates = phone.list_snippets().await.unwrap();
+    assert_eq!(templates.len(), 1, "templates follow the user");
+    assert_eq!(templates[0].shortcut.as_deref(), Some("ty"));
 
     // A change on the phone reaches the laptop.
     let mut synced = phone.get_settings().await.unwrap();

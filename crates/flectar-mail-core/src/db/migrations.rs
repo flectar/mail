@@ -48,6 +48,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/029_mail_transfers.sql")),
     Migration::Plain(include_str!("migrations/030_folder_server_only_unseen.sql")),
     Migration::Plain(include_str!("migrations/031_device_sync.sql")),
+    Migration::Plain(include_str!("migrations/032_synced_templates.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

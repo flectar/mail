@@ -2,8 +2,9 @@
 //!
 //! Each item is one record. Accounts carry their per-account preferences;
 //! preferences, signatures and profiles are named records (their record ids
-//! derive from their key), and each device describes itself in a `device`
-//! record under its own device id.
+//! derive from their key), templates are records under their own sync id,
+//! and each device describes itself in a `device` record under its own
+//! device id.
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -22,6 +23,11 @@ pub(crate) const ACCOUNT: &str = "account";
 pub(crate) const SIGNATURE: &str = "signature";
 pub(crate) const PROFILE: &str = "profile";
 pub(crate) const DEVICE: &str = "device";
+pub(crate) const TEMPLATE: &str = "template";
+
+/// The largest template body that syncs, well under the server's record
+/// limit: one record too large would stop every upload.
+const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 
 /// The schema this version writes and reads for `collection`, or `None` for
 /// a collection it does not know. A version that changes what a record
@@ -29,7 +35,7 @@ pub(crate) const DEVICE: &str = "device";
 /// unread here, and this device leaves them alone until it updates.
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
-        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE => Some(1),
+        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE => Some(1),
         _ => None,
     }
 }
@@ -279,8 +285,44 @@ pub(crate) fn snapshot(
         );
     }
 
+    for (sync_id, body) in template_bodies(conn)? {
+        if let Some(id) = sync_id_bytes(&sync_id) {
+            records.insert(id, entry(TEMPLATE, body));
+        }
+    }
+
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
+}
+
+/// Templates as record bodies, by sync id. How often each is used stays on
+/// this device: counting every use would upload it each time.
+fn template_bodies(conn: &Connection) -> Result<Vec<(String, Value)>> {
+    let mut statement = conn.prepare(
+        "SELECT sync_id, name, shortcut, subject, body_text FROM snippets
+         WHERE sync_id IS NOT NULL ORDER BY id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            json!({
+                "name": row.get::<_, String>(1)?,
+                "shortcut": row.get::<_, Option<String>>(2)?,
+                "subject": row.get::<_, Option<String>>(3)?,
+                "bodyText": row.get::<_, String>(4)?,
+            }),
+        ))
+    })?;
+    let mut bodies = Vec::new();
+    for row in rows {
+        let (sync_id, body) = row?;
+        if body.to_string().len() > MAX_TEMPLATE_BYTES {
+            tracing::debug!("a template is too large to sync");
+            continue;
+        }
+        bodies.push((sync_id, body));
+    }
+    Ok(bodies)
 }
 
 /// A profile's accounts by sync id: the ones this device has, plus the
@@ -352,7 +394,7 @@ fn readable(entry: &Entry) -> bool {
 fn order(collection: &str, deleted: bool) -> (u8, bool) {
     let rank = match collection {
         ACCOUNT => 0,
-        PREF | SIGNATURE | PROFILE => 1,
+        PREF | SIGNATURE | PROFILE | TEMPLATE => 1,
         _ => 2,
     };
     (rank, deleted)
@@ -527,6 +569,7 @@ fn apply_put(
             }
             Ok(Outcome::Applied)
         }
+        TEMPLATE => apply_template(conn, id, &entry.body),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -686,6 +729,57 @@ fn apply_account(
     Ok(Outcome::Applied)
 }
 
+/// Create or update a template from another device. Shortcuts are unique:
+/// when two templates claim one, the one with the smaller sync id keeps it,
+/// on every device.
+fn apply_template(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
+    let (Some(name), Some(body_text)) = (
+        body.get("name").and_then(Value::as_str),
+        body.get("bodyText").and_then(Value::as_str),
+    ) else {
+        return Ok(Outcome::Ignored);
+    };
+    let subject = body.get("subject").and_then(Value::as_str);
+    let mut shortcut = body
+        .get("shortcut")
+        .and_then(Value::as_str)
+        .filter(|shortcut| !shortcut.is_empty());
+    let sync_id = sync_id_hex(id);
+    if let Some(wanted) = shortcut {
+        let holder: Option<(i64, Option<String>)> = conn
+            .query_row(
+                "SELECT id, sync_id FROM snippets
+                 WHERE shortcut = ?1 AND (sync_id IS NULL OR sync_id <> ?2)",
+                params![wanted, sync_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((holder, holder_sync_id)) = holder {
+            if holder_sync_id.is_some_and(|other| other < sync_id) {
+                shortcut = None;
+            } else {
+                conn.execute(
+                    "UPDATE snippets SET shortcut = NULL WHERE id = ?1",
+                    params![holder],
+                )?;
+            }
+        }
+    }
+    let updated = conn.execute(
+        "UPDATE snippets SET name = ?2, shortcut = ?3, subject = ?4, body_text = ?5
+         WHERE sync_id = ?1",
+        params![sync_id, name, shortcut, subject, body_text],
+    )?;
+    if updated == 0 {
+        conn.execute(
+            "INSERT INTO snippets (name, shortcut, subject, body_text, sync_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![name, shortcut, subject, body_text, sync_id],
+        )?;
+    }
+    Ok(Outcome::Applied)
+}
+
 /// Whether the server has seen the record with this sync id: it is mirrored,
 /// even as a deletion, or waiting to upload.
 fn server_knows(conn: &Connection, sync_id: &str) -> Result<bool> {
@@ -772,6 +866,12 @@ fn apply_delete(
                     settings.active_mail_profile = None;
                 }
             }
+        }
+        TEMPLATE => {
+            conn.execute(
+                "DELETE FROM snippets WHERE sync_id = ?1",
+                params![sync_id_hex(id)],
+            )?;
         }
         // Preferences are never deleted, and device records go with their
         // device.
@@ -973,6 +1073,121 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sync_id_of(&conn, local), smaller);
+    }
+
+    fn template(conn: &Connection, name: &str, shortcut: Option<&str>, sync_id: &str) {
+        conn.execute(
+            "INSERT INTO snippets (name, shortcut, subject, body_text, sync_id)
+             VALUES (?1, ?2, 'Hello', 'Thanks!', ?3)",
+            params![name, shortcut, sync_id],
+        )
+        .unwrap();
+    }
+
+    fn shortcut_of(conn: &Connection, sync_id: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT shortcut FROM snippets WHERE sync_id = ?1",
+            params![sync_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn templates_travel_between_devices_and_go_when_deleted() {
+        let laptop = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        template(&laptop, "Thanks", Some("ty"), &sync_id);
+        let records = snapshot(
+            &laptop,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap();
+        let id = sync_id_bytes(&sync_id).unwrap();
+        assert_eq!(records[&id].collection, TEMPLATE);
+        assert_eq!(
+            records[&id].body,
+            json!({"name": "Thanks", "shortcut": "ty", "subject": "Hello", "bodyText": "Thanks!"})
+        );
+
+        let phone = testutil::conn();
+        let mut waiting = BTreeMap::new();
+        waiting.insert(id, records[&id].clone());
+        apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        let templates = repo::snippets::list(&phone).unwrap();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "Thanks");
+        assert_eq!(shortcut_of(&phone, &sync_id).as_deref(), Some("ty"));
+
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: Some(records[&id].clone()),
+                next: None,
+            },
+        );
+        apply(
+            &phone,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::snippets::list(&phone).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_template_with_the_smaller_id_keeps_a_shared_shortcut() {
+        let smaller = "11".repeat(16);
+        let larger = "ff".repeat(16);
+        let incoming = |sync_id: &str| {
+            let mut waiting = BTreeMap::new();
+            waiting.insert(
+                sync_id_bytes(sync_id).unwrap(),
+                entry(
+                    TEMPLATE,
+                    json!({"name": "Hi", "shortcut": "hi", "subject": null, "bodyText": "Hi!"}),
+                ),
+            );
+            waiting
+        };
+
+        let conn = testutil::conn();
+        template(&conn, "Hello", Some("hi"), &larger);
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &incoming(&smaller),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(shortcut_of(&conn, &smaller).as_deref(), Some("hi"));
+        assert_eq!(shortcut_of(&conn, &larger), None);
+
+        let conn = testutil::conn();
+        template(&conn, "Hello", Some("hi"), &smaller);
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &incoming(&larger),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(shortcut_of(&conn, &smaller).as_deref(), Some("hi"));
+        assert_eq!(shortcut_of(&conn, &larger), None);
     }
 
     #[test]

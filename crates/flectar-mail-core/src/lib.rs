@@ -7863,7 +7863,8 @@ impl Core {
         subject: Option<String>,
         body_text: String,
     ) -> Result<Snippet> {
-        self.db
+        let saved = self
+            .db
             .write(move |conn| {
                 repo::snippets::save(
                     conn,
@@ -7874,13 +7875,18 @@ impl Core {
                     &body_text,
                 )
             })
-            .await
+            .await?;
+        // Templates follow the user to their other devices.
+        self.device_sync_now();
+        Ok(saved)
     }
 
     pub async fn delete_snippet(&self, id: i64) -> Result<()> {
         self.db
             .write(move |conn| repo::snippets::delete(conn, id))
-            .await
+            .await?;
+        self.device_sync_now();
+        Ok(())
     }
 
     pub async fn use_snippet(&self, id: i64) -> Result<()> {
