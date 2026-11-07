@@ -4625,6 +4625,75 @@ impl Core {
             .await
     }
 
+    /// Remind the user at `remind_at` unless someone replies by then to the
+    /// mail they sent in a conversation: `message_id`, or else the newest
+    /// message they sent there. This follows them to every device with
+    /// Flectar Mail Sync. The conversation then comes back to the top of the
+    /// inbox until a reply arrives or the user dismisses it.
+    pub async fn set_reply_reminder(
+        &self,
+        thread_id: i64,
+        message_id: Option<i64>,
+        remind_at: i64,
+    ) -> Result<()> {
+        self.db
+            .write(move |conn| {
+                let sent: Option<(i64, Option<String>)> = conn
+                    .query_row(
+                        "SELECT account_id, message_id FROM messages
+                         WHERE thread_id = ?1 AND (?2 IS NULL OR id = ?2)
+                           AND is_outgoing = 1 AND is_draft = 0
+                         ORDER BY date DESC, id DESC LIMIT 1",
+                        rusqlite::params![thread_id, message_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                let Some((account_id, header)) = sent else {
+                    return Err(CoreError::Other(
+                        "nothing you sent in this conversation waits for a reply".into(),
+                    ));
+                };
+                let header = header
+                    .as_deref()
+                    .map(|id| id.trim_matches(['<', '>', ' ']))
+                    .filter(|id| !id.is_empty())
+                    .ok_or_else(|| CoreError::Other("this message has no Message-ID".into()))?
+                    .to_owned();
+                let tx = conn.transaction()?;
+                repo::reply_reminders::set(&tx, account_id, &header, remind_at)?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await?;
+        self.bus.emit(CoreEvent::MailUpdated {
+            thread_ids: vec![thread_id],
+        });
+        self.device_sync_now();
+        Ok(())
+    }
+
+    /// The user is done waiting for a reply in a conversation, or no longer
+    /// wants a reminder: its reminders end on every device, and it leaves
+    /// the inbox unless its mail is there.
+    pub async fn dismiss_reply_reminder(&self, thread_id: i64) -> Result<()> {
+        let cleared = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let cleared = repo::reply_reminders::clear_thread(&tx, thread_id, false)?;
+                tx.commit()?;
+                Ok(cleared)
+            })
+            .await?;
+        if cleared > 0 {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: vec![thread_id],
+            });
+            self.device_sync_now();
+        }
+        Ok(())
+    }
+
     /// Drafts waiting to be sent at a time the user chose, soonest first.
     pub async fn scheduled_sends(&self) -> Result<Vec<ScheduledSend>> {
         self.db
@@ -5426,17 +5495,31 @@ impl Core {
         let draft_id = args.draft_id;
         let scheduled = args.send_at.is_some();
         let shared = share_as.is_some();
+        let remind_at = args.remind_at;
         let (action_id, account_id, thread_id) = self
             .db
             .write(move |conn| {
                 let row = repo::messages::get_row(conn, draft_id)?
                     .ok_or_else(|| CoreError::NotFound("draft".into()))?;
+                // "Remind me if no reply" names the message by the
+                // Message-ID it goes out with.
+                let remind = |conn: &rusqlite::Connection| -> Result<()> {
+                    if let Some(remind_at) = remind_at {
+                        let (message_id, _) = name_draft(conn, draft_id)?;
+                        repo::reply_reminders::set(conn, row.account_id, &message_id, remind_at)?;
+                    }
+                    Ok(())
+                };
                 if let Some(me) = &share_as {
                     let tx = conn.transaction()?;
                     let action = schedule_shared_send(&tx, &row, &policy, dispatch_at, me)?;
+                    remind(&tx)?;
                     tx.commit()?;
                     return Ok((action, row.account_id, row.thread_id));
                 }
+                let tx = conn.transaction()?;
+                remind(&tx)?;
+                let conn = &tx;
                 conn.execute(
                     "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
                      WHERE message_id = ?1 AND kind = 'save_draft' AND state = 'pending'",
@@ -5469,6 +5552,7 @@ impl Core {
                          WHERE id = ?1",
                         rusqlite::params![action_id, dispatch_at, payload.to_string()],
                     )?;
+                    tx.commit()?;
                     return Ok((action_id, row.account_id, row.thread_id));
                 }
                 let aid = repo::actions::enqueue(
@@ -5480,9 +5564,13 @@ impl Core {
                     &payload,
                     Some(dispatch_at),
                 )?;
+                tx.commit()?;
                 Ok((aid, row.account_id, row.thread_id))
             })
             .await?;
+        if remind_at.is_some() {
+            self.device_sync_now();
+        }
         // A scheduled draft joins the Scheduled view.
         if let (true, Some(thread)) = (scheduled, thread_id) {
             self.bus.emit(CoreEvent::MailUpdated {
@@ -7193,6 +7281,7 @@ impl Core {
         self.queue_send(QueueSendArgs {
             draft_id,
             send_at: None,
+            remind_at: None,
         })
         .await?;
         Ok(())
@@ -9357,15 +9446,9 @@ async fn stage_draft_attachment(
 /// This device holds its send until then; the draft's latest edit uploads
 /// first, under a Message-ID the other devices find it by. Scheduling a
 /// shared draft again moves it. Returns the send's action id.
-fn schedule_shared_send(
-    conn: &rusqlite::Connection,
-    draft: &repo::messages::MessageRow,
-    policy: &crate::mail_security::MailSecurity,
-    send_at: i64,
-    me: &str,
-) -> Result<i64> {
-    let now = now_ms();
-    let draft_id = draft.id;
+/// The Message-ID a draft goes out with, which other devices find it by:
+/// one is chosen now if it has none. Returns it bare, and whether it is new.
+fn name_draft(conn: &rusqlite::Connection, draft_id: i64) -> Result<(String, bool)> {
     let from: Option<String> = conn.query_row(
         "SELECT from_addr FROM messages WHERE id = ?1",
         rusqlite::params![draft_id],
@@ -9379,13 +9462,26 @@ fn schedule_shared_send(
     let unnamed = conn.execute(
         "UPDATE messages SET message_id = printf('%d.%s@%s', ?2, lower(hex(randomblob(8))), ?3)
          WHERE id = ?1 AND (message_id IS NULL OR trim(message_id) = '')",
-        rusqlite::params![draft_id, now.saturating_mul(1000), domain],
+        rusqlite::params![draft_id, now_ms().saturating_mul(1000), domain],
     )? > 0;
     let message_id: String = conn.query_row(
         "SELECT trim(message_id, '<> ') FROM messages WHERE id = ?1",
         rusqlite::params![draft_id],
         |row| row.get(0),
     )?;
+    Ok((message_id, unnamed))
+}
+
+fn schedule_shared_send(
+    conn: &rusqlite::Connection,
+    draft: &repo::messages::MessageRow,
+    policy: &crate::mail_security::MailSecurity,
+    send_at: i64,
+    me: &str,
+) -> Result<i64> {
+    let now = now_ms();
+    let draft_id = draft.id;
+    let (message_id, unnamed) = name_draft(conn, draft_id)?;
     let upload_waiting: bool = conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM pending_actions
            WHERE message_id = ?1 AND kind = 'save_draft' AND state IN ('pending', 'inflight'))",
@@ -9892,6 +9988,9 @@ fn apply_thread_action(
             // left the inbox.
             if !message_only || !thread_in_inbox(&tx, thread_id)? {
                 repo::snoozes::clear(&tx, thread_id)?;
+                // A conversation back for want of a reply is done with once
+                // archived; deleted or junk mail waits for no reply at all.
+                repo::reply_reminders::clear_thread(&tx, thread_id, kind == ActionKind::Archive)?;
             }
         }
         ActionKind::Unarchive | ActionKind::NotSpam => {
@@ -9953,6 +10052,9 @@ fn apply_thread_action(
             // The Move to picker lists these folders first.
             if !out.is_empty() {
                 repo::folders::mark_moved_to(&tx, target, now_ms())?;
+            }
+            if !message_only || !thread_in_inbox(&tx, thread_id)? {
+                repo::reply_reminders::clear_thread(&tx, thread_id, true)?;
             }
         }
         ActionKind::Copy => {

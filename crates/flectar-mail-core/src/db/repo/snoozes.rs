@@ -66,25 +66,26 @@ pub fn clear_local(conn: &Connection, thread_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Threads whose wake time has passed.
-pub fn woken(conn: &Connection, now_ms: i64) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare("SELECT thread_id FROM snoozes WHERE wake_at <= ?1")?;
+/// Threads whose wake time has passed, with that time.
+pub fn woken(conn: &Connection, now_ms: i64) -> Result<Vec<(i64, i64)>> {
+    let mut stmt = conn.prepare("SELECT thread_id, wake_at FROM snoozes WHERE wake_at <= ?1")?;
     let rows = stmt
-        .query_map(params![now_ms], |r| r.get(0))?
+        .query_map(params![now_ms], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
-/// Bring a woken conversation back: its newest message turns unread, so it
-/// stands out at the top of the inbox.
-pub fn mark_woken(conn: &Connection, thread_id: i64) -> Result<()> {
+/// Bring a woken conversation back at `at`: it moves to the top of the
+/// inbox, as Gmail brings back snoozed mail, and its newest message turns
+/// unread, so it stands out.
+pub fn mark_woken(conn: &Connection, thread_id: i64, at: i64) -> Result<()> {
     conn.execute(
         "UPDATE messages SET is_read = 0 WHERE id =
            (SELECT id FROM messages WHERE thread_id = ?1
             ORDER BY date DESC LIMIT 1)",
         params![thread_id],
     )?;
-    super::threads::recompute(conn, thread_id)?;
+    super::threads::resurface(conn, thread_id, at)?;
     Ok(())
 }
 
@@ -260,7 +261,7 @@ mod tests {
         set(&c, t2, 1, 6_000, None).unwrap();
 
         assert_eq!(next_wake_at(&c).unwrap(), Some(1_000));
-        assert_eq!(woken(&c, 1_500).unwrap(), vec![t1]);
+        assert_eq!(woken(&c, 1_500).unwrap(), vec![(t1, 1_000)]);
         assert_eq!(woken(&c, 10_000).unwrap().len(), 2);
         assert!(woken(&c, 500).unwrap().is_empty());
 

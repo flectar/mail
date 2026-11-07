@@ -2154,6 +2154,7 @@ impl CoreMailSource {
             .queue_send(QueueSendArgs {
                 draft_id,
                 send_at: None,
+                remind_at: None,
             })
             .await?;
         self.core
@@ -3668,6 +3669,8 @@ mod tests {
             has_attachments: false,
             has_replied: false,
             snoozed_until: None,
+            reply_reminder_at: None,
+            reply_reminder_due: false,
             labels: vec![3],
             verification_code: None,
             first_attachment: None,
@@ -3749,6 +3752,8 @@ mod tests {
             has_attachments: false,
             has_replied: true,
             snoozed_until: None,
+            reply_reminder_at: None,
+            reply_reminder_due: false,
             labels: Vec::new(),
             verification_code: Some("482913".into()),
             first_attachment: Some(flectar_mail_core::models::AttachmentMeta {

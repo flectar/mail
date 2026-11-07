@@ -962,6 +962,10 @@ pub struct ThreadSummary {
     pub has_attachments: bool,
     pub has_replied: bool,
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
     /// The one-time code the newest message asks its reader to enter.
@@ -1009,6 +1013,10 @@ pub struct MessageSummary {
     pub has_replied: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     pub labels: Vec<i64>,
     pub verification_code: Option<String>,
     /// The message's first file. Inline images are not files.
@@ -1362,6 +1370,9 @@ pub struct SaveDraftArgs {
 pub struct QueueSendArgs {
     pub draft_id: i64,
     pub send_at: Option<i64>,
+    /// Remind the user at this time unless someone replies by then.
+    #[serde(default)]
+    pub remind_at: Option<i64>,
 }
 
 /// A draft waiting to be sent at a time the user chose.

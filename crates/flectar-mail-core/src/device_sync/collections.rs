@@ -2,9 +2,9 @@
 //!
 //! Each item is one record. Accounts carry their per-account preferences;
 //! preferences, signatures and profiles are named records (their record ids
-//! derive from their key), templates and snoozes are records under their
-//! own sync id, and each device describes itself in a `device` record under
-//! its own device id.
+//! derive from their key), templates, snoozes, scheduled sends and reply
+//! reminders are records under their own sync id, and each device describes
+//! itself in a `device` record under its own device id.
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -26,6 +26,7 @@ pub(crate) const DEVICE: &str = "device";
 pub(crate) const TEMPLATE: &str = "template";
 pub(crate) const SNOOZE: &str = "snooze";
 pub(crate) const SCHEDULED: &str = "scheduled";
+pub(crate) const REMINDER: &str = "reminder";
 
 /// The largest template body that syncs, well under the server's record
 /// limit: one record too large would stop every upload.
@@ -37,7 +38,8 @@ const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 /// unread here, and this device leaves them alone until it updates.
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
-        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED => Some(1),
+        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
+        | REMINDER => Some(1),
         _ => None,
     }
 }
@@ -332,6 +334,28 @@ pub(crate) fn snapshot(
         records.insert(id, entry(SCHEDULED, super::scheduled::body(&send, account)));
     }
 
+    // When it came due stays on each device: every device sees for itself
+    // that nobody replied.
+    for reminder in repo::reply_reminders::all(conn)? {
+        let (Some(id), Some(account)) = (
+            sync_id_bytes(&reminder.sync_id),
+            ids.by_local.get(&reminder.account_id),
+        ) else {
+            continue;
+        };
+        records.insert(
+            id,
+            entry(
+                REMINDER,
+                json!({
+                    "account": account,
+                    "messageId": reminder.message_id,
+                    "remindAt": reminder.remind_at,
+                }),
+            ),
+        );
+    }
+
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
 }
@@ -438,7 +462,7 @@ fn readable(entry: &Entry) -> bool {
 fn order(collection: &str, deleted: bool) -> (u8, bool) {
     let rank = match collection {
         ACCOUNT => 0,
-        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE | SCHEDULED => 1,
+        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE | SCHEDULED | REMINDER => 1,
         _ => 2,
     };
     (rank, deleted)
@@ -503,13 +527,16 @@ pub(crate) fn apply(
         repo::settings::set(conn, &settings)?;
         applied.settings_changed = true;
     }
-    // Snoozes that waited for their conversation's mail.
+    // Snoozes and reply reminders that waited for their conversation's mail.
     applied
         .threads_changed
         .extend(repo::snoozes::attach_waiting(
             conn,
             crate::models::now_ms(),
         )?);
+    applied
+        .threads_changed
+        .extend(repo::reply_reminders::attach_waiting(conn)?);
     Ok(applied)
 }
 
@@ -623,6 +650,7 @@ fn apply_put(
         TEMPLATE => apply_template(conn, id, &entry.body),
         SNOOZE => apply_snooze(conn, id, &entry.body, applied),
         SCHEDULED => apply_scheduled(conn, id, &entry.body, applied),
+        REMINDER => apply_reminder(conn, id, &entry.body, applied),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -870,6 +898,39 @@ fn apply_snooze(
     Ok(Outcome::Applied)
 }
 
+/// Take on a reply reminder another device set or moved. It is kept before
+/// its message arrives here, and its conversation comes back then if nobody
+/// replied.
+fn apply_reminder(
+    conn: &Connection,
+    id: &RecordId,
+    body: &Value,
+    applied: &mut Applied,
+) -> Result<Outcome> {
+    let (Some(account), Some(message_id), Some(remind_at)) = (
+        body.get("account").and_then(Value::as_str),
+        body.get("messageId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty()),
+        body.get("remindAt").and_then(Value::as_i64),
+    ) else {
+        return Ok(Outcome::Ignored);
+    };
+    let Some(account_id) = account_ids(conn)?.by_sync.get(account).copied() else {
+        return Ok(Outcome::Waiting);
+    };
+    if let Some(thread) = repo::reply_reminders::put_shared(
+        conn,
+        &sync_id_hex(id),
+        account_id,
+        message_id,
+        remind_at,
+    )? {
+        applied.threads_changed.push(thread);
+    }
+    Ok(Outcome::Applied)
+}
+
 /// Take on a send another device scheduled, claimed or finished.
 fn apply_scheduled(
     conn: &Connection,
@@ -1012,19 +1073,25 @@ fn apply_delete(
             if let Some(thread) = thread {
                 // Unsnoozed, archived or woken on another device.
                 repo::snoozes::clear_local(conn, thread)?;
-                let woke = previous
+                let woke_at = previous
                     .body
                     .get("wakeAt")
                     .and_then(Value::as_i64)
-                    .is_some_and(|wake_at| wake_at <= crate::models::now_ms() + 60_000);
-                if woke {
-                    repo::snoozes::mark_woken(conn, thread)?;
+                    .filter(|wake_at| *wake_at <= crate::models::now_ms() + 60_000);
+                if let Some(wake_at) = woke_at {
+                    repo::snoozes::mark_woken(conn, thread, wake_at)?;
                 }
                 applied.threads_changed.push(thread);
             }
         }
         SCHEDULED => {
             if let Some(thread) = super::scheduled::remove(conn, &sync_id_hex(id))? {
+                applied.threads_changed.push(thread);
+            }
+        }
+        // Dismissed, or answered, on another device.
+        REMINDER => {
+            if let Some(thread) = repo::reply_reminders::delete(conn, &sync_id_hex(id))? {
                 applied.threads_changed.push(thread);
             }
         }
@@ -1460,6 +1527,79 @@ mod tests {
         .unwrap();
         assert_eq!(snoozed_until(&phone, phone_thread), None);
         assert!(snooze_records(&phone).is_empty());
+    }
+
+    fn reminder_records(conn: &Connection) -> Vec<(RecordId, Entry)> {
+        snapshot(
+            conn,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap()
+        .into_iter()
+        .filter(|(_, entry)| entry.collection == REMINDER)
+        .collect()
+    }
+
+    #[test]
+    fn reply_reminders_reach_every_device_and_end_everywhere() {
+        let account = "cc".repeat(16);
+        let (laptop, _) = device_with(&account, Some("plans@example.com"), 10);
+        let remind_at = crate::models::now_ms() + 3_600_000;
+        repo::reply_reminders::set(&laptop, 1, "plans@example.com", remind_at).unwrap();
+        let records = reminder_records(&laptop);
+        assert_eq!(records.len(), 1);
+        let (id, record) = records[0].clone();
+        assert_eq!(
+            record.body,
+            json!({"account": account, "messageId": "plans@example.com", "remindAt": remind_at})
+        );
+
+        // The phone has no copy of the message yet: it keeps the reminder,
+        // without re-uploading it, and finds the conversation once it comes.
+        let (phone, _) = device_with(&account, None, 500);
+        let mut waiting = BTreeMap::new();
+        waiting.insert(id, record.clone());
+        apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(reminder_records(&phone), [(id, record.clone())]);
+        let thread = conversation(&phone, "plans@example.com", 600);
+        let applied = apply(
+            &phone,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(applied.threads_changed, [thread]);
+
+        // Dismissed on the laptop: it ends on the phone too.
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: Some(record),
+                next: None,
+            },
+        );
+        let applied = apply(
+            &phone,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(applied.threads_changed, [thread]);
+        assert!(reminder_records(&phone).is_empty());
     }
 
     #[test]

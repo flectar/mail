@@ -1,4 +1,5 @@
-//! Wakes snoozed threads and nudges account actors when timed actions
+//! Wakes snoozed threads, brings back conversations nobody replied to in
+//! time, and nudges account actors when timed actions
 //! (send-later, undo-send windows) come due. Timers are app-local: anything
 //! past due fires on the next tick or at launch.
 
@@ -14,6 +15,11 @@ use crate::caldav::task::CalTaskHandle;
 use crate::sync::engine::{AccountHandle, SyncCmd};
 
 const TICK_SECS: u64 = 5;
+/// How often reply reminders are checked.
+const REMINDER_CHECK_MS: i64 = 30_000;
+/// A reply reminder whose message never arrived on this device is
+/// forgotten this long after its time.
+const REMINDER_STALE_MS: i64 = 30 * 24 * 60 * 60_000;
 
 pub fn spawn(
     db: Db,
@@ -25,6 +31,7 @@ pub fn spawn(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut nudged_until: i64 = 0;
+        let mut reminders_checked_at: i64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
             // An empty welcome has nothing timed to dispatch. Waiting here
@@ -45,11 +52,11 @@ pub fn spawn(
             let woken = db.read(move |conn| repo::snoozes::woken(conn, now)).await;
             if let Ok(woken) = woken {
                 let mut shown = Vec::new();
-                for thread_id in woken {
+                for (thread_id, wake_at) in woken {
                     let res = db
                         .write(move |conn| {
                             repo::snoozes::clear(conn, thread_id)?;
-                            repo::snoozes::mark_woken(conn, thread_id)
+                            repo::snoozes::mark_woken(conn, thread_id, wake_at)
                         })
                         .await;
                     if res.is_ok() {
@@ -64,6 +71,39 @@ pub fn spawn(
             let _ = db
                 .write(move |conn| repo::snoozes::drop_expired(conn, now))
                 .await;
+
+            // 1b. Reply reminders: a conversation nobody replied to in time
+            // comes back to the top of the inbox, and a reply ends its
+            // reminder. Only reminders whose time has passed are looked at,
+            // twice a minute.
+            let reminders_due =
+                now - reminders_checked_at >= REMINDER_CHECK_MS
+                    && db
+                        .read(move |conn| {
+                            Ok(repo::reply_reminders::next_remind_at(conn)?
+                                .is_some_and(|at| at <= now)
+                                || repo::reply_reminders::any_due(conn)?)
+                        })
+                        .await
+                        .unwrap_or(false);
+            if reminders_due {
+                reminders_checked_at = now;
+            }
+            if reminders_due
+                && let Ok(checked) = db
+                    .write(move |conn| {
+                        let checked = repo::reply_reminders::check(conn, now)?;
+                        repo::reply_reminders::drop_stale(conn, now - REMINDER_STALE_MS)?;
+                        Ok(checked)
+                    })
+                    .await
+            {
+                let mut shown = checked.due;
+                shown.extend(checked.replied);
+                if !shown.is_empty() {
+                    bus.emit(CoreEvent::MailUpdated { thread_ids: shown });
+                }
+            }
 
             // 2. Nudge actors when a timed pending action has come due
             // since the last nudge. Asking for anything due since then, not

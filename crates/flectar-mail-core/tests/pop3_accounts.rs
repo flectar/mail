@@ -332,6 +332,7 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
         .queue_send(QueueSendArgs {
             draft_id,
             send_at: Some(now_ms()),
+            remind_at: None,
         })
         .await
         .unwrap();

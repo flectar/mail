@@ -16,6 +16,7 @@ pub mod local;
 pub mod messages;
 pub mod notifications;
 pub mod pop3;
+pub mod reply_reminders;
 pub mod search;
 pub mod sender_identities;
 pub mod settings;

@@ -1,7 +1,8 @@
 //! Send later on one device: a scheduled draft waits in the Scheduled view,
 //! scheduling it again moves it instead of sending it twice, and cancelling
-//! leaves it a draft. The account's servers are unreachable, so nothing is
-//! ever sent.
+//! leaves it a draft. A reply reminder goes with a send, and brings the
+//! conversation back to the inbox. The account's servers are unreachable,
+//! so nothing is ever sent.
 
 use flectar_mail_core::Core;
 use flectar_mail_core::config::Paths;
@@ -107,6 +108,7 @@ async fn a_scheduled_draft_waits_moves_and_cancels() {
         .queue_send(QueueSendArgs {
             draft_id,
             send_at: Some(in_an_hour),
+            remind_at: None,
         })
         .await
         .expect("schedule");
@@ -123,6 +125,7 @@ async fn a_scheduled_draft_waits_moves_and_cancels() {
         .queue_send(QueueSendArgs {
             draft_id,
             send_at: Some(tomorrow),
+            remind_at: None,
         })
         .await
         .expect("reschedule");
@@ -152,9 +155,125 @@ async fn a_send_in_the_undo_window_is_not_scheduled() {
     core.queue_send(QueueSendArgs {
         draft_id,
         send_at: None,
+        remind_at: None,
     })
     .await
     .expect("send");
     assert!(core.scheduled_sends().await.unwrap().is_empty());
     assert_eq!(scheduled_threads(&core).await, 0);
+}
+
+async fn inbox(core: &Core) -> Vec<ThreadSummary> {
+    core.list_threads(View::Inbox, None, None, None, None, (None, 10))
+        .await
+        .unwrap()
+        .threads
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reply_reminder_goes_with_the_send_and_brings_the_conversation_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed(&db, dead_port()).await;
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+
+    let draft_id = draft(&core, account_id).await;
+    let remind_at = now_ms() + 3 * 24 * 3_600_000;
+    core.queue_send(QueueSendArgs {
+        draft_id,
+        send_at: Some(now_ms() + 3_600_000),
+        remind_at: Some(remind_at),
+    })
+    .await
+    .expect("schedule");
+    // The draft now has the Message-ID it goes out with, and the reminder
+    // names it.
+    let (message_id, reminders) = db
+        .read(move |conn| {
+            let message_id: String = conn.query_row(
+                "SELECT message_id FROM messages WHERE id = ?1",
+                [draft_id],
+                |row| row.get(0),
+            )?;
+            Ok((message_id, repo::reply_reminders::all(conn)?))
+        })
+        .await
+        .unwrap();
+    assert!(message_id.ends_with("@example.com"), "{message_id}");
+    assert_eq!(reminders.len(), 1);
+    assert_eq!(reminders[0].message_id, message_id);
+    assert_eq!(reminders[0].remind_at, remind_at);
+
+    // Not sent yet when the time comes: it waits.
+    let checked = db
+        .write(move |conn| repo::reply_reminders::check(conn, remind_at))
+        .await
+        .unwrap();
+    assert!(checked.due.is_empty());
+
+    // Sent, filed in Sent, and nobody replied: back at the top of the inbox.
+    db.write(move |conn| {
+        conn.execute(
+            "UPDATE messages SET is_draft = 0, is_outgoing = 1, date = ?2,
+                    folder_id = (SELECT id FROM folders WHERE role = 'sent')
+             WHERE id = ?1",
+            rusqlite::params![draft_id, now_ms()],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert!(inbox(&core).await.is_empty());
+    let checked = db
+        .write(move |conn| repo::reply_reminders::check(conn, remind_at))
+        .await
+        .unwrap();
+    assert_eq!(checked.due.len(), 1);
+    let listed = inbox(&core).await;
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].reply_reminder_due);
+    assert_eq!(listed[0].last_message_at, remind_at);
+
+    // Dismissed: it leaves the inbox, where its mail never was.
+    let thread_id = listed[0].id;
+    core.dismiss_reply_reminder(thread_id).await.unwrap();
+    assert!(inbox(&core).await.is_empty());
+    assert!(
+        db.read(|conn| repo::reply_reminders::all(conn))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Set again from the conversation: it names the message the user sent.
+    let later = remind_at + 3_600_000;
+    core.set_reply_reminder(thread_id, None, later)
+        .await
+        .unwrap();
+    let reminders = db
+        .read(|conn| repo::reply_reminders::all(conn))
+        .await
+        .unwrap();
+    assert_eq!(reminders.len(), 1);
+    assert_eq!(reminders[0].message_id, message_id);
+    assert_eq!(reminders[0].remind_at, later);
+    assert_eq!(reminders[0].thread_id, Some(thread_id));
+    // A conversation with nothing the user sent has nothing to wait for.
+    let incoming = db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE messages SET is_outgoing = 0 WHERE id = ?1",
+                [draft_id],
+            )?;
+            Ok(())
+        })
+        .await;
+    assert!(incoming.is_ok());
+    assert!(
+        core.set_reply_reminder(thread_id, None, later)
+            .await
+            .is_err()
+    );
 }

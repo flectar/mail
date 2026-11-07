@@ -420,6 +420,7 @@ async fn a_scheduled_send_goes_out_from_one_device() {
         .queue_send(QueueSendArgs {
             draft_id: draft,
             send_at: Some(send_at),
+            remind_at: None,
         })
         .await
         .unwrap();
