@@ -12,7 +12,7 @@ use crate::models::{
     AccountSettings, MailProfile, MailProtocol, PortableAccountConfig, Settings, Signature,
     SignatureDefaults,
 };
-use flectar_mail_sync_client::Entry;
+use flectar_mail_sync_client::{Entry, Mirrored};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -23,9 +23,16 @@ pub(crate) const SIGNATURE: &str = "signature";
 pub(crate) const PROFILE: &str = "profile";
 pub(crate) const DEVICE: &str = "device";
 
-/// The schema this version writes and reads, for every collection. Records
-/// with a newer schema stay unread until this device updates.
-pub(crate) const SCHEMA: u32 = 1;
+/// The schema this version writes and reads for `collection`, or `None` for
+/// a collection it does not know. A version that changes what a record
+/// holds raises its collection's schema: records with a newer schema stay
+/// unread here, and this device leaves them alone until it updates.
+pub(crate) fn schema(collection: &str) -> Option<u32> {
+    match collection {
+        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE => Some(1),
+        _ => None,
+    }
+}
 
 /// Preferences that follow the user to every device: how the app looks and
 /// reads, and how mail and contacts behave. Window, notification, sound,
@@ -149,7 +156,7 @@ fn account_ids(conn: &Connection) -> Result<AccountIds> {
 fn entry(collection: &str, body: Value) -> Entry {
     Entry {
         collection: collection.to_owned(),
-        schema: SCHEMA,
+        schema: schema(collection).unwrap_or_default(),
         body,
     }
 }
@@ -187,9 +194,12 @@ fn account_body(
 }
 
 /// The app's synced items as records, with this device's own record.
+/// `mirror` holds what the server has: references this device cannot follow
+/// yet, such as a profile's account that has not arrived, are kept from it.
 pub(crate) fn snapshot(
     conn: &Connection,
     names: &Names,
+    mirror: &BTreeMap<RecordId, Mirrored>,
     device: (RecordId, Value),
 ) -> Result<BTreeMap<RecordId, Entry>> {
     let settings = repo::settings::get(conn)?;
@@ -247,11 +257,14 @@ pub(crate) fn snapshot(
         let Some(id) = names.get(&profile_name(&profile.id)) else {
             continue;
         };
-        let accounts: Vec<&String> = profile
-            .account_ids
-            .iter()
-            .filter_map(|account| ids.by_local.get(account))
-            .collect();
+        let accounts = profile_accounts(
+            mirror.get(&id).and_then(|mirrored| mirrored.entry.as_ref()),
+            profile
+                .account_ids
+                .iter()
+                .filter_map(|account| ids.by_local.get(account)),
+            &ids,
+        );
         records.insert(
             id,
             entry(
@@ -270,13 +283,55 @@ pub(crate) fn snapshot(
     Ok(records)
 }
 
+/// A profile's accounts by sync id: the ones this device has, plus the
+/// mirrored record's accounts it does not have yet, so applying a profile
+/// before all its accounts arrived never takes them out of it. Keeps the
+/// mirrored order, so an unchanged profile reproduces the mirrored body.
+fn profile_accounts<'a>(
+    mirrored: Option<&Entry>,
+    local: impl Iterator<Item = &'a String>,
+    ids: &AccountIds,
+) -> Vec<String> {
+    let local: Vec<&str> = local.map(String::as_str).collect();
+    let mut accounts: Vec<String> = mirrored
+        .filter(|entry| entry.collection == PROFILE)
+        .and_then(|entry| entry.body.get("accounts"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|account| !ids.by_sync.contains_key(*account) || local.contains(account))
+        .map(str::to_owned)
+        .collect();
+    for account in local {
+        if !accounts.iter().any(|kept| kept == account) {
+            accounts.push(account.to_owned());
+        }
+    }
+    accounts
+}
+
 /// Work the app must do after the transaction that applied records.
 #[derive(Debug)]
 pub(crate) enum FollowUp {
-    /// Another device removed the account.
-    RemoveAccount(i64),
+    /// Another device removed the account: the local id, and the sync id it
+    /// had, which must still be its own when the removal runs.
+    RemoveAccount(i64, String),
     /// Another device changed how the account connects.
     RestartAccount(i64),
+}
+
+/// What became of a record this device was given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    /// Taken on: a later change of it here is a local edit.
+    Applied,
+    /// Needs something that has not arrived yet, such as its account; a
+    /// later run tries again.
+    Waiting,
+    /// Nothing to take on here: another device's own record, or one this
+    /// version cannot use. Never treated as this device's item.
+    Ignored,
 }
 
 /// What applying records changed.
@@ -288,16 +343,19 @@ pub(crate) struct Applied {
 }
 
 fn readable(entry: &Entry) -> bool {
-    entry.schema <= SCHEMA
+    schema(&entry.collection).is_some_and(|known| entry.schema <= known)
 }
 
-/// Collections that other records refer to come first.
-fn order(collection: &str) -> u8 {
-    match collection {
+/// Collections that other records refer to come first, and within one,
+/// changes before deletions: an account that moved to another device's id
+/// is adopted before the id it leaves is deleted.
+fn order(collection: &str, deleted: bool) -> (u8, bool) {
+    let rank = match collection {
         ACCOUNT => 0,
         PREF | SIGNATURE | PROFILE => 1,
         _ => 2,
-    }
+    };
+    (rank, deleted)
 }
 
 /// Apply records to the app: `incoming` from the run, plus every mirrored
@@ -329,6 +387,7 @@ pub(crate) fn apply(
         order(
             next.or(*previous)
                 .map_or("", |entry| entry.collection.as_str()),
+            next.is_none(),
         )
     });
 
@@ -337,18 +396,20 @@ pub(crate) fn apply(
         if local_before.get(&id) != local_now.get(&id) {
             continue;
         }
-        let done = match (previous, next) {
-            (_, Some(next)) if !readable(next) => false,
+        let outcome = match (previous, next) {
+            (_, Some(next)) if !readable(next) => Outcome::Waiting,
             (_, Some(next)) => apply_put(conn, &mut settings, &id, next, &mut applied)?,
             (Some(previous), None) => {
                 apply_delete(conn, &mut settings, &id, previous, &mut applied)?;
-                true
+                Outcome::Applied
             }
-            (None, None) => true,
+            (None, None) => Outcome::Applied,
         };
-        if done {
-            // Taken on: a later change of it here is a local edit.
-            set_local_hash(conn, &id, next.map(body_hash))?;
+        match outcome {
+            Outcome::Applied => set_local_hash(conn, &id, next.map(body_hash))?,
+            // Not this device's item: it never uploads or deletes it.
+            Outcome::Ignored => set_local_hash(conn, &id, None)?,
+            Outcome::Waiting => {}
         }
     }
 
@@ -365,17 +426,17 @@ fn apply_put(
     id: &RecordId,
     entry: &Entry,
     applied: &mut Applied,
-) -> Result<bool> {
+) -> Result<Outcome> {
     match entry.collection.as_str() {
         PREF => {
             let (Some(key), Some(value)) = (
                 entry.body.get("key").and_then(Value::as_str),
                 entry.body.get("value"),
             ) else {
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             };
             if !SYNCED_PREFERENCES.contains(&key) {
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             }
             let mut object = serde_json::to_value(&*settings)?;
             if let Some(fields) = object.as_object_mut() {
@@ -384,11 +445,11 @@ fn apply_put(
             match serde_json::from_value::<Settings>(object) {
                 Ok(updated) => {
                     *settings = updated;
-                    Ok(true)
+                    Ok(Outcome::Applied)
                 }
                 Err(error) => {
                     tracing::warn!(%error, key, "a synced preference does not fit this version");
-                    Ok(false)
+                    Ok(Outcome::Ignored)
                 }
             }
         }
@@ -401,11 +462,11 @@ fn apply_put(
                 entry.body.get("name").and_then(Value::as_str),
                 entry.body.get("html").and_then(Value::as_str),
             ) else {
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             };
             // Its account has not arrived yet; a later run applies it.
             let Some(account_id) = ids.by_sync.get(account).copied() else {
-                return Ok(false);
+                return Ok(Outcome::Waiting);
             };
             let signature = Signature {
                 id: signature_id.to_owned(),
@@ -421,7 +482,7 @@ fn apply_put(
                 Some(existing) => *existing = signature,
                 None => settings.signature_list.push(signature),
             }
-            Ok(true)
+            Ok(Outcome::Applied)
         }
         PROFILE => {
             let ids = account_ids(conn)?;
@@ -430,7 +491,7 @@ fn apply_put(
                 entry.body.get("name").and_then(Value::as_str),
                 entry.body.get("color").and_then(Value::as_str),
             ) else {
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             };
             let account_ids: Vec<i64> = entry
                 .body
@@ -464,12 +525,12 @@ fn apply_put(
                 Some(existing) => *existing = profile,
                 None => settings.mail_profiles.push(profile),
             }
-            Ok(true)
+            Ok(Outcome::Applied)
         }
         // Other devices describe themselves; the app reads them from the
-        // mirror.
-        DEVICE => Ok(true),
-        _ => Ok(false),
+        // mirror, and only each device writes its own.
+        DEVICE => Ok(Outcome::Ignored),
+        _ => Ok(Outcome::Ignored),
     }
 }
 
@@ -479,16 +540,16 @@ fn apply_account(
     id: &RecordId,
     body: &Value,
     applied: &mut Applied,
-) -> Result<bool> {
+) -> Result<Outcome> {
     let config: PortableAccountConfig = match serde_json::from_value(body.clone()) {
         Ok(config) => config,
         Err(error) => {
             tracing::warn!(%error, "a synced account does not fit this version");
-            return Ok(false);
+            return Ok(Outcome::Ignored);
         }
     };
     if crate::validate_portable_account(&config).is_err() {
-        return Ok(false);
+        return Ok(Outcome::Ignored);
     }
     let sync_id = sync_id_hex(id);
     let mut local = conn
@@ -500,8 +561,22 @@ fn apply_account(
         .optional()?;
     if local.is_none() {
         // The same mailbox added on two devices before they synced: they
-        // become one account.
+        // become one account, under one id every device agrees on.
         if let Some(existing) = repo::accounts::find_by_mailbox(conn, config.email.trim())? {
+            let own: Option<String> = conn.query_row(
+                "SELECT sync_id FROM accounts WHERE id = ?1",
+                params![existing.id],
+                |row| row.get(0),
+            )?;
+            // An id the server already has stays unless the other one is
+            // smaller: the device with the larger id adopts the smaller and
+            // deletes its own, so both end with one account.
+            let keep_own = own.as_deref().is_some_and(|own| {
+                own < sync_id.as_str() && server_knows(conn, own).unwrap_or(true)
+            });
+            if keep_own {
+                return Ok(Outcome::Ignored);
+            }
             conn.execute(
                 "UPDATE accounts SET sync_id = ?1 WHERE id = ?2",
                 params![sync_id, existing.id],
@@ -512,13 +587,13 @@ fn apply_account(
     let local_id = match local {
         Some(local_id) => {
             let Some(current) = repo::accounts::get_config(conn, local_id)? else {
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             };
             if (current.provider, current.auth_kind, current.mail_protocol)
                 != (config.provider, config.auth_kind, config.mail_protocol)
             {
                 tracing::warn!("a synced account changed protocol; keeping this device's");
-                return Ok(false);
+                return Ok(Outcome::Ignored);
             }
             let settings_json = merged_account_settings(&current.settings, &config.settings);
             let reconnect = current.username != config.username
@@ -608,7 +683,21 @@ fn apply_account(
         }
     }
     applied.accounts_changed = true;
-    Ok(true)
+    Ok(Outcome::Applied)
+}
+
+/// Whether the server has seen the record with this sync id: it is mirrored,
+/// even as a deletion, or waiting to upload.
+fn server_knows(conn: &Connection, sync_id: &str) -> Result<bool> {
+    let Some(id) = sync_id_bytes(sync_id) else {
+        return Ok(false);
+    };
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM device_sync_mirror WHERE record_id = ?1)
+             OR EXISTS (SELECT 1 FROM device_sync_outbox WHERE record_id = ?1)",
+        params![&id[..]],
+        |row| row.get(0),
+    )?)
 }
 
 fn set_or_remove(
@@ -653,7 +742,9 @@ fn apply_delete(
                 )
                 .optional()?
             {
-                applied.follow_ups.push(FollowUp::RemoveAccount(local_id));
+                applied
+                    .follow_ups
+                    .push(FollowUp::RemoveAccount(local_id, sync_id_hex(id)));
                 applied.accounts_changed = true;
             }
         }
@@ -703,6 +794,186 @@ pub(crate) fn device_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::testutil;
+    use crate::models::{AuthKind, Provider};
+    use flectar_mail_sync_client::Clock;
+
+    fn account(conn: &Connection, email: &str, sync_id: &str) -> i64 {
+        let id = repo::accounts::insert(
+            conn,
+            &repo::accounts::NewAccount {
+                email,
+                display_name: None,
+                avatar_url: None,
+                provider: Provider::Generic,
+                auth_kind: AuthKind::Password,
+                mail_protocol: MailProtocol::Imap,
+                username: email,
+                jmap_url: "",
+                jmap_account_id: None,
+                incoming_host: "imap.example.com",
+                incoming_port: 993,
+                smtp_host: "smtp.example.com",
+                smtp_port: 465,
+            },
+            &testutil::account_settings(),
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE accounts SET sync_id = ?1 WHERE id = ?2",
+            params![sync_id, id],
+        )
+        .unwrap();
+        id
+    }
+
+    /// What the server has for `id`: a record, or a deletion.
+    fn mirror_row(conn: &Connection, id: &RecordId, entry: Option<&Entry>) {
+        conn.execute(
+            "INSERT OR REPLACE INTO device_sync_mirror
+               (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
+             VALUES (?1, 1, 1, 0, ?2, ?3, ?4, ?5)",
+            params![
+                &id[..],
+                &[9u8; 16][..],
+                entry.map(|entry| entry.collection.clone()),
+                entry.map(|entry| i64::from(entry.schema)),
+                entry.map(|entry| entry.body.to_string())
+            ],
+        )
+        .unwrap();
+    }
+
+    fn sync_id_of(conn: &Connection, account: i64) -> String {
+        conn.query_row(
+            "SELECT sync_id FROM accounts WHERE id = ?1",
+            params![account],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn other_devices_records_are_never_this_devices_items() {
+        let conn = testutil::conn();
+        let phone = [7u8; 16];
+        let mut waiting = BTreeMap::new();
+        waiting.insert(
+            phone,
+            entry(DEVICE, json!({"name": "Phone", "platform": "android"})),
+        );
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        // So this device never deletes it for being missing from its items.
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &BTreeMap::new(), &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn profiles_keep_accounts_this_device_does_not_have_yet() {
+        let conn = testutil::conn();
+        let known = "aa".repeat(16);
+        let missing = "bb".repeat(16);
+        let local = account(&conn, "me@example.com", &known);
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings.mail_profiles.push(MailProfile {
+            id: "profile-1".into(),
+            name: "Work".into(),
+            color: "#8b5cf6".into(),
+            account_ids: vec![local],
+        });
+        repo::settings::set(&conn, &settings).unwrap();
+        let profile = [3u8; 16];
+        let mut names = Names::default();
+        names.insert(profile_name("profile-1"), profile);
+        let mut mirror = BTreeMap::new();
+        mirror.insert(
+            profile,
+            Mirrored {
+                seq: 1,
+                stamp: None,
+                entry: Some(entry(
+                    PROFILE,
+                    json!({"id": "profile-1", "name": "Work", "color": "#8b5cf6",
+                           "accounts": [missing, known]}),
+                )),
+            },
+        );
+        let records = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
+        assert_eq!(records[&profile].body["accounts"], json!([missing, known]));
+    }
+
+    #[test]
+    fn records_from_a_newer_version_are_left_alone() {
+        let conn = testutil::conn();
+        let id = [5u8; 16];
+        let newer = Entry {
+            collection: PREF.into(),
+            schema: 2,
+            body: json!({"key": "theme", "value": "dark", "since": "v2"}),
+        };
+        mirror_row(&conn, &id, Some(&newer));
+        let mut local = BTreeMap::new();
+        local.insert(id, entry(PREF, json!({"key": "theme", "value": "light"})));
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(
+            super::super::store::track(&conn, &local, &clock).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn one_mailbox_added_on_two_devices_ends_under_the_smaller_id() {
+        let smaller = "11".repeat(16);
+        let larger = "ff".repeat(16);
+        let remote = |conn: &Connection, local: i64| {
+            let config = repo::accounts::get_config(conn, local).unwrap().unwrap();
+            let settings = repo::settings::get(conn).unwrap();
+            entry(ACCOUNT, account_body(&config, &settings, 0).unwrap())
+        };
+
+        // This device's id is the larger one: it adopts the other device's.
+        let conn = testutil::conn();
+        let local = account(&conn, "me@example.com", &larger);
+        mirror_row(&conn, &sync_id_bytes(&larger).unwrap(), None);
+        let mut waiting = BTreeMap::new();
+        waiting.insert(sync_id_bytes(&smaller).unwrap(), remote(&conn, local));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(sync_id_of(&conn, local), smaller);
+
+        // This device's id is the smaller one: it keeps it, and the other
+        // device adopts it.
+        let conn = testutil::conn();
+        let local = account(&conn, "me@example.com", &smaller);
+        mirror_row(&conn, &sync_id_bytes(&smaller).unwrap(), None);
+        let mut waiting = BTreeMap::new();
+        waiting.insert(sync_id_bytes(&larger).unwrap(), remote(&conn, local));
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(sync_id_of(&conn, local), smaller);
+    }
 
     #[test]
     fn sync_ids_round_trip() {

@@ -299,6 +299,17 @@ pub(crate) fn track(
         if hashes.get(id) == Some(&hash) {
             continue;
         }
+        // A newer version wrote this record with fields this one would drop:
+        // leave it alone until this device updates.
+        if mirror
+            .get(id)
+            .and_then(|mirrored| mirrored.entry.as_ref())
+            .is_some_and(|mirrored| {
+                mirrored.collection == entry.collection && mirrored.schema > entry.schema
+            })
+        {
+            continue;
+        }
         // The item may only now match what the server has, after a merge.
         let unchanged = mirror
             .get(id)
