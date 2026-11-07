@@ -11,8 +11,9 @@ use flectar_mail_core::{
     error::{CoreError, Result},
     events::CoreEvent,
     models::{
-        AccountSettings, Address, AuthKind, ConnectionSecurity, MailConnectionSettings,
-        MailProtocol, PortableAccountConfig, Provider, QueueSendArgs, SaveDraftArgs, now_ms, roles,
+        AccountSettings, Address, AuthKind, ConnectionSecurity, DraftAttachmentIn,
+        MailConnectionSettings, MailProtocol, PortableAccountConfig, Provider, QueueSendArgs,
+        SaveDraftArgs, now_ms, roles,
     },
 };
 use std::collections::HashMap;
@@ -623,4 +624,190 @@ async fn an_imap_message_scheduled_on_one_device_waits_on_the_other() {
         .unwrap();
     assert_eq!(subject, "Monday plans");
     assert!(bcc.contains("boss@example.com"), "{bcc}");
+}
+
+/// An IMAP message too large for its record goes into a file in Flectar Mail
+/// Sync's storage, sealed. Other devices show it from the preview the record
+/// carries, and the one that sends it fetches it first: here the phone, once
+/// the laptop that scheduled it is gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
+    let files = tempfile::tempdir().unwrap();
+    let files_dir = files.path().to_str().unwrap().to_owned();
+    let Some(server) = start_server_with(&[("FLECTAR_MAIL_SYNC_FILES_DIR", &files_dir)]).await
+    else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![imap_account("me@example.com")])
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
+    let phone_account = phone.list_accounts().await.unwrap()[0].id;
+    for (core, account) in [(&laptop, laptop_account), (&phone, phone_account)] {
+        core.db
+            .write(move |conn| {
+                flectar_mail_core::db::repo::folders::upsert(
+                    conn,
+                    account,
+                    "Drafts",
+                    None,
+                    Some(roles::DRAFTS),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    // A draft with a 300 KB attachment.
+    let attachment_dir = tempfile::tempdir().unwrap();
+    let attachment = attachment_dir.path().join("plans.bin");
+    let content: Vec<u8> = (0..300_000u32).map(|index| (index % 251) as u8).collect();
+    std::fs::write(&attachment, &content).unwrap();
+    let draft = laptop
+        .save_draft(SaveDraftArgs {
+            draft_id: None,
+            account_id: laptop_account,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "alice@example.com".into(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Monday plans".into(),
+            body_text: "The plans are attached.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: vec![DraftAttachmentIn {
+                file_path: attachment.to_string_lossy().into_owned(),
+                filename: "plans.bin".into(),
+            }],
+        })
+        .await
+        .unwrap();
+    let send_at = now_ms() + 3_600_000;
+    laptop
+        .queue_send(QueueSendArgs {
+            draft_id: draft,
+            send_at: Some(send_at),
+            remind_at: None,
+        })
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+
+    // The server holds one sealed file.
+    let stored: Vec<Vec<u8>> = std::fs::read_dir(files.path())
+        .unwrap()
+        .map(|entry| std::fs::read(entry.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(stored.len(), 1);
+    assert!(stored[0].len() > 300_000);
+    assert!(
+        !stored[0]
+            .windows(100)
+            .any(|window| window == &content[1000..1100])
+    );
+
+    // The phone shows it from its preview, without fetching it.
+    phone.device_sync_run().await.unwrap();
+    let scheduled = phone.scheduled_sends().await.unwrap();
+    assert_eq!(scheduled.len(), 1, "it shows in the phone's Scheduled view");
+    let subject: String = phone
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT subject FROM messages WHERE account_id = ?1 AND is_draft = 1",
+                [phone_account],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(subject, "Monday plans");
+    let carried = || async {
+        phone
+            .db
+            .read(|conn| {
+                Ok(
+                    conn.query_row("SELECT file, mime FROM synced_sends", [], |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<Vec<u8>>>(1)?,
+                        ))
+                    })?,
+                )
+            })
+            .await
+            .unwrap()
+    };
+    let (file, mime) = carried().await;
+    assert!(file.is_some());
+    assert!(mime.is_none(), "fetched only to send it");
+
+    // Moved to later on the laptop: shared again as it is now, and the file
+    // stored before goes.
+    let names = || -> Vec<std::ffi::OsString> {
+        std::fs::read_dir(files.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect()
+    };
+    let before = names();
+    laptop
+        .queue_send(QueueSendArgs {
+            draft_id: draft,
+            send_at: Some(send_at + 3_600_000),
+            remind_at: None,
+        })
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    let after = names();
+    assert_eq!(after.len(), 1, "one file: {after:?}");
+    assert_ne!(after, before);
+    phone.device_sync_run().await.unwrap();
+    let (moved, _) = carried().await;
+    assert!(moved.is_some());
+    assert_ne!(moved, file, "the phone has the new file");
+    let scheduled = phone.scheduled_sends().await.unwrap();
+    assert_eq!(scheduled.len(), 1);
+    assert_eq!(scheduled[0].send_at, send_at + 3_600_000);
+
+    // The laptop is gone. "Send now" on the phone: it claims the send, and
+    // fetches the message before sending it.
+    laptop.device_sync_turn_off().await.unwrap();
+    assert!(phone.send_now(scheduled[0].action_id).await.unwrap());
+    for _ in 0..3 {
+        phone.device_sync_run().await.unwrap();
+    }
+    let (_, mime) = carried().await;
+    let mime = mime.expect("fetched to send it");
+    assert!(String::from_utf8_lossy(&mime).contains("plans.bin"));
+    assert!(mime.len() > 300_000);
+    let (state, due) = send_of(&phone).await.unwrap();
+    assert!(
+        state != "pending" || due != i64::MAX,
+        "its send started: {state} {due}"
+    );
 }

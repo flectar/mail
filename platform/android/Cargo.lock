@@ -2057,7 +2057,7 @@ dependencies = [
 [[package]]
 name = "flectar-mail-sync-client"
 version = "0.1.0"
-source = "git+https://github.com/flectar/mail-sync-client?rev=314bba04ef55b104a36de2dc08f88481efd4bf1a#314bba04ef55b104a36de2dc08f88481efd4bf1a"
+source = "git+https://github.com/flectar/mail-sync-client?rev=f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc#f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc"
 dependencies = [
  "flectar-mail-sync-crypto",
  "flectar-mail-sync-proto",
@@ -2075,7 +2075,7 @@ dependencies = [
 [[package]]
 name = "flectar-mail-sync-crypto"
 version = "0.1.0"
-source = "git+https://github.com/flectar/mail-sync-client?rev=314bba04ef55b104a36de2dc08f88481efd4bf1a#314bba04ef55b104a36de2dc08f88481efd4bf1a"
+source = "git+https://github.com/flectar/mail-sync-client?rev=f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc#f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc"
 dependencies = [
  "bip39",
  "chacha20poly1305",
@@ -2092,7 +2092,7 @@ dependencies = [
 [[package]]
 name = "flectar-mail-sync-proto"
 version = "0.1.0"
-source = "git+https://github.com/flectar/mail-sync-client?rev=314bba04ef55b104a36de2dc08f88481efd4bf1a#314bba04ef55b104a36de2dc08f88481efd4bf1a"
+source = "git+https://github.com/flectar/mail-sync-client?rev=f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc#f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc"
 dependencies = [
  "base64 0.23.1",
  "serde",

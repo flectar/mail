@@ -101,6 +101,118 @@ pub fn set_mime(
     Ok(())
 }
 
+/// The file a shared IMAP or POP3 message too large for its record went
+/// into, and the preview other devices show of it.
+pub fn file(conn: &Connection, sync_id: &str) -> Result<(Option<String>, Option<Vec<u8>>)> {
+    Ok(conn
+        .query_row(
+            "SELECT file, preview FROM synced_sends WHERE sync_id = ?1",
+            params![sync_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?
+        .unwrap_or((None, None)))
+}
+
+/// Keep the file a shared message went into, and its preview: as this
+/// device stored it, or as another device's record carries it. A file it
+/// replaces waits for its device to remove it (migration 037).
+pub fn put_file(
+    conn: &Connection,
+    sync_id: &str,
+    file: Option<&str>,
+    preview: Option<&[u8]>,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET file = ?2, preview = ?3
+         WHERE sync_id = ?1 AND (file IS NOT ?2 OR preview IS NOT ?3)",
+        params![sync_id, file, preview],
+    )?;
+    Ok(())
+}
+
+/// A send as it waited when this device began to share its message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AsSeen {
+    pub updated_at: i64,
+    pub send_at: i64,
+}
+
+/// Share the message of a send this device scheduled, as `version`: in its
+/// record, or as a file and its preview. Only while the send still waits as
+/// it did when its sharing began: a send moved, edited or cancelled since is
+/// shared again as it is now, or not at all. Returns whether it was shared.
+pub fn share(
+    conn: &Connection,
+    sync_id: &str,
+    version: &str,
+    mime: Option<&[u8]>,
+    file: Option<(&str, &[u8])>,
+    seen: AsSeen,
+    now_ms: i64,
+) -> Result<bool> {
+    let (file, preview) = file.unzip();
+    let changed = conn.execute(
+        "UPDATE synced_sends
+         SET mime = ?2, draft_ref = ?3, file = ?4, preview = ?5, updated_at = ?6
+         WHERE sync_id = ?1 AND state = 'scheduled' AND draft_ref IS NULL
+           AND updated_at = ?7 AND send_at = ?8",
+        params![
+            sync_id,
+            mime,
+            version,
+            file,
+            preview,
+            now_ms,
+            seen.updated_at,
+            seen.send_at
+        ],
+    )?;
+    Ok(changed == 1)
+}
+
+/// A file this device stored that no send took, to remove.
+pub fn forget_file(conn: &Connection, file: &str, origin: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO synced_send_files_gone (file, origin) VALUES (?1, ?2)",
+        params![file, origin],
+    )?;
+    Ok(())
+}
+
+/// Let go of the files of this device's sends that went out or were
+/// cancelled: nothing needs them any more. Returns how many it let go.
+pub fn release_finished_files(conn: &Connection, origin: &str) -> Result<usize> {
+    Ok(conn.execute(
+        "UPDATE synced_sends SET file = NULL, preview = NULL
+         WHERE origin = ?1 AND state IN ('sent', 'cancelled') AND file IS NOT NULL",
+        params![origin],
+    )?)
+}
+
+/// The files `origin` stored that nothing needs any more, to remove from
+/// Flectar Mail Sync's storage. Other devices remove their own.
+pub fn files_gone(conn: &Connection, origin: &str) -> Result<Vec<String>> {
+    conn.execute(
+        "DELETE FROM synced_send_files_gone WHERE origin IS NOT ?1",
+        params![origin],
+    )?;
+    let mut statement = conn.prepare("SELECT file FROM synced_send_files_gone ORDER BY file")?;
+    let files = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(files)
+}
+
+/// A file removed from Flectar Mail Sync's storage.
+pub fn file_removed(conn: &Connection, file: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM synced_send_files_gone WHERE file = ?1",
+        params![file],
+    )?;
+    Ok(())
+}
+
 /// Take on the message another device's record carries, if any.
 pub fn put_mime(conn: &Connection, sync_id: &str, mime: Option<&[u8]>) -> Result<()> {
     conn.execute(
@@ -395,5 +507,110 @@ mod tests {
         assert_eq!(prune_finished(&conn, 11).unwrap(), 1);
         assert!(get(&conn, &waiting).unwrap().is_some());
         assert!(get(&conn, &sent).unwrap().is_none());
+    }
+
+    fn file_named(id: &str) -> String {
+        format!(r#"{{"id":"{id}","key":"00","size":1}}"#)
+    }
+
+    #[test]
+    fn files_nothing_needs_wait_for_the_device_that_stored_them() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO pending_actions (id, account_id, kind, created_at) VALUES (7, 1, 'send', 0)",
+            [],
+        )
+        .unwrap();
+        let mine = create(&conn, 1, "a@example.com", 1_000, "aa", 7, 0).unwrap();
+        let theirs = create(&conn, 1, "b@example.com", 1_000, "bb", 7, 0).unwrap();
+        let forgotten = create(&conn, 1, "c@example.com", 1_000, "aa", 7, 0).unwrap();
+        put_file(&conn, &mine, Some(&file_named("01")), Some(b"Plans")).unwrap();
+        put_file(&conn, &theirs, Some(&file_named("02")), None).unwrap();
+        put_file(&conn, &forgotten, Some(&file_named("03")), None).unwrap();
+
+        // The same file with another preview is still needed.
+        put_file(&conn, &mine, Some(&file_named("01")), Some(b"Other")).unwrap();
+        assert!(files_gone(&conn, "aa").unwrap().is_empty());
+
+        // Stored again, or its send forgotten: the old file goes. Another
+        // device's file is that device's to remove.
+        put_file(&conn, &mine, Some(&file_named("04")), None).unwrap();
+        put_file(&conn, &theirs, None, None).unwrap();
+        delete(&conn, &forgotten).unwrap();
+        assert_eq!(
+            files_gone(&conn, "aa").unwrap(),
+            [file_named("01"), file_named("03")]
+        );
+        file_removed(&conn, &file_named("01")).unwrap();
+        assert_eq!(files_gone(&conn, "aa").unwrap(), [file_named("03")]);
+
+        // Sent: its file goes too.
+        assert_eq!(release_finished_files(&conn, "aa").unwrap(), 0);
+        set_state(&conn, &mine, SENT, None, 10).unwrap();
+        assert_eq!(release_finished_files(&conn, "aa").unwrap(), 1);
+        assert_eq!(file(&conn, &mine).unwrap(), (None, None));
+        assert_eq!(
+            files_gone(&conn, "aa").unwrap(),
+            [file_named("03"), file_named("04")]
+        );
+
+        // One that no send took.
+        forget_file(&conn, &file_named("05"), "aa").unwrap();
+        assert_eq!(files_gone(&conn, "aa").unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_send_that_changed_while_its_message_was_stored_is_shared_again() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "INSERT INTO pending_actions (id, account_id, kind, created_at) VALUES (7, 1, 'send', 0)",
+            [],
+        )
+        .unwrap();
+        let sync_id = create(&conn, 1, "a@example.com", 1_000, "aa", 7, 0).unwrap();
+        let first = AsSeen {
+            updated_at: 0,
+            send_at: 1_000,
+        };
+        let stored = file_named("01");
+
+        // Moved, and so edited perhaps, while its file went up.
+        reschedule(&conn, &sync_id, 2_000, 5).unwrap();
+        set_mime(&conn, &sync_id, None, None, 5).unwrap();
+        let file_and_preview = Some((stored.as_str(), &b"Plans"[..]));
+        assert!(!share(&conn, &sync_id, "v1", None, file_and_preview, first, 6).unwrap());
+        assert_eq!(get(&conn, &sync_id).unwrap().unwrap().draft_ref, None);
+        assert_eq!(file(&conn, &sync_id).unwrap(), (None, None));
+
+        // As it waits now.
+        let now = AsSeen {
+            updated_at: 5,
+            send_at: 2_000,
+        };
+        assert!(share(&conn, &sync_id, "v1", None, file_and_preview, now, 7).unwrap());
+        assert_eq!(
+            get(&conn, &sync_id).unwrap().unwrap().draft_ref.as_deref(),
+            Some("v1")
+        );
+        assert_eq!(
+            file(&conn, &sync_id).unwrap(),
+            (Some(stored.clone()), Some(b"Plans".to_vec()))
+        );
+
+        // Shared already, or cancelled: not again.
+        let after = AsSeen {
+            updated_at: 7,
+            send_at: 2_000,
+        };
+        assert!(!share(&conn, &sync_id, "v2", None, None, after, 8).unwrap());
+        set_mime(&conn, &sync_id, None, None, 9).unwrap();
+        set_state(&conn, &sync_id, CANCELLED, None, 9).unwrap();
+        let cancelled = AsSeen {
+            updated_at: 9,
+            send_at: 2_000,
+        };
+        assert!(!share(&conn, &sync_id, "v2", None, None, cancelled, 10).unwrap());
     }
 }

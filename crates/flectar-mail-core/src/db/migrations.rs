@@ -53,6 +53,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/034_synced_sends.sql")),
     Migration::Plain(include_str!("migrations/035_reply_reminders.sql")),
     Migration::Plain(include_str!("migrations/036_shared_send_messages.sql")),
+    Migration::Plain(include_str!("migrations/037_shared_send_files.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -384,6 +385,7 @@ mod tests {
             "snoozes",
             "split_rules",
             "sync_failures",
+            "synced_send_files_gone",
             "synced_sends",
             "synced_snoozes",
             "threads",

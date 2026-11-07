@@ -9557,6 +9557,7 @@ fn schedule_shared_send(
             // An IMAP or POP3 message is shared again as it is now.
             if !uploads_drafts {
                 repo::synced_sends::set_mime(conn, &send.sync_id, None, None, now)?;
+                repo::synced_sends::put_file(conn, &send.sync_id, None, None)?;
             }
             send.sync_id
         }

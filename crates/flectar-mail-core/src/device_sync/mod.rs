@@ -228,6 +228,9 @@ pub(crate) struct Service {
     client: Mutex<Option<Arc<SyncClient>>>,
     wake: Notify,
     run_lock: tokio::sync::Mutex<()>,
+    /// One share of scheduled messages at a time, so a message is never
+    /// stored twice. Apart from `run_lock`: an upload can take a while.
+    share_lock: tokio::sync::Mutex<()>,
     names: tokio::sync::Mutex<Names>,
     status: Mutex<DeviceSyncStatus>,
     pairing: Mutex<Option<Pairing>>,
@@ -310,6 +313,7 @@ impl Service {
             client: Mutex::new(None),
             wake: Notify::new(),
             run_lock: tokio::sync::Mutex::new(()),
+            share_lock: tokio::sync::Mutex::new(()),
             names: tokio::sync::Mutex::new(Names::default()),
             status: Mutex::new(DeviceSyncStatus::default()),
             pairing: Mutex::new(None),
@@ -484,7 +488,8 @@ impl Core {
             return;
         };
         let me = hex(&client.identity().device_id());
-        self.share_scheduled_messages(&me).await;
+        self.share_scheduled_messages(&me, &client).await;
+        self.remove_unneeded_files(&me, &client).await;
         for _ in 0..3 {
             let reach = match lock(&self.sync_service().status).state {
                 DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
@@ -524,7 +529,10 @@ impl Core {
                     thread_ids: driven.threads,
                 });
             }
-            if !driven.upload || reach != scheduled::Reach::Usable {
+            // Another device's messages this device now sends: fetched
+            // first, then the next round lets their sends start.
+            let fetched = self.fetch_scheduled_files(&client, driven.fetch).await;
+            if (!driven.upload && !fetched) || reach != scheduled::Reach::Usable {
                 return;
             }
             // Another run may have uploaded it already; either way, act on
@@ -535,16 +543,98 @@ impl Core {
         }
     }
 
+    /// Download the files of shared sends this device holds the claim for.
+    /// Returns whether one arrived.
+    async fn fetch_scheduled_files(&self, client: &SyncClient, sync_ids: Vec<String>) -> bool {
+        let mut fetched = false;
+        for sync_id in sync_ids {
+            let id = sync_id.clone();
+            let file = self
+                .db
+                .read(move |conn| crate::db::repo::synced_sends::file(conn, &id))
+                .await
+                .ok()
+                .and_then(|(file, _)| file)
+                .and_then(|file| scheduled::FileRef::from_json(&file));
+            let Some(file) = file else {
+                continue;
+            };
+            let reference = flectar_mail_sync_client::FileRef {
+                id: file.id,
+                key: file.key,
+                size: file.size,
+            };
+            match client.download_file(&reference).await {
+                Ok(mime) => {
+                    fetched |= self
+                        .db
+                        .write(move |conn| {
+                            crate::db::repo::synced_sends::put_mime(conn, &sync_id, Some(&mime))
+                        })
+                        .await
+                        .is_ok();
+                }
+                Err(error) => {
+                    tracing::info!(%error, "could not fetch a scheduled message; trying again");
+                }
+            }
+        }
+        fetched
+    }
+
+    /// Remove from Flectar Mail Sync's storage the files this device stored
+    /// that nothing needs any more: their send went out, was cancelled or
+    /// forgotten, or its message was stored again.
+    async fn remove_unneeded_files(&self, me: &str, client: &SyncClient) {
+        let me = me.to_owned();
+        let found = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let released = crate::db::repo::synced_sends::release_finished_files(&tx, &me)?;
+                let gone = crate::db::repo::synced_sends::files_gone(&tx, &me)?;
+                tx.commit()?;
+                Ok((released > 0, gone))
+            })
+            .await;
+        let Ok((released, gone)) = found else {
+            return;
+        };
+        for file in gone {
+            // Gone already counts: removed by an earlier try, or expired.
+            let removed = match scheduled::FileRef::from_json(&file) {
+                Some(reference) => client.delete_file(&reference.id).await.is_ok(),
+                None => true,
+            };
+            if removed {
+                let _ = self
+                    .db
+                    .write(move |conn| crate::db::repo::synced_sends::file_removed(conn, &file))
+                    .await;
+            }
+        }
+        // Their records no longer name them.
+        if released {
+            self.device_sync_now();
+        }
+    }
+
     /// Share the IMAP and POP3 messages this device scheduled. Their drafts
     /// stay on this device, so their records carry them for another device
-    /// to send; a message too large for a record goes out from here alone.
-    async fn share_scheduled_messages(&self, me: &str) {
-        let me = me.to_owned();
+    /// to send. A message too large for a record goes into a file in Flectar
+    /// Mail Sync's storage, when the server keeps files; otherwise it goes
+    /// out from here alone.
+    async fn share_scheduled_messages(&self, me: &str, client: &SyncClient) {
+        // What waits is read under the lock: another share may have just
+        // stored it.
+        let _share = self.sync_service().share_lock.lock().await;
+        let origin = me.to_owned();
         let waiting = self
             .db
             .read(move |conn| {
                 let mut statement = conn.prepare(
-                    "SELECT ss.sync_id, ss.account_id, MAX(m.id) FROM synced_sends ss
+                    "SELECT ss.sync_id, ss.account_id, MAX(m.id), ss.updated_at, ss.send_at
+                     FROM synced_sends ss
                      JOIN accounts a ON a.id = ss.account_id
                      JOIN messages m ON m.account_id = ss.account_id
                        AND m.message_id = ss.message_id AND m.is_draft = 1
@@ -553,11 +643,15 @@ impl Core {
                      GROUP BY ss.sync_id",
                 )?;
                 let rows = statement
-                    .query_map([&me], |row| {
+                    .query_map([&origin], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, i64>(1)?,
                             row.get::<_, i64>(2)?,
+                            crate::db::repo::synced_sends::AsSeen {
+                                updated_at: row.get(3)?,
+                                send_at: row.get(4)?,
+                            },
                         ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -568,7 +662,7 @@ impl Core {
             return;
         };
         let mut shared = false;
-        for (sync_id, account_id, draft_id) in waiting {
+        for (sync_id, account_id, draft_id, seen) in waiting {
             // Signed and encrypted here, with this device's keys, if the
             // account's mail security asks for it.
             let built =
@@ -587,35 +681,107 @@ impl Core {
                     }
                     Err(error) => Err(error),
                 };
-            let (mime, version) = match built {
+            let version = |raw: &[u8]| {
+                use sha2::Digest as _;
+                hex(&sha2::Sha256::digest(raw)[..8])
+            };
+            let (mime, file, version) = match built {
                 Ok(raw) if raw.len() <= scheduled::MAX_SHARED_MESSAGE_BYTES => {
-                    use sha2::Digest as _;
-                    let version = hex(&sha2::Sha256::digest(&raw)[..8]);
-                    (Some(raw), version)
+                    let version = version(&raw);
+                    (Some(raw), None, version)
                 }
-                Ok(_) => (None, scheduled::LOCAL_ONLY.to_owned()),
+                Ok(raw) if raw.len() <= scheduled::MAX_FILE_MESSAGE_BYTES => {
+                    match self.store_scheduled_file(client, &raw).await {
+                        Ok(Some(file)) => (None, Some(file), version(&raw)),
+                        Ok(None) => (None, None, scheduled::LOCAL_ONLY.to_owned()),
+                        // Tried again on the next round.
+                        Err(error) => {
+                            tracing::info!(%error, "could not store a scheduled message yet");
+                            continue;
+                        }
+                    }
+                }
+                Ok(_) => (None, None, scheduled::LOCAL_ONLY.to_owned()),
                 Err(error) => {
                     tracing::info!(%error, "a scheduled message goes out from this device alone");
-                    (None, scheduled::LOCAL_ONLY.to_owned())
+                    (None, None, scheduled::LOCAL_ONLY.to_owned())
                 }
             };
-            shared |= self
+            let me = me.to_owned();
+            let written = self
                 .db
                 .write(move |conn| {
-                    crate::db::repo::synced_sends::set_mime(
+                    let file_and_preview = file
+                        .as_ref()
+                        .map(|(file, preview)| (file.as_str(), preview.as_slice()));
+                    let taken = crate::db::repo::synced_sends::share(
                         conn,
                         &sync_id,
+                        &version,
                         mime.as_deref(),
-                        Some(&version),
+                        file_and_preview,
+                        seen,
                         now_ms(),
-                    )
+                    )?;
+                    // It changed meanwhile, and is shared again as it is
+                    // now: the file stored for it goes.
+                    if !taken && let Some((file, _)) = &file {
+                        crate::db::repo::synced_sends::forget_file(conn, file, &me)?;
+                    }
+                    Ok(taken)
                 })
-                .await
-                .is_ok();
+                .await;
+            shared |= matches!(written, Ok(true));
         }
         if shared {
             self.device_sync_now();
         }
+    }
+
+    /// Store a message too large for its record as a file, and make its
+    /// preview. `Ok(None)` when the server keeps no files this large, so the
+    /// message goes out from this device alone.
+    async fn store_scheduled_file(
+        &self,
+        client: &SyncClient,
+        raw: &[u8],
+    ) -> std::result::Result<Option<(String, Vec<u8>)>, SyncError> {
+        let Some(files) = client.files().await? else {
+            return Ok(None);
+        };
+        // Sealing adds a version byte, a nonce and a tag.
+        let sealed = raw.len() as u64 + 41;
+        if sealed > files.max_file_bytes {
+            return Ok(None);
+        }
+        let file = match client.upload_file(raw).await {
+            Ok(file) => file,
+            Err(error) => {
+                return match error {
+                    // Nothing changes until the group pays, or has room.
+                    SyncError::PaymentRequired => Ok(None),
+                    SyncError::Server {
+                        status: 413 | 507, ..
+                    } => Ok(None),
+                    error => Err(error),
+                };
+            }
+        };
+        let reference = scheduled::FileRef {
+            id: file.id,
+            key: file.key,
+            size: file.size,
+        };
+        let text = crate::sync::ingest::parse_or_text(raw)
+            .text
+            .unwrap_or_default()
+            .chars()
+            .take(2000)
+            .collect::<String>();
+        Ok(Some((
+            reference.to_json(),
+            crate::mime::preview(raw, &text),
+        )))
     }
 
     async fn resume_device_sync(&self) -> Result<()> {

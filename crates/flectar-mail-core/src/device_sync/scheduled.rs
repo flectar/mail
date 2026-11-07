@@ -13,7 +13,9 @@
 //! part only once it holds the version that device uploaded. An IMAP or
 //! POP3 account keeps drafts on the device that wrote them, so there the
 //! record carries the message itself, which other devices keep as a draft
-//! until it goes out. When Flectar Mail Sync cannot be reached, only the
+//! until it goes out. A message too large for a record goes into a file in
+//! Flectar Mail Sync's storage instead: the record carries a preview that
+//! other devices show, and only the device that sends it downloads it. When Flectar Mail Sync cannot be reached, only the
 //! device that scheduled it sends it, a little late, after checking that no
 //! other device did.
 
@@ -52,6 +54,8 @@ pub(crate) const MAX_SHARED_MESSAGE_BYTES: usize = 176 * 1024;
 /// The version of a message too large to share: only the device that
 /// scheduled it can send it.
 pub(crate) const LOCAL_ONLY: &str = "local";
+/// The largest message that goes into a file: what mail servers accept.
+pub(crate) const MAX_FILE_MESSAGE_BYTES: usize = 25 * 1000 * 1000;
 
 /// A shared send as its record says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +70,10 @@ pub(super) struct Record<'a> {
     pub claim: Option<(&'a str, i64)>,
     /// An IMAP or POP3 message, in base64.
     pub mime: Option<&'a str>,
+    /// The file a message too large for the record went into.
+    pub file: Option<&'a Value>,
+    /// What other devices show of that message, in base64.
+    pub preview: Option<&'a str>,
 }
 
 impl Record<'_> {
@@ -74,6 +82,78 @@ impl Record<'_> {
         let text = self.mime?;
         base64::engine::general_purpose::STANDARD.decode(text).ok()
     }
+
+    /// The file reference, as stored.
+    pub(super) fn file_ref(&self) -> Option<String> {
+        self.file
+            .and_then(FileRef::parse)
+            .map(|file| file.to_json())
+    }
+
+    pub(super) fn preview_bytes(&self) -> Option<Vec<u8>> {
+        let text = self.preview?;
+        base64::engine::general_purpose::STANDARD.decode(text).ok()
+    }
+}
+
+/// A file in Flectar Mail Sync's storage, as records name it: its id, the
+/// key it is sealed under, and its sealed size.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct FileRef {
+    pub id: [u8; 16],
+    pub key: [u8; 32],
+    pub size: u64,
+}
+
+impl std::fmt::Debug for FileRef {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("FileRef")
+            .field("size", &self.size)
+            .finish_non_exhaustive()
+    }
+}
+
+fn hex_bytes<const N: usize>(text: &str) -> Option<[u8; N]> {
+    if text.len() != N * 2 || !text.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (index, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(out)
+}
+
+fn hex_text(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+impl FileRef {
+    pub(crate) fn parse(value: &Value) -> Option<Self> {
+        Some(Self {
+            id: hex_bytes(value.get("id")?.as_str()?)?,
+            key: hex_bytes(value.get("key")?.as_str()?)?,
+            size: value.get("size")?.as_u64()?,
+        })
+    }
+
+    pub(crate) fn from_json(text: &str) -> Option<Self> {
+        Self::parse(&serde_json::from_str(text).ok()?)
+    }
+
+    pub(crate) fn to_json(&self) -> String {
+        json!({"id": hex_text(&self.id), "key": hex_text(&self.key), "size": self.size}).to_string()
+    }
+}
+
+/// What a shared send's record carries besides its schedule.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Carried<'a> {
+    pub mime: Option<&'a [u8]>,
+    /// The file reference, as stored.
+    pub file: Option<&'a str>,
+    pub preview: Option<&'a [u8]>,
 }
 
 pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
@@ -100,12 +180,14 @@ pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
         error: body.get("error").and_then(Value::as_str),
         claim,
         mime: body.get("mime").and_then(Value::as_str),
+        file: body.get("file").filter(|file| file.is_object()),
+        preview: body.get("preview").and_then(Value::as_str),
     })
 }
 
 /// The record body of a shared send of the account with sync id `account`,
-/// with the IMAP or POP3 message it carries, if any.
-pub(super) fn body(send: &SyncedSend, account: &str, mime: Option<&[u8]>) -> Value {
+/// with the IMAP or POP3 message, or file and preview, it carries.
+pub(super) fn body(send: &SyncedSend, account: &str, carried: Carried) -> Value {
     let mut body = json!({
         "account": account,
         "messageId": send.message_id,
@@ -119,8 +201,18 @@ pub(super) fn body(send: &SyncedSend, account: &str, mime: Option<&[u8]>) -> Val
             _ => Value::Null,
         },
     });
-    if let Some(mime) = mime {
-        body["mime"] = json!(base64::engine::general_purpose::STANDARD.encode(mime));
+    let base64 = &base64::engine::general_purpose::STANDARD;
+    if let Some(mime) = carried.mime {
+        body["mime"] = json!(base64.encode(mime));
+    }
+    if let Some(file) = carried
+        .file
+        .and_then(|file| serde_json::from_str::<Value>(file).ok())
+    {
+        body["file"] = file;
+    }
+    if let Some(preview) = carried.preview {
+        body["preview"] = json!(base64.encode(preview));
     }
     body
 }
@@ -453,6 +545,8 @@ pub(crate) struct Driven {
     pub threads: Vec<i64>,
     /// A claim or a result waits to reach the other devices.
     pub upload: bool,
+    /// Shared sends this device may send once their file is downloaded.
+    pub fetch: Vec<String>,
 }
 
 impl Driven {
@@ -554,9 +648,12 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
             && protocol(conn, send.account_id)?
                 .as_deref()
                 .is_some_and(carries_message)
-            && let Some(mime) = synced_sends::mime(conn, &send.sync_id)?
+            && let Some(shown) = match synced_sends::mime(conn, &send.sync_id)? {
+                Some(mime) => Some(mime),
+                None => synced_sends::file(conn, &send.sync_id)?.1,
+            }
         {
-            driven.thread(materialize(conn, &send, &mime)?);
+            driven.thread(materialize(conn, &send, &shown)?);
         }
         let local_draft = draft(conn, send.account_id, &send.message_id)?;
 
@@ -660,7 +757,11 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
                 if send.may_send_until != Some(until) {
                     synced_sends::set_may_send_until(conn, &send.sync_id, Some(until))?;
                 }
-                if send_at(conn, action, send.send_at)? {
+                // Another device's message in a file is fetched before its
+                // send may start.
+                if !origin && waits_for_file(conn, &send.sync_id)? {
+                    driven.fetch.push(send.sync_id.clone());
+                } else if send_at(conn, action, send.send_at)? {
                     driven.nudge(send.account_id);
                     driven.thread(thread_of_action(conn, action)?);
                 }
@@ -705,6 +806,12 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
         driven.upload = true;
     }
     Ok(driven)
+}
+
+/// Whether a shared message is in a file that is not here yet.
+fn waits_for_file(conn: &Connection, sync_id: &str) -> Result<bool> {
+    Ok(synced_sends::file(conn, sync_id)?.0.is_some()
+        && synced_sends::mime(conn, sync_id)?.is_none())
 }
 
 /// Whether the draft's latest edit still waits to reach the mail server.
@@ -851,7 +958,11 @@ mod tests {
     /// The server took the record with `claim`.
     fn server_has(conn: &Connection, sync_id: &str, claim: Option<(&str, i64)>) {
         let send = synced_sends::get(conn, sync_id).unwrap().unwrap();
-        let mut body = body(&send, "0123456789abcdef0123456789abcdef", None);
+        let mut body = body(
+            &send,
+            "0123456789abcdef0123456789abcdef",
+            Carried::default(),
+        );
         body["claim"] = match claim {
             Some((device, until)) => json!({"device": device, "until": until}),
             None => Value::Null,
@@ -1424,13 +1535,17 @@ mod tests {
         let conn = imap_helper();
         let sync_id = scheduled_elsewhere(&conn, Some("v1"));
         let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
-        let body = body(&send, "0123456789abcdef0123456789abcdef", Some(MESSAGE));
+        let carried = Carried {
+            mime: Some(MESSAGE),
+            ..Carried::default()
+        };
+        let body = body(&send, "0123456789abcdef0123456789abcdef", carried);
         assert_eq!(parse(&body).unwrap().message().as_deref(), Some(MESSAGE));
         assert!(
             parse(&super::body(
                 &send,
                 "0123456789abcdef0123456789abcdef",
-                None
+                Carried::default()
             ))
             .unwrap()
             .message()
@@ -1463,5 +1578,70 @@ mod tests {
             )
             .unwrap();
         assert!(kept);
+    }
+
+    #[test]
+    fn another_devices_large_message_waits_for_its_file_before_its_send_starts() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        let preview = crate::mime::preview(MESSAGE, "See you on Monday.");
+        let file = FileRef {
+            id: [3; 16],
+            key: [4; 32],
+            size: 9000,
+        }
+        .to_json();
+        synced_sends::put_file(&conn, &sync_id, Some(&file), Some(&preview)).unwrap();
+
+        // Shown from its preview, and held.
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let (_, is_draft, subject) = shadow(&conn, &sync_id).expect("kept as a draft");
+        assert!(is_draft);
+        assert_eq!(subject, "Plans");
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .expect("a held send");
+
+        // Its claim holds: the file comes first.
+        let now = AT - HELPER_LEAD_MS;
+        drive(&conn, HELPER, now, Reach::Usable).unwrap();
+        server_has(&conn, &sync_id, Some((HELPER, AT + CLAIM_MS)));
+        let driven = drive(&conn, HELPER, now, Reach::Usable).unwrap();
+        assert_eq!(driven.fetch, vec![sync_id.clone()]);
+        assert_eq!(not_before(&conn, action), HELD);
+
+        // Fetched: it goes out at its time.
+        synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
+        let driven = drive(&conn, HELPER, now, Reach::Usable).unwrap();
+        assert!(driven.fetch.is_empty());
+        assert_eq!(not_before(&conn, action), AT);
+    }
+
+    #[test]
+    fn a_file_reference_and_preview_travel_in_the_record() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        let file = FileRef {
+            id: [3; 16],
+            key: [4; 32],
+            size: 9000,
+        };
+        let json = file.to_json();
+        let carried = Carried {
+            file: Some(&json),
+            preview: Some(b"Subject: Plans\r\n\r\nSee you"),
+            ..Carried::default()
+        };
+        let body = body(&send, "0123456789abcdef0123456789abcdef", carried);
+        let record = parse(&body).unwrap();
+        assert_eq!(FileRef::from_json(&record.file_ref().unwrap()), Some(file));
+        assert_eq!(
+            record.preview_bytes().as_deref(),
+            Some(&b"Subject: Plans\r\n\r\nSee you"[..])
+        );
+        assert!(record.message().is_none());
     }
 }

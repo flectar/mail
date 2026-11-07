@@ -331,13 +331,21 @@ pub(crate) fn snapshot(
         ) else {
             continue;
         };
-        let mime = repo::synced_sends::mime(conn, &send.sync_id)?;
+        let (file, preview) = repo::synced_sends::file(conn, &send.sync_id)?;
+        // A message in a file never goes into the record, even once fetched
+        // here, and nothing larger than a record holds ever does: one record
+        // too large would stop every upload.
+        let mime = repo::synced_sends::mime(conn, &send.sync_id)?.filter(|mime| {
+            file.is_none() && mime.len() <= super::scheduled::MAX_SHARED_MESSAGE_BYTES
+        });
+        let carried = super::scheduled::Carried {
+            mime: mime.as_deref(),
+            file: file.as_deref(),
+            preview: preview.as_deref(),
+        };
         records.insert(
             id,
-            entry(
-                SCHEDULED,
-                super::scheduled::body(&send, account, mime.as_deref()),
-            ),
+            entry(SCHEDULED, super::scheduled::body(&send, account, carried)),
         );
     }
 
@@ -966,8 +974,22 @@ fn apply_scheduled(
     if let Some(thread) = super::scheduled::put(conn, &sync_id, &shared, crate::models::now_ms())? {
         applied.threads_changed.push(thread);
     }
-    // An IMAP or POP3 message travels with its schedule.
-    repo::synced_sends::put_mime(conn, &sync_id, record.message().as_deref())?;
+    // An IMAP or POP3 message travels with its schedule, or in a file. A
+    // message in a file stays here once fetched, while the record names that
+    // file: another one holds the message as it was edited since.
+    let file = record.file_ref();
+    let (fetched_from, _) = repo::synced_sends::file(conn, &sync_id)?;
+    match record.message() {
+        Some(mime) => repo::synced_sends::put_mime(conn, &sync_id, Some(&mime))?,
+        None if file.is_some() && file == fetched_from => {}
+        None => repo::synced_sends::put_mime(conn, &sync_id, None)?,
+    }
+    repo::synced_sends::put_file(
+        conn,
+        &sync_id,
+        file.as_deref(),
+        record.preview_bytes().as_deref(),
+    )?;
     Ok(Outcome::Applied)
 }
 
@@ -1608,6 +1630,63 @@ mod tests {
         .unwrap();
         assert_eq!(applied.threads_changed, [thread]);
         assert!(reminder_records(&phone).is_empty());
+    }
+
+    #[test]
+    fn a_fetched_message_stays_while_its_record_names_its_file() {
+        let account = "cc".repeat(16);
+        let (phone, _) = device_with(&account, None, 10);
+        let id = [5u8; 16];
+        let sync_id = sync_id_hex(&id);
+        let record = |file: u8, claim: Value| {
+            let file = super::super::scheduled::FileRef {
+                id: [file; 16],
+                key: [4; 32],
+                size: 9000,
+            };
+            entry(
+                SCHEDULED,
+                json!({
+                    "account": account, "messageId": "plans@example.com",
+                    "sendAt": 4_000_000_000_000_i64, "origin": "aa", "draft": "v1",
+                    "state": "scheduled", "error": null, "claim": claim,
+                    "file": serde_json::from_str::<Value>(&file.to_json()).unwrap(),
+                }),
+            )
+        };
+        let change = |previous: Option<Entry>, next: Entry| {
+            let mut incoming = BTreeMap::new();
+            incoming.insert(
+                id,
+                Incoming {
+                    previous,
+                    next: Some(next),
+                },
+            );
+            apply(
+                &phone,
+                &incoming,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap();
+        };
+        let fetched = || repo::synced_sends::mime(&phone, &sync_id).unwrap();
+
+        let first = record(3, Value::Null);
+        change(None, first.clone());
+        assert_eq!(fetched(), None);
+        repo::synced_sends::put_mime(&phone, &sync_id, Some(b"Subject: Plans")).unwrap();
+
+        // Claimed: the record still names the file it came from.
+        let claimed = record(3, json!({"device": "bb", "until": 1}));
+        change(Some(first), claimed.clone());
+        assert_eq!(fetched().as_deref(), Some(&b"Subject: Plans"[..]));
+
+        // Stored again after an edit: the copy here is out of date.
+        change(Some(claimed), record(8, Value::Null));
+        assert_eq!(fetched(), None);
     }
 
     #[test]
