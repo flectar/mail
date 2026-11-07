@@ -893,6 +893,10 @@ impl GpuEmailRenderer {
             }
         };
         self.update_image_priorities();
+        if self.tile_count != tiles {
+            // Painting leaves the memory it freed with the allocator.
+            crate::memory::release_free_heap_when_idle();
+        }
         if let Some(start) = start
             && matches!(&result, Ok(Some(_)))
         {
@@ -1110,6 +1114,9 @@ impl GpuEmailRenderer {
             });
         }
         self.update_image_priorities();
+        if self.tile_count != tiles {
+            crate::memory::release_free_heap_when_idle();
+        }
         result
     }
 
