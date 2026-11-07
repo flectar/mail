@@ -360,6 +360,18 @@ pub struct CoreMailSource {
     grouping: Arc<std::sync::Mutex<MailGrouping>>,
 }
 
+/// Accounts changed outside the window, such as on another device through
+/// Flectar Sync.
+#[derive(Clone)]
+pub(crate) struct AccountChangeNotice(Arc<std::sync::atomic::AtomicU64>);
+
+impl AccountChangeNotice {
+    /// Snapshots of the accounts read before must not be applied.
+    pub(crate) fn note(&self) {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 pub struct AccountSnapshot {
     pub revision: u64,
     pub accounts: Vec<Account>,
@@ -466,6 +478,17 @@ impl CoreMailSource {
 
     pub(crate) fn file_core(&self) -> Arc<Core> {
         Arc::clone(&self.core)
+    }
+
+    /// Flectar Sync's settings call the core directly.
+    pub(crate) fn device_sync_core(&self) -> Arc<Core> {
+        Arc::clone(&self.core)
+    }
+
+    /// A way to say accounts changed outside this window, which doesn't keep
+    /// the core alive.
+    pub(crate) fn account_change_notice(&self) -> AccountChangeNotice {
+        AccountChangeNotice(Arc::clone(&self.account_revision))
     }
     pub async fn start(
         paths: Paths,

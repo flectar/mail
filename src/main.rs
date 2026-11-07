@@ -72,6 +72,7 @@ mod sidebar_model;
 mod single_instance;
 mod startup;
 mod startup_metrics;
+mod sync_controller;
 mod tabs;
 mod theme;
 mod ui_dispatch;
@@ -3328,6 +3329,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // that replaces its temporary snippet with the real body.
     let pending_core_updates = Arc::new(Mutex::new(PendingCoreUpdates::default()));
     let core_updates_wake = UiWake::new(app.as_weak(), |app| app.invoke_drain_core_updates());
+    let device_sync = Rc::new(sync_controller::SyncController::default());
+
+    // Long-running account and OAuth work always stays on Tokio. This bridge
+    // applies only small, already-materialized results on the Slint thread.
+    let (ui_task_raw_tx, ui_task_rx) = bounded_ui_channel::<UiTaskUpdate>();
+    let ui_task_tx = UiSender::new(
+        ui_task_raw_tx,
+        UiWake::new(app.as_weak(), |app| app.invoke_drain_ui_task_updates()),
+    );
 
     let (message_load_raw_tx, message_load_rx) = bounded_ui_channel::<MessageLoadUpdate>();
     let message_load_tx = UiSender::new(
@@ -3849,6 +3859,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let contacts_loaded_for_core = Rc::clone(&contacts_loaded);
     let contacts_loading_for_core = Rc::clone(&contacts_loading);
     let contact_state_for_core_updates = Rc::clone(&contact_state);
+    let device_sync_for_core_updates = Rc::clone(&device_sync);
+    let ui_task_tx_for_device_sync = ui_task_tx.clone();
     app.on_drain_core_updates(move || {
         let pending = {
             let mut pending = pending_core_updates_for_ui
@@ -3992,6 +4004,17 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             {
                 app.invoke_load_contacts();
             }
+        }
+        if let Some(app) = mail_update_app.upgrade() {
+            let calendar_month = calendar_for_core_updates.borrow().visible_month;
+            device_sync_for_core_updates.apply(
+                &app,
+                &mail_update_state,
+                &mail_update_runtime,
+                &ui_task_tx_for_device_sync,
+                calendar_month,
+                pending.device_sync,
+            );
         }
         if !mail_active {
             return;
@@ -4308,6 +4331,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let startup_runtime = runtime.clone();
     let startup_pending_core_updates = Arc::clone(&pending_core_updates);
     let startup_core_wake = core_updates_wake.clone();
+    let startup_device_sync = Rc::clone(&device_sync);
     let startup_notification_publisher = platform.notification_publisher.clone();
     let startup_app = app.as_weak();
     let startup_paths_for_ui = platform.paths.clone();
@@ -4488,6 +4512,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                         Arc::clone(&startup_pending_core_updates),
                         startup_core_wake.clone(),
                     );
+                    startup_device_sync.attach(&app, &core);
                     notifications::spawn_dispatcher(
                         &startup_runtime,
                         core.file_core(),
@@ -4737,13 +4762,6 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
     render_current(&app, &state, &runtime)?;
 
-    // Long-running account and OAuth work always stays on Tokio. This bridge
-    // applies only small, already-materialized results on the Slint thread.
-    let (ui_task_raw_tx, ui_task_rx) = bounded_ui_channel::<UiTaskUpdate>();
-    let ui_task_tx = UiSender::new(
-        ui_task_raw_tx,
-        UiWake::new(app.as_weak(), |app| app.invoke_drain_ui_task_updates()),
-    );
     let ui_task_rx = Rc::new(RefCell::new(ui_task_rx));
     let ui_task_state = Rc::clone(&state);
     let ui_task_runtime = runtime.clone();
@@ -5051,7 +5069,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             return;
         }
         let account_id = i64::from(account_id);
-        let (core, scope, query, limit, profile, local) = {
+        let calendar_month = calendar_for_account_delete.borrow().visible_month;
+        let (core, view, local) = {
             let state = state_for_account_delete.borrow();
             let Some(core) = state.core.clone() else {
                 return;
@@ -5068,24 +5087,12 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             {
                 return;
             }
-            let scope = if account_owns_scope(&state, account_id) {
-                Scope::UNIFIED_INBOX
-            } else {
-                state.scope
-            };
-            // Keep a surviving selection reachable after browsing past the
-            // first page, including when deleting from a unified scope.
-            let limit = state.messages.len().max(PAGE_SIZE) as i64;
             (
                 core,
-                scope,
-                state.query.clone(),
-                limit,
-                state.profile_accounts.clone(),
+                RemovalView::of(&state, account_id, calendar_month),
                 local,
             )
         };
-        let calendar_month = calendar_for_account_delete.borrow().visible_month;
         app.set_account_setup_in_progress(true);
         app.set_sync_status(if local {
             UiMessage::plain("Deleting mail on this device…")
@@ -5107,47 +5114,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             } else {
                 account_was_removed(account_id, &result, accounts.as_ref())
             };
-            // Match the selection `reconcile_removed_account` will leave.
-            let scope = accounts.as_ref().map_or(scope, |snapshot| {
-                let shown = snapshot
-                    .accounts
-                    .iter()
-                    .filter(|account| {
-                        profile
-                            .as_ref()
-                            .is_none_or(|accounts| accounts.binary_search(&account.id).is_ok())
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                scope.visible_for(&shown)
-            });
-            let (metadata, page) = if removed {
-                let (metadata, page) = tokio::join!(
-                    core.load_mail_metadata(scope),
-                    core.load_page(scope, &query, None, limit, false)
-                );
-                (metadata.ok(), page.ok())
-            } else {
-                (None, None)
-            };
-            let calendar_sources = core
-                .load_calendars(None)
-                .await
-                .ok()
-                .map(calendar::calendar_sources);
-            let calendar_events =
-                if let Ok((start, end)) = calendar::calendar_range_millis(calendar_month) {
-                    core.load_events(start, end).await.ok().map(|events| {
-                        events
-                            .into_iter()
-                            .map(calendar::core_calendar_event)
-                            .collect()
-                    })
-                } else {
-                    None
-                };
+            let removal =
+                read_account_removal(&core, account_id, removed, accounts.as_ref(), view).await;
+            let incomplete = removal.metadata.is_none() || removal.page.is_none();
             let message = match result {
-                Ok(()) if local && (metadata.is_none() || page.is_none()) => {
+                Ok(()) if local && incomplete => {
                     UiMessage::plain("Mail on this device deleted. Mail refresh will retry.")
                 }
                 Ok(()) if local => UiMessage::plain("Mail on this device deleted."),
@@ -5158,7 +5129,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 Err(error) if local => {
                     UiMessage::detail("Could not delete mail on this device: {}", error)
                 }
-                Ok(()) if metadata.is_none() || page.is_none() => {
+                Ok(()) if incomplete => {
                     UiMessage::plain("Account removed. Mail refresh will retry.")
                 }
                 Ok(()) => UiMessage::plain("Account removed from this device."),
@@ -5171,17 +5142,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                 .send(UiTaskUpdate {
                     message,
                     accounts,
-                    account_removal: Some(AccountRemovalUpdate {
-                        account_id,
-                        removed,
-                        scope,
-                        query,
-                        metadata,
-                        page,
-                        calendar_month,
-                        calendar_events,
-                        calendar_sources,
-                    }),
+                    account_removal: Some(removal),
                     calendar_connections: core.load_calendar_connections().await.ok(),
                     carddav_connections: core.load_carddav_connections().await.ok(),
                     calendar_error: None,
@@ -7874,6 +7835,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
 
     import_controller::register_import_callbacks(&app, &platform.documents, &state, &runtime);
+    device_sync.register(&app, &state, &runtime);
 
     register_renderer_input_callbacks(
         &app,

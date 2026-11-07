@@ -49,6 +49,13 @@ pub(crate) fn email_fonts() -> Option<&'static EmailFonts> {
     None
 }
 
+/// How this device appears in Flectar Sync's device list: its host name and
+/// operating system.
+#[cfg(desktop)]
+pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    flectar_mail_core::device_sync::DeviceDescription::default()
+}
+
 /// Build the platform context for the process launcher in src/desktop.rs.
 #[cfg(desktop)]
 pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::error::CoreError> {

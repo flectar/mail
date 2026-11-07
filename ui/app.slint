@@ -41,6 +41,7 @@ import { ConfirmationDialog } from "components/confirmation-dialog.slint";
 import { SettingsDialog } from "dialogs/settings-dialog.slint";
 import { AccountImport, ImportDialog } from "dialogs/import-dialog.slint";
 export { LocalMailUi } from "local-mail.slint";
+export { SyncUi, SyncDeviceRow } from "device-sync.slint";
 export { Numbers } from "numbers.slint";
 import { LocalMailUi } from "local-mail.slint";
 export { AccountImport, ImportAccountRow, ImportFailureRow, ImportFindingRow, ImportMailRow, ImportProfileRow } from "dialogs/import-dialog.slint";
@@ -349,6 +350,8 @@ export global I18n {
         if (key == "Could not save account order: {}") { return @tr("Could not save account order: {}", argument); }
         if (key == "Mail history updated. Background sync is adjusting now.") { return @tr("Mail history updated. Background sync is adjusting now."); }
         if (key == "Account removed from this device.") { return @tr("Account removed from this device."); }
+        if (key == "Account removed on another device.") { return @tr("Account removed on another device."); }
+        if (key == "Accounts updated from your other devices.") { return @tr("Accounts updated from your other devices."); }
         if (key == "Account removed. Mail refresh will retry.") { return @tr("Account removed. Mail refresh will retry."); }
         if (key == "Account removed; local cleanup needs a retry: {}") { return @tr("Account removed; local cleanup needs a retry: {}", argument); }
         if (key == "Could not remove account: {}") { return @tr("Could not remove account: {}", argument); }

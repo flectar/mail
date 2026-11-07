@@ -123,3 +123,11 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
 pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }
+
+/// How this device appears in Flectar Sync's device list.
+pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    flectar_mail_core::device_sync::DeviceDescription {
+        platform: "ios".to_owned(),
+        ..Default::default()
+    }
+}

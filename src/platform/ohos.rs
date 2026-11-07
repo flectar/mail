@@ -88,3 +88,11 @@ pub fn configure_email_fonts(fonts: super::EmailFonts) {
 pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     EMAIL_FONTS.get()
 }
+
+/// How this device appears in Flectar Sync's device list.
+pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    flectar_mail_core::device_sync::DeviceDescription {
+        platform: "harmonyos".to_owned(),
+        ..Default::default()
+    }
+}

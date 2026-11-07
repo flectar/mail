@@ -574,6 +574,7 @@ pub(crate) enum StartupUpdate {
 }
 
 const MAX_PENDING_THREAD_UPDATES: usize = 2_048;
+const MAX_PENDING_PAIRING_STEPS: usize = 16;
 
 /// Cross-thread core events are collapsed to the latest meaningful state.
 /// A massive backfill can therefore never grow an unbounded UI queue or make
@@ -590,6 +591,22 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) server_only_changed: bool,
     pub(crate) calendar_changed: bool,
     pub(crate) contacts_changed: bool,
+    pub(crate) device_sync: DeviceSyncUpdates,
+}
+
+/// What Flectar Sync reported since the window last looked.
+#[derive(Default)]
+pub(crate) struct DeviceSyncUpdates {
+    /// Where sync stands, as last reported.
+    pub(crate) status: Option<flectar_mail_core::device_sync::DeviceSyncStatus>,
+    /// Steps of adding a device, by pairing, oldest first. A pairing the
+    /// user ended can still report one; the window keeps only its own.
+    pub(crate) pairing: Vec<(u64, flectar_mail_core::device_sync::PairingEvent)>,
+    /// Another device changed synced preferences.
+    pub(crate) settings_changed: bool,
+    /// Another device changed accounts; these were removed.
+    pub(crate) accounts_changed: bool,
+    pub(crate) removed_accounts: Vec<i64>,
 }
 
 impl PendingCoreUpdates {
@@ -720,6 +737,7 @@ pub(crate) fn spawn_core_event_listener(
     let mut events = core.subscribe_events();
     // Weak, so the loop still ends when the core and its event bus are gone.
     let stores = Arc::downgrade(&core.file_core());
+    let accounts_changed = core.account_change_notice();
     runtime.spawn(async move {
         use tokio::sync::broadcast::error::RecvError;
 
@@ -806,7 +824,51 @@ pub(crate) fn spawn_core_event_listener(
                         .server_only_changed = true;
                     true
                 }
+                Ok(CoreEvent::DeviceSync(status)) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .device_sync
+                        .status = Some(status);
+                    true
+                }
+                Ok(CoreEvent::DeviceSyncPairing { pairing, event }) => {
+                    let mut pending = pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let steps = &mut pending.device_sync.pairing;
+                    // A pairing has a handful of steps; never let a stalled
+                    // window queue more.
+                    if steps.len() == MAX_PENDING_PAIRING_STEPS {
+                        steps.remove(0);
+                    }
+                    steps.push((pairing, event));
+                    true
+                }
+                Ok(CoreEvent::SettingsChanged) => {
+                    pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .device_sync
+                        .settings_changed = true;
+                    true
+                }
+                Ok(CoreEvent::AccountsChanged { removed }) => {
+                    // Before the window reads the accounts again, so a
+                    // snapshot read earlier can't bring the old ones back.
+                    accounts_changed.note();
+                    let mut pending = pending
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    pending.device_sync.accounts_changed = true;
+                    pending.device_sync.removed_accounts.extend(removed);
+                    true
+                }
                 Err(RecvError::Lagged(_)) => {
+                    // Settings and accounts may have changed by sync, and
+                    // the status it reported is lost: read them again.
+                    accounts_changed.note();
+                    let status = stores.upgrade().map(|core| core.device_sync_status());
                     let mut pending = pending
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -814,6 +876,11 @@ pub(crate) fn spawn_core_event_listener(
                     pending.all_mail_changed = true;
                     pending.calendar_changed = true;
                     pending.contacts_changed = true;
+                    if status.is_some() {
+                        pending.device_sync.status = status;
+                    }
+                    pending.device_sync.settings_changed = true;
+                    pending.device_sync.accounts_changed = true;
                     true
                 }
                 Ok(_) => false,
@@ -882,6 +949,11 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_workspace_list_pane_width(normalized_workspace_list_pane_width(
         settings.workspace_list_pane_width,
     ) as f32);
+    apply_theme(app, settings);
+}
+
+/// The light or dark mode, palette and custom colors.
+pub(crate) fn apply_theme(app: &AppWindow, settings: &Settings) {
     app.set_theme_mode(
         match settings.theme.as_str() {
             "carbon" | "dark" => "dark",

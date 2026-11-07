@@ -1958,6 +1958,7 @@ dependencies = [
  "pdfium-render",
  "percent-encoding",
  "pulldown-cmark",
+ "qrcode",
  "reqwest",
  "rfd",
  "seccompiler",
@@ -5345,6 +5346,12 @@ name = "pulldown-cmark-escape"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "007d8adb5ddab6f8e3f491ac63566a7d5002cc7ed73901f72057943fa71ae1ae"
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"
