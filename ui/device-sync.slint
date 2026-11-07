@@ -399,6 +399,8 @@ component PricingCard inherits Rectangle {
         }
         for feature in [
             @tr("All your devices, one subscription"),
+            @tr("Scheduled emails go out from any of your devices"),
+            @tr("Snoozes, reply reminders and templates on every device"),
             @tr("Accounts, signatures, profiles and preferences"),
             @tr("End-to-end encrypted: not even Flectar Mail can read it"),
         ] : Rectangle {
@@ -583,7 +585,7 @@ export component SyncSettingsPage inherits VerticalBox {
     }
     Text {
         height: max(root.compact ? 51px : 34px, self.preferred-height);
-        text: @tr("Keep your accounts, signatures, profiles and preferences the same on all your devices. They are end-to-end encrypted, so not even Flectar Mail can read them. Your mail, contacts and calendars keep syncing with your mail provider.");
+        text: @tr("Keep your accounts, preferences, templates, snoozes and reply reminders the same on all your devices, and let any of them send your scheduled emails. Everything is end-to-end encrypted, so not even Flectar Mail can read it. Your mail, contacts and calendars keep syncing with your mail provider.");
         color: root.secondary-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;

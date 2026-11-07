@@ -2567,14 +2567,15 @@ export component SettingsDialog inherits Rectangle {
                                 icon: @image-url("../icons/lucide/filled/cloud-sync.svg");
                                 title: @tr("Flectar Mail Sync");
                                 tagline: @tr("Your setup on every device");
-                                description: @tr("Connect your phone and computers once, and your accounts, signatures, profiles and preferences stay the same on all of them.");
+                                description: @tr("Connect your phone and computers once. Your accounts, preferences, templates, snoozes and reply reminders stay the same on all of them, and any of them sends your scheduled emails.");
                                 features: [
-                                    @tr("Mail accounts, profiles, and signatures"),
-                                    @tr("Themes, layout, and mail preferences"),
+                                    @tr("Scheduled emails go out from any of your devices"),
+                                    @tr("Snoozes, reply reminders and templates everywhere"),
+                                    @tr("Mail accounts, profiles, signatures and preferences"),
                                     @tr("End-to-end encrypted: not even Flectar Mail can read it"),
                                     @tr("No account needed: a recovery code restores it"),
                                 ];
-                                note: @tr("Your messages stay with your mail provider. Flectar Mail Sync only carries your setup.");
+                                note: @tr("Your mail stays with your mail provider. Flectar Mail Sync carries your setup, and a scheduled message until it goes out.");
                                 surface: root.surface;
                                 card-border-color: root.border-subtle;
                                 heading: root.heading;
