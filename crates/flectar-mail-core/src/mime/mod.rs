@@ -1939,6 +1939,49 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
 }
 
 /// Parse a full raw RFC 5322 message.
+/// The message with its Date header set to `date`. A message that goes out
+/// later than it was written says when it went: recipients sort mail by it.
+pub fn with_date(raw: &[u8], date: &str) -> Vec<u8> {
+    // The header block ends at the first empty line.
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|at| at + 2)
+        .or_else(|| {
+            raw.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|at| at + 1)
+        })
+        .unwrap_or(raw.len());
+    let (head, rest) = raw.split_at(end);
+    let line = format!("Date: {date}\r\n");
+    let mut out = Vec::with_capacity(raw.len() + line.len());
+    let mut replaced = false;
+    let mut skipping = false;
+    for header in head.split_inclusive(|byte| *byte == b'\n') {
+        // A folded header continues on lines that start with blank space.
+        let continuation = matches!(header.first(), Some(b' ' | b'\t'));
+        if skipping && continuation {
+            continue;
+        }
+        skipping = false;
+        if !continuation && header.len() >= 5 && header[..5].eq_ignore_ascii_case(b"date:") {
+            if !replaced {
+                out.extend_from_slice(line.as_bytes());
+                replaced = true;
+            }
+            skipping = true;
+            continue;
+        }
+        out.extend_from_slice(header);
+    }
+    if !replaced {
+        out.splice(0..0, line.bytes());
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
 pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
     let msg = mail_parser::MessageParser::default()
         .parse(raw)
@@ -2342,6 +2385,21 @@ pub fn normalize_subject(subject: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_message_sent_later_says_when_it_went() {
+        let raw = b"From: a@example.test\r\nDate: Mon, 2 Nov 2026 09:00:00 +0100\r\n\tfolded\r\nSubject: Hi\r\n\r\nDate: in the body stays\r\n";
+        let dated = with_date(raw, "Sun, 8 Nov 2026 08:00:00 +0100");
+        assert_eq!(
+            dated,
+            b"From: a@example.test\r\nDate: Sun, 8 Nov 2026 08:00:00 +0100\r\nSubject: Hi\r\n\r\nDate: in the body stays\r\n"
+        );
+        // A message without a date gains one.
+        assert_eq!(
+            with_date(b"Subject: Hi\n\nBody", "Sun, 8 Nov 2026 08:00:00 +0100"),
+            b"Date: Sun, 8 Nov 2026 08:00:00 +0100\r\nSubject: Hi\n\nBody"
+        );
+    }
+
     use super::*;
 
     #[test]

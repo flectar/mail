@@ -331,7 +331,14 @@ pub(crate) fn snapshot(
         ) else {
             continue;
         };
-        records.insert(id, entry(SCHEDULED, super::scheduled::body(&send, account)));
+        let mime = repo::synced_sends::mime(conn, &send.sync_id)?;
+        records.insert(
+            id,
+            entry(
+                SCHEDULED,
+                super::scheduled::body(&send, account, mime.as_deref()),
+            ),
+        );
     }
 
     // When it came due stays on each device: every device sees for itself
@@ -955,11 +962,12 @@ fn apply_scheduled(
         claimed_by: record.claim.map(|(device, _)| device),
         claim_until: record.claim.map(|(_, until)| until),
     };
-    if let Some(thread) =
-        super::scheduled::put(conn, &sync_id_hex(id), &shared, crate::models::now_ms())?
-    {
+    let sync_id = sync_id_hex(id);
+    if let Some(thread) = super::scheduled::put(conn, &sync_id, &shared, crate::models::now_ms())? {
         applied.threads_changed.push(thread);
     }
+    // An IMAP or POP3 message travels with its schedule.
+    repo::synced_sends::put_mime(conn, &sync_id, record.message().as_deref())?;
     Ok(Outcome::Applied)
 }
 

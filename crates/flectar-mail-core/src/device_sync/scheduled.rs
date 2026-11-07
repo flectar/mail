@@ -10,15 +10,19 @@
 //!
 //! The device that scheduled it sends its own draft, and claims first.
 //! Other devices send the draft as the mail server keeps it, so they take
-//! part only once it holds the version that device uploaded. When Flectar
-//! Mail Sync cannot be reached, only the device that scheduled it sends it,
-//! a little late, after checking that no other device did.
+//! part only once it holds the version that device uploaded. An IMAP or
+//! POP3 account keeps drafts on the device that wrote them, so there the
+//! record carries the message itself, which other devices keep as a draft
+//! until it goes out. When Flectar Mail Sync cannot be reached, only the
+//! device that scheduled it sends it, a little late, after checking that no
+//! other device did.
 
 use super::store::{self, RecordId};
 use crate::db::repo;
 use crate::db::repo::actions::HELD;
 use crate::db::repo::synced_sends::{self, CANCELLED, FAILED, SCHEDULED, SENT, Shared, SyncedSend};
 use crate::error::Result;
+use base64::Engine as _;
 use flectar_mail_sync_client::Entry;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
@@ -40,6 +44,14 @@ const UNREACHABLE_DELAY_MS: i64 = 10 * 60_000;
 const KEEP_FINISHED_MS: i64 = 7 * 24 * 60 * 60_000;
 /// A send no device here can send, a month past its time, is forgotten.
 const KEEP_STUCK_MS: i64 = 30 * 24 * 60 * 60_000;
+/// The largest IMAP or POP3 message a record carries: its base64 text stays
+/// well under the server's record limit, as one record too large would stop
+/// every upload. A larger message goes out from the device that scheduled
+/// it.
+pub(crate) const MAX_SHARED_MESSAGE_BYTES: usize = 176 * 1024;
+/// The version of a message too large to share: only the device that
+/// scheduled it can send it.
+pub(crate) const LOCAL_ONLY: &str = "local";
 
 /// A shared send as its record says.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +64,16 @@ pub(super) struct Record<'a> {
     pub state: &'a str,
     pub error: Option<&'a str>,
     pub claim: Option<(&'a str, i64)>,
+    /// An IMAP or POP3 message, in base64.
+    pub mime: Option<&'a str>,
+}
+
+impl Record<'_> {
+    /// The message the record carries, when it is the version to send.
+    pub(super) fn message(&self) -> Option<Vec<u8>> {
+        let text = self.mime?;
+        base64::engine::general_purpose::STANDARD.decode(text).ok()
+    }
 }
 
 pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
@@ -77,12 +99,14 @@ pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
         state,
         error: body.get("error").and_then(Value::as_str),
         claim,
+        mime: body.get("mime").and_then(Value::as_str),
     })
 }
 
-/// The record body of a shared send of the account with sync id `account`.
-pub(super) fn body(send: &SyncedSend, account: &str) -> Value {
-    json!({
+/// The record body of a shared send of the account with sync id `account`,
+/// with the IMAP or POP3 message it carries, if any.
+pub(super) fn body(send: &SyncedSend, account: &str, mime: Option<&[u8]>) -> Value {
+    let mut body = json!({
         "account": account,
         "messageId": send.message_id,
         "sendAt": send.send_at,
@@ -94,7 +118,11 @@ pub(super) fn body(send: &SyncedSend, account: &str) -> Value {
             (Some(device), Some(until)) => json!({"device": device, "until": until}),
             _ => Value::Null,
         },
-    })
+    });
+    if let Some(mime) = mime {
+        body["mime"] = json!(base64::engine::general_purpose::STANDARD.encode(mime));
+    }
+    body
 }
 
 /// Settle a merge of this device's change to a shared send with another
@@ -135,7 +163,9 @@ fn draft(conn: &Connection, account_id: i64, message_id: &str) -> Result<Option<
             "SELECT m.id, m.thread_id,
                     CASE a.mail_protocol
                       WHEN 'gmail' THEN CASE WHEN m.gmail_draft_id IS NOT NULL THEN m.gm_msgid END
-                      WHEN 'jmap' THEN m.jmap_id END
+                      WHEN 'jmap' THEN m.jmap_id
+                      -- Another device's message kept here as a draft.
+                      ELSE (SELECT ss.draft_ref FROM synced_sends ss WHERE ss.shadow_id = m.id) END
              FROM messages m JOIN accounts a ON a.id = m.account_id
              WHERE m.account_id = ?1 AND m.message_id = ?2 AND m.is_draft = 1
              ORDER BY m.id DESC LIMIT 1",
@@ -161,17 +191,73 @@ fn sent_copy(conn: &Connection, account_id: i64, message_id: &str) -> Result<boo
     )?)
 }
 
-/// Whether another device can send the account's drafts as the mail server
-/// keeps them.
-fn shareable(conn: &Connection, account_id: i64) -> Result<bool> {
-    let protocol: Option<String> = conn
+fn protocol(conn: &Connection, account_id: i64) -> Result<Option<String>> {
+    Ok(conn
         .query_row(
             "SELECT mail_protocol FROM accounts WHERE id = ?1",
             params![account_id],
             |row| row.get(0),
         )
-        .optional()?;
-    Ok(matches!(protocol.as_deref(), Some("gmail" | "jmap")))
+        .optional()?)
+}
+
+/// Whether another device can send the account's drafts: as the mail server
+/// keeps them, or as the record carries them.
+fn shareable(conn: &Connection, account_id: i64) -> Result<bool> {
+    Ok(matches!(
+        protocol(conn, account_id)?.as_deref(),
+        Some("gmail" | "jmap" | "imap" | "pop3")
+    ))
+}
+
+/// Whether the account's scheduled messages travel in their records.
+pub(crate) fn carries_message(protocol: &str) -> bool {
+    matches!(protocol, "imap" | "pop3")
+}
+
+/// Keep another device's IMAP or POP3 message here as a draft, in the
+/// account's Drafts, while it waits to go out. Returns its conversation.
+fn materialize(conn: &Connection, send: &SyncedSend, mime: &[u8]) -> Result<Option<i64>> {
+    let Some(drafts) = repo::folders::by_role(conn, send.account_id, crate::models::roles::DRAFTS)?
+    else {
+        return Ok(None);
+    };
+    let parsed = crate::sync::ingest::parse_or_text(mime);
+    if parsed.headers.message_id.as_deref() != Some(send.message_id.as_str()) {
+        tracing::warn!("a shared message does not carry the Message-ID of its schedule");
+        return Ok(None);
+    }
+    let has_attachments = parsed.attachments.iter().any(|file| !file.is_inline);
+    let mut importer = crate::sync::ingest::Importer::new(conn, send.account_id)?;
+    let imported = importer.insert(
+        conn,
+        &parsed.headers,
+        &crate::sync::ingest::Delivery {
+            folder_id: drafts.id,
+            folder_role: Some(crate::models::roles::DRAFTS),
+            uid: None,
+            received_ms: None,
+            seen: true,
+            flagged: false,
+            draft: true,
+            has_attachments,
+            size: i64::try_from(mime.len()).ok(),
+        },
+    )?;
+    // Its files open from the copy that goes out; this one only shows it.
+    repo::messages::store_body(
+        conn,
+        imported.message_id,
+        parsed.text.as_deref(),
+        parsed.html.as_deref(),
+        None,
+        has_attachments,
+        Some(&parsed.snippet),
+    )?;
+    repo::threads::recompute(conn, imported.thread_id)?;
+    repo::search::index_message(conn, imported.message_id)?;
+    synced_sends::set_shadow(conn, &send.sync_id, Some(imported.message_id))?;
+    Ok(Some(imported.thread_id))
 }
 
 fn thread_of_action(conn: &Connection, action_id: i64) -> Result<Option<i64>> {
@@ -252,10 +338,12 @@ pub(super) fn put(
         hold(conn, action)?;
     }
     // Another version of the draft: a device that sends the server's draft
-    // waits for that version to arrive.
+    // waits for that version to arrive, and one that keeps another device's
+    // message as a draft takes on the new one.
     if before.draft_ref.as_deref() != shared.draft_ref && sends_as_is(conn, action)? {
         repo::actions::try_cancel(conn, action)?;
         synced_sends::set_action(conn, sync_id, None)?;
+        synced_sends::drop_shadow(conn, sync_id)?;
         return Ok(thread);
     }
     match shared.state {
@@ -264,6 +352,7 @@ pub(super) fn put(
             repo::actions::try_cancel(conn, action)?;
             synced_sends::set_action(conn, sync_id, None)?;
             synced_sends::set_may_send_until(conn, sync_id, None)?;
+            synced_sends::drop_shadow(conn, sync_id)?;
         }
         FAILED => {
             conn.execute(
@@ -425,6 +514,9 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
                     synced_sends::set_state(conn, &send.sync_id, result, error.as_deref(), now)?;
                     if result != FAILED {
                         synced_sends::set_action(conn, &send.sync_id, None)?;
+                        // Sent from here, or cancelled here: the message
+                        // kept for another device is this device's own now.
+                        synced_sends::set_shadow(conn, &send.sync_id, None)?;
                     }
                     driven.upload = true;
                     driven.thread(thread_of_action(conn, action)?);
@@ -450,6 +542,22 @@ pub(crate) fn drive(conn: &Connection, me: &str, now: i64, reach: Reach) -> Resu
             continue;
         }
 
+        // Another device's IMAP or POP3 message comes with its schedule: it
+        // waits here as a draft.
+        if !origin
+            && send.action_id.is_none()
+            && send.shadow_id.is_none()
+            && send
+                .draft_ref
+                .as_deref()
+                .is_some_and(|version| version != LOCAL_ONLY)
+            && protocol(conn, send.account_id)?
+                .as_deref()
+                .is_some_and(carries_message)
+            && let Some(mime) = synced_sends::mime(conn, &send.sync_id)?
+        {
+            driven.thread(materialize(conn, &send, &mime)?);
+        }
         let local_draft = draft(conn, send.account_id, &send.message_id)?;
 
         // The device that scheduled it shares the version it uploaded.
@@ -743,7 +851,7 @@ mod tests {
     /// The server took the record with `claim`.
     fn server_has(conn: &Connection, sync_id: &str, claim: Option<(&str, i64)>) {
         let send = synced_sends::get(conn, sync_id).unwrap().unwrap();
-        let mut body = body(&send, "0123456789abcdef0123456789abcdef");
+        let mut body = body(&send, "0123456789abcdef0123456789abcdef", None);
         body["claim"] = match claim {
             Some((device, until)) => json!({"device": device, "until": until}),
             None => Value::Null,
@@ -1207,5 +1315,153 @@ mod tests {
         let mut merged = crate::device_sync::merge::merge(Some(&base), &local, &remote, true);
         settle(Some(&base), &local, &remote, &mut merged);
         assert_eq!(merged["state"], json!("sent"));
+    }
+
+    /// A helper with an IMAP account, which keeps its drafts on each device.
+    fn imap_helper() -> Connection {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute_batch(
+            "UPDATE accounts SET sync_id = '0123456789abcdef0123456789abcdef';
+             INSERT INTO folders (id, account_id, path, role) VALUES (3, 1, 'Drafts', 'drafts');",
+        )
+        .unwrap();
+        conn
+    }
+
+    const MESSAGE: &[u8] = b"Message-ID: <plans@example.com>\r\nFrom: Me <me@test.dev>\r\n\
+        To: ann@example.com\r\nBcc: boss@example.com\r\nSubject: Plans\r\n\
+        Date: Mon, 2 Nov 2026 09:00:00 +0000\r\n\r\nSee you on Monday.\r\n";
+
+    /// The draft kept here for another device's message: its id, whether it
+    /// is still a draft, and its subject.
+    fn shadow(conn: &Connection, sync_id: &str) -> Option<(i64, bool, String)> {
+        let id = synced_sends::get(conn, sync_id).unwrap()?.shadow_id?;
+        conn.query_row(
+            "SELECT id, is_draft, subject FROM messages WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .unwrap()
+    }
+
+    #[test]
+    fn another_devices_imap_message_waits_here_as_a_draft_and_goes_out_as_it_is() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
+        let driven = drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let (draft, is_draft, subject) = shadow(&conn, &sync_id).expect("kept as a draft");
+        assert!(is_draft);
+        assert_eq!(subject, "Plans");
+        assert_eq!(driven.threads.len(), 1);
+        // Its send waits, held, and goes out as the record carries it.
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .expect("a held send");
+        assert_eq!(not_before(&conn, action), HELD);
+        let payload: String = conn
+            .query_row(
+                "SELECT payload FROM pending_actions WHERE id = ?1",
+                params![action],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let payload: Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(payload["asIs"], true);
+        assert_eq!(payload["draftId"], draft);
+        assert_eq!(payload["syncedSend"], sync_id.as_str());
+
+        // A new version replaces the draft kept here.
+        put(&conn, &sync_id, &shared(Some("v2"), None), 0).unwrap();
+        assert_eq!(shadow(&conn, &sync_id), None);
+        assert_eq!(action_state(&conn, action), "cancelled");
+        let gone: bool = conn
+            .query_row(
+                "SELECT NOT EXISTS (SELECT 1 FROM messages WHERE id = ?1)",
+                params![draft],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(gone);
+        synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        assert!(shadow(&conn, &sync_id).is_some());
+
+        // Sent from another device: the draft kept here goes too.
+        let sent = Shared {
+            state: SENT,
+            ..shared(Some("v2"), None)
+        };
+        put(&conn, &sync_id, &sent, 0).unwrap();
+        assert_eq!(shadow(&conn, &sync_id), None);
+    }
+
+    #[test]
+    fn a_message_too_large_to_share_goes_out_from_its_device_alone() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some(LOCAL_ONLY));
+        drive(&conn, HELPER, AT, Reach::Usable).unwrap();
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        assert_eq!(send.shadow_id, None);
+        assert_eq!(send.action_id, None);
+    }
+
+    #[test]
+    fn the_device_that_scheduled_an_imap_message_keeps_no_copy() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
+        drive(&conn, ORIGIN, AT - 10 * 60_000, Reach::Usable).unwrap();
+        assert_eq!(shadow(&conn, &sync_id), None);
+    }
+
+    #[test]
+    fn the_record_carries_an_imap_message() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        let send = synced_sends::get(&conn, &sync_id).unwrap().unwrap();
+        let body = body(&send, "0123456789abcdef0123456789abcdef", Some(MESSAGE));
+        assert_eq!(parse(&body).unwrap().message().as_deref(), Some(MESSAGE));
+        assert!(
+            parse(&super::body(
+                &send,
+                "0123456789abcdef0123456789abcdef",
+                None
+            ))
+            .unwrap()
+            .message()
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_draft_kept_for_another_device_stays_once_cancelled_here() {
+        let conn = imap_helper();
+        let sync_id = scheduled_elsewhere(&conn, Some("v1"));
+        synced_sends::put_mime(&conn, &sync_id, Some(MESSAGE)).unwrap();
+        drive(&conn, HELPER, AT - 10 * 60_000, Reach::Usable).unwrap();
+        let (draft, ..) = shadow(&conn, &sync_id).unwrap();
+        let action = synced_sends::get(&conn, &sync_id)
+            .unwrap()
+            .unwrap()
+            .action_id
+            .unwrap();
+        repo::actions::try_cancel(&conn, action).unwrap();
+        drive(&conn, HELPER, AT - 9 * 60_000, Reach::Usable).unwrap();
+        // Forgotten a week later, the send leaves the draft to the user.
+        drive(&conn, HELPER, AT + KEEP_FINISHED_MS + 60_000, Reach::Usable).unwrap();
+        assert_eq!(synced_sends::get(&conn, &sync_id).unwrap(), None);
+        let kept: bool = conn
+            .query_row(
+                "SELECT EXISTS (SELECT 1 FROM messages WHERE id = ?1 AND is_draft = 1)",
+                params![draft],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(kept);
     }
 }

@@ -1,7 +1,9 @@
 //! Scheduled sends that Flectar Mail Sync shares between the user's devices,
 //! so another device sends one when the device that scheduled it is off.
-//! What syncs is the schedule and which device claimed the send; the
-//! message waits in the account's Drafts on the mail server.
+//! What syncs is the schedule and which device claimed the send. A Gmail or
+//! JMAP message waits in the account's Drafts on the mail server; an IMAP or
+//! POP3 account keeps drafts on the device that wrote them, so the message
+//! itself travels with the schedule.
 
 use crate::error::Result;
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -27,6 +29,8 @@ pub struct SyncedSend {
     pub action_id: Option<i64>,
     /// Until when this device may send it.
     pub may_send_until: Option<i64>,
+    /// Another device's IMAP or POP3 message as a draft here.
+    pub shadow_id: Option<i64>,
 }
 
 /// What another device says about a shared send.
@@ -49,7 +53,7 @@ pub const CANCELLED: &str = "cancelled";
 pub const FAILED: &str = "failed";
 
 const COLUMNS: &str = "sync_id, account_id, message_id, send_at, origin, draft_ref, state, error,
-                       claimed_by, claim_until, action_id, may_send_until";
+                       claimed_by, claim_until, action_id, may_send_until, shadow_id";
 
 fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
     Ok(SyncedSend {
@@ -65,7 +69,54 @@ fn from_row(row: &Row) -> rusqlite::Result<SyncedSend> {
         claim_until: row.get(9)?,
         action_id: row.get(10)?,
         may_send_until: row.get(11)?,
+        shadow_id: row.get(12)?,
     })
+}
+
+/// The message a shared IMAP or POP3 send goes out as, once known here.
+pub fn mime(conn: &Connection, sync_id: &str) -> Result<Option<Vec<u8>>> {
+    Ok(conn
+        .query_row(
+            "SELECT mime FROM synced_sends WHERE sync_id = ?1",
+            params![sync_id],
+            |row| row.get::<_, Option<Vec<u8>>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Keep the message a shared send goes out as, and the version other
+/// devices send: `draft_ref` names this message.
+pub fn set_mime(
+    conn: &Connection,
+    sync_id: &str,
+    mime: Option<&[u8]>,
+    draft_ref: Option<&str>,
+    now_ms: i64,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET mime = ?2, draft_ref = ?3, updated_at = ?4 WHERE sync_id = ?1",
+        params![sync_id, mime, draft_ref, now_ms],
+    )?;
+    Ok(())
+}
+
+/// Take on the message another device's record carries, if any.
+pub fn put_mime(conn: &Connection, sync_id: &str, mime: Option<&[u8]>) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET mime = ?2 WHERE sync_id = ?1 AND mime IS NOT ?2",
+        params![sync_id, mime],
+    )?;
+    Ok(())
+}
+
+/// Note the draft that stands for another device's message here.
+pub fn set_shadow(conn: &Connection, sync_id: &str, shadow_id: Option<i64>) -> Result<()> {
+    conn.execute(
+        "UPDATE synced_sends SET shadow_id = ?2 WHERE sync_id = ?1",
+        params![sync_id, shadow_id],
+    )?;
+    Ok(())
 }
 
 /// Share a send this device scheduled and holds as `action_id`. Returns its
@@ -225,6 +276,7 @@ pub fn set_draft_ref(conn: &Connection, sync_id: &str, draft_ref: &str, now_ms: 
 
 pub fn delete(conn: &Connection, sync_id: &str) -> Result<Option<SyncedSend>> {
     let send = get(conn, sync_id)?;
+    drop_shadow(conn, sync_id)?;
     conn.execute(
         "DELETE FROM synced_sends WHERE sync_id = ?1",
         params![sync_id],
@@ -234,10 +286,50 @@ pub fn delete(conn: &Connection, sync_id: &str) -> Result<Option<SyncedSend>> {
 
 /// Forget sends that finished before `before`: sent, cancelled or failed.
 pub fn prune_finished(conn: &Connection, before: i64) -> Result<usize> {
-    Ok(conn.execute(
-        "DELETE FROM synced_sends WHERE state <> 'scheduled' AND updated_at < ?1",
-        params![before],
-    )?)
+    let mut statement = conn.prepare(
+        "SELECT sync_id FROM synced_sends WHERE state <> 'scheduled' AND updated_at < ?1",
+    )?;
+    let finished = statement
+        .query_map(params![before], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for sync_id in &finished {
+        delete(conn, sync_id)?;
+    }
+    Ok(finished.len())
+}
+
+/// Forget the draft that stood for another device's message here, unless it
+/// went out from this device. Returns its conversation.
+pub fn drop_shadow(conn: &Connection, sync_id: &str) -> Result<Option<i64>> {
+    let shadow: Option<i64> = conn
+        .query_row(
+            "SELECT shadow_id FROM synced_sends WHERE sync_id = ?1",
+            params![sync_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(shadow) = shadow else {
+        return Ok(None);
+    };
+    set_shadow(conn, sync_id, None)?;
+    let row: Option<(bool, Option<i64>)> = conn
+        .query_row(
+            "SELECT is_draft, thread_id FROM messages WHERE id = ?1",
+            params![shadow],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((is_draft, thread)) = row else {
+        return Ok(None);
+    };
+    if is_draft {
+        super::messages::delete(conn, shadow)?;
+        if let Some(thread) = thread {
+            super::threads::recompute(conn, thread)?;
+        }
+    }
+    Ok(thread)
 }
 
 #[cfg(test)]

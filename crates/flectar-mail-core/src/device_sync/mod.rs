@@ -484,6 +484,7 @@ impl Core {
             return;
         };
         let me = hex(&client.identity().device_id());
+        self.share_scheduled_messages(&me).await;
         for _ in 0..3 {
             let reach = match lock(&self.sync_service().status).state {
                 DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
@@ -531,6 +532,73 @@ impl Core {
             if self.run_device_sync(false).await.is_err() {
                 return;
             }
+        }
+    }
+
+    /// Share the IMAP and POP3 messages this device scheduled. Their drafts
+    /// stay on this device, so their records carry them for another device
+    /// to send; a message too large for a record goes out from here alone.
+    async fn share_scheduled_messages(&self, me: &str) {
+        let me = me.to_owned();
+        let waiting = self
+            .db
+            .read(move |conn| {
+                let mut statement = conn.prepare(
+                    "SELECT ss.sync_id, ss.account_id, MAX(m.id) FROM synced_sends ss
+                     JOIN accounts a ON a.id = ss.account_id
+                     JOIN messages m ON m.account_id = ss.account_id
+                       AND m.message_id = ss.message_id AND m.is_draft = 1
+                     WHERE ss.origin = ?1 AND ss.state = 'scheduled' AND ss.draft_ref IS NULL
+                       AND a.mail_protocol IN ('imap', 'pop3')
+                     GROUP BY ss.sync_id",
+                )?;
+                let rows = statement
+                    .query_map([&me], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await;
+        let Ok(waiting) = waiting else {
+            return;
+        };
+        let mut shared = false;
+        for (sync_id, account_id, draft_id) in waiting {
+            let built =
+                crate::queue::build_outgoing(&self.db, &self.paths, account_id, draft_id).await;
+            let (mime, version) = match built {
+                Ok(outgoing) if outgoing.raw.len() <= scheduled::MAX_SHARED_MESSAGE_BYTES => {
+                    use sha2::Digest as _;
+                    let version = hex(&sha2::Sha256::digest(&outgoing.raw)[..8]);
+                    (Some(outgoing.raw), version)
+                }
+                Ok(_) => (None, scheduled::LOCAL_ONLY.to_owned()),
+                Err(error) => {
+                    tracing::info!(%error, "a scheduled message goes out from this device alone");
+                    (None, scheduled::LOCAL_ONLY.to_owned())
+                }
+            };
+            shared |= self
+                .db
+                .write(move |conn| {
+                    crate::db::repo::synced_sends::set_mime(
+                        conn,
+                        &sync_id,
+                        mime.as_deref(),
+                        Some(&version),
+                        now_ms(),
+                    )
+                })
+                .await
+                .is_ok();
+        }
+        if shared {
+            self.device_sync_now();
         }
     }
 

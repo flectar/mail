@@ -4721,6 +4721,10 @@ impl Core {
                                 now_ms(),
                             )?;
                             repo::synced_sends::set_action(&tx, &send.sync_id, None)?;
+                            // Another device's message kept here is the
+                            // user's draft now: it stays when the send is
+                            // forgotten.
+                            repo::synced_sends::set_shadow(&tx, &send.sync_id, None)?;
                             true
                         }
                         _ => false,
@@ -5476,17 +5480,19 @@ impl Core {
         crate::mail_security::Gpg::default()
             .preflight(&policy, &sender, &recipients)
             .await?;
-        // With Flectar Mail Sync, a send scheduled from a Gmail or JMAP
-        // account, whose drafts wait on the mail server, can go out from any
-        // of the user's devices. Protected drafts never leave this device.
+        // With Flectar Mail Sync, a scheduled send can go out from any of
+        // the user's devices: a Gmail or JMAP draft waits on the mail
+        // server, and an IMAP or POP3 message travels in its record.
+        // Protected drafts never leave this device.
         let share_as = match protocol {
-            MailProtocol::Gmail | MailProtocol::Jmap
+            MailProtocol::Gmail | MailProtocol::Jmap | MailProtocol::Imap | MailProtocol::Pop3
                 if args.send_at.is_some() && !policy.enabled() =>
             {
                 self.shared_send_device()
             }
             _ => None,
         };
+        let uploads_drafts = matches!(protocol, MailProtocol::Gmail | MailProtocol::Jmap);
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
         let dispatch_at = args
             .send_at
@@ -5512,7 +5518,8 @@ impl Core {
                 };
                 if let Some(me) = &share_as {
                     let tx = conn.transaction()?;
-                    let action = schedule_shared_send(&tx, &row, &policy, dispatch_at, me)?;
+                    let action =
+                        schedule_shared_send(&tx, &row, &policy, dispatch_at, me, uploads_drafts)?;
                     remind(&tx)?;
                     tx.commit()?;
                     return Ok((action, row.account_id, row.thread_id));
@@ -9478,6 +9485,7 @@ fn schedule_shared_send(
     policy: &crate::mail_security::MailSecurity,
     send_at: i64,
     me: &str,
+    uploads_drafts: bool,
 ) -> Result<i64> {
     let now = now_ms();
     let draft_id = draft.id;
@@ -9488,7 +9496,8 @@ fn schedule_shared_send(
         rusqlite::params![draft_id],
         |row| row.get(0),
     )?;
-    if unnamed && !upload_waiting {
+    // A Gmail or JMAP draft goes up again with its new Message-ID.
+    if unnamed && !upload_waiting && uploads_drafts {
         repo::actions::enqueue(
             conn,
             draft.account_id,
@@ -9540,6 +9549,10 @@ fn schedule_shared_send(
     let sync_id = match repo::synced_sends::by_action(conn, action_id)? {
         Some(send) => {
             repo::synced_sends::reschedule(conn, &send.sync_id, send_at, now)?;
+            // An IMAP or POP3 message is shared again as it is now.
+            if !uploads_drafts {
+                repo::synced_sends::set_mime(conn, &send.sync_id, None, None, now)?;
+            }
             send.sync_id
         }
         None => repo::synced_sends::create(

@@ -520,3 +520,107 @@ async fn a_scheduled_send_goes_out_from_one_device() {
     );
     assert!(phone.scheduled_sends().await.unwrap().is_empty());
 }
+
+/// An IMAP account keeps its drafts on the device that wrote them, so a send
+/// scheduled there carries the message in its record, and another device
+/// keeps it as a draft, ready to send it. The account's servers are never
+/// reached.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_imap_message_scheduled_on_one_device_waits_on_the_other() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![imap_account("me@example.com")])
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
+    let phone_account = phone.list_accounts().await.unwrap()[0].id;
+    for (core, account) in [(&laptop, laptop_account), (&phone, phone_account)] {
+        core.db
+            .write(move |conn| {
+                flectar_mail_core::db::repo::folders::upsert(
+                    conn,
+                    account,
+                    "Drafts",
+                    None,
+                    Some(roles::DRAFTS),
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+
+    let draft = laptop
+        .save_draft(SaveDraftArgs {
+            draft_id: None,
+            account_id: laptop_account,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "alice@example.com".into(),
+            }],
+            cc: vec![],
+            bcc: vec![Address {
+                name: None,
+                email: "boss@example.com".into(),
+            }],
+            subject: "Monday plans".into(),
+            body_text: "See you on Monday.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let send_at = now_ms() + 3_600_000;
+    laptop
+        .queue_send(QueueSendArgs {
+            draft_id: draft,
+            send_at: Some(send_at),
+            remind_at: None,
+        })
+        .await
+        .unwrap();
+    // The laptop puts the message in the record, then uploads it.
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone.device_sync_run().await.unwrap();
+
+    let scheduled = phone.scheduled_sends().await.unwrap();
+    assert_eq!(scheduled.len(), 1, "it shows in the phone's Scheduled view");
+    assert_eq!(scheduled[0].send_at, send_at);
+    let (state, due) = send_of(&phone).await.unwrap();
+    assert_eq!(state, "pending");
+    assert_eq!(due, i64::MAX, "held until the phone's claim holds");
+    let (subject, bcc): (String, String) = phone
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT subject, bcc_json FROM messages WHERE account_id = ?1 AND is_draft = 1",
+                [phone_account],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(subject, "Monday plans");
+    assert!(bcc.contains("boss@example.com"), "{bcc}");
+}
