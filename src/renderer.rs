@@ -21,7 +21,9 @@ use semantics::*;
 #[cfg(feature = "gpu-renderer")]
 use slint::wgpu_30::wgpu;
 use std::{
+    cell::RefCell,
     collections::BTreeMap,
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicU8, AtomicUsize, Ordering},
@@ -168,8 +170,9 @@ pub struct GpuEmailRenderer {
     dirty: bool,
     paint_dirty: bool,
     painted_selection: Vec<(NodeId, usize, usize)>,
-    cpu_painter: Option<VelloCpuImageRenderer>,
-    cpu_size: (u32, u32),
+    cpu_painter: Rc<RefCell<CpuPainter>>,
+    /// Releases the painter's per-frame buffers once rendering pauses.
+    scratch_release: slint::Timer,
     tile_work_limit: usize,
     pub preparation_viewport: (u32, u32, f32),
     appearance: EmailAppearance,
@@ -233,8 +236,8 @@ impl Default for GpuEmailRenderer {
             dirty: false,
             paint_dirty: false,
             painted_selection: Vec::new(),
-            cpu_painter: None,
-            cpu_size: (0, 0),
+            cpu_painter: Rc::default(),
+            scratch_release: slint::Timer::default(),
             tile_work_limit: usize::MAX,
             preparation_viewport: (INITIAL_WIDTH, INITIAL_HEIGHT, 1.0),
             appearance: EmailAppearance::default(),
@@ -447,7 +450,7 @@ impl GpuEmailRenderer {
         self.painted_selection.clear();
         self.find_matches.clear();
         self.find_query.clear();
-        self.cpu_painter = None;
+        self.cpu_painter.borrow_mut().clear();
         // Completions may have arrived while the document was being prepared.
         self.resource_poll_ticks.store(1, Ordering::Release);
         self.dirty = false;
@@ -484,7 +487,7 @@ impl GpuEmailRenderer {
         self.suspended = suspended;
         if suspended {
             self.tiles.clear();
-            self.cpu_painter = None;
+            self.cpu_painter.borrow_mut().clear();
             if let Some(email) = self.email.as_mut() {
                 email.paint_cache.clear();
             }
@@ -522,7 +525,7 @@ impl GpuEmailRenderer {
         self.selection_focus = None;
         self.metadata_revision += 1;
         self.resource_poll_ticks.store(0, Ordering::Release);
-        self.cpu_painter = None;
+        self.cpu_painter.borrow_mut().clear();
         self.last_size = None;
         self.dirty = false;
         self.region_dirty = false;
@@ -606,7 +609,7 @@ impl GpuEmailRenderer {
         );
         let before = self.tiles.len();
         self.tiles.retain(|index, _| visible.contains(index));
-        self.cpu_painter = None;
+        self.cpu_painter.borrow_mut().clear();
         if let Some(email) = self.email.as_mut() {
             email.paint_cache.clear();
         }
@@ -1041,8 +1044,7 @@ impl GpuEmailRenderer {
                 break;
             }
             let tile = render_cpu_tile_cached(
-                &mut self.cpu_painter,
-                &mut self.cpu_size,
+                &mut self.cpu_painter.borrow_mut(),
                 email,
                 canvas_width,
                 self.content_height,
@@ -1053,6 +1055,9 @@ impl GpuEmailRenderer {
             self.tile_count += 1;
             rendered += 1;
             self.tiles.insert(index, tile);
+        }
+        if rendered > 0 {
+            schedule_scratch_release(&self.scratch_release, &self.cpu_painter);
         }
 
         self.last_size = Some(size);
@@ -1391,8 +1396,7 @@ fn render_cpu_tile(
     scale_factor: f32,
 ) -> Result<RenderedEmailTile, String> {
     render_cpu_tile_cached(
-        &mut None,
-        &mut (0, 0),
+        &mut CpuPainter::default(),
         email,
         logical_width,
         content_height,
@@ -1402,10 +1406,88 @@ fn render_cpu_tile(
     )
 }
 
+/// How long rendering must pause before the CPU painter's per-frame buffers
+/// are released. Chromium frees a GPU context's command-buffer data one second
+/// after the context goes idle (viz `ContextCacheController`); here too the
+/// buffers grow back with the next frame for the cost of a few allocations.
+const SCRATCH_IDLE: Duration = Duration::from_secs(1);
+
+/// The CPU painter of the email document. Its vello_cpu render context is
+/// per-frame scratch (encoded commands, coarse buckets, strips); its glyph
+/// caches and converted images are expensive to rebuild, so they outlive it.
+#[derive(Default)]
+struct CpuPainter {
+    renderer: Option<VelloCpuImageRenderer>,
+    /// The device-pixel size `renderer` was last built or resized for.
+    size: (u32, u32),
+    /// The render context has painted since it was last rebuilt.
+    scratch_used: bool,
+}
+
+impl CpuPainter {
+    /// The painter for a tile of `width` by `height` device pixels.
+    fn for_size(&mut self, width: u32, height: u32) -> &mut VelloCpuImageRenderer {
+        self.scratch_used = true;
+        if self.size != (width, height)
+            && let Some(renderer) = self.renderer.as_mut()
+        {
+            // Resizing preserves prepared glyphs and converted images. Replacing
+            // the renderer threw both away for the final, shorter tile.
+            renderer.resize(width, height);
+        }
+        self.size = (width, height);
+        self.renderer.get_or_insert_with(|| {
+            VelloCpuImageRenderer::with_image_cache_config(
+                width,
+                height,
+                ImageCacheConfig {
+                    max_bytes: 8 * 1024 * 1024,
+                    max_age: 8,
+                    prune_interval: 1,
+                },
+            )
+        })
+    }
+
+    /// Rebuild the render context, which frees the last frame's buffers, and
+    /// keep the glyph caches and converted images: anyrender's `resize`
+    /// replaces only the vello_cpu `RenderContext`. Returns whether the
+    /// painter had painted since it was last released.
+    fn release_scratch(&mut self) -> bool {
+        if !std::mem::take(&mut self.scratch_used) {
+            return false;
+        }
+        let (width, height) = self.size;
+        self.renderer
+            .as_mut()
+            .map(|renderer| renderer.resize(width, height))
+            .is_some()
+    }
+
+    /// Drop the painter together with its glyph caches and converted images.
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// Release the painter's per-frame buffers once rendering has paused for
+/// [`SCRATCH_IDLE`]; every frame restarts the countdown.
+fn schedule_scratch_release(timer: &slint::Timer, painter: &Rc<RefCell<CpuPainter>>) {
+    let painter = Rc::downgrade(painter);
+    timer.start(slint::TimerMode::SingleShot, SCRATCH_IDLE, move || {
+        // Timers fire between frames, never inside one; a failed borrow only
+        // means the next frame schedules the release again.
+        if let Some(painter) = painter.upgrade()
+            && let Ok(mut painter) = painter.try_borrow_mut()
+        {
+            painter.release_scratch();
+        }
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_cpu_tile_cached(
-    painter: &mut Option<VelloCpuImageRenderer>,
-    size: &mut (u32, u32),
+    painter: &mut CpuPainter,
     email: &mut PreparedEmail,
     logical_width: f32,
     content_height: f32,
@@ -1421,27 +1503,7 @@ fn render_cpu_tile_cached(
         return Err("Email surface exceeds rendering limits".into());
     }
     let mut rgba = vec![0; physical_width as usize * physical_tile_height as usize * 4];
-    if painter.is_none() {
-        *painter = Some(VelloCpuImageRenderer::with_image_cache_config(
-            physical_width,
-            physical_tile_height,
-            ImageCacheConfig {
-                max_bytes: 8 * 1024 * 1024,
-                max_age: 8,
-                prune_interval: 1,
-            },
-        ));
-        *size = (physical_width, physical_tile_height);
-    } else if *size != (physical_width, physical_tile_height) {
-        // Resizing preserves prepared glyphs and converted images. Replacing
-        // the renderer threw both away for the final, shorter tile.
-        painter
-            .as_mut()
-            .unwrap()
-            .resize(physical_width, physical_tile_height);
-        *size = (physical_width, physical_tile_height);
-    }
-    let renderer = painter.as_mut().unwrap();
+    let renderer = painter.for_size(physical_width, physical_tile_height);
     renderer.reset();
     let start = render_timings_enabled().then(Instant::now);
     let mut scene_time = Duration::ZERO;
@@ -2431,10 +2493,10 @@ mod tests {
             .unwrap();
         let positions: Vec<_> = frame.tiles.iter().map(|t| (t.y, t.height)).collect();
         drop(frame);
-        assert!(renderer.cpu_painter.is_some());
+        assert!(renderer.cpu_painter.borrow().renderer.is_some());
         renderer.set_suspended(true);
         assert!(renderer.tiles.is_empty());
-        assert!(renderer.cpu_painter.is_none());
+        assert!(renderer.cpu_painter.borrow().renderer.is_none());
         assert!(renderer.has_document());
         assert!(!renderer.needs_repaint());
         assert!(

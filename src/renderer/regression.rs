@@ -305,7 +305,7 @@ fn scrolling_reuses_pixels_and_layout_with_a_bounded_cache() {
         assert_eq!(r.layout_count, layouts);
     }
     r.clear();
-    assert!(r.tiles.is_empty() && r.cpu_painter.is_none());
+    assert!(r.tiles.is_empty() && r.cpu_painter.borrow().renderer.is_none());
 }
 
 #[test]
@@ -334,7 +334,7 @@ fn memory_pressure_keeps_only_the_visible_tiles_until_it_passes() {
 
     assert!(r.release_caches(Instant::now() + Duration::from_secs(600)));
     assert_eq!(tiles(&r), [3, 4, 5]);
-    assert!(r.cpu_painter.is_none());
+    assert!(r.cpu_painter.borrow().renderer.is_none());
     assert_eq!(r.retained_tiles().len(), 3);
     // Scrolling paints what it reveals, still without overscan.
     r.set_visible_region(2100.0, 900.0);
@@ -346,6 +346,40 @@ fn memory_pressure_keeps_only_the_visible_tiles_until_it_passes() {
     assert!(r.set_visible_region(2100.0, 900.0));
     r.render_cpu_if_needed(520, 900, 1.0).unwrap();
     assert_eq!(tiles(&r), [3, 4, 5, 6]);
+}
+
+#[test]
+fn releasing_render_scratch_keeps_painter_caches_and_pixels() {
+    let mut r = renderer(&format!(
+        "<body style='margin:0'>{}</body>",
+        "<p style='height:110px;margin:0'>Scrollable words</p>".repeat(20)
+    ));
+    let pixels = |frame: RenderedEmail| {
+        frame
+            .tiles
+            .iter()
+            .map(|tile| {
+                tile.image
+                    .to_rgb8()
+                    .expect("tiles are RGB")
+                    .as_bytes()
+                    .to_vec()
+            })
+            .collect::<Vec<_>>()
+    };
+    let painted = pixels(r.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap());
+    // Only a painter that painted since its last release has buffers to free,
+    // and the glyph caches and converted images stay with it.
+    assert!(r.cpu_painter.borrow_mut().release_scratch());
+    assert!(!r.cpu_painter.borrow_mut().release_scratch());
+    assert!(r.cpu_painter.borrow().renderer.is_some());
+
+    // The rebuilt render context paints the same pixels.
+    r.tiles.clear();
+    r.region_dirty = true;
+    let repainted = pixels(r.render_cpu_if_needed(520, 900, 1.0).unwrap().unwrap());
+    assert_eq!(repainted, painted);
+    assert!(r.cpu_painter.borrow_mut().release_scratch());
 }
 
 #[test]
