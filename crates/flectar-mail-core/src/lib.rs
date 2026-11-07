@@ -4511,6 +4511,10 @@ impl Core {
         for acc in touched_accounts {
             self.nudge(Some(acc), || SyncCmd::RunActions).await;
         }
+        // Snoozes follow the user to their other devices.
+        if matches!(args.kind, ActionKind::Snooze | ActionKind::Unsnooze) {
+            self.device_sync_now();
+        }
         Ok(ActionResult { action_ids })
     }
 

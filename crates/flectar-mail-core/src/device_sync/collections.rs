@@ -2,9 +2,9 @@
 //!
 //! Each item is one record. Accounts carry their per-account preferences;
 //! preferences, signatures and profiles are named records (their record ids
-//! derive from their key), templates are records under their own sync id,
-//! and each device describes itself in a `device` record under its own
-//! device id.
+//! derive from their key), templates and snoozes are records under their
+//! own sync id, and each device describes itself in a `device` record under
+//! its own device id.
 
 use super::store::{Incoming, RecordId, body_hash, set_local_hash};
 use crate::db::repo;
@@ -24,6 +24,7 @@ pub(crate) const SIGNATURE: &str = "signature";
 pub(crate) const PROFILE: &str = "profile";
 pub(crate) const DEVICE: &str = "device";
 pub(crate) const TEMPLATE: &str = "template";
+pub(crate) const SNOOZE: &str = "snooze";
 
 /// The largest template body that syncs, well under the server's record
 /// limit: one record too large would stop every upload.
@@ -35,7 +36,7 @@ const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 /// unread here, and this device leaves them alone until it updates.
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
-        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE => Some(1),
+        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE => Some(1),
         _ => None,
     }
 }
@@ -291,6 +292,35 @@ pub(crate) fn snapshot(
         }
     }
 
+    let mut snoozes = conn.prepare(
+        "SELECT s.sync_id, a.sync_id, s.anchor, s.wake_at FROM synced_snoozes s
+         JOIN accounts a ON a.id = s.account_id WHERE a.sync_id IS NOT NULL",
+    )?;
+    let rows = snoozes.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (sync_id, account, anchor, wake_at) = row?;
+        let (Some(id), Ok(anchor)) = (
+            sync_id_bytes(&sync_id),
+            serde_json::from_str::<Value>(&anchor),
+        ) else {
+            continue;
+        };
+        records.insert(
+            id,
+            entry(
+                SNOOZE,
+                json!({"account": account, "anchor": anchor, "wakeAt": wake_at}),
+            ),
+        );
+    }
+
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
 }
@@ -382,6 +412,9 @@ pub(crate) struct Applied {
     pub settings_changed: bool,
     pub accounts_changed: bool,
     pub follow_ups: Vec<FollowUp>,
+    /// Conversations whose state changed here, such as one another device
+    /// snoozed: the mail lists show them again.
+    pub threads_changed: Vec<i64>,
 }
 
 fn readable(entry: &Entry) -> bool {
@@ -394,7 +427,7 @@ fn readable(entry: &Entry) -> bool {
 fn order(collection: &str, deleted: bool) -> (u8, bool) {
     let rank = match collection {
         ACCOUNT => 0,
-        PREF | SIGNATURE | PROFILE | TEMPLATE => 1,
+        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE => 1,
         _ => 2,
     };
     (rank, deleted)
@@ -459,6 +492,13 @@ pub(crate) fn apply(
         repo::settings::set(conn, &settings)?;
         applied.settings_changed = true;
     }
+    // Snoozes that waited for their conversation's mail.
+    applied
+        .threads_changed
+        .extend(repo::snoozes::attach_waiting(
+            conn,
+            crate::models::now_ms(),
+        )?);
     Ok(applied)
 }
 
@@ -570,6 +610,7 @@ fn apply_put(
             Ok(Outcome::Applied)
         }
         TEMPLATE => apply_template(conn, id, &entry.body),
+        SNOOZE => apply_snooze(conn, id, &entry.body, applied),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -780,6 +821,43 @@ fn apply_template(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outc
     Ok(Outcome::Applied)
 }
 
+/// Snooze a conversation as another device did. The shared snooze is kept
+/// even before the conversation's mail arrives here; it snoozes it then.
+fn apply_snooze(
+    conn: &Connection,
+    id: &RecordId,
+    body: &Value,
+    applied: &mut Applied,
+) -> Result<Outcome> {
+    let (Some(account), Some(anchor), Some(wake_at)) = (
+        body.get("account").and_then(Value::as_str),
+        body.get("anchor").filter(|anchor| anchor.is_object()),
+        body.get("wakeAt").and_then(Value::as_i64),
+    ) else {
+        return Ok(Outcome::Ignored);
+    };
+    let Some(account_id) = account_ids(conn)?.by_sync.get(account).copied() else {
+        return Ok(Outcome::Waiting);
+    };
+    // Already over: taken on as gone, so this device removes it everywhere.
+    if wake_at <= crate::models::now_ms() {
+        return Ok(Outcome::Applied);
+    }
+    let sync_id = sync_id_hex(id);
+    conn.execute(
+        "INSERT INTO synced_snoozes (sync_id, account_id, anchor, wake_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(sync_id) DO UPDATE SET
+           account_id = excluded.account_id, anchor = excluded.anchor,
+           wake_at = excluded.wake_at",
+        params![sync_id, account_id, anchor.to_string(), wake_at],
+    )?;
+    if let Some(thread) = repo::snoozes::attach(conn, &sync_id, account_id, anchor, wake_at)? {
+        applied.threads_changed.push(thread);
+    }
+    Ok(Outcome::Applied)
+}
+
 /// Whether the server has seen the record with this sync id: it is mirrored,
 /// even as a deletion, or waiting to upload.
 fn server_knows(conn: &Connection, sync_id: &str) -> Result<bool> {
@@ -872,6 +950,34 @@ fn apply_delete(
                 "DELETE FROM snippets WHERE sync_id = ?1",
                 params![sync_id_hex(id)],
             )?;
+        }
+        SNOOZE => {
+            let sync_id = sync_id_hex(id);
+            let thread: Option<i64> = conn
+                .query_row(
+                    "SELECT thread_id FROM synced_snoozes WHERE sync_id = ?1",
+                    params![sync_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .flatten();
+            conn.execute(
+                "DELETE FROM synced_snoozes WHERE sync_id = ?1",
+                params![sync_id],
+            )?;
+            if let Some(thread) = thread {
+                // Unsnoozed, archived or woken on another device.
+                repo::snoozes::clear_local(conn, thread)?;
+                let woke = previous
+                    .body
+                    .get("wakeAt")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|wake_at| wake_at <= crate::models::now_ms() + 60_000);
+                if woke {
+                    repo::snoozes::mark_woken(conn, thread)?;
+                }
+                applied.threads_changed.push(thread);
+            }
         }
         // Preferences are never deleted, and device records go with their
         // device.
@@ -1188,6 +1294,228 @@ mod tests {
         .unwrap();
         assert_eq!(shortcut_of(&conn, &smaller).as_deref(), Some("hi"));
         assert_eq!(shortcut_of(&conn, &larger), None);
+    }
+
+    /// A device with account 1 under `account` and, unless `None`, a
+    /// conversation holding the message `message_id`. Returns the
+    /// conversation's local id.
+    fn device_with(
+        account: &str,
+        message_id: Option<&str>,
+        local_ids_from: i64,
+    ) -> (Connection, Option<i64>) {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        conn.execute(
+            "UPDATE accounts SET sync_id = ?1 WHERE id = 1",
+            params![account],
+        )
+        .unwrap();
+        // Local ids differ between devices.
+        conn.execute(
+            "UPDATE sqlite_sequence SET seq = ?1 WHERE name = 'threads'",
+            params![local_ids_from],
+        )
+        .unwrap();
+        let thread = message_id.map(|message_id| conversation(&conn, message_id, local_ids_from));
+        (conn, thread)
+    }
+
+    fn conversation(conn: &Connection, message_id: &str, thread_id: i64) -> i64 {
+        conn.execute(
+            "INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+             VALUES (?1, 1, 'plans', 0, 1000)",
+            params![thread_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, uid, message_id, subject,
+             from_addr, date, is_read, is_automated, is_draft, is_outgoing)
+             VALUES (?1, 1, 1, ?1, ?2, 'Plans', 'ann@example.com', 1000, 1, 0, 0, 0)",
+            params![thread_id, message_id],
+        )
+        .unwrap();
+        thread_id
+    }
+
+    fn snoozed_until(conn: &Connection, thread: i64) -> Option<i64> {
+        conn.query_row(
+            "SELECT wake_at FROM snoozes WHERE thread_id = ?1",
+            params![thread],
+            |row| row.get(0),
+        )
+        .optional()
+        .unwrap()
+    }
+
+    fn snooze_records(conn: &Connection) -> Vec<(RecordId, Entry)> {
+        snapshot(
+            conn,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap()
+        .into_iter()
+        .filter(|(_, entry)| entry.collection == SNOOZE)
+        .collect()
+    }
+
+    #[test]
+    fn snoozes_follow_the_conversation_to_other_devices() {
+        let account = "cc".repeat(16);
+        let (laptop, laptop_thread) = device_with(&account, Some("plans@example.com"), 10);
+        let laptop_thread = laptop_thread.unwrap();
+        let wake_at = crate::models::now_ms() + 3_600_000;
+        repo::snoozes::set(&laptop, laptop_thread, 1, wake_at, Some(1)).unwrap();
+        let records = snooze_records(&laptop);
+        assert_eq!(records.len(), 1);
+        let (id, record) = records[0].clone();
+        assert_eq!(record.body["anchor"]["messageId"], "plans@example.com");
+        assert_eq!(record.body["wakeAt"], wake_at);
+
+        // The phone has the conversation under another local id.
+        let (phone, phone_thread) = device_with(&account, Some("plans@example.com"), 500);
+        let phone_thread = phone_thread.unwrap();
+        let mut waiting = BTreeMap::new();
+        waiting.insert(id, record.clone());
+        let applied = apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(snoozed_until(&phone, phone_thread), Some(wake_at));
+        assert_eq!(applied.threads_changed, [phone_thread]);
+        // It reproduces the record it took on, so nothing uploads again.
+        assert_eq!(snooze_records(&phone), [(id, record.clone())]);
+
+        // Unsnoozed on the laptop: it ends here too.
+        let mut incoming = BTreeMap::new();
+        incoming.insert(
+            id,
+            Incoming {
+                previous: Some(record),
+                next: None,
+            },
+        );
+        apply(
+            &phone,
+            &incoming,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(snoozed_until(&phone, phone_thread), None);
+        assert!(snooze_records(&phone).is_empty());
+    }
+
+    #[test]
+    fn a_snooze_waits_for_its_conversations_mail() {
+        let account = "cc".repeat(16);
+        let (laptop, thread) = device_with(&account, Some("plans@example.com"), 10);
+        let wake_at = crate::models::now_ms() + 3_600_000;
+        repo::snoozes::set(&laptop, thread.unwrap(), 1, wake_at, Some(1)).unwrap();
+        let (id, record) = snooze_records(&laptop).remove(0);
+
+        let (phone, _) = device_with(&account, None, 500);
+        let mut waiting = BTreeMap::new();
+        waiting.insert(id, record.clone());
+        apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        // Kept, so the phone neither drops nor re-uploads it.
+        assert_eq!(snooze_records(&phone), [(id, record)]);
+
+        // The mail arrives; the next run snoozes it.
+        let thread = conversation(&phone, "plans@example.com", 600);
+        let snoozed = repo::snoozes::attach_waiting(&phone, crate::models::now_ms()).unwrap();
+        assert_eq!(snoozed, [thread]);
+        assert_eq!(snoozed_until(&phone, thread), Some(wake_at));
+    }
+
+    #[test]
+    fn a_snooze_that_already_ended_is_removed_everywhere() {
+        let account = "cc".repeat(16);
+        let (phone, thread) = device_with(&account, Some("plans@example.com"), 10);
+        let id = [4u8; 16];
+        let mut waiting = BTreeMap::new();
+        waiting.insert(
+            id,
+            entry(
+                SNOOZE,
+                json!({"account": account, "anchor": {"messageId": "plans@example.com"},
+                       "wakeAt": crate::models::now_ms() - 1_000}),
+            ),
+        );
+        apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(snoozed_until(&phone, thread.unwrap()), None);
+        // Taken on but not kept: the next check uploads its deletion.
+        let clock = Clock::new([1; 16], None);
+        let local = snapshot(
+            &phone,
+            &Names::default(),
+            &BTreeMap::new(),
+            ([1; 16], json!({})),
+        )
+        .unwrap();
+        super::super::store::track(&phone, &local, &clock).unwrap();
+        let deleted: i64 = phone
+            .query_row(
+                "SELECT COUNT(*) FROM device_sync_outbox WHERE record_id = ?1 AND body IS NULL",
+                params![&id[..]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted, 1);
+    }
+
+    #[test]
+    fn two_snoozes_of_one_conversation_keep_the_smaller_id() {
+        let account = "cc".repeat(16);
+        let (phone, thread) = device_with(&account, Some("plans@example.com"), 10);
+        let thread = thread.unwrap();
+        let soon = crate::models::now_ms() + 3_600_000;
+        let later = soon + 3_600_000;
+        let record = |wake_at: i64| {
+            entry(
+                SNOOZE,
+                json!({"account": account, "anchor": {"messageId": "plans@example.com"},
+                       "wakeAt": wake_at}),
+            )
+        };
+        let mut waiting = BTreeMap::new();
+        waiting.insert([0xee; 16], record(later));
+        waiting.insert([0x22; 16], record(soon));
+        apply(
+            &phone,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert_eq!(snoozed_until(&phone, thread), Some(soon));
+        let kept: Vec<RecordId> = snooze_records(&phone)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(kept, [[0x22; 16]]);
     }
 
     #[test]

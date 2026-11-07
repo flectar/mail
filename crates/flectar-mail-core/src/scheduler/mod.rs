@@ -40,29 +40,30 @@ pub fn spawn(
             }
             let now = now_ms();
 
-            // 1. Wake snoozed threads.
+            // 1. Wake snoozed threads, on every device: the shared snooze
+            // goes too.
             let woken = db.read(move |conn| repo::snoozes::woken(conn, now)).await;
             if let Ok(woken) = woken {
+                let mut shown = Vec::new();
                 for thread_id in woken {
                     let res = db
                         .write(move |conn| {
                             repo::snoozes::clear(conn, thread_id)?;
-                            // Mark latest message unread so the thread pops.
-                            conn.execute(
-                                "UPDATE messages SET is_read = 0 WHERE id =
-                                   (SELECT id FROM messages WHERE thread_id = ?1
-                                    ORDER BY date DESC LIMIT 1)",
-                                rusqlite::params![thread_id],
-                            )?;
-                            repo::threads::recompute(conn, thread_id)?;
-                            Ok(())
+                            repo::snoozes::mark_woken(conn, thread_id)
                         })
                         .await;
                     if res.is_ok() {
                         bus.emit(CoreEvent::ThreadWoke { thread_id });
+                        shown.push(thread_id);
                     }
                 }
+                if !shown.is_empty() {
+                    bus.emit(CoreEvent::MailUpdated { thread_ids: shown });
+                }
             }
+            let _ = db
+                .write(move |conn| repo::snoozes::drop_expired(conn, now))
+                .await;
 
             // 2. Nudge actors when a timed pending action becomes due.
             let mail_due = db

@@ -701,6 +701,11 @@ impl Core {
         if applied.settings_changed {
             self.bus.emit(CoreEvent::SettingsChanged);
         }
+        if !applied.threads_changed.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: applied.threads_changed,
+            });
+        }
 
         {
             let mut status = lock(&service.status);
