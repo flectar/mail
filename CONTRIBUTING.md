@@ -73,6 +73,8 @@ contributing.
 - Preserve third-party copyright and license notices.
 - Do not add dependencies or copied assets without documenting their source,
   version, license, and required notices.
+- After a dependency change, run `scripts/update-flatpak-cargo-sources.py`:
+  the Flatpak builds offline from the crates that file lists.
 
 ## Local validation
 
