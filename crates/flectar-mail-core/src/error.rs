@@ -17,6 +17,11 @@ pub enum CoreError {
     },
     #[error("imap error: {0}")]
     Imap(String),
+    /// The server answered the command with a tagged NO or BAD, as in
+    /// `NO [NONEXISTENT] Unknown Mailbox`. Only the command failed: the
+    /// connection stays in step and serves the next one (RFC 9051 7.1).
+    #[error("imap error: {0}")]
+    ImapRefused(String),
     /// A selective FETCH response could not be parsed. Its session must be
     /// discarded; explicit opens may retry using the complete message.
     #[error("imap response parse error: {0}")]
@@ -64,7 +69,7 @@ impl CoreError {
             CoreError::Db(_) => "db",
             CoreError::Io(_) => "io",
             CoreError::Network(_) | CoreError::ResponseTooLarge { .. } => "network",
-            CoreError::Imap(_) | CoreError::ImapParse(_) => "imap",
+            CoreError::Imap(_) | CoreError::ImapRefused(_) | CoreError::ImapParse(_) => "imap",
             CoreError::Jmap(_) => "jmap",
             CoreError::Pop3(_) => "pop3",
             CoreError::SendUncertain(_) => "send_uncertain",

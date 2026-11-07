@@ -587,3 +587,155 @@ async fn full_sync_triage_and_search() {
         "e2e OK: sync, threading, splits, bodies, FTS, archive+undo, snooze, contacts, remote replay, IDLE push, read elsewhere"
     );
 }
+
+/// A folder deleted on the server while the account is open (issue #215):
+/// the account stays online, the folder after it still syncs, and the
+/// deleted folder goes away.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_deleted_on_the_server_goes_away_and_the_account_stays_online() {
+    use flectar_mail_core::imap;
+    if !gated() {
+        eprintln!("skipping (set FLECTAR_MAIL_TEST_IMAP=1 to run)");
+        return;
+    }
+    // SAFETY: single-threaded test setup, before any threads read the env.
+    unsafe { std::env::set_var("FLECTAR_MAIL_TLS_INSECURE", "1") };
+    let creds_file = std::env::temp_dir().join(format!(
+        "flectar-mail-test-creds-deleted-folder-{}.json",
+        std::process::id()
+    ));
+    unsafe { std::env::set_var("FLECTAR_MAIL_CREDENTIALS_INSECURE_FILE", &creds_file) };
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "flectar_mail_core=warn".into()),
+        )
+        .try_init();
+    let server = || async {
+        imap::connect(
+            "127.0.0.1",
+            10993,
+            imap::ImapCredentials::Password {
+                user: "probeuser".into(),
+                password: "pass".into(),
+            },
+        )
+        .await
+        .expect("connect")
+    };
+    let message = |id: &str, subject: &str| {
+        format!(
+            "Message-ID: <{id}@example.com>\r\nFrom: Alice <alice@example.com>\r\n\
+             To: probeuser@example.com\r\nSubject: {subject}\r\nDate: {}\r\n\r\nHello\r\n",
+            chrono::Utc::now().to_rfc2822()
+        )
+    };
+    // Doomed is made first, so the cycle meets it before Projects.
+    let mut s = server().await;
+    for name in ["Doomed", "Projects"] {
+        let _ = imap::delete_folder(&mut s, name).await;
+        imap::create_folder(&mut s, name).await.expect("create");
+        imap::append(&mut s, name, message(name, name).as_bytes(), false)
+            .await
+            .expect("append");
+    }
+    imap::logout(s).await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+    // As the app does: otherwise the startup task starts the account's
+    // worker afresh a minute in, which lists the folders anyway.
+    core.notify_ui_ready();
+    let account = core
+        .add_account_password(AddPasswordAccountArgs {
+            connection: MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Starttls,
+            ),
+            email: "probeuser@example.com".into(),
+            display_name: None,
+            username: "probeuser".into(),
+            password: "pass".into(),
+            mail_protocol: MailProtocol::Imap,
+            jmap_url: String::new(),
+            incoming_host: "127.0.0.1".into(),
+            incoming_port: 10993,
+            smtp_host: "127.0.0.1".into(),
+            smtp_port: 10587,
+        })
+        .await
+        .expect("add account");
+    let folder = |name: &'static str| {
+        let core = &core;
+        async move {
+            core.list_folders(Some(account.id))
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|folder| folder.path == name)
+                .map(|folder| folder.id)
+        }
+    };
+    let in_projects = |subject: &'static str, projects: i64| {
+        let core = &core;
+        async move {
+            core.list_threads(
+                View::All,
+                None,
+                Some(account.id),
+                None,
+                Some(projects),
+                (None, 50),
+            )
+            .await
+            .unwrap()
+            .threads
+            .iter()
+            .any(|thread| thread.subject == subject)
+            .then_some(())
+        }
+    };
+    let projects = wait_for("Projects", Duration::from_secs(60), || folder("Projects")).await;
+    wait_for("Doomed", Duration::from_secs(60), || folder("Doomed")).await;
+    wait_for("Projects synced", Duration::from_secs(60), || {
+        in_projects("Projects", projects)
+    })
+    .await;
+    // After the first cycle: a retry of that one reads the folder list anyway.
+    wait_for(
+        "the first sync to finish",
+        Duration::from_secs(60),
+        || async {
+            let account = core.list_accounts().await.unwrap().remove(0);
+            (account.sync_state == "idle").then_some(())
+        },
+    )
+    .await;
+
+    let mut s = server().await;
+    imap::delete_folder(&mut s, "Doomed")
+        .await
+        .expect("delete Doomed");
+    imap::append(
+        &mut s,
+        "Projects",
+        message("later", "After the delete").as_bytes(),
+        false,
+    )
+    .await
+    .expect("append");
+    imap::logout(s).await;
+    core.sync_accounts(Some(&[account.id])).await.unwrap();
+
+    wait_for("new mail in Projects", Duration::from_secs(60), || {
+        in_projects("After the delete", projects)
+    })
+    .await;
+    wait_for("Doomed to go", Duration::from_secs(60), || async {
+        folder("Doomed").await.is_none().then_some(())
+    })
+    .await;
+    let account = core.list_accounts().await.unwrap().remove(0);
+    assert_ne!(account.sync_state, "offline", "{:?}", account.sync_error);
+    let _ = std::fs::remove_file(&creds_file);
+}

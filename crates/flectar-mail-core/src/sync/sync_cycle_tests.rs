@@ -312,10 +312,11 @@ async fn courier_cycle_applies_move_and_downloads_sparse_new_uid_without_uidnext
             &ctx,
             &config,
             &mut session,
-            1,
             &hist_tx,
             &mut inbox_baseline,
+            &mut listed_now(),
             CycleMode {
+                cycle: 1,
                 foreground_only: false,
                 immediate_follow_up: false,
                 list_status: false,
@@ -443,10 +444,11 @@ async fn count_inbox_without_list_status(inbox_uid_next: u32) -> (Vec<String>, O
         &ctx,
         &config,
         &mut session,
-        1,
         &hist_tx,
         &mut None,
+        &mut listed_now(),
         CycleMode {
+            cycle: 1,
             foreground_only: false,
             immediate_follow_up: false,
             list_status: offered.list_status,
@@ -806,10 +808,11 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
         &ctx,
         &config,
         &mut session,
-        1,
         &hist_tx,
         &mut None,
+        &mut listed_now(),
         CycleMode {
+            cycle: 1,
             foreground_only: true,
             immediate_follow_up: false,
             list_status: false,
@@ -858,10 +861,11 @@ async fn reload_removes_deleted_messages_even_outside_flag_window() {
         &ctx,
         &config,
         &mut session,
-        2,
         &hist_tx,
         &mut None,
+        &mut listed_now(),
         CycleMode {
+            cycle: 2,
             foreground_only: true,
             immediate_follow_up: false,
             list_status: false,
@@ -1291,53 +1295,9 @@ async fn list_status_opens_only_the_folders_that_changed() {
         .write(move |conn| {
             repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
             repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
-            let folder = |path: &str, uid_next: i64, messages: i64, unseen: i64| {
-                let id = repo::folders::upsert(conn, account_id, path, Some("/"), None)?;
-                repo::folders::set_uid_state(conn, id, Some(7), Some(uid_next), None)?;
-                repo::folders::set_last_seen_uid(conn, id, uid_next - 1)?;
-                repo::folders::set_backfill(conn, id, Some(1), true)?;
-                repo::folders::set_server_counts(conn, id, Some(messages), Some(unseen))?;
-                crate::Result::Ok(id)
-            };
-            let archive_id = folder("Archive", 21, 20, 0)?;
-            let lists_id = folder("Lists", 51, 50, 5)?;
-            let thread_id = repo::threads::create(conn, account_id, None, "digest")?;
-            let message_id = repo::messages::insert(
-                conn,
-                &NewMessage {
-                    account_id,
-                    folder_id: lists_id,
-                    uid: Some(50),
-                    message_id: Some("digest@example.test".into()),
-                    gm_msgid: None,
-                    gm_thrid: None,
-                    subject: "Digest".into(),
-                    from: Some(Address {
-                        name: None,
-                        email: "list@example.test".into(),
-                    }),
-                    to: Vec::new(),
-                    cc: Vec::new(),
-                    bcc: Vec::new(),
-                    date: 1,
-                    internal_date: None,
-                    is_read: false,
-                    is_starred: false,
-                    is_draft: false,
-                    is_outgoing: false,
-                    is_automated: true,
-                    has_attachments: false,
-                    size: None,
-                    snippet: String::new(),
-                    references: Vec::new(),
-                    list_unsubscribe: None,
-                    list_unsubscribe_post: None,
-                    sender_addr: None,
-                    sender_verification: SenderVerification::None,
-                },
-                thread_id,
-            )?;
-            repo::threads::recompute(conn, thread_id)?;
+            let archive_id = synced_folder(conn, account_id, "Archive", 21, 20, 0)?;
+            let lists_id = synced_folder(conn, account_id, "Lists", 51, 50, 5)?;
+            let message_id = seed_unread(conn, account_id, lists_id, 50)?;
             Ok((archive_id, lists_id, message_id))
         })
         .await
@@ -1351,10 +1311,11 @@ async fn list_status_opens_only_the_folders_that_changed() {
         &ctx,
         &config,
         &mut session,
-        1,
         &hist_tx,
         &mut None,
+        &mut listed_now(),
         CycleMode {
+            cycle: 1,
             foreground_only: false,
             immediate_follow_up: false,
             list_status: offered.list_status,
@@ -1387,4 +1348,520 @@ async fn list_status_opens_only_the_folders_that_changed() {
         })
         .await
         .unwrap();
+}
+
+/// A folder list read just now, so a cycle doesn't read it again.
+fn listed_now() -> FolderListing {
+    FolderListing {
+        listed_at: Some(tokio::time::Instant::now()),
+        ..FolderListing::default()
+    }
+}
+
+/// A folder synced up to `uid_next`, with the counts the server last gave.
+fn synced_folder(
+    conn: &rusqlite::Connection,
+    account_id: i64,
+    path: &str,
+    uid_next: i64,
+    messages: i64,
+    unseen: i64,
+) -> crate::Result<i64> {
+    let id = repo::folders::upsert(conn, account_id, path, Some("/"), None)?;
+    repo::folders::set_uid_state(conn, id, Some(7), Some(uid_next), None)?;
+    repo::folders::set_last_seen_uid(conn, id, uid_next - 1)?;
+    repo::folders::set_backfill(conn, id, Some(1), true)?;
+    repo::folders::set_server_counts(conn, id, Some(messages), Some(unseen))?;
+    Ok(id)
+}
+
+/// Inserts an unread message with `uid` in `folder_id`.
+fn seed_unread(
+    conn: &rusqlite::Connection,
+    account_id: i64,
+    folder_id: i64,
+    uid: i64,
+) -> crate::Result<i64> {
+    let thread_id = repo::threads::create(conn, account_id, None, "digest")?;
+    let message_id = repo::messages::insert(
+        conn,
+        &NewMessage {
+            account_id,
+            folder_id,
+            uid: Some(uid),
+            message_id: Some(format!("{uid}@example.test")),
+            gm_msgid: None,
+            gm_thrid: None,
+            subject: "Digest".into(),
+            from: Some(Address {
+                name: None,
+                email: "list@example.test".into(),
+            }),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            date: 1,
+            internal_date: None,
+            is_read: false,
+            is_starred: false,
+            is_draft: false,
+            is_outgoing: false,
+            is_automated: true,
+            has_attachments: false,
+            size: None,
+            snippet: String::new(),
+            references: Vec::new(),
+            list_unsubscribe: None,
+            list_unsubscribe_post: None,
+            sender_addr: None,
+            sender_verification: SenderVerification::None,
+        },
+        thread_id,
+    )?;
+    repo::threads::recompute(conn, thread_id)?;
+    Ok(message_id)
+}
+
+/// Serves one connection until LOGOUT, logging each command in `commands`
+/// and answering it with `respond`, which gets the command and its words.
+fn serve(
+    listener: tokio::net::TcpListener,
+    commands: Arc<Mutex<Vec<String>>>,
+    mut respond: impl FnMut(&str, &[&str]) -> String + Send + 'static,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut stream = BufReader::new(tls_acceptor().accept(tcp).await.unwrap());
+        stream.write_all(b"* OK fixture ready\r\n").await.unwrap();
+        loop {
+            let command = read_line(&mut stream).await;
+            if command.is_empty() {
+                break;
+            }
+            commands.lock().unwrap().push(command.clone());
+            let fields: Vec<_> = command.split_whitespace().collect();
+            if fields[1] == "LOGOUT" {
+                let tag = fields[0];
+                stream
+                    .write_all(format!("* BYE closing\r\n{tag} OK logout\r\n").as_bytes())
+                    .await
+                    .unwrap();
+                break;
+            }
+            let response = respond(&command, &fields);
+            stream.write_all(response.as_bytes()).await.unwrap();
+        }
+    })
+}
+
+/// The mailboxes `commands` selected, in order.
+fn selected_folders(commands: &[String]) -> Vec<&str> {
+    commands
+        .iter()
+        .filter(|command| command.split_whitespace().nth(1) == Some("SELECT"))
+        .filter_map(|command| command.split('"').nth(1))
+        .collect()
+}
+
+/// Gmail renames its folders when its language changes, and the old names
+/// then answer `NO [NONEXISTENT]` (issue #215). That one folder must not
+/// stop the cycle: the folders after it still sync on the same connection,
+/// and the folder list is read again, so the old folder goes away and the
+/// folder under its new name syncs straight away.
+#[tokio::test]
+async fn a_folder_the_server_no_longer_has_does_not_stop_the_cycle() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let mut selected = "";
+    let server = serve(listener, commands.clone(), move |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "STATUS" | "SELECT" if command.contains("\"Gone\"") => {
+                selected = "";
+                format!(
+                    "{tag} NO [NONEXISTENT] Unknown Mailbox: Gone \
+                     (now in authenticated state) (Failure)\r\n"
+                )
+            }
+            "STATUS" if command.contains("\"Projects\"") => format!(
+                "* STATUS Projects (MESSAGES 50 UIDNEXT 51 UNSEEN 4 UIDVALIDITY 7)\r\n\
+                 {tag} OK status\r\n"
+            ),
+            "STATUS" => format!(
+                "* STATUS INBOX (MESSAGES 3 UIDNEXT 10 UNSEEN 0 UIDVALIDITY 7)\r\n\
+                 {tag} OK status\r\n"
+            ),
+            "SELECT" => {
+                let (name, exists, uid_next) = if command.contains("\"Projects\"") {
+                    ("Projects", 50, 51)
+                } else {
+                    ("INBOX", 3, 10)
+                };
+                selected = name;
+                format!(
+                    "* {exists} EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                     * OK [UIDNEXT {uid_next}] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            "UID" if fields[2] == "FETCH" && selected == "Projects" => {
+                format!("* 1 FETCH (UID 50 FLAGS (\\Seen))\r\n{tag} OK fetched\r\n")
+            }
+            "UID" if fields[2] == "FETCH" => format!("{tag} OK fetched\r\n"),
+            // Gone is listed no more; Renamed is what it became.
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Projects\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Renamed\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox.id;
+    let (gone_id, message_id) = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
+            repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
+            // Synced before Projects: the old name comes first.
+            let gone_id = synced_folder(conn, account_id, "Gone", 21, 20, 0)?;
+            let projects_id = synced_folder(conn, account_id, "Projects", 51, 50, 5)?;
+            let message_id = seed_unread(conn, account_id, projects_id, 50)?;
+            Ok((gone_id, message_id))
+        })
+        .await
+        .unwrap();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let offered = imap::capabilities(&mut session).await.unwrap();
+    let (hist_tx, _hist_rx) = mpsc::channel(1);
+    let follow_up = match run_cycle(
+        &ctx,
+        &config,
+        &mut session,
+        &hist_tx,
+        &mut None,
+        &mut listed_now(),
+        CycleMode {
+            cycle: 1,
+            foreground_only: false,
+            immediate_follow_up: false,
+            list_status: offered.list_status,
+            inbox_pushed: PushedChanges::default(),
+        },
+    )
+    .await
+    {
+        Ok(follow_up) => follow_up,
+        Err(error) => panic!("the cycle stopped at the missing folder: {error}"),
+    };
+    assert!(
+        follow_up,
+        "the folder under its new name waits for a later cycle"
+    );
+    imap::logout(session).await;
+    server.await.unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    assert_eq!(selected_folders(&commands), ["INBOX", "Gone", "Projects"]);
+    let refused = commands
+        .iter()
+        .position(|command| command.contains("SELECT \"Gone\""))
+        .unwrap();
+    assert!(
+        commands[refused..]
+            .iter()
+            .any(|command| command.contains(" LIST ")),
+        "the folder list wasn't read again: {commands:?}"
+    );
+    ctx.db
+        .read(move |conn| {
+            assert!(repo::messages::get_row(conn, message_id)?.unwrap().is_read);
+            let listed = repo::folders::list(conn, Some(account_id))?
+                .into_iter()
+                .map(|folder| (folder.id, folder.path))
+                .collect::<Vec<_>>();
+            assert!(
+                listed.iter().all(|(id, _)| *id != gone_id),
+                "the folder the server no longer lists is still shown: {listed:?}"
+            );
+            assert!(
+                listed.iter().any(|(_, path)| path == "Renamed"),
+                "{listed:?}"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+/// A folder the server lists but won't open, such as one without read
+/// rights, is skipped as well. The folder list then still has it, so the
+/// next refusals don't read the list again before it is due.
+#[tokio::test]
+async fn a_refused_folder_the_server_still_lists_is_not_listed_again() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "STATUS" | "SELECT" if command.contains("\"Locked\"") => {
+                format!("{tag} NO [NOPERM] Permission denied\r\n")
+            }
+            "STATUS" => format!(
+                "* STATUS INBOX (MESSAGES 3 UIDNEXT 10 UNSEEN 0 UIDVALIDITY 7)\r\n\
+                 {tag} OK status\r\n"
+            ),
+            "SELECT" => format!(
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                 * OK [UIDNEXT 10] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+            ),
+            "UID" if fields[2] == "FETCH" => format!("{tag} OK fetched\r\n"),
+            "LIST" => format!(
+                "* LIST (\\HasNoChildren) \"/\" INBOX\r\n\
+                 * LIST (\\HasNoChildren) \"/\" Locked\r\n\
+                 {tag} OK list completed\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let inbox_id = inbox.id;
+    let locked_id = ctx
+        .db
+        .write(move |conn| {
+            repo::folders::set_uid_state(conn, inbox_id, Some(7), Some(10), None)?;
+            repo::folders::set_last_seen_uid(conn, inbox_id, 9)?;
+            synced_folder(conn, account_id, "Locked", 21, 20, 0)
+        })
+        .await
+        .unwrap();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let offered = imap::capabilities(&mut session).await.unwrap();
+    let (hist_tx, _hist_rx) = mpsc::channel(1);
+    // Never listed yet: the first cycle reads the folder list first thing.
+    let mut listing = FolderListing::default();
+    for cycle in 1..=2 {
+        let result = run_cycle(
+            &ctx,
+            &config,
+            &mut session,
+            &hist_tx,
+            &mut None,
+            &mut listing,
+            CycleMode {
+                cycle,
+                foreground_only: false,
+                immediate_follow_up: false,
+                list_status: offered.list_status,
+                inbox_pushed: PushedChanges::default(),
+            },
+        )
+        .await;
+        assert!(matches!(result, Ok(false)), "cycle {cycle}: {result:?}");
+    }
+    imap::logout(session).await;
+    server.await.unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    assert_eq!(
+        selected_folders(&commands),
+        ["INBOX", "Locked", "INBOX", "Locked"]
+    );
+    let lists = commands
+        .iter()
+        .filter(|command| command.contains(" LIST "))
+        .count();
+    assert_eq!(lists, 1, "{commands:?}");
+    let locked_listed = ctx
+        .db
+        .read(move |conn| {
+            Ok(repo::folders::list(conn, Some(account_id))?
+                .iter()
+                .any(|folder| folder.id == locked_id))
+        })
+        .await
+        .unwrap();
+    assert!(locked_listed);
+}
+
+#[test]
+fn the_folder_list_is_read_first_and_then_every_half_hour() {
+    let start = tokio::time::Instant::now();
+    let mut listing = FolderListing::default();
+    assert!(listing.due(start));
+    listing.listed_at = Some(start);
+    assert!(!listing.due(start + FOLDER_LIST_INTERVAL - std::time::Duration::from_secs(1)));
+    assert!(listing.due(start + FOLDER_LIST_INTERVAL));
+}
+
+#[test]
+fn only_a_folder_refused_anew_calls_for_the_folder_list() {
+    let mut listing = FolderListing::default();
+    assert!(!listing.recheck(&[]));
+    assert!(listing.recheck(&[7]));
+    listing.refused_but_listed.insert(7);
+    assert!(!listing.recheck(&[7]));
+    assert!(listing.recheck(&[7, 8]));
+}
+
+/// The folders the body worker selects for empty batches from `batches`,
+/// one after another on one connection. The server refuses Gone, and has
+/// made Reset afresh since its mail was queued.
+async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" if command.contains("\"Gone\"") => {
+                format!("{tag} NO [NONEXISTENT] Unknown Mailbox: Gone\r\n")
+            }
+            "SELECT" => {
+                let uid_validity = if command.contains("\"Reset\"") { 9 } else { 7 };
+                format!(
+                    "* 3 EXISTS\r\n* OK [UIDVALIDITY {uid_validity}] valid\r\n\
+                     * OK [UIDNEXT 10] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .write(move |conn| {
+            let mut folders = HashMap::new();
+            for name in ["Lists", "Gone", "Reset"] {
+                folders.insert(name, synced_folder(conn, account_id, name, 10, 3, 0)?);
+            }
+            repo::folders::set_uid_state(conn, folders["Reset"], Some(8), Some(10), None)?;
+            Ok(folders)
+        })
+        .await
+        .unwrap();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let mut selected = None;
+    for name in batches {
+        let chunk = BodyChunk {
+            folder_id: folders[name],
+            folder_name: (*name).into(),
+            uid_validity: Some(if *name == "Reset" { 8 } else { 7 }),
+            items: Vec::new(),
+        };
+        let fetched = fetch_body_chunk(&ctx, &config, &mut session, &mut selected, &chunk).await;
+        assert!(matches!(fetched, Ok(0)), "{name}");
+    }
+    imap::logout(session).await;
+    server.await.unwrap();
+    let commands = commands.lock().unwrap().clone();
+    selected_folders(&commands)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The body worker skips a batch from a folder the server turns down,
+/// rather than splitting it over new connections, and the next batch
+/// selects its folder again.
+#[tokio::test]
+async fn a_body_batch_from_a_refused_folder_is_skipped() {
+    assert_eq!(
+        body_batch_selects(&["Lists", "Gone", "Lists"]).await,
+        ["Lists", "Gone", "Lists"]
+    );
+}
+
+/// After opening a folder to find its UIDVALIDITY changed, the next batch
+/// of the folder open before selects it again instead of reading its UIDs
+/// in the other folder.
+#[tokio::test]
+async fn a_body_batch_after_a_new_uidvalidity_selects_its_folder_again() {
+    assert_eq!(
+        body_batch_selects(&["Lists", "Reset", "Lists"]).await,
+        ["Lists", "Reset", "Lists"]
+    );
+}
+
+/// History downloads go on past a folder the server turns down, on the same
+/// connection.
+#[tokio::test]
+async fn history_backfill_goes_on_past_a_refused_folder() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" if command.contains("\"Gone\"") => {
+                format!("{tag} NO [NONEXISTENT] Unknown Mailbox: Gone\r\n")
+            }
+            "SELECT" => format!(
+                "* 3 EXISTS\r\n* OK [UIDVALIDITY 7] valid\r\n\
+                 * OK [UIDNEXT 10] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+            ),
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    // Both still need their history; Gone comes first.
+    ctx.db
+        .write(move |conn| {
+            repo::folders::upsert(conn, account_id, "Gone", Some("/"), None)?;
+            repo::folders::upsert(conn, account_id, "Projects", Some("/"), None)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+    let (nudge, rx) = mpsc::channel(1);
+    let (pool_tx, _pool_rx) = mpsc::channel(1);
+    let (_settings, settings_rx) = watch::channel(config.settings.clone());
+    let worker = tokio::spawn(run_history_backfill(
+        ctx.clone(),
+        config.clone(),
+        rx,
+        pool_tx,
+        settings_rx,
+    ));
+    nudge.send(()).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), server)
+        .await
+        .expect("the history worker never signed out")
+        .unwrap();
+    drop(nudge);
+    tokio::time::timeout(std::time::Duration::from_secs(5), worker)
+        .await
+        .expect("the history worker didn't stop")
+        .unwrap();
+
+    let commands = commands.lock().unwrap().clone();
+    assert_eq!(selected_folders(&commands), ["Gone", "Projects"]);
+    let sign_ins = commands
+        .iter()
+        .filter(|command| command.contains(" LOGIN "))
+        .count();
+    assert_eq!(sign_ins, 1, "{commands:?}");
 }
