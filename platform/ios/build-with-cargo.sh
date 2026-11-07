@@ -64,6 +64,16 @@ done
 
 lipo -create -output "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" "${executables[@]}"
 
+# Devices give the main thread 1 MB unless the executable asks for more, as
+# build.rs does; the simulator has 8 MiB anyway, so only this check notices.
+if ! otool -l "$TARGET_BUILD_DIR/$EXECUTABLE_PATH" | awk '
+  /cmd LC_MAIN/ { main = 1 }
+  main && $1 == "stacksize" { slices++; if ($2 < 8388608) small++; main = 0 }
+  END { exit !(slices > 0 && small == 0) }'; then
+  printf 'The executable does not ask for an 8 MiB main-thread stack.\n' >&2
+  exit 1
+fi
+
 # iOS permits embedded dynamic frameworks, not loose third-party dylibs.
 # Device and simulator slices are never mixed; Xcode chooses the SDK above.
 framework="$TARGET_BUILD_DIR/${FRAMEWORKS_FOLDER_PATH:?}/PDFium.framework"
