@@ -365,21 +365,29 @@ fn build_filter(
             let c = role_exists(roles::SENT, &mut bind);
             where_clauses.push(c);
         }
+        // A scheduled draft waits in Scheduled instead, as in Gmail.
         View::Drafts if messages => {
             let c = role_exists(roles::DRAFTS, &mut bind);
-            where_clauses.push(format!("m.is_draft = 1 AND {c}"));
+            where_clauses.push(format!(
+                "m.is_draft = 1 AND {c} AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                   WHERE pa.message_id = m.id AND {SCHEDULED_SEND})"
+            ));
         }
         View::Drafts => {
             bind.push(Box::new(roles::DRAFTS.to_string()));
             where_clauses.push(format!(
                 "(EXISTS (SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
-                          WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0})
+                          WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0}
+                            AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                                  WHERE pa.message_id = m.id AND {SCHEDULED_SEND}))
                   OR EXISTS (
                        SELECT 1 FROM messages m
                        JOIN accounts ma ON ma.id = m.account_id AND ma.provider = 'gmail'
                        JOIN message_folders mf ON mf.message_id = m.id
                        JOIN folders f ON f.id = mf.folder_id
                        WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0}
+                         AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                               WHERE pa.message_id = m.id AND {SCHEDULED_SEND})
                   ))",
                 bind.len()
             ));

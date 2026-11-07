@@ -76,6 +76,14 @@ async fn draft(core: &Core, account_id: i64) -> i64 {
     .expect("save draft")
 }
 
+async fn drafts(core: &Core) -> usize {
+    core.list_threads(View::Drafts, None, None, None, None, (None, 10))
+        .await
+        .unwrap()
+        .threads
+        .len()
+}
+
 async fn scheduled_threads(core: &Core) -> usize {
     core.list_threads(View::Scheduled, None, None, None, None, (None, 10))
         .await
@@ -103,6 +111,11 @@ async fn a_scheduled_draft_waits_moves_and_cancels() {
         .await
         .expect("schedule");
     assert_eq!(scheduled_threads(&core).await, 1);
+    assert_eq!(
+        drafts(&core).await,
+        0,
+        "a scheduled draft waits in Scheduled, not Drafts"
+    );
 
     // Scheduling it again moves the one send.
     let tomorrow = now_ms() + 86_400_000;
@@ -123,11 +136,7 @@ async fn a_scheduled_draft_waits_moves_and_cancels() {
     assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
     assert!(core.scheduled_sends().await.unwrap().is_empty());
     assert_eq!(scheduled_threads(&core).await, 0);
-    let drafts = core
-        .list_threads(View::Drafts, None, None, None, None, (None, 10))
-        .await
-        .unwrap();
-    assert_eq!(drafts.threads.len(), 1);
+    assert_eq!(drafts(&core).await, 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
