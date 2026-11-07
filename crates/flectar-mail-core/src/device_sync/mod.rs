@@ -421,8 +421,13 @@ impl Core {
         Ok(())
     }
 
-    /// Stop syncing on this device. The app's data stays.
-    async fn drop_sync_state(&self, state: DeviceSyncState) -> Result<()> {
+    /// Stop syncing on this device. The app's data stays; `departure` says
+    /// who sends this device's scheduled mail now.
+    async fn drop_sync_state(
+        &self,
+        state: DeviceSyncState,
+        departure: scheduled::Departure,
+    ) -> Result<()> {
         let service = self.sync_service();
         service.end_pairing();
         service.stop_events();
@@ -430,9 +435,9 @@ impl Core {
         *lock(&service.billing_checked) = None;
         let threads = self
             .db
-            .write(|conn| {
+            .write(move |conn| {
                 let tx = conn.transaction()?;
-                let threads = scheduled::detach(&tx)?;
+                let threads = scheduled::detach(&tx, departure, now_ms())?;
                 store::clear(&tx)?;
                 tx.commit()?;
                 Ok(threads)
@@ -799,7 +804,8 @@ impl Core {
                 // The keys are gone, so this device cannot sign in to its
                 // group again: it has to rejoin.
                 tracing::warn!(%error, "Flectar Mail Sync keys are missing; turning sync off");
-                self.drop_sync_state(DeviceSyncState::Off).await?;
+                self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
+                    .await?;
                 return Ok(());
             }
         };
@@ -1056,11 +1062,15 @@ impl Core {
 
     async fn sync_failed<T: Default>(&self, error: SyncError) -> Result<T> {
         match error {
+            // The group goes on without this device, and keeps its
+            // scheduled mail.
             SyncError::Removed | SyncError::LoginRefused => {
-                self.drop_sync_state(DeviceSyncState::Removed).await?;
+                self.drop_sync_state(DeviceSyncState::Removed, scheduled::Departure::Kept)
+                    .await?;
             }
             SyncError::GroupDeleted => {
-                self.drop_sync_state(DeviceSyncState::Deleted).await?;
+                self.drop_sync_state(DeviceSyncState::Deleted, scheduled::Departure::Alone)
+                    .await?;
             }
             SyncError::PaymentRequired => {
                 self.set_sync_state(DeviceSyncState::PaymentRequired);
@@ -1447,14 +1457,92 @@ impl Core {
     /// Stop syncing on this device and leave the group. The app's data
     /// stays here; the other devices keep syncing.
     pub async fn device_sync_turn_off(&self) -> Result<()> {
+        let mut departure = scheduled::Departure::Alone;
         if let Some(client) = self.sync_service().client() {
+            departure = self.take_back_scheduled_sends(&client).await;
             let own = client.identity().device_id();
             if let Err(error) = client.remove_device(own).await {
                 // The other devices can still remove this one themselves.
                 tracing::warn!(%error, "could not leave the Flectar Mail Sync group");
             }
         }
-        self.drop_sync_state(DeviceSyncState::Off).await
+        self.drop_sync_state(DeviceSyncState::Off, departure).await
+    }
+
+    /// Before this device leaves the group, take its scheduled mail back:
+    /// the other devices forget it, and it goes out from here. When they
+    /// cannot hear of it, they keep it, and send what they can.
+    async fn take_back_scheduled_sends(&self, client: &SyncClient) -> scheduled::Departure {
+        let own = client.identity().device_id();
+        // Without another device, or a payment, none sends this device's.
+        let others = client
+            .state()
+            .await
+            .devices
+            .keys()
+            .any(|device| *device != own);
+        let paused = lock(&self.sync_service().status).state == DeviceSyncState::PaymentRequired;
+        if !others || paused {
+            return scheduled::Departure::Alone;
+        }
+        let me = hex(&own);
+        let taken = {
+            let me = me.clone();
+            self.db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    let taken = scheduled::take_back(&tx, &me, now_ms())?;
+                    tx.commit()?;
+                    Ok(taken)
+                })
+                .await
+        };
+        let Ok(taken) = taken else {
+            return scheduled::Departure::Kept;
+        };
+        if taken.is_empty() {
+            return scheduled::Departure::TakenBack;
+        }
+        let reached = matches!(self.run_device_sync(true).await, Ok(true));
+        let ids: Vec<RecordId> = taken
+            .iter()
+            .filter_map(|send| collections::sync_id_bytes(send.sync_id()))
+            .collect();
+        let heard = reached
+            && self
+                .db
+                .read(move |conn| {
+                    for id in &ids {
+                        if store::has_pending(conn, id)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })
+                .await
+                .unwrap_or(false);
+        if heard {
+            // Their files go too.
+            self.remove_unneeded_files(&me, client).await;
+            return scheduled::Departure::TakenBack;
+        }
+        let given_back = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                scheduled::give_back(&tx, &taken, now_ms())?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+        match given_back {
+            Ok(()) => scheduled::Departure::Kept,
+            // They go out from here, as taken back.
+            Err(error) => {
+                tracing::warn!(%error, "could not leave scheduled mail to the other devices");
+                scheduled::Departure::TakenBack
+            }
+        }
     }
 
     /// Delete the group and everything the server holds for it, for every
@@ -1462,6 +1550,7 @@ impl Core {
     pub async fn device_sync_delete_everywhere(&self) -> Result<()> {
         let client = self.sync_service().require_client()?;
         client.delete_group().await.map_err(sync_error)?;
-        self.drop_sync_state(DeviceSyncState::Off).await
+        self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
+            .await
     }
 }

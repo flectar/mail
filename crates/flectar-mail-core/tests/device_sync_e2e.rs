@@ -624,12 +624,23 @@ async fn an_imap_message_scheduled_on_one_device_waits_on_the_other() {
         .unwrap();
     assert_eq!(subject, "Monday plans");
     assert!(bcc.contains("boss@example.com"), "{bcc}");
+
+    // Sync turned off on the laptop: the message goes out from there at its
+    // time, and the phone forgets it.
+    laptop.device_sync_turn_off().await.unwrap();
+    assert_eq!(
+        send_of(&laptop).await.unwrap(),
+        ("pending".to_owned(), send_at)
+    );
+    phone.device_sync_run().await.unwrap();
+    assert!(phone.scheduled_sends().await.unwrap().is_empty());
+    assert_eq!(send_of(&phone).await.unwrap().0, "cancelled");
 }
 
 /// An IMAP message too large for its record goes into a file in Flectar Mail
 /// Sync's storage, sealed. Other devices show it from the preview the record
 /// carries, and the one that sends it fetches it first: here the phone, once
-/// the laptop that scheduled it is gone.
+/// the laptop that scheduled it is lost and removed from the group.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
     let files = tempfile::tempdir().unwrap();
@@ -794,9 +805,15 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
     assert_eq!(scheduled.len(), 1);
     assert_eq!(scheduled[0].send_at, send_at + 3_600_000);
 
-    // The laptop is gone. "Send now" on the phone: it claims the send, and
-    // fetches the message before sending it.
-    laptop.device_sync_turn_off().await.unwrap();
+    // The laptop is lost, and removed from the phone. "Send now" there: it
+    // claims the send, and fetches the message before sending it.
+    let lost = phone
+        .device_sync_status()
+        .devices
+        .into_iter()
+        .find(|device| !device.this_device)
+        .unwrap();
+    phone.device_sync_remove_device(lost.id).await.unwrap();
     assert!(phone.send_now(scheduled[0].action_id).await.unwrap());
     for _ in 0..3 {
         phone.device_sync_run().await.unwrap();
@@ -810,4 +827,9 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
         state != "pending" || due != i64::MAX,
         "its send started: {state} {due}"
     );
+
+    // Found again, the laptop hears it was removed: the phone sends this one.
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Removed);
+    assert_eq!(send_of(&laptop).await.unwrap().0, "cancelled");
 }

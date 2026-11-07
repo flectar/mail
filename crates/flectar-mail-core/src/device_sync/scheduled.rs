@@ -862,23 +862,136 @@ fn hold_new(conn: &Connection, send: &SyncedSend, draft: &Draft, origin: bool) -
     )
 }
 
-/// Stop sharing sends: Flectar Mail Sync was turned off here. A send of this
-/// device's own draft goes out at its time from this device alone; a send
-/// of another device's draft is dropped.
-pub(crate) fn detach(conn: &Connection) -> Result<Vec<i64>> {
+/// Who sends this device's own shared sends once it stops syncing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Departure {
+    /// No other device does: the group is gone, has no other device, or
+    /// waits for a payment. They go out from here.
+    Alone,
+    /// The group goes on, and this device took them back as it left (see
+    /// [`take_back`]): they go out from here, but for one another device
+    /// holds the claim on.
+    TakenBack,
+    /// The group goes on and keeps them, as when another device removed
+    /// this one: it sends those it can, and this device the rest.
+    Kept,
+}
+
+/// A send this device took back from the group as it left.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TakenBack {
+    sync_id: String,
+    action_id: Option<i64>,
+    send_at: i64,
+}
+
+impl TakenBack {
+    pub(crate) fn sync_id(&self) -> &str {
+        &self.sync_id
+    }
+}
+
+/// Take this device's own shared sends back from the group as it leaves:
+/// cancelled for the other devices, they go out from here at their time.
+/// One another device holds the claim on stays with that device.
+pub(crate) fn take_back(conn: &Connection, me: &str, now: i64) -> Result<Vec<TakenBack>> {
+    let mut taken = Vec::new();
+    for send in synced_sends::all(conn)? {
+        if send.origin != me || send.state != SCHEDULED || claimed_elsewhere(&send, now) {
+            continue;
+        }
+        synced_sends::set_state(conn, &send.sync_id, CANCELLED, None, now)?;
+        if let Some(action) = send.action_id {
+            move_held(conn, action, HELD, send.send_at)?;
+            synced_sends::set_action(conn, &send.sync_id, None)?;
+        }
+        taken.push(TakenBack {
+            sync_id: send.sync_id,
+            action_id: send.action_id,
+            send_at: send.send_at,
+        });
+    }
+    Ok(taken)
+}
+
+/// The other devices did not hear that this device took its sends back:
+/// they wait for the group again. A send already forgotten here stays this
+/// device's.
+pub(crate) fn give_back(conn: &Connection, taken: &[TakenBack], now: i64) -> Result<()> {
+    for send in taken {
+        if synced_sends::get(conn, &send.sync_id)?.is_none() {
+            continue;
+        }
+        synced_sends::set_state(conn, &send.sync_id, SCHEDULED, None, now)?;
+        if let Some(action) = send.action_id {
+            move_held(conn, action, send.send_at, HELD)?;
+            synced_sends::set_action(conn, &send.sync_id, Some(action))?;
+        }
+    }
+    Ok(())
+}
+
+/// Move a waiting send from `from` to `to`: held, or due at its time.
+fn move_held(conn: &Connection, action: i64, from: i64, to: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions SET not_before = ?3
+         WHERE id = ?1 AND state = 'pending' AND not_before = ?2",
+        params![action, from, to],
+    )?;
+    Ok(())
+}
+
+/// Whether a device other than the one that scheduled the send holds a
+/// claim on it that still holds: that device may be sending it.
+fn claimed_elsewhere(send: &SyncedSend, now: i64) -> bool {
+    send.claimed_by
+        .as_deref()
+        .is_some_and(|device| device != send.origin)
+        && send.claim_until.is_some_and(|until| until > now)
+}
+
+/// Whether the other devices can send it without this one: from the mail
+/// server's copy of its draft, or the message its record carries.
+fn group_can_send(conn: &Connection, send: &SyncedSend) -> Result<bool> {
+    if send
+        .draft_ref
+        .as_deref()
+        .is_none_or(|version| version == LOCAL_ONLY)
+    {
+        return Ok(false);
+    }
+    Ok(match protocol(conn, send.account_id)?.as_deref() {
+        Some(protocol) if carries_message(protocol) => {
+            synced_sends::mime(conn, &send.sync_id)?.is_some()
+                || synced_sends::file(conn, &send.sync_id)?.0.is_some()
+        }
+        Some(_) => true,
+        None => false,
+    })
+}
+
+/// Stop sharing sends: this device no longer syncs. A send of another
+/// device's draft is dropped. A send of this device's own draft goes out
+/// from here at its time, unless another device sends it (see
+/// [`Departure`]); then it stays a draft here.
+pub(crate) fn detach(conn: &Connection, departure: Departure, now: i64) -> Result<Vec<i64>> {
     let mut threads = Vec::new();
     for send in synced_sends::all(conn)? {
         if let Some(action) = send.action_id
             && send.state == SCHEDULED
         {
-            if !sends_as_is(conn, action)? {
-                conn.execute(
-                    "UPDATE pending_actions SET not_before = ?2
-                     WHERE id = ?1 AND state = 'pending' AND not_before = ?3",
-                    params![action, send.send_at, HELD],
-                )?;
-            } else {
+            let elsewhere = sends_as_is(conn, action)?
+                || match departure {
+                    Departure::Alone => false,
+                    Departure::TakenBack => claimed_elsewhere(&send, now),
+                    Departure::Kept => {
+                        claimed_elsewhere(&send, now) || group_can_send(conn, &send)?
+                    }
+                };
+            if elsewhere {
                 repo::actions::try_cancel(conn, action)?;
+            } else {
+                move_held(conn, action, HELD, send.send_at)?;
             }
             if let Some(thread) = thread_of_action(conn, action)? {
                 threads.push(thread);
@@ -886,6 +999,8 @@ pub(crate) fn detach(conn: &Connection) -> Result<Vec<i64>> {
         }
         synced_sends::delete(conn, &send.sync_id)?;
     }
+    // Files in the group's storage are no longer this device's to remove.
+    synced_sends::clear_files_gone(conn)?;
     Ok(threads)
 }
 
@@ -1398,13 +1513,91 @@ mod tests {
             .action_id
             .unwrap();
 
-        detach(&conn).unwrap();
+        detach(&conn, Departure::Alone, AT - 10 * 60_000).unwrap();
         assert_eq!(
             not_before(&conn, own),
             AT,
             "its own send goes out at its time"
         );
         assert_eq!(action_state(&conn, theirs), "cancelled");
+        assert!(!synced_sends::any(&conn).unwrap());
+    }
+
+    #[test]
+    fn a_device_that_leaves_takes_its_sends_back_unless_another_holds_the_claim() {
+        let conn = setup("E1");
+        let (own, action) = scheduled_here(&conn);
+        let claimed_action = repo::actions::enqueue(
+            &conn,
+            1,
+            "send",
+            Some(9),
+            Some(5),
+            &json!({"draftId": 9, "scheduled": true, "sendAt": AT}),
+            Some(HELD),
+        )
+        .unwrap();
+        let claimed =
+            synced_sends::create(&conn, 1, "later@example.com", AT, ORIGIN, claimed_action, 0)
+                .unwrap();
+        let now = AT - HELPER_LEAD_MS;
+        synced_sends::set_claim(&conn, &claimed, Some(HELPER), Some(AT + CLAIM_MS), now).unwrap();
+
+        let taken = take_back(&conn, ORIGIN, now).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].sync_id(), own);
+        let send = synced_sends::get(&conn, &own).unwrap().unwrap();
+        assert_eq!(send.state, CANCELLED, "the other devices forget it");
+        assert_eq!(send.action_id, None);
+        assert_eq!(not_before(&conn, action), AT, "it goes out from here");
+        assert_eq!(not_before(&conn, claimed_action), HELD);
+
+        // The other devices did not hear of it: it waits for them again.
+        give_back(&conn, &taken, now + 1).unwrap();
+        let send = synced_sends::get(&conn, &own).unwrap().unwrap();
+        assert_eq!(send.state, SCHEDULED);
+        assert_eq!(send.action_id, Some(action));
+        assert_eq!(not_before(&conn, action), HELD);
+
+        // They did: the one another device claimed is that device's to send.
+        take_back(&conn, ORIGIN, now).unwrap();
+        detach(&conn, Departure::TakenBack, now).unwrap();
+        assert_eq!(not_before(&conn, action), AT);
+        assert_eq!(action_state(&conn, claimed_action), "cancelled");
+        assert!(!synced_sends::any(&conn).unwrap());
+    }
+
+    #[test]
+    fn a_removed_device_leaves_to_the_group_what_the_group_can_send() {
+        let conn = setup("E1");
+        let (uploaded, sent_elsewhere) = scheduled_here(&conn);
+        synced_sends::set_draft_ref(&conn, &uploaded, "E1", 0).unwrap();
+        let unshared_action = repo::actions::enqueue(
+            &conn,
+            1,
+            "send",
+            Some(9),
+            Some(5),
+            &json!({"draftId": 9, "scheduled": true, "sendAt": AT}),
+            Some(HELD),
+        )
+        .unwrap();
+        synced_sends::create(
+            &conn,
+            1,
+            "later@example.com",
+            AT,
+            ORIGIN,
+            unshared_action,
+            0,
+        )
+        .unwrap();
+
+        detach(&conn, Departure::Kept, AT - 10 * 60_000).unwrap();
+        // The other devices have the draft the server keeps, and send it.
+        assert_eq!(action_state(&conn, sent_elsewhere), "cancelled");
+        // Not uploaded yet: only this device can send it.
+        assert_eq!(not_before(&conn, unshared_action), AT);
         assert!(!synced_sends::any(&conn).unwrap());
     }
 

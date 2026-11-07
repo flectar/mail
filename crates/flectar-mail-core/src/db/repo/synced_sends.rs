@@ -213,6 +213,12 @@ pub fn file_removed(conn: &Connection, file: &str) -> Result<()> {
     Ok(())
 }
 
+/// Forget the files waiting for removal: this device left the group.
+pub fn clear_files_gone(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM synced_send_files_gone", [])?;
+    Ok(())
+}
+
 /// Take on the message another device's record carries, if any.
 pub fn put_mime(conn: &Connection, sync_id: &str, mime: Option<&[u8]>) -> Result<()> {
     conn.execute(
