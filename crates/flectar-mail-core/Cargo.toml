@@ -79,8 +79,8 @@ quick-xml = { version = "0.42", features = ["encoding"] }
 async-trait = "0.1"
 
 # Flectar Mail Sync (issue #39): end-to-end encrypted sync of the app's setup
-# between the user's devices. See flectar/mail-sync.
-flectar-mail-sync-client = { git = "https://github.com/flectar/mail-sync", rev = "056c85dbb2cc9d0c73c5356a838ef095c36b2290" }
+# between the user's devices. See flectar/mail-sync-client.
+flectar-mail-sync-client = { git = "https://github.com/flectar/mail-sync-client", rev = "314bba04ef55b104a36de2dc08f88481efd4bf1a" }
 # Names this device in the list of synced devices.
 hostname = "0.4"
 
