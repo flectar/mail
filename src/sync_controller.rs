@@ -1,4 +1,4 @@
-//! Flectar Sync's settings page and dialogs (issue #39).
+//! Flectar Mail Sync's settings page and dialogs (issue #39).
 //!
 //! The core runs sync. This controller starts what the user asks for, shows
 //! where sync stands from the core's events, and draws pairing QR codes.

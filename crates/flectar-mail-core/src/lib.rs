@@ -826,7 +826,7 @@ pub struct Core {
     ai_router_lock: Arc<tokio::sync::Mutex<()>>,
     /// Wakes the loop that copies and moves mail to other accounts.
     transfers: Arc<tokio::sync::Notify>,
-    /// Flectar Sync: this device's setup kept the same on the user's other
+    /// Flectar Mail Sync: this device's setup kept the same on the user's other
     /// devices.
     device_sync: Arc<device_sync::Service>,
 }
@@ -1176,7 +1176,7 @@ impl Core {
             tokio::spawn(async move { c.transfer_loop().await });
         }
 
-        // Flectar Sync, when this device has it on.
+        // Flectar Mail Sync, when this device has it on.
         {
             let c = core.clone();
             tokio::spawn(async move { c.device_sync_loop().await });
@@ -2852,7 +2852,7 @@ impl Core {
             .await?;
         // This device stops syncing; the group goes on without it.
         if let Err(error) = self.device_sync_turn_off().await {
-            tracing::warn!(%error, "could not turn Flectar Sync off");
+            tracing::warn!(%error, "could not turn Flectar Mail Sync off");
         }
         // Account id 0 owns app-level secrets such as the optional AI key.
         credentials::delete_all_async(self.credentials.clone(), 0).await?;

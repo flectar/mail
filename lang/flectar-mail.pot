@@ -2127,8 +2127,8 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:169
 msgid ""
 "Add an alias or another address your mail server lets you send from. The "
-"server decides when you send; Flectar shows whether it accepted the last "
-"message."
+"server decides when you send; Flectar Mail shows whether it accepted the "
+"last message."
 msgstr ""
 
 #: ui/components/account-mail-preferences.slint:171
@@ -3085,8 +3085,8 @@ msgstr ""
 
 #: ui/components/oauth-browser-help.slint:73
 msgid ""
-"Flectar could not reach the system browser from this app environment. Open "
-"the link again or copy it into a browser on this device."
+"Flectar Mail could not reach the system browser from this app environment. "
+"Open the link again or copy it into a browser on this device."
 msgstr ""
 
 #: ui/components/oauth-browser-help.slint:73
@@ -3653,8 +3653,8 @@ msgstr ""
 msgid "Yearly"
 msgstr ""
 
-#: ui/device-sync.slint:365
-msgid "Flectar Sync"
+#: ui/device-sync.slint:365 ui/dialogs/settings-dialog.slint:2568
+msgid "Flectar Mail Sync"
 msgstr ""
 
 #: ui/device-sync.slint:401
@@ -3665,8 +3665,8 @@ msgstr ""
 msgid "Accounts, signatures, profiles and preferences"
 msgstr ""
 
-#: ui/device-sync.slint:403
-msgid "End-to-end encrypted: Flectar can't read it"
+#: ui/device-sync.slint:403 ui/dialogs/settings-dialog.slint:2574
+msgid "End-to-end encrypted: not even Flectar Mail can read it"
 msgstr ""
 
 #: ui/device-sync.slint:430
@@ -3722,16 +3722,17 @@ msgid "{} a year"
 msgstr ""
 
 #: ui/device-sync.slint:577 ui/dialogs/settings-dialog.slint:72
-#: ui/device-sync.slint:577 ui/dialogs/settings-dialog.slint:72 ui/dialogs/settings-dialog.slint:2568
-#: ui/device-sync.slint:577 ui/dialogs/settings-dialog.slint:72 ui/dialogs/settings-dialog.slint:2568 ui/dialogs/settings-dialog.slint:2823
+#: ui/device-sync.slint:577 ui/dialogs/settings-dialog.slint:72 ui/dialogs/settings-dialog.slint:2751
+#: ui/device-sync.slint:577 ui/dialogs/settings-dialog.slint:72 ui/dialogs/settings-dialog.slint:2751
 msgid "Sync"
 msgstr ""
 
 #: ui/device-sync.slint:586
 msgid ""
 "Keep your accounts, signatures, profiles and preferences the same on all "
-"your devices. They are end-to-end encrypted: Flectar cannot read them. Your "
-"mail, contacts and calendars keep syncing with your mail provider."
+"your devices. They are end-to-end encrypted, so not even Flectar Mail can "
+"read them. Your mail, contacts and calendars keep syncing with your mail "
+"provider."
 msgstr ""
 
 #: ui/device-sync.slint:594
@@ -3848,7 +3849,7 @@ msgid "Sync server"
 msgstr ""
 
 #: ui/device-sync.slint:671
-msgid "Leave empty for Flectar's server, or enter your own."
+msgid "Leave empty to use Flectar Mail Sync, or enter your own server."
 msgstr ""
 
 #: ui/device-sync.slint:690
@@ -4004,7 +4005,7 @@ msgstr ""
 msgid ""
 "If you lose all your devices, these 24 words bring your sync back. Anyone "
 "who has them can read your synced setup, so keep them offline, such as on "
-"paper. Flectar cannot show them again."
+"paper. Flectar Mail cannot show them again."
 msgstr ""
 
 #: ui/device-sync.slint:1024
@@ -4069,7 +4070,7 @@ msgid "The code expired. Start again to get a new one."
 msgstr ""
 
 #: ui/device-sync.slint:1135 ui/device-sync.slint:1250
-msgid "That QR code isn't for Flectar Sync, or it expired."
+msgid "That QR code isn't for Flectar Mail Sync, or it expired."
 msgstr ""
 
 #: ui/device-sync.slint:1152
@@ -5839,7 +5840,8 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2168
 msgid ""
-"Choose who saves sent mail. Use Flectar if your server does not save a copy."
+"Choose who saves sent mail. Use Flectar Mail if your server does not save a "
+"copy."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2169
@@ -5851,7 +5853,7 @@ msgid "Server saves a copy"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2169
-msgid "Flectar saves a copy"
+msgid "Flectar Mail saves a copy"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2183
@@ -6189,8 +6191,8 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2550
 msgid ""
-"A Flectar account is only needed for business email. Sync works without one. "
-"Learn more at flectar.com/mail."
+"A Flectar account is only needed for business email. Flectar Mail Sync works "
+"without one. Learn more at flectar.com/mail."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2555
@@ -6219,18 +6221,14 @@ msgstr ""
 msgid "Themes, layout, and mail preferences"
 msgstr ""
 
-#: ui/dialogs/settings-dialog.slint:2574
-msgid "End-to-end encrypted: Flectar cannot read it"
-msgstr ""
-
 #: ui/dialogs/settings-dialog.slint:2575
 msgid "No account needed: a recovery code restores it"
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2577
 msgid ""
-"Your messages stay with your mail provider. Sync only carries your Flectar "
-"Mail setup."
+"Your messages stay with your mail provider. Flectar Mail Sync only carries "
+"your setup."
 msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2592

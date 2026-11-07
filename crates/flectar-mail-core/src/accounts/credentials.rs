@@ -41,7 +41,7 @@ pub enum Slot {
     /// CardDAV app password. Kept separate because a user may configure
     /// different DAV providers for calendars and contacts.
     CarddavPassword,
-    /// This device's Flectar Sync keys (stored under account id 0).
+    /// This device's Flectar Mail Sync keys (stored under account id 0).
     DeviceSync,
 }
 

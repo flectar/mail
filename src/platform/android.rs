@@ -105,12 +105,12 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }
 
-/// Whether this build may send people to the web checkout for Flectar Sync.
+/// Whether this build may send people to the web checkout for Flectar Mail Sync.
 /// The APKs on GitHub may. A Google Play build must not: Play requires its
 /// own billing for in-app purchases.
 pub(crate) const SELLS_SYNC: bool = true;
 
-/// How this device appears in Flectar Sync's device list.
+/// How this device appears in Flectar Mail Sync's device list.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
     flectar_mail_core::device_sync::DeviceDescription {
         platform: "android".to_owned(),

@@ -1,4 +1,4 @@
-//! Flectar Sync (issue #39) keeps this device's setup the same on the user's
+//! Flectar Mail Sync (issue #39) keeps this device's setup the same on the user's
 //! other devices: accounts with their per-account preferences, the synced
 //! preferences, signatures and mail profiles. It goes through an end-to-end
 //! encrypted server that cannot read it. Mail, contacts and calendars keep
@@ -325,7 +325,7 @@ impl Service {
 
     fn require_client(&self) -> Result<Arc<SyncClient>> {
         self.client()
-            .ok_or_else(|| CoreError::Other("Flectar Sync is off on this device".into()))
+            .ok_or_else(|| CoreError::Other("Flectar Mail Sync is off on this device".into()))
     }
 
     fn end_pairing(&self) {
@@ -436,7 +436,7 @@ impl Core {
     /// Load this device's sync state at startup and run the loop.
     pub(crate) async fn device_sync_loop(&self) {
         if let Err(error) = self.resume_device_sync().await {
-            tracing::warn!(%error, "could not resume Flectar Sync");
+            tracing::warn!(%error, "could not resume Flectar Mail Sync");
             self.set_sync_state(DeviceSyncState::Error(error.to_string()));
         }
         let mut last_pull = tokio::time::Instant::now() - PULL_INTERVAL;
@@ -453,7 +453,7 @@ impl Core {
                 Ok(true) => last_pull = tokio::time::Instant::now(),
                 Ok(false) => {}
                 Err(error) => {
-                    tracing::info!(%error, "Flectar Sync run failed");
+                    tracing::info!(%error, "Flectar Mail Sync run failed");
                 }
             }
         }
@@ -463,20 +463,21 @@ impl Core {
         let Some(row) = self.db.read(|conn| store::load_row(conn)).await? else {
             return Ok(());
         };
-        let secrets =
-            match credentials::load_async(self.credentials.clone(), 0, Slot::DeviceSync).await {
-                Ok(encoded) => STANDARD
-                    .decode(encoded.trim())
-                    .map_err(|_| CoreError::Other("stored Flectar Sync keys are damaged".into()))
-                    .and_then(|bytes| Secrets::from_bytes(&bytes).map_err(sync_error))?,
-                Err(error) => {
-                    // The keys are gone, so this device cannot sign in to its
-                    // group again: it has to rejoin.
-                    tracing::warn!(%error, "Flectar Sync keys are missing; turning sync off");
-                    self.drop_sync_state(DeviceSyncState::Off).await?;
-                    return Ok(());
-                }
-            };
+        let secrets = match credentials::load_async(self.credentials.clone(), 0, Slot::DeviceSync)
+            .await
+        {
+            Ok(encoded) => STANDARD
+                .decode(encoded.trim())
+                .map_err(|_| CoreError::Other("stored Flectar Mail Sync keys are damaged".into()))
+                .and_then(|bytes| Secrets::from_bytes(&bytes).map_err(sync_error))?,
+            Err(error) => {
+                // The keys are gone, so this device cannot sign in to its
+                // group again: it has to rejoin.
+                tracing::warn!(%error, "Flectar Mail Sync keys are missing; turning sync off");
+                self.drop_sync_state(DeviceSyncState::Off).await?;
+                return Ok(());
+            }
+        };
         let device = secrets.identity.device_id();
         let floor = flectar_mail_sync_client::Stamp {
             ms: row.clock.0,
@@ -535,7 +536,7 @@ impl Core {
                         }
                     }
                     Err(error) => {
-                        tracing::debug!(%error, "Flectar Sync events unavailable");
+                        tracing::debug!(%error, "Flectar Mail Sync events unavailable");
                     }
                 }
                 tokio::time::sleep(backoff).await;
@@ -589,7 +590,7 @@ impl Core {
                 .write(move |conn| {
                     let tx = conn.transaction()?;
                     let row = store::load_row(&tx)?
-                        .ok_or_else(|| CoreError::Other("Flectar Sync is off".into()))?;
+                        .ok_or_else(|| CoreError::Other("Flectar Mail Sync is off".into()))?;
                     let local = collections::snapshot(&tx, &names, (device_id, device_body))?;
                     let queued = if row.adopting {
                         0
@@ -614,7 +615,7 @@ impl Core {
             Ok(report) => report,
             Err(error) => return self.sync_failed(error).await,
         };
-        tracing::debug!(?report, "Flectar Sync run");
+        tracing::debug!(?report, "Flectar Mail Sync run");
 
         let secrets = run.secrets.take();
         let applied = {
@@ -651,7 +652,7 @@ impl Core {
         if let Some(secrets) = secrets
             && let Err(error) = self.store_sync_secrets(&secrets).await
         {
-            tracing::warn!(%error, "could not store new Flectar Sync keys");
+            tracing::warn!(%error, "could not store new Flectar Mail Sync keys");
         }
 
         let mut removed = Vec::new();
@@ -728,7 +729,7 @@ impl Core {
     /// it keeps what was known.
     async fn check_billing(&self) {
         if let Err(error) = self.device_sync_refresh_billing().await {
-            tracing::debug!(%error, "could not read Flectar Sync billing");
+            tracing::debug!(%error, "could not read Flectar Mail Sync billing");
         }
     }
 
@@ -1082,7 +1083,7 @@ impl Core {
             let own = client.identity().device_id();
             if let Err(error) = client.remove_device(own).await {
                 // The other devices can still remove this one themselves.
-                tracing::warn!(%error, "could not leave the Flectar Sync group");
+                tracing::warn!(%error, "could not leave the Flectar Mail Sync group");
             }
         }
         self.drop_sync_state(DeviceSyncState::Off).await

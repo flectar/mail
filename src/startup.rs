@@ -594,7 +594,7 @@ pub(crate) struct PendingCoreUpdates {
     pub(crate) device_sync: DeviceSyncUpdates,
 }
 
-/// What Flectar Sync reported since the window last looked.
+/// What Flectar Mail Sync reported since the window last looked.
 #[derive(Default)]
 pub(crate) struct DeviceSyncUpdates {
     /// Where sync stands, as last reported.

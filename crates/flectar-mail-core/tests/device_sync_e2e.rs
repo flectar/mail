@@ -1,4 +1,4 @@
-//! Flectar Sync between two app cores through a real sync server, started
+//! Flectar Mail Sync between two app cores through a real sync server, started
 //! from the binary that `FLECTAR_MAIL_SYNC_SERVER` names (build it in
 //! flectar/mail-sync with `cargo build -p flectar-mail-sync-server`). The
 //! test is skipped without it: the server is not part of the app's build.

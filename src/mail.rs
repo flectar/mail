@@ -361,7 +361,7 @@ pub struct CoreMailSource {
 }
 
 /// Accounts changed outside the window, such as on another device through
-/// Flectar Sync.
+/// Flectar Mail Sync.
 #[derive(Clone)]
 pub(crate) struct AccountChangeNotice(Arc<std::sync::atomic::AtomicU64>);
 
@@ -480,7 +480,7 @@ impl CoreMailSource {
         Arc::clone(&self.core)
     }
 
-    /// Flectar Sync's settings call the core directly.
+    /// Flectar Mail Sync's settings call the core directly.
     pub(crate) fn device_sync_core(&self) -> Arc<Core> {
         Arc::clone(&self.core)
     }

@@ -650,7 +650,7 @@ export component SettingsDialog inherits Rectangle {
     in property <bool> flectar-services-available: false;
     callback start_flectar_sign_in();
 
-    // Flectar Sync's confirmation before deleting it everywhere.
+    // Flectar Mail Sync's confirmation before deleting it everywhere.
     private property <bool> sync-delete-confirmation: false;
 
     private property <[string]> sync-interval-options: [
@@ -2165,8 +2165,8 @@ export component SettingsDialog inherits Rectangle {
                                         compact: root.compact;
                                         title: @tr("Sent copies");
                                         compact-description-height: 51px;
-                                        description: @tr("Choose who saves sent mail. Use Flectar if your server does not save a copy.");
-                                        choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar saves a copy")];
+                                        description: @tr("Choose who saves sent mail. Use Flectar Mail if your server does not save a copy.");
+                                        choices: [@tr("Provider default"), @tr("Server saves a copy"), @tr("Flectar Mail saves a copy")];
                                         selected-index: account.sent_copy_policy == "server" ? 1 : account.sent_copy_policy == "client" ? 2 : 0;
                                         title-color: root.body-text;
                                         description-color: root.faint-text;
@@ -2547,7 +2547,7 @@ export component SettingsDialog inherits Rectangle {
                                 vertical-stretch: 0;
                                 account-card := SettingsCard { title: @tr("Flectar account"); description: @tr("Not signed in"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading; secondary-text: root.faint-text; }
                                 Image { x: 20px; y: account-note.y + (account-note.height - self.height) / 2; width: LayoutMetrics.icon-size; height: LayoutMetrics.icon-size; source: @image-url("../icons/lucide/outline/lock.svg"); colorize: root.accent; image-fit: contain; accessible-role: none; }
-                                account-note := Text { x: 48px; y: account-card.content-y + 14px; width: root.compact ? parent.width - 68px : sign-in-button.x - 70px; height: max(root.compact ? 68px : 42px, self.preferred-height); text: @tr("A Flectar account is only needed for business email. Sync works without one. Learn more at flectar.com/mail."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
+                                account-note := Text { x: 48px; y: account-card.content-y + 14px; width: root.compact ? parent.width - 68px : sign-in-button.x - 70px; height: max(root.compact ? 68px : 42px, self.preferred-height); text: @tr("A Flectar account is only needed for business email. Flectar Mail Sync works without one. Learn more at flectar.com/mail."); color: root.secondary-text; font-size: TypeScale.caption; wrap: word-wrap; vertical-alignment: center; }
                                 sign-in-button := Button {
                                     x: root.compact ? 20px : parent.width - self.width - 20px;
                                     y: root.compact ? account-note.y + account-note.height + 18px : account-note.y + (account-note.height - self.height) / 2;
@@ -2565,16 +2565,16 @@ export component SettingsDialog inherits Rectangle {
                                 compact: root.compact;
                                 available: true;
                                 icon: @image-url("../icons/lucide/filled/cloud-sync.svg");
-                                title: @tr("Sync");
+                                title: @tr("Flectar Mail Sync");
                                 tagline: @tr("Your setup on every device");
                                 description: @tr("Connect your phone and computers once, and your accounts, signatures, profiles and preferences stay the same on all of them.");
                                 features: [
                                     @tr("Mail accounts, profiles, and signatures"),
                                     @tr("Themes, layout, and mail preferences"),
-                                    @tr("End-to-end encrypted: Flectar cannot read it"),
+                                    @tr("End-to-end encrypted: not even Flectar Mail can read it"),
                                     @tr("No account needed: a recovery code restores it"),
                                 ];
-                                note: @tr("Your messages stay with your mail provider. Sync only carries your Flectar Mail setup.");
+                                note: @tr("Your messages stay with your mail provider. Flectar Mail Sync only carries your setup.");
                                 surface: root.surface;
                                 card-border-color: root.border-subtle;
                                 heading: root.heading;

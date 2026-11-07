@@ -89,12 +89,12 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     EMAIL_FONTS.get()
 }
 
-/// Whether this build may send people to the web checkout for Flectar Sync.
+/// Whether this build may send people to the web checkout for Flectar Mail Sync.
 /// HarmonyOS apps ship only through AppGallery, which requires Huawei's
 /// in-app purchases, so this build only shows what the group pays.
 pub(crate) const SELLS_SYNC: bool = false;
 
-/// How this device appears in Flectar Sync's device list.
+/// How this device appears in Flectar Mail Sync's device list.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
     flectar_mail_core::device_sync::DeviceDescription {
         platform: "harmonyos".to_owned(),

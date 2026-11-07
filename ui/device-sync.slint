@@ -1,4 +1,4 @@
-// Flectar Sync: this device's setup kept the same on the user's other
+// Flectar Mail Sync: this device's setup kept the same on the user's other
 // devices. Rust keeps `SyncUi` up to date and handles its callbacks.
 
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
@@ -362,7 +362,7 @@ component PricingCard inherits Rectangle {
         padding: 22px;
         spacing: 10px;
         Text {
-            text: @tr("Flectar Sync");
+            text: @tr("Flectar Mail Sync");
             color: AppTheme.accent;
             font-size: TypeScale.secondary;
             font-weight: 700;
@@ -400,7 +400,7 @@ component PricingCard inherits Rectangle {
         for feature in [
             @tr("All your devices, one subscription"),
             @tr("Accounts, signatures, profiles and preferences"),
-            @tr("End-to-end encrypted: Flectar can't read it"),
+            @tr("End-to-end encrypted: not even Flectar Mail can read it"),
         ] : Rectangle {
             // Sized from the text at its width, so lines that wrap on a
             // narrow phone make the card taller.
@@ -583,7 +583,7 @@ export component SyncSettingsPage inherits VerticalBox {
     }
     Text {
         height: max(root.compact ? 51px : 34px, self.preferred-height);
-        text: @tr("Keep your accounts, signatures, profiles and preferences the same on all your devices. They are end-to-end encrypted: Flectar cannot read them. Your mail, contacts and calendars keep syncing with your mail provider.");
+        text: @tr("Keep your accounts, signatures, profiles and preferences the same on all your devices. They are end-to-end encrypted, so not even Flectar Mail can read them. Your mail, contacts and calendars keep syncing with your mail provider.");
         color: root.secondary-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -668,7 +668,7 @@ export component SyncSettingsPage inherits VerticalBox {
         vertical-stretch: 0;
         server-card := SettingsCard {
             title: @tr("Sync server");
-            description: @tr("Leave empty for Flectar's server, or enter your own.");
+            description: @tr("Leave empty to use Flectar Mail Sync, or enter your own server.");
             surface: root.surface;
             card-border-color: root.card-border-color;
             heading: root.heading;
@@ -1002,7 +1002,7 @@ export component RecoveryWordsDialog inherits SyncModal {
     changed open => { root.copied = false; }
 
     Text {
-        text: @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so keep them offline, such as on paper. Flectar cannot show them again.");
+        text: @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so keep them offline, such as on paper. Flectar Mail cannot show them again.");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -1132,7 +1132,7 @@ export component InviteDeviceDialog inherits SyncModal {
         body-text: root.body-text;
         declined-text: @tr("The device was not added.");
         expired-text: @tr("The code expired. Start again to get a new one.");
-        not-found-text: @tr("That QR code isn't for Flectar Sync, or it expired.");
+        not-found-text: @tr("That QR code isn't for Flectar Mail Sync, or it expired.");
     }
     HorizontalLayout {
         spacing: 8px;
@@ -1247,7 +1247,7 @@ export component JoinDeviceDialog inherits SyncModal {
         expired-text: @tr("The code expired. Get a new one on your other device.");
         not-found-text: root.method == "recovery" ? @tr("No sync on this server uses these words. Check each word, and the server address.")
             : root.method == "code" ? @tr("That code didn't work. Check it, or get a new one on your other device.")
-            : @tr("That QR code isn't for Flectar Sync, or it expired.");
+            : @tr("That QR code isn't for Flectar Mail Sync, or it expired.");
     }
     if (SyncUi.pairing-stage == "" && !root.typing) || SyncUi.pairing-stage == "starting" : Text {
         text: root.method == "qr" ? @tr("Getting a code…")
