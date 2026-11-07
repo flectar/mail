@@ -2,9 +2,10 @@
 //!
 //! Allocators keep freed pages for later allocations, so resident memory stays
 //! at the peak of the last burst of work. The app returns those pages only at
-//! explicit idle boundaries (a finished sync, leaving a product, the window
-//! going to the tray) and when the operating system reports memory pressure,
-//! never on a periodic timer.
+//! explicit idle boundaries (a finished sync, the window going still after
+//! input or painting, leaving a product, the window going to the tray) and
+//! when the operating system reports memory pressure, never on a periodic
+//! timer.
 
 use std::{
     cell::RefCell,
@@ -126,50 +127,115 @@ pub(crate) fn release_free_heap() {
     release_heap(MemoryPressure::Moderate);
 }
 
+/// How long the window must go without input, and the email reader without
+/// painting, before the memory that work freed is returned. A few seconds
+/// keep the trims apart while the window is in use; Cinnamon's background
+/// daemon trims 3 s after its last draw.
+const UI_IDLE_DELAY: Duration = Duration::from_secs(3);
+
+thread_local! {
+    /// Restarted by every call to [`release_free_heap_when_idle`].
+    static UI_IDLE: slint::Timer = slint::Timer::default();
+}
+
+/// Return free heap pages once the window has gone [`UI_IDLE_DELAY`] without
+/// input or painting. Call on the UI thread after either; every call restarts
+/// the countdown, so scrolling and typing pay nothing until they stop.
+pub(crate) fn release_free_heap_when_idle() {
+    UI_IDLE.with(|timer| {
+        timer.start(
+            slint::TimerMode::SingleShot,
+            UI_IDLE_DELAY,
+            release_after_ui_work,
+        );
+    });
+}
+
+/// Return what the allocator keeps after a burst of UI work: scrolling
+/// through a message leaves about half a MiB. glibc keeps freed chunks inside
+/// its heap until `malloc_trim`, the magazine allocator of macOS 15 and Intel
+/// Macs keeps freed pages until relief (xzone returns them itself), and scudo
+/// releases only while the app keeps freeing. Windows heaps decommit free
+/// blocks on their own, so the heap optimization stays with the rarer releases.
+fn release_after_ui_work() {
+    #[cfg(mobile)]
+    crate::platform::purge_allocator(Purge::Fast);
+    #[cfg(glibc)]
+    trim_heap();
+    #[cfg(target_os = "macos")]
+    relieve_malloc_zones();
+}
+
+/// How much work an allocator purge may do.
+#[cfg(mobile)]
+#[derive(Clone, Copy)]
+pub(crate) enum Purge {
+    /// Bounded, for frequent use.
+    Fast,
+    /// Every free page.
+    Normal,
+    /// Every free page and the thread caches, however long that takes.
+    All,
+}
+
 /// Return free allocator pages, as far as `level` asks.
 pub(crate) fn release_heap(level: MemoryPressure) {
     #[cfg(mobile)]
-    crate::platform::purge_allocator(level == MemoryPressure::Critical);
+    crate::platform::purge_allocator(match level {
+        MemoryPressure::Moderate => Purge::Normal,
+        MemoryPressure::Critical => Purge::All,
+    });
     #[cfg(not(mobile))]
     let _ = level;
     #[cfg(glibc)]
+    trim_heap();
+    #[cfg(target_os = "macos")]
+    relieve_malloc_zones();
+    #[cfg(target_os = "windows")]
+    optimize_heaps();
+}
+
+#[cfg(glibc)]
+fn trim_heap() {
     // SAFETY: malloc_trim only releases free heap pages; no pointers change.
     unsafe {
         libc::malloc_trim(0);
     }
-    #[cfg(target_os = "macos")]
-    {
-        unsafe extern "C" {
-            fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-        }
-        // SAFETY: a null zone asks every malloc zone to release free pages.
-        unsafe {
-            malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
-        }
+}
+
+#[cfg(target_os = "macos")]
+fn relieve_malloc_zones() {
+    unsafe extern "C" {
+        fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
     }
-    #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::System::{
-            Memory::{HeapOptimizeResources, HeapSetInformation},
-            SystemServices::{
-                HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION, HEAP_OPTIMIZE_RESOURCES_INFORMATION,
-            },
-        };
-        let information = HEAP_OPTIMIZE_RESOURCES_INFORMATION {
-            Version: HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION,
-            Flags: 0,
-        };
-        // SAFETY: a null heap handle asks every heap of this process to
-        // decommit its free cached memory. The structure outlives the call
-        // and its size is passed with it.
-        unsafe {
-            HeapSetInformation(
-                std::ptr::null_mut(),
-                HeapOptimizeResources,
-                (&raw const information).cast(),
-                size_of::<HEAP_OPTIMIZE_RESOURCES_INFORMATION>(),
-            );
-        }
+    // SAFETY: a null zone asks every malloc zone to release free pages.
+    unsafe {
+        malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn optimize_heaps() {
+    use windows_sys::Win32::System::{
+        Memory::{HeapOptimizeResources, HeapSetInformation},
+        SystemServices::{
+            HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION, HEAP_OPTIMIZE_RESOURCES_INFORMATION,
+        },
+    };
+    let information = HEAP_OPTIMIZE_RESOURCES_INFORMATION {
+        Version: HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION,
+        Flags: 0,
+    };
+    // SAFETY: a null heap handle asks every heap of this process to decommit
+    // its free cached memory. The structure outlives the call and its size is
+    // passed with it.
+    unsafe {
+        HeapSetInformation(
+            std::ptr::null_mut(),
+            HeapOptimizeResources,
+            (&raw const information).cast(),
+            size_of::<HEAP_OPTIMIZE_RESOURCES_INFORMATION>(),
+        );
     }
 }
 
@@ -192,9 +258,13 @@ pub(crate) fn trim_working_set() {
 mod tests {
     use super::{
         DISPATCH_CRITICAL, DISPATCH_NORMAL, DISPATCH_WARN, MemoryPressure, REPEAT_INTERVAL,
-        dispatch_pressure, should_handle,
+        UI_IDLE, UI_IDLE_DELAY, dispatch_pressure, release_free_heap_when_idle, should_handle,
     };
-    use std::time::{Duration, Instant};
+    use std::{
+        cell::Cell,
+        rc::Rc,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn repeats_are_merged_unless_stronger() {
@@ -244,5 +314,39 @@ mod tests {
             dispatch_pressure(DISPATCH_CRITICAL | DISPATCH_WARN),
             Some(MemoryPressure::Critical)
         );
+    }
+
+    /// Timers only, on a clock the test moves.
+    struct Clock(Rc<Cell<Duration>>);
+
+    impl slint::platform::Platform for Clock {
+        fn create_window_adapter(
+            &self,
+        ) -> Result<Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError> {
+            Err(slint::PlatformError::NoPlatform)
+        }
+
+        fn duration_since_start(&self) -> Duration {
+            self.0.get()
+        }
+    }
+
+    #[test]
+    fn activity_postpones_the_idle_release() {
+        let clock = Rc::new(Cell::new(Duration::ZERO));
+        slint::platform::set_platform(Box::new(Clock(clock.clone()))).unwrap();
+        let advance = |by: Duration| {
+            clock.set(clock.get() + by);
+            slint::platform::update_timers_and_animations();
+        };
+        let pending = || UI_IDLE.with(slint::Timer::running);
+
+        release_free_heap_when_idle();
+        advance(UI_IDLE_DELAY / 2);
+        release_free_heap_when_idle();
+        advance(UI_IDLE_DELAY / 2);
+        assert!(pending(), "more activity restarts the countdown");
+        advance(UI_IDLE_DELAY / 2);
+        assert!(!pending(), "the release runs once the window stays idle");
     }
 }

@@ -167,6 +167,12 @@ fn register_desktop_events(app: &AppWindow) {
         let Some(app) = weak.upgrade() else {
             return EventResult::Propagate;
         };
+        // Input, resizing and focus changes leave freed memory behind; return
+        // it once the window goes still. Repaints don't count: a blinking text
+        // cursor would keep the countdown from ever ending.
+        if !matches!(event, winit::event::WindowEvent::RedrawRequested) {
+            crate::memory::release_free_heap_when_idle();
+        }
         match event {
             winit::event::WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
             // Tab shortcuts work wherever focus is, as in a browser, except in

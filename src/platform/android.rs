@@ -42,20 +42,27 @@ pub fn trim_memory(level: i32, sdk: i32) {
 /// subscribe to.
 pub(crate) fn watch_memory_pressure() {}
 
-/// Bionic returns free pages through mallopt. M_PURGE (API 28) is quick;
-/// M_PURGE_ALL (API 34) also drains every thread cache and takes longer, so it
-/// is kept for critical pressure. Releases without them return 0, which is
-/// harmless; Zygote falls back the same way.
-pub(crate) fn purge_allocator(urgent: bool) {
+/// Bionic returns free pages through mallopt. M_PURGE_FAST (API 37) is bounded
+/// for frequent use, M_PURGE (API 28) returns every free page, and M_PURGE_ALL
+/// (API 34) also drains every thread cache and takes longer. Options a device
+/// lacks return 0, which is harmless, and fall back to M_PURGE.
+pub(crate) fn purge_allocator(purge: crate::memory::Purge) {
+    use crate::memory::Purge;
     use std::ffi::c_int;
     const M_PURGE: c_int = -101;
     const M_PURGE_ALL: c_int = -104;
+    const M_PURGE_FAST: c_int = -105;
     unsafe extern "C" {
         fn mallopt(param: c_int, value: c_int) -> c_int;
     }
+    let preferred = match purge {
+        Purge::Fast => Some(M_PURGE_FAST),
+        Purge::Normal => None,
+        Purge::All => Some(M_PURGE_ALL),
+    };
     // SAFETY: these options only return free pages; no pointers change.
     unsafe {
-        if !urgent || mallopt(M_PURGE_ALL, 0) != 1 {
+        if preferred.is_none_or(|option| mallopt(option, 0) != 1) {
             mallopt(M_PURGE, 0);
         }
     }
