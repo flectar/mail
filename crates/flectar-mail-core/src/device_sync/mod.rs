@@ -569,13 +569,29 @@ impl Core {
         };
         let mut shared = false;
         for (sync_id, account_id, draft_id) in waiting {
+            // Signed and encrypted here, with this device's keys, if the
+            // account's mail security asks for it.
             let built =
-                crate::queue::build_outgoing(&self.db, &self.paths, account_id, draft_id).await;
+                match crate::queue::build_outgoing(&self.db, &self.paths, account_id, draft_id)
+                    .await
+                {
+                    Ok(outgoing) => {
+                        crate::mail_security::protect_draft(
+                            &self.db,
+                            account_id,
+                            draft_id,
+                            outgoing.raw,
+                            outgoing.security_recipients,
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                };
             let (mime, version) = match built {
-                Ok(outgoing) if outgoing.raw.len() <= scheduled::MAX_SHARED_MESSAGE_BYTES => {
+                Ok(raw) if raw.len() <= scheduled::MAX_SHARED_MESSAGE_BYTES => {
                     use sha2::Digest as _;
-                    let version = hex(&sha2::Sha256::digest(&outgoing.raw)[..8]);
-                    (Some(outgoing.raw), version)
+                    let version = hex(&sha2::Sha256::digest(&raw)[..8]);
+                    (Some(raw), version)
                 }
                 Ok(_) => (None, scheduled::LOCAL_ONLY.to_owned()),
                 Err(error) => {

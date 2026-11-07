@@ -5482,12 +5482,17 @@ impl Core {
             .await?;
         // With Flectar Mail Sync, a scheduled send can go out from any of
         // the user's devices: a Gmail or JMAP draft waits on the mail
-        // server, and an IMAP or POP3 message travels in its record.
-        // Protected drafts never leave this device.
+        // server, and an IMAP or POP3 message travels in its record. A
+        // protected draft never reaches the mail server, so a Gmail or JMAP
+        // one stays with this device; an IMAP or POP3 one travels already
+        // signed and encrypted, and other devices send it without the keys.
         let share_as = match protocol {
-            MailProtocol::Gmail | MailProtocol::Jmap | MailProtocol::Imap | MailProtocol::Pop3
+            MailProtocol::Gmail | MailProtocol::Jmap
                 if args.send_at.is_some() && !policy.enabled() =>
             {
+                self.shared_send_device()
+            }
+            MailProtocol::Imap | MailProtocol::Pop3 if args.send_at.is_some() => {
                 self.shared_send_device()
             }
             _ => None,

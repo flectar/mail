@@ -957,7 +957,8 @@ pub(crate) struct Outgoing {
     pub raw: Vec<u8>,
     pub from: String,
     pub recipients: Vec<String>,
-    security_recipients: Vec<Address>,
+    /// Whom mail security encrypts for.
+    pub security_recipients: Vec<Address>,
     attachment_count: usize,
 }
 
