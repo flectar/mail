@@ -13,7 +13,9 @@
 //! Each cycle first asks the server for every folder's STATUS, in one
 //! LIST-STATUS command where offered, and opens only the folders whose counts
 //! changed since they were last synced; every fifth cycle still opens them
-//! all, since STATUS does not report stars or labels.
+//! all, since STATUS does not report stars or labels. A folder the server
+//! refuses to open is skipped on the same connection, and the folder list is
+//! read again, so one renamed or deleted on the server goes away.
 //!
 //! On servers that support it the actor waits in IMAP IDLE between cycles, so
 //! new inbox mail wakes it within seconds; the user-selected periodic cycle is
@@ -32,7 +34,7 @@ use crate::models::*;
 use crate::oauth::tokens::TokenProvider;
 use crate::queue;
 use rusqlite::OptionalExtension;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -77,6 +79,10 @@ const MAX_MICROSOFT_BATCH_BYTES: u64 = 4 * 1024 * 1024;
 const BODY_POOL_CONNS: usize = 2;
 const HISTORY_CHUNK: u32 = 500;
 const CYCLE_SECS: u64 = 60;
+/// How long the folder list stays current before LIST reads it again, as in
+/// K-9 Mail (Geary: 15 minutes). A folder the server refuses to open has it
+/// read at once.
+const FOLDER_LIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 /// Short retry used only while a new account does not have an Inbox row yet.
 const IDLE_FALLBACK_SECS: u64 = 20;
 /// Re-issue IDLE at least this often (RFC 2177 recommends < 29 min) to keep the
@@ -96,6 +102,8 @@ struct InboxBaseline {
 
 #[derive(Debug, Clone, Copy)]
 struct CycleMode {
+    /// Cycles completed so far; every fifth checks every folder in full.
+    cycle: u64,
     foreground_only: bool,
     immediate_follow_up: bool,
     /// Whether one LIST reports every folder's STATUS on this connection.
@@ -904,6 +912,7 @@ async fn run_actor(
     let mut cycle: u64 = 0;
     let mut immediate_follow_up = false;
     let mut inbox_baseline: Option<InboxBaseline> = None;
+    let mut listing = FolderListing::default();
     let mut sync_waiters: Vec<oneshot::Sender<std::result::Result<(), String>>> = Vec::new();
     // When the next cycle is due; only read by the waits below (any wake-up
     // from a wait runs a cycle immediately).
@@ -1017,10 +1026,11 @@ async fn run_actor(
             &ctx,
             &config,
             &mut s,
-            cycle,
             &hist_tx,
             &mut inbox_baseline,
+            &mut listing,
             CycleMode {
+                cycle,
                 foreground_only,
                 immediate_follow_up,
                 list_status: capabilities.is_some_and(|offered| offered.list_status),
@@ -1446,12 +1456,13 @@ async fn run_cycle(
     ctx: &SyncCtx,
     config: &AccountConfig,
     session: &mut Session,
-    cycle: u64,
     hist_tx: &mpsc::Sender<()>,
     inbox_baseline: &mut Option<InboxBaseline>,
+    listing: &mut FolderListing,
     mode: CycleMode,
 ) -> Result<bool> {
     let CycleMode {
+        cycle,
         foreground_only,
         immediate_follow_up,
         list_status,
@@ -1459,9 +1470,11 @@ async fn run_cycle(
     } = mode;
     let account_id = config.id;
 
-    // Folder discovery: first cycle and then every ~30 cycles.
-    if !immediate_follow_up && cycle.is_multiple_of(30) {
+    // The folder list: first thing, then once it is FOLDER_LIST_INTERVAL old.
+    let listed_now = !immediate_follow_up && listing.due(tokio::time::Instant::now());
+    if listed_now {
         discover_folders(ctx, config, session).await?;
+        listing.listed_at = Some(tokio::time::Instant::now());
     }
 
     let folders = {
@@ -1541,6 +1554,7 @@ async fn run_cycle(
     }
 
     let mut left_inbox = false;
+    let mut refused = Vec::new();
     for folder in ordered {
         if folder.role.as_deref() == Some(roles::INBOX) {
             continue;
@@ -1553,7 +1567,7 @@ async fn run_cycle(
         if !full_pass && folder_check.unchanged() {
             continue;
         }
-        if let Err(e) = sync_folder(
+        match sync_folder(
             ctx,
             config,
             session,
@@ -1564,8 +1578,20 @@ async fn run_cycle(
         )
         .await
         {
-            tracing::warn!(folder = %folder.path, "folder sync failed: {e}");
-            return Err(e); // connection likely broken; reconnect
+            Ok(_) => {
+                listing.refused_but_listed.remove(&folder.id);
+            }
+            // The server turned down this folder alone, such as one renamed
+            // or deleted since the folder list was read. The connection still
+            // serves the others (RFC 9051 7.1).
+            Err(CoreError::ImapRefused(reply)) => {
+                tracing::warn!(account_id, folder = %folder.path, "folder sync refused: {reply}");
+                refused.push(folder.id);
+            }
+            Err(e) => {
+                tracing::warn!(folder = %folder.path, "folder sync failed: {e}");
+                return Err(e); // connection likely broken; reconnect
+            }
         }
         left_inbox = true;
     }
@@ -1576,13 +1602,43 @@ async fn run_cycle(
         count_inbox(ctx, session, inbox).await?;
     }
 
+    // A refused folder may be gone: reading the folder list again hides the
+    // folders the server no longer has. One the list still had after its
+    // first refusal waits for the list's next due read.
+    let mut listed_new = false;
+    if listing.recheck(&refused) {
+        if !listed_now {
+            discover_folders(ctx, config, session).await?;
+            listing.listed_at = Some(tokio::time::Instant::now());
+        }
+        let known = folders
+            .iter()
+            .map(|folder| folder.id)
+            .collect::<HashSet<_>>();
+        let listed = ctx
+            .db
+            .read(move |conn| repo::folders::list(conn, Some(account_id)))
+            .await?;
+        // Folders new to the list, such as Gmail's under the names of its
+        // new language, sync in a follow-up cycle straight away.
+        listed_new = listed
+            .iter()
+            .any(|folder| folder.selectable && !known.contains(&folder.id));
+        listing.refused_but_listed.extend(
+            listed
+                .iter()
+                .map(|folder| folder.id)
+                .filter(|folder_id| refused.contains(folder_id)),
+        );
+    }
+
     // GC old finished actions (keep 7 days).
     let _ = ctx
         .db
         .write(move |conn| repo::actions::gc(conn, now_ms() - 7 * 24 * 3600 * 1000))
         .await;
 
-    Ok(false)
+    Ok(listed_new)
 }
 
 /// Without LIST-STATUS nothing reports the Inbox's counts: STATUS should not
@@ -1717,6 +1773,35 @@ impl FolderCheck {
             self.flags || !unseen_explained,
             self.removals || !messages_explained,
         )
+    }
+}
+
+/// When the receive actor reads the server's folder list (LIST) again.
+#[derive(Debug, Default)]
+struct FolderListing {
+    /// When the folders were last listed.
+    listed_at: Option<tokio::time::Instant>,
+    /// Folders the server refused to open that a folder list read since
+    /// still had. Refusing them again doesn't call for another LIST.
+    refused_but_listed: HashSet<i64>,
+}
+
+impl FolderListing {
+    /// Whether the folder list is due: first thing, then once it is
+    /// FOLDER_LIST_INTERVAL old. Time, not successful cycles, decides, so a
+    /// failing cycle can't put it off.
+    fn due(&self, now: tokio::time::Instant) -> bool {
+        self.listed_at.is_none_or(|listed_at| {
+            now.saturating_duration_since(listed_at) >= FOLDER_LIST_INTERVAL
+        })
+    }
+
+    /// Whether the folders the server just refused call for reading the
+    /// folder list again: one it hasn't listed since may be gone.
+    fn recheck(&self, refused: &[i64]) -> bool {
+        refused
+            .iter()
+            .any(|folder_id| !self.refused_but_listed.contains(folder_id))
     }
 }
 
