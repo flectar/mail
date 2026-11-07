@@ -65,25 +65,21 @@ pub fn spawn(
                 .write(move |conn| repo::snoozes::drop_expired(conn, now))
                 .await;
 
-            // 2. Nudge actors when a timed pending action becomes due.
+            // 2. Nudge actors when a timed pending action has come due
+            // since the last nudge. Asking for anything due since then, not
+            // for the oldest due action, keeps one action that cannot run,
+            // such as on an offline account, from holding back later ones.
+            let since = nudged_until;
             let mail_due = db
-                .read(|conn| repo::actions::next_mail_due_at(conn))
+                .read(move |conn| repo::actions::mail_due_between(conn, since, now))
                 .await
-                .ok()
-                .flatten();
-            let calendar_due = if calendar_db.is_open() {
-                calendar_db
-                    .read(|conn| repo::actions::next_due_at(conn))
+                .unwrap_or(false);
+            let calendar_due = calendar_db.is_open()
+                && calendar_db
+                    .read(move |conn| repo::actions::due_between(conn, since, now))
                     .await
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            if let Some(due_at) = mail_due.into_iter().chain(calendar_due).min()
-                && due_at <= now
-                && due_at > nudged_until - 60_000
-            {
+                    .unwrap_or(false);
+            if mail_due || calendar_due {
                 nudged_until = now;
                 for handle in handles.read().await.values() {
                     handle.send(SyncCmd::RunActions);

@@ -195,6 +195,70 @@ pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
         .flatten())
 }
 
+/// Drafts waiting to be sent at a time the user chose, soonest first.
+pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::ScheduledSend>> {
+    let mut statement = conn.prepare(
+        "SELECT id, message_id, account_id, not_before, state, last_error FROM pending_actions
+         WHERE kind = 'send' AND message_id IS NOT NULL
+           AND state IN ('pending', 'inflight', 'failed')
+           AND json_extract(payload, '$.scheduled') = 1
+         ORDER BY not_before",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(crate::models::ScheduledSend {
+            action_id: row.get(0)?,
+            draft_id: row.get(1)?,
+            account_id: row.get(2)?,
+            send_at: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
+            state: row.get(4)?,
+            error: row.get(5)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Stop the draft's waiting or failed send. Returns the action it stopped.
+pub fn cancel_draft_send(conn: &Connection, draft_id: i64, now_ms: i64) -> Result<Option<i64>> {
+    let action: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM pending_actions
+             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'failed')
+             ORDER BY id DESC LIMIT 1",
+            params![draft_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(action) = action {
+        conn.execute(
+            "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2 WHERE id = ?1",
+            params![action, now_ms],
+        )?;
+    }
+    Ok(action)
+}
+
+/// Whether a timed mail action came due after `after`, up to `until`.
+pub fn mail_due_between(conn: &Connection, after: i64, until: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE state = 'pending' AND not_before > ?1 AND not_before <= ?2
+             AND kind NOT LIKE 'cal!_%' ESCAPE '!')",
+        params![after, until],
+        |row| row.get(0),
+    )?)
+}
+
+/// Whether a timed action of the calendar store came due after `after`, up
+/// to `until`.
+pub fn due_between(conn: &Connection, after: i64, until: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE state = 'pending' AND not_before > ?1 AND not_before <= ?2)",
+        params![after, until],
+        |row| row.get(0),
+    )?)
+}
+
 pub fn next_mail_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
@@ -437,6 +501,20 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn an_action_stuck_in_the_past_does_not_hide_later_ones() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let empty = serde_json::json!({});
+        // Due long ago, on an account that cannot run it.
+        enqueue(&conn, 1, "mark_read", None, None, &empty, Some(100)).unwrap();
+        enqueue(&conn, 1, "send", None, None, &empty, Some(5_000)).unwrap();
+        assert!(mail_due_between(&conn, 0, 200).unwrap());
+        // Nudged for it already: nothing new until the send comes due.
+        assert!(!mail_due_between(&conn, 200, 4_000).unwrap());
+        assert!(mail_due_between(&conn, 4_000, 6_000).unwrap());
+    }
 
     #[test]
     fn due_is_stable_and_has_due_ignores_future_and_calendar_actions() {

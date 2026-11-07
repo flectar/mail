@@ -303,6 +303,11 @@ const AUTO_BUCKET: &str = "(SELECT m.is_automated FROM messages m
 /// their messages does; messages match on their own folders, flags and labels.
 /// Snooze and tab routing belong to the conversation in both groupings, so a
 /// message list joins each message's thread as `t`.
+/// A send queued for a time the user chose, not just the undo-send window:
+/// waiting, under way, or failed and waiting for the user.
+const SCHEDULED_SEND: &str = "pa.kind = 'send' AND pa.state IN ('pending', 'inflight', 'failed')
+    AND json_extract(pa.payload, '$.scheduled') = 1";
+
 fn build_filter(
     args: &ListArgs,
     grouping: MailGrouping,
@@ -348,6 +353,14 @@ fn build_filter(
         View::Starred if messages => where_clauses.push("m.is_starred = 1".into()),
         View::Starred => where_clauses.push("t.starred_count > 0".into()),
         View::Snoozed => where_clauses.push("s.thread_id IS NOT NULL".into()),
+        View::Scheduled if messages => where_clauses.push(format!(
+            "m.is_draft = 1 AND EXISTS (SELECT 1 FROM pending_actions pa
+               WHERE pa.message_id = m.id AND {SCHEDULED_SEND})"
+        )),
+        View::Scheduled => where_clauses.push(format!(
+            "EXISTS (SELECT 1 FROM messages m JOIN pending_actions pa ON pa.message_id = m.id
+               WHERE m.thread_id = t.id AND m.is_draft = 1 AND {SCHEDULED_SEND})"
+        )),
         View::Sent => {
             let c = role_exists(roles::SENT, &mut bind);
             where_clauses.push(c);

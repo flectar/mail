@@ -934,6 +934,8 @@ pub enum View {
     Starred,
     Snoozed,
     Sent,
+    /// Drafts waiting to be sent at a time the user chose.
+    Scheduled,
     Drafts,
     Done,
     Trash,
@@ -1360,6 +1362,20 @@ pub struct SaveDraftArgs {
 pub struct QueueSendArgs {
     pub draft_id: i64,
     pub send_at: Option<i64>,
+}
+
+/// A draft waiting to be sent at a time the user chose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledSend {
+    pub action_id: i64,
+    pub draft_id: i64,
+    pub account_id: i64,
+    /// When it goes out, in ms since the epoch.
+    pub send_at: i64,
+    /// `pending`, `inflight`, or `failed` and waiting for the user.
+    pub state: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

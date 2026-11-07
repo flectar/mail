@@ -4625,6 +4625,32 @@ impl Core {
             .await
     }
 
+    /// Drafts waiting to be sent at a time the user chose, soonest first.
+    pub async fn scheduled_sends(&self) -> Result<Vec<ScheduledSend>> {
+        self.db
+            .read(|conn| repo::actions::scheduled_sends(conn))
+            .await
+    }
+
+    /// Stop a draft's scheduled send. The message stays a draft, to edit or
+    /// schedule again. Returns whether a send was waiting.
+    pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<bool> {
+        let (cancelled, thread) = self
+            .db
+            .write(move |conn| {
+                let cancelled = repo::actions::cancel_draft_send(conn, draft_id, now_ms())?;
+                let thread = repo::messages::get_row(conn, draft_id)?.and_then(|row| row.thread_id);
+                Ok((cancelled.is_some(), thread))
+            })
+            .await?;
+        if let Some(thread) = thread {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: vec![thread],
+            });
+        }
+        Ok(cancelled)
+    }
+
     /// "Send now": make a queued send due immediately (skip the remaining undo
     /// window) and nudge its actor. Returns false if it was already sent or
     /// cancelled.
@@ -5335,7 +5361,8 @@ impl Core {
             .unwrap_or_else(|| now_ms() + settings.undo_send_seconds * 1000);
 
         let draft_id = args.draft_id;
-        let (action_id, account_id) = self
+        let scheduled = args.send_at.is_some();
+        let (action_id, account_id, thread_id) = self
             .db
             .write(move |conn| {
                 let row = repo::messages::get_row(conn, draft_id)?
@@ -5345,7 +5372,35 @@ impl Core {
                      WHERE message_id = ?1 AND kind = 'save_draft' AND state = 'pending'",
                     rusqlite::params![draft_id, now_ms()],
                 )?;
-                let payload = serde_json::json!({ "draftId": draft_id, "mailSecurity": policy });
+                let payload = serde_json::json!({
+                    "draftId": draft_id,
+                    "mailSecurity": policy,
+                    "scheduled": scheduled,
+                });
+                // One send per draft: queueing it again moves the waiting
+                // send to the new time instead of sending it twice.
+                let queued: Option<(i64, String)> = conn
+                    .query_row(
+                        "SELECT id, state FROM pending_actions
+                         WHERE message_id = ?1 AND kind = 'send'
+                           AND state IN ('pending', 'inflight', 'failed')
+                         ORDER BY id DESC LIMIT 1",
+                        rusqlite::params![draft_id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some((action_id, state)) = queued {
+                    if state == "inflight" {
+                        return Err(CoreError::Other("this message is being sent".into()));
+                    }
+                    conn.execute(
+                        "UPDATE pending_actions SET state = 'pending', not_before = ?2,
+                                payload = ?3, attempts = 0, last_error = NULL
+                         WHERE id = ?1",
+                        rusqlite::params![action_id, dispatch_at, payload.to_string()],
+                    )?;
+                    return Ok((action_id, row.account_id, row.thread_id));
+                }
                 let aid = repo::actions::enqueue(
                     conn,
                     row.account_id,
@@ -5355,9 +5410,15 @@ impl Core {
                     &payload,
                     Some(dispatch_at),
                 )?;
-                Ok((aid, row.account_id))
+                Ok((aid, row.account_id, row.thread_id))
             })
             .await?;
+        // A scheduled draft joins the Scheduled view.
+        if let (true, Some(thread)) = (scheduled, thread_id) {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: vec![thread],
+            });
+        }
 
         // Fire exactly when the send comes due instead of waiting for the
         // scheduler's next tick (up to TICK_SECS of extra slop, which made even
