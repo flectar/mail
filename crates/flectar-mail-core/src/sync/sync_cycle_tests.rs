@@ -1716,3 +1716,73 @@ fn only_a_folder_refused_anew_calls_for_the_folder_list() {
     assert!(!listing.recheck(&[7]));
     assert!(listing.recheck(&[7, 8]));
 }
+
+/// The folders the body worker selects for empty batches from `batches`,
+/// one after another on one connection. The server has made Reset afresh
+/// since its mail was queued.
+async fn body_batch_selects(batches: &[&str]) -> Vec<String> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let commands = Arc::new(Mutex::new(Vec::<String>::new()));
+    let server = serve(listener, commands.clone(), |command, fields| {
+        let tag = fields[0];
+        match fields[1] {
+            "LOGIN" => format!("{tag} OK logged in\r\n"),
+            "CAPABILITY" => format!("* CAPABILITY IMAP4rev1 IDLE\r\n{tag} OK capability\r\n"),
+            "SELECT" => {
+                let uid_validity = if command.contains("\"Reset\"") { 9 } else { 7 };
+                format!(
+                    "* 3 EXISTS\r\n* OK [UIDVALIDITY {uid_validity}] valid\r\n\
+                     * OK [UIDNEXT 10] next\r\n{tag} OK [READ-WRITE] selected\r\n"
+                )
+            }
+            other => panic!("unexpected command {other}: {command:?}"),
+        }
+    });
+
+    let (_dir, ctx, config, _inbox) = deleted_mail_context(port).await;
+    let account_id = config.id;
+    let folders = ctx
+        .db
+        .write(move |conn| {
+            let mut folders = HashMap::new();
+            for name in ["Lists", "Reset"] {
+                folders.insert(name, synced_folder(conn, account_id, name, 10, 3, 0)?);
+            }
+            repo::folders::set_uid_state(conn, folders["Reset"], Some(8), Some(10), None)?;
+            Ok(folders)
+        })
+        .await
+        .unwrap();
+
+    let mut session = connect(&ctx, &config).await.unwrap();
+    let mut selected = None;
+    for name in batches {
+        let chunk = BodyChunk {
+            folder_id: folders[name],
+            folder_name: (*name).into(),
+            uid_validity: Some(if *name == "Reset" { 8 } else { 7 }),
+            items: Vec::new(),
+        };
+        let fetched = fetch_body_chunk(&ctx, &config, &mut session, &mut selected, &chunk).await;
+        assert!(matches!(fetched, Ok(0)), "{name}");
+    }
+    imap::logout(session).await;
+    server.await.unwrap();
+    let commands = commands.lock().unwrap().clone();
+    selected_folders(&commands)
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// After opening a folder to find its UIDVALIDITY changed, the next batch
+/// of the folder open before selects it again instead of reading its UIDs
+/// in the other folder.
+#[tokio::test]
+async fn a_body_batch_after_a_new_uidvalidity_selects_its_folder_again() {
+    assert_eq!(
+        body_batch_selects(&["Lists", "Reset", "Lists"]).await,
+        ["Lists", "Reset", "Lists"]
+    );
+}

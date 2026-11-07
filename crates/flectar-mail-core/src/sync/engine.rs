@@ -3759,6 +3759,10 @@ async fn fetch_body_chunk(
         name == &chunk.folder_name && *uid_validity == chunk.uid_validity
     });
     if !selected_matches {
+        // Whatever was open is closed now: by this SELECT, or by its failure
+        // (RFC 9051 6.3.2). Until it opens the chunk's folder, no chunk may
+        // skip its own SELECT.
+        *selected = None;
         let mailbox = imap::select(session, &chunk.folder_name)
             .await
             .map_err(BodyChunkError::Reconnect)?;
