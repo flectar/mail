@@ -502,10 +502,10 @@ impl Actions {
                             trial_days: 0,
                             plans: Vec::new(),
                         });
-                        let (monthly, yearly) = plan_prices(&offer.plans);
+                        let prices = plan_prices(&offer.plans);
                         ui.set_offer_trial_days(i32::try_from(offer.trial_days).unwrap_or(0));
-                        ui.set_offer_monthly(monthly.into());
-                        ui.set_offer_yearly(yearly.into());
+                        ui.set_offer_monthly(prices.monthly.into());
+                        ui.set_offer_yearly(prices.yearly.into());
                     }
                     // Offline: try again the next time the page opens.
                     _ => controller.offer_loaded.set(false),
@@ -585,9 +585,12 @@ fn show_billing(ui: &SyncUi, billing: Option<&SyncBilling>) {
     ui.set_billing(state.into());
     ui.set_billing_date(billing_date(date).into());
     ui.set_billing_renews(billing.renews);
-    let (monthly, yearly) = plan_prices(&billing.plans);
-    ui.set_monthly_price(monthly.into());
-    ui.set_yearly_price(yearly.into());
+    let prices = plan_prices(&billing.plans);
+    ui.set_monthly_price(prices.monthly.into());
+    ui.set_yearly_price(prices.yearly.into());
+    ui.set_yearly_monthly_price(prices.yearly_monthly.into());
+    ui.set_yearly_saving(prices.yearly_saving);
+    ui.set_tax_included(prices.tax_included);
 }
 
 /// A date the subscription card names, such as "Oct 22, 2026".
@@ -599,17 +602,45 @@ fn billing_date(at: Option<i64>) -> String {
         .unwrap_or_default()
 }
 
-/// The prices of the monthly and yearly plans, each empty when there is no
-/// such plan.
-fn plan_prices(plans: &[SyncPlan]) -> (String, String) {
-    let of = |interval: &str| {
-        plans
-            .iter()
-            .find(|plan| plan.interval == interval)
-            .map(|plan| price(plan.amount, &plan.currency))
+/// The plans as the pricing card shows them.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct PlanPrices {
+    /// Each empty when there is no such plan.
+    monthly: String,
+    yearly: String,
+    /// The yearly price per month.
+    yearly_monthly: String,
+    /// What the yearly plan saves against twelve monthly payments, in
+    /// percent.
+    yearly_saving: i32,
+    tax_included: bool,
+}
+
+fn plan_prices(plans: &[SyncPlan]) -> PlanPrices {
+    let monthly = plans.iter().find(|plan| plan.interval == "month");
+    let yearly = plans.iter().find(|plan| plan.interval == "year");
+    let label = |plan: Option<&SyncPlan>| {
+        plan.map(|plan| price(plan.amount, &plan.currency))
             .unwrap_or_default()
     };
-    (of("month"), of("year"))
+    let mut prices = PlanPrices {
+        monthly: label(monthly),
+        yearly: label(yearly),
+        tax_included: !plans.is_empty() && plans.iter().all(|plan| plan.tax_included),
+        ..PlanPrices::default()
+    };
+    if let Some(yearly) = yearly {
+        // Rounded to the nearest smallest unit.
+        prices.yearly_monthly = price((yearly.amount + 6) / 12, &yearly.currency);
+        if let Some(monthly) = monthly.filter(|monthly| monthly.currency == yearly.currency) {
+            let twelve = monthly.amount.saturating_mul(12);
+            if yearly.amount < twelve {
+                let saving = ((twelve - yearly.amount) * 100 + twelve / 2) / twelve;
+                prices.yearly_saving = i32::try_from(saving).unwrap_or(0);
+            }
+        }
+    }
+    prices
 }
 
 /// A price such as "€4" or "€4.50", from the amount in the currency's
@@ -1048,12 +1079,24 @@ mod tests {
         };
         assert_eq!(
             plan_prices(&[plan("year", 4000), plan("month", 400)]),
-            ("€4".into(), "€40".into())
+            PlanPrices {
+                monthly: "€4".into(),
+                yearly: "€40".into(),
+                yearly_monthly: "€3.33".into(),
+                yearly_saving: 17,
+                tax_included: true,
+            }
         );
+        let yearly_only = plan_prices(&[plan("year", 4800)]);
         assert_eq!(
-            plan_prices(&[plan("year", 4000)]),
-            (String::new(), "€40".into())
+            (
+                yearly_only.monthly.as_str(),
+                yearly_only.yearly_monthly.as_str()
+            ),
+            ("", "€4")
         );
+        assert_eq!(yearly_only.yearly_saving, 0);
+        assert_eq!(plan_prices(&[]), PlanPrices::default());
     }
 
     #[test]

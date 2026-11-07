@@ -4,6 +4,7 @@
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Button } from "components/button.slint";
 import { LineEdit } from "components/controls.slint";
+import { FocusVisibleScope } from "components/focus-visible-scope.slint";
 import { SettingsCard } from "components/settings-components.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
 import { TypeScale } from "typography.slint";
@@ -66,6 +67,12 @@ export global SyncUi {
     // The prices of the group's plans; empty without such a plan.
     in property <string> monthly-price;
     in property <string> yearly-price;
+    // The yearly plan's price per month, such as "€3.33", and what it saves
+    // against twelve monthly payments, in percent.
+    in property <string> yearly-monthly-price;
+    in property <int> yearly-saving;
+    // The prices include tax; otherwise tax is added where it applies.
+    in property <bool> tax-included;
     // This build may send people to the web checkout. Builds sold through a
     // store that requires its own in-app purchases only show the state.
     in property <bool> can-buy: true;
@@ -244,6 +251,260 @@ component ActionCard inherits Rectangle {
     }
 }
 
+// One side of the monthly/yearly switch.
+component PeriodChoice inherits FocusVisibleScope {
+    in property <string> label;
+    in property <string> badge;
+    in property <bool> selected;
+    callback chosen;
+
+    focus-on-click: true;
+    accessible-role: radio-button;
+    accessible-label: root.badge == "" ? root.label : root.label + ", " + root.badge;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.chosen();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 15px;
+        background: root.selected ? AppTheme.surface : transparent;
+        border-width: root.focus-visible ? 2px : root.selected ? 1px : 0px;
+        border-color: root.focus-visible ? AppTheme.accent : AppTheme.border;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: root.badge == "" ? 16px : 6px;
+            spacing: 8px;
+            Text {
+                text: root.label;
+                color: root.selected ? AppTheme.title : AppTheme.secondary;
+                font-size: TypeScale.caption;
+                font-weight: root.selected ? 600 : 500;
+                vertical-alignment: center;
+            }
+            if root.badge != "" : VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 20px;
+                    border-radius: 10px;
+                    background: AppTheme.accent-soft;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Text {
+                            text: root.badge;
+                            color: AppTheme.accent;
+                            font-size: TypeScale.micro;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.pointer-activated();
+                root.chosen();
+            }
+        }
+    }
+}
+
+// Pay monthly or yearly, as one control with two sides.
+component PeriodSwitch inherits Rectangle {
+    in property <bool> yearly;
+    in property <string> saving;
+    callback choose(bool /* yearly */);
+
+    height: 36px;
+    border-radius: 18px;
+    background: AppTheme.control-bg;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        PeriodChoice {
+            label: @tr("Monthly");
+            selected: !root.yearly;
+            chosen => { root.choose(false); }
+        }
+        PeriodChoice {
+            label: @tr("Yearly");
+            badge: root.saving;
+            selected: root.yearly;
+            chosen => { root.choose(true); }
+        }
+    }
+}
+
+// The plan, as a pricing card: price, what it includes, and the button.
+component PricingCard inherits Rectangle {
+    in property <string> price;
+    in property <string> period;
+    in property <string> detail;
+    in property <string> fine-print;
+    in property <bool> busy;
+    callback subscribe();
+
+    border-radius: 12px;
+    border-width: 2px;
+    border-color: AppTheme.accent;
+    background: AppTheme.surface-raised;
+    VerticalLayout {
+        padding: 22px;
+        spacing: 10px;
+        Text {
+            text: @tr("Flectar Sync");
+            color: AppTheme.accent;
+            font-size: TypeScale.secondary;
+            font-weight: 700;
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 6px;
+            Text {
+                text: root.price;
+                color: AppTheme.title;
+                font-size: TypeScale.display-large;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                vertical-alignment: bottom;
+            }
+            VerticalLayout {
+                alignment: end;
+                padding-bottom: 4px;
+                Text {
+                    text: root.period;
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.body;
+                }
+            }
+        }
+        Text {
+            text: root.detail;
+            color: AppTheme.secondary;
+            font-size: TypeScale.caption;
+        }
+        Rectangle {
+            height: 1px;
+            background: AppTheme.border-subtle;
+        }
+        for feature in [
+            @tr("All your devices, one subscription"),
+            @tr("Accounts, signatures, profiles and preferences"),
+            @tr("End-to-end encrypted: Flectar can't read it"),
+        ] : Rectangle {
+            // Sized from the text at its width, so lines that wrap on a
+            // narrow phone make the card taller.
+            height: feature-text.height;
+            Image {
+                x: 0px;
+                y: 1px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("icons/lucide/outline/check.svg");
+                colorize: AppTheme.accent;
+                accessible-role: none;
+            }
+            feature-text := Text {
+                x: 26px;
+                width: parent.width - 26px;
+                height: self.preferred-height;
+                text: feature;
+                color: AppTheme.body;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+        Rectangle { height: 4px; }
+        Button {
+            height: 36px;
+            text: @tr("Subscribe");
+            primary: true;
+            enabled: !root.busy;
+            clicked => { root.subscribe(); }
+        }
+        Text {
+            text: root.fine-print;
+            color: AppTheme.faint;
+            font-size: TypeScale.micro;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// The subscription card while the group can subscribe: the period switch
+// above the pricing card.
+component SubscriptionOffer inherits Rectangle {
+    in property <string> description;
+    in property <string> note;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in-out property <bool> yearly: true;
+
+    private property <bool> both: SyncUi.monthly-price != "" && SyncUi.yearly-price != "";
+    private property <bool> showing-yearly: SyncUi.yearly-price != "" && (root.yearly || SyncUi.monthly-price == "");
+
+    height: offer.y + offer.height + 24px;
+    vertical-stretch: 0;
+
+    card := SettingsCard {
+        title: @tr("Subscription");
+        description: root.description;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.faint-text;
+    }
+    offer := VerticalLayout {
+        x: 20px;
+        y: card.content-y + 16px;
+        width: parent.width - 40px;
+        height: self.preferred-height;
+        spacing: 16px;
+        if root.note != "" : Text {
+            text: root.note;
+            color: root.secondary-text;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+        if root.both : HorizontalLayout {
+            alignment: center;
+            PeriodSwitch {
+                yearly: root.yearly;
+                saving: SyncUi.yearly-saving > 0 ? @tr("Save {}%", SyncUi.yearly-saving) : "";
+                choose(yearly) => { root.yearly = yearly; }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            PricingCard {
+                width: min(parent.width, 380px);
+                price: root.showing-yearly ? SyncUi.yearly-price : SyncUi.monthly-price;
+                period: root.showing-yearly ? @tr("/ year") : @tr("/ month");
+                detail: !root.showing-yearly ? @tr("Billed monthly")
+                    : SyncUi.yearly-monthly-price != "" ? @tr("{} a month, billed yearly", SyncUi.yearly-monthly-price)
+                    : @tr("Billed yearly");
+                fine-print: SyncUi.tax-included ? @tr("Includes tax. Cancel any time.") : @tr("Tax is added where it applies. Cancel any time.");
+                busy: SyncUi.busy;
+                subscribe => { SyncUi.subscribe(root.showing-yearly ? "yearly" : "monthly"); }
+            }
+        }
+    }
+}
+
 // A message above the cards.
 component Notice inherits Rectangle {
     in property <string> text;
@@ -284,8 +545,9 @@ export component SyncSettingsPage inherits VerticalBox {
     // The offer applies to Flectar's server, not to one typed in.
     private property <bool> offered: SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
     private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended");
-    private property <bool> two-plans: SyncUi.monthly-price != "" && SyncUi.yearly-price != "";
     private property <bool> priced: SyncUi.monthly-price != "" || SyncUi.yearly-price != "";
+    // The group can subscribe here: the pricing card shows.
+    private property <bool> offering: root.can-subscribe && root.priced;
 
     // "€4 a month or €40 a year", from the plans there are.
     function prices(monthly: string, yearly: string) -> string {
@@ -451,7 +713,19 @@ export component SyncSettingsPage inherits VerticalBox {
         }
     }
 
-    if root.on && SyncUi.billing != "" : ActionCard {
+    if root.on && root.offering : SubscriptionOffer {
+        description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
+            : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
+            : @tr("Your subscription has ended.");
+        note: SyncUi.billing == "trial" ? "" : @tr("Until you subscribe, changes wait on each device; nothing is lost.");
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+    }
+
+    if root.on && SyncUi.billing != "" && !root.offering : ActionCard {
         compact: root.compact;
         title: @tr("Subscription");
         description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
@@ -461,12 +735,8 @@ export component SyncSettingsPage inherits VerticalBox {
             : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
             : SyncUi.billing == "ended" ? @tr("Your subscription has ended.")
             : "";
-        note: SyncUi.billing == "trial"
-                ? (root.can-subscribe && root.priced ? @tr("{}. Subscribe to keep syncing after the trial.", root.prices(SyncUi.monthly-price, SyncUi.yearly-price)) : "")
-            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended"
-                ? (root.can-subscribe && root.priced
-                    ? @tr("{}. Until you subscribe, changes wait on each device; nothing is lost.", root.prices(SyncUi.monthly-price, SyncUi.yearly-price))
-                    : @tr("Changes wait on each device; nothing is lost."))
+        note: SyncUi.billing == "trial" ? ""
+            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" ? @tr("Changes wait on each device; nothing is lost.")
             : SyncUi.billing == "past-due"
                 ? (SyncUi.can-buy ? @tr("Sync keeps going while the payment is tried again. Update your payment method to keep it.") : @tr("Sync keeps going while the payment is tried again."))
             : SyncUi.can-buy && SyncUi.billing == "active" && !SyncUi.billing-renews ? @tr("Turn renewal back on, or see invoices.")
@@ -474,26 +744,12 @@ export component SyncSettingsPage inherits VerticalBox {
             : "";
         icon: @image-url("icons/lucide/outline/credit-card.svg");
         icon-color: SyncUi.billing == "past-due" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" ? AppTheme.destructive : root.accent;
-        actions-width: root.can-subscribe && root.two-plans ? 300px : 150px;
-        actions-height: root.compact && root.can-subscribe && root.two-plans ? 2 * 32px + 8px : 32px;
+        actions-width: 150px;
         surface: root.surface;
         card-border-color: root.card-border-color;
         heading: root.heading;
         secondary-text: root.secondary-text;
         faint-text: root.faint-text;
-        if root.can-subscribe && root.compact && root.two-plans : VerticalLayout {
-            spacing: 8px;
-            Button { height: 32px; text: @tr("Pay yearly"); primary: true; enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("yearly"); } }
-            Button { height: 32px; text: @tr("Pay monthly"); enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("monthly"); } }
-        }
-        if root.can-subscribe && !root.compact && root.two-plans : Button { text: @tr("Pay monthly"); enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("monthly"); } }
-        if root.can-subscribe && !root.compact && root.two-plans : Button { text: @tr("Pay yearly"); primary: true; enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("yearly"); } }
-        if root.can-subscribe && !root.two-plans && root.priced : Button {
-            text: @tr("Subscribe");
-            primary: true;
-            enabled: !SyncUi.busy;
-            clicked => { SyncUi.subscribe(SyncUi.monthly-price != "" ? "monthly" : "yearly"); }
-        }
         if SyncUi.can-buy && !root.can-subscribe : Button {
             text: @tr("Manage");
             primary: SyncUi.billing == "past-due";
