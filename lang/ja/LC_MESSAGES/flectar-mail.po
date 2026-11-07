@@ -3,8 +3,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: flectar-mail 0.1.0\n"
 "POT-Creation-Date: 2026-10-16 12:17+0000\n"
-"PO-Revision-Date: 2026-11-05 10:09+0000\n"
-"Last-Translator: Yusuke Miyajima <miyayuu.since2018@gmail.com>\n"
+"PO-Revision-Date: 2026-11-06 13:10+0000\n"
+"Last-Translator: miyaji255 <miyaji255@users.noreply.translate.flectar.com>\n"
 "Language-Team: Japanese <https://translate.flectar.com/projects/flectar-mail/"
 "mail/ja/>\n"
 "Language: ja\n"
@@ -16,30 +16,30 @@ msgstr ""
 
 #: ui/app-icon.slint:19
 msgid "Orange"
-msgstr ""
+msgstr "オレンジ"
 
 #: ui/app-icon.slint:20
 msgid "Graphite"
-msgstr ""
+msgstr "グラファイト"
 
 #: ui/app-icon.slint:21 ui/components/theme-editor.slint:612
 #: ui/dialogs/settings-dialog.slint:1069
 msgid "Light"
-msgstr ""
+msgstr "ライト"
 
 #: ui/app-icon.slint:22 ui/views/mail-reading-pane.slint:2001
 msgid "Blue"
-msgstr ""
+msgstr "青"
 
 #: ui/app-icon.slint:23 ui/components/theme-editor.slint:623
 #: ui/views/mail-reading-pane.slint:2006
 msgid "Green"
-msgstr ""
+msgstr "緑"
 
 #: ui/app-icon.slint:24 ui/components/theme-editor.slint:624
 #: ui/views/mail-reading-pane.slint:2002
 msgid "Purple"
-msgstr ""
+msgstr "紫"
 
 #: ui/app.slint:97
 msgctxt "abbreviated month in a date"
@@ -349,12 +349,12 @@ msgstr ""
 #: ui/app.slint:167
 msgctxt "time pattern (CLDR): 12-hour clock, a is AM or PM"
 msgid "h:mm a"
-msgstr ""
+msgstr "a h:mm"
 
 #: ui/app.slint:168
 msgctxt "time pattern (CLDR): whole hour on a 12-hour clock"
 msgid "h a"
-msgstr ""
+msgstr "a h"
 
 #: ui/app.slint:171
 msgctxt "date range"
@@ -372,7 +372,7 @@ msgstr ""
 
 #: ui/app.slint:175
 msgid "(untitled event)"
-msgstr ""
+msgstr "(無題の予定)"
 
 #: ui/app.slint:176
 msgid "No conversation history"
@@ -706,7 +706,7 @@ msgstr ""
 
 #: ui/app.slint:293
 msgid "Mail-list marker preference saved."
-msgstr ""
+msgstr "メール一覧に表示するアカウントの色の設定を保存しました。"
 
 #: ui/app.slint:294
 msgid "Could not save mail-list marker preference: {}"
@@ -1122,7 +1122,7 @@ msgstr ""
 #: ui/app.slint:420 ui/components/calendar.slint:273
 #: ui/components/calendar.slint:321 ui/components/calendar.slint:439
 msgid "Calendar"
-msgstr ""
+msgstr "カレンダー"
 
 #: ui/app.slint:421
 msgid "Could not load calendar: {}"
@@ -1956,7 +1956,7 @@ msgstr ""
 
 #: ui/components/account-mail-preferences.slint:157
 msgid "Edit"
-msgstr ""
+msgstr "編集"
 
 #: ui/components/account-mail-preferences.slint:158
 #: ui/views/contacts-view.slint:608
@@ -1993,7 +1993,7 @@ msgstr ""
 #: ui/components/account-mail-preferences.slint:171
 #: ui/dialogs/settings-dialog.slint:2953 ui/views/onboarding-view.slint:267
 msgid "Email address"
-msgstr ""
+msgstr "メールアドレス"
 
 #: ui/components/account-mail-preferences.slint:171
 msgid "alias@example.com"
@@ -2028,7 +2028,7 @@ msgstr ""
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:3029
 #: ui/views/contacts-view.slint:604 ui/views/files-view.slint:659
 msgid "Cancel"
-msgstr ""
+msgstr "キャンセル"
 
 #: ui/components/account-mail-preferences.slint:183
 msgid "Edit signature"
@@ -3186,11 +3186,11 @@ msgstr "新しいタブ"
 
 #: ui/components/theme-editor.slint:232
 msgid "Color saturation and brightness"
-msgstr ""
+msgstr "彩度と明るさ"
 
 #: ui/components/theme-editor.slint:233
 msgid "Saturation {}%, brightness {}%"
-msgstr ""
+msgstr "彩度 {}%、明るさ {}%"
 
 #: ui/components/theme-editor.slint:291
 msgid "Hue"
@@ -3242,39 +3242,39 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:599
 msgid "Theme"
-msgstr ""
+msgstr "テーマ"
 
 #: ui/components/theme-editor.slint:606
 msgid "Color scheme"
-msgstr ""
+msgstr "配色"
 
 #: ui/components/theme-editor.slint:610
 msgid "System"
-msgstr ""
+msgstr "システム"
 
 #: ui/components/theme-editor.slint:611 ui/components/theme-editor.slint:682
 msgid "Dark"
-msgstr ""
+msgstr "ダーク"
 
 #: ui/components/theme-editor.slint:616
 msgid "Palette"
-msgstr ""
+msgstr "パレット"
 
 #: ui/components/theme-editor.slint:621 ui/components/theme-editor.slint:633
 msgid "Default"
-msgstr ""
+msgstr "デフォルト"
 
 #: ui/components/theme-editor.slint:622 ui/components/theme-editor.slint:634
 msgid "Teal"
-msgstr ""
+msgstr "ティール"
 
 #: ui/components/theme-editor.slint:625 ui/components/theme-editor.slint:646
 msgid "Custom"
-msgstr ""
+msgstr "カスタム"
 
 #: ui/components/theme-editor.slint:655 ui/components/theme-editor.slint:668
 msgid "Custom palette"
-msgstr ""
+msgstr "カスタムパレット"
 
 #: ui/components/theme-editor.slint:688 ui/components/theme-editor.slint:695
 msgid "Unsaved changes"
@@ -3286,23 +3286,23 @@ msgstr ""
 
 #: ui/components/theme-editor.slint:704 ui/components/theme-editor.slint:718
 msgid "Primary"
-msgstr ""
+msgstr "メインカラー"
 
 #: ui/components/theme-editor.slint:705 ui/components/theme-editor.slint:719
 msgid "Canvas"
-msgstr ""
+msgstr "背景（全体）"
 
 #: ui/components/theme-editor.slint:706 ui/components/theme-editor.slint:725
 msgid "Surface"
-msgstr ""
+msgstr "カード・枠内背景"
 
 #: ui/components/theme-editor.slint:707 ui/components/theme-editor.slint:726
 msgid "Text"
-msgstr ""
+msgstr "文字"
 
 #: ui/components/theme-editor.slint:708 ui/components/theme-editor.slint:733
 msgid "Border"
-msgstr ""
+msgstr "枠線"
 
 #: ui/components/theme-editor.slint:755
 msgid "Checked text contrast meets 4.5:1 · minimum {}:1"
@@ -3329,7 +3329,7 @@ msgstr ""
 #: ui/components/theme-editor.slint:785 ui/dialogs/folder-dialog.slint:135
 #: ui/views/mail-reading-pane.slint:2027
 msgid "Save"
-msgstr ""
+msgstr "保存"
 
 #: ui/components/theme-editor.slint:785
 msgid "Save palette"
@@ -3562,11 +3562,11 @@ msgstr ""
 
 #: ui/dialogs/folder-dialog.slint:133 ui/views/mail-reading-pane.slint:1976
 msgid "Create label"
-msgstr ""
+msgstr "ラベルを作成"
 
 #: ui/dialogs/folder-dialog.slint:134
 msgid "Create folder"
-msgstr ""
+msgstr "フォルダーを作成"
 
 #: ui/dialogs/import-dialog.slint:130
 msgid "No valid email address was found."
@@ -4307,43 +4307,43 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:649
 msgid "Every minute"
-msgstr ""
+msgstr "毎分"
 
 #: ui/dialogs/settings-dialog.slint:650
 msgid "Every 5 minutes"
-msgstr ""
+msgstr "５分ごと"
 
 #: ui/dialogs/settings-dialog.slint:651
 msgid "Every 15 minutes"
-msgstr ""
+msgstr "１５分毎"
 
 #: ui/dialogs/settings-dialog.slint:655
 msgid "Important mail"
-msgstr ""
+msgstr "重要なメール"
 
 #: ui/dialogs/settings-dialog.slint:656
 msgid "All new mail"
-msgstr ""
+msgstr "すべての新規メール"
 
 #: ui/dialogs/settings-dialog.slint:659
 msgid "1 month"
-msgstr ""
+msgstr "１か月"
 
 #: ui/dialogs/settings-dialog.slint:660
 msgid "3 months"
-msgstr ""
+msgstr "３か月"
 
 #: ui/dialogs/settings-dialog.slint:661
 msgid "6 months · Recommended"
-msgstr ""
+msgstr "６か月・推奨"
 
 #: ui/dialogs/settings-dialog.slint:662
 msgid "1 year"
-msgstr ""
+msgstr "１年"
 
 #: ui/dialogs/settings-dialog.slint:663 ui/views/mail-list-pane.slint:645
 msgid "All mail"
-msgstr ""
+msgstr "すべてのメール"
 
 #: ui/dialogs/settings-dialog.slint:666
 msgid "Always"
@@ -4395,7 +4395,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:682
 msgid "Automatic"
-msgstr ""
+msgstr "自動"
 
 #: ui/dialogs/settings-dialog.slint:683
 msgid "12-hour"
@@ -4468,21 +4468,21 @@ msgstr "一般"
 #: ui/dialogs/settings-dialog.slint:1025 ui/dialogs/settings-dialog.slint:1729
 #: ui/dialogs/settings-dialog.slint:2715 ui/dialogs/settings-dialog.slint:3160
 msgid "Accounts"
-msgstr ""
+msgstr "アカウント"
 
 #: ui/dialogs/settings-dialog.slint:1027 ui/dialogs/settings-dialog.slint:2340
 #: ui/dialogs/settings-dialog.slint:2717
 msgid "Notifications"
-msgstr ""
+msgstr "通知"
 
 #: ui/dialogs/settings-dialog.slint:1028 ui/dialogs/settings-dialog.slint:2647
 msgid "Shortcuts"
-msgstr ""
+msgstr "ショートカット"
 
 #: ui/dialogs/settings-dialog.slint:1029 ui/dialogs/settings-dialog.slint:2248
 #: ui/dialogs/settings-dialog.slint:2719
 msgid "Storage"
-msgstr ""
+msgstr "ストレージ"
 
 #: ui/dialogs/settings-dialog.slint:1030 ui/dialogs/settings-dialog.slint:2437
 #: ui/dialogs/settings-dialog.slint:2720
@@ -4556,7 +4556,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1213
 msgid "Display language"
-msgstr ""
+msgstr "表示言語"
 
 #: ui/dialogs/settings-dialog.slint:1214
 msgid "Follow your device language when a translation is available."
@@ -4811,6 +4811,8 @@ msgid ""
 "Manage connected mailboxes and add providers. Drag an account to change its "
 "order everywhere."
 msgstr ""
+"接続済みメールボックスの管理やプロバイダーの追加ができます。アカウントを"
+"ドラッグして並べ替えると、アプリ全体の表示順に反映されます。"
 
 #: ui/dialogs/settings-dialog.slint:1757
 msgid ""
@@ -4820,73 +4822,75 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:1766 ui/dialogs/settings-dialog.slint:1796
 msgid "Add profile"
-msgstr ""
+msgstr "プロファイルを追加"
 
 #: ui/dialogs/settings-dialog.slint:1780 ui/dialogs/settings-dialog.slint:1788
 msgid "Show account color at the left edge of each message"
-msgstr ""
+msgstr "各メールの左端にアカウントの色を表示"
 
 #: ui/dialogs/settings-dialog.slint:1810
 msgid ""
 "No profiles yet. Accounts keep their individual or generated colors until "
 "you create one."
 msgstr ""
+"プロファイルはまだありません。作成するまでは、各アカウントに設定された色また"
+"は自動で割り当てられた色が使われます。"
 
 #: ui/dialogs/settings-dialog.slint:1855 ui/dialogs/settings-dialog.slint:3056
 msgid "Edit profile"
-msgstr ""
+msgstr "プロファイルを編集"
 
 #: ui/dialogs/settings-dialog.slint:1865 ui/dialogs/settings-dialog.slint:3311
 msgid "Delete profile"
-msgstr ""
+msgstr "プロファイルを削除"
 
 #: ui/dialogs/settings-dialog.slint:1881 ui/dialogs/settings-dialog.slint:1927
 msgid "Add Gmail"
-msgstr ""
+msgstr "Gmailを追加"
 
 #: ui/dialogs/settings-dialog.slint:1894 ui/dialogs/settings-dialog.slint:1928
 msgid "Add Outlook"
-msgstr ""
+msgstr "Outlookを追加"
 
 #: ui/dialogs/settings-dialog.slint:1907 ui/dialogs/settings-dialog.slint:1929
 msgid "Add mail account"
-msgstr ""
+msgstr "メールアカウントを追加"
 
 #: ui/dialogs/settings-dialog.slint:1920 ui/dialogs/settings-dialog.slint:1930
 msgid "Cancel sign-in"
-msgstr ""
+msgstr "サインインをキャンセル"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected · Gmail"
-msgstr ""
+msgstr "接続済み・Gmail"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected · JMAP"
-msgstr ""
+msgstr "接続済み・JMAP"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected without encryption · POP3 + SMTP"
-msgstr ""
+msgstr "暗号化なしで接続済み・POP3 + SMTP"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected · POP3 + SMTP"
-msgstr ""
+msgstr "接続済み・POP3 + SMTP"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected without encryption · IMAP + SMTP"
-msgstr ""
+msgstr "暗号化なしで接続済み・IMAP + SMTP"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Connected · IMAP + SMTP"
-msgstr ""
+msgstr "接続済み・IMAP + SMTP"
 
 #: ui/dialogs/settings-dialog.slint:2013
 msgid "Account status: {}"
-msgstr ""
+msgstr "アカウントの状態：{}"
 
 #: ui/dialogs/settings-dialog.slint:2016 ui/dialogs/settings-dialog.slint:2229
 msgid "Reconnect"
-msgstr ""
+msgstr "再接続"
 
 #: ui/dialogs/settings-dialog.slint:2042 ui/views/files-view.slint:504
 msgid "Manage"
@@ -4902,42 +4906,48 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2057
 msgid "Mail synchronization error: {}"
-msgstr ""
+msgstr "メール同期エラー：{}"
 
 #: ui/dialogs/settings-dialog.slint:2073
 msgid "Mail history"
-msgstr ""
+msgstr "メール履歴"
 
 #: ui/dialogs/settings-dialog.slint:2076
 msgid ""
 "Download the full mailbox. Large accounts can take considerable time and "
 "storage."
 msgstr ""
+"メールボックス全体をダウンロードします。容量の大きいアカウントの場合、かなり"
+"の時間とストレージを消費することがあります。"
 
 #: ui/dialogs/settings-dialog.slint:2077
 msgid "How far back to download. Mail already stored on this device is kept."
 msgstr ""
+"過去のメールをどこまでさかのぼってダウンロードするかを設定します。この"
+"デバイスに保存済みのメールは保持されます。"
 
 #: ui/dialogs/settings-dialog.slint:2090
 msgid "Sent copies"
-msgstr ""
+msgstr "送信済みメールのコピー"
 
 #: ui/dialogs/settings-dialog.slint:2092
 msgid ""
 "Choose who saves sent mail. Use Flectar if your server does not save a copy."
 msgstr ""
+"送信済みメールのコピーをどこが保存するかを選びます。サーバーがコピーを保存し"
+"ない場合は、Flectarを選択してください。"
 
 #: ui/dialogs/settings-dialog.slint:2093
 msgid "Provider default"
-msgstr ""
+msgstr "プロバイダーの既定値"
 
 #: ui/dialogs/settings-dialog.slint:2093
 msgid "Server saves a copy"
-msgstr ""
+msgstr "サーバーがコピーを保存"
 
 #: ui/dialogs/settings-dialog.slint:2093
 msgid "Flectar saves a copy"
-msgstr ""
+msgstr "Flectarがコピーを保存"
 
 #: ui/dialogs/settings-dialog.slint:2107
 msgid "Keep mail on the server"
@@ -4980,11 +4990,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2211
 msgid "OAuth app credentials"
-msgstr ""
+msgstr "OAuthアプリの認証情報"
 
 #: ui/dialogs/settings-dialog.slint:2211
 msgid "Custom desktop app credentials are configured."
-msgstr ""
+msgstr "独自のデスクトップアプリの認証情報が設定されています。"
 
 #: ui/dialogs/settings-dialog.slint:2211
 msgid "Advanced: use your own Gmail or Microsoft desktop app registration."
@@ -5038,19 +5048,19 @@ msgstr ""
 #: ui/dialogs/settings-dialog.slint:2228 ui/dialogs/settings-dialog.slint:2824
 #: ui/dialogs/settings-dialog.slint:2954
 msgid "Username"
-msgstr ""
+msgstr "ユーザー名"
 
 #: ui/dialogs/settings-dialog.slint:2228 ui/dialogs/settings-dialog.slint:2832
 msgid "App password"
-msgstr ""
+msgstr "アプリパスワード"
 
 #: ui/dialogs/settings-dialog.slint:2229
 msgid "Disconnect"
-msgstr ""
+msgstr "接続を解除"
 
 #: ui/dialogs/settings-dialog.slint:2229 ui/dialogs/settings-dialog.slint:2859
 msgid "Connect"
-msgstr ""
+msgstr "接続"
 
 #: ui/dialogs/settings-dialog.slint:2251
 msgid ""
@@ -5180,13 +5190,13 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2393 ui/views/mail-list-pane.slint:643
 msgid "Search mail"
-msgstr ""
+msgstr "メールを検索"
 
 #. Local mail has no archive or spam.
 #: ui/dialogs/settings-dialog.slint:2394 ui/views/mail-list-pane.slint:1348
 #: ui/views/mail-reading-pane.slint:365
 msgid "Archive"
-msgstr ""
+msgstr "アーカイブ"
 
 #: ui/dialogs/settings-dialog.slint:2395 ui/views/mail-list-pane.slint:725
 #: ui/views/mail-reading-pane.slint:349 ui/views/mail-reading-pane.slint:795
@@ -5465,11 +5475,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2877
 msgid "Edit mail account"
-msgstr ""
+msgstr "メールアカウントを編集"
 
 #: ui/dialogs/settings-dialog.slint:2877 ui/dialogs/settings-dialog.slint:2925
 msgid "Connect a mail account"
-msgstr ""
+msgstr "メールアカウントを追加"
 
 #: ui/dialogs/settings-dialog.slint:2925
 msgid "Edit {}"
@@ -5486,7 +5496,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2926
 msgid "Uses separate IMAP and SMTP servers for mail sync and sending."
-msgstr ""
+msgstr "メールの同期にはIMAPサーバー、送信にはSMTPサーバーを使用します。"
 
 #: ui/dialogs/settings-dialog.slint:2946 ui/dialogs/settings-dialog.slint:2953
 msgid "name@example.com"
@@ -5518,15 +5528,15 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2971
 msgid "Discovered from your email domain"
-msgstr ""
+msgstr "メールアドレスのドメインから自動検出"
 
 #: ui/dialogs/settings-dialog.slint:2978 ui/views/onboarding-view.slint:337
 msgid "POP3 server"
-msgstr ""
+msgstr "POP3 サーバー"
 
 #: ui/dialogs/settings-dialog.slint:2978 ui/views/onboarding-view.slint:337
 msgid "IMAP server"
-msgstr ""
+msgstr "IMAP サーバー"
 
 #: ui/dialogs/settings-dialog.slint:2978
 msgid "pop.example.com"
@@ -5543,7 +5553,7 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:2985 ui/views/onboarding-view.slint:359
 msgid "SMTP server"
-msgstr ""
+msgstr "SMTP サーバー"
 
 #: ui/dialogs/settings-dialog.slint:2985
 msgid "smtp.example.com"
@@ -5554,18 +5564,20 @@ msgid ""
 "Proton Bridge: use the local servers, ports and password shown in Bridge, "
 "and match its encryption settings."
 msgstr ""
+"Proton Bridge：Bridgeに表示されるローカルサーバー、ポート、パスワードを使用し"
+"、暗号化設定もBridgeに合わせてください。"
 
 #: ui/dialogs/settings-dialog.slint:3035
 msgid "Save account"
-msgstr ""
+msgstr "アカウントを保存"
 
 #: ui/dialogs/settings-dialog.slint:3035 ui/views/onboarding-view.slint:407
 msgid "Connect account"
-msgstr ""
+msgstr "アカウントを接続"
 
 #: ui/dialogs/settings-dialog.slint:3056 ui/dialogs/settings-dialog.slint:3112
 msgid "Create profile"
-msgstr ""
+msgstr "プロファイルを作成"
 
 #: ui/dialogs/settings-dialog.slint:3113
 msgid ""
@@ -5574,27 +5586,27 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3118
 msgid "Profile name"
-msgstr ""
+msgstr "プロファイル名"
 
 #: ui/dialogs/settings-dialog.slint:3120
 msgid "Personal or Work"
-msgstr ""
+msgstr "個人用や仕事用"
 
 #: ui/dialogs/settings-dialog.slint:3126 ui/views/mail-reading-pane.slint:1991
 msgid "Color"
-msgstr ""
+msgstr "色"
 
 #: ui/dialogs/settings-dialog.slint:3135
 msgid "Profile color {}"
-msgstr ""
+msgstr "プロファイルの色{}"
 
 #: ui/dialogs/settings-dialog.slint:3177
 msgid "Save profile"
-msgstr ""
+msgstr "プロファイルを保存"
 
 #: ui/dialogs/settings-dialog.slint:3185
 msgid "Could not save this profile. Check the name and try again."
-msgstr ""
+msgstr "プロファイルを保存できませんでした。名前を確認して、もう一度お試しください。"
 
 #: ui/dialogs/settings-dialog.slint:3203
 msgid "Choose a profile for {}"
@@ -5602,13 +5614,15 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3233
 msgid "Delete all local data?"
-msgstr ""
+msgstr "すべてのローカルデータを削除しますか？"
 
 #: ui/dialogs/settings-dialog.slint:3234
 msgid ""
 "This removes every account, downloaded message, calendar, contact, "
 "preference, and credential stored by Flectar Mail on this device."
 msgstr ""
+"このデバイスにFlectar Mailが保存したすべてのアカウント、ダウンロード済み"
+"メール、カレンダー、連絡先、設定、認証情報が削除されます。"
 
 #: ui/dialogs/settings-dialog.slint:3236
 msgid ""
@@ -5616,17 +5630,22 @@ msgid ""
 "device and will be deleted. Mail and events on Gmail, Outlook, and IMAP "
 "servers will not be deleted."
 msgstr ""
+"インポートしたメールとPOP3アカウントのメールは、このデバイスにのみ保存されて"
+"おり、削除されます。Gmail、Outlook、IMAPサーバー上のメールと予定は削除されま"
+"せん。"
 
 #: ui/dialogs/settings-dialog.slint:3238
 msgid ""
 "POP3 mail is stored only on this device and will be deleted. Mail and events "
 "on Gmail, Outlook, and IMAP servers will not be deleted."
 msgstr ""
+"POP3メールは、このデバイスにのみ保存されており、削除されます。Gmail、Outlook"
+"、IMAPサーバー上のメールと予定は削除されません。"
 
 #: ui/dialogs/settings-dialog.slint:3239
 msgid ""
 "Mail and events on Gmail, Outlook, and IMAP servers will not be deleted."
-msgstr ""
+msgstr "Gmail、Outlook、IMAPサーバー上のメールと予定は削除されません。"
 
 #: ui/dialogs/settings-dialog.slint:3240
 msgid "Export POP3 mail…"
@@ -5658,11 +5677,11 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3282
 msgid "Remove account?"
-msgstr ""
+msgstr "アカウントを削除しますか？"
 
 #: ui/dialogs/settings-dialog.slint:3284
 msgid "Remove this account and its downloaded mail from this device."
-msgstr ""
+msgstr "このアカウントとダウンロードしたメールを、このデバイスから削除します。"
 
 #: ui/dialogs/settings-dialog.slint:3286
 msgid ""
@@ -5676,29 +5695,31 @@ msgstr ""
 
 #: ui/dialogs/settings-dialog.slint:3292
 msgid "Remove account"
-msgstr ""
+msgstr "アカウントを削除"
 
 #: ui/dialogs/settings-dialog.slint:3293
 msgid "Keep account"
-msgstr ""
+msgstr "削除しない"
 
 #: ui/dialogs/settings-dialog.slint:3307
 msgid "Delete profile?"
-msgstr ""
+msgstr "プロファイルを削除しますか？"
 
 #: ui/dialogs/settings-dialog.slint:3309
 msgid ""
 "Accounts assigned to this profile will return to their individual or "
 "generated account colors."
 msgstr ""
+"このプロファイルに含まれるアカウントは、個別に設定した色または自動的に割り当"
+"てられた色に戻ります。"
 
 #: ui/dialogs/settings-dialog.slint:3310
 msgid "Accounts and provider data are not changed."
-msgstr ""
+msgstr "アカウントとプロバイダーのデータは変わりません。"
 
 #: ui/dialogs/settings-dialog.slint:3312
 msgid "Keep profile"
-msgstr ""
+msgstr "削除しない"
 
 #: ui/dialogs/settings-dialog.slint:3326
 msgid "Remove calendar?"
@@ -6647,7 +6668,7 @@ msgstr ""
 
 #: ui/views/mail-reading-pane.slint:765
 msgid "Archive message"
-msgstr ""
+msgstr "メールをアーカイブ"
 
 #: ui/views/mail-reading-pane.slint:868
 msgid "Search labels"
