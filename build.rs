@@ -25,6 +25,11 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=UIKit");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=AuthenticationServices");
+        // iOS gives the main thread a 1 MB stack, and Slint's generated code
+        // for the main window takes a 930 KiB frame when the mailbox first
+        // appears (slint-ui/slint#14817). Ask for the 8 MiB the same code gets
+        // on macOS and Linux; the kernel sizes the main stack from LC_MAIN.
+        println!("cargo:rustc-link-arg-bins=-Wl,-stack_size,0x800000");
         println!("cargo:rerun-if-changed=platform/ios/Documents.m");
         println!("cargo:rerun-if-changed=platform/ios/PdfPreview.m");
         println!("cargo:rerun-if-changed=platform/ios/AppIcon.m");
