@@ -282,6 +282,33 @@ pub(crate) fn set_local_hash(
     Ok(())
 }
 
+/// The server's version of one record, if it has one.
+pub(crate) fn mirrored_entry(conn: &Connection, id: &RecordId) -> Result<Option<Entry>> {
+    let row = conn
+        .query_row(
+            "SELECT collection, schema, body FROM device_sync_mirror WHERE record_id = ?1",
+            params![&id[..]],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    Ok(row.and_then(|(collection, schema, body)| entry(collection, schema, body)))
+}
+
+/// Whether a local change to the record waits to reach the server.
+pub(crate) fn has_pending(conn: &Connection, id: &RecordId) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM device_sync_outbox WHERE record_id = ?1)",
+        params![&id[..]],
+        |row| row.get(0),
+    )?)
+}
+
 /// Record local changes: compare the app's items with the hashes of the last
 /// check, and queue an upload for each one that changed or vanished.
 pub(crate) fn track(
@@ -535,7 +562,10 @@ impl Store for RunStore {
                         .as_ref()
                         .filter(|base| base.collection == remote.collection)
                         .map(|base| &base.body);
-                    let body = merge::merge(base_body, &local.body, &remote.body, remote_newer);
+                    let mut body = merge::merge(base_body, &local.body, &remote.body, remote_newer);
+                    if remote.collection == super::collections::SCHEDULED {
+                        super::scheduled::settle(base_body, &local.body, &remote.body, &mut body);
+                    }
                     if body == remote.body {
                         self.outbox.remove(&id);
                         self.take(id, base_entry, Some(remote.clone()));

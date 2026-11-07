@@ -25,6 +25,7 @@ pub(crate) const PROFILE: &str = "profile";
 pub(crate) const DEVICE: &str = "device";
 pub(crate) const TEMPLATE: &str = "template";
 pub(crate) const SNOOZE: &str = "snooze";
+pub(crate) const SCHEDULED: &str = "scheduled";
 
 /// The largest template body that syncs, well under the server's record
 /// limit: one record too large would stop every upload.
@@ -36,7 +37,7 @@ const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 /// unread here, and this device leaves them alone until it updates.
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
-        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE => Some(1),
+        PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED => Some(1),
         _ => None,
     }
 }
@@ -121,7 +122,7 @@ pub(crate) fn names_needed(settings: &Settings) -> Vec<String> {
         .collect()
 }
 
-fn sync_id_bytes(sync_id: &str) -> Option<RecordId> {
+pub(crate) fn sync_id_bytes(sync_id: &str) -> Option<RecordId> {
     if sync_id.len() != 32 {
         return None;
     }
@@ -321,6 +322,16 @@ pub(crate) fn snapshot(
         );
     }
 
+    for send in repo::synced_sends::all(conn)? {
+        let (Some(id), Some(account)) = (
+            sync_id_bytes(&send.sync_id),
+            ids.by_local.get(&send.account_id),
+        ) else {
+            continue;
+        };
+        records.insert(id, entry(SCHEDULED, super::scheduled::body(&send, account)));
+    }
+
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
 }
@@ -427,7 +438,7 @@ fn readable(entry: &Entry) -> bool {
 fn order(collection: &str, deleted: bool) -> (u8, bool) {
     let rank = match collection {
         ACCOUNT => 0,
-        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE => 1,
+        PREF | SIGNATURE | PROFILE | TEMPLATE | SNOOZE | SCHEDULED => 1,
         _ => 2,
     };
     (rank, deleted)
@@ -611,6 +622,7 @@ fn apply_put(
         }
         TEMPLATE => apply_template(conn, id, &entry.body),
         SNOOZE => apply_snooze(conn, id, &entry.body, applied),
+        SCHEDULED => apply_scheduled(conn, id, &entry.body, applied),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -858,6 +870,38 @@ fn apply_snooze(
     Ok(Outcome::Applied)
 }
 
+/// Take on a send another device scheduled, claimed or finished.
+fn apply_scheduled(
+    conn: &Connection,
+    id: &RecordId,
+    body: &Value,
+    applied: &mut Applied,
+) -> Result<Outcome> {
+    let Some(record) = super::scheduled::parse(body) else {
+        return Ok(Outcome::Ignored);
+    };
+    let Some(account_id) = account_ids(conn)?.by_sync.get(record.account).copied() else {
+        return Ok(Outcome::Waiting);
+    };
+    let shared = repo::synced_sends::Shared {
+        account_id,
+        message_id: record.message_id,
+        send_at: record.send_at,
+        origin: record.origin,
+        draft_ref: record.draft,
+        state: record.state,
+        error: record.error,
+        claimed_by: record.claim.map(|(device, _)| device),
+        claim_until: record.claim.map(|(_, until)| until),
+    };
+    if let Some(thread) =
+        super::scheduled::put(conn, &sync_id_hex(id), &shared, crate::models::now_ms())?
+    {
+        applied.threads_changed.push(thread);
+    }
+    Ok(Outcome::Applied)
+}
+
 /// Whether the server has seen the record with this sync id: it is mirrored,
 /// even as a deletion, or waiting to upload.
 fn server_knows(conn: &Connection, sync_id: &str) -> Result<bool> {
@@ -976,6 +1020,11 @@ fn apply_delete(
                 if woke {
                     repo::snoozes::mark_woken(conn, thread)?;
                 }
+                applied.threads_changed.push(thread);
+            }
+        }
+        SCHEDULED => {
+            if let Some(thread) = super::scheduled::remove(conn, &sync_id_hex(id))? {
                 applied.threads_changed.push(thread);
             }
         }

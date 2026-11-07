@@ -23,6 +23,7 @@ pub mod snippets;
 pub mod snoozes;
 pub mod splits;
 pub mod sync_failures;
+pub mod synced_sends;
 pub mod threads;
 pub mod transfers;
 

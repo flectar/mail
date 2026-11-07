@@ -50,6 +50,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/031_device_sync.sql")),
     Migration::Plain(include_str!("migrations/032_synced_templates.sql")),
     Migration::Plain(include_str!("migrations/033_synced_snoozes.sql")),
+    Migration::Plain(include_str!("migrations/034_synced_sends.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -380,6 +381,7 @@ mod tests {
             "snoozes",
             "split_rules",
             "sync_failures",
+            "synced_sends",
             "synced_snoozes",
             "threads",
         ]

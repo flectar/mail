@@ -1370,6 +1370,8 @@ pub struct QueueSendArgs {
 pub struct ScheduledSend {
     pub action_id: i64,
     pub draft_id: i64,
+    /// The draft's conversation.
+    pub thread_id: Option<i64>,
     pub account_id: i64,
     /// When it goes out, in ms since the epoch.
     pub send_at: i64,

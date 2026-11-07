@@ -4635,18 +4635,41 @@ impl Core {
     /// Stop a draft's scheduled send. The message stays a draft, to edit or
     /// schedule again. Returns whether a send was waiting.
     pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<bool> {
-        let (cancelled, thread) = self
+        let (cancelled, thread, shared) = self
             .db
             .write(move |conn| {
-                let cancelled = repo::actions::cancel_draft_send(conn, draft_id, now_ms())?;
-                let thread = repo::messages::get_row(conn, draft_id)?.and_then(|row| row.thread_id);
-                Ok((cancelled.is_some(), thread))
+                let tx = conn.transaction()?;
+                let cancelled = repo::actions::cancel_draft_send(&tx, draft_id, now_ms())?;
+                // Cancelled on every device.
+                let shared = match cancelled {
+                    Some(action) => match repo::synced_sends::by_action(&tx, action)? {
+                        Some(send) if send.state == repo::synced_sends::SCHEDULED => {
+                            repo::synced_sends::set_state(
+                                &tx,
+                                &send.sync_id,
+                                repo::synced_sends::CANCELLED,
+                                None,
+                                now_ms(),
+                            )?;
+                            repo::synced_sends::set_action(&tx, &send.sync_id, None)?;
+                            true
+                        }
+                        _ => false,
+                    },
+                    None => false,
+                };
+                let thread = repo::messages::get_row(&tx, draft_id)?.and_then(|row| row.thread_id);
+                tx.commit()?;
+                Ok((cancelled.is_some(), thread, shared))
             })
             .await?;
         if let Some(thread) = thread {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: vec![thread],
             });
+        }
+        if shared {
+            self.device_sync_now();
         }
         Ok(cancelled)
     }
@@ -4655,6 +4678,30 @@ impl Core {
     /// window) and nudge its actor. Returns false if it was already sent or
     /// cancelled.
     pub async fn send_now(&self, action_id: i64) -> Result<bool> {
+        // A send shared with the user's other devices goes out once this
+        // device's claim on it reaches the server.
+        let shared = self
+            .db
+            .write(move |conn| {
+                let Some(send) = repo::synced_sends::by_action(conn, action_id)?
+                    .filter(|send| send.state == repo::synced_sends::SCHEDULED)
+                else {
+                    return Ok(false);
+                };
+                let now = now_ms();
+                repo::synced_sends::reschedule(conn, &send.sync_id, now, now)?;
+                conn.execute(
+                    "UPDATE pending_actions SET payload = json_set(payload, '$.sendAt', ?2)
+                     WHERE id = ?1 AND state = 'pending'",
+                    rusqlite::params![action_id, now],
+                )?;
+                Ok(true)
+            })
+            .await?;
+        if shared {
+            self.device_sync_now();
+            return Ok(true);
+        }
         let account_id = self
             .db
             .write(move |conn| repo::actions::expedite(conn, action_id))
@@ -5327,7 +5374,7 @@ impl Core {
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
         let draft_id = args.draft_id;
-        let (policy, sender, recipients) = self
+        let (policy, sender, recipients, protocol) = self
             .db
             .read(move |conn| {
                 let detail = repo::messages::detail(conn, draft_id)?;
@@ -5349,12 +5396,28 @@ impl Core {
                         "{sender} is not an authorized sender identity for this account"
                     )));
                 }
-                Ok((config.settings.security, sender, recipients))
+                Ok((
+                    config.settings.security,
+                    sender,
+                    recipients,
+                    config.mail_protocol,
+                ))
             })
             .await?;
         crate::mail_security::Gpg::default()
             .preflight(&policy, &sender, &recipients)
             .await?;
+        // With Flectar Mail Sync, a send scheduled from a Gmail or JMAP
+        // account, whose drafts wait on the mail server, can go out from any
+        // of the user's devices. Protected drafts never leave this device.
+        let share_as = match protocol {
+            MailProtocol::Gmail | MailProtocol::Jmap
+                if args.send_at.is_some() && !policy.enabled() =>
+            {
+                self.shared_send_device()
+            }
+            _ => None,
+        };
         let settings = self.db.read(|conn| repo::settings::get(conn)).await?;
         let dispatch_at = args
             .send_at
@@ -5362,11 +5425,18 @@ impl Core {
 
         let draft_id = args.draft_id;
         let scheduled = args.send_at.is_some();
+        let shared = share_as.is_some();
         let (action_id, account_id, thread_id) = self
             .db
             .write(move |conn| {
                 let row = repo::messages::get_row(conn, draft_id)?
                     .ok_or_else(|| CoreError::NotFound("draft".into()))?;
+                if let Some(me) = &share_as {
+                    let tx = conn.transaction()?;
+                    let action = schedule_shared_send(&tx, &row, &policy, dispatch_at, me)?;
+                    tx.commit()?;
+                    return Ok((action, row.account_id, row.thread_id));
+                }
                 conn.execute(
                     "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
                      WHERE message_id = ?1 AND kind = 'save_draft' AND state = 'pending'",
@@ -5417,6 +5487,17 @@ impl Core {
         if let (true, Some(thread)) = (scheduled, thread_id) {
             self.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: vec![thread],
+            });
+        }
+        if shared {
+            // Upload the draft, and share the schedule. The send goes out
+            // once one device claims it.
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+            self.device_sync_now();
+            return Ok(QueueSendResult {
+                action_id,
+                draft_id,
+                dispatch_at,
             });
         }
 
@@ -9269,6 +9350,117 @@ async fn stage_draft_attachment(
         }
     };
     Ok((dst.to_string_lossy().into_owned(), size, true))
+}
+
+/// Schedule `draft` to go out at `send_at` from whichever of the user's
+/// devices claims it first, through Flectar Mail Sync, as device `me`.
+/// This device holds its send until then; the draft's latest edit uploads
+/// first, under a Message-ID the other devices find it by. Scheduling a
+/// shared draft again moves it. Returns the send's action id.
+fn schedule_shared_send(
+    conn: &rusqlite::Connection,
+    draft: &repo::messages::MessageRow,
+    policy: &crate::mail_security::MailSecurity,
+    send_at: i64,
+    me: &str,
+) -> Result<i64> {
+    let now = now_ms();
+    let draft_id = draft.id;
+    let from: Option<String> = conn.query_row(
+        "SELECT from_addr FROM messages WHERE id = ?1",
+        rusqlite::params![draft_id],
+        |row| row.get(0),
+    )?;
+    let domain = from
+        .as_deref()
+        .and_then(|from| from.rsplit_once('@'))
+        .map_or("localhost", |(_, domain)| domain)
+        .to_owned();
+    let unnamed = conn.execute(
+        "UPDATE messages SET message_id = printf('%d.%s@%s', ?2, lower(hex(randomblob(8))), ?3)
+         WHERE id = ?1 AND (message_id IS NULL OR trim(message_id) = '')",
+        rusqlite::params![draft_id, now.saturating_mul(1000), domain],
+    )? > 0;
+    let message_id: String = conn.query_row(
+        "SELECT trim(message_id, '<> ') FROM messages WHERE id = ?1",
+        rusqlite::params![draft_id],
+        |row| row.get(0),
+    )?;
+    let upload_waiting: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE message_id = ?1 AND kind = 'save_draft' AND state IN ('pending', 'inflight'))",
+        rusqlite::params![draft_id],
+        |row| row.get(0),
+    )?;
+    if unnamed && !upload_waiting {
+        repo::actions::enqueue(
+            conn,
+            draft.account_id,
+            "save_draft",
+            Some(draft_id),
+            draft.thread_id,
+            &serde_json::json!({ "draftId": draft_id }),
+            None,
+        )?;
+    }
+    let payload = serde_json::json!({
+        "draftId": draft_id,
+        "mailSecurity": policy,
+        "scheduled": true,
+        "sendAt": send_at,
+    });
+    let queued: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT id, state FROM pending_actions
+             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight', 'failed')
+             ORDER BY id DESC LIMIT 1",
+            rusqlite::params![draft_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let action_id = match queued {
+        Some((_, state)) if state == "inflight" => {
+            return Err(CoreError::Other("this message is being sent".into()));
+        }
+        Some((action_id, _)) => {
+            conn.execute(
+                "UPDATE pending_actions SET state = 'pending', not_before = ?2, payload = ?3,
+                        attempts = 0, last_error = NULL, finished_at = NULL
+                 WHERE id = ?1",
+                rusqlite::params![action_id, repo::actions::HELD, payload.to_string()],
+            )?;
+            action_id
+        }
+        None => repo::actions::enqueue(
+            conn,
+            draft.account_id,
+            "send",
+            Some(draft_id),
+            draft.thread_id,
+            &payload,
+            Some(repo::actions::HELD),
+        )?,
+    };
+    let sync_id = match repo::synced_sends::by_action(conn, action_id)? {
+        Some(send) => {
+            repo::synced_sends::reschedule(conn, &send.sync_id, send_at, now)?;
+            send.sync_id
+        }
+        None => repo::synced_sends::create(
+            conn,
+            draft.account_id,
+            &message_id,
+            send_at,
+            me,
+            action_id,
+            now,
+        )?,
+    };
+    conn.execute(
+        "UPDATE pending_actions SET payload = json_set(payload, '$.syncedSend', ?2) WHERE id = ?1",
+        rusqlite::params![action_id, sync_id],
+    )?;
+    Ok(action_id)
 }
 
 pub(crate) async fn remove_staged_attachment(root: &std::path::Path, path: &str) {

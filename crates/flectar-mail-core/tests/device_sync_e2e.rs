@@ -11,8 +11,8 @@ use flectar_mail_core::{
     error::{CoreError, Result},
     events::CoreEvent,
     models::{
-        AccountSettings, AuthKind, ConnectionSecurity, MailConnectionSettings, MailProtocol,
-        PortableAccountConfig, Provider,
+        AccountSettings, Address, AuthKind, ConnectionSecurity, MailConnectionSettings,
+        MailProtocol, PortableAccountConfig, Provider, QueueSendArgs, SaveDraftArgs, now_ms, roles,
     },
 };
 use std::collections::HashMap;
@@ -135,6 +135,19 @@ fn imap_account(email: &str) -> PortableAccountConfig {
             ConnectionSecurity::Tls,
             ConnectionSecurity::Tls,
         )),
+    }
+}
+
+/// A JMAP account whose server is never reached.
+fn jmap_account(email: &str) -> PortableAccountConfig {
+    let port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    PortableAccountConfig {
+        mail_protocol: MailProtocol::Jmap,
+        jmap_url: format!("http://127.0.0.1:{port}/.well-known/jmap"),
+        ..imap_account(email)
     }
 }
 
@@ -333,4 +346,176 @@ async fn uploads_wait_for_payment_on_a_server_that_charges() {
     let billing = status.billing.expect("the status says what the group pays");
     assert_eq!(billing.status, SyncBillingStatus::Expired);
     assert!(billing.trial_ends_at.is_some());
+}
+
+/// The state and due time of a device's send of its scheduled draft.
+async fn send_of(core: &Core) -> Option<(String, i64)> {
+    core.db
+        .read(|conn| {
+            use rusqlite::OptionalExtension;
+            Ok(conn
+                .query_row(
+                    "SELECT state, not_before FROM pending_actions
+                     WHERE kind = 'send' ORDER BY id DESC LIMIT 1",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_scheduled_send_goes_out_from_one_device() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .import_account_configs(vec![jmap_account("me@example.com")])
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    let laptop_account = laptop.list_accounts().await.unwrap()[0].id;
+    let phone_account = phone.list_accounts().await.unwrap()[0].id;
+
+    // The laptop schedules a draft, which reaches the mail server as Email
+    // "E1" (the JMAP server here is a stand-in: nothing is ever sent).
+    let draft = laptop
+        .save_draft(SaveDraftArgs {
+            draft_id: None,
+            account_id: laptop_account,
+            from: None,
+            to: vec![Address {
+                name: None,
+                email: "alice@example.com".into(),
+            }],
+            cc: vec![],
+            bcc: vec![],
+            subject: "Monday plans".into(),
+            body_text: "See you on Monday.".into(),
+            body_html: None,
+            mode: "new".into(),
+            in_reply_to_message_id: None,
+            in_reply_to_header: None,
+            attachments: vec![],
+        })
+        .await
+        .unwrap();
+    let send_at = now_ms() + 100_000;
+    laptop
+        .queue_send(QueueSendArgs {
+            draft_id: draft,
+            send_at: Some(send_at),
+        })
+        .await
+        .unwrap();
+    let message_id = laptop
+        .db
+        .write(move |conn| {
+            conn.execute(
+                "UPDATE messages SET jmap_id = 'E1' WHERE id = ?1",
+                rusqlite::params![draft],
+            )?;
+            conn.execute(
+                "UPDATE pending_actions SET state = 'done' WHERE kind = 'save_draft'",
+                [],
+            )?;
+            Ok(conn.query_row(
+                "SELECT message_id FROM messages WHERE id = ?1",
+                rusqlite::params![draft],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    // It claims the send, the server takes the claim, and it lets the send
+    // go out at its time.
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(
+        send_of(&laptop).await,
+        Some(("pending".into(), send_at)),
+        "the laptop sends it"
+    );
+
+    // The phone has the draft from the mail server, and holds a send of it.
+    phone
+        .db
+        .write(move |conn| {
+            let drafts = flectar_mail_core::db::repo::folders::upsert(
+                conn,
+                phone_account,
+                "Drafts",
+                None,
+                Some(roles::DRAFTS),
+            )?;
+            conn.execute(
+                "INSERT INTO threads (id, account_id, subject_norm, last_message_at)
+                 VALUES (77, ?1, 'monday plans', 1)",
+                rusqlite::params![phone_account],
+            )?;
+            conn.execute(
+                "INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject,
+                                       from_addr, date, is_read, is_draft, jmap_id)
+                 VALUES (77, ?1, ?2, ?3, 'Monday plans', 'me@example.com', 1, 1, 1, 'E1')",
+                rusqlite::params![phone_account, drafts, message_id],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    let scheduled = phone.scheduled_sends().await.unwrap();
+    assert_eq!(scheduled.len(), 1, "it shows in the phone's Scheduled view");
+    assert_eq!(scheduled[0].send_at, send_at);
+    let (state, due) = send_of(&phone).await.unwrap();
+    assert_eq!(state, "pending");
+    assert_eq!(due, i64::MAX, "the laptop's claim holds the phone's send");
+
+    // "Send now" on the phone: the laptop, which holds the claim, sends it
+    // now. Only the device holding a claim gives it up.
+    assert!(phone.send_now(scheduled[0].action_id).await.unwrap());
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    let (_, due) = send_of(&laptop).await.unwrap();
+    assert!(due <= now_ms(), "the laptop sends it now");
+    phone.device_sync_run().await.unwrap();
+    assert_eq!(
+        send_of(&phone).await.map(|(_, due)| due),
+        Some(i64::MAX),
+        "the phone keeps holding its send"
+    );
+
+    // Sent from the laptop: the phone drops its send.
+    laptop
+        .db
+        .write(|conn| {
+            conn.execute(
+                "UPDATE pending_actions SET state = 'done' WHERE kind = 'send'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    phone.device_sync_run().await.unwrap();
+    assert_eq!(
+        send_of(&phone).await.map(|(state, _)| state),
+        Some("cancelled".into())
+    );
+    assert!(phone.scheduled_sends().await.unwrap().is_empty());
 }

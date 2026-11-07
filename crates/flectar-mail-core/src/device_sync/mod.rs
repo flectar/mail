@@ -11,6 +11,7 @@
 
 mod collections;
 mod merge;
+mod scheduled;
 mod store;
 
 use crate::Core;
@@ -423,7 +424,21 @@ impl Core {
         service.stop_events();
         *lock(&service.client) = None;
         *lock(&service.billing_checked) = None;
-        self.db.write(|conn| store::clear(conn)).await?;
+        let threads = self
+            .db
+            .write(|conn| {
+                let tx = conn.transaction()?;
+                let threads = scheduled::detach(&tx)?;
+                store::clear(&tx)?;
+                tx.commit()?;
+                Ok(threads)
+            })
+            .await?;
+        if !threads.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: threads,
+            });
+        }
         credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await?;
         *lock(&service.status) = DeviceSyncStatus {
             state,
@@ -455,6 +470,66 @@ impl Core {
                 Err(error) => {
                     tracing::info!(%error, "Flectar Mail Sync run failed");
                 }
+            }
+            self.drive_scheduled_sends().await;
+        }
+    }
+
+    /// Move the sends shared with the user's other devices along: claim the
+    /// ones coming due, send the ones this device holds the claim for, and
+    /// report how they went. A claim or result is uploaded at once, and the
+    /// server's answer acted on.
+    async fn drive_scheduled_sends(&self) {
+        let Some(client) = self.sync_service().client() else {
+            return;
+        };
+        let me = hex(&client.identity().device_id());
+        for _ in 0..3 {
+            let reach = match lock(&self.sync_service().status).state {
+                DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
+                DeviceSyncState::Error(_) => scheduled::Reach::Unreachable,
+                _ => scheduled::Reach::Usable,
+            };
+            let driven = {
+                let _run = self.sync_service().run_lock.lock().await;
+                let me = me.clone();
+                self.db
+                    .write(move |conn| {
+                        if !crate::db::repo::synced_sends::any(conn)? {
+                            return Ok(scheduled::Driven::default());
+                        }
+                        let tx = conn.transaction()?;
+                        let driven = scheduled::drive(&tx, &me, now_ms(), reach)?;
+                        tx.commit()?;
+                        Ok(driven)
+                    })
+                    .await
+            };
+            let driven = match driven {
+                Ok(driven) => driven,
+                Err(error) => {
+                    tracing::warn!(%error, "could not move scheduled sends along");
+                    return;
+                }
+            };
+            for account_id in &driven.nudge {
+                self.nudge(Some(*account_id), || {
+                    crate::sync::engine::SyncCmd::RunActions
+                })
+                .await;
+            }
+            if !driven.threads.is_empty() {
+                self.bus.emit(CoreEvent::MailUpdated {
+                    thread_ids: driven.threads,
+                });
+            }
+            if !driven.upload || reach != scheduled::Reach::Usable {
+                return;
+            }
+            // Another run may have uploaded it already; either way, act on
+            // what the server holds now.
+            if self.run_device_sync(false).await.is_err() {
+                return;
             }
         }
     }
@@ -812,14 +887,28 @@ impl Core {
         self.emit_sync_status();
     }
 
+    /// This device's id in hex, when a send it schedules now can be shared
+    /// with the user's other devices: sync is on, and the group may upload.
+    pub(crate) fn shared_send_device(&self) -> Option<String> {
+        let service = self.sync_service();
+        let client = service.client()?;
+        if lock(&service.status).state == DeviceSyncState::PaymentRequired {
+            return None;
+        }
+        Some(hex(&client.identity().device_id()))
+    }
+
     /// Sync now, for example when the app comes to the foreground.
     pub fn device_sync_now(&self) {
         self.sync_service().wake.notify_one();
     }
 
-    /// Run one sync to the end. Returns whether it reached the server.
+    /// Run one sync to the end, and move the shared scheduled sends along.
+    /// Returns whether it reached the server.
     pub async fn device_sync_run(&self) -> Result<bool> {
-        self.run_device_sync(true).await
+        let reached = self.run_device_sync(true).await;
+        self.drive_scheduled_sends().await;
+        reached
     }
 
     /// What `server_url`, Flectar's by default, charges for syncing, to show

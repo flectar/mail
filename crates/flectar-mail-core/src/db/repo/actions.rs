@@ -4,6 +4,14 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::parse_json_column;
 
+/// `not_before` of a send held for Flectar Mail Sync: it never comes due on
+/// its own, and goes out only once this device's claim on it holds.
+pub const HELD: i64 = i64::MAX;
+
+/// How long before its claim ends a device stops starting a synced send, so
+/// the next device that claims it never sends at the same time.
+pub const CLAIM_MARGIN_MS: i64 = 60_000;
+
 #[derive(Debug, Clone)]
 pub struct PendingAction {
     pub id: i64,
@@ -187,8 +195,8 @@ pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
             "SELECT MIN(not_before) FROM pending_actions
-             WHERE state = 'pending' AND not_before IS NOT NULL",
-            [],
+             WHERE state = 'pending' AND not_before IS NOT NULL AND not_before < ?1",
+            params![HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -198,20 +206,24 @@ pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
 /// Drafts waiting to be sent at a time the user chose, soonest first.
 pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::ScheduledSend>> {
     let mut statement = conn.prepare(
-        "SELECT id, message_id, account_id, not_before, state, last_error FROM pending_actions
-         WHERE kind = 'send' AND message_id IS NOT NULL
-           AND state IN ('pending', 'inflight', 'failed')
-           AND json_extract(payload, '$.scheduled') = 1
-         ORDER BY not_before",
+        "SELECT pa.id, pa.message_id, m.thread_id, pa.account_id,
+                COALESCE(json_extract(pa.payload, '$.sendAt'), pa.not_before) AS send_at,
+                pa.state, pa.last_error
+         FROM pending_actions pa LEFT JOIN messages m ON m.id = pa.message_id
+         WHERE pa.kind = 'send' AND pa.message_id IS NOT NULL
+           AND pa.state IN ('pending', 'inflight', 'failed')
+           AND json_extract(pa.payload, '$.scheduled') = 1
+         ORDER BY send_at",
     )?;
     let rows = statement.query_map([], |row| {
         Ok(crate::models::ScheduledSend {
             action_id: row.get(0)?,
             draft_id: row.get(1)?,
-            account_id: row.get(2)?,
-            send_at: row.get::<_, Option<i64>>(3)?.unwrap_or_default(),
-            state: row.get(4)?,
-            error: row.get(5)?,
+            thread_id: row.get(2)?,
+            account_id: row.get(3)?,
+            send_at: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+            state: row.get(5)?,
+            error: row.get(6)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -263,9 +275,9 @@ pub fn next_mail_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
             "SELECT MIN(not_before) FROM pending_actions
-             WHERE state = 'pending' AND not_before IS NOT NULL
+             WHERE state = 'pending' AND not_before IS NOT NULL AND not_before < ?1
                AND kind NOT LIKE 'cal!_%' ESCAPE '!'",
-            [],
+            params![HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -276,8 +288,9 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
     Ok(conn
         .query_row(
             "SELECT MIN(COALESCE(not_before, created_at)) FROM pending_actions
-             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'",
-            params![account_id],
+             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'
+               AND COALESCE(not_before, 0) < ?2",
+            params![account_id, HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -314,7 +327,32 @@ pub fn set_payload(conn: &Connection, id: i64, payload: &serde_json::Value) -> R
 /// Atomically claim a pending action for execution. Returns false if it was
 /// cancelled (or otherwise transitioned) since being read - the executor must
 /// skip it in that case.
+///
+/// A send shared through Flectar Mail Sync goes out only while this device
+/// may send it; otherwise it is held again until its claim holds. Sends
+/// live in the mail database only: the calendar store's own queue has no
+/// shared sends to check.
 pub fn try_claim(conn: &Connection, id: i64) -> Result<bool> {
+    let send: bool = conn
+        .query_row(
+            "SELECT kind = 'send' FROM pending_actions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if send
+        && conn.execute(
+            "UPDATE pending_actions SET not_before = ?2
+             WHERE id = ?1 AND state = 'pending' AND EXISTS (
+               SELECT 1 FROM synced_sends s
+               WHERE s.action_id = ?1
+                 AND NOT (s.state = 'scheduled' AND COALESCE(s.may_send_until, 0) > ?3))",
+            params![id, HELD, now_ms().saturating_add(CLAIM_MARGIN_MS)],
+        )? > 0
+    {
+        return Ok(false);
+    }
     let n = conn.execute(
         "UPDATE pending_actions SET state = 'inflight' WHERE id = ?1 AND state = 'pending'",
         params![id],
@@ -501,6 +539,19 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn the_calendar_store_claims_its_actions() {
+        // Its own queue, without the mail database's shared sends.
+        let conn = testutil::calendar_conn();
+        conn.execute(
+            "INSERT INTO pending_actions (id, account_id, kind, created_at)
+             VALUES (1, 1, 'cal_put', 0)",
+            [],
+        )
+        .unwrap();
+        assert!(try_claim(&conn, 1).unwrap());
+    }
 
     #[test]
     fn an_action_stuck_in_the_past_does_not_hide_later_ones() {
