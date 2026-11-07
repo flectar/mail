@@ -79,6 +79,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: quality-default
+          # Every pull request can restore caches saved on main. Caches saved by
+          # pull requests or tags only serve those, and they push main's out of
+          # the 10 GB cache limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Leave translation catalogs to Weblate
@@ -220,6 +224,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: quality-${{ matrix.name }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Slint's Android backend compiles its Java helper during the build.
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         if: matrix.name == 'Android'
@@ -273,6 +278,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: quality-embeddings
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint the opt-in model runtime
         run: cargo clippy -p flectar-mail-core --all-targets --locked --features local-embeddings -- -D warnings
       - name: Verify the Candle ZIP compatibility patch
@@ -294,6 +300,7 @@ jobs:
         with:
           cache-targets: false
           key: quality-rustsec
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.2
       - name: Audit the locked dependency graph

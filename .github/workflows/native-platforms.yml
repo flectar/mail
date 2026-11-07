@@ -147,6 +147,10 @@ jobs:
         with:
           cache-on-failure: true
           key: native-linux-${{ matrix.arch }}
+          # Every pull request can restore caches saved on main. Caches saved by
+          # pull requests or tags only serve those, and they push main's out of
+          # the 10 GB cache limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Validate desktop metadata
         run: |
@@ -240,6 +244,7 @@ jobs:
         with:
           cache-on-failure: true
           key: native-fedora-43-rpm-${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build Fedora release executable
         env:
           FLECTAR_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.FLECTAR_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -381,6 +386,7 @@ jobs:
         with:
           cache-on-failure: true
           key: native-windows-${{ matrix.arch }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Put Clang on the path
         if: matrix.arch == 'arm64'
@@ -576,6 +582,7 @@ jobs:
         with:
           cache-on-failure: true
           key: native-macos-${{ matrix.architecture }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build release application
         env:
@@ -640,6 +647,7 @@ jobs:
           workspaces: platform/android -> ../../target
           cache-on-failure: true
           key: native-android-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
@@ -732,6 +740,7 @@ jobs:
         with:
           cache-on-failure: true
           key: native-ios-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Xcode project generator
         run: brew install xcodegen

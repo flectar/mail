@@ -39,6 +39,10 @@ jobs:
         with:
           workspaces: platform/android -> ../../target
           key: android-production-arm64
+          # Every pull request can restore caches saved on main. Caches saved by
+          # pull requests or tags only serve those, and they push main's out of
+          # the 10 GB cache limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
       - name: Configure Android NDK compiler
