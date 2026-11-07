@@ -7,7 +7,7 @@ use flectar_mail_core::{
     Core,
     accounts::credentials::{CredentialStore, Slot},
     config::Paths,
-    device_sync::{DeviceSyncState, PairingEvent},
+    device_sync::{DeviceSyncState, PairingEvent, SyncBillingStatus},
     error::{CoreError, Result},
     events::CoreEvent,
     models::{
@@ -69,6 +69,11 @@ impl Drop for Server {
 }
 
 async fn start_server() -> Option<Server> {
+    start_server_with(&[]).await
+}
+
+/// A server with more settings, such as billing.
+async fn start_server_with(env: &[(&str, &str)]) -> Option<Server> {
     let Ok(binary) = std::env::var("FLECTAR_MAIL_SYNC_SERVER") else {
         eprintln!("skipped: set FLECTAR_MAIL_SYNC_SERVER to a flectar-mail-sync-server binary");
         return None;
@@ -84,6 +89,7 @@ async fn start_server() -> Option<Server> {
         .env("FLECTAR_MAIL_SYNC_LISTEN", format!("127.0.0.1:{port}"))
         .env("FLECTAR_MAIL_SYNC_DATABASE", dir.path().join("sync.db"))
         .env("RUST_LOG", "warn")
+        .envs(env.iter().copied())
         .spawn()
         .unwrap();
     let server = Server {
@@ -272,4 +278,46 @@ async fn two_devices_share_accounts_and_preferences() {
     phone.device_sync_run().await.unwrap();
     assert_eq!(phone.device_sync_status().state, DeviceSyncState::Removed);
     assert_eq!(phone.get_settings().await.unwrap().theme, "carbon");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn uploads_wait_for_payment_on_a_server_that_charges() {
+    // No trial, and no Stripe to reach: refusing uploads never needs it.
+    let Some(server) = start_server_with(&[
+        ("FLECTAR_MAIL_SYNC_STRIPE_SECRET_KEY", "sk_test_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_WEBHOOK_SECRET", "whsec_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_PRICE_MONTHLY", "price_monthly"),
+        (
+            "FLECTAR_MAIL_SYNC_BILLING_RETURN_URL",
+            "https://flectar.test/sync",
+        ),
+        ("FLECTAR_MAIL_SYNC_TRIAL_DAYS", "0"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_API", "http://127.0.0.1:9"),
+    ])
+    .await
+    else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(dir.path()).await;
+
+    // The offer shows before sync is on.
+    let offer = laptop
+        .device_sync_offer(Some(server.url.clone()))
+        .await
+        .unwrap()
+        .expect("the server charges");
+    assert_eq!(offer.trial_days, 0);
+
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    // This device's records can't upload, but the run itself succeeds.
+    assert!(laptop.device_sync_run().await.unwrap());
+    let status = laptop.device_sync_status();
+    assert_eq!(status.state, DeviceSyncState::PaymentRequired);
+    let billing = status.billing.expect("the status says what the group pays");
+    assert_eq!(billing.status, SyncBillingStatus::Expired);
+    assert!(billing.trial_ends_at.is_some());
 }

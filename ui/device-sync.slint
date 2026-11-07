@@ -16,7 +16,8 @@ export struct SyncDeviceRow {
 }
 
 export global SyncUi {
-    // "off", "idle", "syncing", "error", "removed" or "deleted".
+    // "off", "idle", "syncing", "error", "removed", "deleted", or "payment"
+    // when the subscription ended and changes wait to upload.
     in property <string> state: "off";
     // Why the last sync failed, while the state is "error".
     in property <string> error;
@@ -29,7 +30,8 @@ export global SyncUi {
     // A request is running; its buttons wait.
     in property <bool> busy;
     // The action that failed last: "turn-on", "server", "remove", "reset",
-    // "turn-off" or "delete", and why. Empty when the last one worked.
+    // "turn-off", "delete", "subscribe" or "manage", and why. Empty when the
+    // last one worked.
     in property <string> failed-action;
     in property <string> failure;
 
@@ -48,6 +50,25 @@ export global SyncUi {
     in-out property <string> join-method: "code";
     // This device can scan QR codes with its camera.
     in property <bool> can-scan;
+
+    // What Flectar's server charges, shown while sync is off: the days of
+    // free trial, and the monthly and yearly prices, such as "€4". Empty
+    // prices when it doesn't charge.
+    in property <int> offer-trial-days;
+    in property <string> offer-monthly;
+    in property <string> offer-yearly;
+    // What the group pays: "" on a server that doesn't charge, "trial",
+    // "active", "past-due", "trial-ended", "ended" or "unknown".
+    in property <string> billing;
+    // When the trial or paid period ends, or the subscription renews.
+    in property <string> billing-date;
+    in property <bool> billing-renews;
+    // The prices of the group's plans; empty without such a plan.
+    in property <string> monthly-price;
+    in property <string> yearly-price;
+    // This build may send people to the web checkout. Builds sold through a
+    // store that requires its own in-app purchases only show the state.
+    in property <bool> can-buy: true;
 
     // Adding a device: "", "starting", "code", "request", "waiting", "added",
     // "joined", "declined", "expired", "not-found" (the code or recovery
@@ -76,6 +97,11 @@ export global SyncUi {
     callback turn-off();
     callback delete-everywhere();
     callback sync-now();
+    // The settings page opened.
+    callback opened();
+    // Open the checkout for "monthly" or "yearly" in the browser.
+    callback subscribe(string /* plan */);
+    callback manage-subscription();
 }
 
 component DeviceRow inherits Rectangle {
@@ -253,7 +279,22 @@ export component SyncSettingsPage inherits VerticalBox {
     in property <color> accent-soft;
     callback confirm-delete();
 
-    private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error";
+    private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error" || SyncUi.state == "payment";
+    private property <bool> paused: SyncUi.state == "payment";
+    // The offer applies to Flectar's server, not to one typed in.
+    private property <bool> offered: SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
+    private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended");
+    private property <bool> two-plans: SyncUi.monthly-price != "" && SyncUi.yearly-price != "";
+    private property <bool> priced: SyncUi.monthly-price != "" || SyncUi.yearly-price != "";
+
+    // "€4 a month or €40 a year", from the plans there are.
+    function prices(monthly: string, yearly: string) -> string {
+        return monthly != "" && yearly != "" ? @tr("{} a month or {} a year", monthly, yearly)
+            : monthly != "" ? @tr("{} a month", monthly)
+            : @tr("{} a year", yearly);
+    }
+
+    init => { SyncUi.opened(); }
 
     function open-join(method: string) {
         SyncUi.join-method = method;
@@ -301,6 +342,8 @@ export component SyncSettingsPage inherits VerticalBox {
             : SyncUi.failed-action == "reset" ? @tr("Could not replace the recovery code: {}", SyncUi.failure)
             : SyncUi.failed-action == "turn-off" ? @tr("Could not turn off sync: {}", SyncUi.failure)
             : SyncUi.failed-action == "delete" ? @tr("Could not delete sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "subscribe" ? @tr("Could not open the checkout: {}", SyncUi.failure)
+            : SyncUi.failed-action == "manage" ? @tr("Could not open the subscription page: {}", SyncUi.failure)
             : SyncUi.failure;
         body-text: root.body-text;
         fill: AppTheme.destructive.with-alpha(0.12);
@@ -309,7 +352,9 @@ export component SyncSettingsPage inherits VerticalBox {
     if !root.on : ActionCard {
         compact: root.compact;
         title: @tr("Start syncing");
-        description: @tr("Sync this device's setup to your other devices.");
+        description: !root.offered ? @tr("Sync this device's setup to your other devices.")
+            : SyncUi.offer-trial-days > 0 ? @tr("Free for {n} day, then {}." | "Free for {n} days, then {}." % SyncUi.offer-trial-days, root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly))
+            : @tr("{}.", root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly));
         note: @tr("You get a recovery code to keep somewhere safe. Passwords and sign-ins stay on each device: your other devices ask you to sign in once.");
         icon: @image-url("icons/lucide/filled/cloud-sync.svg");
         icon-color: root.accent;
@@ -380,16 +425,17 @@ export component SyncSettingsPage inherits VerticalBox {
 
     if root.on : ActionCard {
         compact: root.compact;
-        title: @tr("Sync is on");
+        title: root.paused ? @tr("Sync is paused") : @tr("Sync is on");
         description: SyncUi.state == "error"
             ? @tr("Sync could not finish and will try again.")
+            : root.paused ? @tr("Changes made here wait to upload; nothing is lost.")
             : SyncUi.server-url != "" ? @tr("Syncing with {}", SyncUi.server-url) : "";
         note: SyncUi.state == "syncing" ? @tr("Syncing…")
             : SyncUi.state == "error" ? SyncUi.error
             : SyncUi.last-synced == "" ? @tr("Not synced yet.")
             : SyncUi.last-synced-today ? @tr("Last synced at {}.", SyncUi.last-synced)
             : @tr("Last synced on {}.", SyncUi.last-synced);
-        icon: SyncUi.state == "error" ? @image-url("icons/lucide/outline/alert.svg") : @image-url("icons/lucide/filled/cloud-sync.svg");
+        icon: SyncUi.state == "error" || root.paused ? @image-url("icons/lucide/outline/alert.svg") : @image-url("icons/lucide/filled/cloud-sync.svg");
         icon-color: SyncUi.state == "error" ? AppTheme.destructive : root.accent;
         surface: root.surface;
         card-border-color: root.card-border-color;
@@ -402,6 +448,57 @@ export component SyncSettingsPage inherits VerticalBox {
             has-icon: true;
             enabled: SyncUi.state != "syncing";
             clicked => { SyncUi.sync-now(); }
+        }
+    }
+
+    if root.on && SyncUi.billing != "" : ActionCard {
+        compact: root.compact;
+        title: @tr("Subscription");
+        description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
+            : SyncUi.billing == "active" && SyncUi.billing-renews ? @tr("Renews on {}.", SyncUi.billing-date)
+            : SyncUi.billing == "active" ? @tr("Ends on {}.", SyncUi.billing-date)
+            : SyncUi.billing == "past-due" ? @tr("The last payment didn't go through.")
+            : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
+            : SyncUi.billing == "ended" ? @tr("Your subscription has ended.")
+            : "";
+        note: SyncUi.billing == "trial"
+                ? (root.can-subscribe && root.priced ? @tr("{}. Subscribe to keep syncing after the trial.", root.prices(SyncUi.monthly-price, SyncUi.yearly-price)) : "")
+            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended"
+                ? (root.can-subscribe && root.priced
+                    ? @tr("{}. Until you subscribe, changes wait on each device; nothing is lost.", root.prices(SyncUi.monthly-price, SyncUi.yearly-price))
+                    : @tr("Changes wait on each device; nothing is lost."))
+            : SyncUi.billing == "past-due"
+                ? (SyncUi.can-buy ? @tr("Sync keeps going while the payment is tried again. Update your payment method to keep it.") : @tr("Sync keeps going while the payment is tried again."))
+            : SyncUi.can-buy && SyncUi.billing == "active" && !SyncUi.billing-renews ? @tr("Turn renewal back on, or see invoices.")
+            : SyncUi.can-buy ? @tr("Change your plan or payment method, see invoices, or cancel.")
+            : "";
+        icon: @image-url("icons/lucide/outline/credit-card.svg");
+        icon-color: SyncUi.billing == "past-due" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" ? AppTheme.destructive : root.accent;
+        actions-width: root.can-subscribe && root.two-plans ? 300px : 150px;
+        actions-height: root.compact && root.can-subscribe && root.two-plans ? 2 * 32px + 8px : 32px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        if root.can-subscribe && root.compact && root.two-plans : VerticalLayout {
+            spacing: 8px;
+            Button { height: 32px; text: @tr("Pay yearly"); primary: true; enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("yearly"); } }
+            Button { height: 32px; text: @tr("Pay monthly"); enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("monthly"); } }
+        }
+        if root.can-subscribe && !root.compact && root.two-plans : Button { text: @tr("Pay monthly"); enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("monthly"); } }
+        if root.can-subscribe && !root.compact && root.two-plans : Button { text: @tr("Pay yearly"); primary: true; enabled: !SyncUi.busy; clicked => { SyncUi.subscribe("yearly"); } }
+        if root.can-subscribe && !root.two-plans && root.priced : Button {
+            text: @tr("Subscribe");
+            primary: true;
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.subscribe(SyncUi.monthly-price != "" ? "monthly" : "yearly"); }
+        }
+        if SyncUi.can-buy && !root.can-subscribe : Button {
+            text: @tr("Manage");
+            primary: SyncUi.billing == "past-due";
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.manage-subscription(); }
         }
     }
 

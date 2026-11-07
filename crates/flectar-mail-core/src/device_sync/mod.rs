@@ -21,7 +21,8 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use collections::{FollowUp, Names};
 use flectar_mail_sync_client::{
-    Clock, Entry, Error as SyncError, Event, Invitation, JoinAttempt, Joining, Secrets, SyncClient,
+    Billing, BillingStatus, Clock, Entry, Error as SyncError, Event, Http, Invitation, JoinAttempt,
+    Joining, Plan, Secrets, SyncClient,
 };
 use futures::StreamExt;
 use std::collections::BTreeMap;
@@ -43,6 +44,9 @@ const CHECK_INTERVAL: Duration = Duration::from_secs(30);
 const PULL_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// The longest wait between attempts to reconnect the live event stream.
 const MAX_EVENTS_BACKOFF: Duration = Duration::from_secs(5 * 60);
+/// How long what the group pays is shown before the server is asked again.
+/// Uploads the server refuses, and leaving that state, ask at once.
+const BILLING_REFRESH: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Where sync stands on this device.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +60,9 @@ pub enum DeviceSyncState {
     Removed,
     /// The group was deleted from another device.
     Deleted,
+    /// The free trial or subscription ended on a server that charges. This
+    /// device still downloads; its changes wait for a payment.
+    PaymentRequired,
 }
 
 /// A device of the group.
@@ -74,6 +81,9 @@ pub struct DeviceSyncStatus {
     pub server_url: Option<String>,
     pub last_synced_at: Option<i64>,
     pub devices: Vec<SyncDevice>,
+    /// What the group pays. `None` on a server that doesn't charge, or
+    /// before the server was asked.
+    pub billing: Option<SyncBilling>,
 }
 
 impl Default for DeviceSyncStatus {
@@ -83,8 +93,85 @@ impl Default for DeviceSyncStatus {
             server_url: None,
             last_synced_at: None,
             devices: Vec::new(),
+            billing: None,
         }
     }
+}
+
+/// What the group pays on a server that charges, as Flectar's does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncBilling {
+    pub status: SyncBillingStatus,
+    /// End of the free trial, in milliseconds since the Unix epoch.
+    pub trial_ends_at: Option<i64>,
+    /// End of the last paid period, in milliseconds since the Unix epoch.
+    pub paid_until: Option<i64>,
+    /// The subscription renews at `paid_until`.
+    pub renews: bool,
+    pub plans: Vec<SyncPlan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncBillingStatus {
+    Trial,
+    Active,
+    /// A renewal payment failed and is being retried.
+    PastDue,
+    /// The trial or paid period ended: uploads wait for a payment.
+    Expired,
+    /// A status this version doesn't know.
+    Unknown,
+}
+
+/// A subscription plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPlan {
+    /// What a checkout names it by, such as "monthly" or "yearly".
+    pub id: String,
+    /// Price per period in the currency's smallest unit, such as cents.
+    pub amount: u64,
+    /// ISO 4217 code, lowercase.
+    pub currency: String,
+    /// "month" or "year".
+    pub interval: String,
+    /// `amount` includes tax; otherwise tax is added where it applies.
+    pub tax_included: bool,
+}
+
+/// What a server that charges offers before sync is turned on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncOffer {
+    pub trial_days: u32,
+    pub plans: Vec<SyncPlan>,
+}
+
+fn sync_plan(plan: Plan) -> SyncPlan {
+    SyncPlan {
+        id: plan.id,
+        amount: plan.amount,
+        currency: plan.currency,
+        interval: plan.interval,
+        tax_included: plan.tax_included,
+    }
+}
+
+fn sync_billing(billing: Billing) -> Option<SyncBilling> {
+    if !billing.enabled {
+        return None;
+    }
+    Some(SyncBilling {
+        status: match billing.status {
+            BillingStatus::Trial => SyncBillingStatus::Trial,
+            BillingStatus::Active => SyncBillingStatus::Active,
+            BillingStatus::PastDue => SyncBillingStatus::PastDue,
+            BillingStatus::Expired => SyncBillingStatus::Expired,
+            _ => SyncBillingStatus::Unknown,
+        },
+        trial_ends_at: billing.trial_ends_at,
+        paid_until: billing.paid_until,
+        renews: billing.renews,
+        plans: billing.plans.into_iter().map(sync_plan).collect(),
+    })
 }
 
 /// What a device that invites another, or asks to join, shows.
@@ -146,6 +233,8 @@ pub(crate) struct Service {
     next_pairing: AtomicU64,
     events_task: Mutex<Option<JoinHandle<()>>>,
     device: Mutex<DeviceDescription>,
+    /// When the server was last asked what the group pays.
+    billing_checked: Mutex<Option<tokio::time::Instant>>,
 }
 
 impl std::fmt::Debug for Service {
@@ -226,6 +315,7 @@ impl Service {
             next_pairing: AtomicU64::new(1),
             events_task: Mutex::new(None),
             device: Mutex::new(DeviceDescription::default()),
+            billing_checked: Mutex::new(None),
         }
     }
 
@@ -332,6 +422,7 @@ impl Core {
         service.end_pairing();
         service.stop_events();
         *lock(&service.client) = None;
+        *lock(&service.billing_checked) = None;
         self.db.write(|conn| store::clear(conn)).await?;
         credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await?;
         *lock(&service.status) = DeviceSyncStatus {
@@ -432,6 +523,13 @@ impl Core {
                                 Ok(Event::Seq(_) | Event::Chain(_)) => {
                                     core.sync_service().wake.notify_one();
                                 }
+                                // A payment, a renewal or a cancellation:
+                                // show it, and upload what waited for it.
+                                Ok(Event::Billing) => {
+                                    core.check_billing().await;
+                                    core.sync_service().wake.notify_one();
+                                }
+                                Ok(_) => {}
                                 Err(_) => break,
                             }
                         }
@@ -504,7 +602,10 @@ impl Core {
                 })
                 .await?
         };
-        if !pull && queued == 0 && run.outbox.is_empty() {
+        let was_paused = lock(&service.status).state == DeviceSyncState::PaymentRequired;
+        // Uploads the server refused wait for a pull or a new change, not
+        // the next check.
+        if !pull && queued == 0 && (run.outbox.is_empty() || was_paused) {
             return Ok(false);
         }
 
@@ -578,10 +679,19 @@ impl Core {
 
         {
             let mut status = lock(&service.status);
-            status.state = DeviceSyncState::Idle;
+            status.state = if report.payment_required {
+                DeviceSyncState::PaymentRequired
+            } else {
+                DeviceSyncState::Idle
+            };
             status.last_synced_at = Some(now_ms());
         }
         self.refresh_sync_devices().await;
+        let billing_due = lock(&service.billing_checked)
+            .is_none_or(|checked| checked.elapsed() >= BILLING_REFRESH);
+        if billing_due || report.payment_required != was_paused {
+            self.check_billing().await;
+        }
         if adopting {
             // Upload what only this device had, now that it has the group's.
             service.wake.notify_one();
@@ -597,6 +707,10 @@ impl Core {
             SyncError::GroupDeleted => {
                 self.drop_sync_state(DeviceSyncState::Deleted).await?;
             }
+            SyncError::PaymentRequired => {
+                self.set_sync_state(DeviceSyncState::PaymentRequired);
+                self.check_billing().await;
+            }
             error => {
                 let message = error.to_string();
                 let stored = message.clone();
@@ -608,6 +722,14 @@ impl Core {
             }
         }
         Ok(T::default())
+    }
+
+    /// Ask the server what the group pays, for the status. Failing to reach
+    /// it keeps what was known.
+    async fn check_billing(&self) {
+        if let Err(error) = self.device_sync_refresh_billing().await {
+            tracing::debug!(%error, "could not read Flectar Sync billing");
+        }
     }
 
     /// The group's devices, named by their own records.
@@ -668,6 +790,53 @@ impl Core {
     /// Run one sync to the end. Returns whether it reached the server.
     pub async fn device_sync_run(&self) -> Result<bool> {
         self.run_device_sync(true).await
+    }
+
+    /// What `server_url`, Flectar's by default, charges for syncing, to show
+    /// before sync is turned on. `None` when it is free.
+    pub async fn device_sync_offer(&self, server_url: Option<String>) -> Result<Option<SyncOffer>> {
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let info = Http::new(self.sync_service().http.clone(), &server_url)
+            .info()
+            .await
+            .map_err(sync_error)?;
+        Ok(info.billing.map(|offer| SyncOffer {
+            trial_days: offer.trial_days,
+            plans: offer.plans.into_iter().map(sync_plan).collect(),
+        }))
+    }
+
+    /// Ask the server what the group pays, and report it in the status.
+    pub async fn device_sync_refresh_billing(&self) -> Result<()> {
+        let service = self.sync_service();
+        let client = service.require_client()?;
+        let billing = client.billing().await.map_err(sync_error)?;
+        *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
+        lock(&service.status).billing = sync_billing(billing);
+        self.emit_sync_status();
+        Ok(())
+    }
+
+    /// A checkout page for subscribing the group to `plan`, to open in the
+    /// browser. `None` when the group already pays: the status then says
+    /// so.
+    pub async fn device_sync_checkout(&self, plan: String) -> Result<Option<String>> {
+        let client = self.sync_service().require_client()?;
+        match client.checkout(&plan).await {
+            Ok(url) => Ok(Some(url)),
+            Err(error) if error.code() == Some(flectar_mail_sync_client::ErrorCode::Conflict) => {
+                self.device_sync_refresh_billing().await?;
+                Ok(None)
+            }
+            Err(error) => Err(sync_error(error)),
+        }
+    }
+
+    /// The page that changes or cancels the subscription and lists its
+    /// invoices, to open in the browser.
+    pub async fn device_sync_manage_billing(&self) -> Result<String> {
+        let client = self.sync_service().require_client()?;
+        client.manage_billing().await.map_err(sync_error)
     }
 
     /// Start a group with this device. Returns the 24 recovery words to show

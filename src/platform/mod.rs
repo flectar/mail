@@ -49,6 +49,12 @@ pub(crate) fn email_fonts() -> Option<&'static EmailFonts> {
     None
 }
 
+/// Whether this build may send people to the web checkout for Flectar Sync.
+/// Direct downloads, Flathub and the Microsoft Store allow it; a store that
+/// requires its own in-app purchases doesn't.
+#[cfg(desktop)]
+pub(crate) const SELLS_SYNC: bool = true;
+
 /// How this device appears in Flectar Sync's device list: its host name and
 /// operating system.
 #[cfg(desktop)]

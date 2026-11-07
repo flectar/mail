@@ -80,7 +80,7 @@ async-trait = "0.1"
 
 # Flectar Sync (issue #39): end-to-end encrypted sync of the app's setup
 # between the user's devices. See flectar/mail-sync.
-flectar-mail-sync-client = { git = "https://github.com/flectar/mail-sync", rev = "7e552729617a9671fe31fc22854c65d694fc3068" }
+flectar-mail-sync-client = { git = "https://github.com/flectar/mail-sync", rev = "056c85dbb2cc9d0c73c5356a838ef095c36b2290" }
 # Names this device in the list of synced devices.
 hostname = "0.4"
 

@@ -2,6 +2,9 @@
 //!
 //! The core runs sync. This controller starts what the user asks for, shows
 //! where sync stands from the core's events, and draws pairing QR codes.
+//! Paying for sync happens in the browser, on the payment provider's pages
+//! the sync server opens; builds sold through a store that requires its own
+//! in-app purchases only show what the group pays.
 //! What another device changed reaches the window the way a change made here
 //! does: preferences through the settings they belong to, and accounts
 //! through the window's own account updates.
@@ -11,7 +14,8 @@ use crate::retained_model::RetainedModel;
 use chrono::{Datelike, Timelike};
 use flectar_mail_core::Core;
 use flectar_mail_core::device_sync::{
-    DeviceSyncState, DeviceSyncStatus, PairingCode, PairingEvent,
+    DeviceSyncState, DeviceSyncStatus, PairingCode, PairingEvent, SyncBilling, SyncBillingStatus,
+    SyncPlan,
 };
 use flectar_mail_core::error::CoreError;
 use slint::SharedString;
@@ -35,6 +39,8 @@ pub(super) struct SyncController {
     /// Steps that arrived before the request starting the pairing returned
     /// its number, oldest first.
     early: RefCell<Vec<(u64, PairingEvent)>>,
+    /// Flectar's server was asked what it charges, while sync was off.
+    offer_loaded: Cell<bool>,
 }
 
 impl SyncController {
@@ -45,15 +51,18 @@ impl SyncController {
         app: &AppWindow,
         state: &Rc<RefCell<InboxState>>,
         runtime: &tokio::runtime::Handle,
+        urls: ExternalUrlOpener,
     ) {
         let ui = app.global::<SyncUi>();
         ui.set_devices(Rc::clone(&self.devices).into());
+        ui.set_can_buy(platform::SELLS_SYNC);
 
         let actions = Actions {
             app: app.as_weak(),
             state: Rc::clone(state),
             runtime: runtime.clone(),
             controller: Rc::clone(self),
+            urls,
         };
 
         let turn_on = actions.clone();
@@ -80,6 +89,12 @@ impl SyncController {
         ui.on_turn_off(move || turn_off.turn_off());
         let delete = actions.clone();
         ui.on_delete_everywhere(move || delete.delete_everywhere());
+        let opened = actions.clone();
+        ui.on_opened(move || opened.opened());
+        let subscribe = actions.clone();
+        ui.on_subscribe(move |plan| subscribe.subscribe(plan.to_string()));
+        let manage = actions.clone();
+        ui.on_manage_subscription(move || manage.manage_subscription());
         ui.on_sync_now(move || {
             if let Some(core) = actions.core() {
                 core.device_sync_now();
@@ -134,6 +149,7 @@ impl SyncController {
             DeviceSyncState::Error(error) => ("error", error.as_str()),
             DeviceSyncState::Removed => ("removed", ""),
             DeviceSyncState::Deleted => ("deleted", ""),
+            DeviceSyncState::PaymentRequired => ("payment", ""),
         };
         ui.set_state(state.into());
         ui.set_error(sentence(error).into());
@@ -155,10 +171,14 @@ impl SyncController {
             |row| row.id.clone(),
             |a, b| a == b,
         );
+        show_billing(&ui, status.billing.as_ref());
         // Adding a device needs sync on; one that stopped can't finish.
         let off = !matches!(
             status.state,
-            DeviceSyncState::Idle | DeviceSyncState::Syncing | DeviceSyncState::Error(_)
+            DeviceSyncState::Idle
+                | DeviceSyncState::Syncing
+                | DeviceSyncState::Error(_)
+                | DeviceSyncState::PaymentRequired
         );
         if off && ui.get_dialog() == "invite" {
             self.end_attempt(&ui);
@@ -226,6 +246,7 @@ struct Actions {
     state: Rc<RefCell<InboxState>>,
     runtime: tokio::runtime::Handle,
     controller: Rc<SyncController>,
+    urls: ExternalUrlOpener,
 }
 
 impl Actions {
@@ -447,6 +468,84 @@ impl Actions {
         );
     }
 
+    /// The page opened. With sync off, show what Flectar's server charges,
+    /// once; with sync on, ask what the group pays, which a payment in the
+    /// browser may have changed.
+    fn opened(&self) {
+        let (Some(app), Some(core)) = (self.app.upgrade(), self.core()) else {
+            return;
+        };
+        if core.device_sync_status().state != DeviceSyncState::Off {
+            self.runtime.spawn(async move {
+                // The status reports it; failing to reach the server keeps
+                // what was known.
+                let _ = core.device_sync_refresh_billing().await;
+            });
+            return;
+        }
+        if self.controller.offer_loaded.replace(true) {
+            return;
+        }
+        let app = app.as_weak();
+        let controller = Rc::clone(&self.controller);
+        documents::run_request(
+            &self.runtime,
+            Box::pin(async move { Ok::<_, String>(core.device_sync_offer(None).await) }),
+            move |result| {
+                let Some(app) = app.upgrade() else {
+                    return;
+                };
+                match result {
+                    Ok(Ok(offer)) => {
+                        let ui = app.global::<SyncUi>();
+                        let offer = offer.unwrap_or(flectar_mail_core::device_sync::SyncOffer {
+                            trial_days: 0,
+                            plans: Vec::new(),
+                        });
+                        let (monthly, yearly) = plan_prices(&offer.plans);
+                        ui.set_offer_trial_days(i32::try_from(offer.trial_days).unwrap_or(0));
+                        ui.set_offer_monthly(monthly.into());
+                        ui.set_offer_yearly(yearly.into());
+                    }
+                    // Offline: try again the next time the page opens.
+                    _ => controller.offer_loaded.set(false),
+                }
+            },
+        );
+    }
+
+    /// Open the payment provider's checkout for `plan` in the browser.
+    fn subscribe(&self, plan: String) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        let urls = self.urls.clone();
+        self.run(
+            async move { core.device_sync_checkout(plan).await },
+            move |ui, _, result| match result {
+                Ok(Some(url)) => open_page(ui, &urls, &url, "subscribe"),
+                // The group pays already; the status now says so.
+                Ok(None) => show_failure(ui, "", ""),
+                Err(error) => show_failure(ui, "subscribe", &error_text(&error)),
+            },
+        );
+    }
+
+    /// Open the page that changes or cancels the subscription.
+    fn manage_subscription(&self) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        let urls = self.urls.clone();
+        self.run(
+            async move { core.device_sync_manage_billing().await },
+            move |ui, _, result| match result {
+                Ok(url) => open_page(ui, &urls, &url, "manage"),
+                Err(error) => show_failure(ui, "manage", &error_text(&error)),
+            },
+        );
+    }
+
     fn delete_everywhere(&self) {
         let Some(core) = self.core() else {
             return;
@@ -458,6 +557,84 @@ impl Actions {
                 Err(error) => show_failure(ui, "delete", &error_text(&error)),
             },
         );
+    }
+}
+
+/// Open a page of the payment provider; `action` names it if that fails.
+fn open_page(ui: &SyncUi, urls: &ExternalUrlOpener, url: &str, action: &str) {
+    match urls.open_external(url) {
+        Ok(()) => show_failure(ui, "", ""),
+        Err(error) => show_failure(ui, action, &error),
+    }
+}
+
+/// What the group pays, for the subscription card.
+fn show_billing(ui: &SyncUi, billing: Option<&SyncBilling>) {
+    let Some(billing) = billing else {
+        ui.set_billing("".into());
+        return;
+    };
+    let (state, date) = match billing.status {
+        SyncBillingStatus::Trial => ("trial", billing.trial_ends_at),
+        SyncBillingStatus::Active => ("active", billing.paid_until),
+        SyncBillingStatus::PastDue => ("past-due", billing.paid_until),
+        SyncBillingStatus::Expired if billing.paid_until.is_some() => ("ended", billing.paid_until),
+        SyncBillingStatus::Expired => ("trial-ended", billing.trial_ends_at),
+        SyncBillingStatus::Unknown => ("unknown", None),
+    };
+    ui.set_billing(state.into());
+    ui.set_billing_date(billing_date(date).into());
+    ui.set_billing_renews(billing.renews);
+    let (monthly, yearly) = plan_prices(&billing.plans);
+    ui.set_monthly_price(monthly.into());
+    ui.set_yearly_price(yearly.into());
+}
+
+/// A date the subscription card names, such as "Oct 22, 2026".
+fn billing_date(at: Option<i64>) -> String {
+    at.and_then(chrono::DateTime::from_timestamp_millis)
+        .map(|at| {
+            date_format::current().date(DateStyle::Medium, at.with_timezone(&Local).date_naive())
+        })
+        .unwrap_or_default()
+}
+
+/// The prices of the monthly and yearly plans, each empty when there is no
+/// such plan.
+fn plan_prices(plans: &[SyncPlan]) -> (String, String) {
+    let of = |interval: &str| {
+        plans
+            .iter()
+            .find(|plan| plan.interval == interval)
+            .map(|plan| price(plan.amount, &plan.currency))
+            .unwrap_or_default()
+    };
+    (of("month"), of("year"))
+}
+
+/// A price such as "€4" or "€4.50", from the amount in the currency's
+/// smallest unit and its ISO 4217 code. Like the app's other numbers, it
+/// uses a decimal point.
+fn price(amount: u64, currency: &str) -> String {
+    // Currencies without a smaller unit, as Stripe counts them.
+    const ZERO_DECIMAL: [&str; 16] = [
+        "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv",
+        "xaf", "xof", "xpf",
+    ];
+    let currency = currency.to_ascii_lowercase();
+    let number = if ZERO_DECIMAL.contains(&currency.as_str()) {
+        amount.to_string()
+    } else if amount.is_multiple_of(100) {
+        (amount / 100).to_string()
+    } else {
+        format!("{}.{:02}", amount / 100, amount % 100)
+    };
+    match currency.as_str() {
+        "eur" => format!("€{number}"),
+        "usd" => format!("${number}"),
+        "gbp" => format!("£{number}"),
+        "jpy" => format!("¥{number}"),
+        _ => format!("{} {number}", currency.to_ascii_uppercase()),
     }
 }
 
@@ -853,6 +1030,30 @@ mod tests {
             "Could not reach the sync server"
         );
         assert_eq!(sentence(""), "");
+    }
+
+    #[test]
+    fn prices_read_like_price_tags() {
+        assert_eq!(price(400, "eur"), "€4");
+        assert_eq!(price(450, "EUR"), "€4.50");
+        assert_eq!(price(4805, "usd"), "$48.05");
+        assert_eq!(price(500, "jpy"), "¥500");
+        assert_eq!(price(400, "chf"), "CHF 4");
+        let plan = |interval: &str, amount| SyncPlan {
+            id: interval.into(),
+            amount,
+            currency: "eur".into(),
+            interval: interval.into(),
+            tax_included: true,
+        };
+        assert_eq!(
+            plan_prices(&[plan("year", 4000), plan("month", 400)]),
+            ("€4".into(), "€40".into())
+        );
+        assert_eq!(
+            plan_prices(&[plan("year", 4000)]),
+            (String::new(), "€40".into())
+        );
     }
 
     #[test]

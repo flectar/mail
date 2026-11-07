@@ -54,6 +54,9 @@
     "copy.svg": {
       "source": "copy"
     },
+    "credit-card.svg": {
+      "source": "credit-card"
+    },
     "dash.svg": {
       "source": "minus"
     },
@@ -296,6 +299,10 @@
     "copy": {
       "path": "sources/copy.svg",
       "sha256": "268d1ef461571f0df4e32b0068e6d3d0d73d016d2166d3bb9d0849edc48e736c"
+    },
+    "credit-card": {
+      "path": "sources/credit-card.svg",
+      "sha256": "7b3268db7b3d52be668cf02b5a30a76b99caf7338a552298250f43163c5240f4"
     },
     "database": {
       "path": "sources/database.svg",
