@@ -97,7 +97,10 @@ struct AuthoredFold {
 pub struct TableCell {
     pub node_id: NodeId,
     style: taffy::Style<Atom>,
-    layout_style: ServoArc<ComputedValues>,
+    /// The cell's style as its own layout sees it: the primary style with the
+    /// collapsed half-borders and an authored width left to the column.
+    /// Derived lazily and again whenever the primary style changes.
+    layout_style: CellLayoutStyle,
     /// Zero-based slot of the cell's first row and column.
     pub row: u16,
     pub column: u16,
@@ -110,6 +113,55 @@ pub struct TableCell {
     /// Whether the cell has an authored length `height`, which its children's
     /// percentage heights resolve against.
     has_authored_height: bool,
+}
+
+/// The primary style a cell's layout style was derived from, and that style.
+#[derive(Debug, Default)]
+struct CellLayoutStyle(AtomicRefCell<Option<(ServoArc<ComputedValues>, ServoArc<ComputedValues>)>>);
+
+impl Clone for CellLayoutStyle {
+    fn clone(&self) -> Self {
+        Self(AtomicRefCell::new(self.0.borrow().clone()))
+    }
+}
+
+impl TableCell {
+    /// The cell's layout style for its current primary style. Only the cell's
+    /// own layout sees it; painting and style sharing keep the primary style.
+    fn layout_style(
+        &self,
+        primary: &ServoArc<ComputedValues>,
+        is_fixed: bool,
+    ) -> ServoArc<ComputedValues> {
+        let mut cached = self.layout_style.0.borrow_mut();
+        if let Some((base, style)) = cached.as_ref()
+            && ServoArc::ptr_eq(base, primary)
+        {
+            return style.clone();
+        }
+        let mut style = primary.clone();
+        if let Some(half) = self.collapsed_border {
+            let border = ServoArc::make_mut(&mut style).mutate_border();
+            border.border_top_width.0 = app_units::Au::from_f32_px(half.top);
+            border.border_right_width.0 = app_units::Au::from_f32_px(half.right);
+            border.border_bottom_width.0 = app_units::Au::from_f32_px(half.bottom);
+            border.border_left_width.0 = app_units::Au::from_f32_px(half.left);
+            border.border_top_style = BorderStyle::Solid;
+            border.border_right_style = BorderStyle::Solid;
+            border.border_bottom_style = BorderStyle::Solid;
+            border.border_left_style = BorderStyle::Solid;
+        }
+        // The column track carries an authored length, so the cell measures its
+        // content. Like browsers, auto layout treats that width as preferred,
+        // not as a minimum: a fluid table narrows such columns toward their
+        // content.
+        if !is_fixed && self.authored_width.tag() == taffy::CompactLength::LENGTH_TAG {
+            let position = ServoArc::make_mut(&mut style).mutate_position();
+            position.width = style::values::generics::length::Size::Auto;
+        }
+        *cached = Some((primary.clone(), style.clone()));
+        style
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -597,32 +649,8 @@ pub(crate) fn build_table_context(
         }
     };
 
-    // Cache the cell's layout-only computed style once per table construction.
-    // Beta.3 reads styles lazily; changing the author's primary style would also
-    // change painting and style sharing. Only the cell's layout call sees this copy.
-    for cell in &mut cells {
-        let mut layout_style = cell.layout_style.clone();
-        if let Some(half) = cell.collapsed_border {
-            let border = ServoArc::make_mut(&mut layout_style).mutate_border();
-            border.border_top_width.0 = app_units::Au::from_f32_px(half.top);
-            border.border_right_width.0 = app_units::Au::from_f32_px(half.right);
-            border.border_bottom_width.0 = app_units::Au::from_f32_px(half.bottom);
-            border.border_left_width.0 = app_units::Au::from_f32_px(half.left);
-            border.border_top_style = BorderStyle::Solid;
-            border.border_right_style = BorderStyle::Solid;
-            border.border_bottom_style = BorderStyle::Solid;
-            border.border_left_style = BorderStyle::Solid;
-        }
-        // The column track carries an authored length, so the cell measures its
-        // content. Like browsers, auto layout treats that width as preferred,
-        // not as a minimum: a fluid table narrows such columns toward their
-        // content.
-        if !is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG {
-            let position = ServoArc::make_mut(&mut layout_style).mutate_position();
-            position.width = style::values::generics::length::Size::Auto;
-        }
-        cell.layout_style = layout_style;
-        if is_fixed {
+    if is_fixed {
+        for cell in &mut cells {
             cell.style.min_size.width = style_helpers::length(0.0);
         }
     }
@@ -1322,7 +1350,7 @@ impl TableCollector {
         self.cells.push(TableCell {
             node_id,
             style,
-            layout_style: node.primary_styles().unwrap().clone(),
+            layout_style: CellLayoutStyle::default(),
             row,
             column: column as u16,
             rowspan,
@@ -1525,10 +1553,13 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
         let node_id = crate::taffy_node_id(dom_id);
         let measure_without_width =
             !self.ctx.is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG;
-        let previous_style = self.doc.nodes[dom_id]
-            .layout_data_mut()
-            .style_override
-            .replace(cell.layout_style.clone());
+        let layout_style = self.doc.nodes[dom_id]
+            .primary_styles()
+            .map(|primary| cell.layout_style(&primary, self.ctx.is_fixed));
+        let previous_style = std::mem::replace(
+            &mut self.doc.nodes[dom_id].layout_data_mut().style_override,
+            layout_style,
+        );
 
         // A cell stretched to its row's height still resolves its children's
         // percentage heights against its own authored height, not the row's

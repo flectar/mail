@@ -1038,3 +1038,20 @@ fn resource_damage_survives_a_resolve() {
         vec![doc.query_selector("img").unwrap().unwrap()]
     );
 }
+
+#[test]
+fn cells_lay_out_with_their_current_style() {
+    // `vertical-align` changes need no table rebuild, so the cell's layout must
+    // read its current style rather than one captured when the table was built.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'><tr style='height:100px'>
+         <td style='vertical-align:top;border:2px solid red'><div id='d' style='height:10px'></div></td>
+         </tr></table>",
+    );
+    close(node(&doc, "#d").final_layout().location.y, 1.0);
+    doc.add_user_agent_stylesheet(blitz_dom::UserAgentStylesheet::parse(
+        "td { vertical-align: bottom !important }",
+    ));
+    doc.resolve(0.0);
+    close(node(&doc, "#d").final_layout().location.y, 89.0);
+}
