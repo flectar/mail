@@ -325,6 +325,18 @@ async fn two_devices_share_accounts_and_preferences() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn clearing_the_ai_key_keeps_the_sync_keys() {
+    let credentials = Arc::new(MemoryCredentials::default());
+    credentials.store(0, Slot::DeviceSync, "sync keys").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let core = start_core_with(dir.path(), credentials.clone()).await;
+    core.set_ai_key("sk-test".into()).await.unwrap();
+    core.set_ai_key(String::new()).await.unwrap();
+    assert!(credentials.load(0, Slot::AiApiKey).is_err());
+    assert_eq!(credentials.load(0, Slot::DeviceSync).unwrap(), "sync keys");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn uploads_wait_for_payment_on_a_server_that_charges() {
     // No trial, and no Stripe to reach: refusing uploads never needs it.
     let Some(server) = start_server_with(&[

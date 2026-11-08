@@ -7608,7 +7608,9 @@ impl Core {
 
     pub async fn set_ai_key(&self, api_key: String) -> Result<()> {
         if api_key.trim().is_empty() {
-            credentials::delete_all_async(self.credentials.clone(), 0).await?;
+            // Account id 0 also keeps other app-level secrets, such as this
+            // device's Flectar Mail Sync keys.
+            credentials::delete_async(self.credentials.clone(), 0, Slot::AiApiKey).await?;
             return Ok(());
         }
         credentials::store_async(
