@@ -465,3 +465,30 @@ fn fluid_tables_narrow_columns_with_authored_widths() {
     close(node(&doc, "#a").final_layout().size.width, 200.0);
     close(node(&doc, "#b").final_layout().size.width, 200.0);
 }
+
+#[test]
+fn collapsed_borders_follow_later_colour_changes() {
+    // The reader lays a message out, then adds its appearance overrides as a
+    // user-agent sheet. Colour changes only repaint, so collapsed borders must
+    // read the winning box's colour when they paint, `currentcolor` included.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'><tr>
+         <td style='width:50px;height:40px;border:4px solid red'></td>
+         <td style='width:50px;border:4px solid;color:red'></td></tr></table>",
+    );
+    let pixels = |doc: &mut HtmlDocument| {
+        render_to_buffer::<VelloCpuImageRenderer, _>(
+            |scene| blitz_paint::paint_scene(scene, doc, 1.0, 400, 300, 0, 0),
+            400,
+            300,
+        )
+    };
+    assert!(rows_with(&pixels(&mut doc), [255, 0, 0, 255]).is_some());
+    doc.add_user_agent_stylesheet(blitz_dom::UserAgentStylesheet::parse(
+        "td { border-color: rgb(0, 0, 255) !important; color: rgb(0, 0, 255) !important }",
+    ));
+    doc.resolve(0.0);
+    let pixels = pixels(&mut doc);
+    assert!(rows_with(&pixels, [255, 0, 0, 255]).is_none());
+    assert!(rows_with(&pixels, [0, 0, 255, 255]).is_some());
+}

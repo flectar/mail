@@ -6,6 +6,7 @@ use kurbo::{
 };
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
+use style::color::AbsoluteColor;
 use style::values::computed::{BorderStyle, OutlineStyle};
 
 use crate::{
@@ -515,9 +516,7 @@ impl ElementCx<'_, '_> {
     /// Whether a table paints this element's border in the collapsed model,
     /// for the table box itself and for each of its cells.
     pub(crate) fn border_painted_by_table(&self) -> bool {
-        let collapsed = |data: &SpecialElementData| {
-            matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some())
-        };
+        let collapsed = |data: &SpecialElementData| matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some());
         collapsed(&self.element.special_data)
             || self
                 .node
@@ -545,7 +544,10 @@ impl ElementCx<'_, '_> {
         };
         let (columns, rows) = (&grid_info.columns.positions, &grid_info.rows.positions);
         let (column_count, row_count) = (borders.columns, borders.rows);
-        if column_count == 0 || row_count == 0 || columns.len() < column_count || rows.len() < row_count
+        if column_count == 0
+            || row_count == 0
+            || columns.len() < column_count
+            || rows.len() < row_count
         {
             return;
         }
@@ -571,24 +573,43 @@ impl ElementCx<'_, '_> {
         // The physical extent of a vertical edge to the left and right of its line.
         let vertical_extent = |edge: &CollapsedEdge| -> (f64, f64) {
             let (before, after) = (f64::from(edge.before()), f64::from(edge.after()));
-            if rtl { (after, before) } else { (before, after) }
+            if rtl {
+                (after, before)
+            } else {
+                (before, after)
+            }
         };
         // How far the vertical edges meeting horizontal line `line` at vertical
         // line `joint` reach to the left and right, so corners are covered.
         let joint_extent = |line: usize, joint: usize| -> (f64, f64) {
-            let above = line.checked_sub(1).and_then(|row| borders.vertical(row, joint));
-            let below = (line < row_count).then(|| borders.vertical(line, joint)).flatten();
+            let above = line
+                .checked_sub(1)
+                .and_then(|row| borders.vertical(row, joint));
+            let below = (line < row_count)
+                .then(|| borders.vertical(line, joint))
+                .flatten();
             [above, below]
                 .into_iter()
                 .flatten()
                 .map(vertical_extent)
-                .fold((0.0, 0.0), |(l, r), (el, er)| (f64::max(l, el), f64::max(r, er)))
+                .fold((0.0, 0.0), |(l, r), (el, er)| {
+                    (f64::max(l, el), f64::max(r, er))
+                })
+        };
+
+        // Each edge's colour comes from the box that won it, as it is now.
+        let doc = self.context.dom;
+        let painted = |edge: &CollapsedEdge| (*edge, edge.color(doc));
+        // Adjacent edges merge into one run when they paint the same way.
+        let same = |(a, a_color): &(CollapsedEdge, AbsoluteColor),
+                    (b, b_color): &(CollapsedEdge, AbsoluteColor)| {
+            a.width == b.width && a.style == b.style && a_color == b_color
         };
 
         // Horizontal lines, merged along each line.
         for line in 0..=row_count {
             let y = row_line(line);
-            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
+            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
             for column in 0..=column_count {
                 let edge = (column < column_count)
                     .then(|| borders.horizontal(line, column))
@@ -602,21 +623,21 @@ impl ElementCx<'_, '_> {
                     } else {
                         (start - start_left, end + end_right)
                     };
-                    (*edge, x0, x1)
+                    (painted(edge), x0, x1)
                 });
                 run = match (run, segment) {
-                    (Some((edge, x0, x1)), Some((next, n0, n1))) if edge == next => {
+                    (Some((edge, x0, x1)), Some((next, n0, n1))) if same(&edge, &next) => {
                         Some((edge, x0.min(n0), x1.max(n1)))
                     }
                     (finished, next) => {
-                        if let Some((edge, x0, x1)) = finished {
+                        if let Some(((edge, color), x0, x1)) = finished {
                             let rect = Rect::new(
                                 x0,
                                 y - f64::from(edge.before()),
                                 x1,
                                 y + f64::from(edge.after()),
                             );
-                            self.fill_collapsed_edge(scene, &edge, rect, true);
+                            self.fill_collapsed_edge(scene, &edge, color, rect, true);
                         }
                         next
                     }
@@ -627,21 +648,21 @@ impl ElementCx<'_, '_> {
         // Vertical lines, merged down each line.
         for line in 0..=column_count {
             let x = column_line(line);
-            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
+            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
             for row in 0..=row_count {
                 let segment = (row < row_count)
                     .then(|| borders.vertical(row, line))
                     .flatten()
-                    .map(|edge| (*edge, row_line(row), row_line(row + 1)));
+                    .map(|edge| (painted(edge), row_line(row), row_line(row + 1)));
                 run = match (run, segment) {
-                    (Some((edge, y0, _)), Some((next, _, n1))) if edge == next => {
+                    (Some((edge, y0, _)), Some((next, _, n1))) if same(&edge, &next) => {
                         Some((edge, y0, n1))
                     }
                     (finished, next) => {
-                        if let Some((edge, y0, y1)) = finished {
+                        if let Some(((edge, color), y0, y1)) = finished {
                             let (left, right) = vertical_extent(&edge);
                             let rect = Rect::new(x - left, y0, x + right, y1);
-                            self.fill_collapsed_edge(scene, &edge, rect, false);
+                            self.fill_collapsed_edge(scene, &edge, color, rect, false);
                         }
                         next
                     }
@@ -656,15 +677,24 @@ impl ElementCx<'_, '_> {
         &self,
         scene: &mut impl PaintScene,
         edge: &CollapsedEdge,
+        color: AbsoluteColor,
         rect: Rect,
         horizontal: bool,
     ) {
-        let color = edge.color.as_srgb_color();
+        let color = color.as_srgb_color();
         if color.components[3] <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
             return;
         }
-        let thickness = if horizontal { rect.height() } else { rect.width() };
-        let length = if horizontal { rect.width() } else { rect.height() };
+        let thickness = if horizontal {
+            rect.height()
+        } else {
+            rect.width()
+        };
+        let length = if horizontal {
+            rect.width()
+        } else {
+            rect.height()
+        };
         let piece = |offset: f64, size: f64, cross: f64, cross_size: f64| {
             if horizontal {
                 Rect::new(

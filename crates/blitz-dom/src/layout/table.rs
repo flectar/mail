@@ -100,10 +100,32 @@ pub struct TableRow {
 pub struct CollapsedEdge {
     pub width: f32,
     pub style: BorderStyle,
-    pub color: AbsoluteColor,
+    /// The box whose border won the edge, and which of its sides. The colour
+    /// is read from it when painting: colour changes (including `currentcolor`
+    /// after a `color` change) only repaint, so no rebuild would refresh a copy.
+    source: NodeId,
+    side: u8,
 }
 
 impl CollapsedEdge {
+    /// The edge's colour, resolved from the winning box's current style.
+    pub fn color(&self, doc: &BaseDocument) -> AbsoluteColor {
+        let Some(styles) = doc
+            .get_node(self.source)
+            .and_then(|node| node.primary_styles())
+        else {
+            return AbsoluteColor::TRANSPARENT_BLACK;
+        };
+        let border = styles.get_border();
+        let color = match usize::from(self.side) {
+            TOP => &border.border_top_color,
+            RIGHT => &border.border_right_color,
+            BOTTOM => &border.border_bottom_color,
+            _ => &border.border_left_color,
+        };
+        color.resolve_to_absolute(&styles.clone_color())
+    }
+
     /// The part of the edge before (above or left of) its grid line. Odd
     /// pixel widths put the extra pixel after the line, so a 1px border sits
     /// on whole pixels instead of straddling two.
@@ -154,43 +176,33 @@ const LEFT: usize = 3;
 struct BorderCandidate {
     width: f32,
     style: BorderStyle,
-    color: AbsoluteColor,
     origin: u8,
+    source: NodeId,
+    side: u8,
 }
 
-fn border_candidates(style: &ComputedValues, origin: u8) -> [BorderCandidate; 4] {
+fn border_candidates(style: &ComputedValues, origin: u8, source: NodeId) -> [BorderCandidate; 4] {
     let border = style.get_border();
-    let current_color = style.clone_color();
-    let side =
-        |width: app_units::Au, style: BorderStyle, color: &style::values::computed::Color| {
-            BorderCandidate {
-                width: width.to_f32_px(),
-                style,
-                color: color.resolve_to_absolute(&current_color),
-                origin,
-            }
-        };
+    let side = |side: usize, width: app_units::Au, style: BorderStyle| BorderCandidate {
+        width: width.to_f32_px(),
+        style,
+        origin,
+        source,
+        side: side as u8,
+    };
     [
+        side(TOP, border.border_top_width.0, border.border_top_style),
         side(
-            border.border_top_width.0,
-            border.border_top_style,
-            &border.border_top_color,
-        ),
-        side(
+            RIGHT,
             border.border_right_width.0,
             border.border_right_style,
-            &border.border_right_color,
         ),
         side(
+            BOTTOM,
             border.border_bottom_width.0,
             border.border_bottom_style,
-            &border.border_bottom_color,
         ),
-        side(
-            border.border_left_width.0,
-            border.border_left_style,
-            &border.border_left_color,
-        ),
+        side(LEFT, border.border_left_width.0, border.border_left_style),
     ]
 }
 
@@ -233,7 +245,8 @@ fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
     best.map(|best| CollapsedEdge {
         width: best.width,
         style: best.style,
-        color: best.color,
+        source: best.source,
+        side: best.side,
     })
 }
 
@@ -354,7 +367,7 @@ pub(crate) fn build_table_context(
 
     let border_collapse = stylo_styles.clone_border_collapse();
     let border_spacing = stylo_styles.clone_border_spacing().0;
-    let table_borders = border_candidates(&stylo_styles, 1);
+    let table_borders = border_candidates(&stylo_styles, 1, table_root_node_id);
     let rtl = stylo_styles.clone_direction() == style::computed_values::direction::T::Rtl;
 
     drop(stylo_styles);
@@ -944,7 +957,10 @@ impl TableCollector {
             | DisplayInside::TableFooterGroup
             | DisplayInside::Contents => {
                 let group_borders = (self.collapse && display.inside() != DisplayInside::Contents)
-                    .then(|| node.primary_styles().map(|s| border_candidates(&s, 2)))
+                    .then(|| {
+                        node.primary_styles()
+                            .map(|s| border_candidates(&s, 2, node_id))
+                    })
                     .flatten();
                 let first_row = self.row;
                 let first_row_index = self.rows.len();
@@ -970,7 +986,10 @@ impl TableCollector {
                 node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
                 let row_borders = self
                     .collapse
-                    .then(|| node.primary_styles().map(|s| border_candidates(&s, 3)))
+                    .then(|| {
+                        node.primary_styles()
+                            .map(|s| border_candidates(&s, 3, node_id))
+                    })
                     .flatten();
                 let height = node.primary_styles().and_then(|s| {
                     let h = table_taffy_style(&s, self.wm).size.height;
@@ -1047,7 +1066,7 @@ impl TableCollector {
             let stylo_style = node.primary_styles().unwrap();
             (
                 table_taffy_style(&stylo_style, self.wm),
-                border_candidates(&stylo_style, 4),
+                border_candidates(&stylo_style, 4, node_id),
             )
         };
 
@@ -1458,8 +1477,9 @@ mod tests {
         BorderCandidate {
             width,
             style,
-            color: AbsoluteColor::srgb_legacy(origin, 0, 0, 1.0),
             origin,
+            source: NodeId::from_u64(u64::from(origin)),
+            side: TOP as u8,
         }
     }
 
@@ -1494,7 +1514,7 @@ mod tests {
             candidate(1.0, BorderStyle::Solid, 3),
         ])
         .unwrap();
-        assert_eq!(edge.color, AbsoluteColor::srgb_legacy(4, 0, 0, 1.0));
+        assert_eq!(edge.source, NodeId::from_u64(4));
         // `none` never paints.
         assert_eq!(resolve_edge(&[candidate(3.0, BorderStyle::None, 4)]), None);
     }
@@ -1504,7 +1524,8 @@ mod tests {
         let edge = |width| CollapsedEdge {
             width,
             style: BorderStyle::Solid,
-            color: AbsoluteColor::BLACK,
+            source: NodeId::from_u64(0),
+            side: TOP as u8,
         };
         assert_eq!((edge(1.0).before(), edge(1.0).after()), (0.0, 1.0));
         assert_eq!((edge(2.0).before(), edge(2.0).after()), (1.0, 1.0));
