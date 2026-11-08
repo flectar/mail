@@ -1007,3 +1007,34 @@ fn svg_images_load_under_decode_limits() {
     let size = node(&doc, "img").final_layout().size;
     assert_eq!((size.width, size.height), (40.0, 30.0));
 }
+
+#[test]
+fn resource_damage_survives_a_resolve() {
+    // `resolve` handles resource events itself; the embedder's next drain
+    // must still report the damage they caused.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<img src='https://example.com/a.png' width='10' height='10'>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    doc.drain_pending_updates();
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(10, 10),
+    );
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(&png));
+    }
+    doc.resolve(0.0);
+    let updates = doc.drain_pending_updates();
+    assert!(updates.changed);
+    assert_eq!(
+        updates.paint_nodes,
+        vec![doc.query_selector("img").unwrap().unwrap()]
+    );
+}

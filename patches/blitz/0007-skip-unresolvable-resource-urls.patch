@@ -1,8 +1,8 @@
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 53ad0d0..2677822 100644
+index a42379e..bb89de3 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -1151,13 +1151,8 @@ impl BaseDocument {
+@@ -1159,13 +1159,8 @@ impl BaseDocument {
          node
      }
  
@@ -18,7 +18,7 @@ index 53ad0d0..2677822 100644
      }
  
      pub fn print_tree(&self) {
-@@ -1178,8 +1173,9 @@ impl BaseDocument {
+@@ -1186,8 +1181,9 @@ impl BaseDocument {
              if element.name.local == local_name!("link") {
                  if let Some(href) = element.attr(local_name!("href")) {
                      // println!("Node {node_id} {href} {href_to_reload} {} {}", resolved_href.as_str(), resolved_href.as_str() == url_to_reload);

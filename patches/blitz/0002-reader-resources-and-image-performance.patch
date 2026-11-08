@@ -20,13 +20,17 @@ index 4686b12..f6ad6a0 100644
              base_url: None,
              ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 96d7ed0..53ad0d0 100644
+index 96d7ed0..a42379e 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -225,7 +225,63 @@ pub enum DocumentEvent {
+@@ -225,7 +225,70 @@ pub enum DocumentEvent {
      },
  }
  
++/// How many repainted nodes a document keeps before treating the whole
++/// document as damaged.
++const MAX_PAINT_UPDATES: usize = 4096;
++
 +/// Damage from delivered resources. Paint-only updates preserve resolved layout.
 +#[derive(Default, Debug)]
 +pub struct ResourceUpdates {
@@ -84,31 +88,29 @@ index 96d7ed0..53ad0d0 100644
 +
  pub struct BaseDocument {
 +    pub(crate) image_decode_limits: Option<crate::net::ImageDecodeLimits>,
++    /// Damage from resource events handled since the embedder last drained
++    /// it, including events that `resolve` handled.
++    resource_updates: ResourceUpdates,
      /// ID of the document
      id: usize,
  
-@@ -468,6 +524,7 @@ impl BaseDocument {
+@@ -468,6 +531,8 @@ impl BaseDocument {
          let (tx, rx) = channel();
  
          let mut doc = Self {
 +            image_decode_limits: config.image_decode_limits,
++            resource_updates: ResourceUpdates::default(),
              id,
              tx,
              rx: Some(rx),
-@@ -1257,16 +1314,58 @@ impl BaseDocument {
+@@ -1256,17 +1321,75 @@ impl BaseDocument {
+         }
      }
  
++    /// Handle pending resource events. Their damage accumulates until
++    /// `drain_pending_updates` takes it.
      pub fn handle_messages(&mut self) {
-+        self.drain_pending_messages();
-+    }
-+
-+    /// Drain resource events, reporting whether layout may have changed.
-+    pub fn drain_pending_messages(&mut self) -> bool {
-+        self.drain_pending_updates().changed
-+    }
-+
-+    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
-+        let mut updates = ResourceUpdates::default();
++        let mut updates = std::mem::take(&mut self.resource_updates);
          // Remove event Reciever from the Document so that we can process events
          // without holding a borrow to the Document
          let rx = self.rx.take().unwrap();
@@ -148,13 +150,36 @@ index 96d7ed0..53ad0d0 100644
  
          // Put Reciever back
          self.rx = Some(rx);
++        // An embedder that never drains must not grow the list without bound;
++        // past that, everything is damaged anyway.
++        if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
++            updates.paint_nodes.sort_unstable();
++            updates.paint_nodes.dedup();
++            if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
++                updates.paint_nodes.clear();
++                updates.layout = true;
++            }
++        }
++        self.resource_updates = updates;
++    }
++
++    /// Drain resource events, reporting whether layout may have changed.
++    pub fn drain_pending_messages(&mut self) -> bool {
++        self.drain_pending_updates().changed
++    }
++
++    /// Handle pending resource events and take the damage of every event
++    /// handled since the last call, including events `resolve` handled.
++    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
++        self.handle_messages();
++        let mut updates = std::mem::take(&mut self.resource_updates);
 +        updates.paint_nodes.sort_unstable();
 +        updates.paint_nodes.dedup();
 +        updates
      }
  
      pub fn handle_message(&mut self, msg: DocumentEvent) {
-@@ -1309,6 +1408,11 @@ impl BaseDocument {
+@@ -1309,6 +1432,11 @@ impl BaseDocument {
          };
  
          match resource {
@@ -166,7 +191,7 @@ index 96d7ed0..53ad0d0 100644
              Resource::Css(css) => {
                  let node_id = res.node_id.unwrap();
                  self.add_stylesheet_for_node(css, node_id);
-@@ -1410,6 +1514,9 @@ impl BaseDocument {
+@@ -1410,6 +1538,9 @@ impl BaseDocument {
  
          // Apply to all waiting nodes
          for (node_id, image_type) in waiting_nodes {
@@ -176,7 +201,7 @@ index 96d7ed0..53ad0d0 100644
              let Some(node) = self.get_node_mut(node_id) else {
                  continue;
              };
-@@ -1424,8 +1531,10 @@ impl BaseDocument {
+@@ -1424,8 +1555,10 @@ impl BaseDocument {
                      element.special_data = SpecialElementData::Image(Box::new(image.clone()));
  
                      // Clear layout cache
@@ -189,7 +214,7 @@ index 96d7ed0..53ad0d0 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2636,19 +2745,24 @@ impl BaseDocument {
+@@ -2636,19 +2769,24 @@ impl BaseDocument {
          }
  
          let mut result = String::new();
@@ -209,17 +234,17 @@ index 96d7ed0..53ad0d0 100644
 +            let text = self.visible_text(inline_layout, *start..*end);
 +            if text.is_empty() {
 +                continue;
-             }
--            result.push_str(&inline_layout.text[*start..*end]);
++            }
 +            if let Some(previous) = previous {
 +                result.push_str(self.selection_separator(previous, *node_id));
-+            }
+             }
+-            result.push_str(&inline_layout.text[*start..*end]);
 +            result.push_str(&text);
 +            previous = Some(*node_id);
          }
  
          if result.is_empty() {
-@@ -2658,6 +2772,98 @@ impl BaseDocument {
+@@ -2658,6 +2796,98 @@ impl BaseDocument {
          }
      }
  

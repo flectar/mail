@@ -225,6 +225,10 @@ pub enum DocumentEvent {
     },
 }
 
+/// How many repainted nodes a document keeps before treating the whole
+/// document as damaged.
+const MAX_PAINT_UPDATES: usize = 4096;
+
 /// Damage from delivered resources. Paint-only updates preserve resolved layout.
 #[derive(Default, Debug)]
 pub struct ResourceUpdates {
@@ -282,6 +286,9 @@ fn image_has_fixed_size(doc: &BaseDocument, node: &Node) -> bool {
 
 pub struct BaseDocument {
     pub(crate) image_decode_limits: Option<crate::net::ImageDecodeLimits>,
+    /// Damage from resource events handled since the embedder last drained
+    /// it, including events that `resolve` handled.
+    resource_updates: ResourceUpdates,
     /// ID of the document
     id: usize,
 
@@ -525,6 +532,7 @@ impl BaseDocument {
 
         let mut doc = Self {
             image_decode_limits: config.image_decode_limits,
+            resource_updates: ResourceUpdates::default(),
             id,
             tx,
             rx: Some(rx),
@@ -1309,17 +1317,10 @@ impl BaseDocument {
         }
     }
 
+    /// Handle pending resource events. Their damage accumulates until
+    /// `drain_pending_updates` takes it.
     pub fn handle_messages(&mut self) {
-        self.drain_pending_messages();
-    }
-
-    /// Drain resource events, reporting whether layout may have changed.
-    pub fn drain_pending_messages(&mut self) -> bool {
-        self.drain_pending_updates().changed
-    }
-
-    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
-        let mut updates = ResourceUpdates::default();
+        let mut updates = std::mem::take(&mut self.resource_updates);
         // Remove event Reciever from the Document so that we can process events
         // without holding a borrow to the Document
         let rx = self.rx.take().unwrap();
@@ -1359,6 +1360,29 @@ impl BaseDocument {
 
         // Put Reciever back
         self.rx = Some(rx);
+        // An embedder that never drains must not grow the list without bound;
+        // past that, everything is damaged anyway.
+        if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
+            updates.paint_nodes.sort_unstable();
+            updates.paint_nodes.dedup();
+            if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
+                updates.paint_nodes.clear();
+                updates.layout = true;
+            }
+        }
+        self.resource_updates = updates;
+    }
+
+    /// Drain resource events, reporting whether layout may have changed.
+    pub fn drain_pending_messages(&mut self) -> bool {
+        self.drain_pending_updates().changed
+    }
+
+    /// Handle pending resource events and take the damage of every event
+    /// handled since the last call, including events `resolve` handled.
+    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
+        self.handle_messages();
+        let mut updates = std::mem::take(&mut self.resource_updates);
         updates.paint_nodes.sort_unstable();
         updates.paint_nodes.dedup();
         updates
