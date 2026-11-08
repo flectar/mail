@@ -646,3 +646,15 @@ fn only_boxes_that_overflow_applies_to_clip() {
     assert!(!node(&doc, "#inline").clips_content());
     assert!(node(&doc, "#cell").clips_content());
 }
+
+#[test]
+fn column_min_widths_floor_columns() {
+    // A `<col>` min-width floors its column, with or without cells in it,
+    // while a percentage column past the last cell adds nothing.
+    let doc = document(
+        "<table id='t' style='border-spacing:0'><col style='min-width:100px'><col style='min-width:50px'>
+         <col style='width:50%'><tr><td id='a'>x</td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 100.0);
+    close(node(&doc, "#t").final_layout().size.width, 150.0);
+}

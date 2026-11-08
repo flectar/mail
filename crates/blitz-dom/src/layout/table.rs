@@ -66,6 +66,9 @@ pub struct TableContext {
     /// keep them while they fit the table and shrink the columns toward their
     /// content only when they do not (CSS Tables 3 §3.9.3).
     pub(crate) fold_authored_widths: std::sync::atomic::AtomicBool,
+    /// Per column, the `min-width` of its `<col>` (0 without one), which its
+    /// single-column cells measure at least as wide as in auto layout.
+    pub(crate) column_floors: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -430,12 +433,19 @@ pub(crate) fn build_table_context(
         ..
     } = collector;
 
-    // Preserve explicit trailing columns but drop empty auto columns.
-    while column_sizes.len() > column_count && column_sizes.last().is_some_and(|c| c.min.is_auto())
+    // A column past the last cell only stays for a positive length width or
+    // min-width. Percentage, calc() and zero widths act as auto there, as in
+    // Gecko and Blink.
+    let has_length_minimum = |column: &TrackSizingFunction| {
+        let min = column.min.into_raw();
+        min.tag() == taffy::CompactLength::LENGTH_TAG && min.value() > 0.0
+    };
+    while column_sizes.len() > column_count && !column_sizes.last().is_some_and(has_length_minimum)
     {
         column_sizes.pop();
         columns.pop();
     }
+    let cell_columns = column_count;
     column_count = column_count.max(column_sizes.len());
 
     // A rowspan never extends past the last row.
@@ -646,6 +656,7 @@ pub(crate) fn build_table_context(
     // Explicit columns take precedence over first-row cell widths in fixed layout.
     // Percentages exclude inner spacing and include a content-box cell's padding/border.
     let mut calc_values = Vec::new();
+    let mut column_floors = vec![0.0; column_count];
     let inner_spacing = if border_collapse == BorderCollapse::Separate {
         border_spacing.width.px() * column_count.saturating_sub(1) as f32
     } else {
@@ -680,6 +691,13 @@ pub(crate) fn build_table_context(
                 && !column.max.is_auto()
             {
                 style.grid_template_columns[index] = (*column).into();
+            } else if has_length_minimum(column) {
+                // A column's `min-width` floors its width: its cells measure at
+                // least that wide, and a column without cells takes it as its size.
+                column_floors[index] = column.min.into_raw().value();
+                if index >= cell_columns {
+                    style.grid_template_columns[index] = (*column).into();
+                }
             }
         }
     }
@@ -712,6 +730,7 @@ pub(crate) fn build_table_context(
             relax_text_minimums: AtomicRefCell::new(false),
             authored_width,
             fold_authored_widths: std::sync::atomic::AtomicBool::new(true),
+            column_floors,
         },
         layout_children,
     )
@@ -1352,6 +1371,15 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
             .replace(cell.layout_style.clone());
 
         let mut output = self.doc.compute_child_layout(node_id, inputs);
+
+        // A column's `min-width` floors the content widths of its cells.
+        if cell.colspan == 1
+            && inputs.run_mode == taffy::RunMode::ComputeSize
+            && inputs.known_dimensions.width.is_none()
+            && let Some(&floor) = self.ctx.column_floors.get(usize::from(cell.column))
+        {
+            output.size.width = output.size.width.max(floor);
+        }
 
         // An authored width the table can hold is also the cell's minimum.
         if measure_without_width
