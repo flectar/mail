@@ -450,3 +450,18 @@ fn middle_aligned_cells_move_text_and_floats_once() {
     );
     assert!(float_top.abs_diff(40) <= 1, "float top {float_top}");
 }
+
+#[test]
+fn fluid_tables_narrow_columns_with_authored_widths() {
+    // Two `width=300` columns in a 400px-wide `width=100%` table: as in
+    // browsers, the authored widths are preferred, not minimums, so the
+    // columns share the table instead of overflowing it.
+    let doc = document(
+        "<table id='t' width='100%' style='border-spacing:0'><tr>
+         <td id='a' width='300'>Lorem ipsum dolor sit amet</td>
+         <td id='b' width='300'>Consectetur adipiscing elit</td></tr></table>",
+    );
+    close(node(&doc, "#t").final_layout().size.width, 400.0);
+    close(node(&doc, "#a").final_layout().size.width, 200.0);
+    close(node(&doc, "#b").final_layout().size.width, 200.0);
+}

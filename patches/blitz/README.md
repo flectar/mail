@@ -20,7 +20,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | Patch | Purpose |
 | --- | --- |
 | 0002 reader resources and images | Decode limits with native JPEG scaling (CMYK included), progressive-JPEG and allocation guards, premultiplied downscaling and EXIF orientation, separate intrinsic/pixel sizes, paint-only updates for images whose layout cannot change, resource notifications, selection paragraph separators and range checks. |
-| 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, proportional authored columns, wrapping), rowspan handling, collapsed edges, cached legacy hints, visibility export and clip-aware hit testing. |
+| 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, authored widths kept while they fit, proportional authored columns, wrapping), rowspan handling, collapsed edges, cached legacy hints, visibility export and clip-aware hit testing. |
 | 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, a non-looping height-limit failure, float line slots clamped to the layout width, and floats that move with `align-content` (cell `vertical-align`). |
 | 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, and a bounded line cache with conservative culling. |
 | 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |

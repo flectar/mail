@@ -16,7 +16,8 @@ use style::values::computed::length_percentage::CalcLengthPercentage;
 use stylo_taffy::TaffyStyloStyle;
 use taffy::{
     AxisStaticEdge, AxisStaticPosition, BlockContext, CoreStyle as _, DetailedLayoutInfo,
-    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, NodeId, OofCandidate,
+    FlexDirection, LayoutContainingBlock, LayoutPartialTree, MaybeMath as _, MaybeResolve as _,
+    NodeId, OofCandidate,
     ResolveOrZero, RoundTree, RunMode, TraversePartialTree, TraverseTree, compute_block_layout,
     compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
     compute_oof_layout, prelude::*,
@@ -532,6 +533,35 @@ impl LayoutPassState<'_> {
                     let context = Arc::clone(context);
 
                     *context.relax_text_minimums.borrow_mut() = false;
+                    // Authored cell widths are minimums only while the table can
+                    // hold them. A table's min-content width ignores them, as in
+                    // browsers, so it can narrow inside a constrained parent.
+                    let table_width = inputs.known_dimensions.width.or(match inputs
+                        .available_space
+                        .width
+                    {
+                        taffy::AvailableSpace::Definite(available) => Some(
+                            context
+                                .style
+                                .size
+                                .width
+                                .maybe_resolve(inputs.parent_size.width, resolve_calc_value)
+                                .unwrap_or(available)
+                                .maybe_min(
+                                    context
+                                        .style
+                                        .max_size
+                                        .width
+                                        .maybe_resolve(inputs.parent_size.width, resolve_calc_value),
+                                ),
+                        ),
+                        taffy::AvailableSpace::MaxContent => Some(f32::INFINITY),
+                        taffy::AvailableSpace::MinContent => None,
+                    });
+                    context.fold_authored_widths.store(
+                        table_width.is_some_and(|width| width + 0.5 >= context.authored_width),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
                     let mut table_wrapper = TableTreeWrapper {
                         doc: self,
                         ctx: context,

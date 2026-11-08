@@ -59,6 +59,13 @@ pub struct TableContext {
     /// `overflow-wrap: break-word` wraps long words instead of the table
     /// growing past its container.
     pub relax_text_minimums: AtomicRefCell<bool>,
+    /// The border-box width the table needs to give every cell of its widest
+    /// row its authored width.
+    pub(crate) authored_width: f32,
+    /// Whether authored cell widths act as minimums in this layout. Browsers
+    /// keep them while they fit the table and shrink the columns toward their
+    /// content only when they do not (CSS Tables 3 §3.9.3).
+    pub(crate) fold_authored_widths: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Debug, Clone)]
@@ -530,11 +537,12 @@ pub(crate) fn build_table_context(
             border.border_bottom_style = BorderStyle::Solid;
             border.border_left_style = BorderStyle::Solid;
         }
+        // The column track carries an authored length, so the cell measures its
+        // content. Like browsers, auto layout treats that width as preferred,
+        // not as a minimum: a fluid table narrows such columns toward their
+        // content.
         if !is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG {
             let position = ServoArc::make_mut(&mut layout_style).mutate_position();
-            if position.min_width.is_auto() {
-                position.min_width = position.width.clone();
-            }
             position.width = style::values::generics::length::Size::Auto;
         }
         cell.layout_style = layout_style;
@@ -567,6 +575,30 @@ pub(crate) fn build_table_context(
             }
         }
     }
+    // The widest row's authored border-box widths, with the spacing between
+    // and around the columns and the table's own padding and border.
+    let mut row_widths = vec![0.0f32; usize::from(row_count)];
+    for cell in &cells {
+        if !is_fixed
+            && let Some(length) = ColumnHint::from_cell(cell).length
+            && let Some(row) = row_widths.get_mut(usize::from(cell.row))
+        {
+            *row += length;
+        }
+    }
+    let gaps = column_count.saturating_sub(1) as f32;
+    let table_pb = style
+        .padding()
+        .resolve_or_zero(None, resolve_calc_value)
+        .horizontal_axis_sum()
+        + style
+            .border()
+            .resolve_or_zero(None, resolve_calc_value)
+            .horizontal_axis_sum();
+    let authored_width = row_widths.iter().copied().fold(0.0, f32::max)
+        + gaps * style.gap.width.into_raw().value()
+        + table_pb;
+
     // When every column has an authored length in a table of definite width,
     // browsers grow those columns in proportion to the authored widths.
     let table_width_is_definite = style.size().width.tag() != taffy::CompactLength::AUTO_TAG;
@@ -642,6 +674,8 @@ pub(crate) fn build_table_context(
             collapsed_borders,
             rtl,
             relax_text_minimums: AtomicRefCell::new(false),
+            authored_width,
+            fold_authored_widths: std::sync::atomic::AtomicBool::new(true),
         },
         layout_children,
     )
@@ -1176,9 +1210,8 @@ impl ColumnHint {
         }
 
         // Auto layout never shrinks a column below its content's min-content
-        // width; the cell measurement folds an authored length into that
-        // floor (see `compute_child_layout`). Over-wide content therefore
-        // widens the table instead of painting over neighbouring cells.
+        // width. Over-wide content therefore widens the table instead of
+        // painting over neighbouring cells.
         //
         // The minimum is `min-content` rather than `auto`: grid clamps an
         // `auto` minimum to a fixed maximum, which would let a 120px image
@@ -1277,6 +1310,19 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
             .replace(cell.layout_style.clone());
 
         let mut output = self.doc.compute_child_layout(node_id, inputs);
+
+        // An authored width the table can hold is also the cell's minimum.
+        if measure_without_width
+            && inputs.run_mode == taffy::RunMode::ComputeSize
+            && inputs.known_dimensions.width.is_none()
+            && self
+                .ctx
+                .fold_authored_widths
+                .load(std::sync::atomic::Ordering::Relaxed)
+            && let Some(length) = ColumnHint::from_cell(cell).length
+        {
+            output.size.width = output.size.width.max(length);
+        }
 
         if *self.ctx.relax_text_minimums.borrow()
             && inputs.run_mode == taffy::RunMode::ComputeSize
