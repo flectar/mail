@@ -482,7 +482,11 @@ pub(crate) fn build_table_context(
             // shared at row and column boundaries rather than spaced apart.
             style.padding = taffy::Rect::ZERO.map(style_helpers::length);
             let slots = usize::from(row_count) * column_count;
-            if slots > 0 && slots <= MAX_COLLAPSED_SLOTS {
+            if slots == 0 {
+                // With no cells there are no edges, so not even the table's
+                // own border survives conflict resolution.
+                style.border = taffy::Rect::ZERO.map(style_helpers::length);
+            } else if slots <= MAX_COLLAPSED_SLOTS {
                 let borders = resolve_collapsed_borders(
                     usize::from(row_count),
                     column_count,

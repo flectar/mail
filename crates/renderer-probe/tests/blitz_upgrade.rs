@@ -547,3 +547,13 @@ fn only_the_first_header_and_footer_groups_move() {
         .collect();
     assert!(order.is_sorted_by(|a, b| a < b), "{order:?}");
 }
+
+#[test]
+fn empty_collapsed_tables_have_no_border() {
+    let doc = document(
+        "<table id='t' style='border-collapse:collapse;border:10px solid'><tbody></tbody></table>",
+    );
+    let size = node(&doc, "#t").final_layout().size;
+    close(size.width, 0.0);
+    close(size.height, 0.0);
+}
