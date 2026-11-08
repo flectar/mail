@@ -19,7 +19,6 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 
 | Patch | Purpose |
 | --- | --- |
-| 0001 bounded event queue | Bounds resource completions waiting for the UI, including the CSSOM `fetch_font_face_rules` sender. |
 | 0002 reader resources and images | Decode limits with native JPEG scaling and EXIF orientation, separate intrinsic/pixel sizes, paint-only updates for fixed-size images, resource notifications, selection paragraph separators and range checks. |
 | 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, proportional authored columns, wrapping), rowspan handling, collapsed edges, cell alignment, cached legacy hints, visibility export and clip-aware hit testing. |
 | 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, a non-looping height-limit failure, and float line slots clamped to the layout width. |
@@ -28,7 +27,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
 | 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow. Tiles far down a message no longer paint the elements above them. |
 
-0001–0006 are not upstream yet, except 0004's float slot clamp, which backports
+0002–0006 are not upstream yet, except 0004's float slot clamp, which backports
 upstream #1443. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports

@@ -3,7 +3,7 @@ use selectors::context::QuirksMode;
 use std::sync::atomic::Ordering as Ao;
 use std::{
     io::Cursor,
-    sync::{Arc, atomic::AtomicUsize, mpsc::SyncSender},
+    sync::{Arc, atomic::AtomicUsize, mpsc::Sender},
 };
 use style::{
     font_face::{FontFaceSourceFormat, FontFaceSourceFormatKeyword, FontStyleRange, Source},
@@ -76,14 +76,14 @@ pub(crate) struct ResourceHandler<T: Send + Sync + 'static> {
     doc_id: usize,
     request_id: usize,
     node_id: Option<NodeId>,
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     shell_provider: Arc<dyn ShellProvider>,
     data: T,
 }
 
 impl<T: Send + Sync + 'static> ResourceHandler<T> {
     pub(crate) fn new(
-        tx: SyncSender<DocumentEvent>,
+        tx: Sender<DocumentEvent>,
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
@@ -101,7 +101,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
     }
 
     pub(crate) fn boxed(
-        tx: SyncSender<DocumentEvent>,
+        tx: Sender<DocumentEvent>,
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
@@ -187,7 +187,7 @@ const MAX_IMPORT_DEPTH: usize = 16;
 
 #[derive(Clone)]
 pub(crate) struct StylesheetLoader {
-    pub(crate) tx: SyncSender<DocumentEvent>,
+    pub(crate) tx: Sender<DocumentEvent>,
     pub(crate) doc_id: usize,
     pub(crate) net_provider: Arc<dyn NetProvider>,
     pub(crate) shell_provider: Arc<dyn ShellProvider>,
@@ -388,7 +388,7 @@ impl FontFaceHandler {
 /// Fetch the fonts of all `@font-face` rules in `sheet`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_font_face(
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     doc_id: usize,
     node_id: Option<NodeId>,
     sheet: &Stylesheet,
@@ -413,7 +413,7 @@ pub(crate) fn fetch_font_face(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_font_face_rules<'a>(
     rules: impl Iterator<Item = &'a CssRule>,
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     doc_id: usize,
     node_id: Option<NodeId>,
     network_provider: &Arc<dyn NetProvider>,

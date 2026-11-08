@@ -1,8 +1,8 @@
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 3ed8c1c..c8259c1 100644
+index a26484e..a9426d2 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -1124,13 +1124,8 @@ impl BaseDocument {
+@@ -1119,13 +1119,8 @@ impl BaseDocument {
          node
      }
  
@@ -18,7 +18,7 @@ index 3ed8c1c..c8259c1 100644
      }
  
      pub fn print_tree(&self) {
-@@ -1151,8 +1146,9 @@ impl BaseDocument {
+@@ -1146,8 +1141,9 @@ impl BaseDocument {
              if element.name.local == local_name!("link") {
                  if let Some(href) = element.attr(local_name!("href")) {
                      // println!("Node {node_id} {href} {href_to_reload} {} {}", resolved_href.as_str(), resolved_href.as_str() == url_to_reload);
@@ -129,7 +129,7 @@ index 7427db4..afc5272 100644
      fn media_type_defaults_to_screen() {
          let mut document = BaseDocument::new(DocumentConfig::default());
 diff --git a/crates/blitz-dom/src/net.rs b/crates/blitz-dom/src/net.rs
-index e9765fa..0dcb58f 100644
+index 0c58c2e..b1bda7a 100644
 --- a/crates/blitz-dom/src/net.rs
 +++ b/crates/blitz-dom/src/net.rs
 @@ -206,7 +206,12 @@ impl ServoStylesheetLoader for StylesheetLoader {

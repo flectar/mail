@@ -239,8 +239,8 @@ impl NetProvider for LimitedImageProvider {
                 let url = request.url.to_string();
                 let ledger = ledger.clone();
                 let decode_waker = waker.clone();
-                // Decode and the bounded Blitz response queue may block. Keep
-                // both off Tokio's async executor and hold the work permit.
+                // Decoding may block. Keep it off Tokio's async executor and
+                // hold the work permit.
                 tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     let _decode_permit = decode_permit;

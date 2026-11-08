@@ -38,7 +38,7 @@ use std::ops::{Deref, DerefMut};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
 use std::task::{Context as TaskContext, Waker};
 use style::Atom;
@@ -68,11 +68,6 @@ use style_dom::ElementState;
 use thin_vec::ThinVec;
 use url::Url;
 use web_time::Instant;
-
-// Resource completions may retain decoded image buffers until the document is
-// polled. Keep the queue bounded so a hidden or stalled view has a fixed
-// memory ceiling; producers apply backpressure until the UI drains it.
-const DOCUMENT_EVENT_QUEUE_CAPACITY: usize = 16;
 
 #[cfg(feature = "parallel-construct")]
 use thread_local::ThreadLocal;
@@ -282,7 +277,7 @@ pub struct BaseDocument {
     pub(crate) subdocument_depth: usize,
 
     // Events
-    pub(crate) tx: SyncSender<DocumentEvent>,
+    pub(crate) tx: Sender<DocumentEvent>,
     // rx will always be Some, except temporarily while processing events
     pub(crate) rx: Option<Receiver<DocumentEvent>>,
 
@@ -494,7 +489,7 @@ impl BaseDocument {
             .html_parser_provider
             .unwrap_or_else(|| Arc::new(DummyHtmlParserProvider));
 
-        let (tx, rx) = sync_channel(DOCUMENT_EVENT_QUEUE_CAPACITY);
+        let (tx, rx) = channel();
 
         let mut doc = Self {
             image_decode_limits: config.image_decode_limits,
