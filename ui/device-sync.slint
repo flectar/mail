@@ -938,19 +938,34 @@ component SyncModal inherits Rectangle {
 
 component WordGrid inherits Rectangle {
     in property <[string]> words;
+    // The most columns: fewer where they would cut words short.
     in property <int> columns: 4;
     in property <color> body-text;
     in property <color> secondary-text;
     in property <color> fill;
 
-    height: (ceil(root.words.length / root.columns) * 30px) + 20px;
+    // Room for a number and the widest word of the list at the grid's
+    // font, so a larger text size gets fewer columns too.
+    private property <length> cell-width: 22px + 6px + widest.preferred-width + 2px;
+    private property <int> shown-columns: max(1, min(root.columns, floor((root.width - 24px) / root.cell-width)));
+
+    height: (ceil(root.words.length / root.shown-columns) * 30px) + 20px;
     border-radius: 8px;
     background: root.fill;
 
+    // The list's widest word in the app's font.
+    widest := Text {
+        visible: false;
+        text: "mushroom";
+        font-size: TypeScale.secondary;
+        font-weight: 600;
+        accessible-role: none;
+    }
+
     for word[index] in root.words : HorizontalLayout {
-        x: 12px + mod(index, root.columns) * ((root.width - 24px) / root.columns);
-        y: 10px + floor(index / root.columns) * 30px;
-        width: (root.width - 24px) / root.columns;
+        x: 12px + mod(index, root.shown-columns) * ((root.width - 24px) / root.shown-columns);
+        y: 10px + floor(index / root.shown-columns) * 30px;
+        width: (root.width - 24px) / root.shown-columns;
         height: 30px;
         spacing: 6px;
         Text {
