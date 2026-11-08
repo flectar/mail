@@ -492,3 +492,24 @@ fn collapsed_borders_follow_later_colour_changes() {
     assert!(rows_with(&pixels, [255, 0, 0, 255]).is_none());
     assert!(rows_with(&pixels, [0, 0, 255, 255]).is_some());
 }
+
+#[test]
+fn collapsed_tables_relayout_after_border_changes() {
+    // A later style change widens a row's border to 30px. The table resolves
+    // its edges again, and the unchanged cell above gets the new 15px half.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'>
+         <tr><td id='above' style='border:10px solid green'>a</td></tr>
+         <tr class='target'><td id='middle' style='border:10px solid green'>b</td></tr></table>",
+    );
+    let before = node(&doc, "#above").final_layout().size.height;
+    doc.add_user_agent_stylesheet(blitz_dom::UserAgentStylesheet::parse(
+        ".target { border: 30px solid green !important }",
+    ));
+    doc.resolve(0.0);
+    close(node(&doc, "#middle").final_layout().border.top, 15.0);
+    close(
+        node(&doc, "#above").final_layout().size.height,
+        before + 10.0,
+    );
+}

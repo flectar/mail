@@ -665,6 +665,11 @@ pub(crate) fn build_table_context(
             }
         }
     }
+    // A rebuild can move any cell's collapsed half-borders, including cells
+    // whose own style did not change, so no cell may reuse a cached size.
+    for cell in &cells {
+        doc.nodes[cell.node_id].clear_layout_cache();
+    }
     let layout_children = cells
         .iter()
         .map(|cell| cell.node_id)
