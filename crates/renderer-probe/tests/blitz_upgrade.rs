@@ -605,3 +605,13 @@ fn shrink_to_fit_boxes_make_room_for_their_floats() {
     );
     assert!(node(&doc, "#outer").final_layout().size.width >= 150.0);
 }
+
+#[test]
+fn vertical_margin_percentages_of_floats_use_the_width() {
+    // CSS 2.1 §8.3: `margin-top: 10%` of a float beside text in a 400px-wide
+    // block is 40px, even though the block's height is auto.
+    let doc = document(
+        "<div style='width:400px'>Text <span id='f' style='float:left;margin-top:10%;width:50px;height:50px'></span></div>",
+    );
+    close(node(&doc, "#f").final_layout().location.y, 40.0);
+}

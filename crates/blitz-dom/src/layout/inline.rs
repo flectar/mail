@@ -404,9 +404,11 @@ impl LayoutPassState<'_> {
         // Update inline boxes
         for ibox in inline_layout.layout.inline_boxes_mut() {
             let style = self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
+            // Margin and padding percentages resolve against the containing block's
+            // width on every side (CSS 2.1 §8.3, §8.4).
             let margin = style
                 .margin()
-                .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
+                .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
 
             #[cfg(feature = "floats")]
             let is_floated = style.float().is_floated();
@@ -524,7 +526,7 @@ impl LayoutPassState<'_> {
                                 (
                                     style.float().is_floated(),
                                     style.margin().resolve_or_zero(
-                                        child_inputs.parent_size,
+                                        child_inputs.parent_size.width,
                                         resolve_calc_value,
                                     ),
                                 )
@@ -564,7 +566,7 @@ impl LayoutPassState<'_> {
                                     style.float(),
                                     style.clear(),
                                     style.margin().resolve_or_zero(
-                                        child_inputs.parent_size,
+                                        child_inputs.parent_size.width,
                                         resolve_calc_value,
                                     ),
                                 )
@@ -758,9 +760,10 @@ impl LayoutPassState<'_> {
                             (
                                 direction,
                                 style.clear(),
-                                style
-                                    .margin()
-                                    .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
+                                style.margin().resolve_or_zero(
+                                    child_inputs.parent_size.width,
+                                    resolve_calc_value,
+                                ),
                                 style.size().width,
                             )
                         };
@@ -978,13 +981,13 @@ impl LayoutPassState<'_> {
                     let style = self.child_layout_style(node);
                     let padding = style
                         .padding()
-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
+                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
                     let border = style
                         .border()
-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
+                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
                     let margin = style
                         .margin()
-                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value);
+                        .resolve_or_zero(child_inputs.parent_size.width, resolve_calc_value);
 
                     #[cfg(feature = "floats")]
                     let is_floated = style.float() != Float::None;
