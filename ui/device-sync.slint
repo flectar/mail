@@ -1,7 +1,7 @@
 // Flectar Mail Sync: this device's setup kept the same on the user's other
 // devices. Rust keeps `SyncUi` up to date and handles its callbacks.
 
-import { HorizontalBox, VerticalBox } from "std-widgets.slint";
+import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { Button } from "components/button.slint";
 import { LineEdit, Switch } from "components/controls.slint";
 import { FocusVisibleScope } from "components/focus-visible-scope.slint";
@@ -889,6 +889,8 @@ component SyncModal inherits Rectangle {
     in property <color> panel-border-color;
     in property <color> title-color;
     in property <length> panel-width: 480px;
+    // Phones pan the content by dragging where it is taller than the screen.
+    in property <bool> compact;
     callback dismissed();
 
     visible: root.open;
@@ -920,17 +922,26 @@ component SyncModal inherits Rectangle {
                 }
                 reject
             }
-            content := VerticalBox {
-                padding: 22px;
-                spacing: 14px;
-                Text {
-                    text: root.title;
-                    color: root.title-color;
-                    font-size: TypeScale.title;
-                    font-weight: 600;
-                    wrap: word-wrap;
+            // Scrolls on a screen too short for it, such as a small phone.
+            scroll := ScrollView {
+                width: parent.width;
+                height: parent.height;
+                content-width: self.visible-width;
+                content-height: content.preferred-height;
+                mouse-drag-pan-enabled: root.compact;
+                content := VerticalBox {
+                    width: scroll.visible-width;
+                    padding: 22px;
+                    spacing: 14px;
+                    Text {
+                        text: root.title;
+                        color: root.title-color;
+                        font-size: TypeScale.title;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    @children
                 }
-                @children
             }
         }
     }
