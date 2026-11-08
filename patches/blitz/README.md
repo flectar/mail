@@ -38,7 +38,8 @@ when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
-restores the previous override; table reconstruction refreshes cached styles.
+restores the previous override, and a cell's cached override is rebuilt
+whenever its primary style changes.
 
 Beta.3 removed the implicit available-width clamp on replaced elements. The
 reader supplies `img { max-width: 100% }` in its user-agent stylesheet to
