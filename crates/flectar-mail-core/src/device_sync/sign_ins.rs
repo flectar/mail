@@ -83,16 +83,9 @@ impl Kind {
 }
 
 /// The kind of device this is, for sign-ins that work on one kind only.
+/// build.rs names it from the target.
 pub(crate) fn this_family() -> &'static str {
-    if cfg!(target_env = "ohos") {
-        "ohos"
-    } else if cfg!(target_os = "android") {
-        "android"
-    } else if cfg!(target_os = "ios") {
-        "ios"
-    } else {
-        "desktop"
-    }
+    env!("FLECTAR_SIGN_IN_FAMILY")
 }
 
 /// The family a share of `kind` is for: a password works anywhere.
@@ -569,6 +562,16 @@ mod tests {
             fingerprint(&group, b"app-password").unwrap(),
             fingerprint(&secrets(&[(2, 9)]), b"app-password").unwrap()
         );
+    }
+
+    #[test]
+    fn this_build_names_a_known_kind_of_device() {
+        assert!(matches!(
+            this_family(),
+            "desktop" | "android" | "ios" | "ohos"
+        ));
+        #[cfg(desktop)]
+        assert_eq!(this_family(), "desktop");
     }
 
     #[test]
