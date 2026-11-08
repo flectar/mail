@@ -557,3 +557,28 @@ fn empty_collapsed_tables_have_no_border() {
     close(size.width, 0.0);
     close(size.height, 0.0);
 }
+
+#[test]
+fn collapsed_border_lines_land_on_whole_pixels() {
+    // Six equal columns share 399px, which puts grid lines at fractional
+    // positions. The 1px borders must sit on the cells' rounded edges instead
+    // of smearing across two pixels.
+    let cells = "<td style='height:20px;border:1px solid #000'></td>".repeat(6);
+    let mut doc = document(&format!(
+        "<table style='width:400px;border-collapse:collapse'><tr>{cells}</tr></table>"
+    ));
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    // Row 10 crosses every vertical line and no horizontal one. A smeared
+    // line shows as partly transparent pixels on the transparent canvas.
+    let row = &pixels.as_chunks::<4>().0[10 * 400..11 * 400];
+    let partial = row
+        .iter()
+        .filter(|pixel| (1..255).contains(&pixel[3]))
+        .count();
+    let solid = row.iter().filter(|pixel| pixel[3] == 255).count();
+    assert_eq!((partial, solid), (0, 7));
+}

@@ -555,6 +555,9 @@ impl ElementCx<'_, '_> {
         let rtl = table.rtl;
         // Grid line positions in the table's border box. Vertical lines are
         // numbered in column order, which runs right to left in RTL tables.
+        // Layout rounds each cell's position within the table, so rounding the
+        // lines the same way keeps borders on the cells' edges instead of
+        // smearing them across two pixels.
         let column_line = |line: usize| -> f64 {
             f64::from(match (rtl, line < column_count) {
                 (false, true) => columns[line].start,
@@ -562,6 +565,7 @@ impl ElementCx<'_, '_> {
                 (true, true) => columns[line].end,
                 (true, false) => columns[column_count - 1].start,
             })
+            .round()
         };
         let row_line = |line: usize| -> f64 {
             f64::from(if line < row_count {
@@ -569,6 +573,7 @@ impl ElementCx<'_, '_> {
             } else {
                 rows[row_count - 1].end
             })
+            .round()
         };
         // The physical extent of a vertical edge to the left and right of its line.
         let vertical_extent = |edge: &CollapsedEdge| -> (f64, f64) {

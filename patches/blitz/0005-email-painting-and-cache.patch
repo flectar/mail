@@ -367,7 +367,7 @@ index e5e048e..446fef7 100644
                  );
              }
 diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
-index c7ecb2e..e13c8d4 100644
+index c7ecb2e..8f5cebe 100644
 --- a/crates/blitz-paint/src/render/border.rs
 +++ b/crates/blitz-paint/src/render/border.rs
 @@ -1,17 +1,18 @@
@@ -405,7 +405,7 @@ index c7ecb2e..e13c8d4 100644
          let style = &*self.style;
          let border = style.get_border();
          let current_color = style.clone_color();
-@@ -509,83 +513,234 @@ impl ElementCx<'_, '_> {
+@@ -509,83 +513,239 @@ impl ElementCx<'_, '_> {
          scene.pop_layer();
      }
  
@@ -479,6 +479,9 @@ index c7ecb2e..e13c8d4 100644
 +        let rtl = table.rtl;
 +        // Grid line positions in the table's border box. Vertical lines are
 +        // numbered in column order, which runs right to left in RTL tables.
++        // Layout rounds each cell's position within the table, so rounding the
++        // lines the same way keeps borders on the cells' edges instead of
++        // smearing them across two pixels.
 +        let column_line = |line: usize| -> f64 {
 +            f64::from(match (rtl, line < column_count) {
 +                (false, true) => columns[line].start,
@@ -486,6 +489,7 @@ index c7ecb2e..e13c8d4 100644
 +                (true, true) => columns[line].end,
 +                (true, false) => columns[column_count - 1].start,
 +            })
++            .round()
 +        };
 +        let row_line = |line: usize| -> f64 {
 +            f64::from(if line < row_count {
@@ -493,6 +497,7 @@ index c7ecb2e..e13c8d4 100644
 +            } else {
 +                rows[row_count - 1].end
 +            })
++            .round()
 +        };
 +        // The physical extent of a vertical edge to the left and right of its line.
 +        let vertical_extent = |edge: &CollapsedEdge| -> (f64, f64) {
