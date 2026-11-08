@@ -1,5 +1,0 @@
-{
-  "version": "0.11.0",
-  "sha256": "5ecb245093b0f791b89d3420c3df9c6d49c60ab63ba54db896bf8a3baf486706",
-  "adaptation": "https://github.com/huggingface/candle/pull/4041"
-}

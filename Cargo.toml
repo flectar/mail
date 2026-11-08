@@ -1,6 +1,6 @@
 [workspace]
 members = ["crates/flectar-mail-core", "crates/renderer-probe"]
-exclude = ["crates/candle-core", "crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
+exclude = ["crates/blitz-dom", "crates/blitz-paint", "crates/i-slint-backend-winit", "crates/parley", "crates/parley_emoji"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -13,8 +13,6 @@ tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 
 [patch.crates-io]
-# Remove when Candle releases ZIP 9 support; see patches/candle/README.md.
-candle-core = { path = "crates/candle-core" }
 blitz-dom = { path = "crates/blitz-dom" }
 blitz-paint = { path = "crates/blitz-paint" }
 # Slint still uses Parley 0.11.1; Blitz's Parley 0.12 is already fixed upstream.
