@@ -419,7 +419,7 @@ index e5e048e..446fef7 100644
                  );
              }
 diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
-index c7ecb2e..8f5cebe 100644
+index c7ecb2e..9eb7bb4 100644
 --- a/crates/blitz-paint/src/render/border.rs
 +++ b/crates/blitz-paint/src/render/border.rs
 @@ -1,17 +1,18 @@
@@ -457,7 +457,7 @@ index c7ecb2e..8f5cebe 100644
          let style = &*self.style;
          let border = style.get_border();
          let current_color = style.clone_color();
-@@ -509,83 +513,239 @@ impl ElementCx<'_, '_> {
+@@ -509,83 +513,272 @@ impl ElementCx<'_, '_> {
          scene.pop_layer();
      }
  
@@ -486,33 +486,17 @@ index c7ecb2e..8f5cebe 100644
          };
 -        // Borders are only handled at the table level when BorderCollapse::Collapse
 -        if table.border_collapse != BorderCollapse::Collapse {
--            return;
++        let Some(borders) = &table.collapsed_borders else {
+             return;
 -        }
 -
 -        let Some(grid_info) = &mut *table.computed_grid_info.borrow_mut() else {
-+        let Some(borders) = &table.collapsed_borders else {
-             return;
-         };
--        let Some(border_style) = table.border_style.as_deref() else {
++        };
 +        let grid_info = table.computed_grid_info.borrow();
 +        let Some(grid_info) = grid_info.as_ref() else {
              return;
          };
--
--        let outer_border_style = self.style.get_border();
--
--        let cols = PhysicalTracks::from_tracks(&grid_info.columns);
--        let rows = PhysicalTracks::from_tracks(&grid_info.rows);
--
--        // TODO: support different colors for different borders
--        let current_color = self.style.clone_color();
--        let border_color = border_style
--            .border_top_color
--            .resolve_to_absolute(&current_color)
--            .as_srgb_color();
--
--        // No need to draw transparent borders (as they won't be visible anyway)
--        if border_color == Color::TRANSPARENT {
+-        let Some(border_style) = table.border_style.as_deref() else {
 +        let (columns, rows) = (&grid_info.columns.positions, &grid_info.rows.positions);
 +        let (column_count, row_count) = (borders.columns, borders.rows);
 +        if column_count == 0
@@ -521,13 +505,8 @@ index c7ecb2e..8f5cebe 100644
 +            || rows.len() < row_count
 +        {
              return;
-         }
- 
--        // Border widths are not adjusted for border-style in computed styles,
--        // so a border with `none`/`hidden` style must be treated as zero-width.
--        if border_style.border_top_style.none_or_hidden() {
--            return;
--        }
++        }
++
 +        let rtl = table.rtl;
 +        // Grid line positions in the table's border box. Vertical lines are
 +        // numbered in column order, which runs right to left in RTL tables.
@@ -576,19 +555,9 @@ index c7ecb2e..8f5cebe 100644
 +                .fold((0.0, 0.0), |(l, r), (el, er)| {
 +                    (f64::max(l, el), f64::max(r, er))
 +                })
-+        };
+         };
  
--        // The borders are laid out as the gutters between the tracks, and as the border
--        // of the table around them. Track positions are relative to the table's border box.
--        let border_width = table.style.gap.map(|gap| gap.into_raw().value() as f64);
--        let left = cols.origin() as f64 - border_width.width;
--        let right = (cols.origin() + cols.span()) as f64 + border_width.width;
--        let top = rows.origin() as f64 - border_width.height;
--        let bottom = (rows.origin() + rows.span()) as f64 + border_width.height;
--
--        let mut fill = |x0: f64, y0: f64, x1: f64, y1: f64| {
--            let shape = Rect::new(x0, y0, x1, y1).scale_from_origin(self.scale);
--            scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
+-        let outer_border_style = self.style.get_border();
 +        // Each edge's colour comes from the box that won it, as it is now.
 +        let doc = self.context.dom;
 +        let painted = |edge: &CollapsedEdge| (*edge, edge.color(doc));
@@ -596,15 +565,10 @@ index c7ecb2e..8f5cebe 100644
 +        let same = |(a, a_color): &(CollapsedEdge, AbsoluteColor),
 +                    (b, b_color): &(CollapsedEdge, AbsoluteColor)| {
 +            a.width == b.width && a.style == b.style && a_color == b_color
-         };
++        };
  
--        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
--        // The vertical borders are drawn between them so that no corner is painted twice.
--        if outer_border_style.border_top_style != BorderStyle::Hidden {
--            fill(left, top, right, top + border_width.height);
--        }
--        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
--            fill(left, bottom - border_width.height, right, bottom);
+-        let cols = PhysicalTracks::from_tracks(&grid_info.columns);
+-        let rows = PhysicalTracks::from_tracks(&grid_info.rows);
 +        // Horizontal lines, merged along each line.
 +        for line in 0..=row_count {
 +            let y = row_line(line);
@@ -642,11 +606,42 @@ index c7ecb2e..8f5cebe 100644
 +                    }
 +                };
 +            }
-         }
--        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
--            fill(left, prev.end as f64, right, next.start as f64);
-+
-+        // Vertical lines, merged down each line.
++        }
+ 
+-        // TODO: support different colors for different borders
+-        let current_color = self.style.clone_color();
+-        let border_color = border_style
+-            .border_top_color
+-            .resolve_to_absolute(&current_color)
+-            .as_srgb_color();
++        // A horizontal edge that outranks the vertical ones meeting it owns their
++        // joint: vertical lines stop at its extent instead of cutting through it.
++        let horizontal_owner = |line: usize, joint: usize| -> Option<&CollapsedEdge> {
++            let left = joint
++                .checked_sub(1)
++                .and_then(|c| borders.horizontal(line, c));
++            let right = (joint < column_count)
++                .then(|| borders.horizontal(line, joint))
++                .flatten();
++            let above = line.checked_sub(1).and_then(|r| borders.vertical(r, joint));
++            let below = (line < row_count)
++                .then(|| borders.vertical(line, joint))
++                .flatten();
++            let owner = [left, right]
++                .into_iter()
++                .flatten()
++                .reduce(|a, b| if b.outranks(a) { b } else { a })?;
++            [above, below]
++                .into_iter()
++                .flatten()
++                .all(|vertical| owner.outranks(vertical))
++                .then_some(owner)
++        };
+ 
+-        // No need to draw transparent borders (as they won't be visible anyway)
+-        if border_color == Color::TRANSPARENT {
+-            return;
++        // Vertical lines, merged down each line where segments touch.
 +        for line in 0..=column_count {
 +            let x = column_line(line);
 +            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
@@ -654,9 +649,18 @@ index c7ecb2e..8f5cebe 100644
 +                let segment = (row < row_count)
 +                    .then(|| borders.vertical(row, line))
 +                    .flatten()
-+                    .map(|edge| (painted(edge), row_line(row), row_line(row + 1)));
++                    .and_then(|edge| {
++                        let y0 = row_line(row)
++                            + horizontal_owner(row, line).map_or(0.0, |h| f64::from(h.after()));
++                        let y1 = row_line(row + 1)
++                            - horizontal_owner(row + 1, line)
++                                .map_or(0.0, |h| f64::from(h.before()));
++                        (y1 > y0).then(|| (painted(edge), y0, y1))
++                    });
 +                run = match (run, segment) {
-+                    (Some((edge, y0, _)), Some((next, _, n1))) if same(&edge, &next) => {
++                    (Some((edge, y0, y1)), Some((next, n0, n1)))
++                        if same(&edge, &next) && n0 <= y1 =>
++                    {
 +                        Some((edge, y0, n1))
 +                    }
 +                    (finished, next) => {
@@ -672,11 +676,9 @@ index c7ecb2e..8f5cebe 100644
          }
 +    }
  
--        // Vertical borders, one segment per row
--        for row in rows.iter() {
--            let (y0, y1) = (row.start as f64, row.end as f64);
--            if outer_border_style.border_left_style != BorderStyle::Hidden {
--                fill(left, y0, left + border_width.width, y1);
+-        // Border widths are not adjusted for border-style in computed styles,
+-        // so a border with `none`/`hidden` style must be treated as zero-width.
+-        if border_style.border_top_style.none_or_hidden() {
 +    /// Fill one merged collapsed edge. Bevelled styles have no single shared
 +    /// light source across a collapsed grid, so they paint as solid lines.
 +    fn fill_collapsed_edge(
@@ -689,13 +691,43 @@ index c7ecb2e..8f5cebe 100644
 +    ) {
 +        let color = color.as_srgb_color();
 +        if color.components[3] <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-+            return;
-+        }
+             return;
+         }
+-
+-        // The borders are laid out as the gutters between the tracks, and as the border
+-        // of the table around them. Track positions are relative to the table's border box.
+-        let border_width = table.style.gap.map(|gap| gap.into_raw().value() as f64);
+-        let left = cols.origin() as f64 - border_width.width;
+-        let right = (cols.origin() + cols.span()) as f64 + border_width.width;
+-        let top = rows.origin() as f64 - border_width.height;
+-        let bottom = (rows.origin() + rows.span()) as f64 + border_width.height;
+-
+-        let mut fill = |x0: f64, y0: f64, x1: f64, y1: f64| {
+-            let shape = Rect::new(x0, y0, x1, y1).scale_from_origin(self.scale);
+-            scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
 +        let thickness = if horizontal {
 +            rect.height()
 +        } else {
 +            rect.width()
-+        };
+         };
+-
+-        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
+-        // The vertical borders are drawn between them so that no corner is painted twice.
+-        if outer_border_style.border_top_style != BorderStyle::Hidden {
+-            fill(left, top, right, top + border_width.height);
+-        }
+-        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
+-            fill(left, bottom - border_width.height, right, bottom);
+-        }
+-        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
+-            fill(left, prev.end as f64, right, next.start as f64);
+-        }
+-
+-        // Vertical borders, one segment per row
+-        for row in rows.iter() {
+-            let (y0, y1) = (row.start as f64, row.end as f64);
+-            if outer_border_style.border_left_style != BorderStyle::Hidden {
+-                fill(left, y0, left + border_width.width, y1);
 +        let length = if horizontal {
 +            rect.width()
 +        } else {

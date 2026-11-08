@@ -722,3 +722,29 @@ fn nested_tables_that_wrap_long_words_keep_their_row_height() {
         outer.size
     );
 }
+
+#[test]
+fn wider_collapsed_edges_own_their_joints() {
+    // A 3px header rule outranks the 1px cell borders meeting it, so the cells'
+    // vertical lines stop at the rule instead of notching it.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'>
+         <tr><th style='width:60px;height:20px;border:1px solid rgb(0,0,255);border-bottom:3px solid rgb(255,0,0)'></th>
+         <th style='width:60px;border:1px solid rgb(0,0,255);border-bottom:3px solid rgb(255,0,0)'></th></tr>
+         <tr><td style='height:20px;border:1px solid rgb(0,0,255)'></td><td style='border:1px solid rgb(0,0,255)'></td></tr></table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    let (top, bottom) = rows_with(&pixels, [255, 0, 0, 255]).unwrap();
+    let rows = pixels.as_chunks::<4>().0;
+    for y in top..=bottom {
+        let row = &rows[y * 400..(y + 1) * 400];
+        assert!(
+            !row.contains(&[0, 0, 255, 255]),
+            "blue notch in rule row {y}"
+        );
+    }
+}

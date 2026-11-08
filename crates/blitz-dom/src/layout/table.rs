@@ -114,6 +114,12 @@ pub struct CollapsedEdge {
 }
 
 impl CollapsedEdge {
+    /// Whether this edge wins a joint against `other`: the wider edge wins, then
+    /// the edge whose style ranks higher (CSS 2.1 §17.6.2.1, as Blink resolves joints).
+    pub fn outranks(&self, other: &CollapsedEdge) -> bool {
+        (self.width, style_rank(self.style)) > (other.width, style_rank(other.style))
+    }
+
     /// The edge's colour, resolved from the winning box's current style.
     pub fn color(&self, doc: &BaseDocument) -> AbsoluteColor {
         let Some(styles) = doc
@@ -212,22 +218,23 @@ fn border_candidates(style: &ComputedValues, origin: u8, source: NodeId) -> [Bor
     ]
 }
 
+/// The style precedence of CSS 2.1 §17.6.2.1, from `double` down to `inset`.
+fn style_rank(style: BorderStyle) -> u8 {
+    match style {
+        BorderStyle::Double => 8,
+        BorderStyle::Solid => 7,
+        BorderStyle::Dashed => 6,
+        BorderStyle::Dotted => 5,
+        BorderStyle::Ridge => 4,
+        BorderStyle::Outset => 3,
+        BorderStyle::Groove => 2,
+        BorderStyle::Inset => 1,
+        BorderStyle::None | BorderStyle::Hidden => 0,
+    }
+}
+
 /// CSS 2.1 §17.6.2.1 border conflict resolution.
 fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
-    fn style_rank(style: BorderStyle) -> u8 {
-        match style {
-            BorderStyle::Double => 8,
-            BorderStyle::Solid => 7,
-            BorderStyle::Dashed => 6,
-            BorderStyle::Dotted => 5,
-            BorderStyle::Ridge => 4,
-            BorderStyle::Outset => 3,
-            BorderStyle::Groove => 2,
-            BorderStyle::Inset => 1,
-            BorderStyle::None | BorderStyle::Hidden => 0,
-        }
-    }
-
     let mut best: Option<&BorderCandidate> = None;
     for candidate in candidates {
         // `hidden` suppresses every other border on the edge.

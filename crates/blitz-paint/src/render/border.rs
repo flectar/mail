@@ -650,7 +650,31 @@ impl ElementCx<'_, '_> {
             }
         }
 
-        // Vertical lines, merged down each line.
+        // A horizontal edge that outranks the vertical ones meeting it owns their
+        // joint: vertical lines stop at its extent instead of cutting through it.
+        let horizontal_owner = |line: usize, joint: usize| -> Option<&CollapsedEdge> {
+            let left = joint
+                .checked_sub(1)
+                .and_then(|c| borders.horizontal(line, c));
+            let right = (joint < column_count)
+                .then(|| borders.horizontal(line, joint))
+                .flatten();
+            let above = line.checked_sub(1).and_then(|r| borders.vertical(r, joint));
+            let below = (line < row_count)
+                .then(|| borders.vertical(line, joint))
+                .flatten();
+            let owner = [left, right]
+                .into_iter()
+                .flatten()
+                .reduce(|a, b| if b.outranks(a) { b } else { a })?;
+            [above, below]
+                .into_iter()
+                .flatten()
+                .all(|vertical| owner.outranks(vertical))
+                .then_some(owner)
+        };
+
+        // Vertical lines, merged down each line where segments touch.
         for line in 0..=column_count {
             let x = column_line(line);
             let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
@@ -658,9 +682,18 @@ impl ElementCx<'_, '_> {
                 let segment = (row < row_count)
                     .then(|| borders.vertical(row, line))
                     .flatten()
-                    .map(|edge| (painted(edge), row_line(row), row_line(row + 1)));
+                    .and_then(|edge| {
+                        let y0 = row_line(row)
+                            + horizontal_owner(row, line).map_or(0.0, |h| f64::from(h.after()));
+                        let y1 = row_line(row + 1)
+                            - horizontal_owner(row + 1, line)
+                                .map_or(0.0, |h| f64::from(h.before()));
+                        (y1 > y0).then(|| (painted(edge), y0, y1))
+                    });
                 run = match (run, segment) {
-                    (Some((edge, y0, _)), Some((next, _, n1))) if same(&edge, &next) => {
+                    (Some((edge, y0, y1)), Some((next, n0, n1)))
+                        if same(&edge, &next) && n0 <= y1 =>
+                    {
                         Some((edge, y0, n1))
                     }
                     (finished, next) => {
