@@ -251,8 +251,10 @@ fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
 }
 
 /// Grids beyond this many slots skip collapsed resolution, which needs a
-/// slot map, and fall back to each cell painting its own borders.
-const MAX_COLLAPSED_SLOTS: usize = 1 << 20;
+/// slot map, and fall back to each cell painting its own borders. Spans let a
+/// few kilobytes of markup describe a huge grid, so this keeps the edge maps
+/// of hostile mail to about 2 MiB while covering very large real tables.
+const MAX_COLLAPSED_SLOTS: usize = 1 << 16;
 
 /// HTML caps `colspan` at 1000; rows are bounded by Taffy's `i16` lines.
 const MAX_COLSPAN: u16 = 1000;
@@ -1538,6 +1540,12 @@ mod tests {
         assert_eq!(edge.source, NodeId::from_u64(4));
         // `none` never paints.
         assert_eq!(resolve_edge(&[candidate(3.0, BorderStyle::None, 4)]), None);
+    }
+
+    #[test]
+    fn collapsed_edges_stay_small() {
+        // Two edge maps of `MAX_COLLAPSED_SLOTS` slots stay around 2 MiB.
+        assert!(std::mem::size_of::<Option<CollapsedEdge>>() <= 16);
     }
 
     #[test]
