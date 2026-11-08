@@ -566,6 +566,7 @@ impl LayoutPassState<'_> {
                         doc: self,
                         ctx: context,
                     };
+
                     let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
 
                     // An auto-layout table is never narrower than its columns'
@@ -574,27 +575,45 @@ impl LayoutPassState<'_> {
                     // across its neighbours. Long words in text-only cells
                     // are the exception: `overflow-wrap` may break them, so
                     // those cells wrap first and the table only widens for
-                    // content that cannot wrap.
-                    if inputs.run_mode == taffy::RunMode::PerformLayout {
+                    // content that cannot wrap. Measuring a table at a finite
+                    // width runs the same layout, so a parent that measures it
+                    // (as a table does for a nested one) gets the size its
+                    // layout has.
+                    let measuring = inputs.run_mode == RunMode::ComputeSize;
+                    if !table_wrapper.ctx.is_fixed
+                        && (!measuring || table_width.is_some_and(|width| width.is_finite()))
+                    {
+                        let mut layout = taffy::LayoutInput {
+                            run_mode: RunMode::PerformLayout,
+                            known_dimensions: taffy::Size {
+                                width: Some(output.size.width),
+                                ..inputs.known_dimensions
+                            },
+                            ..inputs
+                        };
+                        let mut laid_out = if measuring {
+                            compute_grid_layout(&mut table_wrapper, node_id, layout)
+                        } else {
+                            output
+                        };
                         if table_wrapper
                             .required_width()
-                            .is_some_and(|required| required > output.size.width + 0.5)
+                            .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
-                            output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
+                            laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
                         }
                         if let Some(required) = table_wrapper.required_width() {
-                            if required > output.size.width + 0.5 {
-                                let widened = taffy::LayoutInput {
-                                    known_dimensions: taffy::Size {
-                                        width: Some(required),
-                                        ..inputs.known_dimensions
-                                    },
-                                    ..inputs
-                                };
-                                output = compute_grid_layout(&mut table_wrapper, node_id, widened);
+                            if required > laid_out.size.width + 0.5 {
+                                layout.known_dimensions.width = Some(required);
+                                laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
                             }
                         }
+                        output = if measuring {
+                            taffy::LayoutOutput::from_outer_size(laid_out.size)
+                        } else {
+                            laid_out
+                        };
                     }
 
                     // Absolutely positioned children take no part in the table grid. Their

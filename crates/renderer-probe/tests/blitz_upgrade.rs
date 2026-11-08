@@ -696,3 +696,29 @@ fn rowspans_end_with_their_row_group() {
     );
     close(node(&doc, "#c").final_layout().location.x, 0.0);
 }
+
+#[test]
+fn nested_tables_that_wrap_long_words_keep_their_row_height() {
+    // The inner table only fits its 200px cell by wrapping the long word. The
+    // outer row must be measured with that wrapping, or the inner table paints
+    // over the next row.
+    let mut doc = HtmlDocument::from_html(
+        "<style>body{margin:0} html,body{overflow-wrap:break-word} table{max-width:100%}</style>
+         <div style='width:200px'><table style='border-spacing:0'><tr><td id='outer'>
+         <table style='border-spacing:0'><tr><td>Supercalifragilisticexpialidocious_and_more_text</td><td>x</td></tr></table>
+         </td></tr><tr><td id='next'>Next row</td></tr></table></div>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    let outer = node(&doc, "#outer").final_layout();
+    let inner = node(&doc, "#outer table").final_layout();
+    assert!(
+        inner.location.y + inner.size.height <= outer.size.height + 0.5,
+        "inner table {:?} overflows its cell {:?}",
+        inner.size,
+        outer.size
+    );
+}
