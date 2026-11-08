@@ -233,19 +233,51 @@ pub struct ResourceUpdates {
     pub paint_nodes: Vec<NodeId>,
 }
 
-fn image_has_fixed_size(node: &Node) -> bool {
+/// Whether an image's layout cannot depend on its pixels, so a decoded image
+/// only needs a repaint. Its width and height must be fixed lengths, and its
+/// last layout must have used exactly those sizes: when a min/max constraint
+/// applies (such as a reader's `img { max-width: 100% }` in a narrow column),
+/// replaced sizing brings in the natural aspect ratio. Flex and grid items are
+/// excluded because their automatic minimum size depends on the image, as in
+/// Blink's `LayoutImage::NeedsLayoutOnNaturalSizeChange`.
+fn image_has_fixed_size(doc: &BaseDocument, node: &Node) -> bool {
+    use style::values::specified::box_::DisplayInside;
     use taffy::CoreStyle as _;
     if node.primary_styles().is_none() {
         return false;
     }
-    let size = node.layout_style().size();
-    size.width
-        .into_option()
-        .is_some_and(|v| v.is_finite() && v > 0.0)
-        && size
-            .height
-            .into_option()
-            .is_some_and(|v| v.is_finite() && v > 0.0)
+    let in_flex_or_grid = node
+        .layout_parent
+        .get()
+        .and_then(|id| doc.get_node(id))
+        .and_then(|parent| parent.display_style())
+        .is_some_and(|display| {
+            matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid)
+        });
+    if in_flex_or_grid {
+        return false;
+    }
+    let style = node.layout_style();
+    let size = style.size();
+    let (Some(width), Some(height)) = (size.width.into_option(), size.height.into_option()) else {
+        return false;
+    };
+    if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
+        return false;
+    }
+    let border_box = style.box_sizing() == taffy::BoxSizing::BorderBox;
+    drop(style);
+    let layout = node.unrounded_layout();
+    let (width, height) = if border_box {
+        (width, height)
+    } else {
+        let (padding, border) = (layout.padding, layout.border);
+        (
+            width + padding.left + padding.right + border.left + border.right,
+            height + padding.top + padding.bottom + border.top + border.bottom,
+        )
+    };
+    (layout.size.width - width).abs() < 0.01 && (layout.size.height - height).abs() < 0.01
 }
 
 pub struct BaseDocument {
@@ -1308,7 +1340,7 @@ impl BaseDocument {
                                     if matches!(kind, ImageType::Image)
                                         && self
                                             .get_node(id)
-                                            .is_some_and(|node| !image_has_fixed_size(node))
+                                            .is_some_and(|node| !image_has_fixed_size(self, node))
                                     {
                                         updates.layout = true;
                                     }
@@ -1478,13 +1510,15 @@ impl BaseDocument {
 
         // Apply to all waiting nodes
         for (node_id, image_type) in waiting_nodes {
+            let fixed_size = self
+                .get_node(node_id)
+                .is_some_and(|node| image_has_fixed_size(self, node));
             let Some(node) = self.get_node_mut(node_id) else {
                 continue;
             };
 
             match image_type {
                 ImageType::Image => {
-                    let fixed_size = image_has_fixed_size(node);
                     let element = node.element_data_mut().unwrap();
                     #[cfg(feature = "custom-widget")]
                     if element.custom_widget_data().is_some() {

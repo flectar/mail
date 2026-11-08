@@ -20,10 +20,10 @@ index 4686b12..f6ad6a0 100644
              base_url: None,
              ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 96d7ed0..a26484e 100644
+index 96d7ed0..215538e 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -225,7 +225,31 @@ pub enum DocumentEvent {
+@@ -225,7 +225,63 @@ pub enum DocumentEvent {
      },
  }
  
@@ -35,19 +35,51 @@ index 96d7ed0..a26484e 100644
 +    pub paint_nodes: Vec<NodeId>,
 +}
 +
-+fn image_has_fixed_size(node: &Node) -> bool {
++/// Whether an image's layout cannot depend on its pixels, so a decoded image
++/// only needs a repaint. Its width and height must be fixed lengths, and its
++/// last layout must have used exactly those sizes: when a min/max constraint
++/// applies (such as a reader's `img { max-width: 100% }` in a narrow column),
++/// replaced sizing brings in the natural aspect ratio. Flex and grid items are
++/// excluded because their automatic minimum size depends on the image, as in
++/// Blink's `LayoutImage::NeedsLayoutOnNaturalSizeChange`.
++fn image_has_fixed_size(doc: &BaseDocument, node: &Node) -> bool {
++    use style::values::specified::box_::DisplayInside;
 +    use taffy::CoreStyle as _;
 +    if node.primary_styles().is_none() {
 +        return false;
 +    }
-+    let size = node.layout_style().size();
-+    size.width
-+        .into_option()
-+        .is_some_and(|v| v.is_finite() && v > 0.0)
-+        && size
-+            .height
-+            .into_option()
-+            .is_some_and(|v| v.is_finite() && v > 0.0)
++    let in_flex_or_grid = node
++        .layout_parent
++        .get()
++        .and_then(|id| doc.get_node(id))
++        .and_then(|parent| parent.display_style())
++        .is_some_and(|display| {
++            matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid)
++        });
++    if in_flex_or_grid {
++        return false;
++    }
++    let style = node.layout_style();
++    let size = style.size();
++    let (Some(width), Some(height)) = (size.width.into_option(), size.height.into_option()) else {
++        return false;
++    };
++    if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
++        return false;
++    }
++    let border_box = style.box_sizing() == taffy::BoxSizing::BorderBox;
++    drop(style);
++    let layout = node.unrounded_layout();
++    let (width, height) = if border_box {
++        (width, height)
++    } else {
++        let (padding, border) = (layout.padding, layout.border);
++        (
++            width + padding.left + padding.right + border.left + border.right,
++            height + padding.top + padding.bottom + border.top + border.bottom,
++        )
++    };
++    (layout.size.width - width).abs() < 0.01 && (layout.size.height - height).abs() < 0.01
 +}
 +
  pub struct BaseDocument {
@@ -55,7 +87,7 @@ index 96d7ed0..a26484e 100644
      /// ID of the document
      id: usize,
  
-@@ -468,6 +492,7 @@ impl BaseDocument {
+@@ -468,6 +524,7 @@ impl BaseDocument {
          let (tx, rx) = channel();
  
          let mut doc = Self {
@@ -63,7 +95,7 @@ index 96d7ed0..a26484e 100644
              id,
              tx,
              rx: Some(rx),
-@@ -1257,16 +1282,58 @@ impl BaseDocument {
+@@ -1257,16 +1314,58 @@ impl BaseDocument {
      }
  
      pub fn handle_messages(&mut self) {
@@ -97,7 +129,7 @@ index 96d7ed0..a26484e 100644
 +                                    if matches!(kind, ImageType::Image)
 +                                        && self
 +                                            .get_node(id)
-+                                            .is_some_and(|node| !image_has_fixed_size(node))
++                                            .is_some_and(|node| !image_has_fixed_size(self, node))
 +                                    {
 +                                        updates.layout = true;
 +                                    }
@@ -122,7 +154,7 @@ index 96d7ed0..a26484e 100644
      }
  
      pub fn handle_message(&mut self, msg: DocumentEvent) {
-@@ -1309,6 +1376,11 @@ impl BaseDocument {
+@@ -1309,6 +1408,11 @@ impl BaseDocument {
          };
  
          match resource {
@@ -134,15 +166,17 @@ index 96d7ed0..a26484e 100644
              Resource::Css(css) => {
                  let node_id = res.node_id.unwrap();
                  self.add_stylesheet_for_node(css, node_id);
-@@ -1416,6 +1488,7 @@ impl BaseDocument {
+@@ -1410,6 +1514,9 @@ impl BaseDocument {
  
-             match image_type {
-                 ImageType::Image => {
-+                    let fixed_size = image_has_fixed_size(node);
-                     let element = node.element_data_mut().unwrap();
-                     #[cfg(feature = "custom-widget")]
-                     if element.custom_widget_data().is_some() {
-@@ -1424,8 +1497,10 @@ impl BaseDocument {
+         // Apply to all waiting nodes
+         for (node_id, image_type) in waiting_nodes {
++            let fixed_size = self
++                .get_node(node_id)
++                .is_some_and(|node| image_has_fixed_size(self, node));
+             let Some(node) = self.get_node_mut(node_id) else {
+                 continue;
+             };
+@@ -1424,8 +1531,10 @@ impl BaseDocument {
                      element.special_data = SpecialElementData::Image(Box::new(image.clone()));
  
                      // Clear layout cache
@@ -155,7 +189,7 @@ index 96d7ed0..a26484e 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2646,9 +2721,11 @@ impl BaseDocument {
+@@ -2646,9 +2755,11 @@ impl BaseDocument {
              }
  
              if !result.is_empty() {

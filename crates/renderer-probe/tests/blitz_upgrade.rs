@@ -348,3 +348,68 @@ fn translucent_images_shrink_without_dark_fringes() {
         "{first:?}"
     );
 }
+
+/// Holds image requests until the test delivers them, so a test decides
+/// whether pixels arrive before or after the first layout.
+#[derive(Default)]
+struct HeldImages(std::sync::Mutex<Vec<(String, Box<dyn blitz_traits::net::NetHandler>)>>);
+
+impl blitz_traits::net::NetProvider for HeldImages {
+    fn fetch(
+        &self,
+        _doc_id: usize,
+        request: blitz_traits::net::Request,
+        handler: Box<dyn blitz_traits::net::NetHandler>,
+    ) {
+        self.0
+            .lock()
+            .unwrap()
+            .push((request.url.to_string(), handler));
+    }
+}
+
+fn image_size_after_load(html: &str, image: &[u8], deliver_before_layout: bool) -> (f32, f32) {
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        &format!("<style>body{{margin:0}} img{{max-width:100%}}</style>{html}"),
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    if !deliver_before_layout {
+        doc.resolve(0.0);
+    }
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(image));
+    }
+    doc.resolve(0.0);
+    let size = node(&doc, "img").final_layout().size;
+    (size.width, size.height)
+}
+
+#[test]
+fn image_layout_does_not_depend_on_load_timing() {
+    // Clamped by max-width, this image's height follows its natural aspect
+    // ratio. As a flex item, its automatic minimum width does too.
+    let cases = [
+        (
+            "<div style='width:300px'><img src='https://example.com/a.png' width=600 height=300></div>",
+            image::DynamicImage::new_rgb8(600, 200),
+        ),
+        (
+            "<div style='display:flex;width:200px'>
+             <img src='https://example.com/a.png' style='width:300px;height:100px;max-width:none'></div>",
+            image::DynamicImage::new_rgb8(400, 100),
+        ),
+    ];
+    for (html, image) in cases {
+        let png = encoded(image::ImageFormat::Png, image);
+        assert_eq!(
+            image_size_after_load(html, &png, false),
+            image_size_after_load(html, &png, true),
+            "{html}"
+        );
+    }
+}
