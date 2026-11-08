@@ -85,6 +85,9 @@ pub struct TableCell {
     collapsed_border: Option<taffy::Rect<f32>>,
     /// The authored `width`; the grid item itself is always auto-sized.
     authored_width: taffy::Dimension,
+    /// Whether the cell has an authored length `height`, which its children's
+    /// percentage heights resolve against.
+    has_authored_height: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1165,6 +1168,7 @@ impl TableCollector {
             }
         }
         let authored_width = style.size.width;
+        let has_authored_height = style.size.height.tag() == taffy::CompactLength::LENGTH_TAG;
         style.size.width = style_helpers::auto();
         // Cells always fill their row. An authored height is a minimum, which
         // the row already honours through the cell's measured size.
@@ -1181,6 +1185,7 @@ impl TableCollector {
             colspan,
             collapsed_border: None,
             authored_width,
+            has_authored_height,
         });
         self.cell_borders.push(borders);
     }
@@ -1370,6 +1375,13 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
             .style_override
             .replace(cell.layout_style.clone());
 
+        // A cell stretched to its row's height still resolves its children's
+        // percentage heights against its own authored height, not the row's
+        // (as Blink's `ComputeCellBlockSize` does for fixed-height cells).
+        let mut inputs = inputs;
+        if cell.has_authored_height {
+            inputs.known_dimensions_are_definite.height = false;
+        }
         let mut output = self.doc.compute_child_layout(node_id, inputs);
 
         // A column's `min-width` floors the content widths of its cells.

@@ -658,3 +658,14 @@ fn column_min_widths_floor_columns() {
     close(node(&doc, "#a").final_layout().size.width, 100.0);
     close(node(&doc, "#t").final_layout().size.width, 150.0);
 }
+
+#[test]
+fn cell_children_resolve_percent_heights_against_the_cell_height() {
+    // The first cell is 50px tall but stretched to its 100px row; its child's
+    // 200% height resolves against the cell's own 50px.
+    let doc = document(
+        "<table style='border-spacing:0'><tr><td style='height:50px'><div id='c' style='height:200%'></div></td>
+         <td><div style='height:100px'></div></td></tr></table>",
+    );
+    close(node(&doc, "#c").final_layout().size.height, 100.0);
+}
