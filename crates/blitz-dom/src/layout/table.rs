@@ -59,16 +59,38 @@ pub struct TableContext {
     /// `overflow-wrap: break-word` wraps long words instead of the table
     /// growing past its container.
     pub relax_text_minimums: AtomicRefCell<bool>,
-    /// The border-box width the table needs to give every cell of its widest
-    /// row its authored width.
-    pub(crate) authored_width: f32,
-    /// Whether authored cell widths act as minimums in this layout. Browsers
-    /// keep them while they fit the table and shrink the columns toward their
-    /// content only when they do not (CSS Tables 3 §3.9.3).
-    pub(crate) fold_authored_widths: std::sync::atomic::AtomicBool,
+    /// Per column in auto layout, the authored length its cells ask for, unless
+    /// a percentage takes precedence.
+    column_lengths: Vec<Option<f32>>,
+    /// Per column in auto layout, the authored percentage, as a fraction.
+    column_percents: Vec<Option<f32>>,
+    /// The table's padding, border and spacing between columns: the part of
+    /// its border-box width no column gets.
+    column_extra: f32,
+    /// The spacing between two columns.
+    column_gap: f32,
+    /// Whether any cell has an authored length width in auto layout.
+    has_authored_lengths: bool,
+    /// How far authored cell widths act as minimums in the current layout.
+    fold: AtomicRefCell<AuthoredFold>,
     /// Per column, the `min-width` of its `<col>` (0 without one), which its
     /// single-column cells measure at least as wide as in auto layout.
     pub(crate) column_floors: Vec<f32>,
+}
+
+/// How far authored column widths are minimums in one layout of an auto table.
+///
+/// Browsers give authored columns their widths while the table can also hold
+/// every other column's min-content width. A narrower table interpolates them
+/// toward their content's min-content width, all by the same fraction, while
+/// auto columns keep their min-content widths: the table width lies between
+/// the min-content and min-content-specified guesses of CSS Tables 3 §3.9.3.
+#[derive(Debug, Default)]
+struct AuthoredFold {
+    /// 0 leaves authored widths out of the minimums; 1 makes them minimums.
+    amount: f32,
+    /// Per column, the width its single-column cells measure at least.
+    floors: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -626,17 +648,8 @@ pub(crate) fn build_table_context(
             }
         }
     }
-    // The widest row's authored border-box widths, with the spacing between
-    // and around the columns and the table's own padding and border.
-    let mut row_widths = vec![0.0f32; usize::from(row_count)];
-    for cell in &cells {
-        if !is_fixed
-            && let Some(length) = ColumnHint::from_cell(cell).length
-            && let Some(row) = row_widths.get_mut(usize::from(cell.row))
-        {
-            *row += length;
-        }
-    }
+    // The spacing between and around the columns and the table's own
+    // padding and border, which the columns share the table's width with.
     let gaps = column_count.saturating_sub(1) as f32;
     let table_pb = style
         .padding()
@@ -646,9 +659,20 @@ pub(crate) fn build_table_context(
             .border()
             .resolve_or_zero(None, resolve_calc_value)
             .horizontal_axis_sum();
-    let authored_width = row_widths.iter().copied().fold(0.0, f32::max)
-        + gaps * style.gap.width.into_raw().value()
-        + table_pb;
+    let column_gap = style.gap.width.into_raw().value();
+    let column_extra = gaps * column_gap + table_pb;
+    let has_authored_lengths = !is_fixed
+        && cells
+            .iter()
+            .any(|cell| ColumnHint::from_cell(cell).length.is_some());
+    let (column_lengths, column_percents) = column_hints
+        .iter()
+        .map(|hint| match hint.percent {
+            _ if is_fixed => (None, None),
+            Some(percent) => (None, Some(percent)),
+            None => (hint.length, None),
+        })
+        .unzip();
 
     // When every column has an authored length in a table of definite width,
     // browsers grow those columns in proportion to the authored widths.
@@ -753,8 +777,12 @@ pub(crate) fn build_table_context(
             collapsed_borders,
             rtl,
             relax_text_minimums: AtomicRefCell::new(false),
-            authored_width,
-            fold_authored_widths: std::sync::atomic::AtomicBool::new(true),
+            column_lengths,
+            column_percents,
+            column_extra,
+            column_gap,
+            has_authored_lengths,
+            fold: AtomicRefCell::new(AuthoredFold::default()),
             column_floors,
         },
         layout_children,
@@ -1424,26 +1452,22 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
         }
         let mut output = self.doc.compute_child_layout(node_id, inputs);
 
-        // A column's `min-width` floors the content widths of its cells.
-        if cell.colspan == 1
-            && inputs.run_mode == taffy::RunMode::ComputeSize
-            && inputs.known_dimensions.width.is_none()
-            && let Some(&floor) = self.ctx.column_floors.get(usize::from(cell.column))
+        // A column's `min-width` floors the content widths of its cells, and so
+        // does the part of an authored width this layout keeps as a minimum.
+        if inputs.run_mode == taffy::RunMode::ComputeSize && inputs.known_dimensions.width.is_none()
         {
-            output.size.width = output.size.width.max(floor);
-        }
-
-        // An authored width the table can hold is also the cell's minimum.
-        if measure_without_width
-            && inputs.run_mode == taffy::RunMode::ComputeSize
-            && inputs.known_dimensions.width.is_none()
-            && self
-                .ctx
-                .fold_authored_widths
-                .load(std::sync::atomic::Ordering::Relaxed)
-            && let Some(length) = ColumnHint::from_cell(cell).length
-        {
-            output.size.width = output.size.width.max(length);
+            let fold = self.ctx.fold.borrow();
+            if cell.colspan == 1 {
+                let column = usize::from(cell.column);
+                let floor = [&self.ctx.column_floors, &fold.floors]
+                    .iter()
+                    .filter_map(|floors| floors.get(column).copied())
+                    .fold(0.0, f32::max);
+                output.size.width = output.size.width.max(floor);
+            } else if measure_without_width && let Some(length) = ColumnHint::from_cell(cell).length
+            {
+                output.size.width += (length - output.size.width).max(0.0) * fold.amount;
+            }
         }
 
         if *self.ctx.relax_text_minimums.borrow()
@@ -1519,6 +1543,121 @@ fn wraps_text_only(doc: &BaseDocument, node_id: NodeId) -> bool {
 }
 
 impl TableTreeWrapper<'_, '_> {
+    /// Decides how far authored cell widths are minimums in a layout of the
+    /// table at `table_width`, its border-box width. `None` stands for the
+    /// table's min-content width, which ignores them, as in browsers, so the
+    /// table can narrow inside a constrained parent.
+    pub(crate) fn fold_authored_widths(&mut self, table_width: Option<f32>) {
+        let ctx = Arc::clone(&self.ctx);
+        let lengths = &ctx.column_lengths;
+        let mut fold = AuthoredFold::default();
+        match table_width {
+            _ if !ctx.has_authored_lengths => {}
+            None => {}
+            Some(width) if width.is_infinite() => {
+                fold.amount = 1.0;
+                fold.floors = lengths.iter().map(|length| length.unwrap_or(0.0)).collect();
+            }
+            Some(width) => {
+                // Measure the cells' own min-content widths first.
+                *ctx.fold.borrow_mut() = AuthoredFold::default();
+                let (minimums, spanning) = self.min_content_widths();
+                let available = width - ctx.column_extra;
+                // Per column, the width at no fold and how much a full fold
+                // adds. Percentage columns come before authored lengths.
+                let (base, grow): (Vec<f32>, Vec<f32>) = minimums
+                    .iter()
+                    .enumerate()
+                    .map(|(column, &min)| {
+                        let base = ctx.column_percents[column]
+                            .map_or(min, |percent| min.max(percent * available));
+                        let grow = lengths[column].map_or(0.0, |length| (length - base).max(0.0));
+                        (base, grow)
+                    })
+                    .unzip();
+                // The largest fold that fits the columns, and every spanning
+                // cell together with the columns outside its span.
+                let fit = |base: f32, grow: f32| {
+                    if grow < 0.5 {
+                        1.0
+                    } else {
+                        ((available - base) / grow).clamp(0.0, 1.0)
+                    }
+                };
+                let mut amount = fit(base.iter().sum(), grow.iter().sum());
+                for (span, min, length) in spanning {
+                    let outside = |values: &[f32]| -> f32 {
+                        values[..span.start].iter().chain(&values[span.end..]).sum()
+                    };
+                    let inner_gaps = (span.len() - 1) as f32 * ctx.column_gap;
+                    amount = amount.min(fit(
+                        outside(&base) + min - inner_gaps,
+                        outside(&grow) + (length - min).max(0.0),
+                    ));
+                }
+                fold.amount = amount;
+                fold.floors = base
+                    .iter()
+                    .zip(&grow)
+                    .zip(lengths)
+                    .map(|((&base, &grow), length)| {
+                        if length.is_some() {
+                            base + grow * amount
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+            }
+        }
+        *ctx.fold.borrow_mut() = fold;
+    }
+
+    /// The min-content widths of each column's single-column cells, and of
+    /// each spanning cell with an authored length, measured as the grid
+    /// measures them, so the grid reuses the cached results.
+    #[allow(clippy::type_complexity)]
+    fn min_content_widths(&mut self) -> (Vec<f32>, Vec<(Range<usize>, f32, f32)>) {
+        let mut minimums = vec![0.0f32; self.ctx.column_lengths.len()];
+        let mut spanning = Vec::new();
+        for index in 0..self.ctx.cells.len() {
+            let cell = &self.ctx.cells[index];
+            let span =
+                usize::from(cell.column)..usize::from(cell.column) + usize::from(cell.colspan);
+            let length = ColumnHint::from_cell(cell).length;
+            if span.end > minimums.len() || (span.len() != 1 && length.is_none()) {
+                continue;
+            }
+            let width = taffy::LayoutPartialTree::compute_child_layout(
+                self,
+                taffy::NodeId::from(index),
+                taffy::LayoutInput {
+                    known_dimensions: taffy::Size::NONE,
+                    known_dimensions_are_definite: taffy::Size {
+                        width: true,
+                        height: true,
+                    },
+                    parent_size: taffy::Size::NONE,
+                    available_space: taffy::Size {
+                        width: taffy::AvailableSpace::MinContent,
+                        height: taffy::AvailableSpace::MinContent,
+                    },
+                    sizing_mode: taffy::SizingMode::InherentSize,
+                    axis: taffy::RequestedAxis::Horizontal,
+                    run_mode: taffy::RunMode::ComputeSize,
+                    vertical_margins_are_collapsible: taffy::Line::FALSE,
+                },
+            )
+            .size
+            .width;
+            match length {
+                Some(length) if span.len() != 1 => spanning.push((span, width, length)),
+                _ => minimums[span.start] = minimums[span.start].max(width),
+            }
+        }
+        (minimums, spanning)
+    }
+
     /// The border-box width the last layout's columns need, when the table
     /// uses auto layout. Fixed layout honours the authored width instead.
     pub(crate) fn required_width(&self) -> Option<f32> {

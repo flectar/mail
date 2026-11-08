@@ -455,15 +455,33 @@ fn middle_aligned_cells_move_text_and_floats_once() {
 fn fluid_tables_narrow_columns_with_authored_widths() {
     // Two `width=300` columns in a 400px-wide `width=100%` table: as in
     // browsers, the authored widths are preferred, not minimums, so the
-    // columns share the table instead of overflowing it.
+    // columns share the table instead of overflowing it. Each column moves
+    // from its min-content width (40px, 100px) toward 300px by the same
+    // fraction, (400 - 140) / (600 - 140) (CSS Tables 3 §3.9.3).
     let doc = document(
         "<table id='t' width='100%' style='border-spacing:0'><tr>
-         <td id='a' width='300'>Lorem ipsum dolor sit amet</td>
-         <td id='b' width='300'>Consectetur adipiscing elit</td></tr></table>",
+         <td id='a' width='300'><span style='display:inline-block;width:40px'></span></td>
+         <td id='b' width='300'><span style='display:inline-block;width:100px'></span></td></tr></table>",
     );
     close(node(&doc, "#t").final_layout().size.width, 400.0);
-    close(node(&doc, "#a").final_layout().size.width, 200.0);
-    close(node(&doc, "#b").final_layout().size.width, 200.0);
+    close(node(&doc, "#a").final_layout().size.width, 187.0);
+    close(node(&doc, "#b").final_layout().size.width, 213.0);
+}
+
+#[test]
+fn authored_columns_shrink_before_auto_columns_overflow() {
+    // A `width=296` column next to an auto column in a 300px container: the
+    // auto column keeps its 45px min-content width and the authored column
+    // takes the rest, instead of the table growing to 341px.
+    let doc = document(
+        "<div style='width:300px'><table id='t' style='border-spacing:0'><tr>
+         <td id='a' width='296'><span style='display:inline-block;width:30px'></span></td>
+         <td id='b'><span style='display:inline-block;width:45px'></span> <span style='display:inline-block;width:45px'></span></td>
+         </tr></table></div>",
+    );
+    close(node(&doc, "#t").final_layout().size.width, 300.0);
+    close(node(&doc, "#a").final_layout().size.width, 255.0);
+    close(node(&doc, "#b").final_layout().size.width, 45.0);
 }
 
 #[test]

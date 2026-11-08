@@ -533,9 +533,7 @@ impl LayoutPassState<'_> {
                     let context = Arc::clone(context);
 
                     *context.relax_text_minimums.borrow_mut() = false;
-                    // Authored cell widths are minimums only while the table can
-                    // hold them. A table's min-content width ignores them, as in
-                    // browsers, so it can narrow inside a constrained parent.
+                    // The border-box width this layout gives the table, if known.
                     let table_width = inputs.known_dimensions.width.or(match inputs
                         .available_space
                         .width
@@ -558,14 +556,11 @@ impl LayoutPassState<'_> {
                         taffy::AvailableSpace::MaxContent => Some(f32::INFINITY),
                         taffy::AvailableSpace::MinContent => None,
                     });
-                    context.fold_authored_widths.store(
-                        table_width.is_some_and(|width| width + 0.5 >= context.authored_width),
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
                     let mut table_wrapper = TableTreeWrapper {
                         doc: self,
                         ctx: context,
                     };
+                    table_wrapper.fold_authored_widths(table_width);
 
                     let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
 
