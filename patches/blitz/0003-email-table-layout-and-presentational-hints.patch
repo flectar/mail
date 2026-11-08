@@ -2037,7 +2037,7 @@ index 30b96f0..c6db52e 100644
 +    }
 +}
 diff --git a/crates/blitz-dom/src/lib.rs b/crates/blitz-dom/src/lib.rs
-index fcf5489..019283f 100644
+index fcf5489..f86bbfd 100644
 --- a/crates/blitz-dom/src/lib.rs
 +++ b/crates/blitz-dom/src/lib.rs
 @@ -52,6 +52,7 @@ mod iframe;
@@ -2056,13 +2056,6 @@ index fcf5489..019283f 100644
  #[cfg(feature = "custom-widget")]
  pub use crate::node::Widget;
  
-@@ -158,3 +160,6 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
-     }
-     ctx
- }
-+
-+// Host integrations use computed visibility when projecting native semantics.
-+pub use style::computed_values::visibility::T as Visibility;
 diff --git a/crates/blitz-dom/src/node/element.rs b/crates/blitz-dom/src/node/element.rs
 index 313a073..787b7ab 100644
 --- a/crates/blitz-dom/src/node/element.rs
@@ -2121,7 +2114,7 @@ index 313a073..787b7ab 100644
              height,
              data: Blob::new(data),
 diff --git a/crates/blitz-dom/src/node/node.rs b/crates/blitz-dom/src/node/node.rs
-index 66190f4..424496c 100644
+index 66190f4..b9cc066 100644
 --- a/crates/blitz-dom/src/node/node.rs
 +++ b/crates/blitz-dom/src/node/node.rs
 @@ -1115,10 +1115,13 @@ impl Node {
@@ -2142,10 +2135,10 @@ index 66190f4..424496c 100644
  
          let mut flags = stylo_taffy::StyleFlags::empty();
          if let Some(el) = self.data.downcast_element() {
-@@ -1363,6 +1366,33 @@ impl Node {
-     ///
-     /// TODO: z-index
-     /// (If multiple children are positioned at the position then a random one will be recursed into)
+@@ -1355,6 +1358,33 @@ impl Node {
+             .any(|image| !matches!(image, GenericImage::None))
+     }
+ 
 +    /// Match the content clipping boundary used by the painter. The root
 +    /// element propagates its overflow to the host viewport.
 +    pub fn clips_content(&self) -> bool {
@@ -2173,9 +2166,9 @@ index 66190f4..424496c 100644
 +            || !matches!(styles.get_box().overflow_y, Overflow::Visible)
 +    }
 +
-     pub fn hit(&self, x: f32, y: f32, scale: f64) -> Option<HitResult> {
-         self.hit_inner(x, y, scale, &mut None)
-     }
+     /// Takes an (x, y) position (relative to the *parent's* top-left corner) and returns:
+     ///    - None if the position is outside of this node's bounds
+     ///    - Some(HitResult) if the position is within the node but doesn't match any children
 @@ -1406,7 +1436,18 @@ impl Node {
              y = (p.y / scale) as f32;
          }
