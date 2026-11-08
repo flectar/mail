@@ -313,7 +313,7 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     let mut platform =
         flectar_mail::PlatformContext::app_private(internal, cache, documents, credentials, oauth);
     platform.external_urls = flectar_mail::ExternalUrlOpener::new(bridge::open_url);
-    platform.notification_publisher = flectar_mail::NotificationPublisher::new(bridge::notify);
+    platform.notifications = Some(Arc::new(PageNotifications));
     // Mail content and the composer fall back to the same system faces as the
     // Slint UI the backend set up.
     flectar_mail::platform::configure_email_fonts(flectar_mail::platform::EmailFonts {
@@ -324,6 +324,32 @@ fn run_mail() -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync
     slint_ohos_backend::ohos_info!("mail: entering flectar_mail::run");
     flectar_mail::run(platform).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+/// New-mail notifications through the page's NotificationKit hook. HarmonyOS
+/// grants apps notifications without asking; the page doesn't take them back
+/// yet.
+struct PageNotifications;
+
+impl flectar_mail::NotificationHost for PageNotifications {
+    fn show(
+        &self,
+        alerts: Vec<flectar_mail::Alert>,
+    ) -> flectar_mail::HostFuture<Vec<Result<(), flectar_mail::Failure>>> {
+        let shown = alerts
+            .iter()
+            .map(|alert| bridge::notify(alert).map_err(flectar_mail::Failure::Retry))
+            .collect();
+        Box::pin(std::future::ready(shown))
+    }
+
+    fn withdraw(&self, _ids: Vec<flectar_mail::AlertId>) -> flectar_mail::HostFuture<()> {
+        Box::pin(std::future::ready(()))
+    }
+
+    fn availability(&self) -> flectar_mail::HostFuture<flectar_mail::Availability> {
+        Box::pin(std::future::ready(flectar_mail::Availability::Allowed))
+    }
 }
 
 // ---------------------------------------------------------------------------

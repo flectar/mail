@@ -1675,6 +1675,7 @@ struct LabelMapping {
 #[derive(Default)]
 struct StoreOutcome {
     touched_threads: Vec<i64>,
+    /// Threads that queued a new-mail notification.
     fresh_threads: Vec<i64>,
 }
 
@@ -1948,20 +1949,26 @@ async fn store_resources(
                 if !outcome.touched_threads.contains(&thread_id) {
                     outcome.touched_threads.push(thread_id);
                 }
+                // One notification per conversation in this batch, for mail
+                // that reached the Inbox after the cutoff.
                 if notify_new
                     && inserted
-                    && !is_read
-                    && !is_outgoing
-                    && notification_cutoff.is_none_or(|cutoff| resource.internal_date >= cutoff)
-                    && now_ms().saturating_sub(resource.internal_date) < 24 * 60 * 60 * 1000
+                    && label_set.contains("INBOX")
+                    && crate::sync::ingest::arrival_eligible(
+                        notification_cutoff.is_none_or(|cutoff| resource.internal_date >= cutoff),
+                        is_read,
+                        is_outgoing,
+                        resource.internal_date,
+                        now_ms(),
+                    )
+                    && !outcome.fresh_threads.contains(&thread_id)
                 {
-                    repo::notifications::enqueue(&tx, local_message_id)?;
-                    if !resource.headers.is_automated
-                        && !crate::mime::robot_sender(&from_email)
-                        && !outcome.fresh_threads.contains(&thread_id)
-                    {
-                        outcome.fresh_threads.push(thread_id);
-                    }
+                    let audible = crate::sync::ingest::chime_worthy(
+                        resource.headers.is_automated,
+                        &from_email,
+                    );
+                    repo::notifications::enqueue(&tx, local_message_id, audible)?;
+                    outcome.fresh_threads.push(thread_id);
                 }
             }
 
@@ -2538,12 +2545,15 @@ async fn hydrate_thread(
     Ok(outcome.touched_threads)
 }
 
+/// `live_since` is the receipt time from which new mail counts as arriving
+/// live (see [`crate::sync::ingest::live_since`]); only that notifies.
 async fn sync_once(
     ctx: &SyncCtx,
     config: &AccountConfig,
     api: &GmailApi,
     refresh_labels: bool,
     mail_history: MailHistory,
+    live_since: i64,
 ) -> Result<bool> {
     let account_id = config.id;
     let mut state = ctx
@@ -2580,6 +2590,9 @@ async fn sync_once(
             ));
         }
         let total = resources.len() as u64;
+        // Mail that arrives while a full sync runs is new; what it finds
+        // from before is history, even when the sync resumes after a restart.
+        let cutoff = state.full_started_at.unwrap_or(live_since).max(live_since);
         let outcome = store_resources(
             ctx,
             config,
@@ -2587,12 +2600,18 @@ async fn sync_once(
             Some(state.generation),
             false,
             true,
-            state.full_started_at,
+            Some(cutoff),
         )
         .await?;
         if !outcome.touched_threads.is_empty() {
             ctx.bus.emit(CoreEvent::MailUpdated {
                 thread_ids: outcome.touched_threads,
+            });
+        }
+        if !outcome.fresh_threads.is_empty() {
+            ctx.bus.emit(CoreEvent::MailNew {
+                account_id,
+                thread_ids: outcome.fresh_threads,
             });
         }
         ctx.bus.emit(CoreEvent::SyncProgress(SyncProgress {
@@ -2705,7 +2724,8 @@ async fn sync_once(
             }
         }
         let resources = retain_history_threads(ctx, account_id, resources, mail_history).await?;
-        let outcome = store_resources(ctx, config, &resources, None, true, true, None).await?;
+        let outcome =
+            store_resources(ctx, config, &resources, None, true, true, Some(live_since)).await?;
         touched.extend(outcome.touched_threads);
         fresh_threads.extend(outcome.fresh_threads);
     }
@@ -3872,6 +3892,8 @@ async fn run_actor(
     let mut waiters = Vec::<oneshot::Sender<std::result::Result<(), String>>>::new();
     let mut refresh_labels = true;
     let mut backoff = 1u64;
+    // Mail that came in before this worker started is caught up on silently.
+    let live_since = crate::sync::ingest::live_since(now_ms());
 
     loop {
         while let Ok(command) = rx.try_recv() {
@@ -3898,7 +3920,8 @@ async fn run_actor(
                 sync_labels(&ctx, &config, &api).await?;
             }
             let actions_remaining = execute_actions(&ctx, &config, &api).await?;
-            let backfill_done = sync_once(&ctx, &config, &api, false, mail_history).await?;
+            let backfill_done =
+                sync_once(&ctx, &config, &api, false, mail_history, live_since).await?;
             // The count only explains the Inbox's end, so it never fails a sync.
             if let Err(error) = sync_inbox_count(&ctx, account_id, &api).await {
                 tracing::warn!(account_id, %error, "Gmail Inbox count failed");

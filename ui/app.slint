@@ -76,6 +76,15 @@ export global I18n {
     pure callback new-contact-entry() -> string;
     pure callback no-connected-account() -> string;
     pure callback interaction-count(int) -> string;
+    // Words of new-mail notifications (src/notifications.rs).
+    pure callback notification-new-message() -> string;
+    pure callback notification-no-subject() -> string;
+    pure callback notification-new-messages(int) -> string;
+    pure callback notification-more-senders(string, int) -> string;
+    pure callback notification-open() -> string;
+    pure callback notification-mark-read() -> string;
+    pure callback notification-archive() -> string;
+    pure callback notification-delete() -> string;
     pure callback last-contacted(string) -> string;
     pure callback loading-local-data() -> string;
     pure callback local-data-ready() -> string;
@@ -183,6 +192,19 @@ export global I18n {
     interaction-count(count) => {
         return @tr("{n} interaction" | "{n} interactions" % count);
     }
+    notification-new-message() => { return @tr("New message"); }
+    notification-no-subject() => { return @tr("(No subject)"); }
+    notification-new-messages(count) => {
+        return @tr("{n} new message" | "{n} new messages" % count);
+    }
+    notification-more-senders(senders, count) => {
+        return @tr("the first senders of new mail, then how many others"
+            => "{0} and {n} more" | "{0} and {n} more" % count, senders);
+    }
+    notification-open() => { return @tr("Open"); }
+    notification-mark-read() => { return @tr("Mark as read"); }
+    notification-archive() => { return @tr("Archive"); }
+    notification-delete() => { return @tr("Delete"); }
     last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
     local-data-ready() => { return @tr("Local data ready."); }

@@ -2,17 +2,23 @@ use crate::error::{CoreError, Result};
 use crate::models::{Settings, now_ms, roles};
 use crate::sync::ingest::CHIME_RECENT_MS;
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationOutboxItem {
     pub id: i64,
     pub account_id: i64,
-    pub message_id: i64,
+    /// `None` once the message is gone.
+    pub message_id: Option<i64>,
+    /// The message the notification was queued for, kept after it is gone.
+    pub notified_message_id: i64,
     pub thread_id: Option<i64>,
     pub sender_name: Option<String>,
     pub sender_addr: Option<String>,
     pub subject: String,
+    pub audible: bool,
     pub state: String,
+    pub in_summary: bool,
     pub attempts: i64,
     pub not_before: Option<i64>,
     pub created_at: i64,
@@ -20,19 +26,27 @@ pub struct NotificationOutboxItem {
     pub delivered_at: Option<i64>,
     pub suppressed_at: Option<i64>,
     pub suppression_reason: Option<String>,
+    pub withdrawn_at: Option<i64>,
     pub last_error: Option<String>,
 }
+
+const COLUMNS: &str = "id, account_id, message_id, notified_message_id, thread_id, sender_name,
+     sender_addr, subject, audible, state, in_summary, attempts, not_before, created_at,
+     claimed_at, delivered_at, suppressed_at, suppression_reason, withdrawn_at, last_error";
 
 fn from_row(row: &Row) -> rusqlite::Result<NotificationOutboxItem> {
     Ok(NotificationOutboxItem {
         id: row.get("id")?,
         account_id: row.get("account_id")?,
         message_id: row.get("message_id")?,
+        notified_message_id: row.get("notified_message_id")?,
         thread_id: row.get("thread_id")?,
         sender_name: row.get("sender_name")?,
         sender_addr: row.get("sender_addr")?,
         subject: row.get("subject")?,
+        audible: row.get("audible")?,
         state: row.get("state")?,
+        in_summary: row.get("in_summary")?,
         attempts: row.get("attempts")?,
         not_before: row.get("not_before")?,
         created_at: row.get("created_at")?,
@@ -40,26 +54,34 @@ fn from_row(row: &Row) -> rusqlite::Result<NotificationOutboxItem> {
         delivered_at: row.get("delivered_at")?,
         suppressed_at: row.get("suppressed_at")?,
         suppression_reason: row.get("suppression_reason")?,
+        withdrawn_at: row.get("withdrawn_at")?,
         last_error: row.get("last_error")?,
     })
 }
 
 /// Enqueue one notification by snapshotting the message fields needed by the
-/// native dispatcher. Repeated calls for the same message return the original
-/// outbox id and never reset a terminal delivery state.
-pub fn enqueue(conn: &Connection, message_id: i64) -> Result<i64> {
-    enqueue_at(conn, message_id, now_ms())
+/// native dispatcher. `audible` marks mail from a person, the only kind that
+/// may play the new-mail sound. Repeated calls for the same message return the
+/// original outbox id and never reset a terminal delivery state.
+pub fn enqueue(conn: &Connection, message_id: i64, audible: bool) -> Result<i64> {
+    enqueue_at(conn, message_id, audible, now_ms())
 }
 
-pub fn enqueue_at(conn: &Connection, message_id: i64, created_at: i64) -> Result<i64> {
+pub fn enqueue_at(
+    conn: &Connection,
+    message_id: i64,
+    audible: bool,
+    created_at: i64,
+) -> Result<i64> {
     conn.execute(
         "INSERT INTO notification_outbox (
-             account_id, message_id, thread_id, sender_name, sender_addr, subject, created_at
+             account_id, message_id, notified_message_id, thread_id, sender_name,
+             sender_addr, subject, audible, created_at
          )
-         SELECT account_id, id, thread_id, from_name, from_addr, subject, ?2
+         SELECT account_id, id, id, thread_id, from_name, from_addr, subject, ?2, ?3
          FROM messages WHERE id = ?1
          ON CONFLICT(message_id) DO NOTHING",
-        params![message_id, created_at],
+        params![message_id, audible, created_at],
     )?;
 
     conn.query_row(
@@ -127,25 +149,19 @@ pub fn defer(conn: &Connection, id: i64, not_before: i64) -> Result<bool> {
 }
 
 pub fn get(conn: &Connection, id: i64) -> Result<Option<NotificationOutboxItem>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, account_id, message_id, thread_id, sender_name, sender_addr,
-                subject, state, attempts, not_before, created_at, claimed_at,
-                delivered_at, suppressed_at, suppression_reason, last_error
-         FROM notification_outbox WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM notification_outbox WHERE id = ?1"
+    ))?;
     Ok(stmt.query_row(params![id], from_row).optional()?)
 }
 
 /// Pending notifications ready for dispatch, oldest first.
 pub fn list_due(conn: &Connection, now: i64, limit: i64) -> Result<Vec<NotificationOutboxItem>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, account_id, message_id, thread_id, sender_name, sender_addr,
-                subject, state, attempts, not_before, created_at, claimed_at,
-                delivered_at, suppressed_at, suppression_reason, last_error
-         FROM notification_outbox
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM notification_outbox
          WHERE state = 'pending' AND (not_before IS NULL OR not_before <= ?1)
-         ORDER BY created_at, id LIMIT ?2",
-    )?;
+         ORDER BY created_at, id LIMIT ?2"
+    ))?;
     let rows = stmt
         .query_map(params![now, limit], from_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -165,13 +181,18 @@ pub fn try_claim(conn: &Connection, id: i64, claimed_at: i64) -> Result<bool> {
     )? > 0)
 }
 
-pub fn mark_delivered(conn: &Connection, id: i64, delivered_at: i64) -> Result<bool> {
+pub fn mark_delivered(
+    conn: &Connection,
+    id: i64,
+    in_summary: bool,
+    delivered_at: i64,
+) -> Result<bool> {
     Ok(conn.execute(
         "UPDATE notification_outbox
-         SET state = 'delivered', delivered_at = ?2, not_before = NULL,
+         SET state = 'delivered', in_summary = ?2, delivered_at = ?3, not_before = NULL,
              last_error = NULL
          WHERE id = ?1 AND state IN ('pending','delivering')",
-        params![id, delivered_at],
+        params![id, in_summary, delivered_at],
     )? > 0)
 }
 
@@ -213,6 +234,11 @@ pub fn recover_delivering(conn: &Connection, retry_at: i64) -> Result<usize> {
 /// How long a notification waits for its thread's AI route before another look.
 pub const ROUTE_WAIT_MS: i64 = 60_000;
 
+/// How long settled rows are kept. A shown notification is tracked this long
+/// so it can still be withdrawn; Windows and Android drop their own after
+/// three days.
+pub const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
 /// One new-mail notification for the host to raise. The fields are raw
 /// database values, so the host builds the translated title and body itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -223,25 +249,67 @@ pub struct NewMailNotification {
     /// The sender's display name, or the address when there is none.
     pub sender: String,
     pub subject: String,
+    /// The start of the message text, when its body is already here.
+    pub preview: Option<String>,
+    /// When the server received the message, else the message's own date.
+    pub received_at: i64,
+    /// The account's address, to tell accounts apart when there are several.
+    pub account: Option<String>,
+    /// Mail from a person with sounds on: the host may play the new-mail
+    /// sound for it.
+    pub sound: bool,
+    /// The account has an Archive or All Mail folder to archive into;
+    /// otherwise the message can only go to the Trash.
+    pub can_archive: bool,
 }
 
-impl NewMailNotification {
-    fn new(item: &NotificationOutboxItem, thread_id: i64) -> Self {
-        let sender = item
-            .sender_name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .or_else(|| item.sender_addr.clone())
-            .unwrap_or_default();
-        Self {
-            account_id: item.account_id,
-            message_id: item.message_id,
-            thread_id,
-            sender,
-            subject: item.subject.clone(),
-        }
+/// One dispatch step's notifications for the host to raise, with what the
+/// host needs to sum them up per account.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NotificationBatch {
+    pub mail: Vec<NewMailNotification>,
+    /// For each account in `mail`, how many notifications its summary
+    /// already counts from earlier batches.
+    pub summarized: BTreeMap<i64, u32>,
+}
+
+/// What became of a notification the host was asked to raise.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationOutcome {
+    /// The system shows it on its own.
+    Shown,
+    /// The system shows it inside its account's summary of new mail.
+    ShownInSummary,
+    /// Not shown now; worth another try later, such as when the system's
+    /// notification service didn't answer.
+    Retry(String),
+    /// Not shown, and trying again won't help: notifications are turned off
+    /// for the app, or the system has no notification service.
+    Unavailable(String),
+    /// Not shown because the message is already on screen in the app.
+    OnScreen,
+}
+
+/// A shown notification, under the ids the host raised it with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ShownNotification {
+    pub account_id: i64,
+    pub message_id: i64,
+}
+
+/// Shown notifications to take back: the ones raised on their own, and the
+/// accounts whose summary of new mail no longer counts anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Withdrawal {
+    pub messages: Vec<ShownNotification>,
+    pub summaries: Vec<i64>,
+    /// The outbox rows this withdraws.
+    pub ids: Vec<i64>,
+}
+
+impl Withdrawal {
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
     }
 }
 
@@ -268,7 +336,7 @@ pub fn settle_due(conn: &Connection, settings: &Settings, now: i64, limit: i64) 
         match decide(conn, settings, now, item)? {
             Decision::Publish(thread_id) => {
                 if try_claim(conn, item.id, now)? {
-                    claimed.push((item.id, NewMailNotification::new(item, thread_id)));
+                    claimed.push((item.id, notification(conn, settings, item, thread_id)?));
                 }
             }
             Decision::Wait => {
@@ -285,10 +353,76 @@ pub fn settle_due(conn: &Connection, settings: &Settings, now: i64, limit: i64) 
     })
 }
 
+/// The notification for a claimed row: the snapshot taken when it was
+/// queued, plus what has arrived since, such as the body's preview.
+fn notification(
+    conn: &Connection,
+    settings: &Settings,
+    item: &NotificationOutboxItem,
+    thread_id: i64,
+) -> Result<NewMailNotification> {
+    let sender = item
+        .sender_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .or_else(|| item.sender_addr.clone())
+        .unwrap_or_default();
+    let (snippet, received_at, account, several_accounts, can_archive) = conn.query_row(
+        "SELECT m.snippet, COALESCE(m.internal_date, m.date), a.email,
+                (SELECT COUNT(*) FROM accounts WHERE mail_protocol <> 'local') > 1,
+                EXISTS (SELECT 1 FROM folders f
+                        WHERE f.account_id = m.account_id AND f.role IN (?2, ?3))
+         FROM messages m JOIN accounts a ON a.id = m.account_id
+         WHERE m.id = ?1",
+        params![item.notified_message_id, roles::ARCHIVE, roles::ALL],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
+            ))
+        },
+    )?;
+    Ok(NewMailNotification {
+        account_id: item.account_id,
+        message_id: item.notified_message_id,
+        thread_id,
+        sender,
+        subject: item.subject.clone(),
+        preview: Some(snippet.trim().to_owned()).filter(|preview| !preview.is_empty()),
+        received_at,
+        account: account.filter(|_| several_accounts),
+        sound: settings.sound_enabled && item.audible,
+        can_archive,
+    })
+}
+
+/// How many notifications each of these accounts' summaries already counts.
+pub fn summarized(
+    conn: &Connection,
+    account_ids: impl IntoIterator<Item = i64>,
+) -> Result<BTreeMap<i64, u32>> {
+    let mut stmt = conn.prepare(
+        "SELECT COUNT(*) FROM notification_outbox
+         WHERE account_id = ?1 AND state = 'delivered' AND in_summary = 1",
+    )?;
+    let mut counts = BTreeMap::new();
+    for account_id in account_ids {
+        let count: u32 = stmt.query_row(params![account_id], |row| row.get(0))?;
+        counts.insert(account_id, count);
+    }
+    Ok(counts)
+}
+
 /// Whether a due notification goes out. Nothing does while notifications are
 /// off, so turning them on later doesn't replay old mail. Mail stops counting
-/// as new after the window sync uses to queue it, or once it is read or moved
-/// to Trash or Spam. A thread whose AI route is still pending waits.
+/// as new after the window sync uses to queue it, or once it no longer
+/// waits in the Inbox (see [`still_new`]). A thread whose AI route is still
+/// pending waits.
 fn decide(
     conn: &Connection,
     settings: &Settings,
@@ -301,7 +435,7 @@ fn decide(
     if now - item.created_at >= CHIME_RECENT_MS {
         return Ok(Decision::Suppress("no longer new"));
     }
-    if !unread_in_mailbox(conn, item.message_id)? {
+    if !still_new(conn, item.message_id)? {
         return Ok(Decision::Suppress("read or moved"));
     }
     let Some(thread_id) = item.thread_id else {
@@ -317,14 +451,35 @@ fn decide(
     })
 }
 
-/// Whether the message is still unread and outside Trash and Spam.
-fn unread_in_mailbox(conn: &Connection, message_id: i64) -> Result<bool> {
+/// The SQL condition, on a message `m` of account `a`, for mail that is
+/// still worth a notification: unread and waiting in the Inbox, by folder or
+/// by Gmail label, and not snoozed. Mail that was read, archived, moved to
+/// Trash or Spam, or snoozed, here or on another device, no longer is.
+const STILL_NEW: &str = "m.is_read = 0
+     AND (EXISTS (SELECT 1 FROM folders f WHERE f.id = m.folder_id AND f.role = ?{inbox})
+          OR (a.provider = 'gmail' AND EXISTS (
+                SELECT 1 FROM message_folders mf JOIN folders f ON f.id = mf.folder_id
+                WHERE mf.message_id = m.id AND f.role = ?{inbox})))
+     AND NOT EXISTS (SELECT 1 FROM snoozes s WHERE s.thread_id = m.thread_id)";
+
+fn still_new_condition(inbox: usize) -> String {
+    STILL_NEW.replace("{inbox}", &inbox.to_string())
+}
+
+/// Whether the message is still worth a notification (see [`STILL_NEW`]); a
+/// message that is gone isn't.
+fn still_new(conn: &Connection, message_id: Option<i64>) -> Result<bool> {
+    let Some(message_id) = message_id else {
+        return Ok(false);
+    };
     Ok(conn
         .query_row(
-            "SELECT m.is_read = 0 AND COALESCE(f.role, '') NOT IN (?2, ?3)
-             FROM messages m LEFT JOIN folders f ON f.id = m.folder_id
-             WHERE m.id = ?1",
-            params![message_id, roles::TRASH, roles::SPAM],
+            &format!(
+                "SELECT {} FROM messages m JOIN accounts a ON a.id = m.account_id
+                 WHERE m.id = ?1",
+                still_new_condition(2)
+            ),
+            params![message_id, roles::INBOX],
             |row| row.get(0),
         )
         .optional()?
@@ -355,6 +510,99 @@ pub fn next_due_at(conn: &Connection, now: i64) -> Result<Option<i64>> {
     )?)
 }
 
+/// Shown notifications whose mail is no longer new (see [`STILL_NEW`]):
+/// read, moved out of the Inbox, snoozed or deleted, or its account removed.
+pub fn stale(conn: &Connection) -> Result<Withdrawal> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT o.id, o.account_id, o.notified_message_id, o.in_summary
+         FROM notification_outbox o
+         WHERE o.state = 'delivered'
+           AND NOT EXISTS (
+             SELECT 1 FROM messages m JOIN accounts a ON a.id = m.account_id
+             WHERE m.id = o.message_id AND {})
+         ORDER BY o.id",
+        still_new_condition(1)
+    ))?;
+    let rows = stmt
+        .query_map(params![roles::INBOX], shown_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    withdrawal(conn, rows)
+}
+
+/// Every shown notification, to take them all back when notifications are
+/// turned off.
+pub fn shown(conn: &Connection) -> Result<Withdrawal> {
+    let mut stmt = conn.prepare(
+        "SELECT id, account_id, notified_message_id, in_summary
+         FROM notification_outbox WHERE state = 'delivered' ORDER BY id",
+    )?;
+    let rows = stmt
+        .query_map([], shown_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    withdrawal(conn, rows)
+}
+
+fn shown_row(row: &Row) -> rusqlite::Result<(i64, ShownNotification, bool)> {
+    Ok((
+        row.get(0)?,
+        ShownNotification {
+            account_id: row.get(1)?,
+            message_id: row.get(2)?,
+        },
+        row.get(3)?,
+    ))
+}
+
+/// Group rows to withdraw: the ones shown on their own by message, and an
+/// account's summary once every notification it counts goes.
+fn withdrawal(conn: &Connection, rows: Vec<(i64, ShownNotification, bool)>) -> Result<Withdrawal> {
+    let mut out = Withdrawal::default();
+    let mut leaving: BTreeMap<i64, u32> = BTreeMap::new();
+    for (id, shown, in_summary) in rows {
+        out.ids.push(id);
+        if in_summary {
+            *leaving.entry(shown.account_id).or_default() += 1;
+        } else {
+            out.messages.push(shown);
+        }
+    }
+    let counted = summarized(conn, leaving.keys().copied())?;
+    out.summaries = leaving
+        .into_iter()
+        .filter(|(account_id, leaving)| {
+            counted
+                .get(account_id)
+                .is_some_and(|counted| counted <= leaving)
+        })
+        .map(|(account_id, _)| account_id)
+        .collect();
+    Ok(out)
+}
+
+/// Record that the host took these notifications back.
+pub fn mark_withdrawn(conn: &Connection, ids: &[i64], withdrawn_at: i64) -> Result<usize> {
+    let mut stmt = conn.prepare(
+        "UPDATE notification_outbox SET state = 'withdrawn', withdrawn_at = ?2
+         WHERE id = ?1 AND state = 'delivered'",
+    )?;
+    let mut changed = 0;
+    for id in ids {
+        changed += stmt.execute(params![id, withdrawn_at])?;
+    }
+    Ok(changed)
+}
+
+/// Forget settled rows older than [`KEEP_MS`].
+pub fn prune(conn: &Connection, now: i64) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM notification_outbox
+         WHERE (state = 'suppressed' AND COALESCE(suppressed_at, created_at) < ?1)
+            OR (state = 'withdrawn' AND COALESCE(withdrawn_at, created_at) < ?1)
+            OR (state = 'delivered' AND COALESCE(delivered_at, created_at) < ?1)",
+        params![now.saturating_sub(KEEP_MS)],
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,14 +620,17 @@ mod tests {
         )
         .unwrap();
 
-        let id = enqueue_at(&c, message_id, 100).unwrap();
-        assert_eq!(enqueue_at(&c, message_id, 200).unwrap(), id);
+        let id = enqueue_at(&c, message_id, true, 100).unwrap();
+        assert_eq!(enqueue_at(&c, message_id, false, 200).unwrap(), id);
         let row = get(&c, id).unwrap().unwrap();
         assert_eq!(row.account_id, 1);
+        assert_eq!(row.message_id, Some(message_id));
+        assert_eq!(row.notified_message_id, message_id);
         assert_eq!(row.thread_id, Some(thread_id));
         assert_eq!(row.sender_name.as_deref(), Some("Alice"));
         assert_eq!(row.sender_addr.as_deref(), Some("alice@test.dev"));
         assert_eq!(row.subject, "Deployment");
+        assert!(row.audible);
         assert_eq!(row.created_at, 100);
         assert_eq!(list_due(&c, 100, 10).unwrap().len(), 1);
     }
@@ -389,7 +640,7 @@ mod tests {
         let c = testutil::conn();
         testutil::seed_account(&c);
         let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "One", false);
-        let id = enqueue_at(&c, message_id, 10).unwrap();
+        let id = enqueue_at(&c, message_id, false, 10).unwrap();
 
         assert!(try_claim(&c, id, 20).unwrap());
         assert!(!try_claim(&c, id, 20).unwrap());
@@ -400,9 +651,10 @@ mod tests {
         assert!(try_claim(&c, id, 50).unwrap());
         assert_eq!(recover_delivering(&c, 60).unwrap(), 1);
         assert!(try_claim(&c, id, 60).unwrap());
-        assert!(mark_delivered(&c, id, 61).unwrap());
+        assert!(mark_delivered(&c, id, false, 61).unwrap());
         let row = get(&c, id).unwrap().unwrap();
         assert_eq!(row.state, "delivered");
+        assert!(!row.in_summary);
         assert_eq!(row.attempts, 3);
         assert_eq!(row.delivered_at, Some(61));
         assert!(list_due(&c, i64::MAX, 10).unwrap().is_empty());
@@ -462,7 +714,7 @@ mod tests {
         let c = testutil::conn();
         testutil::seed_account(&c);
         let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "One", false);
-        let id = enqueue_at(&c, message_id, 10).unwrap();
+        let id = enqueue_at(&c, message_id, false, 10).unwrap();
 
         assert!(defer(&c, id, 500).unwrap());
         assert!(list_due(&c, 499, 10).unwrap().is_empty());
@@ -474,21 +726,23 @@ mod tests {
     }
 
     #[test]
-    fn suppression_is_terminal_and_message_delete_cascades() {
+    fn suppression_is_terminal_and_deleting_the_message_keeps_the_row() {
         let c = testutil::conn();
         c.pragma_update(None, "foreign_keys", "ON").unwrap();
         testutil::seed_account(&c);
         let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "Two", false);
-        let id = enqueue_at(&c, message_id, 10).unwrap();
+        let id = enqueue_at(&c, message_id, false, 10).unwrap();
         assert!(mark_suppressed(&c, id, 11, "window focused").unwrap());
         let row = get(&c, id).unwrap().unwrap();
         assert_eq!(row.state, "suppressed");
         assert_eq!(row.suppression_reason.as_deref(), Some("window focused"));
-        assert!(!mark_delivered(&c, id, 12).unwrap());
+        assert!(!mark_delivered(&c, id, false, 12).unwrap());
 
         c.execute("DELETE FROM messages WHERE id = ?1", params![message_id])
             .unwrap();
-        assert!(get(&c, id).unwrap().is_none());
+        let row = get(&c, id).unwrap().unwrap();
+        assert_eq!(row.message_id, None);
+        assert_eq!(row.notified_message_id, message_id);
     }
 
     fn suppression(c: &Connection, id: i64) -> Option<String> {
@@ -511,7 +765,9 @@ mod tests {
 
         let (thread, fresh) = testutil::seed_message(&c, "alice@test.dev", "Fresh", false);
         c.execute(
-            "UPDATE messages SET from_name = ' Alice ' WHERE id = ?1",
+            "UPDATE messages SET from_name = ' Alice ', snippet = ' See you there ',
+                 internal_date = 1500
+             WHERE id = ?1",
             params![fresh],
         )
         .unwrap();
@@ -527,6 +783,13 @@ mod tests {
             params![trashed],
         )
         .unwrap();
+        let (snoozed_thread, snoozed) =
+            testutil::seed_message(&c, "zoe@test.dev", "Snoozed", false);
+        c.execute(
+            "INSERT INTO snoozes (thread_id, account_id, wake_at) VALUES (?1, 1, ?2)",
+            params![snoozed_thread, now + 1],
+        )
+        .unwrap();
         let (_, bulk) = testutil::seed_message(&c, "news@test.dev", "Digest", true);
         let (routing_thread, routing) =
             testutil::seed_message(&c, "dave@test.dev", "Routing", false);
@@ -537,13 +800,14 @@ mod tests {
         .unwrap();
         let (_, old) = testutil::seed_message(&c, "erin@test.dev", "Old", false);
 
-        let [fresh_id, read_id, trashed_id, bulk_id, routing_id] =
-            [fresh, read, trashed, bulk, routing]
-                .map(|id| enqueue_at(&c, id, now - 1_000).unwrap());
-        let old_id = enqueue_at(&c, old, now - CHIME_RECENT_MS).unwrap();
+        let fresh_id = enqueue_at(&c, fresh, true, now - 1_000).unwrap();
+        let [read_id, trashed_id, snoozed_id, bulk_id, routing_id] =
+            [read, trashed, snoozed, bulk, routing]
+                .map(|id| enqueue_at(&c, id, false, now - 1_000).unwrap());
+        let old_id = enqueue_at(&c, old, true, now - CHIME_RECENT_MS).unwrap();
 
         let settled = settle_due(&c, &settings, now, 10).unwrap();
-        assert_eq!(settled.read, 6);
+        assert_eq!(settled.read, 7);
         assert_eq!(
             settled.claimed,
             vec![(
@@ -554,15 +818,18 @@ mod tests {
                     thread_id: thread,
                     sender: "Alice".into(),
                     subject: "Fresh".into(),
+                    preview: Some("See you there".into()),
+                    received_at: 1500,
+                    account: None,
+                    sound: true,
+                    can_archive: false,
                 }
             )]
         );
         assert_eq!(get(&c, fresh_id).unwrap().unwrap().state, "delivering");
-        assert_eq!(suppression(&c, read_id).as_deref(), Some("read or moved"));
-        assert_eq!(
-            suppression(&c, trashed_id).as_deref(),
-            Some("read or moved")
-        );
+        for id in [read_id, trashed_id, snoozed_id] {
+            assert_eq!(suppression(&c, id).as_deref(), Some("read or moved"));
+        }
         assert_eq!(
             suppression(&c, bulk_id).as_deref(),
             Some("outside notification scope")
@@ -590,7 +857,45 @@ mod tests {
         let later = settle_due(&c, &settings, now + ROUTE_WAIT_MS, 10).unwrap();
         assert_eq!(later.claimed.len(), 1);
         assert_eq!(later.claimed[0].0, routing_id);
+        assert!(!later.claimed[0].1.sound);
         assert_eq!(next_due_at(&c, now + ROUTE_WAIT_MS).unwrap(), None);
+    }
+
+    #[test]
+    fn settled_mail_names_its_account_only_among_several() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "Hello", false);
+        let settings = Settings {
+            sound_enabled: false,
+            ..Settings::default()
+        };
+        let id = enqueue_at(&c, message_id, true, 1_000).unwrap();
+        let claimed = settle_due(&c, &settings, 2_000, 10).unwrap().claimed;
+        assert_eq!(claimed[0].1.account, None);
+        // Sounds off: never a sound, even for mail from a person.
+        assert!(!claimed[0].1.sound);
+        // No Archive or All Mail folder: the message can only be deleted.
+        assert!(!claimed[0].1.can_archive);
+        assert!(retry(&c, id, 2_000, "later").unwrap());
+
+        c.execute(
+            "INSERT INTO accounts (id, email, provider, auth_kind, username,
+             incoming_host, incoming_port, smtp_host, smtp_port, created_at, mail_protocol,
+             settings_json)
+             VALUES (2, 'work@test.dev', 'generic', 'password', 'w', 'h', 993, 'h', 587, 0,
+                     'imap', '{}')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive')",
+            [],
+        )
+        .unwrap();
+        let claimed = settle_due(&c, &settings, 3_000, 10).unwrap().claimed;
+        assert_eq!(claimed[0].1.account.as_deref(), Some("me@test.dev"));
+        assert!(claimed[0].1.can_archive);
     }
 
     #[test]
@@ -598,7 +903,7 @@ mod tests {
         let c = testutil::conn();
         testutil::seed_account(&c);
         let (_, message_id) = testutil::seed_message(&c, "a@test.dev", "Quiet", false);
-        let id = enqueue_at(&c, message_id, 1_000).unwrap();
+        let id = enqueue_at(&c, message_id, false, 1_000).unwrap();
         let settings = Settings {
             notifications_enabled: false,
             ..Settings::default()
@@ -610,6 +915,147 @@ mod tests {
             suppression(&c, id).as_deref(),
             Some("notifications are off")
         );
+    }
+
+    /// Queue and deliver a notification for new mail from `from`, on its own
+    /// or in its account's summary.
+    fn delivered(c: &Connection, from: &str, in_summary: bool) -> (i64, i64) {
+        let (_, message_id) = testutil::seed_message(c, from, "Hi", false);
+        let id = enqueue_at(c, message_id, false, 10).unwrap();
+        assert!(try_claim(c, id, 20).unwrap());
+        assert!(mark_delivered(c, id, in_summary, 30).unwrap());
+        (id, message_id)
+    }
+
+    #[test]
+    fn stale_finds_read_moved_snoozed_and_deleted_mail() {
+        let c = testutil::conn();
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive')",
+            [],
+        )
+        .unwrap();
+        let (_, waiting) = delivered(&c, "a@test.dev", false);
+        let (read_id, read) = delivered(&c, "b@test.dev", false);
+        let (moved_id, moved) = delivered(&c, "c@test.dev", false);
+        let (snoozed_id, snoozed) = delivered(&c, "d@test.dev", false);
+        let (deleted_id, deleted) = delivered(&c, "e@test.dev", false);
+        c.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = ?1",
+            params![read],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE messages SET folder_id = 2 WHERE id = ?1",
+            params![moved],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO snoozes (thread_id, account_id, wake_at)
+             SELECT thread_id, 1, 99 FROM messages WHERE id = ?1",
+            params![snoozed],
+        )
+        .unwrap();
+        c.execute("DELETE FROM messages WHERE id = ?1", params![deleted])
+            .unwrap();
+
+        let withdrawal = stale(&c).unwrap();
+        assert_eq!(
+            withdrawal.ids,
+            vec![read_id, moved_id, snoozed_id, deleted_id]
+        );
+        assert_eq!(
+            withdrawal.messages,
+            [read, moved, snoozed, deleted].map(|message_id| ShownNotification {
+                account_id: 1,
+                message_id
+            })
+        );
+        assert!(withdrawal.summaries.is_empty());
+
+        assert_eq!(mark_withdrawn(&c, &withdrawal.ids, 40).unwrap(), 4);
+        assert!(stale(&c).unwrap().is_empty());
+        let everything = shown(&c).unwrap();
+        assert_eq!(
+            everything.messages,
+            vec![ShownNotification {
+                account_id: 1,
+                message_id: waiting
+            }]
+        );
+    }
+
+    #[test]
+    fn a_gmail_message_stays_new_while_it_carries_the_inbox_label() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute_batch(
+            "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail', auth_kind = 'oauth2';
+             INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, '[Gmail]/All Mail', 'all');",
+        )
+        .unwrap();
+        let (_, message_id) = delivered(&c, "a@test.dev", false);
+        c.execute_batch(&format!(
+            "UPDATE messages SET folder_id = 2 WHERE id = {message_id};
+             INSERT INTO message_folders (message_id, folder_id) VALUES ({message_id}, 1);"
+        ))
+        .unwrap();
+        assert!(stale(&c).unwrap().is_empty());
+
+        // Archived elsewhere: the Inbox label goes.
+        c.execute(
+            "DELETE FROM message_folders WHERE message_id = ?1",
+            params![message_id],
+        )
+        .unwrap();
+        assert_eq!(stale(&c).unwrap().messages.len(), 1);
+    }
+
+    #[test]
+    fn a_summary_goes_once_nothing_it_counts_is_new() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (first_id, first) = delivered(&c, "a@test.dev", true);
+        let (_, second) = delivered(&c, "b@test.dev", true);
+        assert_eq!(summarized(&c, [1]).unwrap(), BTreeMap::from([(1, 2)]));
+
+        c.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = ?1",
+            params![first],
+        )
+        .unwrap();
+        let partly = stale(&c).unwrap();
+        assert_eq!(partly.ids, vec![first_id]);
+        assert!(partly.messages.is_empty());
+        assert!(partly.summaries.is_empty());
+        mark_withdrawn(&c, &partly.ids, 40).unwrap();
+
+        c.execute(
+            "UPDATE messages SET is_read = 1 WHERE id = ?1",
+            params![second],
+        )
+        .unwrap();
+        assert_eq!(stale(&c).unwrap().summaries, vec![1]);
+    }
+
+    #[test]
+    fn prune_forgets_settled_rows_after_a_week() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let (_, pending) = testutil::seed_message(&c, "a@test.dev", "Pending", false);
+        let pending_id = enqueue_at(&c, pending, false, 10).unwrap();
+        let (shown_id, _) = delivered(&c, "b@test.dev", false);
+        let (_, quiet) = testutil::seed_message(&c, "c@test.dev", "Quiet", false);
+        let quiet_id = enqueue_at(&c, quiet, false, 10).unwrap();
+        mark_suppressed(&c, quiet_id, 10, "notifications are off").unwrap();
+
+        assert_eq!(prune(&c, KEEP_MS).unwrap(), 0);
+        assert_eq!(prune(&c, KEEP_MS + 31).unwrap(), 2);
+        assert!(get(&c, shown_id).unwrap().is_none());
+        assert!(get(&c, quiet_id).unwrap().is_none());
+        assert!(get(&c, pending_id).unwrap().is_some());
     }
 
     #[test]

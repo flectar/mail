@@ -179,7 +179,9 @@ fn validate_folder_leaf(value: &str) -> Result<String> {
     Ok(value.to_owned())
 }
 
-pub use crate::db::repo::notifications::{NewMailNotification, NotificationOutboxItem, RoutedTab};
+pub use crate::db::repo::notifications::{
+    NewMailNotification, NotificationBatch, NotificationOutcome, ShownNotification, Withdrawal,
+};
 pub use crate::db::snapshot::DatabaseSnapshotManifest;
 
 /// Read the presentation state needed to lay out the first application frame.
@@ -8837,79 +8839,6 @@ impl Core {
         Ok(())
     }
 
-    /// Return notifications that are ready for the native host to dispatch.
-    /// Eligibility is decided by sync before enqueueing; this API only exposes
-    /// durable delivery state to the host process.
-    pub async fn due_notifications(&self, limit: i64) -> Result<Vec<NotificationOutboxItem>> {
-        let now = now_ms();
-        let limit = limit.clamp(1, 100);
-        self.db
-            .read(move |conn| repo::notifications::list_due(conn, now, limit))
-            .await
-    }
-
-    /// Resolve which inbox tab a thread lands in, for notification-scope
-    /// filtering. `RoutedTab::Pending` means AI classification is still in
-    /// flight and the host should wait before deciding.
-    pub async fn notification_thread_tab(&self, thread_id: i64) -> Result<Option<RoutedTab>> {
-        self.db
-            .read(move |conn| repo::notifications::resolve_tab(conn, thread_id))
-            .await
-    }
-
-    /// Defer a pending notification's next dispatch without consuming a delivery
-    /// attempt, used while waiting for its thread's tab to resolve.
-    pub async fn defer_notification_delivery(&self, id: i64, not_before: i64) -> Result<bool> {
-        self.db
-            .write(move |conn| repo::notifications::defer(conn, id, not_before))
-            .await
-    }
-
-    /// Atomically claim one due notification. A false result means another
-    /// dispatcher or a state transition won the race.
-    pub async fn claim_notification_delivery(&self, id: i64) -> Result<bool> {
-        let now = now_ms();
-        self.db
-            .write(move |conn| repo::notifications::try_claim(conn, id, now))
-            .await
-    }
-
-    pub async fn mark_notification_delivered(&self, id: i64) -> Result<bool> {
-        let now = now_ms();
-        self.db
-            .write(move |conn| repo::notifications::mark_delivered(conn, id, now))
-            .await
-    }
-
-    pub async fn suppress_notification_delivery(
-        &self,
-        id: i64,
-        reason: impl Into<String>,
-    ) -> Result<bool> {
-        let now = now_ms();
-        let reason = reason.into();
-        self.db
-            .write(move |conn| repo::notifications::mark_suppressed(conn, id, now, &reason))
-            .await
-    }
-
-    /// Return a claimed notification to the pending queue after a bounded
-    /// delay. The cap prevents a bad caller from making a row disappear for an
-    /// unreasonable amount of time.
-    pub async fn retry_notification_delivery(
-        &self,
-        id: i64,
-        delay_ms: i64,
-        error: impl Into<String>,
-    ) -> Result<bool> {
-        const MAX_DELAY_MS: i64 = 24 * 60 * 60 * 1_000;
-        let retry_at = now_ms().saturating_add(delay_ms.clamp(0, MAX_DELAY_MS));
-        let error = error.into();
-        self.db
-            .write(move |conn| repo::notifications::retry(conn, id, retry_at, &error))
-            .await
-    }
-
     /// Recover rows left in `delivering` by a process crash. Native delivery is
     /// necessarily at-least-once because the OS send and SQLite commit cannot
     /// share a transaction.
@@ -8920,22 +8849,24 @@ impl Core {
             .await
     }
 
-    /// Hand every due new-mail notification to `publish`, which raises it on
-    /// the host or says why it couldn't, and suppress or postpone the rest (see
-    /// [`repo::notifications::settle_due`]). Each row is claimed before
-    /// `publish` and marked delivered after it, so a crash in between delivers
-    /// it again once [`Self::recover_notification_deliveries`] runs; a row the
-    /// host couldn't raise is tried again a minute later. Returns when the next
+    /// Hand every due new-mail notification to `publish`, a batch at a time,
+    /// and suppress or postpone the rest (see
+    /// [`repo::notifications::settle_due`]). `publish` raises them on the host
+    /// and says what became of each, in order. Each row is claimed before
+    /// `publish` and settled after it, so a crash in between delivers it again
+    /// once [`Self::recover_notification_deliveries`] runs; a row the host
+    /// couldn't raise is tried again a minute later. Returns when the next
     /// postponed notification falls due, for the caller to dispatch again then.
-    pub async fn dispatch_notifications(
-        &self,
-        publish: impl Fn(&NewMailNotification) -> std::result::Result<(), String>,
-    ) -> Result<Option<i64>> {
+    pub async fn dispatch_notifications<F, Fut>(&self, mut publish: F) -> Result<Option<i64>>
+    where
+        F: FnMut(NotificationBatch) -> Fut,
+        Fut: std::future::Future<Output = Vec<NotificationOutcome>>,
+    {
         let settings = Arc::new(self.get_settings().await?);
         loop {
             let now = now_ms();
             let batch_settings = Arc::clone(&settings);
-            let settled = self
+            let (read, claimed, summarized) = self
                 .db
                 .write(move |conn| {
                     let tx = conn.transaction()?;
@@ -8945,35 +8876,107 @@ impl Core {
                         now,
                         NOTIFICATION_BATCH as i64,
                     )?;
+                    let summarized = repo::notifications::summarized(
+                        &tx,
+                        settled
+                            .claimed
+                            .iter()
+                            .map(|(_, mail)| mail.account_id)
+                            .collect::<std::collections::BTreeSet<_>>(),
+                    )?;
                     tx.commit()?;
-                    Ok(settled)
+                    Ok((settled.read, settled.claimed, summarized))
                 })
                 .await?;
-            // Every claimed row goes to the host even if recording one fails;
-            // the failed ones are delivered again after recovery.
-            let mut failure = None;
-            for (id, notification) in &settled.claimed {
-                let recorded = match publish(notification) {
-                    Ok(()) => self.mark_notification_delivered(*id).await,
-                    Err(error) => {
-                        self.retry_notification_delivery(*id, NOTIFICATION_RETRY_MS, error)
-                            .await
-                    }
-                };
-                if let Err(error) = recorded {
-                    failure.get_or_insert(error);
-                }
+            if !claimed.is_empty() {
+                let (ids, mail): (Vec<i64>, Vec<NewMailNotification>) = claimed.into_iter().unzip();
+                let outcomes = publish(NotificationBatch { mail, summarized }).await;
+                self.settle_notifications(ids, outcomes).await?;
             }
-            if let Some(error) = failure {
-                return Err(error);
-            }
-            if settled.read < NOTIFICATION_BATCH {
+            if read < NOTIFICATION_BATCH {
                 break;
             }
         }
         let now = now_ms();
         self.db
             .read(move |conn| repo::notifications::next_due_at(conn, now))
+            .await
+    }
+
+    /// Record what became of claimed notifications, in claim order. A row the
+    /// host gave no answer for is tried again.
+    async fn settle_notifications(
+        &self,
+        ids: Vec<i64>,
+        outcomes: Vec<NotificationOutcome>,
+    ) -> Result<()> {
+        let now = now_ms();
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let mut outcomes = outcomes.into_iter();
+                for id in ids {
+                    let outcome = outcomes.next().unwrap_or_else(|| {
+                        NotificationOutcome::Retry("the host gave no answer".into())
+                    });
+                    match outcome {
+                        NotificationOutcome::Shown => {
+                            repo::notifications::mark_delivered(&tx, id, false, now)?
+                        }
+                        NotificationOutcome::ShownInSummary => {
+                            repo::notifications::mark_delivered(&tx, id, true, now)?
+                        }
+                        NotificationOutcome::Retry(error) => repo::notifications::retry(
+                            &tx,
+                            id,
+                            now + NOTIFICATION_RETRY_MS,
+                            &error,
+                        )?,
+                        NotificationOutcome::Unavailable(reason) => {
+                            repo::notifications::mark_suppressed(&tx, id, now, &reason)?
+                        }
+                        NotificationOutcome::OnScreen => repo::notifications::mark_suppressed(
+                            &tx,
+                            id,
+                            now,
+                            "on screen in the app",
+                        )?,
+                    };
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Shown notifications whose mail is no longer new: read, moved out of the
+    /// Inbox, snoozed or deleted, here or on another device, or whose account
+    /// was removed. The host takes them back and then calls
+    /// [`Self::notifications_withdrawn`].
+    pub async fn stale_notifications(&self) -> Result<Withdrawal> {
+        self.db.read(|conn| repo::notifications::stale(conn)).await
+    }
+
+    /// Every shown notification, to take back when notifications are turned
+    /// off.
+    pub async fn shown_notifications(&self) -> Result<Withdrawal> {
+        self.db.read(|conn| repo::notifications::shown(conn)).await
+    }
+
+    /// Record that the host took back the notifications of `withdrawal`.
+    pub async fn notifications_withdrawn(&self, withdrawal: &Withdrawal) -> Result<usize> {
+        let ids = withdrawal.ids.clone();
+        let now = now_ms();
+        self.db
+            .write(move |conn| repo::notifications::mark_withdrawn(conn, &ids, now))
+            .await
+    }
+
+    /// Forget notification records settled more than a week ago.
+    pub async fn prune_notifications(&self) -> Result<usize> {
+        let now = now_ms();
+        self.db
+            .write(move |conn| repo::notifications::prune(conn, now))
             .await
     }
 }
@@ -9859,29 +9862,50 @@ mod sync_accounts_tests {
 mod notification_dispatch_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn dispatch_publishes_every_due_notification_once() {
+    async fn seeded(count: usize) -> (tempfile::TempDir, Core, Vec<i64>) {
         let tmp = tempfile::tempdir().unwrap();
         let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
-        let count = NOTIFICATION_BATCH + 2;
-        core.db
+        let ids = core
+            .db
             .write(move |conn| {
                 db::testutil::seed_account(conn);
-                for index in 0..count {
-                    let subject = format!("Mail {index}");
-                    let (_, id) = db::testutil::seed_message(conn, "a@test.dev", &subject, false);
-                    repo::notifications::enqueue(conn, id)?;
-                }
-                Ok(())
+                (0..count)
+                    .map(|index| {
+                        let subject = format!("Mail {index}");
+                        let (_, id) =
+                            db::testutil::seed_message(conn, "a@test.dev", &subject, false);
+                        repo::notifications::enqueue(conn, id, true)
+                    })
+                    .collect::<Result<Vec<_>>>()
             })
             .await
             .unwrap();
+        (tmp, core, ids)
+    }
+
+    async fn row(core: &Core, id: i64) -> repo::notifications::NotificationOutboxItem {
+        core.db
+            .read(move |conn| repo::notifications::get(conn, id))
+            .await
+            .unwrap()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn dispatch_publishes_every_due_notification_once() {
+        let count = NOTIFICATION_BATCH + 2;
+        let (_tmp, core, _) = seeded(count).await;
 
         let published = std::sync::Mutex::new(Vec::new());
         let next = core
-            .dispatch_notifications(|notification| {
-                published.lock().unwrap().push(notification.subject.clone());
-                Ok(())
+            .dispatch_notifications(|batch| {
+                assert_eq!(batch.summarized, [(1, 0)].into());
+                let outcomes = vec![NotificationOutcome::Shown; batch.mail.len()];
+                published
+                    .lock()
+                    .unwrap()
+                    .extend(batch.mail.into_iter().map(|mail| mail.subject));
+                std::future::ready(outcomes)
             })
             .await
             .unwrap();
@@ -9889,8 +9913,8 @@ mod notification_dispatch_tests {
         assert_eq!(published.lock().unwrap().len(), count);
 
         // Delivered rows never come back.
-        core.dispatch_notifications(|notification| {
-            panic!("{} was published twice", notification.subject);
+        core.dispatch_notifications(|batch| -> std::future::Ready<Vec<NotificationOutcome>> {
+            panic!("{} was published twice", batch.mail[0].subject);
         })
         .await
         .unwrap();
@@ -9898,32 +9922,74 @@ mod notification_dispatch_tests {
 
     #[tokio::test]
     async fn dispatch_retries_what_the_host_could_not_raise() {
-        let tmp = tempfile::tempdir().unwrap();
-        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
-        let id = core
-            .db
-            .write(|conn| {
-                db::testutil::seed_account(conn);
-                let (_, id) = db::testutil::seed_message(conn, "a@test.dev", "Later", false);
-                repo::notifications::enqueue(conn, id)
+        let (_tmp, core, ids) = seeded(2).await;
+
+        // The host answers for the first notification only.
+        let next = core
+            .dispatch_notifications(|_| {
+                std::future::ready(vec![NotificationOutcome::Retry("bridge not ready".into())])
             })
             .await
             .unwrap();
-
-        let next = core
-            .dispatch_notifications(|_| Err("bridge not ready".into()))
-            .await
-            .unwrap();
-        let row = core
-            .db
-            .read(move |conn| repo::notifications::get(conn, id))
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(row.state, "pending");
-        assert_eq!(row.last_error.as_deref(), Some("bridge not ready"));
+        let first = row(&core, ids[0]).await;
+        assert_eq!(first.state, "pending");
+        assert_eq!(first.last_error.as_deref(), Some("bridge not ready"));
         assert!(next.is_some());
-        assert_eq!(next, row.not_before);
+        assert_eq!(next, first.not_before);
+        let second = row(&core, ids[1]).await;
+        assert_eq!(second.state, "pending");
+        assert_eq!(
+            second.last_error.as_deref(),
+            Some("the host gave no answer")
+        );
+    }
+
+    #[tokio::test]
+    async fn notifications_the_host_cannot_show_are_settled() {
+        let (_tmp, core, ids) = seeded(3).await;
+        let next = core
+            .dispatch_notifications(|_| {
+                std::future::ready(vec![
+                    NotificationOutcome::Unavailable("turned off in system settings".into()),
+                    NotificationOutcome::OnScreen,
+                    NotificationOutcome::ShownInSummary,
+                ])
+            })
+            .await
+            .unwrap();
+        assert_eq!(next, None);
+        let off = row(&core, ids[0]).await;
+        assert_eq!(off.state, "suppressed");
+        assert_eq!(
+            off.suppression_reason.as_deref(),
+            Some("turned off in system settings")
+        );
+        let seen = row(&core, ids[1]).await;
+        assert_eq!(
+            seen.suppression_reason.as_deref(),
+            Some("on screen in the app")
+        );
+        let summed = row(&core, ids[2]).await;
+        assert_eq!(summed.state, "delivered");
+        assert!(summed.in_summary);
+
+        // Reading the summed-up mail takes its account's summary back.
+        let message_id = summed.notified_message_id;
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET is_read = 1 WHERE id = ?1",
+                    [message_id],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let stale = core.stale_notifications().await.unwrap();
+        assert_eq!(stale.summaries, vec![1]);
+        assert_eq!(core.notifications_withdrawn(&stale).await.unwrap(), 1);
+        assert!(core.stale_notifications().await.unwrap().is_empty());
+        assert_eq!(row(&core, ids[2]).await.state, "withdrawn");
     }
 }
 

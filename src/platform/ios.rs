@@ -58,7 +58,7 @@ pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::err
         // session that returns the provider's redirect to the app.
         external_urls: crate::ExternalUrlOpener::default()
             .with_authorization(move |url| authorize.authorize(url)),
-        notification_publisher: crate::NotificationPublisher::default(),
+        notifications: None,
         paths: flectar_mail_core::config::Paths::new(
             root.join("Library/Application Support/Flectar"),
             root.join("Library/Caches/Flectar"),

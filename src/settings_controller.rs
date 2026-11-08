@@ -73,7 +73,10 @@ pub(super) fn register_settings_preference_callbacks(
             sound,
             scope.as_str(),
         )) {
-            Ok(()) => app.set_sync_status(UiMessage::plain("Notification preferences saved.")),
+            Ok(()) => {
+                crate::notifications::preferences_changed();
+                app.set_sync_status(UiMessage::plain("Notification preferences saved."));
+            }
             Err(error) => {
                 app.set_sync_status(UiMessage::detail("Could not save notifications: {}", error))
             }

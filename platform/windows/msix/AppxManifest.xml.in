@@ -8,7 +8,9 @@
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap3 uap5 uap10 rescap">
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  IgnorableNamespaces="uap uap3 uap5 uap10 rescap com desktop">
 
   <!-- Package identity reserved in Partner Center (Product management >
        Product identity). These are placeholders until the name is reserved;
@@ -75,6 +77,21 @@
             <uap:Logo>Assets\Square44x44Logo.png</uap:Logo>
           </uap3:Protocol>
         </uap3:Extension>
+        <!-- New-mail notifications: Windows starts the app through this class
+             when a notification or one of its buttons is clicked, also after
+             the app has quit (src/notifications/windows.rs). The package has a
+             class of its own, which would otherwise take over the clicks of an
+             installed copy's notifications. -->
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="flectar-mail.exe" Arguments="--toast-activated" DisplayName="Flectar Mail">
+              <com:Class Id="6D5AB7B0-F5FC-4A63-B767-DB4CE788E699" DisplayName="Flectar Mail notifications" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="6D5AB7B0-F5FC-4A63-B767-DB4CE788E699" />
+        </desktop:Extension>
       </Extensions>
     </Application>
   </Applications>

@@ -12,10 +12,22 @@ use crate::mime::{ParsedBody, ParsedHeaders};
 use crate::models::{Settings, now_ms, roles};
 use rusqlite::Connection;
 
-/// A message older than this never triggers the new-mail chime or a
-/// notification, even if it lands unread, so old mail that a server replays
-/// as new stays silent.
+/// A message older than this never triggers a new-mail notification, even if
+/// it lands unread, so old mail that a server replays as new stays silent.
 pub(crate) const CHIME_RECENT_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// How long before an account's sync started mail may have reached the
+/// server and still count as arriving live, allowing for a server clock that
+/// runs behind this device's.
+const LIVE_SKEW_MS: i64 = 60_000;
+
+/// The server receipt time from which an account's new mail counts as
+/// arriving live, for a sync that started at `started_at`. Earlier mail came
+/// in while Flectar Mail wasn't following the account; catching up with it
+/// stays silent.
+pub(crate) fn live_since(started_at: i64) -> i64 {
+    started_at.saturating_sub(LIVE_SKEW_MS)
+}
 
 /// How a protocol delivered a message.
 pub(crate) struct Delivery<'a> {
@@ -52,10 +64,9 @@ pub(crate) struct Importer {
     incoming_learning_since: i64,
     own_addresses: OwnAddresses,
     thread_ids: Vec<i64>,
-    /// Threads already queued for a desktop notification, so a thread that
-    /// gains several messages at once notifies once.
+    /// Threads already queued for a notification, so a thread that gains
+    /// several messages at once notifies once.
     notified_threads: Vec<i64>,
-    fresh_thread_ids: Vec<i64>,
 }
 
 impl Importer {
@@ -82,7 +93,6 @@ impl Importer {
             own_addresses,
             thread_ids: Vec::new(),
             notified_threads: Vec::new(),
-            fresh_thread_ids: Vec::new(),
         })
     }
 
@@ -218,19 +228,14 @@ impl Importer {
         // keeps delivery independent of any later UI or hydration step.
         if !self.notified_threads.contains(&thread_id) {
             self.notified_threads.push(thread_id);
-            repo::notifications::enqueue(conn, imported.message_id)?;
-        }
-        // The audible chime stays human-only regardless of scope.
-        if chime_worthy(imported.is_automated, &imported.from_email)
-            && !self.fresh_thread_ids.contains(&thread_id)
-        {
+            let audible = chime_worthy(imported.is_automated, &imported.from_email);
+            repo::notifications::enqueue(conn, imported.message_id, audible)?;
             tracing::info!(
                 account_id = self.account_id,
                 thread_id,
-                from = %imported.from_email,
-                "receive: chime-worthy new mail",
+                audible,
+                "receive: queued a new-mail notification",
             );
-            self.fresh_thread_ids.push(thread_id);
         }
         Ok(())
     }
@@ -243,7 +248,7 @@ impl Importer {
 
     /// Resolve each touched thread to a tab now that all of its messages are
     /// in place (see crate::route). Returns every touched thread and the
-    /// threads that gained chime-worthy mail.
+    /// threads that queued a notification.
     pub(crate) fn finish(self, conn: &Connection) -> Result<(Vec<i64>, Vec<i64>)> {
         if self.settings.auto_labels_enabled {
             let splits = repo::splits::list(conn)?;
@@ -256,16 +261,15 @@ impl Importer {
                 )?;
             }
         }
-        Ok((self.thread_ids, self.fresh_thread_ids))
+        Ok((self.thread_ids, self.notified_threads))
     }
 }
 
 /// Whether an arrival may surface as new mail: live, unread, incoming, and
-/// genuinely recent. The desktop-notification scope (Important, all, or
-/// specific tabs) is applied later by the host dispatcher, which can see the
-/// thread's resolved tab; bulk and robot filtering lives in
-/// [`chime_worthy`].
-fn arrival_eligible(
+/// genuinely recent. The notification scope (Important, all, or specific
+/// tabs) is applied later by the dispatcher, which can see the thread's
+/// resolved tab; whether it may play a sound is [`chime_worthy`].
+pub(crate) fn arrival_eligible(
     live: bool,
     is_read: bool,
     is_outgoing: bool,
@@ -275,10 +279,10 @@ fn arrival_eligible(
     live && !is_read && !is_outgoing && now - arrival_ms < CHIME_RECENT_MS
 }
 
-/// Whether a fresh arrival should ring the audible new-mail chime. The chime
-/// stays human-only regardless of the desktop-notification scope, so a
-/// newsletter or monitoring flood never rings the bell every minute.
-fn chime_worthy(is_automated: bool, from_email: &str) -> bool {
+/// Whether a fresh arrival's notification may play the new-mail sound. Sound
+/// stays human-only regardless of the notification scope, so a newsletter or
+/// monitoring flood never rings the bell every minute.
+pub(crate) fn chime_worthy(is_automated: bool, from_email: &str) -> bool {
     !is_automated && !crate::mime::robot_sender(from_email)
 }
 

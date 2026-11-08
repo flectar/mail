@@ -40,7 +40,10 @@ mod memory;
 mod message_appearance;
 mod move_picker;
 mod notifications;
-pub use notifications::{NewMailNotification, NotificationPublisher};
+pub use notifications::{
+    Act, Alert, AlertId, Availability, Failure, FixedWords, HostFuture, NewMailNotification,
+    NotificationHost, Response, Route, parse_payload, payload, respond,
+};
 mod number_format;
 mod oauth_browser;
 #[cfg(test)]
@@ -1163,6 +1166,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
     date_format::reload(app);
+    notifications::ui::language_changed(app);
 }
 
 impl InboxState {
@@ -1424,8 +1428,10 @@ impl InboxState {
 pub struct PlatformContext {
     /// Host URL dispatch for mail links and browser-based authorization.
     pub external_urls: ExternalUrlOpener,
-    /// Host publisher for new-mail system notifications.
-    pub notification_publisher: NotificationPublisher,
+    /// The system's notification service for new mail; `None` where the host
+    /// has none. Desktop builds leave it empty: `run` creates the platform's
+    /// own once this process owns the profile.
+    pub notifications: Option<Arc<dyn NotificationHost>>,
     pub paths: Paths,
     pub documents: Arc<dyn documents::DocumentProvider>,
     pub credentials: flectar_mail_core::accounts::credentials::CredentialStoreHandle,
@@ -1440,7 +1446,7 @@ impl PlatformContext {
         Ok(Self {
             paths,
             external_urls: ExternalUrlOpener::default(),
-            notification_publisher: NotificationPublisher::default(),
+            notifications: None,
             documents: documents::default_provider(),
             credentials,
             oauth_redirects: Arc::new(
@@ -1461,7 +1467,7 @@ impl PlatformContext {
         Self {
             paths: Paths::new(data_root.join("data"), cache_dir),
             external_urls: ExternalUrlOpener::default(),
-            notification_publisher: NotificationPublisher::default(),
+            notifications: None,
             documents,
             credentials,
             oauth_redirects,
@@ -1717,6 +1723,15 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
             }
         }
     };
+    // Set up by the process that owns the profile, before any window: Windows
+    // takes the app's identity before the first one, and macOS needs the
+    // notification delegate before the application finishes launching, so a
+    // click that launched it reaches the app.
+    #[cfg(desktop)]
+    let platform = PlatformContext {
+        notifications: platform.notifications.clone().or_else(notifications::host),
+        ..platform
+    };
 
     let renderer_preference_path = platform.paths.data_dir.join("renderer.json");
     let tabs_path = platform.paths.data_dir.join("tabs.json");
@@ -1810,9 +1825,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // attachments, account backups, database snapshots) stay available.
     app.set_document_apis_supported(true);
     // A sign-in launch stays in the tray only when the user keeps the app
-    // there and a tray can actually show it; otherwise the window opens.
+    // there and a tray can actually show it; otherwise the window opens. So
+    // does a launch for a click on a notification: a button needs no window,
+    // and a click on the notification itself shows it.
     #[cfg(desktop)]
-    let start_hidden = background_launch
+    let start_hidden = (background_launch || notifications::launched_for_click())
         && startup_presentation.close_to_tray
         && window_controller::tray_host_available(&runtime);
     #[cfg(mobile)]
@@ -4321,7 +4338,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     let startup_runtime = runtime.clone();
     let startup_pending_core_updates = Arc::clone(&pending_core_updates);
     let startup_core_wake = core_updates_wake.clone();
-    let startup_notification_publisher = platform.notification_publisher.clone();
+    let startup_notification_host = platform.notifications.clone();
     let startup_app = app.as_weak();
     let startup_paths_for_ui = platform.paths.clone();
     let startup_tray = tray.as_ref().map(|tray| tray.as_weak());
@@ -4504,7 +4521,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
                     notifications::spawn_dispatcher(
                         &startup_runtime,
                         core.file_core(),
-                        startup_notification_publisher.clone(),
+                        startup_notification_host.clone(),
                     );
                     if !startup_benchmark_disable_background {
                         core.notify_ui_ready();
@@ -6298,6 +6315,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
     #[cfg(target_os = "macos")]
     mailto_links::receive_from_macos(&app);
+    notifications::ui::attach(&app, &state, &runtime, platform.notifications.clone());
 
     let app_weak = app.as_weak();
     let state_for_message_compose = Rc::clone(&state);

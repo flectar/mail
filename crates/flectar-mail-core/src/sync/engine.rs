@@ -2041,13 +2041,13 @@ async fn sync_folder(
                 if !thread_ids.is_empty() {
                     ctx.bus.emit(CoreEvent::MailUpdated { thread_ids });
                 }
-                // MailNew drives the chime + desktop notification, so it only
-                // fires for genuinely fresh arrivals: unread, incoming, recent,
-                // and never during the launch catch-up cycle (notify=false).
-                // New-to-the-folder UIDs that are our own sends, already read
-                // on another device, or moved back into the inbox (unarchive /
-                // unsnooze) refresh the list via MailUpdated above but stay
-                // silent.
+                // MailNew wakes the notification dispatcher, so it only fires
+                // for threads that queued a notification: genuinely fresh
+                // arrivals that are unread, incoming, recent, and past the
+                // launch catch-up. New-to-the-folder UIDs that are our own
+                // sends, already read on another device, or moved back into the
+                // inbox (unarchive / unsnooze) refresh the list via MailUpdated
+                // above but stay silent.
                 if is_inbox && !fresh.is_empty() {
                     ctx.bus.emit(CoreEvent::MailNew {
                         account_id,
@@ -2681,8 +2681,8 @@ enum NewHeaders {
 
 /// Insert fetched headers. Returns `(all, fresh)` thread ids: `all` for list
 /// refreshes, of the newly inserted messages and of those that moved to the
-/// folder of their server copy, `fresh` only for threads that gained an
-/// unread, incoming, recent message (chime/notification-worthy).
+/// folder of their server copy, `fresh` only for threads that queued a
+/// notification for an unread, incoming, recent message.
 async fn store_headers(
     ctx: &SyncCtx,
     config: &AccountConfig,
