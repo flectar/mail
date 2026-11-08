@@ -1,8 +1,8 @@
 diff --git a/crates/blitz-dom/Cargo.lock b/crates/blitz-dom/Cargo.lock
-index 4ff6834..b17bc6d 100644
+index 6ef2466..01a7823 100644
 --- a/crates/blitz-dom/Cargo.lock
 +++ b/crates/blitz-dom/Cargo.lock
-@@ -105,6 +105,7 @@ dependencies = [
+@@ -102,6 +102,7 @@ dependencies = [
   "icu_properties",
   "icu_segmenter",
   "image",
@@ -10,7 +10,7 @@ index 4ff6834..b17bc6d 100644
   "keyboard-types",
   "kurbo",
   "linebender_resource_handle",
-@@ -837,6 +838,12 @@ version = "1.0.18"
+@@ -834,6 +835,12 @@ version = "1.0.18"
  source = "registry+https://github.com/rust-lang/crates.io-index"
  checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
  
@@ -24,7 +24,7 @@ index 4ff6834..b17bc6d 100644
  name = "js-sys"
  version = "0.3.106"
 diff --git a/crates/blitz-dom/Cargo.toml b/crates/blitz-dom/Cargo.toml
-index 6a8b9c9..682831a 100644
+index 27776f7..3778ae9 100644
 --- a/crates/blitz-dom/Cargo.toml
 +++ b/crates/blitz-dom/Cargo.toml
 @@ -134,6 +134,10 @@ default-features = false
@@ -36,7 +36,7 @@ index 6a8b9c9..682831a 100644
 +default-features = false
 +
  [dependencies.keyboard-types]
- version = "0.7"
+ version = "0.8"
  
 @@ -243,3 +247,8 @@ optional = true
  [target.'cfg(any(target_vendor = "apple"))'.dependencies.objc2]
@@ -69,10 +69,10 @@ index a36fdfa..a7146d9 100644
 +[package.metadata.cargo-machete]
 +ignored = ["objc2"]
 diff --git a/crates/blitz-paint/Cargo.lock b/crates/blitz-paint/Cargo.lock
-index 706dc5c..e9135d2 100644
+index 551dabe..a04fdc0 100644
 --- a/crates/blitz-paint/Cargo.lock
 +++ b/crates/blitz-paint/Cargo.lock
-@@ -149,7 +149,6 @@ dependencies = [
+@@ -146,7 +146,6 @@ dependencies = [
   "blitz-traits",
   "bytemuck",
   "color",
@@ -80,11 +80,27 @@ index 706dc5c..e9135d2 100644
   "kurbo",
   "parley",
   "peniko",
+@@ -155,7 +154,6 @@ dependencies = [
+  "stylo",
+  "taffy",
+  "tracing",
+- "usvg",
+ ]
+ 
+ [[package]]
 diff --git a/crates/blitz-paint/Cargo.toml b/crates/blitz-paint/Cargo.toml
-index 13773b7..8828735 100644
+index 4311259..eebef17 100644
 --- a/crates/blitz-paint/Cargo.toml
 +++ b/crates/blitz-paint/Cargo.toml
-@@ -67,9 +67,6 @@ version = "1"
+@@ -37,7 +37,6 @@ font-embolden = []
+ scrollbars = ["blitz-dom/scrollbars"]
+ svg = [
+     "dep:anyrender_svg",
+-    "dep:usvg",
+     "blitz-dom/svg",
+ ]
+ tracing = ["dep:tracing"]
+@@ -67,9 +66,6 @@ version = "1"
  [dependencies.color]
  version = "0.3"
  
@@ -94,10 +110,27 @@ index 13773b7..8828735 100644
  [dependencies.kurbo]
  version = "0.13.1"
  
+@@ -113,7 +109,3 @@ default-features = false
+ [dependencies.tracing]
+ version = "0.1.40"
+ optional = true
+-
+-[dependencies.usvg]
+-version = "0.48.1"
+-optional = true
 diff --git a/crates/blitz-paint/Cargo.toml.orig b/crates/blitz-paint/Cargo.toml.orig
-index 7fb7d04..d48fee2 100644
+index 7fb7d04..588bc65 100644
 --- a/crates/blitz-paint/Cargo.toml.orig
 +++ b/crates/blitz-paint/Cargo.toml.orig
+@@ -13,7 +13,7 @@ rust-version.workspace = true
+ [features]
+ default = ["svg"]
+ tracing = ["dep:tracing"]
+-svg = ["dep:anyrender_svg", "dep:usvg", "blitz-dom/svg"]
++svg = ["dep:anyrender_svg", "blitz-dom/svg"]
+ custom-widget = ["blitz-dom/custom-widget"]
+ font-embolden = []
+ apple-font-embolden = []
 @@ -31,7 +31,6 @@ blitz-dom = { workspace = true }
  
  # Servo dependencies
@@ -106,3 +139,11 @@ index 7fb7d04..d48fee2 100644
  
  # DioxusLabs dependencies
  taffy = { workspace = true }
+@@ -42,7 +41,6 @@ skrifa = { workspace = true }
+ color = { workspace = true }
+ peniko = { workspace = true }
+ kurbo = { workspace = true }
+-usvg = { workspace = true, optional = true }
+ 
+ # Other dependencies
+ bytemuck = { workspace = true }

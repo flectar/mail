@@ -70,10 +70,10 @@ anyrender_vello = { version = "0.15", optional = true }
 anyrender_vello_cpu = "0.18"
 # Email templates use CSS floats and legacy table/image align attributes.
 # Keep float layout enabled on every platform, including minimal builds.
-blitz-dom = { version = "=0.3.0-beta.3", features = ["floats"] }
-blitz-html = "=0.3.0-beta.3"
-blitz-paint = "=0.3.0-beta.3"
-blitz-traits = "=0.3.0-beta.3"
+blitz-dom = { version = "=0.3.0-beta.4", features = ["floats"] }
+blitz-html = "=0.3.0-beta.4"
+blitz-paint = "=0.3.0-beta.4"
+blitz-traits = "=0.3.0-beta.4"
 base64 = "0.22"
 percent-encoding = "2"
 data-url = "0.3"
@@ -92,14 +92,14 @@ vello = { version = "0.11", optional = true }
 # This native shell currently exposes keyword/FTS search, not local semantic
 # search. Do not link Candle, tokenizers, or Hugging Face into every AppImage.
 flectar-mail-core = { path = "crates/flectar-mail-core", default-features = false }
-# Slint uses Fontique 0.11; Blitz beta.3 uses 0.12. Both must load
+# Slint uses Fontique 0.11; Blitz beta.4 uses 0.12. Both must load
 # Fontconfig dynamically so the rendering stacks agree on the native ABI.
 fontique_0_11 = { package = "fontique", version = "=0.11.1", features = ["fontconfig-dlopen"] }
 fontique_0_12 = { package = "fontique", version = "=0.12.0", features = ["fontconfig-dlopen"] }
 chrono.workspace = true
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
-keyboard-types = "0.7"
+keyboard-types = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2"] }
 sha2 = "0.10"
 serde.workspace = true

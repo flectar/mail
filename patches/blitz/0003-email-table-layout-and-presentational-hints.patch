@@ -1887,7 +1887,7 @@ index 30b96f0..607eb32 100644
 +    }
 +}
 diff --git a/crates/blitz-dom/src/lib.rs b/crates/blitz-dom/src/lib.rs
-index 792aaf1..e3fc3f0 100644
+index fcf5489..019283f 100644
 --- a/crates/blitz-dom/src/lib.rs
 +++ b/crates/blitz-dom/src/lib.rs
 @@ -52,6 +52,7 @@ mod iframe;
@@ -1906,7 +1906,7 @@ index 792aaf1..e3fc3f0 100644
  #[cfg(feature = "custom-widget")]
  pub use crate::node::Widget;
  
-@@ -156,3 +158,6 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
+@@ -158,3 +160,6 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
      }
      ctx
  }

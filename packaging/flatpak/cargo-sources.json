@@ -808,27 +808,27 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/blitz-html/blitz-html-0.3.0-beta.3.crate",
-        "sha256": "0bf860f5757da5c14a2cb986987d2be392e9abc9e2a42d815a699649f08a7cee",
-        "dest": "cargo/vendor/blitz-html-0.3.0-beta.3"
+        "url": "https://static.crates.io/crates/blitz-html/blitz-html-0.3.0-beta.4.crate",
+        "sha256": "eddd638e05f3f3efb9f2d37f0406e7834ea023727e1678524488aa70eb639615",
+        "dest": "cargo/vendor/blitz-html-0.3.0-beta.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"0bf860f5757da5c14a2cb986987d2be392e9abc9e2a42d815a699649f08a7cee\", \"files\": {}}",
-        "dest": "cargo/vendor/blitz-html-0.3.0-beta.3",
+        "contents": "{\"package\": \"eddd638e05f3f3efb9f2d37f0406e7834ea023727e1678524488aa70eb639615\", \"files\": {}}",
+        "dest": "cargo/vendor/blitz-html-0.3.0-beta.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/blitz-traits/blitz-traits-0.3.0-beta.3.crate",
-        "sha256": "61b6c502871a565bb274ddead6d08e33af62cacf88ff0e2557698fdaf24dcaf0",
-        "dest": "cargo/vendor/blitz-traits-0.3.0-beta.3"
+        "url": "https://static.crates.io/crates/blitz-traits/blitz-traits-0.3.0-beta.4.crate",
+        "sha256": "d339c3ff7fe8bed623e27695a4c15dd1ec8faa9bf9158b7475bf180280e4018c",
+        "dest": "cargo/vendor/blitz-traits-0.3.0-beta.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"61b6c502871a565bb274ddead6d08e33af62cacf88ff0e2557698fdaf24dcaf0\", \"files\": {}}",
-        "dest": "cargo/vendor/blitz-traits-0.3.0-beta.3",
+        "contents": "{\"package\": \"d339c3ff7fe8bed623e27695a4c15dd1ec8faa9bf9158b7475bf180280e4018c\", \"files\": {}}",
+        "dest": "cargo/vendor/blitz-traits-0.3.0-beta.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -4703,6 +4703,19 @@
         "type": "inline",
         "contents": "{\"package\": \"b750dcadc39a09dbadd74e118f6dd6598df77fa01df0cfcdc52c28dece74528a\", \"files\": {}}",
         "dest": "cargo/vendor/keyboard-types-0.7.0",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/keyboard-types/keyboard-types-0.8.3.crate",
+        "sha256": "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d",
+        "dest": "cargo/vendor/keyboard-types-0.8.3"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d\", \"files\": {}}",
+        "dest": "cargo/vendor/keyboard-types-0.8.3",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -8829,14 +8842,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/stylo_taffy/stylo_taffy-0.3.0-beta.3.crate",
-        "sha256": "58d910649e40ac76167e51da4692180beadba181581b26d501024a132772f5a3",
-        "dest": "cargo/vendor/stylo_taffy-0.3.0-beta.3"
+        "url": "https://static.crates.io/crates/stylo_taffy/stylo_taffy-0.3.0-beta.4.crate",
+        "sha256": "3d932deb3145f9e1c4159d09237f7999a29632fba9125896abb364dab080e0c0",
+        "dest": "cargo/vendor/stylo_taffy-0.3.0-beta.4"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"58d910649e40ac76167e51da4692180beadba181581b26d501024a132772f5a3\", \"files\": {}}",
-        "dest": "cargo/vendor/stylo_taffy-0.3.0-beta.3",
+        "contents": "{\"package\": \"3d932deb3145f9e1c4159d09237f7999a29632fba9125896abb364dab080e0c0\", \"files\": {}}",
+        "dest": "cargo/vendor/stylo_taffy-0.3.0-beta.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {

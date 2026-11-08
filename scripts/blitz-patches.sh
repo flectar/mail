@@ -194,17 +194,19 @@ verify_manifest_wiring() {
             return 1
         fi
     done
-    for requirement in \
-        'blitz-dom = { path = "../../crates/blitz-dom" }' \
-        'blitz-paint = { path = "../../crates/blitz-paint" }'; do
-        if ! grep -Fqx "$requirement" "$REPO_ROOT/platform/android/Cargo.toml"; then
-            printf 'Android Cargo.toml must contain: %s\n' "$requirement" >&2
-            return 1
-        fi
+    for manifest in platform/android/Cargo.toml platform/ohos/Cargo.toml; do
+        for requirement in \
+            'blitz-dom = { path = "../../crates/blitz-dom" }' \
+            'blitz-paint = { path = "../../crates/blitz-paint" }'; do
+            if ! grep -Fqx "$requirement" "$REPO_ROOT/$manifest"; then
+                printf '%s must contain: %s\n' "$manifest" "$requirement" >&2
+                return 1
+            fi
+        done
     done
 
     # The benchmark is part of the renderer's compatibility surface too, and
-    # Android resolves a separate graph. Do not let either silently drift.
+    # Android and OpenHarmony resolve separate graphs. Do not let any drift.
     python3 - "$REPO_ROOT" "$version" <<'PY'
 from pathlib import Path
 import json
@@ -223,7 +225,7 @@ for manifest in ("Cargo.toml", "crates/renderer-probe/Cargo.toml"):
     if "floats" not in dependencies["blitz-dom"].get("features", []):
         raise SystemExit(f"{manifest}: email layout requires Blitz floats")
 
-for lockfile in ("Cargo.lock", "platform/android/Cargo.lock"):
+for lockfile in ("Cargo.lock", "platform/android/Cargo.lock", "platform/ohos/Cargo.lock"):
     packages = tomllib.loads((root / lockfile).read_text())["package"]
     for crate in (*crates, "stylo_taffy"):
         matches = [package for package in packages if package["name"] == crate]

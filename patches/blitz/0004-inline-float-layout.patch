@@ -16,7 +16,7 @@ index a1b07ff..777cc97 100644
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 226243b..090e49a 100644
+index 1f98570..00a42e8 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -52,7 +52,7 @@ index 226243b..090e49a 100644
  
              #[cfg(feature = "floats")]
              let is_floated = style.float().is_floated();
-@@ -512,7 +518,7 @@ impl LayoutPassState<'_> {
+@@ -520,7 +526,7 @@ impl LayoutPassState<'_> {
                                      style.float().is_floated(),
                                      style
                                          .margin()
@@ -61,7 +61,7 @@ index 226243b..090e49a 100644
                                  )
                              };
  
-@@ -548,7 +554,7 @@ impl LayoutPassState<'_> {
+@@ -556,7 +562,7 @@ impl LayoutPassState<'_> {
                                      style.clear(),
                                      style
                                          .margin()
@@ -70,7 +70,7 @@ index 226243b..090e49a 100644
                                  )
                              };
  
-@@ -707,9 +713,12 @@ impl LayoutPassState<'_> {
+@@ -715,9 +721,12 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
@@ -86,7 +86,7 @@ index 226243b..090e49a 100644
                      }
                      YieldData::InlineBoxBreak(box_break_data) => {
                          let state = breaker.state_mut();
-@@ -728,7 +737,7 @@ impl LayoutPassState<'_> {
+@@ -736,7 +745,7 @@ impl LayoutPassState<'_> {
                                  style.clear(),
                                  style
                                      .margin()
