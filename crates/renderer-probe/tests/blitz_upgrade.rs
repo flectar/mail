@@ -262,3 +262,89 @@ fn float_slots_never_exceed_the_line_breaker_width() {
     );
     assert!(node(&doc, "h2").final_layout().size.width.is_finite());
 }
+
+fn decode_limits() -> blitz_dom::net::ImageDecodeLimits {
+    blitz_dom::net::ImageDecodeLimits {
+        max_source_dimension: 4096,
+        max_source_pixels: 8 * 1024 * 1024,
+        max_jpeg_source_dimension: 16_384,
+        max_jpeg_source_pixels: 64 * 1024 * 1024,
+        max_alloc: 32 * 1024 * 1024,
+        target_dimension: 2048,
+    }
+}
+
+fn encoded(format: image::ImageFormat, image: image::DynamicImage) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut bytes, format).unwrap();
+    bytes.into_inner()
+}
+
+#[test]
+fn large_jpegs_keep_the_target_resolution() {
+    // Halving this JPEG would leave 1250 px. It fits the allocation limit at
+    // full size, so it is decoded whole and reduced to exactly the target.
+    let jpeg = encoded(
+        image::ImageFormat::Jpeg,
+        image::DynamicImage::new_rgb8(2500, 100),
+    );
+    let decoded = decode_limits().decode(&jpeg).unwrap();
+    assert_eq!((decoded.width, decoded.height), (2500, 100));
+    assert_eq!(decoded.pixel_width, 2048);
+}
+
+#[test]
+fn large_progressive_jpegs_are_refused() {
+    // Progressive scans keep full-resolution coefficients at any output scale,
+    // so they get the generic pixel limit. Only the frame header matters here.
+    let mut jpeg = encoded(
+        image::ImageFormat::Jpeg,
+        image::DynamicImage::new_rgb8(16, 16),
+    );
+    let sof = jpeg
+        .windows(2)
+        .position(|marker| marker == [0xFF, 0xC0])
+        .unwrap();
+    jpeg[sof + 1] = 0xC2;
+    jpeg[sof + 5..sof + 7].copy_from_slice(&3000u16.to_be_bytes());
+    jpeg[sof + 7..sof + 9].copy_from_slice(&4000u16.to_be_bytes());
+    let error = decode_limits().decode(&jpeg).unwrap_err();
+    assert!(error.contains("Progressive"), "{error}");
+}
+
+#[test]
+fn unscaled_jpegs_must_fit_the_allocation_limit() {
+    let jpeg = encoded(
+        image::ImageFormat::Jpeg,
+        image::DynamicImage::new_rgb8(64, 64),
+    );
+    let limits = blitz_dom::net::ImageDecodeLimits {
+        max_alloc: 1024,
+        ..decode_limits()
+    };
+    assert!(limits.decode(&jpeg).is_err());
+}
+
+#[test]
+fn translucent_images_shrink_without_dark_fringes() {
+    // Columns alternate between transparent black and opaque white. Averaging
+    // premultiplied colour keeps the visible half white.
+    let pixels = image::RgbaImage::from_fn(4096, 2, |x, _| {
+        if x % 2 == 0 {
+            image::Rgba([0, 0, 0, 0])
+        } else {
+            image::Rgba([255, 255, 255, 255])
+        }
+    });
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::ImageRgba8(pixels),
+    );
+    let decoded = decode_limits().decode(&png).unwrap();
+    assert_eq!(decoded.pixel_width, 2048);
+    let first = &decoded.data.data()[..4];
+    assert!(
+        first[0] > 250 && (100..156).contains(&first[3]),
+        "{first:?}"
+    );
+}
