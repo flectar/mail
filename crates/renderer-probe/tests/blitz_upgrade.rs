@@ -211,3 +211,43 @@ fn scrolled_offscreen_elements_are_not_painted() {
         assert!(fills <= 6, "scale {scale}: {fills} fills");
     }
 }
+
+fn solid_fills(scene: &anyrender::Scene) -> Vec<[u8; 3]> {
+    scene
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            anyrender::recording::RenderCommand::Fill(fill) => match &fill.brush {
+                anyrender::Paint::Solid(color) => {
+                    let color = color.to_rgba8();
+                    Some([color.r, color.g, color.b])
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn inline_backgrounds_stop_at_the_enclosing_block() {
+    // Text beside a block child is wrapped in an anonymous inline root, but its
+    // runs keep their DOM parents. The walk must stop at the first block instead
+    // of painting that block's background again behind the text, while every
+    // enclosing inline background still paints, outermost first.
+    let mut doc = document(
+        "<div style='background:rgb(1,2,3)'>Hello <b>world</b>
+         <a style='background:rgb(4,5,6)'><span style='background:rgba(7,8,9,0.5)'>Go</span></a>
+         <p>Block child</p></div>",
+    );
+    let mut scene = anyrender::Scene::default();
+    blitz_paint::paint_scene(&mut scene, &mut doc, 1.0, 400, 300, 0, 0);
+    let fills = solid_fills(&scene);
+    let count = |rgb: [u8; 3]| fills.iter().filter(|fill| **fill == rgb).count();
+    assert_eq!(count([1, 2, 3]), 1, "{fills:?}");
+    let link: Vec<_> = fills
+        .iter()
+        .filter(|fill| [[4, 5, 6], [7, 8, 9]].contains(*fill))
+        .collect();
+    assert_eq!(link, [&[4, 5, 6], &[7, 8, 9]], "{fills:?}");
+}
