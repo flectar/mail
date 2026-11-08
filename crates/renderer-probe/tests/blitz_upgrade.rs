@@ -882,3 +882,20 @@ fn elements_with_the_same_lang_share_styles() {
     let b = node(&doc, "#b").primary_styles().unwrap();
     assert!(std::ptr::eq(&**a, &**b));
 }
+
+#[test]
+fn copied_text_leaves_out_hidden_text() {
+    // Like browsers, a copy skips `visibility: hidden` text, as it does
+    // `display: none` text.
+    let mut doc = document(
+        "<p id='a'>One <span style='visibility:hidden'>secret</span> two</p>
+         <p id='b'>end <span style='visibility:hidden'>x<b style='visibility:visible'>shown</b></span></p>",
+    );
+    let first = doc.query_selector("#a").unwrap().unwrap();
+    let last = doc.query_selector("#b").unwrap().unwrap();
+    doc.set_text_selection(first, 0, last, "end xshown".len());
+    assert_eq!(
+        doc.get_selected_text().as_deref(),
+        Some("One  two\n\nend shown")
+    );
+}

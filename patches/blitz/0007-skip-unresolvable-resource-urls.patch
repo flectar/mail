@@ -1,5 +1,5 @@
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index cb62be6..ab838d1 100644
+index 53ad0d0..2677822 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
 @@ -1151,13 +1151,8 @@ impl BaseDocument {

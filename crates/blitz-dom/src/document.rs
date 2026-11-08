@@ -2747,16 +2747,17 @@ impl BaseDocument {
             let element_data = node.element_data()?;
             let inline_layout = element_data.inline_layout_data.as_ref()?;
 
-            let Some(text) = inline_layout.text.get(*start..*end) else {
+            if inline_layout.text.get(*start..*end).is_none() {
                 continue;
-            };
+            }
+            let text = self.visible_text(inline_layout, *start..*end);
             if text.is_empty() {
                 continue;
             }
             if let Some(previous) = previous {
                 result.push_str(self.selection_separator(previous, *node_id));
             }
-            result.push_str(text);
+            result.push_str(&text);
             previous = Some(*node_id);
         }
 
@@ -2765,6 +2766,62 @@ impl BaseDocument {
         } else {
             Some(result)
         }
+    }
+
+    /// The text of `range` in an inline formatting context, leaving out text
+    /// whose `visibility` hides it, as browsers do when copying.
+    fn visible_text(
+        &self,
+        inline_layout: &crate::node::TextLayout,
+        range: std::ops::Range<usize>,
+    ) -> String {
+        use style::computed_values::visibility::T as Visibility;
+        let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
+        let mut last: Option<(NodeId, bool)> = None;
+        for line in inline_layout.layout.lines() {
+            for run in line.runs() {
+                for cluster in run.clusters() {
+                    let text_range = cluster.text_range();
+                    if text_range.end <= range.start || range.end <= text_range.start {
+                        continue;
+                    }
+                    // A run can mix styles, so each cluster is checked.
+                    let id = cluster.style().brush.id;
+                    let is_hidden = match last {
+                        Some((last_id, is_hidden)) if last_id == id => is_hidden,
+                        _ => {
+                            let is_hidden = self
+                                .get_node(id)
+                                .and_then(|node| node.primary_styles())
+                                .is_some_and(|styles| {
+                                    styles.get_inherited_box().visibility != Visibility::Visible
+                                });
+                            last = Some((id, is_hidden));
+                            is_hidden
+                        }
+                    };
+                    if is_hidden {
+                        hidden
+                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
+                    }
+                }
+            }
+        }
+        hidden.sort_by_key(|hidden| hidden.start);
+
+        let text = &inline_layout.text;
+        let mut visible = String::new();
+        let mut cursor = range.start;
+        for hidden in hidden {
+            if hidden.start > cursor {
+                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
+            }
+            cursor = cursor.max(hidden.end);
+        }
+        if cursor < range.end {
+            visible.push_str(text.get(cursor..range.end).unwrap_or_default());
+        }
+        visible
     }
 
     /// What separates the selected text of two consecutive inline formatting

@@ -20,7 +20,7 @@ index 4686b12..f6ad6a0 100644
              base_url: None,
              ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 96d7ed0..cb62be6 100644
+index 96d7ed0..53ad0d0 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
 @@ -225,7 +225,63 @@ pub enum DocumentEvent {
@@ -189,7 +189,7 @@ index 96d7ed0..cb62be6 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2636,19 +2745,23 @@ impl BaseDocument {
+@@ -2636,19 +2745,24 @@ impl BaseDocument {
          }
  
          let mut result = String::new();
@@ -200,28 +200,85 @@ index 96d7ed0..cb62be6 100644
              let inline_layout = element_data.inline_layout_data.as_ref()?;
  
 -            if *end > inline_layout.text.len() {
-+            let Some(text) = inline_layout.text.get(*start..*end) else {
-+                continue;
-+            };
-+            if text.is_empty() {
++            if inline_layout.text.get(*start..*end).is_none() {
                  continue;
              }
 -
 -            if !result.is_empty() {
 -                result.push(' ');
-+            if let Some(previous) = previous {
-+                result.push_str(self.selection_separator(previous, *node_id));
++            let text = self.visible_text(inline_layout, *start..*end);
++            if text.is_empty() {
++                continue;
              }
 -            result.push_str(&inline_layout.text[*start..*end]);
-+            result.push_str(text);
++            if let Some(previous) = previous {
++                result.push_str(self.selection_separator(previous, *node_id));
++            }
++            result.push_str(&text);
 +            previous = Some(*node_id);
          }
  
          if result.is_empty() {
-@@ -2658,6 +2771,42 @@ impl BaseDocument {
+@@ -2658,6 +2772,98 @@ impl BaseDocument {
          }
      }
  
++    /// The text of `range` in an inline formatting context, leaving out text
++    /// whose `visibility` hides it, as browsers do when copying.
++    fn visible_text(
++        &self,
++        inline_layout: &crate::node::TextLayout,
++        range: std::ops::Range<usize>,
++    ) -> String {
++        use style::computed_values::visibility::T as Visibility;
++        let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
++        let mut last: Option<(NodeId, bool)> = None;
++        for line in inline_layout.layout.lines() {
++            for run in line.runs() {
++                for cluster in run.clusters() {
++                    let text_range = cluster.text_range();
++                    if text_range.end <= range.start || range.end <= text_range.start {
++                        continue;
++                    }
++                    // A run can mix styles, so each cluster is checked.
++                    let id = cluster.style().brush.id;
++                    let is_hidden = match last {
++                        Some((last_id, is_hidden)) if last_id == id => is_hidden,
++                        _ => {
++                            let is_hidden = self
++                                .get_node(id)
++                                .and_then(|node| node.primary_styles())
++                                .is_some_and(|styles| {
++                                    styles.get_inherited_box().visibility != Visibility::Visible
++                                });
++                            last = Some((id, is_hidden));
++                            is_hidden
++                        }
++                    };
++                    if is_hidden {
++                        hidden
++                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
++                    }
++                }
++            }
++        }
++        hidden.sort_by_key(|hidden| hidden.start);
++
++        let text = &inline_layout.text;
++        let mut visible = String::new();
++        let mut cursor = range.start;
++        for hidden in hidden {
++            if hidden.start > cursor {
++                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
++            }
++            cursor = cursor.max(hidden.end);
++        }
++        if cursor < range.end {
++            visible.push_str(text.get(cursor..range.end).unwrap_or_default());
++        }
++        visible
++    }
++
 +    /// What separates the selected text of two consecutive inline formatting
 +    /// contexts, as `innerText` and browsers' `Selection.toString()` do: a tab
 +    /// between cells of one row, a blank line around a paragraph, and a line
