@@ -7,7 +7,7 @@ use flectar_mail_core::{
     Core,
     accounts::credentials::{CredentialStore, Slot},
     config::Paths,
-    device_sync::{DeviceSyncState, PairingEvent, SyncBillingStatus},
+    device_sync::{DeviceSyncState, PairingEvent, SyncBillingStatus, SyncCodeOutcome},
     error::{CoreError, Result},
     events::CoreEvent,
     models::{
@@ -59,7 +59,22 @@ impl CredentialStore for MemoryCredentials {
 struct Server {
     child: Child,
     url: String,
-    _dir: tempfile::TempDir,
+    binary: String,
+    dir: tempfile::TempDir,
+}
+
+impl Server {
+    /// A code from the server's own command, as whoever runs it makes one.
+    fn create_code(&self) -> String {
+        let output = Command::new(&self.binary)
+            .args(["codes", "create", "--database"])
+            .arg(self.dir.path().join("sync.db"))
+            .env("RUST_LOG", "warn")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
+    }
 }
 
 impl Drop for Server {
@@ -85,7 +100,7 @@ async fn start_server_with(env: &[(&str, &str)]) -> Option<Server> {
     };
     let dir = tempfile::tempdir().unwrap();
     let url = format!("http://127.0.0.1:{port}");
-    let child = Command::new(binary)
+    let child = Command::new(&binary)
         .env("FLECTAR_MAIL_SYNC_PUBLIC_URL", &url)
         .env("FLECTAR_MAIL_SYNC_LISTEN", format!("127.0.0.1:{port}"))
         .env("FLECTAR_MAIL_SYNC_DATABASE", dir.path().join("sync.db"))
@@ -96,7 +111,8 @@ async fn start_server_with(env: &[(&str, &str)]) -> Option<Server> {
     let server = Server {
         child,
         url,
-        _dir: dir,
+        binary,
+        dir,
     };
     for _ in 0..100 {
         if reqwest::get(format!("{}/healthz", server.url))
@@ -348,6 +364,65 @@ async fn uploads_wait_for_payment_on_a_server_that_charges() {
     let billing = status.billing.expect("the status says what the group pays");
     assert_eq!(billing.status, SyncBillingStatus::Expired);
     assert!(billing.trial_ends_at.is_some());
+}
+
+#[tokio::test]
+async fn a_code_makes_syncing_free_for_a_year() {
+    let Some(server) = start_server_with(&[
+        ("FLECTAR_MAIL_SYNC_STRIPE_SECRET_KEY", "sk_test_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_WEBHOOK_SECRET", "whsec_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_PRICE_MONTHLY", "price_monthly"),
+        (
+            "FLECTAR_MAIL_SYNC_BILLING_RETURN_URL",
+            "https://flectar.test/sync",
+        ),
+        ("FLECTAR_MAIL_SYNC_TRIAL_DAYS", "0"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_API", "http://127.0.0.1:9"),
+    ])
+    .await
+    else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(dir.path()).await;
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    assert_eq!(
+        laptop.device_sync_status().state,
+        DeviceSyncState::PaymentRequired
+    );
+
+    // Codes made while the server runs work at once, however they're typed.
+    let code = server.create_code();
+    let typed = code.to_lowercase().replace('-', " ");
+    assert_eq!(
+        laptop.device_sync_redeem_code(typed).await.unwrap(),
+        SyncCodeOutcome::Redeemed
+    );
+    let billing = laptop.device_sync_status().billing.unwrap();
+    assert_eq!(billing.status, SyncBillingStatus::Granted);
+    let year_from_now = now_ms() + 365 * 24 * 60 * 60 * 1000;
+    let free_until = billing.free_until.unwrap();
+    assert!((year_from_now - 60_000..=year_from_now).contains(&free_until));
+
+    // The changes that waited upload now.
+    assert!(laptop.device_sync_run().await.unwrap());
+    assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Idle);
+
+    assert_eq!(
+        laptop.device_sync_redeem_code(code).await.unwrap(),
+        SyncCodeOutcome::Used
+    );
+    assert_eq!(
+        laptop
+            .device_sync_redeem_code("0000-0000-0000-0000".into())
+            .await
+            .unwrap(),
+        SyncCodeOutcome::Unknown
+    );
 }
 
 /// The state and due time of a device's send of its scheduled draft.

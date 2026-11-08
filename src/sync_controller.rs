@@ -16,7 +16,7 @@ use chrono::{Datelike, Timelike};
 use flectar_mail_core::Core;
 use flectar_mail_core::device_sync::{
     DeviceSyncState, DeviceSyncStatus, PairingCode, PairingEvent, SyncBilling, SyncBillingStatus,
-    SyncPlan,
+    SyncCodeOutcome, SyncPlan,
 };
 use flectar_mail_core::error::CoreError;
 use slint::SharedString;
@@ -118,6 +118,8 @@ impl SyncController {
         ui.on_subscribe(move |plan| subscribe.subscribe(plan.to_string()));
         let manage = actions.clone();
         ui.on_manage_subscription(move || manage.manage_subscription());
+        let redeem = actions.clone();
+        ui.on_redeem_code(move |code| redeem.redeem_code(code.to_string()));
         ui.on_sync_now(move || {
             if let Some(core) = actions.core() {
                 core.device_sync_now();
@@ -639,6 +641,30 @@ impl Actions {
         );
     }
 
+    /// Redeem a code that makes syncing free for a while. The dialog says
+    /// how it went; the subscription card follows the status.
+    fn redeem_code(&self, code: String) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        self.run(
+            async move { core.device_sync_redeem_code(code).await },
+            |ui, _, result| {
+                let stage = match result {
+                    Ok(SyncCodeOutcome::Redeemed) => "redeemed",
+                    Ok(SyncCodeOutcome::Unknown) => "unknown",
+                    Ok(SyncCodeOutcome::Used) => "used",
+                    Ok(SyncCodeOutcome::Expired) => "expired",
+                    Err(error) => {
+                        ui.set_redeem_failure(error_text(&error).into());
+                        "failed"
+                    }
+                };
+                ui.set_redeem_stage(stage.into());
+            },
+        );
+    }
+
     fn delete_everywhere(&self) {
         let Some(core) = self.core() else {
             return;
@@ -671,19 +697,32 @@ fn show_billing(ui: &SyncUi, billing: Option<&SyncBilling>) {
         SyncBillingStatus::Trial => ("trial", billing.trial_ends_at),
         SyncBillingStatus::Active => ("active", billing.paid_until),
         SyncBillingStatus::PastDue => ("past-due", billing.paid_until),
-        SyncBillingStatus::Expired if billing.paid_until.is_some() => ("ended", billing.paid_until),
-        SyncBillingStatus::Expired => ("trial-ended", billing.trial_ends_at),
+        SyncBillingStatus::Granted => ("free", billing.free_until),
+        SyncBillingStatus::Expired => ended(billing),
         SyncBillingStatus::Unknown => ("unknown", None),
     };
     ui.set_billing(state.into());
     ui.set_billing_date(billing_date(date).into());
     ui.set_billing_renews(billing.renews);
+    // A free period still to come, which a group that pays is told about.
+    let now = chrono::Utc::now().timestamp_millis();
+    ui.set_free_until(billing_date(billing.free_until.filter(|until| *until > now)).into());
     let prices = plan_prices(&billing.plans);
     ui.set_monthly_price(prices.monthly.into());
     ui.set_yearly_price(prices.yearly.into());
     ui.set_yearly_monthly_price(prices.yearly_monthly.into());
     ui.set_yearly_saving(prices.yearly_saving);
     ui.set_tax_included(prices.tax_included);
+}
+
+/// The state of a group whose trial, paid and free periods have all ended:
+/// the one that ended last names it.
+fn ended(billing: &SyncBilling) -> (&'static str, Option<i64>) {
+    match (billing.paid_until, billing.free_until) {
+        (paid, Some(free)) if paid.is_none_or(|paid| free > paid) => ("free-ended", Some(free)),
+        (Some(paid), _) => ("ended", Some(paid)),
+        _ => ("trial-ended", billing.trial_ends_at),
+    }
 }
 
 /// A date the subscription card names, such as "Oct 22, 2026".
@@ -1261,6 +1300,23 @@ mod tests {
         assert!(!is_today);
         assert!(text.contains("22"), "{text}");
         assert_eq!(last_synced(None, &now), (String::new(), false));
+    }
+
+    #[test]
+    fn the_period_that_ended_last_names_an_ended_group() {
+        let billing = |paid: Option<i64>, free: Option<i64>| SyncBilling {
+            status: SyncBillingStatus::Expired,
+            trial_ends_at: Some(1),
+            paid_until: paid,
+            free_until: free,
+            renews: false,
+            plans: Vec::new(),
+        };
+        assert_eq!(ended(&billing(None, None)), ("trial-ended", Some(1)));
+        assert_eq!(ended(&billing(Some(5), None)), ("ended", Some(5)));
+        assert_eq!(ended(&billing(None, Some(7))), ("free-ended", Some(7)));
+        assert_eq!(ended(&billing(Some(9), Some(7))), ("ended", Some(9)));
+        assert_eq!(ended(&billing(Some(5), Some(7))), ("free-ended", Some(7)));
     }
 
     #[test]

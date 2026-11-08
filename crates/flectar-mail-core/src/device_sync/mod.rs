@@ -108,6 +108,9 @@ pub struct SyncBilling {
     pub trial_ends_at: Option<i64>,
     /// End of the last paid period, in milliseconds since the Unix epoch.
     pub paid_until: Option<i64>,
+    /// End of the free period that redeemed codes gave the group, in
+    /// milliseconds since the Unix epoch.
+    pub free_until: Option<i64>,
     /// The subscription renews at `paid_until`.
     pub renews: bool,
     pub plans: Vec<SyncPlan>,
@@ -119,7 +122,9 @@ pub enum SyncBillingStatus {
     Active,
     /// A renewal payment failed and is being retried.
     PastDue,
-    /// The trial or paid period ended: uploads wait for a payment.
+    /// Free until `free_until`, through a redeemed code.
+    Granted,
+    /// The trial, paid or free period ended: uploads wait for a payment.
     Expired,
     /// A status this version doesn't know.
     Unknown,
@@ -138,6 +143,21 @@ pub struct SyncPlan {
     pub interval: String,
     /// `amount` includes tax; otherwise tax is added where it applies.
     pub tax_included: bool,
+}
+
+/// What redeeming a code did. A code that doesn't work isn't an error: the
+/// user typed it, and is told why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncCodeOutcome {
+    /// The group syncs for free for the code's days; the status says until
+    /// when.
+    Redeemed,
+    /// No such code: mistyped, or never made.
+    Unknown,
+    /// The code was redeemed already.
+    Used,
+    /// The code was not redeemed in time.
+    Expired,
 }
 
 /// What a server that charges offers before sync is turned on.
@@ -166,11 +186,13 @@ fn sync_billing(billing: Billing) -> Option<SyncBilling> {
             BillingStatus::Trial => SyncBillingStatus::Trial,
             BillingStatus::Active => SyncBillingStatus::Active,
             BillingStatus::PastDue => SyncBillingStatus::PastDue,
+            BillingStatus::Granted => SyncBillingStatus::Granted,
             BillingStatus::Expired => SyncBillingStatus::Expired,
             _ => SyncBillingStatus::Unknown,
         },
         trial_ends_at: billing.trial_ends_at,
         paid_until: billing.paid_until,
+        free_until: billing.free_until,
         renews: billing.renews,
         plans: billing.plans.into_iter().map(sync_plan).collect(),
     })
@@ -1214,6 +1236,25 @@ impl Core {
             }
             Err(error) => Err(sync_error(error)),
         }
+    }
+
+    /// Redeem a code that makes syncing free for a while, as the user typed
+    /// it. Changes that waited for a payment upload right after.
+    pub async fn device_sync_redeem_code(&self, code: String) -> Result<SyncCodeOutcome> {
+        let service = self.sync_service();
+        let client = service.require_client()?;
+        let billing = match client.redeem_code(&code).await {
+            Ok(billing) => billing,
+            Err(SyncError::CodeUnknown) => return Ok(SyncCodeOutcome::Unknown),
+            Err(SyncError::CodeUsed) => return Ok(SyncCodeOutcome::Used),
+            Err(SyncError::CodeExpired) => return Ok(SyncCodeOutcome::Expired),
+            Err(error) => return Err(sync_error(error)),
+        };
+        *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
+        lock(&service.status).billing = sync_billing(billing);
+        self.emit_sync_status();
+        self.device_sync_now();
+        Ok(SyncCodeOutcome::Redeemed)
     }
 
     /// The page that changes or cancels the subscription and lists its

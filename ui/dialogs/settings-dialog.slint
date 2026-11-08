@@ -10,7 +10,7 @@ import { OAuthBrowserHelp } from "../components/oauth-browser-help.slint";
 import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
 import { AccountRow, CalendarConnectionRow, MailProfileRow, ProfileMemberRow, StorageUsageRow } from "../models.slint";
 import { AccountCalendars } from "../components/account-calendars.slint";
-import { InviteDeviceDialog, JoinDeviceDialog, RecoveryWordsDialog, SyncSettingsPage, SyncUi } from "../device-sync.slint";
+import { InviteDeviceDialog, JoinDeviceDialog, RecoveryWordsDialog, RedeemCodeDialog, SyncSettingsPage, SyncUi } from "../device-sync.slint";
 import { Avatar } from "../components/avatar.slint";
 import { Button } from "../components/button.slint";
 import { ConfirmationDialog } from "../components/confirmation-dialog.slint";
@@ -3521,6 +3521,18 @@ export component SettingsDialog inherits Rectangle {
                 SyncUi.dialog = "";
                 SyncUi.cancel-pairing();
             }
+        }
+
+        RedeemCodeDialog {
+            width: parent.width;
+            height: parent.height;
+            compact: root.compact;
+            surface: root.surface;
+            panel-border-color: root.border-subtle;
+            title-color: root.title-color;
+            body-text: root.body-text;
+            secondary-text: root.secondary-text;
+            closed => { SyncUi.dialog = ""; }
         }
 
         ConfirmationDialog {

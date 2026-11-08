@@ -2,8 +2,8 @@
     {
         "type": "git",
         "url": "https://github.com/flectar/mail-sync-client",
-        "commit": "f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc",
-        "dest": "flatpak-cargo/git/mail-sync-client-f91e6b4"
+        "commit": "1580b78627055a1d8f8b4eb5c7840365da7bbc18",
+        "dest": "flatpak-cargo/git/mail-sync-client-1580b78"
     },
     {
         "type": "archive",
@@ -2920,7 +2920,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f91e6b4/crates/flectar-mail-sync-client\" \"cargo/vendor/flectar-mail-sync-client\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-1580b78/crates/flectar-mail-sync-client\" \"cargo/vendor/flectar-mail-sync-client\""
         ]
     },
     {
@@ -2938,7 +2938,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f91e6b4/crates/flectar-mail-sync-crypto\" \"cargo/vendor/flectar-mail-sync-crypto\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-1580b78/crates/flectar-mail-sync-crypto\" \"cargo/vendor/flectar-mail-sync-crypto\""
         ]
     },
     {
@@ -2956,7 +2956,7 @@
     {
         "type": "shell",
         "commands": [
-            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-f91e6b4/crates/flectar-mail-sync-proto\" \"cargo/vendor/flectar-mail-sync-proto\""
+            "cp -r --reflink=auto \"flatpak-cargo/git/mail-sync-client-1580b78/crates/flectar-mail-sync-proto\" \"cargo/vendor/flectar-mail-sync-proto\""
         ]
     },
     {
@@ -12528,7 +12528,7 @@
     },
     {
         "type": "inline",
-        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/flectar/mail-sync-client\"]\ngit = \"https://github.com/flectar/mail-sync-client\"\nreplace-with = \"vendored-sources\"\nrev = \"f91e6b48f8148f60737b9365a2b5acd6c2dc1dbc\"\n",
+        "contents": "[source.vendored-sources]\ndirectory = \"cargo/vendor\"\n\n[source.crates-io]\nreplace-with = \"vendored-sources\"\n\n[source.\"https://github.com/flectar/mail-sync-client\"]\ngit = \"https://github.com/flectar/mail-sync-client\"\nreplace-with = \"vendored-sources\"\nrev = \"1580b78627055a1d8f8b4eb5c7840365da7bbc18\"\n",
         "dest": "cargo",
         "dest-filename": "config"
     }

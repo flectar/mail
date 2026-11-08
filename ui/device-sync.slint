@@ -49,7 +49,7 @@ export global SyncUi {
     // Why saving them as a file failed. Empty when it didn't.
     in-out property <string> recovery-save-error;
 
-    // The open dialog: "", "join" or "invite".
+    // The open dialog: "", "join", "invite" or "redeem".
     in-out property <string> dialog;
     // How the join dialog connects: "code", "qr", "scan" or "recovery".
     in-out property <string> join-method: "code";
@@ -65,11 +65,19 @@ export global SyncUi {
     in property <string> offer-monthly;
     in property <string> offer-yearly;
     // What the group pays: "" on a server that doesn't charge, "trial",
-    // "active", "past-due", "trial-ended", "ended" or "unknown".
+    // "active", "past-due", "free" (a code made it free), "trial-ended",
+    // "ended", "free-ended" or "unknown".
     in property <string> billing;
-    // When the trial or paid period ends, or the subscription renews.
+    // When the trial, paid or free period ends, or the subscription renews.
     in property <string> billing-date;
     in property <bool> billing-renews;
+    // When the free period from codes ends, such as "Nov 8, 2027". Empty
+    // without one still to come.
+    in property <string> free-until;
+    // Redeeming a code: "", "redeemed", "unknown", "used", "expired" or
+    // "failed", with why in `redeem-failure`.
+    in-out property <string> redeem-stage;
+    in property <string> redeem-failure;
     // The prices of the group's plans; empty without such a plan.
     in property <string> monthly-price;
     in property <string> yearly-price;
@@ -118,6 +126,8 @@ export global SyncUi {
     // Open the checkout for "monthly" or "yearly" in the browser.
     callback subscribe(string /* plan */);
     callback manage-subscription();
+    // Redeem a code that makes syncing free for a while.
+    callback redeem-code(string /* code */);
 }
 
 component DeviceRow inherits Rectangle {
@@ -513,6 +523,16 @@ component SubscriptionOffer inherits Rectangle {
                 subscribe => { SyncUi.subscribe(root.showing-yearly ? "yearly" : "monthly"); }
             }
         }
+        HorizontalLayout {
+            alignment: center;
+            Button {
+                width: max(130px, self.content-width);
+                height: 32px;
+                text: @tr("Redeem a code");
+                enabled: !SyncUi.busy;
+                clicked => { SyncUi.dialog = "redeem"; }
+            }
+        }
     }
 }
 
@@ -555,7 +575,9 @@ export component SyncSettingsPage inherits VerticalBox {
     private property <bool> paused: SyncUi.state == "payment";
     // The offer applies to Flectar's server, not to one typed in.
     private property <bool> offered: SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
-    private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended");
+    private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended");
+    // The subscription card shows the page that manages a subscription.
+    private property <bool> can-manage: SyncUi.can-buy && !root.can-subscribe && SyncUi.billing != "free";
     private property <bool> priced: SyncUi.monthly-price != "" || SyncUi.yearly-price != "";
     // The group can subscribe here: the pricing card shows.
     private property <bool> offering: root.can-subscribe && root.priced;
@@ -728,6 +750,7 @@ export component SyncSettingsPage inherits VerticalBox {
     if root.on && root.offering : SubscriptionOffer {
         description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
             : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
+            : SyncUi.billing == "free-ended" ? @tr("Your free period has ended.")
             : @tr("Your subscription has ended.");
         note: SyncUi.billing == "trial" ? "" : @tr("Until you subscribe, changes wait on each device; nothing is lost.");
         surface: root.surface;
@@ -744,25 +767,35 @@ export component SyncSettingsPage inherits VerticalBox {
             : SyncUi.billing == "active" && SyncUi.billing-renews ? @tr("Renews on {}.", SyncUi.billing-date)
             : SyncUi.billing == "active" ? @tr("Ends on {}.", SyncUi.billing-date)
             : SyncUi.billing == "past-due" ? @tr("The last payment didn't go through.")
+            : SyncUi.billing == "free" ? @tr("Free until {}.", SyncUi.billing-date)
             : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
             : SyncUi.billing == "ended" ? @tr("Your subscription has ended.")
+            : SyncUi.billing == "free-ended" ? @tr("Your free period has ended.")
             : "";
         note: SyncUi.billing == "trial" ? ""
-            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" ? @tr("Changes wait on each device; nothing is lost.")
+            : SyncUi.billing == "free" ? @tr("Your code makes sync free on all your devices.")
+            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended" ? @tr("Changes wait on each device; nothing is lost.")
+            : SyncUi.billing == "active" && SyncUi.free-until != "" && SyncUi.billing-renews ? @tr("A code makes sync free until {}. Turn off renewal in Manage so you aren't charged before then.", SyncUi.free-until)
+            : SyncUi.billing == "active" && SyncUi.free-until != "" ? @tr("Then free until {}, with your code.", SyncUi.free-until)
             : SyncUi.billing == "past-due"
                 ? (SyncUi.can-buy ? @tr("Sync keeps going while the payment is tried again. Update your payment method to keep it.") : @tr("Sync keeps going while the payment is tried again."))
             : SyncUi.can-buy && SyncUi.billing == "active" && !SyncUi.billing-renews ? @tr("Turn renewal back on, or see invoices.")
             : SyncUi.can-buy ? @tr("Change your plan or payment method, see invoices, or cancel.")
             : "";
         icon: @image-url("icons/lucide/outline/credit-card.svg");
-        icon-color: SyncUi.billing == "past-due" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" ? AppTheme.destructive : root.accent;
-        actions-width: 150px;
+        icon-color: SyncUi.billing == "past-due" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended" ? AppTheme.destructive : root.accent;
+        actions-width: root.can-manage ? 290px : 150px;
         surface: root.surface;
         card-border-color: root.card-border-color;
         heading: root.heading;
         secondary-text: root.secondary-text;
         faint-text: root.faint-text;
-        if SyncUi.can-buy && !root.can-subscribe : Button {
+        if SyncUi.can-buy : Button {
+            text: @tr("Redeem a code");
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.dialog = "redeem"; }
+        }
+        if root.can-manage : Button {
             text: @tr("Manage");
             primary: SyncUi.billing == "past-due";
             enabled: !SyncUi.busy;
@@ -1045,6 +1078,77 @@ component PairingOutcome inherits Text {
     color: root.body-text;
     font-size: TypeScale.secondary;
     wrap: word-wrap;
+}
+
+// Redeeming a code that makes syncing free for a while, such as a year for
+// someone who contributed to Flectar Mail.
+export component RedeemCodeDialog inherits SyncModal {
+    in property <color> body-text;
+    in property <color> secondary-text;
+    callback closed();
+
+    private property <string> code;
+    private property <bool> redeemed: SyncUi.redeem-stage == "redeemed";
+
+    open: SyncUi.dialog == "redeem";
+    title: root.redeemed ? @tr("Code redeemed") : @tr("Redeem a code");
+    panel-width: 440px;
+    dismissed => { root.closed(); }
+    // A typed code doesn't outlive the dialog.
+    changed open => {
+        root.code = "";
+        SyncUi.redeem-stage = "";
+    }
+
+    Text {
+        text: !root.redeemed ? @tr("Enter the code you were given. Flectar Mail Sync is then free on all your devices for the time the code covers.")
+            : SyncUi.billing == "free" ? @tr("Flectar Mail Sync is free until {} on all your devices.", SyncUi.billing-date)
+            : SyncUi.free-until != "" ? @tr("Flectar Mail Sync is free until {} on all your devices.", SyncUi.free-until)
+            : @tr("Flectar Mail Sync is free on all your devices for the time the code covers.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if !root.redeemed : LineEdit {
+        height: 40px;
+        placeholder-text: "XXXX-XXXX-XXXX-XXXX";
+        input-label: @tr("Code");
+        text <=> root.code;
+        edited => { SyncUi.redeem-stage = ""; }
+        accepted => {
+            if !SyncUi.busy && root.code != "" {
+                SyncUi.redeem-code(root.code);
+            }
+        }
+    }
+    if SyncUi.redeem-stage != "" && !root.redeemed : Text {
+        text: SyncUi.redeem-stage == "unknown" ? @tr("That code doesn't exist. Check it and try again.")
+            : SyncUi.redeem-stage == "used" ? @tr("That code was already used.")
+            : SyncUi.redeem-stage == "expired" ? @tr("That code has expired. Ask whoever gave it to you for a new one.")
+            : @tr("Could not redeem the code: {}", SyncUi.redeem-failure);
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            text: root.redeemed ? @tr("Done") : @tr("Cancel");
+            primary: root.redeemed;
+            clicked => { root.closed(); }
+        }
+        if !root.redeemed : Button {
+            width: max(120px, self.content-width);
+            height: 32px;
+            text: @tr("Redeem");
+            primary: true;
+            enabled: !SyncUi.busy && root.code != "";
+            clicked => { SyncUi.redeem-code(root.code); }
+        }
+    }
 }
 
 // Shown once after turning sync on or replacing the recovery code.
