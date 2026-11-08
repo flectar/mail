@@ -529,3 +529,21 @@ fn bgcolor_maps_only_on_body_and_table_elements() {
     assert!(rows_with(&pixels, [255, 0, 0, 255]).is_none());
     assert!(rows_with(&pixels, [0, 0, 255, 255]).is_some());
 }
+
+#[test]
+fn only_the_first_header_and_footer_groups_move() {
+    // CSS 2.1 §17.2: later header and footer groups stay in document order.
+    let doc = document(
+        "<table style='border-spacing:0'>
+         <tbody><tr><td id='b1' style='height:10px'></td></tr></tbody>
+         <thead><tr><td id='h1' style='height:10px'></td></tr></thead>
+         <thead><tr><td id='h2' style='height:10px'></td></tr></thead>
+         <tfoot><tr><td id='f1' style='height:10px'></td></tr></tfoot>
+         <tfoot><tr><td id='f2' style='height:10px'></td></tr></tfoot></table>",
+    );
+    let order: Vec<f32> = ["#h1", "#b1", "#h2", "#f2", "#f1"]
+        .iter()
+        .map(|id| node(&doc, id).final_layout().location.y)
+        .collect();
+    assert!(order.is_sorted_by(|a, b| a < b), "{order:?}");
+}

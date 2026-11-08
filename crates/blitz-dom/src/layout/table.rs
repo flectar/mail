@@ -391,13 +391,25 @@ pub(crate) fn build_table_context(
         groups: Vec::new(),
         columns: 0,
     };
-    // Preserve beta.3's header/body/footer ordering.
+    // Only the first header group renders before the other rows and only the
+    // first footer group after them; later ones are ordinary row groups in
+    // document order (CSS 2.1 §17.2).
+    let first_group = |doc: &BaseDocument, inside: DisplayInside| {
+        children
+            .iter()
+            .copied()
+            .find(|&id| doc.nodes[id].display_style().map(|d| d.inside()) == Some(inside))
+    };
+    let header = first_group(doc, DisplayInside::TableHeaderGroup);
+    let footer = first_group(doc, DisplayInside::TableFooterGroup);
     for order in 0..3 {
         for child_id in children.iter().copied() {
-            let child_order = match doc.nodes[child_id].display_style().map(|d| d.inside()) {
-                Some(DisplayInside::TableHeaderGroup) => 0,
-                Some(DisplayInside::TableFooterGroup) => 2,
-                _ => 1,
+            let child_order = if Some(child_id) == header {
+                0
+            } else if Some(child_id) == footer {
+                2
+            } else {
+                1
             };
             if child_order == order {
                 collector.collect(doc, child_id);
