@@ -54,6 +54,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/035_reply_reminders.sql")),
     Migration::Plain(include_str!("migrations/036_shared_send_messages.sql")),
     Migration::Plain(include_str!("migrations/037_shared_send_files.sql")),
+    Migration::Plain(include_str!("migrations/038_jmap_delayed_send.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 

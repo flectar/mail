@@ -2475,6 +2475,8 @@ pub mod roles {
     pub const SPAM: &str = "spam";
     pub const ALL: &str = "all";
     pub const SNOOZED: &str = "snoozed";
+    /// Where a JMAP server keeps a message it holds to send later.
+    pub const SCHEDULED: &str = "scheduled";
 }
 
 pub fn now_ms() -> i64 {

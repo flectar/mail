@@ -121,6 +121,10 @@ struct MockJmap {
     max_objects_in_get: usize,
     /// How long to hold back the answer to a method call.
     delay: Option<fn(&str, &Value) -> Option<Duration>>,
+    /// The longest the server holds a submission, in seconds.
+    max_delayed_send: u64,
+    /// The EmailSubmissions the server keeps.
+    submissions: Arc<std::sync::Mutex<Vec<Value>>>,
 }
 
 impl Default for MockJmap {
@@ -135,6 +139,8 @@ impl Default for MockJmap {
             // One Email/get object per page.
             max_objects_in_get: 1,
             delay: None,
+            max_delayed_send: 0,
+            submissions: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 }
@@ -145,6 +151,8 @@ struct Mock {
     calls: Arc<std::sync::Mutex<Vec<(String, Value)>>>,
     /// TCP connections the server accepted.
     connections: Arc<std::sync::atomic::AtomicUsize>,
+    /// The EmailSubmissions the server keeps.
+    submissions: Arc<std::sync::Mutex<Vec<Value>>>,
 }
 
 impl Mock {
@@ -175,7 +183,11 @@ impl MockJmap {
             "maxSizeMailboxName": 255, "maxSizeAttachmentsPerEmail": 50_000_000,
             "emailQuerySortOptions": ["receivedAt"], "mayCreateTopLevelMailbox": true
         });
-        let submission = json!({"maxDelayedSend": 0, "submissionExtensions": []});
+        // As RFC 8621 and Fastmail have it: extensions as an object.
+        let submission = json!({
+            "maxDelayedSend": self.max_delayed_send,
+            "submissionExtensions": {"futurerelease": []}
+        });
         let session = json!({
             "capabilities": {
                 "urn:ietf:params:jmap:core": core,
@@ -198,6 +210,7 @@ impl MockJmap {
         });
         let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
         let connections = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let submissions = self.submissions.clone();
         let server = Arc::new((self, session));
         let task = tokio::spawn({
             let calls = calls.clone();
@@ -229,6 +242,7 @@ impl MockJmap {
             task,
             calls,
             connections,
+            submissions,
         }
     }
 
@@ -422,6 +436,107 @@ impl MockJmap {
                     "total": self.mailboxes.len(),
                     "ids": self.mailboxes.iter().skip(position).take(limit)
                         .map(|mailbox| &mailbox["id"]).collect::<Vec<_>>()
+                })
+            }
+            "Identity/get" => json!({
+                "accountId": "mail-account", "state": "identities-0", "notFound": [],
+                "list": [{"id": "identity-1", "name": "Reader", "email": "reader@mail.example"}]
+            }),
+            "EmailSubmission/query" => {
+                let submissions = self.submissions.lock().unwrap();
+                let filter = &args["filter"];
+                let ids = submissions
+                    .iter()
+                    .filter(|submission| {
+                        filter["emailIds"]
+                            .as_array()
+                            .is_none_or(|ids| ids.contains(&submission["emailId"]))
+                            && filter
+                                .get("undoStatus")
+                                .is_none_or(|status| status == &submission["undoStatus"])
+                    })
+                    .map(|submission| submission["id"].clone())
+                    .collect::<Vec<_>>();
+                json!({
+                    "accountId": "mail-account", "queryState": "submissions-0",
+                    "canCalculateChanges": false, "position": 0,
+                    "total": ids.len(), "ids": ids
+                })
+            }
+            "EmailSubmission/get" => {
+                let submissions = self.submissions.lock().unwrap();
+                let ids = args["ids"].as_array().unwrap();
+                let list = submissions
+                    .iter()
+                    .filter(|submission| ids.contains(&submission["id"]))
+                    .collect::<Vec<_>>();
+                let not_found = ids
+                    .iter()
+                    .filter(|id| !list.iter().any(|submission| &submission["id"] == *id))
+                    .collect::<Vec<_>>();
+                json!({
+                    "accountId": "mail-account", "state": "submissions-0",
+                    "list": list, "notFound": not_found
+                })
+            }
+            // Holds a submission for HOLDFOR seconds, while maxDelayedSend
+            // allows it; sends anything else at once.
+            "EmailSubmission/set" => {
+                let mut submissions = self.submissions.lock().unwrap();
+                let mut created = serde_json::Map::new();
+                for (create_id, submission) in args["create"].as_object().into_iter().flatten() {
+                    let hold_for = submission["envelope"]["mailFrom"]["parameters"]["HOLDFOR"]
+                        .as_str()
+                        .and_then(|seconds| seconds.parse::<i64>().ok())
+                        .filter(|seconds| *seconds <= self.max_delayed_send as i64)
+                        .unwrap_or(0);
+                    let send_at = chrono::Utc::now() + chrono::Duration::seconds(hold_for);
+                    let id = format!("S{}", submissions.len() + 1);
+                    let status = if hold_for > 0 { "pending" } else { "final" };
+                    submissions.push(json!({
+                        "id": id, "emailId": submission["emailId"],
+                        "identityId": submission["identityId"],
+                        "envelope": submission["envelope"],
+                        "undoStatus": status,
+                        "sendAt": send_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+                    }));
+                    created.insert(create_id.clone(), json!({"id": id}));
+                }
+                let mut updated = serde_json::Map::new();
+                let mut not_updated = serde_json::Map::new();
+                for (id, change) in args["update"].as_object().into_iter().flatten() {
+                    let Some(submission) = submissions
+                        .iter_mut()
+                        .find(|submission| &submission["id"] == id)
+                    else {
+                        not_updated.insert(id.clone(), json!({"type": "notFound"}));
+                        continue;
+                    };
+                    if change["undoStatus"] == "canceled" && submission["undoStatus"] == "pending" {
+                        submission["undoStatus"] = json!("canceled");
+                        updated.insert(id.clone(), Value::Null);
+                    } else {
+                        not_updated.insert(id.clone(), json!({"type": "cannotUnsend"}));
+                    }
+                }
+                json!({
+                    "accountId": "mail-account", "oldState": "submissions-0",
+                    "newState": "submissions-1", "created": created, "updated": updated,
+                    "notCreated": {}, "notUpdated": not_updated,
+                    "destroyed": [], "notDestroyed": {}
+                })
+            }
+            "Email/set" => {
+                let updated = args["update"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, _)| (id.clone(), Value::Null))
+                    .collect::<serde_json::Map<_, _>>();
+                json!({
+                    "accountId": "mail-account", "oldState": "state-0", "newState": "state-1",
+                    "created": {}, "updated": updated, "destroyed": [],
+                    "notCreated": {}, "notUpdated": {}, "notDestroyed": {}
                 })
             }
             other => panic!("unexpected method {other}"),
@@ -1636,4 +1751,325 @@ async fn counts_are_asked_only_for_mailboxes_that_changed() {
     .await;
     assert_eq!((gets, asked), (vec![vec!["inbox-remote".to_owned()]], true));
     assert_eq!(only_on_server(&ctx).await, (Some(3), None));
+}
+
+/// A JMAP account with Drafts, Scheduled and Sent, on a server that holds
+/// submissions up to `max_delayed_send` seconds, and a draft to Alice that
+/// is the server's Email `E1`.
+async fn holding(max_delayed_send: u64) -> (tempfile::TempDir, SyncCtx, AccountConfig, Mock, i64) {
+    let (dir, ctx, config) = fixture().await;
+    let mock = MockJmap {
+        mailboxes: vec![
+            mailbox("inbox-remote", "Inbox", Some("inbox")),
+            mailbox("drafts-remote", "Drafts", Some("drafts")),
+            mailbox("scheduled-remote", "Scheduled", Some("scheduled")),
+            mailbox("sent-remote", "Sent", Some("sent")),
+        ],
+        max_objects_in_get: 10,
+        max_delayed_send,
+        ..MockJmap::default()
+    }
+    .start()
+    .await;
+    persist_session(&ctx, config.id, &mock.connected)
+        .await
+        .unwrap();
+    sync_mailboxes(&ctx, config.id, &mock.connected)
+        .await
+        .unwrap();
+    let draft = ctx
+        .db
+        .write(|conn| {
+            let drafts = repo::folders::by_jmap_role(conn, 1, roles::DRAFTS)?.unwrap();
+            conn.execute(
+                "INSERT INTO threads (id, account_id, subject_norm, last_message_at)
+                 VALUES (40, 1, 'plans', 1)",
+                [],
+            )?;
+            conn.execute(
+                "INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject,
+                                       from_addr, to_json, bcc_json, date, is_read, is_draft,
+                                       jmap_id)
+                 VALUES (40, 1, ?1, 'plans@mail.example', 'Plans', 'reader@mail.example',
+                         '[{\"name\":\"Alice\",\"email\":\"alice@mail.example\"}]',
+                         '[{\"name\":null,\"email\":\"boss@mail.example\"}]',
+                         1, 1, 1, 'E1')",
+                [drafts.id],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })
+        .await
+        .unwrap();
+    (dir, ctx, config, mock, draft)
+}
+
+async fn scheduled_on_server(ctx: &SyncCtx, draft: i64, send_at: i64) -> i64 {
+    ctx.db
+        .write(move |conn| {
+            repo::actions::enqueue(
+                conn,
+                1,
+                "send",
+                Some(draft),
+                Some(40),
+                &json!({
+                    "draftId": draft, "scheduled": true, "sendAt": send_at,
+                    "serverHold": true, "jmapPreparedEmailId": "E1"
+                }),
+                Some(now_ms()),
+            )
+        })
+        .await
+        .unwrap()
+}
+
+async fn action(ctx: &SyncCtx, id: i64) -> (String, Option<i64>, Value) {
+    ctx.db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT state, not_before, payload FROM pending_actions WHERE id = ?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        serde_json::from_str(&row.get::<_, String>(2)?).unwrap(),
+                    ))
+                },
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+async fn folder_role_of(ctx: &SyncCtx, message: i64) -> Option<String> {
+    ctx.db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT f.role FROM messages m JOIN folders f ON f.id = m.folder_id
+                 WHERE m.id = ?1",
+                [message],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_server_that_holds_mail_keeps_a_scheduled_message_until_its_time() {
+    let (_dir, ctx, config, mock, draft) = holding(30 * 86_400).await;
+    // Read from the Session as the server sent it.
+    assert_eq!(
+        ctx.db
+            .read(|conn| Ok(conn.query_row(
+                "SELECT jmap_max_delayed_send FROM accounts WHERE id = 1",
+                [],
+                |row| row.get::<_, i64>(0)
+            )?))
+            .await
+            .unwrap(),
+        30 * 86_400
+    );
+    let send_at = now_ms() + 3_600_000;
+    let send = scheduled_on_server(&ctx, draft, send_at).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+
+    let submitted = mock.calls("EmailSubmission/set");
+    assert_eq!(submitted.len(), 1);
+    let created = submitted[0]["create"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap();
+    let hold_for: i64 = created["envelope"]["mailFrom"]["parameters"]["HOLDFOR"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((3590..=3600).contains(&hold_for), "{hold_for}");
+    assert_eq!(
+        created["envelope"]["mailFrom"]["email"],
+        "reader@mail.example"
+    );
+    assert_eq!(
+        created["envelope"]["rcptTo"],
+        json!([{"email": "alice@mail.example", "parameters": null},
+               {"email": "boss@mail.example", "parameters": null}])
+    );
+    // It waits in Scheduled, still a draft.
+    let moved = submitted[0]["onSuccessUpdateEmail"]
+        .as_object()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    assert_eq!(moved, json!({"mailboxIds": {"scheduled-remote": true}}));
+    let (state, not_before, payload) = action(&ctx, send).await;
+    assert_eq!(state, "pending");
+    assert_eq!(not_before, Some(repo::actions::HELD));
+    assert_eq!(
+        payload["jmapHeld"],
+        json!({"submissionId": "S1", "emailId": "E1"})
+    );
+    assert_eq!(payload["sendAt"], send_at);
+    assert!(payload.get("serverHold").is_none());
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SCHEDULED)
+    );
+
+    // Cancelled: the server stops it, and the message is a draft in Drafts.
+    ctx.db
+        .write(move |conn| repo::actions::request_unsend(conn, send, now_ms()))
+        .await
+        .unwrap();
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.submissions.lock().unwrap()[0]["undoStatus"],
+        "canceled"
+    );
+    let moved_back = mock.calls("Email/set");
+    assert_eq!(
+        moved_back.last().unwrap()["update"]["E1"]["mailboxIds"],
+        json!({"drafts-remote": true})
+    );
+    assert_eq!(action(&ctx, send).await.0, "cancelled");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::DRAFTS)
+    );
+}
+
+#[tokio::test]
+async fn a_server_that_holds_mail_for_less_time_leaves_it_to_the_device() {
+    let (_dir, ctx, config, mock, draft) = holding(3_600).await;
+    let send_at = now_ms() + 2 * 86_400_000;
+    let send = scheduled_on_server(&ctx, draft, send_at).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert!(mock.calls("EmailSubmission/set").is_empty());
+    let (state, not_before, payload) = action(&ctx, send).await;
+    assert_eq!(state, "pending");
+    assert_eq!(
+        not_before,
+        Some(send_at),
+        "this device sends it at its time"
+    );
+    assert!(payload.get("serverHold").is_none());
+}
+
+#[tokio::test]
+async fn held_mail_follows_the_server_on_every_device() {
+    let (_dir, ctx, config, mock, draft) = holding(30 * 86_400).await;
+    let send = scheduled_on_server(&ctx, draft, now_ms() + 3_600_000).await;
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+
+    // Another device or app holds one more, of a message in Scheduled.
+    let other = ctx
+        .db
+        .write(|conn| {
+            let scheduled = repo::folders::by_jmap_role(conn, 1, roles::SCHEDULED)?.unwrap();
+            conn.execute(
+                "INSERT INTO messages (thread_id, account_id, folder_id, message_id, subject,
+                                       from_addr, date, is_read, is_draft, jmap_id)
+                 VALUES (40, 1, ?1, 'later@mail.example', 'Later', 'reader@mail.example',
+                         1, 1, 1, 'E2')",
+                [scheduled.id],
+            )?;
+            Ok(conn.last_insert_rowid())
+        })
+        .await
+        .unwrap();
+    let later = (chrono::Utc::now() + chrono::Duration::hours(5))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    mock.submissions.lock().unwrap().push(json!({
+        "id": "S9", "emailId": "E2", "identityId": "identity-1",
+        "undoStatus": "pending", "sendAt": later
+    }));
+    super::super::held::reconcile(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    let mirrored = ctx
+        .db
+        .read(move |conn| repo::actions::held_send_of(conn, other))
+        .await
+        .unwrap()
+        .expect("it waits here too");
+    let (state, not_before, payload) = action(&ctx, mirrored).await;
+    assert_eq!(state, "pending");
+    assert_eq!(not_before, Some(repo::actions::HELD));
+    assert_eq!(payload["jmapHeld"]["submissionId"], "S9");
+    // Once is enough.
+    super::super::held::reconcile(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(
+        ctx.db
+            .read(|conn| Ok(repo::actions::held_submissions(conn, 1)?.len()))
+            .await
+            .unwrap(),
+        2
+    );
+
+    // The server released the first, and another device cancelled the other.
+    mock.submissions.lock().unwrap()[0]["undoStatus"] = json!("final");
+    mock.submissions.lock().unwrap()[1]["undoStatus"] = json!("canceled");
+    super::super::held::reconcile(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(action(&ctx, send).await.0, "done");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
+    assert_eq!(action(&ctx, mirrored).await.0, "cancelled");
+    assert_eq!(
+        folder_role_of(&ctx, other).await.as_deref(),
+        Some(roles::DRAFTS)
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_hold_does_not_stop_the_message_going_out() {
+    let (_dir, ctx, config, mock, draft) = holding(30 * 86_400).await;
+    mock.submissions.lock().unwrap().push(json!({
+        "id": "S0", "emailId": "E1", "identityId": "identity-1",
+        "undoStatus": "canceled", "sendAt": "2026-11-08T10:00:00Z"
+    }));
+    // Sent now: the cancelled hold never went out, so this one does.
+    let send = ctx
+        .db
+        .write(move |conn| {
+            repo::actions::enqueue(
+                conn,
+                1,
+                "send",
+                Some(draft),
+                Some(40),
+                &json!({"draftId": draft, "jmapPreparedEmailId": "E1"}),
+                Some(now_ms()),
+            )
+        })
+        .await
+        .unwrap();
+    execute_actions(&ctx, &config, &mock.connected)
+        .await
+        .unwrap();
+    assert_eq!(mock.calls("EmailSubmission/set").len(), 1);
+    assert_eq!(mock.submissions.lock().unwrap()[1]["undoStatus"], "final");
+    assert_eq!(action(&ctx, send).await.0, "done");
+    assert_eq!(
+        folder_role_of(&ctx, draft).await.as_deref(),
+        Some(roles::SENT)
+    );
 }

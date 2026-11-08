@@ -277,3 +277,114 @@ async fn a_reply_reminder_goes_with_the_send_and_brings_the_conversation_back() 
             .is_err()
     );
 }
+
+/// A JMAP account with Drafts, Sent and Scheduled, on a server that holds
+/// submissions for up to 30 days.
+async fn seed_jmap(db: &Db, port: u16) -> i64 {
+    db.write(move |conn| {
+        let account_id = repo::accounts::insert(
+            conn,
+            &repo::accounts::NewAccount {
+                email: "later@example.com",
+                display_name: Some("Later User"),
+                avatar_url: None,
+                provider: Provider::Generic,
+                auth_kind: AuthKind::Password,
+                mail_protocol: MailProtocol::Jmap,
+                username: "later",
+                jmap_url: &format!("http://127.0.0.1:{port}"),
+                jmap_account_id: Some("u1"),
+                incoming_host: "",
+                incoming_port: 0,
+                smtp_host: "",
+                smtp_port: 0,
+            },
+            &AccountSettings::new(MailConnectionSettings::new(
+                ConnectionSecurity::Tls,
+                ConnectionSecurity::Tls,
+            )),
+        )?;
+        for (remote, name, role) in [
+            ("m-inbox", "Inbox", roles::INBOX),
+            ("m-drafts", "Drafts", roles::DRAFTS),
+            ("m-sent", "Sent", roles::SENT),
+            ("m-scheduled", "Scheduled", roles::SCHEDULED),
+        ] {
+            repo::folders::upsert_jmap(conn, account_id, remote, name, Some(role))?;
+        }
+        conn.execute(
+            "UPDATE accounts SET jmap_max_delayed_send = ?2 WHERE id = ?1",
+            rusqlite::params![account_id, 30 * 86_400],
+        )?;
+        Ok(account_id)
+    })
+    .await
+    .expect("seed")
+}
+
+async fn send_row(db: &Db) -> (serde_json::Value, i64) {
+    db.read(|conn| {
+        Ok(conn.query_row(
+            "SELECT payload, not_before FROM pending_actions
+             WHERE kind = 'send' ORDER BY id DESC LIMIT 1",
+            [],
+            |row| {
+                Ok((
+                    serde_json::from_str(&row.get::<_, String>(0)?).unwrap(),
+                    row.get(1)?,
+                ))
+            },
+        )?)
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_jmap_server_that_holds_mail_is_handed_what_it_can_hold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed_jmap(&db, dead_port()).await;
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+
+    // An hour on: handed to the server at once, it waits there.
+    let draft_id = draft(&core, account_id).await;
+    let in_an_hour = now_ms() + 3_600_000;
+    core.queue_send(QueueSendArgs {
+        draft_id,
+        send_at: Some(in_an_hour),
+        remind_at: None,
+    })
+    .await
+    .expect("schedule");
+    let (payload, not_before) = send_row(&db).await;
+    assert_eq!(payload["serverHold"], true);
+    assert_eq!(payload["sendAt"], in_an_hour);
+    assert!(not_before <= now_ms());
+    let scheduled = core.scheduled_sends().await.unwrap();
+    assert_eq!(scheduled.len(), 1);
+    assert_eq!(scheduled[0].send_at, in_an_hour);
+
+    // Further off than the server holds mail: this device sends it.
+    let in_two_months = now_ms() + 60 * 86_400_000;
+    core.queue_send(QueueSendArgs {
+        draft_id,
+        send_at: Some(in_two_months),
+        remind_at: None,
+    })
+    .await
+    .expect("reschedule");
+    let (payload, not_before) = send_row(&db).await;
+    assert!(payload.get("serverHold").is_none());
+    assert_eq!(not_before, in_two_months);
+    assert_eq!(
+        core.scheduled_sends().await.unwrap()[0].send_at,
+        in_two_months
+    );
+
+    // Not handed over yet, so cancelling here is enough.
+    assert!(core.cancel_scheduled_send(draft_id).await.unwrap());
+    assert!(core.scheduled_sends().await.unwrap().is_empty());
+}

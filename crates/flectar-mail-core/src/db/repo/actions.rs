@@ -395,6 +395,170 @@ pub fn expedite(conn: &Connection, id: i64) -> Result<Option<i64>> {
 }
 
 /// Transition pending -> cancelled; returns false if it was no longer pending.
+/// A send the account's JMAP server holds to release at its time: the
+/// EmailSubmission it made, and the Email it sends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldSubmission {
+    pub action_id: i64,
+    pub draft_id: Option<i64>,
+    pub submission_id: String,
+    pub email_id: String,
+    pub send_at: i64,
+    /// The user asked to cancel it.
+    pub unsend: bool,
+}
+
+/// The server holds the send now: it waits, held, until the server
+/// releases it or it is cancelled.
+pub fn hold_on_server(
+    conn: &Connection,
+    id: i64,
+    submission_id: &str,
+    email_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions
+         SET state = 'pending', not_before = ?4, attempts = 0, last_error = NULL,
+             payload = json_set(json_remove(payload, '$.serverHold', '$.unsend'),
+                                '$.jmapHeld',
+                                json_object('submissionId', ?2, 'emailId', ?3))
+         WHERE id = ?1",
+        params![id, submission_id, email_id, HELD],
+    )?;
+    Ok(())
+}
+
+/// The server cannot hold the send after all: this device sends it at its
+/// time.
+pub fn hold_on_device(conn: &Connection, id: i64, send_at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions
+         SET state = 'pending', not_before = ?2, payload = json_remove(payload, '$.serverHold')
+         WHERE id = ?1",
+        params![id, send_at],
+    )?;
+    Ok(())
+}
+
+/// The account's sends its JMAP server holds, as this device knows them.
+pub fn held_submissions(conn: &Connection, account_id: i64) -> Result<Vec<HeldSubmission>> {
+    let mut statement = conn.prepare(
+        "SELECT id, message_id, json_extract(payload, '$.jmapHeld.submissionId'),
+                json_extract(payload, '$.jmapHeld.emailId'),
+                COALESCE(json_extract(payload, '$.sendAt'), 0),
+                COALESCE(json_extract(payload, '$.unsend'), 0)
+         FROM pending_actions
+         WHERE account_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight')
+           AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+         ORDER BY id",
+    )?;
+    let held = statement
+        .query_map(params![account_id], |row| {
+            Ok(HeldSubmission {
+                action_id: row.get(0)?,
+                draft_id: row.get(1)?,
+                submission_id: row.get(2)?,
+                email_id: row.get(3)?,
+                send_at: row.get(4)?,
+                unsend: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(held)
+}
+
+/// The waiting send of a draft its account's JMAP server holds, if any.
+pub fn held_send_of(conn: &Connection, draft_id: i64) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM pending_actions
+             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight')
+               AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+             ORDER BY id DESC LIMIT 1",
+            params![draft_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Whether the action is a send its account's JMAP server holds.
+pub fn is_held_on_server(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+             FROM pending_actions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// A submission another device or app made: the message waits here as a
+/// send the server holds too. Returns the new send, unless one is here
+/// already.
+pub fn mirror_held(
+    conn: &Connection,
+    account_id: i64,
+    draft_id: i64,
+    thread_id: Option<i64>,
+    send_at: i64,
+    submission_id: &str,
+    email_id: &str,
+) -> Result<Option<i64>> {
+    let known: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE account_id = ?1 AND kind = 'send'
+             AND (json_extract(payload, '$.jmapHeld.submissionId') = ?2
+                  OR (message_id = ?3 AND state IN ('pending', 'inflight'))))",
+        params![account_id, submission_id, draft_id],
+        |row| row.get(0),
+    )?;
+    if known {
+        return Ok(None);
+    }
+    let payload = serde_json::json!({
+        "draftId": draft_id,
+        "scheduled": true,
+        "sendAt": send_at,
+        "jmapHeld": {"submissionId": submission_id, "emailId": email_id},
+    });
+    Ok(Some(enqueue(
+        conn,
+        account_id,
+        "send",
+        Some(draft_id),
+        thread_id,
+        &payload,
+        Some(HELD),
+    )?))
+}
+
+/// Ask for a held send to be cancelled: it comes due at once for the
+/// account's JMAP actor, which cancels it on the server. Returns whether it
+/// was waiting.
+pub fn request_unsend(conn: &Connection, id: i64, now_ms: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE pending_actions
+         SET payload = json_set(payload, '$.unsend', json('true')), not_before = ?2,
+             attempts = 0, last_error = NULL
+         WHERE id = ?1 AND state = 'pending'
+           AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL",
+        params![id, now_ms],
+    )? == 1)
+}
+
+/// The cancel did not reach the server: the send stays held. Returns whether
+/// it was still waiting to be cancelled.
+pub fn withdraw_unsend(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE pending_actions
+         SET payload = json_remove(payload, '$.unsend'), not_before = ?2
+         WHERE id = ?1 AND state = 'pending' AND json_extract(payload, '$.unsend') = 1",
+        params![id, HELD],
+    )? == 1)
+}
+
 pub fn try_cancel(conn: &Connection, id: i64) -> Result<bool> {
     let n = conn.execute(
         "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
@@ -539,6 +703,40 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn a_cancel_the_server_never_heard_of_leaves_the_send_held() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let send = enqueue(
+            &conn,
+            1,
+            "send",
+            None,
+            None,
+            &serde_json::json!({"draftId": 9, "scheduled": true, "sendAt": 5_000}),
+            Some(1_000),
+        )
+        .unwrap();
+        // Not held by the server yet: nothing to cancel there.
+        assert!(!request_unsend(&conn, send, 2_000).unwrap());
+        hold_on_server(&conn, send, "S1", "E1").unwrap();
+        assert!(is_held_on_server(&conn, send).unwrap());
+        assert_eq!(held_submissions(&conn, 1).unwrap()[0].send_at, 5_000);
+
+        assert!(request_unsend(&conn, send, 2_000).unwrap());
+        let held = &held_submissions(&conn, 1).unwrap()[0];
+        assert!(held.unsend);
+        assert_eq!(due(&conn, 1, 2_000, 10).unwrap().len(), 1, "due at once");
+
+        assert!(withdraw_unsend(&conn, send).unwrap());
+        assert!(!held_submissions(&conn, 1).unwrap()[0].unsend);
+        assert!(
+            due(&conn, 1, i64::MAX - 1, 10).unwrap().is_empty(),
+            "held again"
+        );
+        assert!(!withdraw_unsend(&conn, send).unwrap());
+    }
 
     #[test]
     fn the_calendar_store_claims_its_actions() {

@@ -4620,9 +4620,124 @@ impl Core {
     }
 
     pub async fn cancel_send(&self, action_id: i64) -> Result<bool> {
+        if self
+            .db
+            .read(move |conn| repo::actions::is_held_on_server(conn, action_id))
+            .await?
+        {
+            self.unhold_send(action_id).await?;
+            return Ok(true);
+        }
         self.db
             .write(move |conn| repo::actions::try_cancel(conn, action_id))
             .await
+    }
+
+    /// Cancel a send its account's JMAP server holds: the server confirms it
+    /// before this returns. Errs when the server cannot be reached, so the
+    /// message stays scheduled, or when it went out already.
+    async fn unhold_send(&self, action_id: i64) -> Result<()> {
+        let account_id = self
+            .db
+            .write(move |conn| {
+                let account_id: Option<i64> = conn
+                    .query_row(
+                        "SELECT account_id FROM pending_actions WHERE id = ?1",
+                        [action_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                Ok(account_id.filter(|_| {
+                    repo::actions::request_unsend(conn, action_id, now_ms()).unwrap_or(false)
+                }))
+            })
+            .await?;
+        let started = std::time::Instant::now();
+        loop {
+            let status: Option<(String, Option<String>, i64)> = self
+                .db
+                .read(move |conn| {
+                    Ok(conn
+                        .query_row(
+                            "SELECT state, last_error, attempts FROM pending_actions
+                             WHERE id = ?1",
+                            [action_id],
+                            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                        )
+                        .optional()?)
+                })
+                .await?;
+            let Some((state, last_error, attempts)) = status else {
+                return Ok(());
+            };
+            match state.as_str() {
+                "cancelled" => return Ok(()),
+                "done" => {
+                    return Err(CoreError::Other(
+                        "the scheduled message was already sent".into(),
+                    ));
+                }
+                "failed" => {
+                    return Err(CoreError::Other(last_error.unwrap_or_else(|| {
+                        "the scheduled message could not be cancelled".into()
+                    })));
+                }
+                _ => {}
+            }
+            let left = UNHOLD_WAIT.saturating_sub(started.elapsed());
+            // A try that failed, or no more time: it stays held, unless the
+            // server is answering for it right now.
+            let failure = if attempts > 0 {
+                Some(last_error.unwrap_or_default())
+            } else if left.is_zero() {
+                Some("the mail server did not answer in time".to_owned())
+            } else if state == "inflight" {
+                None
+            } else {
+                match account_id {
+                    // A sync of the account runs the cancel, and says whether
+                    // it reached the server.
+                    Some(account_id) => self.sync_account_once(account_id, left).await.err(),
+                    None => Some("the account is not syncing".to_owned()),
+                }
+            };
+            if let Some(failure) = failure {
+                let withdrawn = self
+                    .db
+                    .write(move |conn| repo::actions::withdraw_unsend(conn, action_id))
+                    .await?;
+                if withdrawn || started.elapsed() >= UNHOLD_WAIT * 2 {
+                    return Err(CoreError::Network(format!(
+                        "could not reach the mail server to cancel the scheduled message, so it is still scheduled: {failure}"
+                    )));
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    /// Run one sync of the account now, and say whether it reached the
+    /// server.
+    async fn sync_account_once(
+        &self,
+        account_id: i64,
+        wait: std::time::Duration,
+    ) -> std::result::Result<(), String> {
+        let (complete, done) = tokio::sync::oneshot::channel();
+        {
+            let handles = self.handles.read().await;
+            let Some(handle) = handles.get(&account_id) else {
+                return Err("the account is not syncing".into());
+            };
+            handle.send(SyncCmd::SyncNow {
+                complete: Some(complete),
+            });
+        }
+        match tokio::time::timeout(wait, done).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err("the account stopped syncing".into()),
+            Err(_) => Err("the mail server did not answer in time".into()),
+        }
     }
 
     /// Remind the user at `remind_at` unless someone replies by then to the
@@ -4704,6 +4819,15 @@ impl Core {
     /// Stop a draft's scheduled send. The message stays a draft, to edit or
     /// schedule again. Returns whether a send was waiting.
     pub async fn cancel_scheduled_send(&self, draft_id: i64) -> Result<bool> {
+        // One the mail server holds is cancelled there.
+        if let Some(action) = self
+            .db
+            .read(move |conn| repo::actions::held_send_of(conn, draft_id))
+            .await?
+        {
+            self.unhold_send(action).await?;
+            return Ok(true);
+        }
         let (cancelled, thread, shared) = self
             .db
             .write(move |conn| {
@@ -4751,6 +4875,32 @@ impl Core {
     /// window) and nudge its actor. Returns false if it was already sent or
     /// cancelled.
     pub async fn send_now(&self, action_id: i64) -> Result<bool> {
+        // One the mail server holds is taken back, then sent now.
+        let held = self
+            .db
+            .read(move |conn| {
+                Ok(repo::actions::is_held_on_server(conn, action_id)?
+                    .then(|| {
+                        conn.query_row(
+                            "SELECT message_id FROM pending_actions WHERE id = ?1",
+                            [action_id],
+                            |row| row.get::<_, Option<i64>>(0),
+                        )
+                    })
+                    .transpose()?
+                    .flatten())
+            })
+            .await?;
+        if let Some(draft_id) = held {
+            self.unhold_send(action_id).await?;
+            self.queue_send(QueueSendArgs {
+                draft_id,
+                send_at: None,
+                remind_at: None,
+            })
+            .await?;
+            return Ok(true);
+        }
         // A send shared with the user's other devices goes out once this
         // device's claim on it reaches the server.
         let shared = self
@@ -5291,6 +5441,15 @@ impl Core {
     }
 
     pub async fn delete_draft(&self, draft_id: i64) -> Result<()> {
+        // Deleting the Email would not stop the mail server's hold on it
+        // (RFC 8621 §7): the hold is cancelled first.
+        if let Some(action) = self
+            .db
+            .read(move |conn| repo::actions::held_send_of(conn, draft_id))
+            .await?
+        {
+            self.unhold_send(action).await?;
+        }
         let (thread_id, nudge_account, staged_paths) = self
             .db
             .write(move |conn| {
@@ -5447,6 +5606,14 @@ impl Core {
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
         let draft_id = args.draft_id;
+        // Moved, or sent now: the mail server's hold on it ends first.
+        if let Some(action) = self
+            .db
+            .read(move |conn| repo::actions::held_send_of(conn, draft_id))
+            .await?
+        {
+            self.unhold_send(action).await?;
+        }
         let (policy, sender, recipients, protocol) = self
             .db
             .read(move |conn| {
@@ -5486,9 +5653,19 @@ impl Core {
         // protected draft never reaches the mail server, so a Gmail or JMAP
         // one stays with this device; an IMAP or POP3 one travels already
         // signed and encrypted, and other devices send it without the keys.
+        // A JMAP server that holds scheduled mail sends it even with every
+        // device off, from the account's Scheduled mailbox.
+        let server_hold = match (protocol, args.send_at) {
+            (MailProtocol::Jmap, Some(send_at)) if !policy.enabled() => {
+                self.db
+                    .read(move |conn| server_holds(conn, draft_id, send_at))
+                    .await?
+            }
+            _ => false,
+        };
         let share_as = match protocol {
             MailProtocol::Gmail | MailProtocol::Jmap
-                if args.send_at.is_some() && !policy.enabled() =>
+                if args.send_at.is_some() && !policy.enabled() && !server_hold =>
             {
                 self.shared_send_device()
             }
@@ -5537,11 +5714,19 @@ impl Core {
                      WHERE message_id = ?1 AND kind = 'save_draft' AND state = 'pending'",
                     rusqlite::params![draft_id, now_ms()],
                 )?;
-                let payload = serde_json::json!({
+                let mut payload = serde_json::json!({
                     "draftId": draft_id,
                     "mailSecurity": policy,
                     "scheduled": scheduled,
                 });
+                // Handed to the JMAP server at once, it waits there.
+                let not_before = if server_hold {
+                    payload["serverHold"] = serde_json::Value::Bool(true);
+                    payload["sendAt"] = serde_json::json!(dispatch_at);
+                    now_ms()
+                } else {
+                    dispatch_at
+                };
                 // One send per draft: queueing it again moves the waiting
                 // send to the new time instead of sending it twice.
                 let queued: Option<(i64, String)> = conn
@@ -5562,7 +5747,7 @@ impl Core {
                         "UPDATE pending_actions SET state = 'pending', not_before = ?2,
                                 payload = ?3, attempts = 0, last_error = NULL
                          WHERE id = ?1",
-                        rusqlite::params![action_id, dispatch_at, payload.to_string()],
+                        rusqlite::params![action_id, not_before, payload.to_string()],
                     )?;
                     tx.commit()?;
                     return Ok((action_id, row.account_id, row.thread_id));
@@ -5574,7 +5759,7 @@ impl Core {
                     Some(draft_id),
                     row.thread_id,
                     &payload,
-                    Some(dispatch_at),
+                    Some(not_before),
                 )?;
                 tx.commit()?;
                 Ok((aid, row.account_id, row.thread_id))
@@ -5607,6 +5792,9 @@ impl Core {
         // and any timer this task misses. Only armed for near-term sends; far
         // future "send later" relies on the scheduler so we don't hold a task
         // sleeping for hours.
+        if server_hold {
+            self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
         let delay_ms = (dispatch_at - now_ms()).max(0);
         if delay_ms <= 15 * 60 * 1000 {
             let core = self.clone();
@@ -9484,6 +9672,26 @@ fn name_draft(conn: &rusqlite::Connection, draft_id: i64) -> Result<(String, boo
     Ok((message_id, unnamed))
 }
 
+/// Whether the draft's JMAP server can hold it until `send_at`: the account
+/// has a Scheduled mailbox, and the server holds submissions that long.
+fn server_holds(conn: &rusqlite::Connection, draft_id: i64, send_at: i64) -> Result<bool> {
+    let held: Option<(i64, bool)> = conn
+        .query_row(
+            "SELECT a.jmap_max_delayed_send,
+                    EXISTS (SELECT 1 FROM folders f
+                            WHERE f.account_id = a.id AND f.role = ?2
+                              AND f.jmap_id IS NOT NULL AND f.selectable = 1)
+             FROM messages m JOIN accounts a ON a.id = m.account_id
+             WHERE m.id = ?1 AND a.mail_protocol = 'jmap'",
+            rusqlite::params![draft_id, models::roles::SCHEDULED],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(held.is_some_and(|(max_delayed_send, scheduled)| {
+        scheduled && jmap::held::can_hold(max_delayed_send, send_at, now_ms())
+    }))
+}
+
 fn schedule_shared_send(
     conn: &rusqlite::Connection,
     draft: &repo::messages::MessageRow,
@@ -9577,6 +9785,9 @@ fn schedule_shared_send(
     )?;
     Ok(action_id)
 }
+
+/// How long cancelling a send the mail server holds waits for the server.
+const UNHOLD_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 pub(crate) async fn remove_staged_attachment(root: &std::path::Path, path: &str) {
     let (Ok(root), Ok(path)) = (
@@ -10251,6 +10462,113 @@ mod sync_accounts_tests {
             Err(CoreError::NotFound(_))
         ));
         assert!(take().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod held_send_tests {
+    use super::*;
+    use crate::sync::engine::SyncCmd;
+
+    /// Answers each sync like the account's JMAP actor: cancels the held
+    /// send asked to be cancelled, or cannot reach the server.
+    async fn worker(core: &Core, account_id: i64, reachable: bool) {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        let db = core.db.clone();
+        tokio::spawn(async move {
+            while let Some(command) = rx.recv().await {
+                if let SyncCmd::SyncNow { complete } = command {
+                    let result = if reachable {
+                        db.write(|conn| {
+                            conn.execute(
+                                "UPDATE pending_actions SET state = 'cancelled'
+                                 WHERE json_extract(payload, '$.unsend') = 1",
+                                [],
+                            )?;
+                            Ok(())
+                        })
+                        .await
+                        .map_err(|error| error.to_string())
+                    } else {
+                        Err("connection refused".to_owned())
+                    };
+                    if let Some(complete) = complete {
+                        let _ = complete.send(result);
+                    }
+                }
+            }
+        });
+        core.handles
+            .write()
+            .await
+            .insert(account_id, AccountHandle::for_test(account_id, tx));
+    }
+
+    /// A draft whose JMAP server holds its send, and that send.
+    async fn held(core: &Core) -> (i64, i64) {
+        core.db
+            .write(|conn| {
+                crate::db::testutil::seed_account(conn);
+                conn.execute(
+                    "UPDATE accounts SET mail_protocol = 'jmap' WHERE id = 1",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT INTO messages (id, account_id, folder_id, message_id, subject,
+                                           from_addr, date, is_read, is_draft, jmap_id)
+                     VALUES (70, 1, 1, 'plans@test.dev', 'Plans', 'me@test.dev', 1, 1, 1, 'E1')",
+                    [],
+                )?;
+                let action = repo::actions::enqueue(
+                    conn,
+                    1,
+                    "send",
+                    Some(70),
+                    None,
+                    &serde_json::json!({
+                        "draftId": 70, "scheduled": true, "sendAt": now_ms() + 3_600_000
+                    }),
+                    Some(now_ms()),
+                )?;
+                repo::actions::hold_on_server(conn, action, "S1", "E1")?;
+                Ok((70, action))
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_held_send_is_cancelled_on_the_server_or_stays_scheduled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        let (draft, action) = held(&core).await;
+
+        // The server cannot be reached: it stays scheduled, and says so.
+        worker(&core, 1, false).await;
+        let error = core.cancel_scheduled_send(draft).await.unwrap_err();
+        assert!(matches!(error, CoreError::Network(_)), "{error}");
+        let (state, not_before, unsend): (String, i64, Option<i64>) = core
+            .db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT state, not_before, json_extract(payload, '$.unsend')
+                     FROM pending_actions WHERE id = ?1",
+                    [action],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (state.as_str(), not_before, unsend),
+            ("pending", repo::actions::HELD, None)
+        );
+        assert_eq!(core.scheduled_sends().await.unwrap().len(), 1);
+
+        // It can: the server cancels it.
+        worker(&core, 1, true).await;
+        assert!(core.cancel_scheduled_send(draft).await.unwrap());
+        assert!(core.scheduled_sends().await.unwrap().is_empty());
     }
 }
 
