@@ -33,7 +33,7 @@ which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges,
 backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
-upstream #1342, keeping beta.4's element transform. Drop the backported parts
+upstream #1342, keeping beta.4's element transform, and open upstream #1372. Drop the backported parts
 when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do

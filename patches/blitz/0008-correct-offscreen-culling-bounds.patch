@@ -20,7 +20,7 @@ index bb89de3..cc5ada5 100644
              tx,
              rx: Some(rx),
 diff --git a/crates/blitz-dom/src/resolve.rs b/crates/blitz-dom/src/resolve.rs
-index 29a6607..fc98f3e 100644
+index 29a6607..e628f41 100644
 --- a/crates/blitz-dom/src/resolve.rs
 +++ b/crates/blitz-dom/src/resolve.rs
 @@ -113,8 +113,13 @@ impl BaseDocument {
@@ -39,7 +39,7 @@ index 29a6607..fc98f3e 100644
          timer.record_time("transform");
  
          // Build paint children / stacking contexts for damaged subtrees. Runs
-@@ -168,17 +173,18 @@ impl BaseDocument {
+@@ -168,17 +173,23 @@ impl BaseDocument {
          timer.print_times(&format!("Resolve({}): ", self.id()));
      }
  
@@ -55,7 +55,12 @@ index 29a6607..fc98f3e 100644
 -            .damage()
 -            .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
 -            .unwrap_or(false)
++        // Anonymous boxes are never skipped: damage marking walks the DOM parent
++        // chain, which bypasses them, so they carry no damage of their own even
++        // when a descendant's transform or overflow has changed (backport of
++        // upstream #1372).
 +        if !rescaled
++            && !self.nodes[node_id].is_anonymous()
 +            && !self.nodes[node_id]
 +                .damage()
 +                .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
@@ -63,7 +68,7 @@ index 29a6607..fc98f3e 100644
          {
              let node = &self.nodes[node_id];
              let location = node.final_layout().location.map(|v| v as f64 * scale);
-@@ -208,7 +214,7 @@ impl BaseDocument {
+@@ -208,7 +219,7 @@ impl BaseDocument {
                  if self.nodes[child_id].is_out_of_flow() {
                      continue;
                  }
@@ -72,7 +77,7 @@ index 29a6607..fc98f3e 100644
                  overflow = overflow.union(child_rect_in_self);
              }
          }
-@@ -218,7 +224,7 @@ impl BaseDocument {
+@@ -218,7 +229,7 @@ impl BaseDocument {
              if !self.nodes.contains_key(child_id) {
                  continue;
              }
@@ -81,7 +86,7 @@ index 29a6607..fc98f3e 100644
              overflow = overflow.union(child_rect_in_self);
          }
          *self.nodes[node_id].hoisted_children.borrow_mut() = hoisted_children;
-@@ -227,7 +233,7 @@ impl BaseDocument {
+@@ -227,7 +238,7 @@ impl BaseDocument {
              if self.nodes[pseudo].is_out_of_flow() {
                  continue;
              }

@@ -1114,3 +1114,25 @@ fn a_scale_change_rescales_every_overflow() {
         .count();
     assert_eq!(red, 600 * 150);
 }
+
+#[test]
+fn overflow_under_anonymous_blocks_follows_changes() {
+    // The inline-block sits in an anonymous block beside a block sibling. When
+    // its child grows past it, the new overflow must reach the culling of a
+    // tile further down, even though anonymous boxes carry no damage.
+    let mut doc = document(
+        "<div><span style='display:inline-block;height:10px;width:50px'>
+         <div id='o' style='height:10px;background:#c00'></div></span><div>block</div></div>",
+    );
+    doc.add_user_agent_stylesheet(blitz_dom::UserAgentStylesheet::parse(
+        "#o { height: 600px !important }",
+    ));
+    doc.resolve(0.0);
+    doc.set_viewport_scroll(blitz_dom::Point { x: 0.0, y: 400.0 });
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    assert!(rows_with(&pixels, [204, 0, 0, 255]).is_some());
+}
