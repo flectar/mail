@@ -51,6 +51,8 @@ pub(super) struct SyncController {
     early: RefCell<Vec<(u64, PairingEvent)>>,
     /// Flectar's server was asked what it charges, while sync was off.
     offer_loaded: Cell<bool>,
+    /// Sync was on at the last status.
+    was_on: Cell<bool>,
     /// The save dialog for the recovery code is open.
     saving_recovery: Cell<bool>,
 }
@@ -205,6 +207,12 @@ impl SyncController {
                 | DeviceSyncState::Error(_)
                 | DeviceSyncState::PaymentRequired
         );
+        // Turned off: ask again what turning it on costs, since this device
+        // may have had its free trial meanwhile.
+        if self.was_on.replace(!off) && off {
+            self.offer_loaded.set(false);
+            ui.invoke_opened();
+        }
         if off && ui.get_dialog() == "invite" {
             self.end_attempt(&ui);
             ui.set_dialog("".into());

@@ -337,6 +337,61 @@ async fn clearing_the_ai_key_keeps_the_sync_keys() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn starting_over_brings_no_new_trial() {
+    let Some(server) = start_server_with(&[
+        ("FLECTAR_MAIL_SYNC_STRIPE_SECRET_KEY", "sk_test_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_WEBHOOK_SECRET", "whsec_x"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_PRICE_MONTHLY", "price_monthly"),
+        (
+            "FLECTAR_MAIL_SYNC_BILLING_RETURN_URL",
+            "https://flectar.test/sync",
+        ),
+        ("FLECTAR_MAIL_SYNC_TRIAL_DAYS", "14"),
+        ("FLECTAR_MAIL_SYNC_STRIPE_API", "http://127.0.0.1:9"),
+    ])
+    .await
+    else {
+        return;
+    };
+    let credentials = Arc::new(MemoryCredentials::default());
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = start_core_with(dir.path(), credentials.clone()).await;
+    let url = Some(server.url.clone());
+    let offer = laptop
+        .device_sync_offer(url.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(offer.trial_days, 14);
+    laptop.device_sync_turn_on(url.clone()).await.unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    let billing = laptop.device_sync_status().billing.unwrap();
+    assert_eq!(billing.status, SyncBillingStatus::Trial);
+
+    // Deleting sync and turning it on again starts a group without one.
+    laptop.device_sync_delete_everywhere().await.unwrap();
+    let offer = laptop
+        .device_sync_offer(url.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(offer.trial_days, 0);
+    laptop.device_sync_turn_on(url.clone()).await.unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    let status = laptop.device_sync_status();
+    assert_eq!(status.state, DeviceSyncState::PaymentRequired);
+    assert_eq!(status.billing.unwrap().status, SyncBillingStatus::Expired);
+
+    // The app's own data can go: the credential store remembers.
+    drop(laptop);
+    credentials.delete(0, Slot::DeviceSync).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let reinstalled = start_core_with(fresh.path(), credentials).await;
+    let offer = reinstalled.device_sync_offer(url).await.unwrap().unwrap();
+    assert_eq!(offer.trial_days, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn uploads_wait_for_payment_on_a_server_that_charges() {
     // No trial, and no Stripe to reach: refusing uploads never needs it.
     let Some(server) = start_server_with(&[

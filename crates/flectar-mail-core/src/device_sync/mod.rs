@@ -177,6 +177,14 @@ fn sync_plan(plan: Plan) -> SyncPlan {
     }
 }
 
+/// The servers this device had a free trial on.
+async fn trial_servers(store: &credentials::CredentialStoreHandle) -> Vec<String> {
+    match credentials::load_async(store.clone(), 0, Slot::SyncTrial).await {
+        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
 fn sync_billing(billing: Billing) -> Option<SyncBilling> {
     if !billing.enabled {
         return None;
@@ -1206,8 +1214,10 @@ impl Core {
             .info()
             .await
             .map_err(sync_error)?;
+        // A device that had a free trial there starts without one.
+        let had_trial = self.had_trial(&server_url).await;
         Ok(info.billing.map(|offer| SyncOffer {
-            trial_days: offer.trial_days,
+            trial_days: if had_trial { 0 } else { offer.trial_days },
             plans: offer.plans.into_iter().map(sync_plan).collect(),
         }))
     }
@@ -1217,10 +1227,42 @@ impl Core {
         let service = self.sync_service();
         let client = service.require_client()?;
         let billing = client.billing().await.map_err(sync_error)?;
+        if billing.enabled {
+            // Whichever device starts a group there next, it had its trial.
+            self.remember_trial(client.identity().server_url()).await;
+        }
         *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
         lock(&service.status).billing = sync_billing(billing);
         self.emit_sync_status();
         Ok(())
+    }
+
+    /// Whether this device had a free trial on `server_url`.
+    async fn had_trial(&self, server_url: &str) -> bool {
+        let server_url = server_url.trim().trim_end_matches('/');
+        trial_servers(&self.credentials)
+            .await
+            .iter()
+            .any(|known| known == server_url)
+    }
+
+    /// Remember that this device had a free trial on `server_url`, so a
+    /// group it starts there again begins without one. Kept in the
+    /// credential store, which outlives the app's own data where the
+    /// platform allows. A store that can't keep it only loses the reminder.
+    async fn remember_trial(&self, server_url: &str) {
+        let server_url = server_url.trim().trim_end_matches('/');
+        let mut servers = trial_servers(&self.credentials).await;
+        if servers.iter().any(|known| known == server_url) {
+            return;
+        }
+        servers.push(server_url.to_owned());
+        let text = serde_json::to_string(&servers).unwrap_or_default();
+        if let Err(error) =
+            credentials::store_async(self.credentials.clone(), 0, Slot::SyncTrial, text).await
+        {
+            tracing::warn!(%error, "could not remember the Flectar Mail Sync trial");
+        }
     }
 
     /// A checkout page for subscribing the group to `plan`, to open in the
@@ -1268,11 +1310,18 @@ impl Core {
     /// the user once.
     pub async fn device_sync_turn_on(&self, server_url: Option<String>) -> Result<String> {
         let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
-        let (client, code) =
-            SyncClient::create_group(self.sync_service().http.clone(), &server_url)
-                .await
-                .map_err(sync_error)?;
+        let http = self.sync_service().http.clone();
+        // Starting over doesn't bring another free trial.
+        let (client, code) = if self.had_trial(&server_url).await {
+            SyncClient::create_group_without_trial(http, &server_url).await
+        } else {
+            SyncClient::create_group(http, &server_url).await
+        }
+        .map_err(sync_error)?;
         self.adopt_client(client, false).await?;
+        // Learn at once whether the server charges, which remembers the
+        // trial before anything could start the group over.
+        self.check_billing().await;
         Ok(code.to_words())
     }
 

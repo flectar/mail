@@ -483,6 +483,7 @@ fn system_delete_all(account_id: i64) -> Result<()> {
         Slot::AccountCaldavPassword,
         Slot::CarddavPassword,
         Slot::DeviceSync,
+        Slot::SyncTrial,
     ] {
         system_delete(account_id, slot)?;
     }

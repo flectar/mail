@@ -43,6 +43,11 @@ pub enum Slot {
     CarddavPassword,
     /// This device's Flectar Mail Sync keys (stored under account id 0).
     DeviceSync,
+    /// The Flectar Mail Sync servers this device had a free trial on, so a
+    /// group it starts there again begins without one (stored under account
+    /// id 0). Not a secret: the credential store keeps it because it outlives
+    /// the app's own data where the platform allows.
+    SyncTrial,
 }
 
 impl Slot {
@@ -62,6 +67,7 @@ impl Slot {
             }
             Slot::CarddavPassword => "carddav_password".into(),
             Slot::DeviceSync => "device_sync".into(),
+            Slot::SyncTrial => "sync_trial".into(),
         }
     }
 }
