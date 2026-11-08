@@ -73,10 +73,15 @@ where
     if let Some(lang) = lang {
         use style::properties::{Importance, PropertyDeclaration};
         use style::values::specified::XLang;
-        let block = ServoArc::new(node.guard().wrap(PropertyDeclarationBlock::with_one(
-            PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
-            Importance::Normal,
-        )));
+        // Word and Outlook put `lang` on most paragraphs and spans; a shared
+        // block keeps those elements sharing styles. The key cannot collide
+        // with a declaration list, which never contains NUL.
+        let block = cached_block(node, format!("\0{lang}"), || {
+            PropertyDeclarationBlock::with_one(
+                PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
+                Importance::Normal,
+            )
+        });
         hints.push(ApplicableDeclarationBlock::from_declarations(
             block,
             CascadeLevel::new(CascadeOrigin::PresHints),
@@ -95,7 +100,15 @@ where
         return;
     }
 
-    let block = cached_block(node, css);
+    let block = cached_block(node, css.clone(), || {
+        parse_style_attribute(
+            &css,
+            &HINT_URL_DATA,
+            None,
+            QuirksMode::NoQuirks,
+            CssRuleType::Style,
+        )
+    });
     hints.push(ApplicableDeclarationBlock::from_declarations(
         block,
         CascadeLevel::new(CascadeOrigin::PresHints),
@@ -103,16 +116,13 @@ where
     ));
 }
 
-fn cached_block(node: &Node, css: String) -> HintBlock {
-    let parse = |css: &str| {
-        ServoArc::new(node.guard().wrap(parse_style_attribute(
-            css,
-            &HINT_URL_DATA,
-            None,
-            QuirksMode::NoQuirks,
-            CssRuleType::Style,
-        )))
-    };
+/// The document's shared block for `key`, built on first use.
+fn cached_block(
+    node: &Node,
+    key: String,
+    build: impl FnOnce() -> PropertyDeclarationBlock,
+) -> HintBlock {
+    let wrap = |block| ServoArc::new(node.guard().wrap(block));
 
     let mut doc = node;
     while let Some(parent) = doc.parent {
@@ -120,7 +130,7 @@ fn cached_block(node: &Node, css: String) -> HintBlock {
     }
     let NodeData::Document(data) = &doc.data else {
         // Detached subtrees are styled rarely; they just skip the cache.
-        return parse(&css);
+        return wrap(build());
     };
 
     let mut cache = data
@@ -128,11 +138,11 @@ fn cached_block(node: &Node, css: String) -> HintBlock {
         .0
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(block) = cache.get(css.as_str()) {
+    if let Some(block) = cache.get(key.as_str()) {
         return block.clone();
     }
-    let block = parse(&css);
-    cache.insert(css.into_boxed_str(), block.clone());
+    let block = wrap(build());
+    cache.insert(key.into_boxed_str(), block.clone());
     block
 }
 

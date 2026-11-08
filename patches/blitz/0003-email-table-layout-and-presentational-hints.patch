@@ -2359,10 +2359,10 @@ index 7323ebf..3d0cc7a 100644
  }
 diff --git a/crates/blitz-dom/src/presentational_hints.rs b/crates/blitz-dom/src/presentational_hints.rs
 new file mode 100644
-index 0000000..703550d
+index 0000000..f805b73
 --- /dev/null
 +++ b/crates/blitz-dom/src/presentational_hints.rs
-@@ -0,0 +1,696 @@
+@@ -0,0 +1,706 @@
 +//! Legacy HTML presentational attributes, mapped to CSS as the HTML rendering
 +//! section describes.
 +//!
@@ -2438,10 +2438,15 @@ index 0000000..703550d
 +    if let Some(lang) = lang {
 +        use style::properties::{Importance, PropertyDeclaration};
 +        use style::values::specified::XLang;
-+        let block = ServoArc::new(node.guard().wrap(PropertyDeclarationBlock::with_one(
-+            PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
-+            Importance::Normal,
-+        )));
++        // Word and Outlook put `lang` on most paragraphs and spans; a shared
++        // block keeps those elements sharing styles. The key cannot collide
++        // with a declaration list, which never contains NUL.
++        let block = cached_block(node, format!("\0{lang}"), || {
++            PropertyDeclarationBlock::with_one(
++                PropertyDeclaration::XLang(XLang(style::Atom::from(lang))),
++                Importance::Normal,
++            )
++        });
 +        hints.push(ApplicableDeclarationBlock::from_declarations(
 +            block,
 +            CascadeLevel::new(CascadeOrigin::PresHints),
@@ -2460,7 +2465,15 @@ index 0000000..703550d
 +        return;
 +    }
 +
-+    let block = cached_block(node, css);
++    let block = cached_block(node, css.clone(), || {
++        parse_style_attribute(
++            &css,
++            &HINT_URL_DATA,
++            None,
++            QuirksMode::NoQuirks,
++            CssRuleType::Style,
++        )
++    });
 +    hints.push(ApplicableDeclarationBlock::from_declarations(
 +        block,
 +        CascadeLevel::new(CascadeOrigin::PresHints),
@@ -2468,16 +2481,13 @@ index 0000000..703550d
 +    ));
 +}
 +
-+fn cached_block(node: &Node, css: String) -> HintBlock {
-+    let parse = |css: &str| {
-+        ServoArc::new(node.guard().wrap(parse_style_attribute(
-+            css,
-+            &HINT_URL_DATA,
-+            None,
-+            QuirksMode::NoQuirks,
-+            CssRuleType::Style,
-+        )))
-+    };
++/// The document's shared block for `key`, built on first use.
++fn cached_block(
++    node: &Node,
++    key: String,
++    build: impl FnOnce() -> PropertyDeclarationBlock,
++) -> HintBlock {
++    let wrap = |block| ServoArc::new(node.guard().wrap(block));
 +
 +    let mut doc = node;
 +    while let Some(parent) = doc.parent {
@@ -2485,7 +2495,7 @@ index 0000000..703550d
 +    }
 +    let NodeData::Document(data) = &doc.data else {
 +        // Detached subtrees are styled rarely; they just skip the cache.
-+        return parse(&css);
++        return wrap(build());
 +    };
 +
 +    let mut cache = data
@@ -2493,11 +2503,11 @@ index 0000000..703550d
 +        .0
 +        .lock()
 +        .unwrap_or_else(std::sync::PoisonError::into_inner);
-+    if let Some(block) = cache.get(css.as_str()) {
++    if let Some(block) = cache.get(key.as_str()) {
 +        return block.clone();
 +    }
-+    let block = parse(&css);
-+    cache.insert(css.into_boxed_str(), block.clone());
++    let block = wrap(build());
++    cache.insert(key.into_boxed_str(), block.clone());
 +    block
 +}
 +

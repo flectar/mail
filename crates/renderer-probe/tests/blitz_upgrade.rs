@@ -872,3 +872,13 @@ fn invalid_font_faces_keep_the_inherited_family() {
     assert!(family("#bad").contains("Monospace"), "{}", family("#bad"));
     assert!(family("#good").contains("Georgia"), "{}", family("#good"));
 }
+
+#[test]
+fn elements_with_the_same_lang_share_styles() {
+    // Outlook marks most paragraphs `lang=EN-US`; equal hints must not stop
+    // siblings from sharing one computed style.
+    let doc = document("<p id='a' lang='EN-US'>a</p><p id='b' lang='EN-US'>b</p>");
+    let a = node(&doc, "#a").primary_styles().unwrap();
+    let b = node(&doc, "#b").primary_styles().unwrap();
+    assert!(std::ptr::eq(&**a, &**b));
+}
