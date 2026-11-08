@@ -2,7 +2,7 @@
 
 use crate::{
     AccountPresentationSettings, AccountRow, AppTheme, AppWindow, InboxState, MessageColors,
-    PAGE_SIZE,
+    PAGE_SIZE, SyncUi,
     account_controller::apply_connected_account_rows,
     avatar_initials,
     calendar::{
@@ -907,6 +907,8 @@ pub(crate) fn refresh_oauth_availability(app: &AppWindow) {
 pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.global::<MessageColors>()
         .set_preference(settings.message_appearance.as_str().into());
+    app.global::<SyncUi>()
+        .set_sync_sign_ins(settings.sync_sign_ins);
     refresh_oauth_availability(app);
     app.set_time_format(settings.time_format.as_str().into());
     crate::apply_language(app, &settings.language);

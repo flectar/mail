@@ -3,7 +3,7 @@
 
 import { HorizontalBox, VerticalBox } from "std-widgets.slint";
 import { Button } from "components/button.slint";
-import { LineEdit } from "components/controls.slint";
+import { LineEdit, Switch } from "components/controls.slint";
 import { FocusVisibleScope } from "components/focus-visible-scope.slint";
 import { SettingsCard } from "components/settings-components.slint";
 import { AppTheme, LayoutMetrics } from "design-system.slint";
@@ -51,6 +51,8 @@ export global SyncUi {
     in-out property <string> join-method: "code";
     // This device can scan QR codes with its camera.
     in property <bool> can-scan;
+    // Passwords and sign-ins sync too, on every device of the group.
+    in-out property <bool> sync-sign-ins: true;
 
     // What Flectar's server charges, shown while sync is off: the days of
     // free trial, and the monthly and yearly prices, such as "€4". Empty
@@ -103,6 +105,7 @@ export global SyncUi {
     callback reset-recovery();
     callback turn-off();
     callback delete-everywhere();
+    callback set-sync-sign-ins(bool /* on */);
     callback sync-now();
     // The settings page opened.
     callback opened();
@@ -401,7 +404,7 @@ component PricingCard inherits Rectangle {
             @tr("All your devices, one subscription"),
             @tr("Scheduled emails go out from any of your devices"),
             @tr("Snoozes, reply reminders and templates on every device"),
-            @tr("Accounts, signatures, profiles and preferences"),
+            @tr("Accounts, sign-ins, signatures, profiles and preferences"),
             @tr("End-to-end encrypted: not even Flectar Mail can read it"),
         ] : Rectangle {
             // Sized from the text at its width, so lines that wrap on a
@@ -585,7 +588,7 @@ export component SyncSettingsPage inherits VerticalBox {
     }
     Text {
         height: max(root.compact ? 51px : 34px, self.preferred-height);
-        text: @tr("Keep your accounts, preferences, templates, snoozes and reply reminders the same on all your devices, and let any of them send your scheduled emails. Everything is end-to-end encrypted, so not even Flectar Mail can read it. Your mail, contacts and calendars keep syncing with your mail provider.");
+        text: @tr("Keep your accounts and their sign-ins, preferences, templates, snoozes and reply reminders the same on all your devices, and let any of them send your scheduled emails. Everything is end-to-end encrypted, so not even Flectar Mail can read it. Your mail, contacts and calendars keep syncing with your mail provider.");
         color: root.secondary-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -606,6 +609,7 @@ export component SyncSettingsPage inherits VerticalBox {
             : SyncUi.failed-action == "reset" ? @tr("Could not replace the recovery code: {}", SyncUi.failure)
             : SyncUi.failed-action == "turn-off" ? @tr("Could not turn off sync: {}", SyncUi.failure)
             : SyncUi.failed-action == "delete" ? @tr("Could not delete sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "sign-ins" ? @tr("Could not change password and sign-in sync: {}", SyncUi.failure)
             : SyncUi.failed-action == "subscribe" ? @tr("Could not open the checkout: {}", SyncUi.failure)
             : SyncUi.failed-action == "manage" ? @tr("Could not open the subscription page: {}", SyncUi.failure)
             : SyncUi.failure;
@@ -619,7 +623,7 @@ export component SyncSettingsPage inherits VerticalBox {
         description: !root.offered ? @tr("Sync this device's setup to your other devices.")
             : SyncUi.offer-trial-days > 0 ? @tr("Free for {n} day, then {}." | "Free for {n} days, then {}." % SyncUi.offer-trial-days, root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly))
             : @tr("{}.", root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly));
-        note: @tr("You get a recovery code to keep somewhere safe. Passwords and sign-ins stay on each device: your other devices ask you to sign in once.");
+        note: @tr("You get a recovery code to keep somewhere safe. Your passwords and sign-ins sync too, so your other devices are ready at once.");
         icon: @image-url("icons/lucide/filled/cloud-sync.svg");
         icon-color: root.accent;
         surface: root.surface;
@@ -839,6 +843,28 @@ export component SyncSettingsPage inherits VerticalBox {
 
     if root.on : ActionCard {
         compact: root.compact;
+        title: @tr("Passwords and sign-ins");
+        description: @tr("Your other devices are signed in to your accounts at once.");
+        note: @tr("End-to-end encrypted, for all your devices. Anyone with your recovery code can sign in to your accounts.");
+        icon: @image-url("icons/lucide/outline/key.svg");
+        icon-color: root.accent;
+        actions-width: 38px;
+        actions-height: 22px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Switch {
+            checked <=> SyncUi.sync-sign-ins;
+            enabled: !SyncUi.busy;
+            control-label: @tr("Sync passwords and sign-ins");
+            toggled => { SyncUi.set-sync-sign-ins(SyncUi.sync-sign-ins); }
+        }
+    }
+
+    if root.on : ActionCard {
+        compact: root.compact;
         title: @tr("Turn off sync");
         description: @tr("Stop syncing on this device, or delete sync for every device.");
         note: @tr("Turning off keeps this device's accounts and settings. Deleting also removes the encrypted copy from the server; each device keeps its own.");
@@ -1004,7 +1030,9 @@ export component RecoveryWordsDialog inherits SyncModal {
     changed open => { root.copied = false; }
 
     Text {
-        text: @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so keep them offline, such as on paper. Flectar Mail cannot show them again.");
+        text: SyncUi.sync-sign-ins
+            ? @tr("If you lose all your devices, these 24 words bring everything back, signed in. Anyone who has them can read your mail and send as you, so keep them offline, such as on paper. Flectar Mail cannot show them again.")
+            : @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so keep them offline, such as on paper. Flectar Mail cannot show them again.");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -1125,7 +1153,9 @@ export component InviteDeviceDialog inherits SyncModal {
         fill: root.fill;
     }
     if SyncUi.pairing-stage == "added" : Text {
-        text: @tr("The device is joining. It will ask you to sign in to your accounts once.");
+        text: SyncUi.sync-sign-ins
+            ? @tr("The device is joining. Your accounts will be ready there in a moment.")
+            : @tr("The device is joining. It will ask you to sign in to your accounts once.");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;

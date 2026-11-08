@@ -123,6 +123,9 @@
     "kebab-horizontal.svg": {
       "source": "ellipsis"
     },
+    "key.svg": {
+      "source": "key-round"
+    },
     "link.svg": {
       "source": "link-2"
     },

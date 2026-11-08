@@ -89,6 +89,8 @@ impl SyncController {
         ui.on_turn_off(move || turn_off.turn_off());
         let delete = actions.clone();
         ui.on_delete_everywhere(move || delete.delete_everywhere());
+        let sign_ins = actions.clone();
+        ui.on_set_sync_sign_ins(move |on| sign_ins.set_sync_sign_ins(on));
         let opened = actions.clone();
         ui.on_opened(move || opened.opened());
         let subscribe = actions.clone();
@@ -464,6 +466,23 @@ impl Actions {
             |ui, _, result| match result {
                 Ok(()) => show_failure(ui, "", ""),
                 Err(error) => show_failure(ui, "turn-off", &error_text(&error)),
+            },
+        );
+    }
+
+    /// Passwords and sign-ins sync, or stop, on every device of the group.
+    fn set_sync_sign_ins(&self, on: bool) {
+        let Some(core) = self.core() else {
+            return;
+        };
+        self.run(
+            async move { core.device_sync_set_sign_ins(on).await },
+            move |ui, _, result| match result {
+                Ok(()) => show_failure(ui, "", ""),
+                Err(error) => {
+                    ui.set_sync_sign_ins(!on);
+                    show_failure(ui, "sign-ins", &error_text(&error));
+                }
             },
         );
     }
@@ -933,6 +952,8 @@ fn show_preferences(
     }
     apply_mail_grouping(app, state, runtime, settings.mail_grouping());
     app.set_show_account_markers(settings.show_account_badges);
+    app.global::<SyncUi>()
+        .set_sync_sign_ins(settings.sync_sign_ins);
     settings_controller::apply_account_presentation_settings(app, state, runtime, settings);
     let remote_images = settings.load_remote_images && cfg!(feature = "remote-content");
     if app.get_remote_images_enabled() != remote_images {
