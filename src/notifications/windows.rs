@@ -310,7 +310,7 @@ impl Toasts {
                     "notifications are turned off in Windows settings".into(),
                 ));
             }
-            Availability::NotAsked | Availability::Unavailable => {
+            Availability::NotAsked | Availability::Unavailable | Availability::Refused => {
                 return Err(Failure::Unavailable(
                     "Windows shows no notifications for this app".into(),
                 ));

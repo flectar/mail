@@ -25,20 +25,46 @@ use objc2::{
 use objc2_app_kit::NSWorkspace;
 use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSSet, NSString, NSURL};
 use objc2_user_notifications::{
-    UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
-    UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory,
-    UNNotificationCategoryOptions, UNNotificationDefaultActionIdentifier,
-    UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
-    UNNotificationSettings, UNNotificationSound, UNUserNotificationCenter,
-    UNUserNotificationCenterDelegate,
+    UNAuthorizationOptions, UNAuthorizationStatus, UNErrorCode, UNErrorDomain,
+    UNMutableNotificationContent, UNNotification, UNNotificationAction,
+    UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
+    UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
+    UNNotificationRequest, UNNotificationResponse, UNNotificationSettings, UNNotificationSound,
+    UNUserNotificationCenter, UNUserNotificationCenterDelegate,
 };
 use std::{
     cell::OnceCell,
     future::Future,
     ptr::NonNull,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
 };
 use tokio::sync::oneshot;
+
+/// Whether macOS refused this copy of the app outright. It then answers the
+/// permission request with an error, while its settings still say nobody was
+/// asked.
+static REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// Permission requests waiting for their answer. Apple doesn't say what a
+/// request answers while an earlier one's prompt is still up, so only a
+/// request sent while none was waiting can show a refusal.
+static ASKING: AtomicUsize = AtomicUsize::new(0);
+
+/// Note an answer saying that macOS refuses the app's notifications, and
+/// show it in Settings right away rather than at the window's next focus.
+fn note_refusal(error: Option<&NSError>) {
+    let refused = error.is_some_and(|error| {
+        error.code() == UNErrorCode::NotificationsNotAllowed.0
+            // SAFETY: the framework's own constant, set when it loads.
+            && unsafe { UNErrorDomain }.is_some_and(|domain| error.domain().isEqualToString(domain))
+    });
+    if refused && !REFUSED.swap(true, Ordering::Relaxed) {
+        let _ = slint::invoke_from_event_loop(super::ui::refresh_availability);
+    }
+}
 
 /// The bundle the framework knows the app by (platform/macos/Info.plist.in).
 const BUNDLE_ID: &str = "com.flectar.mail";
@@ -127,7 +153,13 @@ impl NotificationHost for Host {
                 // SAFETY: the framework passes a valid settings object for
                 // the block's call.
                 let status = unsafe { settings.as_ref() }.authorizationStatus();
-                done(availability(status));
+                done(match availability(status) {
+                    // Nobody can be asked about an app macOS refuses.
+                    Availability::NotAsked if REFUSED.load(Ordering::Relaxed) => {
+                        Availability::Refused
+                    }
+                    availability => availability,
+                });
             });
             UNUserNotificationCenter::currentNotificationCenter()
                 .getNotificationSettingsWithCompletionHandler(&block);
@@ -135,8 +167,14 @@ impl NotificationHost for Host {
     }
 
     fn request_permission(&self) -> HostFuture<Availability> {
-        let asked = answer(false, |done| {
-            let block = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        let alone = ASKING.fetch_add(1, Ordering::Relaxed) == 0;
+        let asked = answer(false, move |done| {
+            let block = RcBlock::new(move |granted: Bool, error: *mut NSError| {
+                ASKING.fetch_sub(1, Ordering::Relaxed);
+                if alone {
+                    // SAFETY: a non-null error is a valid NSError for the call.
+                    note_refusal(unsafe { error.as_ref() });
+                }
                 done(granted.as_bool());
             });
             UNUserNotificationCenter::currentNotificationCenter()

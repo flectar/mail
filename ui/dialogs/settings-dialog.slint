@@ -695,11 +695,15 @@ export component SettingsDialog inherits Rectangle {
     private property <int> notification-index: !root.notifications_enabled ? 0
         : root.notification_scope == "all" ? 2 : 1;
     // On here but kept from showing by the system: turned off in its settings,
-    // or no notification service running.
+    // refused for this copy of the app (macOS, as for a copy in a temporary
+    // folder), or no notification service running.
     private property <bool> notifications-blocked: root.notifications_enabled
-        && (SystemNotifications.availability == "denied" || SystemNotifications.availability == "unavailable");
+        && (SystemNotifications.availability == "denied" || SystemNotifications.availability == "refused"
+            || SystemNotifications.availability == "unavailable");
     private property <string> notifications-blocked-text: SystemNotifications.availability == "denied"
         ? @tr("Notifications from Flectar Mail are turned off in your system settings.")
+        : SystemNotifications.availability == "refused"
+        ? @tr("macOS doesn't allow notifications from Flectar Mail where it is now. Move it to the Applications folder, then open it again.")
         : @tr("This system has no notification service running, so notifications can't be shown.");
     private property <bool> notifications-settings-offered: SystemNotifications.availability == "denied"
         && SystemNotifications.settings-openable;

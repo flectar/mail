@@ -194,6 +194,7 @@ pub(crate) fn refresh_availability() {
             Availability::NotAsked => "not-asked",
             Availability::Denied => "denied",
             Availability::Unavailable => "unavailable",
+            Availability::Refused => "refused",
         };
         let _ = app.upgrade_in_event_loop(move |app| {
             app.global::<SystemNotifications>()

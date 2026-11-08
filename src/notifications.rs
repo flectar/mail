@@ -236,6 +236,8 @@ pub enum Availability {
     /// There is no notification service to show them: none running, or the
     /// platform has none the app can use.
     Unavailable,
+    /// The system refuses them from this copy of the app outright (macOS).
+    Refused,
 }
 
 /// A click or a button on a notification, as the platform reports it.

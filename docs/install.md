@@ -26,7 +26,9 @@ separately once its configuration is saved.
 
 Windows previews are unsigned; macOS previews are ad-hoc signed and not
 notarized, so operating-system security prompts are expected. Install updates
-manually.
+manually. On macOS, move Flectar Mail to the Applications folder and open it
+from there: macOS may not show notifications from a copy anywhere else, such as
+one in a temporary folder.
 
 Windows downloads come in x64 and arm64 builds. A Windows on Arm PC can run
 the x64 build through emulation, but the arm64 build runs natively. The
