@@ -1376,12 +1376,19 @@ impl Node {
         if self.data.is_element_with_tag_name(&local_name!("html")) {
             return false;
         }
+        // `overflow` and paint containment apply to block, flex and grid containers and
+        // table cells: not to non-atomic inline boxes or the other internal table boxes,
+        // which have no box of their own to clip to (css-overflow-3 §3.1).
         let display = styles.clone_display();
-        let containment = styles.get_box().clone_contain().contains(Contain::PAINT)
-            && !display.is_inline_flow()
-            && !(display.outside() == DisplayOutside::InternalTable
-                && display.inside() != DisplayInside::TableCell);
-        containment
+        if display.is_none()
+            || display.is_contents()
+            || display.is_inline_flow()
+            || (display.outside() == DisplayOutside::InternalTable
+                && display.inside() != DisplayInside::TableCell)
+        {
+            return false;
+        }
+        styles.get_box().clone_contain().contains(Contain::PAINT)
             || !matches!(styles.get_box().overflow_x, Overflow::Visible)
             || !matches!(styles.get_box().overflow_y, Overflow::Visible)
     }

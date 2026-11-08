@@ -2024,7 +2024,7 @@ index 313a073..787b7ab 100644
              height,
              data: Blob::new(data),
 diff --git a/crates/blitz-dom/src/node/node.rs b/crates/blitz-dom/src/node/node.rs
-index 66190f4..dea0f6e 100644
+index 66190f4..424496c 100644
 --- a/crates/blitz-dom/src/node/node.rs
 +++ b/crates/blitz-dom/src/node/node.rs
 @@ -1115,10 +1115,13 @@ impl Node {
@@ -2045,7 +2045,7 @@ index 66190f4..dea0f6e 100644
  
          let mut flags = stylo_taffy::StyleFlags::empty();
          if let Some(el) = self.data.downcast_element() {
-@@ -1363,6 +1366,26 @@ impl Node {
+@@ -1363,6 +1366,33 @@ impl Node {
      ///
      /// TODO: z-index
      /// (If multiple children are positioned at the position then a random one will be recursed into)
@@ -2059,12 +2059,19 @@ index 66190f4..dea0f6e 100644
 +        if self.data.is_element_with_tag_name(&local_name!("html")) {
 +            return false;
 +        }
++        // `overflow` and paint containment apply to block, flex and grid containers and
++        // table cells: not to non-atomic inline boxes or the other internal table boxes,
++        // which have no box of their own to clip to (css-overflow-3 §3.1).
 +        let display = styles.clone_display();
-+        let containment = styles.get_box().clone_contain().contains(Contain::PAINT)
-+            && !display.is_inline_flow()
-+            && !(display.outside() == DisplayOutside::InternalTable
-+                && display.inside() != DisplayInside::TableCell);
-+        containment
++        if display.is_none()
++            || display.is_contents()
++            || display.is_inline_flow()
++            || (display.outside() == DisplayOutside::InternalTable
++                && display.inside() != DisplayInside::TableCell)
++        {
++            return false;
++        }
++        styles.get_box().clone_contain().contains(Contain::PAINT)
 +            || !matches!(styles.get_box().overflow_x, Overflow::Visible)
 +            || !matches!(styles.get_box().overflow_y, Overflow::Visible)
 +    }
@@ -2072,7 +2079,7 @@ index 66190f4..dea0f6e 100644
      pub fn hit(&self, x: f32, y: f32, scale: f64) -> Option<HitResult> {
          self.hit_inner(x, y, scale, &mut None)
      }
-@@ -1406,7 +1429,18 @@ impl Node {
+@@ -1406,7 +1436,18 @@ impl Node {
              y = (p.y / scale) as f32;
          }
  

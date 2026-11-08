@@ -633,3 +633,16 @@ fn tiles_keep_ink_that_overflows_from_the_tile_above() {
     );
     assert_eq!(rows_with(&pixels, [255, 0, 0, 255]), Some((0, 9)));
 }
+
+#[test]
+fn only_boxes_that_overflow_applies_to_clip() {
+    // Rows and inline elements have no box of their own to clip to, so a link
+    // inside them must not be clipped away (css-overflow-3 §3.1).
+    let doc = document(
+        "<table><tr id='row' style='overflow:hidden'><td id='cell' style='overflow:hidden'>
+         <span id='inline' style='overflow:hidden'><a href='https://example.com/'>Offer</a></span></td></tr></table>",
+    );
+    assert!(!node(&doc, "#row").clips_content());
+    assert!(!node(&doc, "#inline").clips_content());
+    assert!(node(&doc, "#cell").clips_content());
+}
