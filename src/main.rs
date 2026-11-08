@@ -8380,6 +8380,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     };
     // Timers stop with the event loop, so a pending tab save is written now.
     app.global::<TabsUi>().invoke_flush();
+    let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
+    notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
     event_loop_result.map_err(|error| {
         renderer_preferences::startup_error(error, use_wgpu && !gpu_startup_completed.get())
     })?;

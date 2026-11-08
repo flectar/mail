@@ -95,6 +95,13 @@ impl NotificationHost for Host {
     fn set_words(&self, words: &FixedWords) {
         *self.0.words.lock().unwrap_or_else(PoisonError::into_inner) = words.clone();
     }
+
+    /// GNOME keeps portal notifications after the app exits, and a click on
+    /// one then does nothing: the Flatpak isn't started over D-Bus. GNOME
+    /// drops a notification server's own at exit.
+    fn withdraw_at_exit(&self) -> bool {
+        cfg!(feature = "flatpak")
+    }
 }
 
 /// The notification's body: the subject, then the start of the message, and

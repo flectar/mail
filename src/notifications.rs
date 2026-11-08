@@ -90,6 +90,11 @@ pub trait NotificationHost: Send + Sync + 'static {
     /// them ahead of the notifications (macOS). Called when the window is
     /// ready and whenever the language changes.
     fn set_words(&self, _words: &FixedWords) {}
+    /// Whether to take every notification back before the app exits: the
+    /// system keeps them, but nothing would start the app for a click.
+    fn withdraw_at_exit(&self) -> bool {
+        false
+    }
 }
 
 /// One notification for the system to show.
@@ -334,6 +339,8 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 const WITHDRAW_SETTLE: Duration = Duration::from_secs(2);
 /// How often old notification records are forgotten.
 const PRUNE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+/// How long taking notifications back may hold up the app's exit.
+const EXIT_WITHDRAW_LIMIT: Duration = Duration::from_secs(2);
 
 /// Wakes the dispatcher when the notification settings change.
 static PREFERENCES: Notify = Notify::const_new();
@@ -396,6 +403,25 @@ pub(crate) fn spawn_dispatcher(
             }
         }
     });
+}
+
+/// Take every notification back as the app exits, where the host asks for
+/// it ([`NotificationHost::withdraw_at_exit`]). Called once the window's event
+/// loop has ended.
+pub(crate) fn withdraw_before_exit(
+    runtime: &tokio::runtime::Handle,
+    core: Option<Arc<Core>>,
+    host: Option<Arc<dyn NotificationHost>>,
+) {
+    let (Some(core), Some(host)) = (core, host) else {
+        return;
+    };
+    if host.withdraw_at_exit() {
+        let _ = runtime.block_on(tokio::time::timeout(
+            EXIT_WITHDRAW_LIMIT,
+            withdraw(&core, Some(host.as_ref()), Withdraw::All),
+        ));
+    }
 }
 
 async fn notifications_enabled(core: &Core) -> bool {
