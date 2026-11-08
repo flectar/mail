@@ -105,6 +105,7 @@ fn main() {
         max_jpeg_source_pixels: 64 * 1024 * 1024,
         max_alloc: 8 * 1024 * 1024 * 4,
         target_dimension: target,
+        target_pixels: u64::from(target) * u64::from(target),
     };
     let baseline = LIVE.load(Ordering::Relaxed);
     PEAK.store(baseline, Ordering::Relaxed);
@@ -163,6 +164,7 @@ mod tests {
             max_jpeg_source_pixels: 64 * 1024 * 1024,
             max_alloc: 8 * 1024 * 1024 * 4,
             target_dimension: 2048,
+            target_pixels: 2048 * 2048,
         }
         .decode(encoded.get_ref())
         .unwrap();

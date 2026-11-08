@@ -477,10 +477,10 @@ index 786b5bd..02b5379 100644
          #[cfg(feature = "svg")]
 diff --git a/crates/blitz-dom/src/net/image_decode.rs b/crates/blitz-dom/src/net/image_decode.rs
 new file mode 100644
-index 0000000..48ce811
+index 0000000..0f90e35
 --- /dev/null
 +++ b/crates/blitz-dom/src/net/image_decode.rs
-@@ -0,0 +1,214 @@
+@@ -0,0 +1,236 @@
 +use crate::node::RasterImageData;
 +use image::metadata::Orientation;
 +use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
@@ -498,7 +498,12 @@ index 0000000..48ce811
 +    pub max_jpeg_source_pixels: u64,
 +    /// The largest pixel buffer a JPEG decode may allocate.
 +    pub max_alloc: u64,
++    /// The longest side a decoded image keeps.
 +    pub target_dimension: u32,
++    /// The most pixels a decoded image keeps. Bounding the area rather than
++    /// only the longer side keeps tall and wide images sharp for the same
++    /// memory.
++    pub target_pixels: u64,
 +}
 +
 +impl ImageDecodeLimits {
@@ -526,15 +531,16 @@ index 0000000..48ce811
 +            || height > max_source_dimension
 +            || u64::from(width) * u64::from(height) > max_source_pixels
 +            || self.target_dimension == 0
++            || self.target_pixels == 0
 +        {
 +            return Err("Image dimensions exceed the document decoder limits".into());
 +        }
 +        // Malformed metadata must not lose an otherwise valid image.
 +        let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
 +
-+        let target = self.target_dimension;
-+        let scaled_jpeg = if is_jpeg && width.max(height) > target {
-+            self.decode_scaled_jpeg(bytes, width, height)?
++        let target = self.target_size(width, height);
++        let scaled_jpeg = if is_jpeg && target != (width, height) {
++            self.decode_scaled_jpeg(bytes, width, height, target)?
 +        } else {
 +            None
 +        };
@@ -575,6 +581,20 @@ index 0000000..48ce811
 +        Ok(image)
 +    }
 +
++    /// The largest size a `width` x `height` image is decoded to: within both
++    /// the longest side and the pixel budget, keeping its aspect ratio.
++    pub fn target_size(self, width: u32, height: u32) -> (u32, u32) {
++        let (w, h) = (f64::from(width), f64::from(height));
++        let scale = (f64::from(self.target_dimension) / w.max(h))
++            .min((self.target_pixels as f64 / (w * h)).sqrt())
++            .min(1.0);
++        if scale >= 1.0 {
++            return (width, height);
++        }
++        let fit = |side: f64| ((side * scale).floor() as u32).max(1);
++        (fit(w), fit(h))
++    }
++
 +    /// Decode a large JPEG at a reduced size using the decoder's IDCT scaling,
 +    /// at the smallest reduction that keeps the target resolution and fits
 +    /// `max_alloc`. `Ok(None)` defers to the general decoder for streams this
@@ -584,6 +604,7 @@ index 0000000..48ce811
 +        bytes: &[u8],
 +        width: u32,
 +        height: u32,
++        (target_width, target_height): (u32, u32),
 +    ) -> Result<Option<DynamicImage>, String> {
 +        let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
 +        decoder.set_max_decoding_buffer_size(self.max_alloc.min(usize::MAX as u64) as usize);
@@ -607,10 +628,11 @@ index 0000000..48ce811
 +            jpeg_decoder::PixelFormat::CMYK32 => 4,
 +            _ => return Ok(None),
 +        };
-+        let longest = width.max(height);
 +        let mut divisor = [8, 4, 2]
 +            .into_iter()
-+            .find(|&divisor| longest.div_ceil(divisor) >= self.target_dimension)
++            .find(|&divisor| {
++                width.div_ceil(divisor) >= target_width && height.div_ceil(divisor) >= target_height
++            })
 +            .unwrap_or(1);
 +        let scaled_bytes = |divisor: u32| {
 +            u64::from(width.div_ceil(divisor)) * u64::from(height.div_ceil(divisor)) * channels
@@ -653,15 +675,15 @@ index 0000000..48ce811
 +        .collect()
 +}
 +
-+/// Reduce an image to fit `target` on its longer side. Colour is averaged
-+/// premultiplied, so fully transparent pixels do not darken the edges of
-+/// translucent images.
-+fn downscale(image: DynamicImage, target: u32) -> DynamicImage {
-+    if image.width().max(image.height()) <= target {
++/// Reduce an image to `target`, the size `target_size` gives its source.
++/// Colour is averaged premultiplied, so fully transparent pixels do not
++/// darken the edges of translucent images.
++fn downscale(image: DynamicImage, (target_width, target_height): (u32, u32)) -> DynamicImage {
++    if image.width() <= target_width && image.height() <= target_height {
 +        return image;
 +    }
 +    if !image.color().has_alpha() {
-+        return image.thumbnail(target, target);
++        return image.thumbnail_exact(target_width, target_height);
 +    }
 +    let mut rgba = image.into_rgba8();
 +    for pixel in rgba.pixels_mut() {
@@ -671,7 +693,7 @@ index 0000000..48ce811
 +        }
 +    }
 +    let mut reduced = DynamicImage::ImageRgba8(rgba)
-+        .thumbnail(target, target)
++        .thumbnail_exact(target_width, target_height)
 +        .into_rgba8();
 +    for pixel in reduced.pixels_mut() {
 +        let alpha = u16::from(pixel[3]);

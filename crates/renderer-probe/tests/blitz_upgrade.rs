@@ -270,7 +270,8 @@ fn decode_limits() -> blitz_dom::net::ImageDecodeLimits {
         max_jpeg_source_dimension: 16_384,
         max_jpeg_source_pixels: 64 * 1024 * 1024,
         max_alloc: 32 * 1024 * 1024,
-        target_dimension: 2048,
+        target_dimension: 4096,
+        target_pixels: 2048 * 2048,
     }
 }
 
@@ -288,7 +289,11 @@ fn large_jpegs_keep_the_target_resolution() {
         image::ImageFormat::Jpeg,
         image::DynamicImage::new_rgb8(2500, 100),
     );
-    let decoded = decode_limits().decode(&jpeg).unwrap();
+    let limits = blitz_dom::net::ImageDecodeLimits {
+        target_dimension: 2048,
+        ..decode_limits()
+    };
+    let decoded = limits.decode(&jpeg).unwrap();
     assert_eq!((decoded.width, decoded.height), (2500, 100));
     assert_eq!(decoded.pixel_width, 2048);
 }
@@ -340,7 +345,11 @@ fn translucent_images_shrink_without_dark_fringes() {
         image::ImageFormat::Png,
         image::DynamicImage::ImageRgba8(pixels),
     );
-    let decoded = decode_limits().decode(&png).unwrap();
+    let limits = blitz_dom::net::ImageDecodeLimits {
+        target_dimension: 2048,
+        ..decode_limits()
+    };
+    let decoded = limits.decode(&png).unwrap();
     assert_eq!(decoded.pixel_width, 2048);
     let first = &decoded.data.data()[..4];
     assert!(
@@ -1152,4 +1161,28 @@ fn text_culling_follows_the_painter_offset() {
     );
     let (top, _) = rows_with(&pixels, [204, 0, 0, 255]).expect("text painted");
     assert!(top >= 340, "text at row {top}");
+}
+
+#[test]
+fn tall_images_keep_their_detail_within_the_pixel_budget() {
+    // Decoded images are bounded by their pixel count, not only their longer
+    // side: a tall newsletter image within the budget keeps its resolution.
+    let limits = blitz_dom::net::ImageDecodeLimits {
+        target_dimension: 1000,
+        target_pixels: 100 * 100,
+        ..decode_limits()
+    };
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(20, 400),
+    );
+    let decoded = limits.decode(&png).unwrap();
+    assert_eq!((decoded.pixel_width, decoded.pixel_height), (20, 400));
+    // Past the budget, both sides shrink by the same factor.
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::new_rgb8(400, 200),
+    );
+    let decoded = limits.decode(&png).unwrap();
+    assert_eq!((decoded.pixel_width, decoded.pixel_height), (141, 70));
 }
