@@ -481,14 +481,16 @@ fn parse_svg_size(value: &str) -> Option<String> {
     if unit.is_empty() {
         return Some(format!("{number}px"));
     }
-    const UNITS: &[&str] = &[
-        "px", "em", "ex", "ch", "rem", "vw", "vh", "vmin", "vmax", "cm", "mm", "q", "in", "pt",
-        "pc",
-    ];
-    let unit = unit.to_ascii_lowercase();
-    UNITS
-        .contains(&unit.as_str())
-        .then(|| format!("{number}{unit}"))
+    // Any unit Stylo knows, serialized back from the parsed length.
+    use style_traits::{ParsingMode, ToCss as _};
+    style::values::specified::NoCalcLength::parse_dimension_with_flags(
+        ParsingMode::DEFAULT,
+        false,
+        number,
+        unit,
+    )
+    .ok()
+    .map(|length| length.to_css_string())
 }
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-a-legacy-colour-value
@@ -669,6 +671,16 @@ mod tests {
             font_family_list(r#""a;}x{color:red"#).as_deref(),
             Some(r#""a;}x{color:red""#)
         );
+    }
+
+    #[test]
+    fn svg_sizes_take_any_css_length() {
+        assert_eq!(parse_svg_size("10").as_deref(), Some("10px"));
+        assert_eq!(parse_svg_size("2lh").as_deref(), Some("2lh"));
+        assert_eq!(parse_svg_size("1.5EM").as_deref(), Some("1.5em"));
+        assert_eq!(parse_svg_size("50%").as_deref(), Some("50%"));
+        assert_eq!(parse_svg_size("3furlongs"), None);
+        assert_eq!(parse_svg_size("-1px"), None);
     }
 
     #[test]
