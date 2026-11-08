@@ -483,46 +483,59 @@ impl RichComposeDocument {
         }
 
         let mut html = String::with_capacity(self.text.len());
-        let mut open_list: Option<BlockKind> = None;
+        let mut open = None;
         let mut line_start = 0;
 
         for line in self.text.split('\n') {
-            let prefix = block_prefix_text(line);
-            let block = prefix.map(|(kind, _)| kind);
-            if !matches!(block, Some(BlockKind::Bullet | BlockKind::Number)) {
-                close_list(&mut html, &mut open_list);
-            }
-            let skip = prefix.map_or(0, |(_, bytes)| bytes);
+            let block = html_line_block(line);
+            let skip = block.map_or(0, |(_, bytes)| bytes);
             let content = line_start + skip..line_start + line.len();
-            match block {
-                Some(kind @ (BlockKind::Bullet | BlockKind::Number)) => {
-                    ensure_list(&mut html, &mut open_list, kind);
+            match block.map(|(block, _)| block) {
+                Some(LineBlock::Bullet) => {
+                    if open != Some(OpenHtmlBlock::Bullets) {
+                        close_html_block(&mut html, &mut open);
+                        html.push_str("<ul>");
+                        open = Some(OpenHtmlBlock::Bullets);
+                    }
                     html.push_str("<li>");
                     append_inline_html(&mut html, &self.text, &self.styles, content);
                     html.push_str("</li>");
                 }
-                Some(BlockKind::Quote) => {
-                    html.push_str("<blockquote>");
-                    if content.is_empty() {
-                        html.push_str("<br>");
-                    } else {
-                        append_inline_html(&mut html, &self.text, &self.styles, content);
+                Some(LineBlock::Number(number)) => {
+                    // Recipients see the numbers shown in the composer: a
+                    // number that does not continue the list starts a new one.
+                    let number = u64::from(number);
+                    if open != Some(OpenHtmlBlock::Numbers { next: number }) {
+                        close_html_block(&mut html, &mut open);
+                        if number == 1 {
+                            html.push_str("<ol>");
+                        } else {
+                            use std::fmt::Write;
+                            write!(html, "<ol start=\"{number}\">")
+                                .expect("writing to a String cannot fail");
+                        }
                     }
-                    html.push_str("</blockquote>");
+                    open = Some(OpenHtmlBlock::Numbers { next: number + 1 });
+                    html.push_str("<li>");
+                    append_inline_html(&mut html, &self.text, &self.styles, content);
+                    html.push_str("</li>");
+                }
+                Some(LineBlock::Quote) => {
+                    if open != Some(OpenHtmlBlock::Quote) {
+                        close_html_block(&mut html, &mut open);
+                        html.push_str("<blockquote>");
+                        open = Some(OpenHtmlBlock::Quote);
+                    }
+                    append_line_html(&mut html, &self.text, &self.styles, content);
                 }
                 None => {
-                    html.push_str("<div>");
-                    if content.is_empty() {
-                        html.push_str("<br>");
-                    } else {
-                        append_inline_html(&mut html, &self.text, &self.styles, content);
-                    }
-                    html.push_str("</div>");
+                    close_html_block(&mut html, &mut open);
+                    append_line_html(&mut html, &self.text, &self.styles, content);
                 }
             }
             line_start += line.len() + 1;
         }
-        close_list(&mut html, &mut open_list);
+        close_html_block(&mut html, &mut open);
         Some(html)
     }
 
@@ -1246,27 +1259,53 @@ fn block_prefix_text(text: &str) -> Option<(BlockKind, usize)> {
     None
 }
 
-fn ensure_list(html: &mut String, current: &mut Option<BlockKind>, requested: BlockKind) {
-    if *current == Some(requested) {
-        return;
-    }
-    close_list(html, current);
-    html.push_str(if requested == BlockKind::Bullet {
-        "<ul>"
-    } else {
-        "<ol>"
-    });
-    *current = Some(requested);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LineBlock {
+    Bullet,
+    Number(u32),
+    Quote,
 }
 
-fn close_list(html: &mut String, current: &mut Option<BlockKind>) {
-    if let Some(kind) = current.take() {
-        html.push_str(if kind == BlockKind::Bullet {
-            "</ul>"
-        } else {
-            "</ol>"
-        });
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenHtmlBlock {
+    Bullets,
+    Numbers { next: u64 },
+    Quote,
+}
+
+/// A numbered line whose number does not fit an HTML list stays a paragraph.
+fn html_line_block(line: &str) -> Option<(LineBlock, usize)> {
+    let (kind, bytes) = block_prefix_text(line)?;
+    let block = match kind {
+        BlockKind::Bullet => LineBlock::Bullet,
+        BlockKind::Quote => LineBlock::Quote,
+        BlockKind::Number => LineBlock::Number(line[..bytes - 2].parse().ok()?),
+    };
+    Some((block, bytes))
+}
+
+fn close_html_block(html: &mut String, open: &mut Option<OpenHtmlBlock>) {
+    match open.take() {
+        Some(OpenHtmlBlock::Bullets) => html.push_str("</ul>"),
+        Some(OpenHtmlBlock::Numbers { .. }) => html.push_str("</ol>"),
+        Some(OpenHtmlBlock::Quote) => html.push_str("</blockquote>"),
+        None => {}
     }
+}
+
+fn append_line_html(
+    output: &mut String,
+    text: &str,
+    styles: &[ComposeStyleRun],
+    range: Range<usize>,
+) {
+    output.push_str("<div>");
+    if range.is_empty() {
+        output.push_str("<br>");
+    } else {
+        append_inline_html(output, text, styles, range);
+    }
+    output.push_str("</div>");
 }
 
 fn append_inline_html(
@@ -1276,18 +1315,35 @@ fn append_inline_html(
     range: Range<usize>,
 ) {
     let first = styles.partition_point(|run| run.range.end <= range.start);
+    // HTML collapses repeated spaces and drops them at either end of a line,
+    // so those spaces are written as no-break spaces.
+    let mut after_space = true;
     for run in styles[first..]
         .iter()
         .take_while(|run| run.range.start < range.end)
     {
         let start = run.range.start.max(range.start);
         let end = run.range.end.min(range.end);
-        append_html_run(output, &text[start..end], &run.style);
+        append_html_run(
+            output,
+            text,
+            start..end,
+            range.end,
+            &run.style,
+            &mut after_space,
+        );
     }
 }
 
-fn append_html_run(output: &mut String, text: &str, style: &CharacterStyle) {
-    if text.is_empty() {
+fn append_html_run(
+    output: &mut String,
+    text: &str,
+    range: Range<usize>,
+    line_end: usize,
+    style: &CharacterStyle,
+    after_space: &mut bool,
+) {
+    if range.is_empty() {
         return;
     }
     if let Some(url) = style.link.as_deref() {
@@ -1311,8 +1367,15 @@ fn append_html_run(output: &mut String, text: &str, style: &CharacterStyle) {
             output.push('>');
         }
     }
-    for character in text.chars() {
-        append_html_char(output, character);
+    for (offset, character) in text[range.clone()].char_indices() {
+        match character {
+            ' ' if *after_space || range.start + offset + 1 == line_end => {
+                output.push_str("&nbsp;");
+            }
+            '\t' => output.push_str("&nbsp;&nbsp;&nbsp;&nbsp;"),
+            _ => append_html_char(output, character),
+        }
+        *after_space = matches!(character, ' ' | '\t');
     }
     for (mark, tag) in tags.into_iter().rev() {
         if style.marks & mark != 0 {
@@ -2180,7 +2243,7 @@ mod tests {
         let bullet_html = "<ul><li>שלום</li><li>مرحبا</li><li>Cafe\u{301}</li></ul>";
         let continued_html = "<ul><li>שלום</li><li>مرحبا</li><li>Cafe\u{301}</li><li></li></ul>";
         let numbered_html = "<ol><li>שלום</li><li>مرحبا</li><li>Cafe\u{301}</li><li></li></ol>";
-        let quoted_html = "<blockquote>שלום</blockquote><blockquote>مرحبا</blockquote><blockquote>Cafe\u{301}</blockquote><blockquote><br></blockquote>";
+        let quoted_html = "<blockquote><div>שלום</div><div>مرحبا</div><div>Cafe\u{301}</div><div><br></div></blockquote>";
 
         document.synchronize(plain, 0, 26);
         assert_fixture_state(&document, plain, plain_html, (0, 26), &[(0..26, 0, None)]);
@@ -2278,6 +2341,66 @@ mod tests {
         assert_eq!(
             document.body_html().as_deref(),
             Some("<div><strong><s><u><code>Hello &amp; welcome</code></u></s></strong></div>")
+        );
+    }
+
+    fn html_for(text: &str) -> String {
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        document.body_html().unwrap()
+    }
+
+    #[test]
+    fn numbered_lists_keep_the_numbers_the_composer_shows() {
+        assert_eq!(
+            html_for("1. First point\n\n2. Second point"),
+            "<ol><li>First point</li></ol><div><br></div><ol start=\"2\"><li>Second point</li></ol>"
+        );
+        assert_eq!(
+            html_for("1. one\n2. two\nA note\n3. three"),
+            "<ol><li>one</li><li>two</li></ol><div>A note</div><ol start=\"3\"><li>three</li></ol>"
+        );
+        assert_eq!(
+            html_for("2. two\n3. three"),
+            "<ol start=\"2\"><li>two</li><li>three</li></ol>"
+        );
+        assert_eq!(
+            html_for("1. a\n2. b\n5. c"),
+            "<ol><li>a</li><li>b</li></ol><ol start=\"5\"><li>c</li></ol>"
+        );
+        assert_eq!(
+            html_for("2026. was a good year"),
+            "<ol start=\"2026\"><li>was a good year</li></ol>"
+        );
+        assert_eq!(
+            html_for("99999999999. too long for a list"),
+            "<div>99999999999. too long for a list</div>"
+        );
+    }
+
+    #[test]
+    fn quoted_lines_share_one_blockquote() {
+        assert_eq!(
+            html_for("│ first\n│ second\n│ \nAfter"),
+            "<blockquote><div>first</div><div>second</div><div><br></div></blockquote><div>After</div>"
+        );
+    }
+
+    #[test]
+    fn spaces_html_would_collapse_are_written_as_no_break_spaces() {
+        assert_eq!(
+            html_for("  two  spaces "),
+            "<div>&nbsp;&nbsp;two &nbsp;spaces&nbsp;</div>"
+        );
+        assert_eq!(html_for("one space"), "<div>one space</div>");
+        assert_eq!(html_for("a\tb"), "<div>a&nbsp;&nbsp;&nbsp;&nbsp;b</div>");
+
+        let mut document = RichComposeDocument::default();
+        document.load("Hello  world", 0, 0);
+        document.format("bold", "Hello  world", 0, 6);
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some("<div><strong>Hello </strong>&nbsp;world</div>")
         );
     }
 }
