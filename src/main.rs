@@ -12,6 +12,7 @@ pub use browser::ExternalUrlOpener;
 mod calendar;
 mod compose_controller;
 mod compose_editor;
+mod compose_quote;
 mod composer;
 mod contacts;
 mod data_controller;
@@ -96,6 +97,7 @@ use calendar::{LocalCalendarState, apply_calendar, first_of_month, refresh_calen
 use chrono::{Duration as ChronoDuration, Local, NaiveDate, NaiveTime, TimeZone};
 use compose_controller::*;
 use compose_editor::{ComposeEditorStyle, LazyComposeEditor, RenderedComposeEditor};
+use compose_quote::ComposeQuote;
 use contacts::{
     ContactDirectoryState, apply_contact_directory, apply_contact_rows, clear_contact_form,
 };

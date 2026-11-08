@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const FONT_SIZE_LOGICAL: f32 = 13.0;
+pub(crate) const FONT_SIZE_LOGICAL: f32 = 13.0;
 const LINE_HEIGHT_LOGICAL: f32 = 18.0;
 pub(crate) const UI_FONT_FAMILY: &str = "Google Sans Flex";
 pub(crate) const UI_FONT_DATA: &[u8] = include_bytes!(

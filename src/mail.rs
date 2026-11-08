@@ -202,6 +202,9 @@ pub struct ComposeSource {
     pub subject: String,
     pub date: i64,
     pub text_body: String,
+    /// The HTML the reader shows, inline images as `data:` URIs, which a
+    /// reply quotes and a forward carries.
+    pub html_body: Option<String>,
     /// The message's files, for a forward or an edited copy to carry along.
     pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
 }
@@ -1006,6 +1009,10 @@ impl CoreMailSource {
                 .clone()
                 .filter(|body| !body.trim().is_empty())
                 .unwrap_or_else(|| message.snippet.clone()),
+            html_body: message
+                .html_body
+                .clone()
+                .filter(|html| !html.trim().is_empty()),
             // Images shown in the text are part of it, not files.
             attachments: message
                 .attachments

@@ -590,6 +590,7 @@ export global I18n {
         if (key == "To: {}") { return @tr("forwarded message header" => "To: {}", argument); }
         if (key == "Attach files to this email") { return @tr("Attach files to this email"); }
         if (key == "Could not add attachments: {}") { return @tr("Could not add attachments: {}", argument); }
+        if (key == "Could not show the quoted message: {}") { return @tr("Could not show the quoted message: {}", argument); }
         if (key == "Added 1 attachment.") { return @tr("Added 1 attachment."); }
         if (key == "Added {} attachments.") { return @tr("Added {} attachments.", argument); }
         if (key == "Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).") { return @tr("Attachments added: {}. Skipped: {} (duplicate, unreadable, or over the 25 MB total limit).", argument, second-argument); }
@@ -877,6 +878,8 @@ export component AppWindow inherits Window {
     callback drain-data-reset-updates();
     callback drain-contact-load-updates();
     callback drain-compose-send-updates();
+    // A quoted message in a composer finished loading an image.
+    callback refresh-composer-quotes();
     callback refresh-email-resources();
     // Calendar connections changed state while Settings shows them.
     callback reload-calendar-connections();

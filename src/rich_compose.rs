@@ -12,6 +12,8 @@ pub(crate) const ITALIC: u8 = 1 << 1;
 pub(crate) const UNDERLINE: u8 = 1 << 2;
 pub(crate) const STRIKE: u8 = 1 << 3;
 pub(crate) const CODE: u8 = 1 << 4;
+/// What starts each line of a quote block in the document's text.
+pub(crate) const QUOTE_MARKER: &str = "│ ";
 const MAX_HISTORY: usize = 128;
 // The most recent edit remains undoable even when one transaction exceeds this limit.
 const MAX_HISTORY_BYTES: usize = 32 * 1024 * 1024;
@@ -549,17 +551,33 @@ impl RichComposeDocument {
     /// not have written, or HTML from versions that kept neither list
     /// numbers nor spacing. Callers then load the plain text.
     pub fn load_html(&mut self, html: &str, text: &str) -> Option<ComposeSelection> {
-        let styles = saved_styles(html, text)?;
+        let (_, styles) = saved_styles(html, text, true)?;
+        Some(self.reopen(text.to_owned(), styles))
+    }
+
+    /// Reopens the start of `text` that `html` holds, up to a line break:
+    /// what the user wrote above the original a saved reply quotes. Returns
+    /// how much of `text` that is, or `None`, leaving the document
+    /// untouched, when the HTML holds other text.
+    pub fn load_html_start(&mut self, html: &str, text: &str) -> Option<usize> {
+        let (end, styles) = saved_styles(html, text, false)?;
+        self.reopen(text[..end].to_owned(), styles);
+        Some(end)
+    }
+
+    /// Loads `text` formatted with `styles` as a reopened message: nothing
+    /// to undo, and the caret at its end.
+    fn reopen(&mut self, text: String, styles: Vec<ComposeStyleRun>) -> ComposeSelection {
         let revision = self.revision.wrapping_add(1);
         *self = Self {
-            text: text.to_owned(),
+            text,
             styles,
             revision,
             ..Self::default()
         };
         self.auto_link_urls();
         let end = to_i32(self.text.len());
-        Some(self.update_selection(end, end))
+        self.update_selection(end, end)
     }
 
     fn toggle_mark(&mut self, mark: u8, start_byte: usize, end_byte: usize) {
@@ -1235,7 +1253,7 @@ fn continue_list_edit(old_text: &str, new_text: &str) -> Option<(String, i32)> {
 fn block_marker_len(kind: BlockKind, number: usize) -> usize {
     match kind {
         BlockKind::Bullet => "• ".len(),
-        BlockKind::Quote => "│ ".len(),
+        BlockKind::Quote => QUOTE_MARKER.len(),
         BlockKind::Number => number.checked_ilog10().unwrap_or(0) as usize + 3,
     }
 }
@@ -1243,7 +1261,7 @@ fn block_marker_len(kind: BlockKind, number: usize) -> usize {
 fn append_block_marker(text: &mut String, kind: BlockKind, number: usize) {
     match kind {
         BlockKind::Bullet => text.push_str("• "),
-        BlockKind::Quote => text.push_str("│ "),
+        BlockKind::Quote => text.push_str(QUOTE_MARKER),
         BlockKind::Number => {
             use std::fmt::Write;
             write!(text, "{number}. ").expect("writing to a String cannot fail");
@@ -1256,8 +1274,8 @@ fn block_prefix_text(text: &str) -> Option<(BlockKind, usize)> {
     if text.starts_with("• ") {
         return Some((BlockKind::Bullet, "• ".len()));
     }
-    if text.starts_with("│ ") {
-        return Some((BlockKind::Quote, "│ ".len()));
+    if text.starts_with(QUOTE_MARKER) {
+        return Some((BlockKind::Quote, QUOTE_MARKER.len()));
     }
     let digits = text.bytes().take_while(u8::is_ascii_digit).count();
     if digits > 0 && text.as_bytes().get(digits..digits + 2) == Some(b". ") {
@@ -1524,7 +1542,7 @@ impl HtmlImport {
         self.line_has_text = false;
         self.pending_space = None;
         if self.in_quote {
-            self.push("│ ", CharacterStyle::default());
+            self.push(QUOTE_MARKER, CharacterStyle::default());
         }
     }
 
@@ -1711,26 +1729,27 @@ fn typed_urls(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
     })
 }
 
-/// The formatting `html` gives `text`, when the HTML holds that text. HTML
-/// keeps a tab only as a run of spaces, a no-break space as a plain one and
-/// a CRLF line end as LF, so those differences still match; any other means
-/// the HTML belongs to other text.
-fn saved_styles(html: &str, text: &str) -> Option<Vec<ComposeStyleRun>> {
+/// The formatting `html` gives `text`, when the HTML holds that text, all
+/// of it when `whole` or else a start of it that ends at a line break, and
+/// where in `text` that ends. HTML keeps a tab only as a run of spaces, a
+/// no-break space as a plain one and a CRLF line end as LF, so those
+/// differences still match; any other means the HTML belongs to other text.
+fn saved_styles(html: &str, text: &str, whole: bool) -> Option<(usize, Vec<ComposeStyleRun>)> {
     let (imported, styles) = import_body_html(html)?;
     let (expected, offsets) = text_as_html_reads_it(text);
-    if imported != expected {
+    let rest = expected.strip_prefix(imported.as_str())?;
+    if !(rest.is_empty() || !whole && rest.starts_with('\n')) {
         return None;
     }
-    Some(
-        styles
-            .into_iter()
-            .map(|run| ComposeStyleRun {
-                range: offsets[run.range.start]..offsets[run.range.end],
-                style: run.style,
-            })
-            .filter(|run| !run.range.is_empty())
-            .collect(),
-    )
+    let styles = styles
+        .into_iter()
+        .map(|run| ComposeStyleRun {
+            range: offsets[run.range.start]..offsets[run.range.end],
+            style: run.style,
+        })
+        .filter(|run| !run.range.is_empty())
+        .collect();
+    Some((offsets[imported.len()], styles))
 }
 
 /// `text` as its HTML imports back, with the byte offset in `text` where
