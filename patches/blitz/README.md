@@ -29,7 +29,8 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,
-which backports #1276's `table_needs_rebuild`. Upstream main adds `cellspacing` and
+which backports #1276's `table_needs_rebuild`, and 0005's clamped `<img>` edges, which
+backport open upstream #1201. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
 and the `<link>` part of #1318; its `@import` change is local. 0008 backports
 upstream #1342, keeping beta.4's element transform. Drop the backported parts

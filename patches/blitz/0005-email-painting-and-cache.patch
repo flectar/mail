@@ -87,7 +87,7 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index 407fd1a..f246bfe 100644
+index 407fd1a..81af02c 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
 @@ -41,69 +41,18 @@ use style::{
@@ -237,7 +237,22 @@ index 407fd1a..f246bfe 100644
                          // Overlay scrollbars, drawn unscrolled above the
                          // clipped content.
                          #[cfg(feature = "scrollbars")]
-@@ -685,8 +663,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
+@@ -679,19 +657,27 @@ fn svg_viewport_affine(svg: &blitz_dom::node::SvgImageData, width: f32, height:
+     Affine::new([t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f64::from))
+ }
+ 
+-/// Ensure that the `resized_image` field has a correctly sized image
++/// The brush an `<img>` is painted with.
++///
++/// The image is clamped (`Extend::Pad`), not repeated: a replaced element is
++/// painted exactly once, and when it is drawn at a non-integer scale the
++/// samples nearest its edges are interpolated with whatever lies beyond
++/// them. With `Repeat` that is the *opposite* edge of the same image, which
++/// shows up as a one pixel line of the far edge's colour along each side.
++/// Pad interpolates with the edge itself, as browsers do for `<img>`.
++/// (Backport of upstream #1201.)
+ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> peniko::ImageBrush {
+     peniko::ImageBrush {
          image: ImageData {
              data: image.data.clone(),
              format: peniko::ImageFormat::Rgba8,
@@ -248,7 +263,14 @@ index 407fd1a..f246bfe 100644
              alpha_type: peniko::ImageAlphaType::Alpha,
          },
          sampler: ImageSampler {
-@@ -863,16 +841,84 @@ impl ElementCx<'_, '_> {
+-            x_extend: peniko::Extend::Repeat,
+-            y_extend: peniko::Extend::Repeat,
++            x_extend: peniko::Extend::Pad,
++            y_extend: peniko::Extend::Pad,
+             quality,
+             alpha: 1.0,
+         },
+@@ -863,16 +849,84 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -337,7 +359,7 @@ index 407fd1a..f246bfe 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -884,16 +930,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +938,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -356,7 +378,7 @@ index 407fd1a..f246bfe 100644
              );
          }
      }
-@@ -960,6 +1006,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +1014,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -364,7 +386,7 @@ index 407fd1a..f246bfe 100644
              );
          }
      }
-@@ -1015,6 +1062,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1070,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -372,7 +394,7 @@ index 407fd1a..f246bfe 100644
              );
          }
      }
-@@ -1206,8 +1254,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1262,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
@@ -384,10 +406,10 @@ index 407fd1a..f246bfe 100644
                  .transform
                  .pre_translate(Vec2 { x, y })
 diff --git a/crates/blitz-paint/src/render/background.rs b/crates/blitz-paint/src/render/background.rs
-index e5e048e..446fef7 100644
+index e5e048e..80acec2 100644
 --- a/crates/blitz-paint/src/render/background.rs
 +++ b/crates/blitz-paint/src/render/background.rs
-@@ -255,16 +255,13 @@ impl ElementCx<'_, '_> {
+@@ -255,16 +255,14 @@ impl ElementCx<'_, '_> {
                  ]
              })
              .collect();
@@ -405,17 +427,34 @@ index e5e048e..446fef7 100644
 +        for row in &table.rows {
 +            row_colors.resize(usize::from(row.index) + 1, [None, None]);
 +            row_colors[usize::from(row.index)] = [
-+                row.group.and_then(background_color), background_color(row.node_id),
++                row.group.and_then(background_color),
++                background_color(row.node_id),
 +            ];
 +        }
          let has_color =
              |colors: &[[Option<Color>; 2]]| colors.iter().flatten().any(Option::is_some);
          if !has_color(&column_colors) && !has_color(&row_colors) {
-@@ -528,7 +525,10 @@ impl ElementCx<'_, '_> {
+@@ -517,6 +515,13 @@ impl ElementCx<'_, '_> {
+             });
+         let tile_rect = Rect::new(0.0, 0.0, x.rect_len, y.rect_len);
+ 
++        // `Repeat` and `Round` fill the whole area with one rect and let the
++        // brush repeat the image, so those axes need `Extend::Repeat`. The
++        // other axes paint each tile once and keep the `<img>` brush's `Pad`.
++        let mut brush = to_peniko_image(image_data, quality);
++        brush.sampler.x_extend = brush_extend(*repeat_x);
++        brush.sampler.y_extend = brush_extend(*repeat_y);
++
+         for hc in 0..y.count {
+             for wc in 0..x.count {
+                 let transform = transform.then_translate(Vec2 {
+@@ -527,8 +532,11 @@ impl ElementCx<'_, '_> {
+                 scene.fill(
                      peniko::Fill::NonZero,
                      transform,
-                     to_peniko_image(image_data, quality).as_ref(),
+-                    to_peniko_image(image_data, quality).as_ref(),
 -                    None,
++                    brush.as_ref(),
 +                    Some(Affine::scale_non_uniform(
 +                        image_data.width as f64 / image_data.pixel_width as f64,
 +                        image_data.height as f64 / image_data.pixel_height as f64,
@@ -423,6 +462,23 @@ index e5e048e..446fef7 100644
                      &tile_rect,
                  );
              }
+@@ -839,6 +847,16 @@ struct AxisTiling {
+ ///
+ /// The fill rect is in image pixel coordinates (the drawing transform is
+ /// pre-scaled by `ratio`), while translations are in device pixels.
++/// How a background image brush extends along an axis with this repeat.
++fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
++    use BackgroundRepeatKeyword::*;
++
++    match repeat {
++        Repeat | Round => peniko::Extend::Repeat,
++        Space | NoRepeat => peniko::Extend::Pad,
++    }
++}
++
+ fn raster_axis_tiling(
+     repeat: BackgroundRepeatKeyword,
+     origin_start: f64,
 diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
 index c7ecb2e..da3370f 100644
 --- a/crates/blitz-paint/src/render/border.rs

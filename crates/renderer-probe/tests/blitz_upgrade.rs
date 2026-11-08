@@ -1055,3 +1055,38 @@ fn cells_lay_out_with_their_current_style() {
     doc.resolve(0.0);
     close(node(&doc, "#d").final_layout().location.y, 89.0);
 }
+
+#[test]
+fn scaled_images_do_not_bleed_their_opposite_edge() {
+    // A white image with a black bottom row, drawn at 2.5x: interpolating its
+    // top edge with the bottom row (`Extend::Repeat`) darkens the top line.
+    let mut image = image::RgbaImage::from_pixel(8, 8, image::Rgba([255, 255, 255, 255]));
+    for x in 0..8 {
+        image.put_pixel(x, 7, image::Rgba([0, 0, 0, 255]));
+    }
+    let png = encoded(
+        image::ImageFormat::Png,
+        image::DynamicImage::ImageRgba8(image),
+    );
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<style>body{margin:0}</style><img src='https://example.com/a.png' style='width:20px;height:20px'>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(&png));
+    }
+    doc.resolve(0.0);
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    let top = &pixels[10 * 4..10 * 4 + 4];
+    assert_eq!(top, [255, 255, 255, 255]);
+}
