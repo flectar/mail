@@ -802,11 +802,7 @@ pub(crate) fn stroke_text<'a>(
                     scene.draw_glyphs(
                         font,
                         font_size,
-                        // Email content is continuously scalable. Drawing the
-                        // source outlines avoids font-program-specific hinting
-                        // failures that can turn otherwise valid glyphs into
-                        // empty paths (notably Segoe UI digits on Windows).
-                        false, // hint
+                        !FONT_EMBOLDEN_ENABLED, // hint
                         bytemuck::cast_slice(run.normalized_coords()),
                         embolden,
                         Fill::NonZero,

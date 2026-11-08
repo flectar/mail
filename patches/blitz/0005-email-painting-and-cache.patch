@@ -669,7 +669,7 @@ index c7ecb2e..65ea196 100644
  
      /// ❌ dotted - Defines a dotted border
 diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
-index 8887f03..2515abb 100644
+index 8887f03..279835a 100644
 --- a/crates/blitz-paint/src/text.rs
 +++ b/crates/blitz-paint/src/text.rs
 @@ -40,16 +40,33 @@ pub(crate) fn draw_inline_backgrounds<'a>(
@@ -840,7 +840,7 @@ index 8887f03..2515abb 100644
      } = context;
      stack.clear();
      path_scratch.clear();
-@@ -644,24 +758,69 @@ pub(crate) fn stroke_text<'a>(
+@@ -644,24 +758,65 @@ pub(crate) fn stroke_text<'a>(
                      kurbo::Vec2::default()
                  };
  
@@ -906,11 +906,7 @@ index 8887f03..2515abb 100644
 +                    scene.draw_glyphs(
 +                        font,
 +                        font_size,
-+                        // Email content is continuously scalable. Drawing the
-+                        // source outlines avoids font-program-specific hinting
-+                        // failures that can turn otherwise valid glyphs into
-+                        // empty paths (notably Segoe UI digits on Windows).
-+                        false, // hint
++                        !FONT_EMBOLDEN_ENABLED, // hint
 +                        bytemuck::cast_slice(run.normalized_coords()),
 +                        embolden,
 +                        Fill::NonZero,
