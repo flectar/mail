@@ -629,7 +629,13 @@ fn make_sidebar_rows(
                     .position(|row| row.mailbox.scope.ends_with(suffix))
                     .map(|found| found + 1)
             };
-            let snoozed = after(&rows, ":Starred").unwrap_or(0);
+            // Without a Starred row, they lead the account's own rows,
+            // under its header.
+            let header = rows
+                .iter()
+                .position(|row| row.mailbox.is_account)
+                .map_or(0, |found| found + 1);
+            let snoozed = after(&rows, ":Starred").unwrap_or(header);
             rows.insert(snoozed, row(SidebarRowKind::Snoozed, "snoozed"));
             let scheduled = after(&rows, ":Sent").unwrap_or(snoozed + 1);
             rows.insert(scheduled, row(SidebarRowKind::Scheduled, "scheduled"));
