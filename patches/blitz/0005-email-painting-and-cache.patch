@@ -424,17 +424,14 @@ index e5e048e..446fef7 100644
                  );
              }
 diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
-index c7ecb2e..9eb7bb4 100644
+index c7ecb2e..0b70f4d 100644
 --- a/crates/blitz-paint/src/render/border.rs
 +++ b/crates/blitz-paint/src/render/border.rs
-@@ -1,17 +1,18 @@
+@@ -1,17 +1,16 @@
  use anyrender::PaintScene;
 +use blitz_dom::CollapsedEdge;
  use blitz_dom::node::SpecialElementData;
--use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
-+use kurbo::{
-+    Affine, BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2,
-+};
+ use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
  use peniko::{Color, Fill};
  use smallvec::SmallVec;
 -use style::{
@@ -452,7 +449,28 @@ index c7ecb2e..9eb7bb4 100644
  };
  
  /// A darker version of a colour (mirrors WebKit/Blink's `Color::Dark`): the
-@@ -147,6 +148,9 @@ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<P
+@@ -104,6 +103,20 @@ fn dashed_ratios(thickness: f64, scale: f64) -> (f64, f64) {
+     }
+ }
+ 
++/// The gap that fits a whole number of dashes along an open line of `length`,
++/// starting and ending with a dash, closest to `gap` (Blink's
++/// `SelectBestDashGap`).
++fn best_dash_gap(length: f64, dash: f64, gap: f64) -> f64 {
++    let fewer = ((length + gap) / (dash + gap)).floor().max(2.0);
++    let gap_for = |dashes: f64| (length - dashes * dash) / (dashes - 1.0);
++    let (fewer_gap, more_gap) = (gap_for(fewer), gap_for(fewer + 1.0));
++    if more_gap <= 0.0 || (fewer_gap - gap).abs() < (more_gap - gap).abs() {
++        fewer_gap
++    } else {
++        more_gap
++    }
++}
++
+ /// Return `count` points spaced `spacing` apart (by arc length) along `path`,
+ /// starting at its beginning. Used to place dots along a rounded border.
+ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<Point> {
+@@ -147,6 +160,9 @@ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<P
  impl ElementCx<'_, '_> {
      /// Draw all borders for a node
      pub(crate) fn draw_border(&self, scene: &mut impl PaintScene) {
@@ -462,7 +480,7 @@ index c7ecb2e..9eb7bb4 100644
          let style = &*self.style;
          let border = style.get_border();
          let current_color = style.clone_color();
-@@ -509,83 +513,272 @@ impl ElementCx<'_, '_> {
+@@ -509,83 +525,330 @@ impl ElementCx<'_, '_> {
          scene.pop_layer();
      }
  
@@ -567,9 +585,14 @@ index c7ecb2e..9eb7bb4 100644
 +        let doc = self.context.dom;
 +        let painted = |edge: &CollapsedEdge| (*edge, edge.color(doc));
 +        // Adjacent edges merge into one run when they paint the same way.
++        // Dashes and dots are laid out per cell edge, as in browsers, so each
++        // edge starts and ends with a dash.
 +        let same = |(a, a_color): &(CollapsedEdge, AbsoluteColor),
 +                    (b, b_color): &(CollapsedEdge, AbsoluteColor)| {
-+            a.width == b.width && a.style == b.style && a_color == b_color
++            a.width == b.width
++                && a.style == b.style
++                && a_color == b_color
++                && !matches!(a.style, BorderStyle::Dashed | BorderStyle::Dotted)
 +        };
  
 -        let cols = PhysicalTracks::from_tracks(&grid_info.columns);
@@ -684,8 +707,10 @@ index c7ecb2e..9eb7bb4 100644
 -        // Border widths are not adjusted for border-style in computed styles,
 -        // so a border with `none`/`hidden` style must be treated as zero-width.
 -        if border_style.border_top_style.none_or_hidden() {
-+    /// Fill one merged collapsed edge. Bevelled styles have no single shared
-+    /// light source across a collapsed grid, so they paint as solid lines.
++    /// Fill one merged collapsed edge the way Blink paints collapsed borders
++    /// (`table_painters.cc`): each edge is a top (horizontal) or left
++    /// (vertical) box side, `inset` paints as `ridge` and `outset` as `groove`
++    /// (CSS 2.1 §17.6.3), and patterns are laid out in device pixels.
 +    fn fill_collapsed_edge(
 +        &self,
 +        scene: &mut impl PaintScene,
@@ -695,6 +720,7 @@ index c7ecb2e..9eb7bb4 100644
 +        horizontal: bool,
 +    ) {
 +        let color = color.as_srgb_color();
++        let rect = rect.scale_from_origin(self.scale);
 +        if color.components[3] <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
              return;
          }
@@ -710,33 +736,10 @@ index c7ecb2e..9eb7bb4 100644
 -        let mut fill = |x0: f64, y0: f64, x1: f64, y1: f64| {
 -            let shape = Rect::new(x0, y0, x1, y1).scale_from_origin(self.scale);
 -            scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
-+        let thickness = if horizontal {
-+            rect.height()
++        let (thickness, length) = if horizontal {
++            (rect.height(), rect.width())
 +        } else {
-+            rect.width()
-         };
--
--        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
--        // The vertical borders are drawn between them so that no corner is painted twice.
--        if outer_border_style.border_top_style != BorderStyle::Hidden {
--            fill(left, top, right, top + border_width.height);
--        }
--        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
--            fill(left, bottom - border_width.height, right, bottom);
--        }
--        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
--            fill(left, prev.end as f64, right, next.start as f64);
--        }
--
--        // Vertical borders, one segment per row
--        for row in rows.iter() {
--            let (y0, y1) = (row.start as f64, row.end as f64);
--            if outer_border_style.border_left_style != BorderStyle::Hidden {
--                fill(left, y0, left + border_width.width, y1);
-+        let length = if horizontal {
-+            rect.width()
-+        } else {
-+            rect.height()
++            (rect.width(), rect.height())
 +        };
 +        let piece = |offset: f64, size: f64, cross: f64, cross_size: f64| {
 +            if horizontal {
@@ -753,40 +756,111 @@ index c7ecb2e..9eb7bb4 100644
 +                    rect.x0 + cross + cross_size,
 +                    rect.y0 + offset + size,
 +                )
++            }
+         };
+ 
+-        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
+-        // The vertical borders are drawn between them so that no corner is painted twice.
+-        if outer_border_style.border_top_style != BorderStyle::Hidden {
+-            fill(left, top, right, top + border_width.height);
+-        }
+-        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
+-            fill(left, bottom - border_width.height, right, bottom);
+-        }
+-        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
+-            fill(left, prev.end as f64, right, next.start as f64);
+-        }
++        let style = match edge.style {
++            BorderStyle::Inset => BorderStyle::Ridge,
++            BorderStyle::Outset => BorderStyle::Groove,
++            style => style,
++        };
++        // Blink's `BorderEdge::EffectiveStyle`: too thin to show their detail,
++        // doubles and bevels paint solid.
++        let style = match style {
++            BorderStyle::Double if thickness < 3.0 => BorderStyle::Solid,
++            BorderStyle::Ridge | BorderStyle::Groove if thickness <= 1.0 => BorderStyle::Solid,
++            style => style,
++        };
+ 
+-        // Vertical borders, one segment per row
+-        for row in rows.iter() {
+-            let (y0, y1) = (row.start as f64, row.end as f64);
+-            if outer_border_style.border_left_style != BorderStyle::Hidden {
+-                fill(left, y0, left + border_width.width, y1);
++        let mut path = BezPath::new();
++        match style {
++            BorderStyle::Ridge | BorderStyle::Groove => {
++                // An outer half (rounded up) and an inner half, shaded as the
++                // top or left side of `inset` and `outset` borders.
++                let side = if horizontal { Edge::Top } else { Edge::Left };
++                let (outer, inner) = grooved_edge_colors(color, side, style == BorderStyle::Ridge);
++                let split = (thickness / 2.0).ceil();
++                let mut inner_path = BezPath::new();
++                path.extend(piece(0.0, length, 0.0, split).path_elements(0.1));
++                inner_path.extend(piece(0.0, length, split, thickness - split).path_elements(0.1));
++                scene.fill(Fill::NonZero, self.transform, outer, None, &path);
++                scene.fill(Fill::NonZero, self.transform, inner, None, &inner_path);
++                return;
++            }
++            BorderStyle::Dotted if thickness > 3.0 => {
++                // Round dots, the first and last touching the ends.
++                let radius = thickness / 2.0;
++                let step = if length < 2.0 * thickness {
++                    f64::INFINITY
++                } else {
++                    best_dash_gap(length, thickness, thickness) + thickness
++                };
++                let mut center = radius;
++                while center <= length - radius + 0.01 {
++                    let dot = if horizontal {
++                        Point::new(rect.x0 + center, rect.y0 + radius)
++                    } else {
++                        Point::new(rect.x0 + radius, rect.y0 + center)
++                    };
++                    path.extend(Circle::new(dot, radius).path_elements(0.1));
++                    center += step;
++                }
              }
 -            if outer_border_style.border_right_style != BorderStyle::Hidden {
 -                fill(right - border_width.width, y0, right, y1);
-+        };
-+
-+        let mut path = BezPath::new();
-+        match edge.style {
 +            BorderStyle::Dashed | BorderStyle::Dotted => {
-+                let (dash, gap) = if edge.style == BorderStyle::Dashed {
-+                    (thickness * 3.0, thickness * 3.0)
-+                } else {
-+                    (thickness, thickness)
++                // Thin dots are square dashes as long as they are wide.
++                let (dash, gap) = match style {
++                    BorderStyle::Dashed => {
++                        let (dash, gap) = dashed_ratios(thickness, 1.0);
++                        (dash * thickness, gap * thickness)
++                    }
++                    _ => (thickness, thickness),
 +                };
-+                let period = (dash + gap).max(1.0);
-+                // Centre the pattern so both ends look alike.
-+                let count = ((length + gap) / period).floor().max(1.0);
-+                let lead = ((length - (count * period - gap)) / 2.0).max(0.0);
-+                let mut offset = lead;
-+                while offset < length {
-+                    let size = dash.min(length - offset);
-+                    path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
-+                    offset += period;
++                if length <= 2.0 * dash {
++                    // No room for two dashes: Blink draws a solid line.
++                    path.extend(rect.path_elements(0.1));
++                } else {
++                    // Dashes at both ends, spaced as close to `gap` as fits.
++                    let (dash, gap) = if length <= 2.0 * dash + gap {
++                        let fit = length / (2.0 * dash + gap);
++                        (dash * fit, gap * fit)
++                    } else {
++                        (dash, best_dash_gap(length, dash, gap))
++                    };
++                    let mut offset = 0.0;
++                    while offset < length - 0.01 {
++                        let size = dash.min(length - offset);
++                        path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
++                        offset += dash + gap;
++                    }
 +                }
              }
 -            for (prev, next) in cols.iter().zip(cols.iter().skip(1)) {
 -                fill(prev.end as f64, y0, next.start as f64, y1);
-+            BorderStyle::Double if thickness >= 3.0 => {
++            BorderStyle::Double => {
 +                let line = (thickness / 3.0).round().max(1.0);
 +                path.extend(piece(0.0, length, 0.0, line).path_elements(0.1));
 +                path.extend(piece(0.0, length, thickness - line, line).path_elements(0.1));
              }
 +            _ => path.extend(rect.path_elements(0.1)),
          }
-+        path.apply_affine(Affine::scale(self.scale));
 +        scene.fill(Fill::NonZero, self.transform, color, None, &path);
      }
  

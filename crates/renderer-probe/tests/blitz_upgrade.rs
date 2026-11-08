@@ -899,3 +899,31 @@ fn copied_text_leaves_out_hidden_text() {
         Some("One  two\n\nend shown")
     );
 }
+
+#[test]
+fn collapsed_bevels_and_dashes_paint_like_browsers() {
+    // `<table border=2>` collapses to a 2px `outset` table edge, which paints
+    // as a groove (CSS 2.1 §17.6.3): a dark outer half over a light inner
+    // half, as in Chrome. A dashed edge starts and ends with a dash.
+    let mut doc = document(
+        "<table border='2' style='border-collapse:collapse'><tr><td style='width:60px;height:20px'></td></tr></table>
+         <table style='border-collapse:collapse;margin-top:10px'><tr>
+         <td style='width:100px;height:20px;border:2px dashed rgb(255,0,0)'></td></tr></table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    let pixel = |x: usize, y: usize| {
+        let i = (y * 400 + x) * 4;
+        [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+    };
+    assert_eq!(pixel(30, 0), [0, 0, 0, 255]);
+    assert_eq!(pixel(30, 1), [84, 84, 84, 255]);
+
+    let red = [255, 0, 0, 255];
+    let (top, _) = rows_with(&pixels, red).unwrap();
+    assert_eq!(pixel(0, top), red, "dash at the start");
+    assert_eq!(pixel(103, top), red, "dash at the end");
+}
