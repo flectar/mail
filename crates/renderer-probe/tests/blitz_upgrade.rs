@@ -685,3 +685,14 @@ fn length_columns_absorb_excess_width_without_auto_columns() {
     close(cells, 300.0);
     close(node(&doc, "#c").final_layout().size.width, 30.0);
 }
+
+#[test]
+fn rowspans_end_with_their_row_group() {
+    // HTML's "ending a row group": the rowspan stops at the end of its tbody,
+    // so the next tbody's first cell starts in the first column.
+    let doc = document(
+        "<table style='border-spacing:0'><tbody><tr><td rowspan='3'>A</td><td>B</td></tr></tbody>
+         <tbody><tr><td id='c'>C</td><td>D</td></tr></tbody></table>",
+    );
+    close(node(&doc, "#c").final_layout().location.x, 0.0);
+}

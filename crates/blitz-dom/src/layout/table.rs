@@ -1024,6 +1024,7 @@ impl TableCollector {
                     .flatten();
                 let first_row = self.row;
                 let first_row_index = self.rows.len();
+                let first_cell = self.cells.len();
                 let children = std::mem::take(&mut doc.nodes[node_id].children);
                 for child_id in children.iter().copied() {
                     doc.nodes[child_id]
@@ -1035,6 +1036,12 @@ impl TableCollector {
                     for row in &mut self.rows[first_row_index..] {
                         row.group.get_or_insert(node_id);
                     }
+                    // HTML's "ending a row group": rowspans stop at the group's last
+                    // row, so the next group starts with no occupied slots.
+                    for cell in &mut self.cells[first_cell..] {
+                        cell.rowspan = cell.rowspan.min(self.row.saturating_sub(cell.row).max(1));
+                    }
+                    self.occupied.fill(0);
                 }
                 if let Some(borders) = group_borders {
                     if self.row > first_row {
