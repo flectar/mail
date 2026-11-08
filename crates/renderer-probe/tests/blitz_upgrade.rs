@@ -1136,3 +1136,20 @@ fn overflow_under_anonymous_blocks_follows_changes() {
     );
     assert!(rows_with(&pixels, [204, 0, 0, 255]).is_some());
 }
+
+#[test]
+fn text_culling_follows_the_painter_offset() {
+    // Painted 100px down the scene (as a sub-document is), the line near the
+    // bottom of the document's viewport lands below 300 scene pixels and must
+    // still be drawn.
+    let mut doc = document(
+        "<p style='position:absolute;top:250px;margin:0;font:20px/20px sans-serif;color:#c00'>MMMM</p>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 100),
+        400,
+        400,
+    );
+    let (top, _) = rows_with(&pixels, [204, 0, 0, 255]).expect("text painted");
+    assert!(top >= 340, "text at row {top}");
+}

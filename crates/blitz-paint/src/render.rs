@@ -858,11 +858,13 @@ impl ElementCx<'_, '_> {
             // Filters can bring offscreen source pixels into the viewport.
             // Keep their source intact, including filters on ancestor boxes.
             let mut ancestor = Some(self.node.id);
+            // In scene space, like the glyphs: a sub-document (an iframe) is
+            // painted at its offset in the parent's scene.
             let mut viewport = Some(Rect::new(
-                0.0,
-                0.0,
-                self.context.width as f64,
-                self.context.height as f64,
+                self.context.initial_x,
+                self.context.initial_y,
+                self.context.initial_x + self.context.width as f64,
+                self.context.initial_y + self.context.height as f64,
             ));
             while let Some(id) = ancestor {
                 let Some(node) = self.context.dom.get_node(id) else {

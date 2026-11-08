@@ -96,7 +96,7 @@ index 29a6607..e628f41 100644
          }
  
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index 81af02c..a07487a 100644
+index 4766ece..b664442 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
 @@ -325,8 +325,13 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {

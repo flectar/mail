@@ -87,7 +87,7 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index 407fd1a..81af02c 100644
+index 407fd1a..4766ece 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
 @@ -41,69 +41,18 @@ use style::{
@@ -270,7 +270,7 @@ index 407fd1a..81af02c 100644
              quality,
              alpha: 1.0,
          },
-@@ -863,16 +849,84 @@ impl ElementCx<'_, '_> {
+@@ -863,16 +849,86 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -280,11 +280,13 @@ index 407fd1a..81af02c 100644
 +            // Filters can bring offscreen source pixels into the viewport.
 +            // Keep their source intact, including filters on ancestor boxes.
 +            let mut ancestor = Some(self.node.id);
++            // In scene space, like the glyphs: a sub-document (an iframe) is
++            // painted at its offset in the parent's scene.
 +            let mut viewport = Some(Rect::new(
-+                0.0,
-+                0.0,
-+                self.context.width as f64,
-+                self.context.height as f64,
++                self.context.initial_x,
++                self.context.initial_y,
++                self.context.initial_x + self.context.width as f64,
++                self.context.initial_y + self.context.height as f64,
 +            ));
 +            while let Some(id) = ancestor {
 +                let Some(node) = self.context.dom.get_node(id) else {
@@ -359,7 +361,7 @@ index 407fd1a..81af02c 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -884,16 +938,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +940,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -378,7 +380,7 @@ index 407fd1a..81af02c 100644
              );
          }
      }
-@@ -960,6 +1014,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +1016,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -386,7 +388,7 @@ index 407fd1a..81af02c 100644
              );
          }
      }
-@@ -1015,6 +1070,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1072,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -394,7 +396,7 @@ index 407fd1a..81af02c 100644
              );
          }
      }
-@@ -1206,8 +1262,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1264,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
