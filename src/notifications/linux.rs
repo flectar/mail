@@ -10,7 +10,9 @@
 //! Both use the session bus connection ashpd keeps for the other portals, so
 //! notifications add no connection and no thread where a portal runs.
 
-use super::{Alert, AlertId, Availability, Failure, FixedWords, HostFuture, NotificationHost};
+use super::{
+    Alert, AlertId, Availability, Controls, Failure, FixedWords, HostFuture, NotificationHost,
+};
 use std::{
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
@@ -101,6 +103,16 @@ impl NotificationHost for Host {
     /// drops a notification server's own at exit.
     fn withdraw_at_exit(&self) -> bool {
         cfg!(feature = "flatpak")
+    }
+
+    /// Desktops keep no per-app notification page an app can open. The
+    /// portal's backends decide on sound themselves: GNOME's and KDE's play
+    /// none for portal notifications.
+    fn controls(&self) -> Controls {
+        Controls {
+            settings: false,
+            sound: !cfg!(feature = "flatpak"),
+        }
     }
 }
 

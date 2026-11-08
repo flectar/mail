@@ -194,6 +194,7 @@ fn register_desktop_events(app: &AppWindow) {
                 chrome.set_active(*focused);
                 if *focused {
                     crate::default_email_app::window_focused(&app);
+                    crate::notifications::ui::refresh_availability();
                 }
                 #[cfg(linux_desktop)]
                 if *focused && chrome.get_integrated() {

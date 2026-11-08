@@ -75,6 +75,7 @@ pub(super) fn register_settings_preference_callbacks(
         )) {
             Ok(()) => {
                 crate::notifications::preferences_changed();
+                crate::notifications::ui::refresh_availability();
                 app.set_sync_status(UiMessage::plain("Notification preferences saved."));
             }
             Err(error) => {

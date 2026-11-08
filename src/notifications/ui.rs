@@ -2,9 +2,9 @@
 //! its language, opening conversations and acting on messages. Everything
 //! here runs on the window's thread.
 
-use super::{Act, FixedWords, NotificationHost, Request, Response, Route, Words};
+use super::{Act, Availability, FixedWords, NotificationHost, Request, Response, Route, Words};
 use crate::{
-    AppWindow, I18n, InboxState, WindowChrome,
+    AppWindow, I18n, InboxState, SystemNotifications, WindowChrome,
     mail_scope::{Scope, StandardMailbox},
 };
 use flectar_mail_core::models::{ActionKind, MailGrouping};
@@ -21,6 +21,7 @@ struct Window {
     app: slint::Weak<AppWindow>,
     state: Weak<RefCell<InboxState>>,
     host: Option<Arc<dyn NotificationHost>>,
+    runtime: tokio::runtime::Handle,
 }
 
 thread_local! {
@@ -35,16 +36,30 @@ pub(crate) fn attach(
     runtime: &tokio::runtime::Handle,
     host: Option<Arc<dyn NotificationHost>>,
 ) {
-    if let Some(host) = &host {
-        host.set_words(&fixed_words(app));
+    let system = app.global::<SystemNotifications>();
+    match &host {
+        // No notifications here: Settings leaves them out.
+        None => system.set_availability("".into()),
+        Some(host) => {
+            host.set_words(&fixed_words(app));
+            let controls = host.controls();
+            system.set_settings_openable(controls.settings);
+            system.set_sound_fixed(!controls.sound);
+            // Until the system answers.
+            system.set_availability("allowed".into());
+            let host = Arc::clone(host);
+            system.on_open_settings(move || host.open_settings());
+        }
     }
     WINDOW.with(|window| {
         *window.borrow_mut() = Some(Window {
             app: app.as_weak(),
             state: Rc::downgrade(state),
             host,
+            runtime: runtime.clone(),
         });
     });
+    refresh_availability();
     let app = app.as_weak();
     let runtime = runtime.clone();
     super::serve_requests(move |request| {
@@ -154,6 +169,36 @@ async fn words(summaries: Vec<(u32, Vec<String>)>) -> Option<Words> {
         Words { fixed, summaries }
     })
     .await
+}
+
+/// Show in Settings whether the system lets the app's notifications through.
+/// Asked again whenever the user may have changed it: when the window gets
+/// the focus back, as after the system settings, and when the notification
+/// settings change.
+pub(crate) fn refresh_availability() {
+    let Some((app, host, runtime)) = WINDOW.with(|window| {
+        let window = window.borrow();
+        let window = window.as_ref()?;
+        Some((
+            window.app.clone(),
+            window.host.clone()?,
+            window.runtime.clone(),
+        ))
+    }) else {
+        return;
+    };
+    runtime.spawn(async move {
+        let availability = match host.availability().await {
+            Availability::Allowed => "allowed",
+            Availability::NotAsked => "not-asked",
+            Availability::Denied => "denied",
+            Availability::Unavailable => "unavailable",
+        };
+        let _ = app.upgrade_in_event_loop(move |app| {
+            app.global::<SystemNotifications>()
+                .set_availability(availability.into());
+        });
+    });
 }
 
 /// The UI's language changed: relabel what the system keeps registered.

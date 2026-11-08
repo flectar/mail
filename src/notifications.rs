@@ -95,6 +95,32 @@ pub trait NotificationHost: Send + Sync + 'static {
     fn withdraw_at_exit(&self) -> bool {
         false
     }
+    /// What Settings can offer about this system's notifications.
+    fn controls(&self) -> Controls {
+        Controls::default()
+    }
+    /// Open the system's settings for the app's notifications, where
+    /// [`Controls::settings`] says there are such.
+    fn open_settings(&self) {}
+}
+
+/// What the system leaves to the app's Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Controls {
+    /// The system has settings for the app's notifications that the app can
+    /// open, where the user turns them back on.
+    pub settings: bool,
+    /// The app decides whether its notifications play a sound.
+    pub sound: bool,
+}
+
+impl Default for Controls {
+    fn default() -> Self {
+        Self {
+            settings: false,
+            sound: true,
+        }
+    }
 }
 
 /// One notification for the system to show.

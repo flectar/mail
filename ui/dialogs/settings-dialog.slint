@@ -3,6 +3,7 @@ import { RendererSettings } from "../renderer-settings.slint";
 import { WindowChrome } from "../window-chrome.slint";
 import { AppIcon } from "../app-icon.slint";
 import { DefaultEmailApp } from "../default-email-app.slint";
+import { SystemNotifications } from "../system-notifications.slint";
 import { AppIconPicker } from "../components/app-icon-picker.slint";
 import { MessageColors } from "../message-colors.slint";
 import { MailPorts, MailSecurityFields } from "../components/mail-security-fields.slint";
@@ -690,6 +691,15 @@ export component SettingsDialog inherits Rectangle {
         : root.sync_interval_minutes <= 5 ? 1 : 2;
     private property <int> notification-index: !root.notifications_enabled ? 0
         : root.notification_scope == "all" ? 2 : 1;
+    // On here but kept from showing by the system: turned off in its settings,
+    // or no notification service running.
+    private property <bool> notifications-blocked: root.notifications_enabled
+        && (SystemNotifications.availability == "denied" || SystemNotifications.availability == "unavailable");
+    private property <string> notifications-blocked-text: SystemNotifications.availability == "denied"
+        ? @tr("Notifications from Flectar Mail are turned off in your system settings.")
+        : @tr("This system has no notification service running, so notifications can't be shown.");
+    private property <bool> notifications-settings-offered: SystemNotifications.availability == "denied"
+        && SystemNotifications.settings-openable;
     private property <int> language-index: root.language_mode == "en" ? 1
         : root.language_mode == "es" ? 2
         : root.language_mode == "tr" ? 3
@@ -713,6 +723,8 @@ export component SettingsDialog inherits Rectangle {
     }
 
     pure function settings-section-visible(section: string) -> bool {
+        // No notifications on this platform: nothing to set.
+        if section == "Notifications" && SystemNotifications.availability == "" { return false; }
         if root.settings-search-query == "" { return true; }
         let terms = section == "General"
             ? @tr("general theme appearance palette app icon dock taskbar launcher language time clock 12-hour 24-hour workspace layout window frameless title bar renderer privacy remote images sync group messages date inbox tray background startup sign in login download location folder attachments save tabs conversations threads")
@@ -1449,7 +1461,10 @@ export component SettingsDialog inherits Rectangle {
 
 
                             Rectangle {
-                                height: max(root.compact ? 360px : 246px, self.preferred-height);
+                                // Without notifications on this platform, their row and its separator go.
+                                height: max(SystemNotifications.availability == ""
+                                    ? (root.compact ? 231px : 179px)
+                                    : (root.compact ? 360px : 246px), self.preferred-height);
                                 background: root.surface;
                                 border-radius: 8px;
                                 border-width: 1px;
@@ -1472,7 +1487,7 @@ export component SettingsDialog inherits Rectangle {
                                         selected(index, value) => { root.select-sync-interval(index); }
                                     }
                                     Rectangle { height: 1px; background: root.border-subtle; }
-                                    SettingsSelectRow {
+                                    if SystemNotifications.availability != "" : SettingsSelectRow {
                                         compact: root.compact;
                                         title: @tr("Desktop notifications");
                                         description: @tr("Choose which incoming messages can alert you.");
@@ -1482,7 +1497,7 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-notification-mode(index); }
                                     }
-                                    Rectangle { height: 1px; background: root.border-subtle; }
+                                    if SystemNotifications.availability != "" : Rectangle { height: 1px; background: root.border-subtle; }
                                     HorizontalBox {
                                         height: max(36px, sync-state.preferred-height + 16px);
                                         spacing: 12px;
@@ -2427,12 +2442,54 @@ export component SettingsDialog inherits Rectangle {
                                         description-color: root.faint-text;
                                         selected(index, value) => { root.select-notification-mode(index); }
                                     }
+                                    // The system has the last word: say so while it shows nothing.
+                                    // Laid out like the row above, so the texts and the right edge line up.
+                                    if root.notifications-blocked && !root.compact : HorizontalBox {
+                                        padding-top: 0px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            horizontal-stretch: 1;
+                                            blocked-text := Text {
+                                                text: root.notifications-blocked-text;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                vertical-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if root.notifications-settings-offered : Button {
+                                            width: max(132px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-settings(); }
+                                        }
+                                    }
+                                    if root.notifications-blocked && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            text: root.notifications-blocked-text;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if root.notifications-settings-offered : Button {
+                                            height: 36px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-settings(); }
+                                        }
+                                    }
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     SettingsSwitchRow {
                                         compact: root.compact;
                                         title: @tr("Notification sounds");
-                                        description: @tr("Play a sound for new mail and sent messages.");
+                                        description: SystemNotifications.sound-fixed
+                                            ? @tr("Your desktop decides whether notifications play a sound.")
+                                            : @tr("Play a sound with new mail notifications.");
                                         checked: root.notification_sound_enabled;
+                                        enabled: !SystemNotifications.sound-fixed;
                                         title-color: root.heading;
                                         description-color: root.faint-text;
                                         toggled(checked) => {

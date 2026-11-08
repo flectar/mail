@@ -13,8 +13,8 @@
 //! when there is mail to show or when they are turned on.
 
 use super::{
-    Act, Alert, AlertId, Availability, Failure, FixedWords, HostFuture, NotificationHost, Response,
-    parse_payload, payload, respond,
+    Act, Alert, AlertId, Availability, Controls, Failure, FixedWords, HostFuture, NotificationHost,
+    Response, parse_payload, payload, respond,
 };
 use block2::RcBlock;
 use objc2::{
@@ -22,7 +22,8 @@ use objc2::{
     rc::Retained,
     runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject},
 };
-use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSSet, NSString};
+use objc2_app_kit::NSWorkspace;
+use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSSet, NSString, NSURL};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNAuthorizationStatus, UNMutableNotificationContent, UNNotification,
     UNNotificationAction, UNNotificationActionOptions, UNNotificationCategory,
@@ -150,6 +151,25 @@ impl NotificationHost for Host {
             asked.await;
             Host.availability().await
         })
+    }
+
+    fn controls(&self) -> Controls {
+        Controls {
+            settings: true,
+            sound: true,
+        }
+    }
+
+    /// The app's page of Notifications in System Settings. macOS has no
+    /// documented link; this is the one Chromium opens, tested by its authors
+    /// on macOS 13 to 26.
+    fn open_settings(&self) {
+        let link = NSString::from_str(&format!(
+            "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={BUNDLE_ID}"
+        ));
+        if let Some(url) = NSURL::URLWithString(&link) {
+            NSWorkspace::sharedWorkspace().openURL(&url);
+        }
     }
 
     fn set_words(&self, words: &FixedWords) {

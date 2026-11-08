@@ -1,0 +1,15 @@
+// What the system allows of new-mail notifications, for Settings.
+// src/notifications/ui.rs fills this in.
+
+export global SystemNotifications {
+    // "" where the app shows no notifications on this platform, which hides
+    // their settings. "allowed"; "not-asked" until the system asks the user
+    // (macOS); "denied" when they are turned off in the system settings;
+    // "unavailable" when the system has no notification service to show them.
+    in property <string> availability;
+    // The system's settings for the app's notifications can be opened.
+    in property <bool> settings-openable;
+    // The desktop decides whether notifications play a sound.
+    in property <bool> sound-fixed;
+    callback open-settings();
+}

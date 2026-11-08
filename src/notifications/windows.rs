@@ -16,7 +16,7 @@
 //! The toasts are shown from that thread too.
 
 use super::{
-    Act, Alert, AlertId, Availability, Failure, HostFuture, NotificationHost, Response,
+    Act, Alert, AlertId, Availability, Controls, Failure, HostFuture, NotificationHost, Response,
     parse_payload, payload, respond,
 };
 use std::{
@@ -192,6 +192,31 @@ impl NotificationHost for Host {
 
     fn availability(&self) -> HostFuture<Availability> {
         self.ask(Job::Availability, Availability::Unavailable)
+    }
+
+    fn controls(&self) -> Controls {
+        Controls {
+            settings: true,
+            sound: true,
+        }
+    }
+
+    fn open_settings(&self) {
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+        let page: Vec<u16> = "ms-settings:notifications\0".encode_utf16().collect();
+        let verb: Vec<u16> = "open\0".encode_utf16().collect();
+        // SAFETY: both strings are NUL-terminated and outlive the call; the
+        // other arguments may be null.
+        unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                page.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            );
+        }
     }
 }
 
