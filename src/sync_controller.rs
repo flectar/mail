@@ -1109,7 +1109,7 @@ mod tests {
     #[test]
     fn qr_codes_keep_a_quiet_zone() {
         let image = qr_image(
-            "flectar-mail-sync:pair?v=1&server=https%3A%2F%2Fsync.flectar.com&slot=AAAAAAAAAAAAAAAAAAAAAA&secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "flectar-mail-sync:pair?v=1&server=https%3A%2F%2Fmail-sync.flectar.com&slot=AAAAAAAAAAAAAAAAAAAAAA&secret=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         )
         .unwrap();
         let size = image.size();

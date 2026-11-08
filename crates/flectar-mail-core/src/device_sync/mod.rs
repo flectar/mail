@@ -36,7 +36,7 @@ use tokio::task::JoinHandle;
 
 /// Flectar's sync server. A device can use another; the address travels to
 /// new devices when they pair.
-pub const DEFAULT_SERVER_URL: &str = "https://sync.flectar.com";
+pub const DEFAULT_SERVER_URL: &str = "https://mail-sync.flectar.com";
 
 /// How often a device that syncs looks for local changes. Uploads follow
 /// within this time even when no part of the app asks for a sync.
