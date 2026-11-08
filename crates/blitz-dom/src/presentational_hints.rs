@@ -191,7 +191,8 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 && attr(table, "rules").is_none()
                 && attr(table, "frame").is_none()
             {
-                css.push_str("border:1px inset gray;");
+                // No colour: cell borders follow the cell's `currentcolor`.
+                css.push_str("border-width:1px;border-style:inset;");
             }
         }
     }
@@ -269,7 +270,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     if let Some(width) = table_border_width(elem) {
                         let _ = write!(css, "border-width:{width}px;");
                         if width > 0 {
-                            css.push_str("border-style:outset;border-color:gray;");
+                            css.push_str("border-style:outset;");
                         }
                     }
                 } else if *tag == local_name!("img")
@@ -294,7 +295,16 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 }
             }
             "nowrap" if is_cell => css.push_str("white-space:nowrap;"),
-            "bgcolor" => {
+            "bgcolor"
+                if *tag == local_name!("body")
+                    || *tag == local_name!("table")
+                    || *tag == local_name!("thead")
+                    || *tag == local_name!("tbody")
+                    || *tag == local_name!("tfoot")
+                    || *tag == local_name!("tr")
+                    || is_cell
+                    || *tag == local_name!("marquee") =>
+            {
                 if let Some(color) = parse_legacy_color(value) {
                     let _ = write!(css, "background-color:{color};");
                 }
@@ -395,7 +405,6 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
         || *tag == local_name!("h4")
         || *tag == local_name!("h5")
         || *tag == local_name!("h6")
-        || *tag == local_name!("legend")
     {
         css.push_str(match value.as_str() {
             "left" => "text-align:left;",
@@ -414,14 +423,10 @@ fn table_border_width(table: &ElementData) -> Option<u32> {
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-non-negative-integers
 fn parse_non_negative_integer(value: &str) -> Option<u32> {
-    let value = value.trim_start_matches(|c: char| c.is_ascii_whitespace());
-    let value = value.strip_prefix('+').unwrap_or(value);
-    let digits = value.len() - value.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-    if digits == 0 {
-        return None;
-    }
-    // Saturate absurd values instead of rejecting them, as browsers clamp.
-    Some(value[..digits].parse().unwrap_or(u32::MAX).min(100_000))
+    // Clamp absurd values, which only hostile markup uses.
+    style::servo::attr::parse_unsigned_integer(value.chars())
+        .ok()
+        .map(|value| value.min(100_000))
 }
 
 /// https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-dimension-values
@@ -650,5 +655,9 @@ mod tests {
         assert_eq!(parse_non_negative_integer(" 10px"), Some(10));
         assert_eq!(parse_non_negative_integer("0"), Some(0));
         assert_eq!(parse_non_negative_integer("-1"), None);
+        // The integer rules accept one sign, so "-0" is zero.
+        assert_eq!(parse_non_negative_integer("-0foo"), Some(0));
+        assert_eq!(parse_non_negative_integer("+0%"), Some(0));
+        assert_eq!(parse_non_negative_integer("+-1"), None);
     }
 }

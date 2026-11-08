@@ -513,3 +513,19 @@ fn collapsed_tables_relayout_after_border_changes() {
         before + 10.0,
     );
 }
+
+#[test]
+fn bgcolor_maps_only_on_body_and_table_elements() {
+    // Like browsers and the HTML Standard, `bgcolor` on a div is ignored.
+    let mut doc = document(
+        "<div bgcolor='#ff0000' style='height:20px'></div>
+         <table><tr><td bgcolor='#0000ff' style='width:20px;height:20px'></td></tr></table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    assert!(rows_with(&pixels, [255, 0, 0, 255]).is_none());
+    assert!(rows_with(&pixels, [0, 0, 255, 255]).is_some());
+}
