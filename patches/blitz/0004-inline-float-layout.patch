@@ -16,7 +16,7 @@ index a1b07ff..777cc97 100644
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 1f98570..00a42e8 100644
+index 1f98570..19bb72a 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -52,25 +52,58 @@ index 1f98570..00a42e8 100644
  
              #[cfg(feature = "floats")]
              let is_floated = style.float().is_floated();
-@@ -520,7 +526,7 @@ impl LayoutPassState<'_> {
+@@ -518,9 +524,10 @@ impl LayoutPassState<'_> {
+                                     self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
+                                 (
                                      style.float().is_floated(),
-                                     style
-                                         .margin()
+-                                    style
+-                                        .margin()
 -                                        .resolve_or_zero(inputs.parent_size, resolve_calc_value),
-+                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                    style.margin().resolve_or_zero(
++                                        child_inputs.parent_size,
++                                        resolve_calc_value,
++                                    ),
                                  )
                              };
  
-@@ -556,7 +562,7 @@ impl LayoutPassState<'_> {
+@@ -554,9 +561,10 @@ impl LayoutPassState<'_> {
+                                 (
+                                     style.float(),
                                      style.clear(),
-                                     style
-                                         .margin()
+-                                    style
+-                                        .margin()
 -                                        .resolve_or_zero(inputs.parent_size, resolve_calc_value),
-+                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                    style.margin().resolve_or_zero(
++                                        child_inputs.parent_size,
++                                        resolve_calc_value,
++                                    ),
                                  )
                              };
  
-@@ -715,9 +721,12 @@ impl LayoutPassState<'_> {
+@@ -680,7 +688,10 @@ impl LayoutPassState<'_> {
+             let mut has_active_floats = initial_slot.segment_id.is_some();
+             let state = breaker.state_mut();
+             state.set_layout_max_advance(width);
+-            state.set_line_max_advance(initial_slot.width * scale);
++            // With huge insets, f32 rounding can make a float slot slightly wider than
++            // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
++            let layout_max_advance = state.layout_max_advance();
++            state.set_line_max_advance((initial_slot.width * scale).min(layout_max_advance));
+             state.set_line_x(initial_slot.x * scale);
+             state.set_line_y((initial_slot.y * scale) as f64);
+ 
+@@ -705,7 +716,9 @@ impl LayoutPassState<'_> {
+                                 block_ctx.find_content_slot(min_y as f32, Clear::None, None);
+                             has_active_floats = next_slot.segment_id.is_some();
+ 
+-                            state.set_line_max_advance(next_slot.width * scale);
++                            state.set_line_max_advance(
++                                (next_slot.width * scale).min(layout_max_advance),
++                            );
+                             state.set_line_x(next_slot.x * scale);
+                             state.set_line_y((next_slot.y * scale) as f64);
+                         } else {
+@@ -715,9 +728,12 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
@@ -86,7 +119,7 @@ index 1f98570..00a42e8 100644
                      }
                      YieldData::InlineBoxBreak(box_break_data) => {
                          let state = breaker.state_mut();
-@@ -736,7 +745,7 @@ impl LayoutPassState<'_> {
+@@ -736,7 +752,7 @@ impl LayoutPassState<'_> {
                                  style.clear(),
                                  style
                                      .margin()
@@ -94,4 +127,15 @@ index 1f98570..00a42e8 100644
 +                                    .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
                              )
                          };
+ 
+@@ -762,7 +778,9 @@ impl LayoutPassState<'_> {
+                             block_ctx.find_content_slot(min_y as f32, Clear::None, None);
+                         has_active_floats = next_slot.segment_id.is_some();
+ 
+-                        state.set_line_max_advance(next_slot.width * scale);
++                        state.set_line_max_advance(
++                            (next_slot.width * scale).min(layout_max_advance),
++                        );
+                         state.set_line_x(next_slot.x * scale);
+                         state.set_line_y((next_slot.y * scale) as f64);
  

@@ -251,3 +251,14 @@ fn inline_backgrounds_stop_at_the_enclosing_block() {
         .collect();
     assert_eq!(link, [&[4, 5, 6], &[7, 8, 9]], "{fills:?}");
 }
+
+#[test]
+fn float_slots_never_exceed_the_line_breaker_width() {
+    // DioxusLabs/blitz#1443: f32 rounding with huge insets can make a float's
+    // line slot wider than the layout, which trips Parley's line-breaker assert.
+    let doc = document(
+        "<div><div style='width:1000px;float:right'></div>
+         <h2 style='padding:0 2147483652%;max-height:0'>x</h2></div>",
+    );
+    assert!(node(&doc, "h2").final_layout().size.width.is_finite());
+}

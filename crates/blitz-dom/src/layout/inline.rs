@@ -524,9 +524,10 @@ impl LayoutPassState<'_> {
                                     self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
                                 (
                                     style.float().is_floated(),
-                                    style
-                                        .margin()
-                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
+                                    style.margin().resolve_or_zero(
+                                        child_inputs.parent_size,
+                                        resolve_calc_value,
+                                    ),
                                 )
                             };
 
@@ -560,9 +561,10 @@ impl LayoutPassState<'_> {
                                 (
                                     style.float(),
                                     style.clear(),
-                                    style
-                                        .margin()
-                                        .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
+                                    style.margin().resolve_or_zero(
+                                        child_inputs.parent_size,
+                                        resolve_calc_value,
+                                    ),
                                 )
                             };
 
@@ -686,7 +688,10 @@ impl LayoutPassState<'_> {
             let mut has_active_floats = initial_slot.segment_id.is_some();
             let state = breaker.state_mut();
             state.set_layout_max_advance(width);
-            state.set_line_max_advance(initial_slot.width * scale);
+            // With huge insets, f32 rounding can make a float slot slightly wider than
+            // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
+            let layout_max_advance = state.layout_max_advance();
+            state.set_line_max_advance((initial_slot.width * scale).min(layout_max_advance));
             state.set_line_x(initial_slot.x * scale);
             state.set_line_y((initial_slot.y * scale) as f64);
 
@@ -711,7 +716,9 @@ impl LayoutPassState<'_> {
                                 block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                             has_active_floats = next_slot.segment_id.is_some();
 
-                            state.set_line_max_advance(next_slot.width * scale);
+                            state.set_line_max_advance(
+                                (next_slot.width * scale).min(layout_max_advance),
+                            );
                             state.set_line_x(next_slot.x * scale);
                             state.set_line_y((next_slot.y * scale) as f64);
                         } else {
@@ -771,7 +778,9 @@ impl LayoutPassState<'_> {
                             block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                         has_active_floats = next_slot.segment_id.is_some();
 
-                        state.set_line_max_advance(next_slot.width * scale);
+                        state.set_line_max_advance(
+                            (next_slot.width * scale).min(layout_max_advance),
+                        );
                         state.set_line_x(next_slot.x * scale);
                         state.set_line_y((next_slot.y * scale) as f64);
 
