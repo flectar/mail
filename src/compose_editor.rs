@@ -2,9 +2,10 @@ use crate::rich_compose::{
     BOLD, CODE, CharacterStyle, ComposeSelection, ITALIC, RichComposeDocument, STRIKE, UNDERLINE,
 };
 use cosmic_text::{
-    Action, Attrs, Buffer, Color as CosmicColor, Cursor, Edit, Editor, Family, FontSystem, Metrics,
-    Motion, PhysicalGlyph, Renderer, Selection, Shaping, Style, SwashCache, SwashContent,
-    UnderlineStyle, Weight, Wrap, fontdb::Source,
+    Action, Attrs, AttrsList, BidiParagraphs, Buffer, BufferLine, Color as CosmicColor, Cursor,
+    Edit, Editor, Family, FontSystem, LineEnding, Metrics, Motion, PhysicalGlyph, Renderer, Scroll,
+    Selection, Shaping, Style, SwashCache, SwashContent, UnderlineStyle, Weight, Wrap,
+    fontdb::Source,
 };
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 use std::{
@@ -463,15 +464,21 @@ impl CosmicComposeEditor {
             ));
         }
 
+        let lines = rich_lines(&spans, &default_attrs);
+        let font_system = &mut self.font_system;
         self.editor.with_buffer_mut(|buffer| {
             buffer.set_metrics_and_size(metrics, Some(physical_width as f32), None);
             buffer.set_wrap(Wrap::WordOrGlyph);
-            buffer.set_rich_text(
-                spans.iter().map(|(text, attrs)| (*text, attrs.clone())),
-                &default_attrs,
-                Shaping::Advanced,
-                None,
-            );
+            // Shaping costs grow with the whole draft, including a reply's
+            // quoted text, so only the paragraphs an edit changed are replaced.
+            let replaced = replace_changed_lines(buffer, lines);
+            buffer.set_scroll(Scroll::default());
+            // cosmic-text does not count a new line as out of date, so its
+            // lazy pass would skip it: lay the replaced lines out here.
+            for line in replaced {
+                buffer.line_layout(font_system, line);
+            }
+            buffer.set_redraw(true);
         });
         self.editor.shape_as_needed(&mut self.font_system, false);
         self.content_height_physical = self.editor.with_buffer(|buffer| {
@@ -752,6 +759,90 @@ fn rich_spans<'a>(
         spans.push(("", default_attrs.clone()));
     }
     spans
+}
+
+/// Splits styled spans into paragraphs the way `Buffer::set_rich_text` does.
+fn rich_lines(
+    spans: &[(&str, Attrs<'static>)],
+    default_attrs: &Attrs<'static>,
+) -> Vec<(String, AttrsList)> {
+    let mut text = String::with_capacity(spans.iter().map(|(span, _)| span.len()).sum());
+    let mut ranges = Vec::with_capacity(spans.len());
+    for (span, attrs) in spans {
+        let start = text.len();
+        text.push_str(span);
+        ranges.push((start..text.len(), attrs));
+    }
+    let base = text.as_ptr() as usize;
+    let mut lines = Vec::new();
+    let mut first_span = 0;
+    for paragraph in BidiParagraphs::new(&text) {
+        let start = paragraph.as_ptr() as usize - base;
+        let end = start + paragraph.len();
+        while ranges
+            .get(first_span)
+            .is_some_and(|(range, _)| range.end <= start)
+        {
+            first_span += 1;
+        }
+        let mut attrs_list = AttrsList::new(default_attrs);
+        for (range, attrs) in ranges[first_span..]
+            .iter()
+            .take_while(|(range, _)| range.start < end)
+        {
+            let span_start = range.start.max(start);
+            let span_end = range.end.min(end);
+            if span_start < span_end && **attrs != attrs_list.defaults() {
+                attrs_list.add_span(span_start - start..span_end - start, attrs);
+            }
+        }
+        lines.push((paragraph.to_owned(), attrs_list));
+    }
+    if lines.is_empty() {
+        lines.push((String::new(), AttrsList::new(default_attrs)));
+    }
+    lines
+}
+
+/// Keeps the shaped lines an edit left alone. Only the changed middle is
+/// replaced, so typing reshapes one paragraph instead of the whole draft.
+/// Returns the indexes of the new lines.
+fn replace_changed_lines(
+    buffer: &mut Buffer,
+    lines: Vec<(String, AttrsList)>,
+) -> std::ops::Range<usize> {
+    let unchanged = |line: &BufferLine, (text, attrs): &(String, AttrsList)| {
+        line.text() == text
+            && line.attrs_list() == attrs
+            && line.ending() == LineEnding::default()
+            && line.align().is_none()
+    };
+    let prefix = buffer
+        .lines
+        .iter()
+        .zip(&lines)
+        .take_while(|(line, wanted)| unchanged(line, wanted))
+        .count();
+    let available = buffer.lines.len().min(lines.len()) - prefix;
+    let suffix = buffer
+        .lines
+        .iter()
+        .rev()
+        .zip(lines.iter().rev())
+        .take(available)
+        .take_while(|(line, wanted)| unchanged(line, wanted))
+        .count();
+    let old_end = buffer.lines.len() - suffix;
+    let new_end = lines.len() - suffix;
+    let replacement = lines
+        .into_iter()
+        .take(new_end)
+        .skip(prefix)
+        .map(|(text, attrs)| {
+            BufferLine::new(text, LineEnding::default(), attrs, Shaping::Advanced)
+        });
+    buffer.lines.splice(prefix..old_end, replacement);
+    prefix..new_end
 }
 
 fn push_span<'a>(spans: &mut Vec<(&'a str, Attrs<'static>)>, text: &'a str, attrs: Attrs<'static>) {
@@ -1594,5 +1685,157 @@ mod tests {
             surface.selection_from_editor(),
             ComposeSelection { start: 8, end: 8 },
         );
+    }
+
+    #[test]
+    fn rich_lines_match_cosmic_texts_own_paragraphs() {
+        let mut font_system = FontSystem::new();
+        let base = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
+        let bold = base.clone().weight(Weight::BOLD);
+        let link = base.clone().color(CosmicColor::rgb(0, 90, 180));
+        let cases: Vec<Vec<(&str, Attrs<'static>)>> = vec![
+            vec![],
+            vec![("plain", base.clone())],
+            vec![
+                ("first\n\nthird\n", base.clone()),
+                (TRAILING_LINE_SENTINEL, base.clone()),
+            ],
+            vec![
+                ("Hello ", base.clone()),
+                ("bold\nnext", bold.clone()),
+                (" line", base.clone()),
+            ],
+            vec![
+                ("שלום ", base.clone()),
+                ("مرحبا\n", link.clone()),
+                ("世界 👩‍💻", bold.clone()),
+            ],
+            vec![("a\r\nb\u{2029}c", base.clone())],
+        ];
+        for spans in cases {
+            let mut expected = Buffer::new(&mut font_system, Metrics::new(13.0, 18.0));
+            expected.set_rich_text(
+                spans.iter().map(|(text, attrs)| (*text, attrs.clone())),
+                &base,
+                Shaping::Advanced,
+                None,
+            );
+            let lines = rich_lines(&spans, &base);
+            assert_eq!(lines.len(), expected.lines.len(), "{spans:?}");
+            for ((text, attrs), line) in lines.iter().zip(&expected.lines) {
+                assert_eq!(text, line.text());
+                assert_eq!(attrs, line.attrs_list());
+            }
+        }
+    }
+
+    #[test]
+    fn typing_reshapes_only_the_edited_paragraph() {
+        let mut font_system = FontSystem::new();
+        let attrs = Attrs::new().family(Family::Name(UI_FONT_FAMILY));
+        let mut buffer = Buffer::new(&mut font_system, Metrics::new(13.0, 18.0));
+        buffer.set_size(Some(600.0), None);
+        let text = (0..200)
+            .map(|line| format!("> quoted line {line}\n"))
+            .collect::<String>();
+        let mut apply = |buffer: &mut Buffer, text: &str| {
+            let replaced =
+                replace_changed_lines(buffer, rich_lines(&[(text, attrs.clone())], &attrs));
+            let reshaped = buffer
+                .lines
+                .iter()
+                .filter(|line| line.shape_opt().is_none())
+                .count();
+            for line in replaced.clone() {
+                buffer.line_layout(&mut font_system, line);
+            }
+            buffer.shape_until_scroll(&mut font_system, false);
+            assert!(buffer.lines.iter().all(|line| line.shape_opt().is_some()));
+            (replaced, reshaped)
+        };
+
+        let (_, reshaped) = apply(&mut buffer, &text);
+        assert_eq!(reshaped, 200);
+        let typed = text.replacen("quoted line 100", "quoted line 100!", 1);
+        assert_eq!(apply(&mut buffer, &typed), (100..101, 1));
+        let split = typed.replacen("quoted line 50", "quoted\nline 50", 1);
+        assert_eq!(apply(&mut buffer, &split), (50..52, 2));
+        assert_eq!(buffer.lines.len(), 201);
+        assert_eq!(apply(&mut buffer, &typed), (50..51, 1));
+        assert_eq!(apply(&mut buffer, &typed), (200..200, 0));
+        assert_eq!(buffer.lines.len(), 200);
+    }
+
+    #[test]
+    fn edits_render_like_a_fresh_layout() {
+        let style = ComposeEditorStyle {
+            text: Color::from_rgb_u8(30, 30, 30),
+            link: Color::from_rgb_u8(0, 90, 180),
+            selection: Color::from_argb_u8(140, 60, 120, 220),
+            selected_text: Color::from_rgb_u8(255, 255, 255),
+        };
+        let quote = (0..40)
+            .map(|line| format!("> Row {line}: café العربية 👩‍💻 quoted text that wraps\n"))
+            .collect::<String>();
+        let mut document = RichComposeDocument::default();
+        document.load(&format!("\n\n{quote}"), 0, 0);
+        let mut surface = CosmicComposeEditor::default();
+        let mut text = document.text().to_owned();
+        let edits: [&dyn Fn(&str) -> String; 6] = [
+            &|text| format!("Thanks{text}"),
+            &|text| text.replacen("Thanks", "Thanks\nfor this", 1),
+            &|text| text.replacen("Thanks\nfor", "Thanks for", 1),
+            &|text| text.replacen("Row 3", "Row three", 1),
+            &|text| text.replacen("> Row 7", "", 1),
+            &|text| text.replacen("Row 9:", "Row 9:\npasted\nlines", 1),
+        ];
+        for (step, edit) in edits.into_iter().enumerate() {
+            text = edit(&text);
+            let end = text.len() as i32;
+            document.synchronize(&text, end, end);
+            if step == 3 {
+                document.format("bold", &text, 0, 10);
+            }
+            for scale in [1.0, 2.0] {
+                let actual = surface.render(
+                    &document,
+                    document.selection(),
+                    320.0,
+                    600.0,
+                    0.0,
+                    scale,
+                    style,
+                    "",
+                );
+                let expected = CosmicComposeEditor::default().render(
+                    &document,
+                    document.selection(),
+                    320.0,
+                    600.0,
+                    0.0,
+                    scale,
+                    style,
+                    "",
+                );
+                assert_eq!(
+                    actual.content_height, expected.content_height,
+                    "step {step}"
+                );
+                assert_eq!(
+                    (actual.caret_x, actual.caret_y, actual.caret_height),
+                    (expected.caret_x, expected.caret_y, expected.caret_height),
+                    "step {step}"
+                );
+                assert_eq!(actual.tiles.len(), expected.tiles.len(), "step {step}");
+                for (actual, expected) in actual.tiles.iter().zip(&expected.tiles) {
+                    assert_eq!(
+                        actual.image.to_rgba8_premultiplied().unwrap().as_bytes(),
+                        expected.image.to_rgba8_premultiplied().unwrap().as_bytes(),
+                        "step {step} scale {scale} tile {}",
+                        actual.y
+                    );
+                }
+            }
+        }
     }
 }
