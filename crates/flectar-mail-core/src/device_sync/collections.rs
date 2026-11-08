@@ -805,8 +805,8 @@ fn apply_account(
                     smtp_port: config.smtp_port,
                 },
                 &account_settings,
-                // Credentials stay on the device that has them: this one
-                // asks the user to sign in.
+                // Signed out until its password or sign-in arrives, or the
+                // user signs in here.
                 "needs_reauth",
             )?;
             conn.execute(

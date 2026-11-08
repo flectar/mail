@@ -16,14 +16,21 @@
 //!   services; Microsoft's Android and iOS apps share one registration.
 //!
 //! Other OAuth sign-ins never travel: servers such as Fastmail and Stalwart
-//! end the whole grant once one refresh token is used from two places.
+//! end the whole grant once one refresh token is used from two places. Nor
+//! does a Google sign-in made through Play services, which leaves the app
+//! only a marker that works on its own device.
 //!
 //! A password goes up whenever it changes here. A sign-in goes up when none
 //! is shared yet, when the shared one stopped working, or when the user
 //! signs in again here; otherwise each device keeps refreshing its own, so
 //! providers that issue a new refresh token on every refresh cause no churn.
-//! A device that receives a sign-in it cannot use marks the record stale,
-//! and a device with a working one shares it instead.
+//! A device whose provider rejects a sign-in it received marks the record
+//! stale, naming the sign-in that failed, and a device with a different
+//! working one shares that instead. The one that failed never goes round
+//! again, even when it still works where it came from, such as on a device
+//! an organization's sign-in rules accept and the receiving one they don't.
+//! A sign-in that cannot be checked, offline for instance, is kept: the
+//! account's own retries take over.
 
 use super::store;
 use crate::Core;
@@ -119,6 +126,31 @@ fn kind_for(auth: AuthKind, provider: Provider) -> Option<Kind> {
     }
 }
 
+/// Whether `secret`, stored in the credential store slot of `kind`, works on
+/// another device at all.
+fn travels(kind: Kind, secret: &str) -> bool {
+    kind == Kind::Password || !crate::oauth::tokens::is_platform_managed(secret)
+}
+
+/// Whether a failed check means the provider rejected the sign-in itself,
+/// rather than that it could not be reached.
+fn is_rejection(error: &CoreError) -> bool {
+    matches!(error, CoreError::NeedsReauth | CoreError::Auth(_))
+}
+
+/// Whether this device's working sign-in, with fingerprint `digest`, should
+/// replace what the group has: nothing yet, or a stale one that was not this
+/// very sign-in, which a device already could not use.
+fn sign_in_wanted(shared: Option<&Record>, digest: &[u8]) -> bool {
+    match shared {
+        None => true,
+        Some(Record {
+            sealed: Some(_), ..
+        }) => false,
+        Some(Record { rejected, .. }) => rejected.as_deref() != Some(digest),
+    }
+}
+
 /// The name a share's record id comes from.
 fn record_name(account_sync_id: &str, kind: Kind, family: &str) -> String {
     format!("signin/{account_sync_id}/{}/{family}", kind.as_str())
@@ -189,6 +221,9 @@ pub(super) fn body(share: &Share, account_sync_id: &str) -> Option<Value> {
     });
     if share.stale {
         body["stale"] = json!(true);
+        if let Some(rejected) = &share.fingerprint {
+            body["rejected"] = json!(STANDARD.encode(rejected));
+        }
     } else {
         body["sealed"] = serde_json::from_str(share.sealed.as_deref()?).ok()?;
     }
@@ -203,20 +238,28 @@ pub(super) struct Record<'a> {
     pub family: &'a str,
     /// The sealed secret, as stored; `None` for a stale sign-in.
     pub sealed: Option<String>,
+    /// For a stale sign-in, the fingerprint of the one that failed.
+    pub rejected: Option<Vec<u8>>,
 }
 
 pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
     let stale = body.get("stale").and_then(Value::as_bool) == Some(true);
+    let (sealed, rejected) = if stale {
+        let rejected = body
+            .get("rejected")
+            .and_then(Value::as_str)
+            .and_then(|digest| STANDARD.decode(digest).ok());
+        (None, rejected)
+    } else {
+        let sealed: Sealed = serde_json::from_value(body.get("sealed")?.clone()).ok()?;
+        (Some(serde_json::to_string(&sealed).ok()?), None)
+    };
     Some(Record {
         account: body.get("account")?.as_str()?,
         kind: Kind::parse(body.get("kind")?.as_str()?)?,
         family: body.get("family")?.as_str()?,
-        sealed: if stale {
-            None
-        } else {
-            let sealed: Sealed = serde_json::from_value(body.get("sealed")?.clone()).ok()?;
-            Some(serde_json::to_string(&sealed).ok()?)
-        },
+        sealed,
+        rejected,
     })
 }
 
@@ -310,29 +353,31 @@ impl Core {
                 None => secrets.insert(client.secrets().await),
             };
             // Nothing stored here, such as for an account waiting for its
-            // sign-in, shares nothing.
-            if let Ok(secret) = credentials::load_async(
+            // sign-in, shares nothing; nor does a sign-in only this device
+            // can use.
+            let stored = credentials::load_async(
                 self.credentials.clone(),
                 candidate.id,
                 candidate.kind.slot(),
             )
             .await
-            {
+            .ok()
+            .filter(|secret| travels(candidate.kind, secret));
+            if let Some(secret) = stored {
                 let Ok(digest) = fingerprint(secrets, secret.as_bytes()) else {
                     return;
                 };
-                let shared = self
+                let mirrored = self
                     .db
                     .read(move |conn| store::mirrored_entry(conn, &record_id))
                     .await
                     .ok()
-                    .flatten()
-                    .and_then(|entry| parse(&entry.body).map(|record| record.sealed.is_some()));
+                    .flatten();
+                let shared = mirrored.as_ref().and_then(|entry| parse(&entry.body));
                 let share_now = match candidate.kind {
                     Kind::Password => share.fingerprint.as_deref() != Some(digest.as_slice()),
-                    // None shared yet, or the shared one stopped working, or
-                    // the user signed in again here.
-                    Kind::Oauth => share.fresh || shared != Some(true),
+                    // The user signed in again here, or the group wants it.
+                    Kind::Oauth => share.fresh || sign_in_wanted(shared.as_ref(), &digest),
                 };
                 if share_now {
                     match seal(secrets, secret.as_bytes()) {
@@ -401,6 +446,9 @@ impl Core {
         }
         let secret = String::from_utf8(open(secrets, &arrival.sealed)?)
             .map_err(|_| CoreError::Other("a shared sign-in is damaged".into()))?;
+        if !travels(kind, &secret) {
+            return Ok(());
+        }
         let digest = fingerprint(secrets, secret.as_bytes())?;
         let needs_sign_in = account.sync_state == "needs_reauth";
         let current =
@@ -416,31 +464,41 @@ impl Core {
                 .await?;
             if kind == Kind::Oauth {
                 self.tokens.invalidate(account_id).await;
-                if let Err(error) = self.tokens.access_token(account_id, account.provider).await {
-                    // Revoked or expired: never keep it, and say so, so a
-                    // device whose sign-in works shares that one instead.
-                    tracing::info!(%error, "a shared sign-in no longer works");
-                    let _ = credentials::delete_async(
-                        self.credentials.clone(),
-                        account_id,
-                        kind.slot(),
-                    )
-                    .await;
-                    self.tokens.invalidate(account_id).await;
-                    let stale = Share {
-                        account_id,
-                        kind: kind.as_str().into(),
-                        family: arrival.family.clone(),
-                        record_id: Some(arrival.record_id),
-                        stale: true,
-                        checked_at: now_ms(),
-                        ..Share::default()
-                    };
-                    self.db
-                        .write(move |conn| repo::sign_ins::put_share(conn, &stale))
-                        .await?;
-                    self.device_sync_now();
-                    return Ok(());
+                match self.tokens.access_token(account_id, account.provider).await {
+                    Ok(_) => {}
+                    // Revoked or expired: never keep it, and say which one
+                    // failed, so a device with another that works shares
+                    // that instead, and this one never comes back.
+                    Err(error) if is_rejection(&error) => {
+                        tracing::info!(%error, "a shared sign-in does not work here");
+                        let _ = credentials::delete_async(
+                            self.credentials.clone(),
+                            account_id,
+                            kind.slot(),
+                        )
+                        .await;
+                        self.tokens.invalidate(account_id).await;
+                        let stale = Share {
+                            account_id,
+                            kind: kind.as_str().into(),
+                            family: arrival.family.clone(),
+                            record_id: Some(arrival.record_id),
+                            fingerprint: Some(digest),
+                            stale: true,
+                            checked_at: now_ms(),
+                            ..Share::default()
+                        };
+                        self.db
+                            .write(move |conn| repo::sign_ins::put_share(conn, &stale))
+                            .await?;
+                        self.device_sync_now();
+                        return Ok(());
+                    }
+                    // Not checked, offline for instance: it worked where it
+                    // came from, and the account retries like any other.
+                    Err(error) => {
+                        tracing::debug!(%error, "could not check a shared sign-in yet");
+                    }
                 }
             }
         }
@@ -572,6 +630,14 @@ mod tests {
         let body = super::body(&stale, "aa").unwrap();
         assert_eq!(body["stale"], true);
         assert_eq!(parse(&body).unwrap().sealed, None);
+        // A stale record names the sign-in that failed.
+        let failed = Share {
+            fingerprint: Some(vec![7; 32]),
+            ..stale.clone()
+        };
+        let body = super::body(&failed, "aa").unwrap();
+        assert!(body.get("sealed").is_none());
+        assert_eq!(parse(&body).unwrap().rejected, Some(vec![7; 32]));
         // Nothing to say without a secret.
         assert!(
             super::body(
@@ -583,5 +649,58 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_sign_in_that_failed_never_goes_round_again() {
+        let record = |sealed: Option<&str>, rejected: Option<Vec<u8>>| Record {
+            account: "aa",
+            kind: Kind::Oauth,
+            family: "desktop",
+            sealed: sealed.map(str::to_owned),
+            rejected,
+        };
+        let mine = [1; 32];
+        // Nothing shared yet.
+        assert!(sign_in_wanted(None, &mine));
+        // A shared one that works stays.
+        assert!(!sign_in_wanted(Some(&record(Some("{}"), None)), &mine));
+        // Another sign-in failed: this one replaces it.
+        assert!(sign_in_wanted(
+            Some(&record(None, Some(vec![2; 32]))),
+            &mine
+        ));
+        assert!(sign_in_wanted(Some(&record(None, None)), &mine));
+        // This very one failed elsewhere: sharing it again would go round
+        // between the two devices for ever.
+        assert!(!sign_in_wanted(
+            Some(&record(None, Some(mine.to_vec()))),
+            &mine
+        ));
+    }
+
+    #[test]
+    fn only_a_provider_rejection_makes_a_sign_in_stale() {
+        assert!(is_rejection(&CoreError::NeedsReauth));
+        assert!(is_rejection(&CoreError::Auth(
+            "token refresh failed: invalid_client".into()
+        )));
+        assert!(!is_rejection(&CoreError::Offline));
+        assert!(!is_rejection(&CoreError::Network(
+            "OAuth token service returned 503".into()
+        )));
+    }
+
+    #[test]
+    fn play_services_sign_ins_stay_on_their_device() {
+        let bundle = |refresh_token: &str| {
+            json!({"version": 1, "refresh_token": refresh_token, "client_id": "client"}).to_string()
+        };
+        let marker =
+            crate::oauth::tokens::platform_google_marker(&["https://mail.google.com/"]).unwrap();
+        assert!(!travels(Kind::Oauth, &bundle(&marker)));
+        assert!(travels(Kind::Oauth, &bundle("1//refresh-token")));
+        // A password is never a bundle.
+        assert!(travels(Kind::Password, &marker));
     }
 }

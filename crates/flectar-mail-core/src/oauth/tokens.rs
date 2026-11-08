@@ -114,6 +114,13 @@ pub fn platform_google_marker(scopes: &[&str]) -> std::result::Result<String, &'
     ))
 }
 
+/// Whether a stored OAuth bundle holds a Play services marker instead of a
+/// refresh token: it names no account and works only where it was made.
+pub(crate) fn is_platform_managed(bundle: &str) -> bool {
+    serde_json::from_str::<OAuthCredentialBundle>(bundle)
+        .is_ok_and(|bundle| bundle.refresh_token.starts_with(PLATFORM_GOOGLE_PREFIX))
+}
+
 fn platform_google_scopes(marker: &str) -> Option<Vec<String>> {
     let encoded = marker.strip_prefix(PLATFORM_GOOGLE_PREFIX)?;
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
