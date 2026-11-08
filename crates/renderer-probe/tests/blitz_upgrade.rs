@@ -927,3 +927,20 @@ fn collapsed_bevels_and_dashes_paint_like_browsers() {
     assert_eq!(pixel(0, top), red, "dash at the start");
     assert_eq!(pixel(103, top), red, "dash at the end");
 }
+
+#[test]
+fn positioned_children_of_collapsed_tables_keep_their_border() {
+    // An absolutely positioned cell takes no part in the collapsed grid, so it
+    // paints its own border.
+    let mut doc = document(
+        "<table style='border-collapse:collapse;position:relative'><tr>
+         <td style='position:absolute;top:30px;left:0;width:20px;height:20px;border:2px solid rgb(255,0,0)'></td>
+         <td style='width:40px;height:10px'></td></tr></table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    assert!(rows_with(&pixels, [255, 0, 0, 255]).is_some());
+}

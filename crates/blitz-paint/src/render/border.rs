@@ -526,9 +526,11 @@ impl ElementCx<'_, '_> {
     }
 
     /// Whether a table paints this element's border in the collapsed model,
-    /// for the table box itself and for each of its cells.
+    /// for the table box itself and for each of its cells. Out-of-flow
+    /// children take no part in the table grid and keep their own border.
     pub(crate) fn border_painted_by_table(&self) -> bool {
         let collapsed = |data: &SpecialElementData| matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some());
+        let id = self.node.id;
         collapsed(&self.element.special_data)
             || self
                 .node
@@ -536,7 +538,13 @@ impl ElementCx<'_, '_> {
                 .get()
                 .and_then(|parent| self.context.dom.get_node(parent))
                 .and_then(|parent| parent.element_data())
-                .is_some_and(|parent| collapsed(&parent.special_data))
+                .is_some_and(|parent| match &parent.special_data {
+                    SpecialElementData::TableRoot(table) => {
+                        table.collapsed_borders.is_some()
+                            && !table.oof_children.iter().any(|&(child, _)| child == id)
+                    }
+                    _ => false,
+                })
     }
 
     /// Paint the resolved borders of a `border-collapse: collapse` table, on
