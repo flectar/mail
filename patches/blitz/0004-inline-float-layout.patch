@@ -16,7 +16,7 @@ index a1b07ff..777cc97 100644
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 1f98570..9ade052 100644
+index 1f98570..fd0735e 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -116,7 +116,7 @@ index 1f98570..9ade052 100644
                              state.set_line_x(next_slot.x * scale);
                              state.set_line_y((next_slot.y * scale) as f64);
                          } else {
-@@ -715,9 +734,12 @@ impl LayoutPassState<'_> {
+@@ -715,15 +734,18 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
@@ -132,16 +132,35 @@ index 1f98570..9ade052 100644
                      }
                      YieldData::InlineBoxBreak(box_break_data) => {
                          let state = breaker.state_mut();
-@@ -736,7 +758,7 @@ impl LayoutPassState<'_> {
+                         let node_id = NodeId::from_u64(box_break_data.inline_box_id);
+ 
+-                        let (direction, clear, margin) = {
++                        let (direction, clear, margin, width) = {
+                             let style = self.child_layout_style(&self.nodes[node_id]);
+                             // We can assume that the box is a float because we only set `break_on_box: true` for floats
+                             let direction = match style.float() {
+@@ -736,15 +758,18 @@ impl LayoutPassState<'_> {
                                  style.clear(),
                                  style
                                      .margin()
 -                                    .resolve_or_zero(inputs.parent_size, resolve_calc_value),
 +                                    .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
++                                style.size().width,
                              )
                          };
  
-@@ -762,7 +784,9 @@ impl LayoutPassState<'_> {
+                         let margin_sum = margin.sum_axes();
+ 
++                        // The float's margin box shrinks to the available width, so its
++                        // border box gets that width less its margins (CSS 2.1 §10.3.5).
+                         let mut output = self.compute_child_layout(
+                             crate::taffy_node_id(node_id),
+-                            float_child_inputs,
++                            inline_box_inputs(width, margin, float_child_inputs),
+                         );
+                         let min_y = state.line_y() as f32 / scale;
+ 
+@@ -762,7 +787,9 @@ impl LayoutPassState<'_> {
                              block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                          has_active_floats = next_slot.segment_id.is_some();
  
@@ -152,7 +171,7 @@ index 1f98570..9ade052 100644
                          state.set_line_x(next_slot.x * scale);
                          state.set_line_y((next_slot.y * scale) as f64);
  
-@@ -777,9 +801,10 @@ impl LayoutPassState<'_> {
+@@ -777,9 +804,10 @@ impl LayoutPassState<'_> {
  
                          // Translate anchors from item-relative to container-relative
                          // coordinates and collect candidates bubbled from the float's subtree
@@ -164,7 +183,7 @@ index 1f98570..9ade052 100644
                          }
  
                          // dbg!(&layout.size);
-@@ -902,9 +927,10 @@ impl LayoutPassState<'_> {
+@@ -902,9 +930,10 @@ impl LayoutPassState<'_> {
  
          let container_direction = self.nodes[node_id].layout_style().direction();
  
@@ -178,7 +197,7 @@ index 1f98570..9ade052 100644
          let align_content = BlockContainerStyle::align_content(&self.nodes[node_id].layout_style());
          let block_offset = if align_content.keyword() == taffy::AlignContentKeyword::Normal {
              0.0
-@@ -916,6 +942,21 @@ impl LayoutPassState<'_> {
+@@ -916,6 +945,21 @@ impl LayoutPassState<'_> {
          inline_layout.block_offset = block_offset;
          let line_box_top = container_pb.top + block_offset;
  

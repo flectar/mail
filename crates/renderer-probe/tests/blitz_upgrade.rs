@@ -582,3 +582,16 @@ fn collapsed_border_lines_land_on_whole_pixels() {
     let solid = row.iter().filter(|pixel| pixel[3] == 255).count();
     assert_eq!((partial, solid), (0, 7));
 }
+
+#[test]
+fn floats_shrink_within_their_margins() {
+    // CSS 2.1 §10.3.5: a shrink-to-fit float gets the containing block's
+    // width less its own margins, so its margin box stays inside the block.
+    let doc = document(
+        "<div style='width:300px'>Text <span id='f' style='float:left;margin-left:40px'>
+         A long floated paragraph whose text is wide enough to wrap inside the block.</span></div>",
+    );
+    let float = node(&doc, "#f").final_layout();
+    close(float.location.x, 40.0);
+    close(float.size.width, 260.0);
+}

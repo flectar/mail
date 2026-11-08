@@ -745,7 +745,7 @@ impl LayoutPassState<'_> {
                         let state = breaker.state_mut();
                         let node_id = NodeId::from_u64(box_break_data.inline_box_id);
 
-                        let (direction, clear, margin) = {
+                        let (direction, clear, margin, width) = {
                             let style = self.child_layout_style(&self.nodes[node_id]);
                             // We can assume that the box is a float because we only set `break_on_box: true` for floats
                             let direction = match style.float() {
@@ -759,14 +759,17 @@ impl LayoutPassState<'_> {
                                 style
                                     .margin()
                                     .resolve_or_zero(child_inputs.parent_size, resolve_calc_value),
+                                style.size().width,
                             )
                         };
 
                         let margin_sum = margin.sum_axes();
 
+                        // The float's margin box shrinks to the available width, so its
+                        // border box gets that width less its margins (CSS 2.1 §10.3.5).
                         let mut output = self.compute_child_layout(
                             crate::taffy_node_id(node_id),
-                            float_child_inputs,
+                            inline_box_inputs(width, margin, float_child_inputs),
                         );
                         let min_y = state.line_y() as f32 / scale;
 
