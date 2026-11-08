@@ -2547,6 +2547,9 @@ export component SettingsDialog inherits Rectangle {
                                 ShortcutRow { title: @tr("Go to tab 1–8"); keys: [Shortcuts.first-tab, Shortcuts.eighth-tab]; separator: "–"; title-color: root.body-text; separator-color: root.faint-text; }
                                 ShortcutRow { title: @tr("Go to last tab"); keys: [Shortcuts.last-tab]; title-color: root.body-text; separator-color: root.faint-text; }
                             }
+                            if WindowChrome.platform == "linux" : ShortcutSection { vertical-stretch: 0; title: @tr("General"); surface: root.surface; card-border-color: root.border-subtle; heading: root.heading;
+                                ShortcutRow { title: @tr("Quit Flectar Mail"); keys: [Shortcuts.quit]; title-color: root.body-text; separator-color: root.faint-text; }
+                            }
                         }
                     }
 
