@@ -5,3 +5,4 @@
 0005-email-painting-and-cache.patch
 0006-repository-integration.patch
 0007-skip-unresolvable-resource-urls.patch
+0008-correct-offscreen-culling-bounds.patch

@@ -26,11 +26,13 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and unhinted email glyphs. |
 | 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |
 | 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
+| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow. Tiles far down a message no longer paint the elements above them. |
 
 0001–0006 are not upstream yet. Upstream main adds `cellspacing` and
 `cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
-and the `<link>` part of #1318; its `@import` change is local. Drop the
-backported parts when a release contains them.
+and the `<link>` part of #1318; its `@import` change is local. 0008 backports
+upstream #1342, keeping beta.4's element transform. Drop the backported parts
+when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
@@ -86,7 +88,7 @@ overlap and locale-sensitive text. Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 
-On Linux, the beta.4 rebase passed the Blitz library suite (86 tests), the
-focused upgrade suite (eight tests), patch reproduction, all three locked
+On Linux, the beta.4 queue passed the Blitz library suite (88 tests), the
+focused upgrade suite (nine tests), patch reproduction, all three locked
 metadata checks and the Flatpak source check. The application crate is
 validated by CI.
