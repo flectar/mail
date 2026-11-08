@@ -984,3 +984,26 @@ fn column_groups_without_columns_span_their_columns() {
     close(node(&doc, "#a").final_layout().size.width, 50.0);
     close(node(&doc, "#b").final_layout().size.width, 50.0);
 }
+
+#[test]
+fn svg_images_load_under_decode_limits() {
+    // Decode limits bound raster images; an SVG still loads as without them.
+    let images = std::sync::Arc::new(HeldImages::default());
+    let mut doc = HtmlDocument::from_html(
+        "<img src='https://example.com/logo.svg'>",
+        DocumentConfig {
+            viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+            net_provider: Some(images.clone()),
+            image_decode_limits: Some(decode_limits()),
+            ..Default::default()
+        },
+    );
+    doc.resolve(0.0);
+    let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"><rect width="40" height="30" fill="red"/></svg>"#;
+    for (url, handler) in images.0.lock().unwrap().drain(..) {
+        handler.bytes(url, blitz_traits::net::Bytes::copy_from_slice(svg));
+    }
+    doc.resolve(0.0);
+    let size = node(&doc, "img").final_layout().size;
+    assert_eq!((size.width, size.height), (40.0, 30.0));
+}

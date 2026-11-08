@@ -583,28 +583,36 @@ impl NetHandler for ResourceHandler<ImageHandler> {
 
 impl ImageHandler {
     fn parse(&self, bytes: Bytes) -> Result<Resource, String> {
-        if let Some(limits) = self.limits {
-            return limits
-                .decode(&bytes)
-                .map(|image| Resource::Raster(self.kind, image));
-        }
-        let image_err = match image::ImageReader::new(Cursor::new(&bytes))
-            .with_guessed_format()
-            .expect("IO errors impossible with Cursor")
-            .decode()
-        {
-            Ok(image) => {
-                let width = image.width();
-                let height = image.height();
-                let raw_rgba8_data = image.into_rgba8().into_raw();
-                return Ok(Resource::Image(
-                    self.kind,
-                    width,
-                    height,
-                    Arc::new(raw_rgba8_data),
-                ));
+        let image_err = if let Some(limits) = self.limits {
+            // The limits bound raster decoding. Bytes in no raster format may
+            // still be an SVG, which is parsed below as without limits.
+            match image::guess_format(&bytes) {
+                Ok(_) => {
+                    return limits
+                        .decode(&bytes)
+                        .map(|image| Resource::Raster(self.kind, image));
+                }
+                Err(e) => e.to_string(),
             }
-            Err(e) => e.to_string(),
+        } else {
+            match image::ImageReader::new(Cursor::new(&bytes))
+                .with_guessed_format()
+                .expect("IO errors impossible with Cursor")
+                .decode()
+            {
+                Ok(image) => {
+                    let width = image.width();
+                    let height = image.height();
+                    let raw_rgba8_data = image.into_rgba8().into_raw();
+                    return Ok(Resource::Image(
+                        self.kind,
+                        width,
+                        height,
+                        Arc::new(raw_rgba8_data),
+                    ));
+                }
+                Err(e) => e.to_string(),
+            }
         };
 
         #[cfg(feature = "svg")]

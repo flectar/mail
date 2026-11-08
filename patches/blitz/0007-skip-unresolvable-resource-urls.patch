@@ -129,7 +129,7 @@ index 7427db4..afc5272 100644
      fn media_type_defaults_to_screen() {
          let mut document = BaseDocument::new(DocumentConfig::default());
 diff --git a/crates/blitz-dom/src/net.rs b/crates/blitz-dom/src/net.rs
-index 0c58c2e..b1bda7a 100644
+index 02b5379..7337367 100644
 --- a/crates/blitz-dom/src/net.rs
 +++ b/crates/blitz-dom/src/net.rs
 @@ -206,7 +206,12 @@ impl ServoStylesheetLoader for StylesheetLoader {
