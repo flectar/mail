@@ -283,9 +283,10 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                     || is_image_input
                 {
                     // Width alone would compute back to zero against the
-                    // default border-style of `none`.
+                    // default border-style of `none`. Like Blink and Gecko,
+                    // zero is mapped too; the colour is left alone.
                     if let Some(width) = parse_non_negative_integer(value) {
-                        let _ = write!(css, "border:{width}px solid;");
+                        let _ = write!(css, "border-width:{width}px;border-style:solid;");
                     }
                 }
             }
@@ -335,24 +336,27 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 }
             }
             "hidden" => css.push_str("display:none;"),
-            // `body` margin attributes, as pixel lengths. There is
-            // deliberately no `rightmargin` or `bottommargin`.
-            "marginwidth" | "marginheight" | "leftmargin" | "topmargin"
-                if *tag == local_name!("body") =>
+            _ => {}
+        }
+    }
+
+    // `body` margins: per axis, the first of these attributes that exists
+    // sets both sides; if it does not parse, the default margin stays. There
+    // is no `rightmargin` or `bottommargin`.
+    if *tag == local_name!("body") {
+        for (attrs, sides) in [
+            (["marginheight", "topmargin"], ["top", "bottom"]),
+            (["marginwidth", "leftmargin"], ["left", "right"]),
+        ] {
+            if let Some(px) = attrs
+                .iter()
+                .find_map(|name| attr(elem, name))
+                .and_then(parse_non_negative_integer)
             {
-                if let Some(px) = parse_non_negative_integer(value) {
-                    let sides: &[&str] = match name {
-                        "marginwidth" => &["left", "right"],
-                        "marginheight" => &["top", "bottom"],
-                        "leftmargin" => &["left"],
-                        _ => &["top"],
-                    };
-                    for side in sides {
-                        let _ = write!(css, "margin-{side}:{px}px;");
-                    }
+                for side in sides {
+                    let _ = write!(css, "margin-{side}:{px}px;");
                 }
             }
-            _ => {}
         }
     }
 }
@@ -553,41 +557,38 @@ fn parse_legacy_color(value: &str) -> Option<String> {
     ))
 }
 
-/// The `<font face>` list as CSS. Generic families stay keywords; every other
-/// name is serialized as an escaped string.
+/// The `<font face>` value parsed as a CSS `font-family` value, as browsers
+/// parse it, and serialized back. A value that is not a valid family list
+/// maps to nothing, so the element keeps its inherited family.
 fn font_family_list(value: &str) -> Option<String> {
-    const GENERICS: &[&str] = &[
-        "serif",
-        "sans-serif",
-        "monospace",
-        "cursive",
-        "fantasy",
-        "system-ui",
-    ];
-    let mut out = String::new();
-    for family in value.split(',') {
-        let family = family.trim().trim_matches(|c| c == '"' || c == '\'').trim();
-        if family.is_empty() || family.chars().any(char::is_control) {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(',');
-        }
-        let lower = family.to_ascii_lowercase();
-        if GENERICS.contains(&lower.as_str()) {
-            out.push_str(&lower);
-        } else {
-            out.push('"');
-            for c in family.chars() {
-                if c == '"' || c == '\\' {
-                    out.push('\\');
-                }
-                out.push(c);
-            }
-            out.push('"');
-        }
-    }
-    (!out.is_empty()).then_some(out)
+    use style::properties::{
+        PropertyDeclaration, PropertyId, SourcePropertyDeclaration, parse_one_declaration_into,
+    };
+    use style::stylesheets::Origin;
+    use style_traits::ParsingMode;
+
+    let property = PropertyId::parse_enabled_for_all_content("font-family").ok()?;
+    let mut declarations = SourcePropertyDeclaration::default();
+    parse_one_declaration_into(
+        &mut declarations,
+        property,
+        value,
+        Origin::Author,
+        &HINT_URL_DATA,
+        None,
+        ParsingMode::DEFAULT,
+        QuirksMode::NoQuirks,
+        CssRuleType::Style,
+    )
+    .ok()?;
+    let declaration = declarations.drain().declarations.next()?;
+    // Only a list of families: no CSS-wide keywords or variables.
+    let PropertyDeclaration::FontFamily(_) = declaration else {
+        return None;
+    };
+    let mut css = String::new();
+    declaration.to_css(&mut css).ok()?;
+    Some(css)
 }
 
 /// https://html.spec.whatwg.org/multipage/rendering.html#rules-for-parsing-a-legacy-font-size
@@ -651,14 +652,22 @@ mod tests {
     }
 
     #[test]
-    fn font_faces_cannot_escape_the_declaration() {
+    fn font_faces_parse_as_css_family_lists() {
         assert_eq!(
             font_family_list(r#"Georgia, "Times New Roman", serif"#).as_deref(),
-            Some(r#""Georgia","Times New Roman",serif"#)
+            Some(r#"Georgia, "Times New Roman", serif"#)
         );
         assert_eq!(
-            font_family_list(r#"a"\;}x{color:red"#).as_deref(),
-            Some(r#""a\"\\;}x{color:red""#)
+            font_family_list("Segoe UI,Tahoma").as_deref(),
+            Some("Segoe UI, Tahoma")
+        );
+        // Not a family list: browsers keep the inherited family.
+        assert_eq!(font_family_list("Calibri (Body)"), None);
+        assert_eq!(font_family_list("inherit"), None);
+        assert_eq!(font_family_list(r#"a"\;}x{color:red"#), None);
+        assert_eq!(
+            font_family_list(r#""a;}x{color:red"#).as_deref(),
+            Some(r#""a;}x{color:red""#)
         );
     }
 

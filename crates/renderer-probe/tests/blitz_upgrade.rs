@@ -826,3 +826,49 @@ fn copied_text_keeps_cells_and_paragraphs_apart() {
         Some("Receipt\n\nItem\t$5\n\nThanks")
     );
 }
+
+#[test]
+fn body_margin_attributes_set_both_sides() {
+    // Per axis, the first of marginheight/topmargin and marginwidth/leftmargin
+    // that exists sets both sides (HTML rendering, "The page").
+    for (attrs, x, width, y) in [
+        ("leftmargin='0' topmargin='0'", 0.0, 400.0, 0.0),
+        (
+            "marginwidth='20' leftmargin='5' marginheight='30' topmargin='5'",
+            20.0,
+            360.0,
+            30.0,
+        ),
+        ("leftmargin='x' marginwidth='10'", 10.0, 380.0, 8.0),
+    ] {
+        let mut doc = HtmlDocument::from_html(
+            &format!("<body {attrs}><div id='d' style='height:5px'></div></body>"),
+            DocumentConfig {
+                viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Light)),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        let body = node(&doc, "body").final_layout();
+        let div = node(&doc, "#d").final_layout();
+        close(body.location.x + div.location.x, x);
+        close(div.size.width, width);
+        close(body.location.y, y);
+    }
+}
+
+#[test]
+fn invalid_font_faces_keep_the_inherited_family() {
+    // `face` is parsed as a CSS family list; like browsers, a value that is
+    // not one (Word's "Calibri (Body)") sets nothing.
+    let doc = document(
+        "<div style='font-family:monospace'><font id='bad' face='Calibri (Body)'>a</font>
+         <font id='good' face='Georgia, serif'>b</font></div>",
+    );
+    let family = |selector| {
+        let styles = node(&doc, selector).primary_styles().unwrap();
+        format!("{:?}", styles.get_font().font_family)
+    };
+    assert!(family("#bad").contains("Monospace"), "{}", family("#bad"));
+    assert!(family("#good").contains("Georgia"), "{}", family("#good"));
+}
