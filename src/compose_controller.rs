@@ -334,7 +334,7 @@ pub(super) fn format_file_size(size: u64) -> String {
     }
 }
 
-pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
+pub(super) fn apply_compose_files(ui: &ComposerUi<'_>, files: &[ComposeFile]) {
     let rows = files
         .iter()
         .map(|file| {
@@ -352,8 +352,8 @@ pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
         })
         .collect::<Vec<_>>();
     let total = files.iter().map(|file| file.size).sum::<u64>();
-    app.set_compose_attachments(ModelRc::new(VecModel::from(rows)));
-    app.set_compose_attachment_summary(
+    ui.set_attachments(ModelRc::new(VecModel::from(rows)));
+    ui.set_attachment_summary(
         if files.is_empty() {
             "".to_owned()
         } else {
@@ -368,28 +368,37 @@ pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
     );
 }
 
+/// Where a composer is shown: its window's `ComposerUi`, the window itself
+/// for the scale factor, and whether that window paints at all.
+pub(super) struct ComposeView<'a> {
+    pub(super) ui: ComposerUi<'a>,
+    pub(super) window: &'a slint::Window,
+    pub(super) suspended: bool,
+}
+
 pub(super) fn apply_rich_compose(
-    app: &AppWindow,
+    view: &ComposeView<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
     editor: &mut LazyComposeEditor,
 ) {
-    app.set_compose_body(document.text().into());
-    apply_rich_compose_state(app, document, selection);
-    apply_compose_editor_surface(app, document, selection, editor);
+    view.ui.set_body(document.text().into());
+    apply_rich_compose_state(&view.ui, document, selection);
+    apply_compose_editor_surface(view, document, selection, editor);
 }
 
 pub(super) fn apply_compose_editor_surface(
-    app: &AppWindow,
+    view: &ComposeView<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
     editor: &mut LazyComposeEditor,
 ) {
-    if app.get_render_suspended() || !app.get_compose_open() {
+    let ui = &view.ui;
+    if view.suspended || !ui.get_open() {
         return;
     }
-    let width = app.get_compose_editor_width().max(1.0);
-    let viewport_height = app.get_compose_editor_viewport_height().max(1.0);
+    let width = ui.get_editor_width().max(1.0);
+    let viewport_height = ui.get_editor_viewport_height().max(1.0);
     let (width, viewport_height) = if width <= 1.0 || viewport_height <= 1.0 {
         (640.0, 360.0)
     } else {
@@ -400,15 +409,15 @@ pub(super) fn apply_compose_editor_surface(
         selection,
         width,
         viewport_height,
-        app.get_compose_editor_scroll_y().max(0.0),
-        app.window().scale_factor(),
-        compose_editor_style(app),
-        app.get_compose_editor_preedit_text().as_str(),
+        ui.get_editor_scroll_y().max(0.0),
+        view.window.scale_factor(),
+        compose_editor_style(ui),
+        ui.get_editor_preedit_text().as_str(),
     );
-    apply_rendered_compose_editor(app, rendered);
+    apply_rendered_compose_editor(ui, rendered);
 }
 
-pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedComposeEditor) {
+pub(super) fn apply_rendered_compose_editor(ui: &ComposerUi<'_>, rendered: RenderedComposeEditor) {
     let started = crate::renderer::render_timings_enabled().then(std::time::Instant::now);
     let tiles = rendered
         .tiles
@@ -420,7 +429,7 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
         })
         .collect::<Vec<_>>();
     let tile_count = tiles.len();
-    let retained = app.get_compose_editor_tiles();
+    let retained = ui.get_editor_tiles();
     let replaced_model = if let Some(model) = retained
         .as_any()
         .downcast_ref::<VecModel<ComposeEditorTile>>()
@@ -428,13 +437,13 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
         crate::reconcile_model_rows_by(model, tiles, |tile| tile.y.to_bits(), PartialEq::eq);
         false
     } else {
-        app.set_compose_editor_tiles(ModelRc::new(VecModel::from(tiles)));
+        ui.set_editor_tiles(ModelRc::new(VecModel::from(tiles)));
         true
     };
-    app.set_compose_editor_content_height(rendered.content_height);
-    app.set_compose_editor_caret_x(rendered.caret_x);
-    app.set_compose_editor_caret_y(rendered.caret_y);
-    app.set_compose_editor_caret_height(rendered.caret_height);
+    ui.set_editor_content_height(rendered.content_height);
+    ui.set_editor_caret_x(rendered.caret_x);
+    ui.set_editor_caret_y(rendered.caret_y);
+    ui.set_editor_caret_height(rendered.caret_height);
     if let Some(started) = started {
         eprintln!(
             "compose Slint model update: {:.2}ms tiles={tile_count} replaced_model={replaced_model}",
@@ -443,39 +452,39 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
     }
 }
 
-pub(super) fn compose_editor_style(app: &AppWindow) -> ComposeEditorStyle {
-    let selection = app.get_compose_editor_selection_color();
+pub(super) fn compose_editor_style(ui: &ComposerUi<'_>) -> ComposeEditorStyle {
+    let selection = ui.get_editor_selection_color();
     ComposeEditorStyle {
-        text: app.get_compose_editor_text_color(),
-        link: app.get_compose_editor_link_color(),
+        text: ui.get_editor_text_color(),
+        link: ui.get_editor_link_color(),
         selection: slint::Color::from_argb_u8(
             140,
             selection.red(),
             selection.green(),
             selection.blue(),
         ),
-        selected_text: app.get_compose_editor_selected_text_color(),
+        selected_text: ui.get_editor_selected_text_color(),
     }
 }
 
 pub(super) fn apply_rich_compose_state(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
 ) {
     let active = document.active_marks();
-    app.set_compose_selection_start(selection.start);
-    app.set_compose_selection_end(selection.end);
-    app.set_compose_bold_active(active.bold);
-    app.set_compose_italic_active(active.italic);
-    app.set_compose_underline_active(active.underline);
-    app.set_compose_strike_active(active.strike);
-    app.set_compose_code_active(active.code);
-    app.set_compose_active_link_url(document.active_link().unwrap_or_default().into());
+    ui.set_selection_start(selection.start);
+    ui.set_selection_end(selection.end);
+    ui.set_bold_active(active.bold);
+    ui.set_italic_active(active.italic);
+    ui.set_underline_active(active.underline);
+    ui.set_strike_active(active.strike);
+    ui.set_code_active(active.code);
+    ui.set_active_link_url(document.active_link().unwrap_or_default().into());
 }
 
 pub(super) fn apply_compose_contacts(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     contacts: &[flectar_mail_core::models::Address],
 ) {
     let rows = contacts
@@ -486,11 +495,11 @@ pub(super) fn apply_compose_contacts(
             initials: contact_initials(contact).into(),
         })
         .collect::<Vec<_>>();
-    app.set_compose_contact_suggestions(ModelRc::new(VecModel::from(rows)));
+    ui.set_contact_suggestions(ModelRc::new(VecModel::from(rows)));
 }
 
 pub(super) fn apply_email_templates(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     templates: &[flectar_mail_core::models::Snippet],
 ) {
     let rows = templates
@@ -505,7 +514,7 @@ pub(super) fn apply_email_templates(
             })
         })
         .collect::<Vec<_>>();
-    app.set_compose_templates(ModelRc::new(VecModel::from(rows)));
+    ui.set_templates(ModelRc::new(VecModel::from(rows)));
 }
 
 pub(super) fn contact_initials(contact: &flectar_mail_core::models::Address) -> String {
@@ -568,124 +577,6 @@ pub(super) fn complete_compose_recipient(
 
 /// The original's files once fetched: each one's path, name and size, or
 /// why it could not be had.
-type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
-
-/// Attaches a forwarded or edited message's files once they are here, the
-/// way the attachment picker adds files, unless the composer was sent,
-/// discarded or replaced meanwhile.
-pub(super) fn attach_original_files(
-    app: &AppWindow,
-    files: &Rc<RefCell<Vec<ComposeFile>>>,
-    session: &Rc<Cell<u64>>,
-    runtime: &tokio::runtime::Handle,
-    core: CoreMailSource,
-    attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
-) {
-    if attachments.is_empty() {
-        return;
-    }
-    let started_in = session.get();
-    app.set_compose_notice(UiMessage::plain("Attaching the original's files…"));
-    app.set_compose_notice_is_error(false);
-    let request: documents::DocumentFuture<FetchedFiles> = Box::pin(async move {
-        let mut fetched = Vec::with_capacity(attachments.len());
-        for attachment in attachments {
-            let name = attachment
-                .filename
-                .clone()
-                .unwrap_or_else(|| "attachment".into());
-            fetched.push(match core.attachment_path(attachment.id).await {
-                Ok(path) => {
-                    let size = tokio::fs::metadata(&path)
-                        .await
-                        .map(|metadata| metadata.len())
-                        .unwrap_or_default();
-                    Ok((PathBuf::from(path), name, size))
-                }
-                Err(error) => Err(format!("{name}: {error}")),
-            });
-        }
-        Ok(fetched)
-    });
-    let app_weak = app.as_weak();
-    let files = Rc::clone(files);
-    let session = Rc::clone(session);
-    documents::run_request(runtime, request, move |fetched| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if session.get() != started_in {
-            return;
-        }
-        let mut compose_files = files.borrow_mut();
-        let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
-        let mut failure = None;
-        let mut too_large = false;
-        for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
-            match file {
-                Ok((path, filename, size)) => {
-                    if total_size.saturating_add(size) > MAX_COMPOSE_ATTACHMENT_BYTES {
-                        too_large = true;
-                        continue;
-                    }
-                    total_size += size;
-                    compose_files.push(ComposeFile {
-                        path,
-                        filename,
-                        size,
-                        _import: None,
-                    });
-                }
-                Err(error) => {
-                    failure.get_or_insert(error);
-                }
-            }
-        }
-        apply_compose_files(&app, &compose_files);
-        let notice = match failure {
-            Some(error) => UiMessage::detail("Could not attach the original's files: {}", error),
-            None if too_large => UiMessage::plain(
-                "Some of the original's files are over the 25 MB limit for attachments.",
-            ),
-            None => UiMessage::EMPTY,
-        };
-        app.set_compose_notice_is_error(notice != UiMessage::EMPTY);
-        app.set_compose_notice(notice);
-    });
-}
-
-pub(super) fn clear_compose(
-    app: &AppWindow,
-    files: &Rc<RefCell<Vec<ComposeFile>>>,
-    session: &Cell<u64>,
-    document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<LazyComposeEditor>>,
-    contacts: &Rc<RefCell<Vec<flectar_mail_core::models::Address>>>,
-) {
-    files.borrow_mut().clear();
-    // A picker still open for this composer must not attach to the next one.
-    session.set(session.get().wrapping_add(1));
-    app.global::<AccountMailPreferences>()
-        .invoke_composer_reset();
-    document.borrow_mut().reset();
-    editor.borrow_mut().release();
-    app.set_compose_editor_tiles(ModelRc::default());
-    contacts.borrow_mut().clear();
-    apply_compose_files(app, &[]);
-    apply_compose_contacts(app, &[]);
-    app.set_compose_sending(false);
-    app.set_compose_open(false);
-    app.set_compose_mode("new".into());
-    app.set_compose_to("".into());
-    app.set_compose_cc("".into());
-    app.set_compose_bcc("".into());
-    app.set_compose_subject("".into());
-    app.set_compose_body("".into());
-    app.set_compose_notice(UiMessage::EMPTY);
-    app.set_compose_notice_is_error(false);
-    apply_rich_compose_state(app, &document.borrow(), ComposeSelection::default());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

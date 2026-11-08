@@ -13,6 +13,9 @@ import { TypeScale } from "../typography.slint";
 // integration; it never supplies coordinates for anything the user can see.
 export component EmailComposer inherits Rectangle {
     in property <bool> compact: false;
+    // In its own window: no frame of its own, and the window's title bar
+    // replaces the heading and its close button.
+    in property <bool> windowed: false;
     in property <bool> attachment-picker-supported: true;
     in property <bool> open: false;
     in property <string> mode: "new";
@@ -44,6 +47,7 @@ export component EmailComposer inherits Rectangle {
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    in property <bool> can-pop-out: false;
 
     in property <color> background-color;
     in property <color> raised-color;
@@ -64,6 +68,7 @@ export component EmailComposer inherits Rectangle {
     out property <string> editor-preedit-text: body-input.preedit-text;
 
     callback close;
+    callback pop-out;
     callback back-requested;
     callback submit(bool);
     callback pick-attachments;
@@ -158,6 +163,8 @@ export component EmailComposer inherits Rectangle {
             root.confirm-discard = false;
             root.templates-open = false;
         } else {
+            // The typing proxy starts where the visible caret is.
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
             root.editor-layout-changed();
         }
     }
@@ -202,21 +209,25 @@ export component EmailComposer inherits Rectangle {
         triggered => { root.caret-visible = !root.caret-visible; }
     }
 
+    private property <bool> framed: !root.compact && !root.windowed;
+
     background: root.background-color;
-    border-radius: root.compact ? 0px : 12px;
-    border-width: root.compact ? 0px : 1px;
+    border-radius: root.framed ? 12px : 0px;
+    border-width: root.framed ? 1px : 0px;
     border-color: root.frame-border-color;
-    drop-shadow-blur: root.compact ? 0px : 24px;
-    drop-shadow-offset-y: root.compact ? 0px : 6px;
-    drop-shadow-color: root.compact ? transparent : #00000035;
+    drop-shadow-blur: root.framed ? 24px : 0px;
+    drop-shadow-offset-y: root.framed ? 6px : 0px;
+    drop-shadow-color: root.framed ? #00000035 : transparent;
     clip: true;
 
     VerticalBox {
         spacing: 0px;
 
-        ComposerHeader {
+        if !root.windowed : ComposerHeader {
             compact: root.compact;
             mode: root.mode;
+            can-pop-out: root.can-pop-out && !root.sending;
+            pop-out => { root.pop-out(); }
             control-hover-color: root.control-hover-color;
             muted-color: root.muted-color;
             raised-color: root.raised-color;

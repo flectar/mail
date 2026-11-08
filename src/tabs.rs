@@ -736,7 +736,7 @@ impl Tabs {
         // Tabs can be turned off; the composer and the calendar editor keep
         // their keys.
         if !app.global::<TabsUi>().get_enabled()
-            || app.get_compose_open()
+            || app.global::<ComposerUi>().get_open()
             || app.get_calendar_editor_open()
         {
             return;
