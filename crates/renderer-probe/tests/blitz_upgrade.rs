@@ -669,3 +669,19 @@ fn cell_children_resolve_percent_heights_against_the_cell_height() {
     );
     close(node(&doc, "#c").final_layout().size.height, 100.0);
 }
+
+#[test]
+fn length_columns_absorb_excess_width_without_auto_columns() {
+    // CSS Tables 3 §3.9.3: with no auto columns, a definite-width table gives
+    // its excess width to the length columns, so the cells fill the table.
+    let doc = document(
+        "<table id='t' style='width:300px;border-spacing:0'><tr><td id='a' style='width:20px'></td>
+         <td id='b' style='width:40px'></td><td id='c' style='width:10%'></td></tr></table>",
+    );
+    let cells: f32 = ["#a", "#b", "#c"]
+        .iter()
+        .map(|id| node(&doc, id).final_layout().size.width)
+        .sum();
+    close(cells, 300.0);
+    close(node(&doc, "#c").final_layout().size.width, 30.0);
+}

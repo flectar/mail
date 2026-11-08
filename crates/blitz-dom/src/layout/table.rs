@@ -645,15 +645,24 @@ pub(crate) fn build_table_context(
 
     // When every column has an authored length in a table of definite width,
     // browsers grow those columns in proportion to the authored widths.
+    // Excess width goes to auto columns first, then to length columns in
+    // proportion to their widths, then to percentage columns (CSS Tables 3
+    // §3.9.3). Without auto columns, the next kind grows instead.
     let table_width_is_definite = style.size().width.tag() != taffy::CompactLength::AUTO_TAG;
-    let all_lengths = !column_hints.is_empty()
+    let is_percent = |hint: &ColumnHint| hint.percent.is_some();
+    let is_length = |hint: &ColumnHint| hint.length.is_some() && hint.percent.is_none();
+    let no_auto_columns = !column_hints.is_empty()
         && column_hints
             .iter()
-            .all(|hint| hint.length.is_some() && hint.percent.is_none());
-    let grow_lengths = !is_fixed && table_width_is_definite && all_lengths;
+            .all(|hint| is_length(hint) || is_percent(hint));
+    let grow_lengths = !is_fixed && table_width_is_definite && no_auto_columns;
+    let grow = Growth {
+        lengths: grow_lengths,
+        percents: grow_lengths && !column_hints.iter().any(is_length),
+    };
     style.grid_template_columns = column_hints
         .iter()
-        .map(|hint| hint.track(is_fixed, grow_lengths).into())
+        .map(|hint| hint.track(is_fixed, grow).into())
         .collect();
 
     // Explicit columns take precedence over first-row cell widths in fixed layout.
@@ -686,7 +695,13 @@ pub(crate) fn build_table_context(
             } else if hint.length.is_none() && hint.calc.is_none() {
                 style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(1.0))
             } else {
-                hint.track(true, false)
+                hint.track(
+                    true,
+                    Growth {
+                        lengths: false,
+                        percents: false,
+                    },
+                )
             };
             style.grid_template_columns[index] = track.into();
         } else if let Some(column) = column_sizes.get(index) {
@@ -1191,6 +1206,13 @@ impl TableCollector {
     }
 }
 
+/// Which authored columns absorb a definite-width table's excess width.
+#[derive(Debug, Clone, Copy)]
+struct Growth {
+    lengths: bool,
+    percents: bool,
+}
+
 /// What the cells of one column ask for, before it becomes a grid track.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ColumnHint {
@@ -1263,7 +1285,7 @@ impl ColumnHint {
         }
     }
 
-    fn track(&self, is_fixed: bool, grow_lengths: bool) -> TrackSizingFunction {
+    fn track(&self, is_fixed: bool, grow: Growth) -> TrackSizingFunction {
         if is_fixed {
             return match (self.length, self.percent, self.calc) {
                 (Some(length), _, _) => style_helpers::length(length),
@@ -1283,10 +1305,14 @@ impl ColumnHint {
         // `auto` minimum to a fixed maximum, which would let a 120px image
         // overflow a `width="50"` column.
         let max = if let Some(percent) = self.percent {
-            // A percentage is the column's preferred share of the table.
-            taffy::MaxTrackSizingFunction::percent(percent)
+            if grow.percents {
+                taffy::MaxTrackSizingFunction::fr(percent.max(f32::EPSILON))
+            } else {
+                // A percentage is the column's preferred share of the table.
+                taffy::MaxTrackSizingFunction::percent(percent)
+            }
         } else if let Some(length) = self.length {
-            if grow_lengths {
+            if grow.lengths {
                 taffy::MaxTrackSizingFunction::fr(length.max(f32::EPSILON))
             } else {
                 // Spare width goes to auto columns before authored ones.
