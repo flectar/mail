@@ -6445,8 +6445,19 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
             {
                 let mut document = document_for_message_compose.borrow_mut();
-                let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
-                let selection = document.load(&draft.body_text, cursor, cursor);
+                // The HTML keeps the draft's formatting; markup the composer
+                // did not write opens as the plain text.
+                let reopened = draft
+                    .body_html
+                    .as_deref()
+                    .and_then(|html| document.load_html(html));
+                let selection = match reopened {
+                    Some(selection) => selection,
+                    None => {
+                        let cursor = i32::try_from(draft.body_text.len()).unwrap_or(i32::MAX);
+                        document.load(&draft.body_text, cursor, cursor)
+                    }
+                };
                 editor_for_message_compose.borrow_mut().reset();
                 apply_rich_compose(
                     &app,

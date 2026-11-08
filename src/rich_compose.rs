@@ -1,5 +1,7 @@
+use html5ever::tokenizer::{BufferQueue, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer};
 use std::{
     borrow::Cow,
+    cell::RefCell,
     collections::{HashSet, VecDeque},
     ops::Range,
     sync::Arc,
@@ -537,6 +539,23 @@ impl RichComposeDocument {
         }
         close_html_block(&mut html, &mut open);
         Some(html)
+    }
+
+    /// Reopens a message from the HTML `body_html` wrote, keeping its
+    /// formatting. Returns `None`, leaving the document untouched, for markup
+    /// the composer could not have written; callers then load the plain text.
+    pub fn load_html(&mut self, html: &str) -> Option<ComposeSelection> {
+        let (text, styles) = import_body_html(html)?;
+        let revision = self.revision.wrapping_add(1);
+        *self = Self {
+            text,
+            styles,
+            revision,
+            ..Self::default()
+        };
+        self.auto_link_urls();
+        let end = to_i32(self.text.len());
+        Some(self.update_selection(end, end))
     }
 
     fn toggle_mark(&mut self, mark: u8, start_byte: usize, end_byte: usize) {
@@ -1398,6 +1417,280 @@ fn append_html_char(output: &mut String, character: char) {
         '\'' => output.push_str("&#39;"),
         _ => output.push(character),
     }
+}
+
+enum HtmlToken {
+    Start {
+        name: String,
+        href: Option<String>,
+        start: Option<String>,
+        styled: bool,
+    },
+    End(String),
+    Text(String),
+}
+
+struct HtmlTokenSink(RefCell<Vec<HtmlToken>>);
+
+impl TokenSink for HtmlTokenSink {
+    type Handle = ();
+
+    fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+        let token = match token {
+            Token::TagToken(tag) if tag.kind == TagKind::EndTag => {
+                HtmlToken::End(tag.name.as_str().to_owned())
+            }
+            Token::TagToken(tag) => {
+                let attribute = |wanted: &str| {
+                    tag.attrs
+                        .iter()
+                        .find(|attribute| attribute.name.local.as_str() == wanted)
+                        .map(|attribute| attribute.value.to_string())
+                };
+                HtmlToken::Start {
+                    name: tag.name.as_str().to_owned(),
+                    href: attribute("href"),
+                    start: attribute("start"),
+                    styled: attribute("style").is_some(),
+                }
+            }
+            Token::CharacterTokens(text) => HtmlToken::Text(text.to_string()),
+            _ => return TokenSinkResult::Continue,
+        };
+        self.0.borrow_mut().push(token);
+        TokenSinkResult::Continue
+    }
+}
+
+const IMPORTED_MARKS: [u8; 5] = [BOLD, ITALIC, UNDERLINE, STRIKE, CODE];
+
+fn imported_mark(tag: &str) -> Option<usize> {
+    Some(match tag {
+        "strong" | "b" => 0,
+        "em" | "i" => 1,
+        "u" => 2,
+        "s" | "strike" | "del" => 3,
+        "code" => 4,
+        _ => return None,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct ImportedList {
+    ordered: bool,
+    next: u64,
+}
+
+/// Rebuilds editable text from the markup `body_html` writes. It also reads
+/// drafts saved before quoted lines were grouped, and the copy a mail server
+/// returns after sanitizing (an html/body wrapper, `rel` on links).
+#[derive(Default)]
+struct HtmlImport {
+    text: String,
+    styles: Vec<ComposeStyleRun>,
+    marks: [u32; 5],
+    links: Vec<Option<Arc<str>>>,
+    list: Option<ImportedList>,
+    in_item: bool,
+    in_quote: bool,
+    lines: usize,
+    line_open: bool,
+    line_has_text: bool,
+    pending_space: Option<CharacterStyle>,
+}
+
+impl HtmlImport {
+    fn style(&self) -> CharacterStyle {
+        let marks = IMPORTED_MARKS
+            .into_iter()
+            .zip(self.marks)
+            .filter(|(_, depth)| *depth > 0)
+            .fold(0, |marks, (mark, _)| marks | mark);
+        CharacterStyle {
+            marks,
+            link: self.links.last().cloned().flatten(),
+            link_is_auto: false,
+        }
+    }
+
+    fn push(&mut self, text: &str, style: CharacterStyle) {
+        let start = self.text.len();
+        self.text.push_str(text);
+        push_style_run(&mut self.styles, start..self.text.len(), style);
+    }
+
+    fn start_line(&mut self) {
+        if self.lines > 0 {
+            self.push("\n", CharacterStyle::default());
+        }
+        self.lines += 1;
+        self.line_open = true;
+        self.line_has_text = false;
+        self.pending_space = None;
+        if self.in_quote {
+            self.push("│ ", CharacterStyle::default());
+        }
+    }
+
+    fn end_line(&mut self) {
+        self.line_open = false;
+        self.pending_space = None;
+    }
+
+    fn characters(&mut self, text: &str) {
+        for character in text.chars() {
+            // Collapsible white space, as HTML renders it: one space between
+            // words and none at either end of a line.
+            if matches!(character, ' ' | '\t' | '\n' | '\r' | '\u{c}') {
+                if self.line_open && self.line_has_text && self.pending_space.is_none() {
+                    self.pending_space = Some(self.style());
+                }
+                continue;
+            }
+            if !self.line_open {
+                self.start_line();
+            }
+            if let Some(style) = self.pending_space.take() {
+                self.push(" ", style);
+            }
+            let character = if character == '\u{a0}' {
+                ' '
+            } else {
+                character
+            };
+            let style = self.style();
+            self.push(character.encode_utf8(&mut [0; 4]), style);
+            self.line_has_text = true;
+        }
+    }
+
+    fn token(&mut self, token: HtmlToken) -> Option<()> {
+        match token {
+            HtmlToken::Text(text) => self.characters(&text),
+            HtmlToken::Start { styled: true, .. } => return None,
+            HtmlToken::Start {
+                name, href, start, ..
+            } => match name.as_str() {
+                "html" | "head" | "body" | "meta" | "span" => {}
+                "div" if !self.in_item => self.end_line(),
+                "br" if !self.in_item => {
+                    if !self.line_open {
+                        self.start_line();
+                    }
+                    self.end_line();
+                }
+                "ul" | "ol" if self.list.is_none() && !self.in_quote => {
+                    self.end_line();
+                    self.list = Some(ImportedList {
+                        ordered: name == "ol",
+                        next: start
+                            .and_then(|start| start.trim().parse().ok())
+                            .unwrap_or(1),
+                    });
+                }
+                "li" => {
+                    let list = self.list?;
+                    self.end_line();
+                    self.start_line();
+                    if list.ordered {
+                        self.push(&format!("{}. ", list.next), CharacterStyle::default());
+                        self.list = Some(ImportedList {
+                            next: list.next.saturating_add(1),
+                            ..list
+                        });
+                    } else {
+                        self.push("• ", CharacterStyle::default());
+                    }
+                    self.in_item = true;
+                }
+                "blockquote" if !self.in_quote && self.list.is_none() => {
+                    self.end_line();
+                    self.in_quote = true;
+                }
+                "a" => {
+                    let link = href
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|href| {
+                            href.starts_with("https://")
+                                || href.starts_with("http://")
+                                || href.starts_with("mailto:")
+                        })
+                        .map(Arc::<str>::from);
+                    self.links.push(link);
+                }
+                tag => self.marks[imported_mark(tag)?] += 1,
+            },
+            HtmlToken::End(name) => match name.as_str() {
+                "html" | "head" | "body" | "meta" | "span" | "br" => {}
+                "div" => self.end_line(),
+                "li" => {
+                    self.in_item = false;
+                    self.end_line();
+                }
+                "ul" | "ol" => {
+                    self.list = None;
+                    self.in_item = false;
+                    self.end_line();
+                }
+                "blockquote" => {
+                    self.in_quote = false;
+                    self.end_line();
+                }
+                "a" => {
+                    self.links.pop();
+                }
+                tag => {
+                    let depth = &mut self.marks[imported_mark(tag)?];
+                    *depth = depth.saturating_sub(1);
+                }
+            },
+        }
+        Some(())
+    }
+
+    fn finish(mut self) -> Option<(String, Vec<ComposeStyleRun>)> {
+        if self.lines == 0 {
+            return None;
+        }
+        // A link written over its own address was found by `auto_link_urls`.
+        let mut index = 0;
+        while let Some(run) = self.styles.get(index) {
+            let Some(link) = run.style.link.clone() else {
+                index += 1;
+                continue;
+            };
+            let start = run.range.start;
+            let end_index = index
+                + self.styles[index..]
+                    .iter()
+                    .take_while(|run| run.style.link.as_ref() == Some(&link))
+                    .count();
+            let end = self.styles[end_index - 1].range.end;
+            if (link.starts_with("https://") || link.starts_with("http://"))
+                && self.text[start..end] == *link
+            {
+                for run in &mut self.styles[index..end_index] {
+                    run.style.link_is_auto = true;
+                }
+            }
+            index = end_index;
+        }
+        Some((self.text, self.styles))
+    }
+}
+
+fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
+    let tokenizer = Tokenizer::new(HtmlTokenSink(RefCell::default()), Default::default());
+    let input = BufferQueue::default();
+    input.push_back(html.into());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    let mut import = HtmlImport::default();
+    for token in tokenizer.sink.0.into_inner() {
+        import.token(token)?;
+    }
+    import.finish()
 }
 
 fn ordered(a: usize, b: usize) -> (usize, usize) {
@@ -2401,6 +2694,105 @@ mod tests {
         assert_eq!(
             document.body_html().as_deref(),
             Some("<div><strong>Hello </strong>&nbsp;world</div>")
+        );
+    }
+
+    fn reopened(document: &RichComposeDocument) -> RichComposeDocument {
+        let mut reopened = RichComposeDocument::default();
+        let html = document.body_html().unwrap();
+        let selection = reopened.load_html(&html).expect("the draft's own HTML");
+        let end = reopened.text().len() as i32;
+        assert_eq!(selection, ComposeSelection { start: end, end });
+        reopened
+    }
+
+    #[test]
+    fn a_reopened_draft_keeps_its_formatting() {
+        let text = "Hi  team,\nRead https://example.org/notes and the plan.\n• שלום\n• Café 👩‍🚀\n1. first\n2. second\n7. seventh\n│ quoted\n│ \nBye ";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        let bold = text.find("team").unwrap();
+        document.format("bold", text, bold as i32, (bold + 4) as i32);
+        let plan = text.find("the plan").unwrap();
+        document.set_link("example.com/plan", text, plan as i32, (plan + 8) as i32);
+        document.format("italic", text, plan as i32, (plan + 3) as i32);
+        let cafe = text.find("Café").unwrap();
+        document.format("code", text, cafe as i32, (cafe + "Café".len()) as i32);
+        let quoted = text.find("quoted").unwrap();
+        document.format("strike", text, quoted as i32, (quoted + 6) as i32);
+        document.format("underline", text, 0, 2);
+
+        let mut reopened = reopened(&document);
+        assert_eq!(reopened.text(), document.text());
+        assert_eq!(reopened.body_html(), document.body_html());
+        assert_style_coverage(&reopened);
+        assert_eq!(reopened.history("undo"), None);
+    }
+
+    #[test]
+    fn a_reopened_automatic_link_still_follows_its_text() {
+        let mut document = RichComposeDocument::default();
+        document.load("See https://a.example", 0, 0);
+        let mut reopened = reopened(&document);
+        reopened.insert_text("/b");
+        assert_eq!(
+            reopened.body_html().as_deref(),
+            Some("<div>See <a href=\"https://a.example/b\">https://a.example/b</a></div>")
+        );
+    }
+
+    #[test]
+    fn drafts_saved_by_earlier_versions_and_server_copies_reopen() {
+        let mut document = RichComposeDocument::default();
+        let selection = document.load_html(
+            "<blockquote>one</blockquote><blockquote><br></blockquote><ol><li>a</li><li>b</li></ol>",
+        );
+        assert!(selection.is_some());
+        assert_eq!(document.text(), "│ one\n│ \n1. a\n2. b");
+
+        let selection = document.load_html(
+            "<html><head><meta charset=\"utf-8\"></head><body><div>Hi <a href=\"https://x.example/\" rel=\"noopener noreferrer\">there</a></div>\n<div><br></div></body></html>",
+        );
+        assert!(selection.is_some());
+        assert_eq!(document.text(), "Hi there\n");
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some("<div>Hi <a href=\"https://x.example/\">there</a></div><div><br></div>")
+        );
+    }
+
+    #[test]
+    fn markup_the_composer_cannot_write_is_left_to_the_plain_text() {
+        for html in [
+            "<p>Paragraph</p>",
+            "<table><tr><td>cell</td></tr></table>",
+            "<div style=\"color:red\">red</div>",
+            "<div><img src=\"cid:logo\" alt=\"Logo\"></div>",
+            "<ul><li>one<ul><li>nested</li></ul></li></ul>",
+            "<blockquote><blockquote>nested</blockquote></blockquote>",
+            "<h1>Heading</h1>",
+            "<style>div { color: red }</style><div>styled</div>",
+            "",
+        ] {
+            let mut document = RichComposeDocument::default();
+            document.load("unchanged", 0, 0);
+            assert_eq!(document.load_html(html), None, "{html}");
+            assert_eq!(document.text(), "unchanged");
+        }
+    }
+
+    #[test]
+    fn imported_links_keep_only_web_and_mail_addresses() {
+        let mut document = RichComposeDocument::default();
+        document
+            .load_html(
+                "<div><a href=\"javascript:alert(1)\">x</a> <a href=\"mailto:a@example.org\">mail</a></div>",
+            )
+            .unwrap();
+        assert_eq!(document.text(), "x mail");
+        assert_eq!(
+            document.body_html().as_deref(),
+            Some("<div>x <a href=\"mailto:a@example.org\">mail</a></div>")
         );
     }
 }
