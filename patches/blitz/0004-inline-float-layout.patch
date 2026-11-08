@@ -16,7 +16,7 @@ index a1b07ff..777cc97 100644
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 1f98570..fd0735e 100644
+index 1f98570..49a3494 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -52,7 +52,15 @@ index 1f98570..fd0735e 100644
  
              #[cfg(feature = "floats")]
              let is_floated = style.float().is_floated();
-@@ -518,9 +524,10 @@ impl LayoutPassState<'_> {
+@@ -509,7 +515,6 @@ impl LayoutPassState<'_> {
+ 
+                 #[cfg(feature = "floats")]
+                 let float_width = match available_space.width {
+-                    AvailableSpace::Definite(_) => 0.0,
+                     AvailableSpace::MinContent => {
+                         let mut width: f32 = 0.0;
+                         for ibox in inline_layout.layout.inline_boxes_mut() {
+@@ -518,9 +523,10 @@ impl LayoutPassState<'_> {
                                      self.child_layout_style(&self.nodes[NodeId::from_u64(ibox.id)]);
                                  (
                                      style.float().is_floated(),
@@ -66,7 +74,19 @@ index 1f98570..fd0735e 100644
                                  )
                              };
  
-@@ -554,9 +561,10 @@ impl LayoutPassState<'_> {
+@@ -535,7 +541,10 @@ impl LayoutPassState<'_> {
+ 
+                         width * scale
+                     }
+-                    AvailableSpace::MaxContent => {
++                    // A definite available width only occurs here when shrink-to-fit sizing,
++                    // which needs the max-content contribution of the floats (backported from
++                    // DioxusLabs/blitz#980).
++                    AvailableSpace::MaxContent | AvailableSpace::Definite(_) => {
+                         // When computing a max-content size the available width is effectively
+                         // infinite, so floats never wrap onto a new "band" due to a lack of
+                         // horizontal space. They only move below preceding floats when the `clear`
+@@ -554,9 +563,10 @@ impl LayoutPassState<'_> {
                                  (
                                      style.float(),
                                      style.clear(),
@@ -80,7 +100,7 @@ index 1f98570..fd0735e 100644
                                  )
                              };
  
-@@ -671,6 +679,12 @@ impl LayoutPassState<'_> {
+@@ -671,6 +681,12 @@ impl LayoutPassState<'_> {
          // Out-of-flow candidates bubbled up from this container and its in-flow subtree.
          // These are laid out by the out-of-flow positioning pass (`compute_oof_layout`).
          let mut oof_candidates = OofCandidates::new();
@@ -93,7 +113,7 @@ index 1f98570..fd0735e 100644
  
          // Perform inline layout
          #[cfg(feature = "floats")]
-@@ -680,7 +694,10 @@ impl LayoutPassState<'_> {
+@@ -680,7 +696,10 @@ impl LayoutPassState<'_> {
              let mut has_active_floats = initial_slot.segment_id.is_some();
              let state = breaker.state_mut();
              state.set_layout_max_advance(width);
@@ -105,7 +125,7 @@ index 1f98570..fd0735e 100644
              state.set_line_x(initial_slot.x * scale);
              state.set_line_y((initial_slot.y * scale) as f64);
  
-@@ -705,7 +722,9 @@ impl LayoutPassState<'_> {
+@@ -705,7 +724,9 @@ impl LayoutPassState<'_> {
                                  block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                              has_active_floats = next_slot.segment_id.is_some();
  
@@ -116,7 +136,7 @@ index 1f98570..fd0735e 100644
                              state.set_line_x(next_slot.x * scale);
                              state.set_line_y((next_slot.y * scale) as f64);
                          } else {
-@@ -715,15 +734,18 @@ impl LayoutPassState<'_> {
+@@ -715,15 +736,18 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
@@ -139,7 +159,7 @@ index 1f98570..fd0735e 100644
                              let style = self.child_layout_style(&self.nodes[node_id]);
                              // We can assume that the box is a float because we only set `break_on_box: true` for floats
                              let direction = match style.float() {
-@@ -736,15 +758,18 @@ impl LayoutPassState<'_> {
+@@ -736,15 +760,18 @@ impl LayoutPassState<'_> {
                                  style.clear(),
                                  style
                                      .margin()
@@ -160,7 +180,7 @@ index 1f98570..fd0735e 100644
                          );
                          let min_y = state.line_y() as f32 / scale;
  
-@@ -762,7 +787,9 @@ impl LayoutPassState<'_> {
+@@ -762,7 +789,9 @@ impl LayoutPassState<'_> {
                              block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                          has_active_floats = next_slot.segment_id.is_some();
  
@@ -171,7 +191,7 @@ index 1f98570..fd0735e 100644
                          state.set_line_x(next_slot.x * scale);
                          state.set_line_y((next_slot.y * scale) as f64);
  
-@@ -777,9 +804,10 @@ impl LayoutPassState<'_> {
+@@ -777,9 +806,10 @@ impl LayoutPassState<'_> {
  
                          // Translate anchors from item-relative to container-relative
                          // coordinates and collect candidates bubbled from the float's subtree
@@ -183,7 +203,7 @@ index 1f98570..fd0735e 100644
                          }
  
                          // dbg!(&layout.size);
-@@ -902,9 +930,10 @@ impl LayoutPassState<'_> {
+@@ -902,9 +932,10 @@ impl LayoutPassState<'_> {
  
          let container_direction = self.nodes[node_id].layout_style().direction();
  
@@ -197,7 +217,7 @@ index 1f98570..fd0735e 100644
          let align_content = BlockContainerStyle::align_content(&self.nodes[node_id].layout_style());
          let block_offset = if align_content.keyword() == taffy::AlignContentKeyword::Normal {
              0.0
-@@ -916,6 +945,21 @@ impl LayoutPassState<'_> {
+@@ -916,6 +947,21 @@ impl LayoutPassState<'_> {
          inline_layout.block_offset = block_offset;
          let line_box_top = container_pb.top + block_offset;
  

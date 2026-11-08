@@ -595,3 +595,13 @@ fn floats_shrink_within_their_margins() {
     close(float.location.x, 40.0);
     close(float.size.width, 260.0);
 }
+
+#[test]
+fn shrink_to_fit_boxes_make_room_for_their_floats() {
+    // DioxusLabs/blitz#980: an outer float sized to fit its contents must
+    // include its inner float, not just the short text beside it.
+    let doc = document(
+        "<div id='outer' style='float:left'>Hi <span style='float:left;width:150px;height:10px'></span></div>",
+    );
+    assert!(node(&doc, "#outer").final_layout().size.width >= 150.0);
+}
