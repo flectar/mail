@@ -1658,12 +1658,9 @@ impl TableTreeWrapper<'_, '_> {
         (minimums, spanning)
     }
 
-    /// The border-box width the last layout's columns need, when the table
-    /// uses auto layout. Fixed layout honours the authored width instead.
+    /// The border-box width the last layout's columns need. Fixed layout too
+    /// widens the table to hold its columns (CSS 2.1 §17.5.2.1).
     pub(crate) fn required_width(&self) -> Option<f32> {
-        if self.ctx.is_fixed {
-            return None;
-        }
         let info = self.ctx.computed_grid_info.borrow();
         let positions = &info.as_ref()?.columns.positions;
         let start = positions.iter().map(|line| line.start).reduce(f32::min)?;

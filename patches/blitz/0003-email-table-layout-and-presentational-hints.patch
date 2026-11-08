@@ -41,7 +41,7 @@ index a48384e..462f013 100644
          // `position` is unchanged here (else the box tree would be rebuilt), so
          // checking the new style suffices. Out-of-flow children are not flex/grid
 diff --git a/crates/blitz-dom/src/layout/mod.rs b/crates/blitz-dom/src/layout/mod.rs
-index 0a5fbc1..535f97e 100644
+index 0a5fbc1..82273f1 100644
 --- a/crates/blitz-dom/src/layout/mod.rs
 +++ b/crates/blitz-dom/src/layout/mod.rs
 @@ -16,7 +16,8 @@ use style::values::computed::length_percentage::CalcLengthPercentage;
@@ -54,7 +54,7 @@ index 0a5fbc1..535f97e 100644
      ResolveOrZero, RoundTree, RunMode, TraversePartialTree, TraverseTree, compute_block_layout,
      compute_cached_layout, compute_flexbox_layout, compute_grid_layout, compute_leaf_layout,
      compute_oof_layout, prelude::*,
-@@ -531,12 +532,85 @@ impl LayoutPassState<'_> {
+@@ -531,12 +532,89 @@ impl LayoutPassState<'_> {
                      };
                      let context = Arc::clone(context);
  
@@ -90,19 +90,22 @@ index 0a5fbc1..535f97e 100644
 +
                      let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
  
-+                    // An auto-layout table is never narrower than its columns'
-+                    // minimums, even with an authored width or max-width:
-+                    // over-wide content widens the table instead of painting
-+                    // across its neighbours. Long words in text-only cells
++                    // A table is never narrower than its columns' minimums, even
++                    // with an authored width or max-width: over-wide content
++                    // widens the table instead of painting across its
++                    // neighbours. In auto layout, long words in text-only cells
 +                    // are the exception: `overflow-wrap` may break them, so
 +                    // those cells wrap first and the table only widens for
 +                    // content that cannot wrap. Measuring a table at a finite
 +                    // width runs the same layout, so a parent that measures it
 +                    // (as a table does for a nested one) gets the size its
-+                    // layout has.
++                    // layout has. Fixed layout sizes its columns without their
++                    // content, so it widens at any width.
 +                    let measuring = inputs.run_mode == RunMode::ComputeSize;
-+                    if !table_wrapper.ctx.is_fixed
-+                        && (!measuring || table_width.is_some_and(|width| width.is_finite()))
++                    let is_fixed = table_wrapper.ctx.is_fixed;
++                    if is_fixed
++                        || !measuring
++                        || table_width.is_some_and(|width| width.is_finite())
 +                    {
 +                        let mut layout = taffy::LayoutInput {
 +                            run_mode: RunMode::PerformLayout,
@@ -117,9 +120,10 @@ index 0a5fbc1..535f97e 100644
 +                        } else {
 +                            output
 +                        };
-+                        if table_wrapper
-+                            .required_width()
-+                            .is_some_and(|required| required > laid_out.size.width + 0.5)
++                        if !is_fixed
++                            && table_wrapper
++                                .required_width()
++                                .is_some_and(|required| required > laid_out.size.width + 0.5)
 +                        {
 +                            *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
 +                            laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);
@@ -141,7 +145,7 @@ index 0a5fbc1..535f97e 100644
                      // static position is the top-left of the table's content box.
                      let context = table_wrapper.ctx;
 diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
-index 30b96f0..4d8e08a 100644
+index 30b96f0..73d67be 100644
 --- a/crates/blitz-dom/src/layout/table.rs
 +++ b/crates/blitz-dom/src/layout/table.rs
 @@ -1,11 +1,12 @@
@@ -1841,7 +1845,7 @@ index 30b96f0..4d8e08a 100644
  }
  
  pub struct RangeIter(Range<usize>);
-@@ -817,8 +1434,252 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
+@@ -817,8 +1434,249 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
          inputs: taffy::tree::LayoutInput,
      ) -> taffy::LayoutOutput {
          let cell = &self.ctx.cells[usize::from(node_id)];
@@ -2071,12 +2075,9 @@ index 30b96f0..4d8e08a 100644
 +        (minimums, spanning)
 +    }
 +
-+    /// The border-box width the last layout's columns need, when the table
-+    /// uses auto layout. Fixed layout honours the authored width instead.
++    /// The border-box width the last layout's columns need. Fixed layout too
++    /// widens the table to hold its columns (CSS 2.1 §17.5.2.1).
 +    pub(crate) fn required_width(&self) -> Option<f32> {
-+        if self.ctx.is_fixed {
-+            return None;
-+        }
 +        let info = self.ctx.computed_grid_info.borrow();
 +        let positions = &info.as_ref()?.columns.positions;
 +        let start = positions.iter().map(|line| line.start).reduce(f32::min)?;
@@ -2096,7 +2097,7 @@ index 30b96f0..4d8e08a 100644
      }
  }
  
-@@ -849,3 +1710,73 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
+@@ -849,3 +1707,73 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
          *self.ctx.computed_grid_info.borrow_mut() = Some(detailed_grid_info);
      }
  }

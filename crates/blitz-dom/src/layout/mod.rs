@@ -564,19 +564,22 @@ impl LayoutPassState<'_> {
 
                     let mut output = compute_grid_layout(&mut table_wrapper, node_id, inputs);
 
-                    // An auto-layout table is never narrower than its columns'
-                    // minimums, even with an authored width or max-width:
-                    // over-wide content widens the table instead of painting
-                    // across its neighbours. Long words in text-only cells
+                    // A table is never narrower than its columns' minimums, even
+                    // with an authored width or max-width: over-wide content
+                    // widens the table instead of painting across its
+                    // neighbours. In auto layout, long words in text-only cells
                     // are the exception: `overflow-wrap` may break them, so
                     // those cells wrap first and the table only widens for
                     // content that cannot wrap. Measuring a table at a finite
                     // width runs the same layout, so a parent that measures it
                     // (as a table does for a nested one) gets the size its
-                    // layout has.
+                    // layout has. Fixed layout sizes its columns without their
+                    // content, so it widens at any width.
                     let measuring = inputs.run_mode == RunMode::ComputeSize;
-                    if !table_wrapper.ctx.is_fixed
-                        && (!measuring || table_width.is_some_and(|width| width.is_finite()))
+                    let is_fixed = table_wrapper.ctx.is_fixed;
+                    if is_fixed
+                        || !measuring
+                        || table_width.is_some_and(|width| width.is_finite())
                     {
                         let mut layout = taffy::LayoutInput {
                             run_mode: RunMode::PerformLayout,
@@ -591,9 +594,10 @@ impl LayoutPassState<'_> {
                         } else {
                             output
                         };
-                        if table_wrapper
-                            .required_width()
-                            .is_some_and(|required| required > laid_out.size.width + 0.5)
+                        if !is_fixed
+                            && table_wrapper
+                                .required_width()
+                                .is_some_and(|required| required > laid_out.size.width + 0.5)
                         {
                             *table_wrapper.ctx.relax_text_minimums.borrow_mut() = true;
                             laid_out = compute_grid_layout(&mut table_wrapper, node_id, layout);

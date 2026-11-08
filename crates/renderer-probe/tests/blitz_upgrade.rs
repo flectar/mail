@@ -485,6 +485,22 @@ fn authored_columns_shrink_before_auto_columns_overflow() {
 }
 
 #[test]
+fn fixed_tables_grow_to_hold_their_columns() {
+    // Google Sheets pastes fixed tables with `width:0px` and `<col>` widths.
+    // The table is as wide as its columns (CSS 2.1 §17.5.2.1), so it encloses
+    // its cells and centres by its real width.
+    let doc = document(
+        "<table id='t' align='center' style='table-layout:fixed;width:0px;border-spacing:0'>
+         <colgroup><col width='100'><col width='120'></colgroup>
+         <tr><td id='a'>a</td><td id='b'>b</td></tr></table>",
+    );
+    let table = node(&doc, "#t").final_layout();
+    close(table.size.width, 220.0);
+    close(table.location.x, 90.0);
+    close(node(&doc, "#b").final_layout().location.x, 100.0);
+}
+
+#[test]
 fn collapsed_borders_follow_later_colour_changes() {
     // The reader lays a message out, then adds its appearance overrides as a
     // user-agent sheet. Colour changes only repaint, so collapsed borders must
