@@ -2520,7 +2520,7 @@ index 7323ebf..3d0cc7a 100644
  }
 diff --git a/crates/blitz-dom/src/presentational_hints.rs b/crates/blitz-dom/src/presentational_hints.rs
 new file mode 100644
-index 0000000..f805b73
+index 0000000..b91f130
 --- /dev/null
 +++ b/crates/blitz-dom/src/presentational_hints.rs
 @@ -0,0 +1,706 @@
@@ -3066,7 +3066,7 @@ index 0000000..f805b73
 +    if value.starts_with('#') {
 +        digits.remove(0);
 +    }
-+    while digits.is_empty() || digits.len() % 3 != 0 {
++    while digits.is_empty() || !digits.len().is_multiple_of(3) {
 +        digits.push(b'0');
 +    }
 +    let mut length = digits.len() / 3;

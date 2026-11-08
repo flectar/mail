@@ -160,7 +160,9 @@ impl ImageDecodeLimits {
 /// Convert the decoder's CMYK output to RGB, as `image` did while it decoded
 /// JPEGs with jpeg-decoder.
 fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
-    cmyk.chunks_exact(4)
+    cmyk.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| {
             let k = 255 - u16::from(pixel[3]);
             [0, 1, 2].map(|channel| ((255 - u16::from(pixel[channel])) * k / 255) as u8)
@@ -190,9 +192,9 @@ fn downscale(image: DynamicImage, target: u32) -> DynamicImage {
         .into_rgba8();
     for pixel in reduced.pixels_mut() {
         let alpha = u16::from(pixel[3]);
-        if alpha > 0 {
-            for channel in &mut pixel.0[..3] {
-                *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        for channel in &mut pixel.0[..3] {
+            if let Some(value) = (u16::from(*channel) * 255 + alpha / 2).checked_div(alpha) {
+                *channel = value.min(255) as u8;
             }
         }
     }

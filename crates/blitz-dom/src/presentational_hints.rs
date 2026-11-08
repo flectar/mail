@@ -540,7 +540,7 @@ fn parse_legacy_color(value: &str) -> Option<String> {
     if value.starts_with('#') {
         digits.remove(0);
     }
-    while digits.is_empty() || digits.len() % 3 != 0 {
+    while digits.is_empty() || !digits.len().is_multiple_of(3) {
         digits.push(b'0');
     }
     let mut length = digits.len() / 3;

@@ -411,10 +411,10 @@ index 786b5bd..0c58c2e 100644
              .expect("IO errors impossible with Cursor")
 diff --git a/crates/blitz-dom/src/net/image_decode.rs b/crates/blitz-dom/src/net/image_decode.rs
 new file mode 100644
-index 0000000..b51b599
+index 0000000..48ce811
 --- /dev/null
 +++ b/crates/blitz-dom/src/net/image_decode.rs
-@@ -0,0 +1,212 @@
+@@ -0,0 +1,214 @@
 +use crate::node::RasterImageData;
 +use image::metadata::Orientation;
 +use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
@@ -577,7 +577,9 @@ index 0000000..b51b599
 +/// Convert the decoder's CMYK output to RGB, as `image` did while it decoded
 +/// JPEGs with jpeg-decoder.
 +fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
-+    cmyk.chunks_exact(4)
++    cmyk.as_chunks::<4>()
++        .0
++        .iter()
 +        .flat_map(|pixel| {
 +            let k = 255 - u16::from(pixel[3]);
 +            [0, 1, 2].map(|channel| ((255 - u16::from(pixel[channel])) * k / 255) as u8)
@@ -607,9 +609,9 @@ index 0000000..b51b599
 +        .into_rgba8();
 +    for pixel in reduced.pixels_mut() {
 +        let alpha = u16::from(pixel[3]);
-+        if alpha > 0 {
-+            for channel in &mut pixel.0[..3] {
-+                *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
++        for channel in &mut pixel.0[..3] {
++            if let Some(value) = (u16::from(*channel) * 255 + alpha / 2).checked_div(alpha) {
++                *channel = value.min(255) as u8;
 +            }
 +        }
 +    }
