@@ -1,3 +1,95 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index bb89de3..cc5ada5 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -289,6 +289,8 @@ pub struct BaseDocument {
+     /// Damage from resource events handled since the embedder last drained
+     /// it, including events that `resolve` handled.
+     resource_updates: ResourceUpdates,
++    /// The scale at which nodes' overflow and transforms were last resolved.
++    pub(crate) transforms_scale: f64,
+     /// ID of the document
+     id: usize,
+ 
+@@ -533,6 +535,7 @@ impl BaseDocument {
+         let mut doc = Self {
+             image_decode_limits: config.image_decode_limits,
+             resource_updates: ResourceUpdates::default(),
++            transforms_scale: 0.0,
+             id,
+             tx,
+             rx: Some(rx),
+diff --git a/crates/blitz-dom/src/resolve.rs b/crates/blitz-dom/src/resolve.rs
+index 29a6607..fc98f3e 100644
+--- a/crates/blitz-dom/src/resolve.rs
++++ b/crates/blitz-dom/src/resolve.rs
+@@ -113,8 +113,13 @@ impl BaseDocument {
+         timer.record_time("layout");
+         self.nodes.bump_geometry_generation();
+ 
+-        // Resolve transforms
+-        self.resolve_transforms(root_node_id);
++        // Resolve transforms. Overflow and transforms are kept in device
++        // pixels, so a scale change recomputes them for every node, not only
++        // for the damaged ones.
++        let scale = self.viewport.scale_f64();
++        let rescaled = self.transforms_scale != scale;
++        self.resolve_transforms(root_node_id, rescaled);
++        self.transforms_scale = scale;
+         timer.record_time("transform");
+ 
+         // Build paint children / stacking contexts for damaged subtrees. Runs
+@@ -168,17 +173,18 @@ impl BaseDocument {
+         timer.print_times(&format!("Resolve({}): ", self.id()));
+     }
+ 
+-    fn resolve_transforms(&mut self, node_id: NodeId) -> Rect {
++    fn resolve_transforms(&mut self, node_id: NodeId, rescaled: bool) -> Rect {
+         if !self.nodes.contains_key(node_id) {
+             return Rect::ZERO;
+         }
+ 
+         let scale = self.viewport.scale_f64();
+ 
+-        if !self.nodes[node_id]
+-            .damage()
+-            .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
+-            .unwrap_or(false)
++        if !rescaled
++            && !self.nodes[node_id]
++                .damage()
++                .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
++                .unwrap_or(false)
+         {
+             let node = &self.nodes[node_id];
+             let location = node.final_layout().location.map(|v| v as f64 * scale);
+@@ -208,7 +214,7 @@ impl BaseDocument {
+                 if self.nodes[child_id].is_out_of_flow() {
+                     continue;
+                 }
+-                let child_rect_in_self = self.resolve_transforms(child_id);
++                let child_rect_in_self = self.resolve_transforms(child_id, rescaled);
+                 overflow = overflow.union(child_rect_in_self);
+             }
+         }
+@@ -218,7 +224,7 @@ impl BaseDocument {
+             if !self.nodes.contains_key(child_id) {
+                 continue;
+             }
+-            let child_rect_in_self = self.resolve_transforms(child_id);
++            let child_rect_in_self = self.resolve_transforms(child_id, rescaled);
+             overflow = overflow.union(child_rect_in_self);
+         }
+         *self.nodes[node_id].hoisted_children.borrow_mut() = hoisted_children;
+@@ -227,7 +233,7 @@ impl BaseDocument {
+             if self.nodes[pseudo].is_out_of_flow() {
+                 continue;
+             }
+-            let child_rect_in_self = self.resolve_transforms(pseudo);
++            let child_rect_in_self = self.resolve_transforms(pseudo, rescaled);
+             overflow = overflow.union(child_rect_in_self);
+         }
+ 
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
 index 81af02c..a07487a 100644
 --- a/crates/blitz-paint/src/render.rs

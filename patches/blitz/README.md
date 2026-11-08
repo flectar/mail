@@ -25,7 +25,7 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and culling that keeps shadows and other ink near tile edges. |
 | 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |
 | 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
-| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow. Tiles far down a message no longer paint the elements above them. |
+| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow, and rescales every element's overflow after a scale change. Tiles far down a message no longer paint the elements above them, nor cull content whose overflow was measured at another scale. |
 
 0002–0006 are not upstream yet, except 0004's float slot clamp and shrink-to-fit
 float widths, which backport upstream #1443 and #980, and 0003's table rebuild on border, padding and size changes,

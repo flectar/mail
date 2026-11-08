@@ -289,6 +289,8 @@ pub struct BaseDocument {
     /// Damage from resource events handled since the embedder last drained
     /// it, including events that `resolve` handled.
     resource_updates: ResourceUpdates,
+    /// The scale at which nodes' overflow and transforms were last resolved.
+    pub(crate) transforms_scale: f64,
     /// ID of the document
     id: usize,
 
@@ -533,6 +535,7 @@ impl BaseDocument {
         let mut doc = Self {
             image_decode_limits: config.image_decode_limits,
             resource_updates: ResourceUpdates::default(),
+            transforms_scale: 0.0,
             id,
             tx,
             rx: Some(rx),

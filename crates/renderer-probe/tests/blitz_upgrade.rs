@@ -1090,3 +1090,27 @@ fn scaled_images_do_not_bleed_their_opposite_edge() {
     let top = &pixels[10 * 4..10 * 4 + 4];
     assert_eq!(top, [255, 255, 255, 255]);
 }
+
+#[test]
+fn a_scale_change_rescales_every_overflow() {
+    // Overflow is kept in device pixels. After a 1x layout, a 1.5x one must
+    // rescale the overflow of text-free boxes too, or a tile further down
+    // culls the red block before its real end at 900 device pixels.
+    let mut doc =
+        document("<div style='height:0'><div style='height:600px;background:#c00'></div></div>");
+    doc.set_viewport(Viewport::new(600, 450, 1.5, ColorScheme::Light));
+    doc.resolve(0.0);
+    doc.set_viewport_scroll(blitz_dom::Point { x: 0.0, y: 500.0 });
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.5, 600, 450, 0, 0),
+        600,
+        450,
+    );
+    let red = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| pixel[0] > 150 && pixel[1] < 50)
+        .count();
+    assert_eq!(red, 600 * 150);
+}
