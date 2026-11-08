@@ -1,22 +1,23 @@
 diff --git a/crates/blitz-dom/src/layout/construct.rs b/crates/blitz-dom/src/layout/construct.rs
-index a1b07ff..777cc97 100644
+index a1b07ff..fb6a1de 100644
 --- a/crates/blitz-dom/src/layout/construct.rs
 +++ b/crates/blitz-dom/src/layout/construct.rs
-@@ -1159,7 +1159,11 @@ pub(crate) fn build_inline_layout_into(
+@@ -1159,7 +1159,12 @@ pub(crate) fn build_inline_layout_into(
                  let float = style.map(|s| s.clone_float()).unwrap_or(Float::None);
                  let box_kind = if position.is_absolutely_positioned() {
                      InlineBoxKind::OutOfFlow
 -                } else if float.is_floating() {
 +                } else if cfg!(feature = "floats") && float.is_floating() {
 +                    // Custom boxes yield until the caller places them. Only the
-+                    // float-aware line breaker handles that yield; break_all_lines
-+                    // would keep retrying the same box forever. Without floats,
-+                    // measure and place these boxes in flow like other inline boxes.
++                    // float-aware line breaker places them; otherwise Parley
++                    // appends them with zero size, so the float would overlap the
++                    // text after it. Without floats, lay these boxes out in flow
++                    // like other inline boxes.
                      InlineBoxKind::CustomOutOfFlow
                  } else {
                      InlineBoxKind::InFlow
 diff --git a/crates/blitz-dom/src/layout/inline.rs b/crates/blitz-dom/src/layout/inline.rs
-index 1f98570..085e4d9 100644
+index 1f98570..74c93cb 100644
 --- a/crates/blitz-dom/src/layout/inline.rs
 +++ b/crates/blitz-dom/src/layout/inline.rs
 @@ -16,7 +16,7 @@ use taffy::{
@@ -116,11 +117,14 @@ index 1f98570..085e4d9 100644
  
          // Perform inline layout
          #[cfg(feature = "floats")]
-@@ -680,7 +698,10 @@ impl LayoutPassState<'_> {
+@@ -680,7 +698,13 @@ impl LayoutPassState<'_> {
              let mut has_active_floats = initial_slot.segment_id.is_some();
              let state = breaker.state_mut();
              state.set_layout_max_advance(width);
 -            state.set_line_max_advance(initial_slot.width * scale);
++            // Lines have no height limit. An infinite one, unlike Parley's `f32::MAX`
++            // default, can never be exceeded, even by an infinitely tall box.
++            state.set_line_max_height(f32::INFINITY);
 +            // With huge insets, f32 rounding can make a float slot slightly wider than
 +            // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
 +            let layout_max_advance = state.layout_max_advance();
@@ -128,7 +132,7 @@ index 1f98570..085e4d9 100644
              state.set_line_x(initial_slot.x * scale);
              state.set_line_y((initial_slot.y * scale) as f64);
  
-@@ -705,7 +726,9 @@ impl LayoutPassState<'_> {
+@@ -705,7 +729,9 @@ impl LayoutPassState<'_> {
                                  block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                              has_active_floats = next_slot.segment_id.is_some();
  
@@ -139,19 +143,18 @@ index 1f98570..085e4d9 100644
                              state.set_line_x(next_slot.x * scale);
                              state.set_line_y((next_slot.y * scale) as f64);
                          } else {
-@@ -715,15 +738,18 @@ impl LayoutPassState<'_> {
+@@ -715,15 +741,18 @@ impl LayoutPassState<'_> {
  
                          continue;
                      }
 -                    YieldData::MaxHeightExceeded(_data) => {
 -                        // TODO
--                        continue;
 +                    YieldData::MaxHeightExceeded(_) => {
-+                        // We never constrain line height, so this means the
-+                        // measured content is unrepresentable. Retrying without
-+                        // changing breaker state would loop forever. Let the
-+                        // embedding application recover from the layout failure.
-+                        panic!("Inline content exceeded the line breaker's height limit");
++                        // Unreachable with an infinite height limit. Should it happen,
++                        // breaking the line again without a limit still makes progress.
++                        debug_assert!(false, "line breaker yielded MaxHeightExceeded");
++                        breaker.state_mut().set_line_max_height(f32::INFINITY);
+                         continue;
                      }
                      YieldData::InlineBoxBreak(box_break_data) => {
                          let state = breaker.state_mut();
@@ -162,7 +165,7 @@ index 1f98570..085e4d9 100644
                              let style = self.child_layout_style(&self.nodes[node_id]);
                              // We can assume that the box is a float because we only set `break_on_box: true` for floats
                              let direction = match style.float() {
-@@ -734,17 +760,21 @@ impl LayoutPassState<'_> {
+@@ -734,17 +763,21 @@ impl LayoutPassState<'_> {
                              (
                                  direction,
                                  style.clear(),
@@ -188,7 +191,7 @@ index 1f98570..085e4d9 100644
                          );
                          let min_y = state.line_y() as f32 / scale;
  
-@@ -762,7 +792,9 @@ impl LayoutPassState<'_> {
+@@ -762,7 +795,9 @@ impl LayoutPassState<'_> {
                              block_ctx.find_content_slot(min_y as f32, Clear::None, None);
                          has_active_floats = next_slot.segment_id.is_some();
  
@@ -199,7 +202,7 @@ index 1f98570..085e4d9 100644
                          state.set_line_x(next_slot.x * scale);
                          state.set_line_y((next_slot.y * scale) as f64);
  
-@@ -777,9 +809,10 @@ impl LayoutPassState<'_> {
+@@ -777,9 +812,10 @@ impl LayoutPassState<'_> {
  
                          // Translate anchors from item-relative to container-relative
                          // coordinates and collect candidates bubbled from the float's subtree
@@ -211,7 +214,7 @@ index 1f98570..085e4d9 100644
                          }
  
                          // dbg!(&layout.size);
-@@ -902,9 +935,10 @@ impl LayoutPassState<'_> {
+@@ -902,9 +938,10 @@ impl LayoutPassState<'_> {
  
          let container_direction = self.nodes[node_id].layout_style().direction();
  
@@ -225,7 +228,7 @@ index 1f98570..085e4d9 100644
          let align_content = BlockContainerStyle::align_content(&self.nodes[node_id].layout_style());
          let block_offset = if align_content.keyword() == taffy::AlignContentKeyword::Normal {
              0.0
-@@ -916,6 +950,21 @@ impl LayoutPassState<'_> {
+@@ -916,6 +953,21 @@ impl LayoutPassState<'_> {
          inline_layout.block_offset = block_offset;
          let line_box_top = container_pb.top + block_offset;
  
@@ -247,7 +250,7 @@ index 1f98570..085e4d9 100644
          // Store sizes and positions of inline boxes
          let mut ibox_order: u32 = 0;
          let mut span_cb_flags = StyleFlags::empty();
-@@ -932,13 +981,13 @@ impl LayoutPassState<'_> {
+@@ -932,13 +984,13 @@ impl LayoutPassState<'_> {
                      let style = self.child_layout_style(node);
                      let padding = style
                          .padding()

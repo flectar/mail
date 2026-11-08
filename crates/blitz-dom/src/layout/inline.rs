@@ -698,6 +698,9 @@ impl LayoutPassState<'_> {
             let mut has_active_floats = initial_slot.segment_id.is_some();
             let state = breaker.state_mut();
             state.set_layout_max_advance(width);
+            // Lines have no height limit. An infinite one, unlike Parley's `f32::MAX`
+            // default, can never be exceeded, even by an infinitely tall box.
+            state.set_line_max_height(f32::INFINITY);
             // With huge insets, f32 rounding can make a float slot slightly wider than
             // the layout, which Parley's line breaker rejects (DioxusLabs/blitz#1443).
             let layout_max_advance = state.layout_max_advance();
@@ -739,11 +742,11 @@ impl LayoutPassState<'_> {
                         continue;
                     }
                     YieldData::MaxHeightExceeded(_) => {
-                        // We never constrain line height, so this means the
-                        // measured content is unrepresentable. Retrying without
-                        // changing breaker state would loop forever. Let the
-                        // embedding application recover from the layout failure.
-                        panic!("Inline content exceeded the line breaker's height limit");
+                        // Unreachable with an infinite height limit. Should it happen,
+                        // breaking the line again without a limit still makes progress.
+                        debug_assert!(false, "line breaker yielded MaxHeightExceeded");
+                        breaker.state_mut().set_line_max_height(f32::INFINITY);
+                        continue;
                     }
                     YieldData::InlineBoxBreak(box_break_data) => {
                         let state = breaker.state_mut();

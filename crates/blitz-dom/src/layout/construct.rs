@@ -1161,9 +1161,10 @@ pub(crate) fn build_inline_layout_into(
                     InlineBoxKind::OutOfFlow
                 } else if cfg!(feature = "floats") && float.is_floating() {
                     // Custom boxes yield until the caller places them. Only the
-                    // float-aware line breaker handles that yield; break_all_lines
-                    // would keep retrying the same box forever. Without floats,
-                    // measure and place these boxes in flow like other inline boxes.
+                    // float-aware line breaker places them; otherwise Parley
+                    // appends them with zero size, so the float would overlap the
+                    // text after it. Without floats, lay these boxes out in flow
+                    // like other inline boxes.
                     InlineBoxKind::CustomOutOfFlow
                 } else {
                     InlineBoxKind::InFlow
