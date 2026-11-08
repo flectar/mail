@@ -205,7 +205,8 @@ const BOTTOM: usize = 2;
 const LEFT: usize = 3;
 
 /// A border that competes for a shared edge, with the precedence of the box
-/// it came from: cell 4, row 3, row group 2, table 1.
+/// it came from (CSS 2.1 §17.6.2.1 rule 4): cell 6, row 5, row group 4,
+/// column 3, column group 2, table 1.
 #[derive(Debug, Clone, Copy)]
 struct BorderCandidate {
     width: f32,
@@ -531,6 +532,7 @@ pub(crate) fn build_table_context(
                 // own border survives conflict resolution.
                 style.border = taffy::Rect::ZERO.map(style_helpers::length);
             } else if slots <= MAX_COLLAPSED_SLOTS {
+                let column_borders = column_border_candidates(doc, &columns);
                 let borders = resolve_collapsed_borders(
                     usize::from(row_count),
                     column_count,
@@ -539,6 +541,7 @@ pub(crate) fn build_table_context(
                     &cell_borders,
                     &row_borders,
                     &groups,
+                    &column_borders,
                     &table_borders,
                 );
                 // The table box holds the outer half of its edges.
@@ -927,6 +930,7 @@ fn resolve_collapsed_borders(
     cell_borders: &[[BorderCandidate; 4]],
     row_borders: &[(u16, [BorderCandidate; 4])],
     groups: &[(u16, u16, [BorderCandidate; 4])],
+    column_borders: &ColumnBorders,
     table_borders: &[BorderCandidate; 4],
 ) -> CollapsedBorders {
     const EMPTY: u32 = u32::MAX;
@@ -986,11 +990,19 @@ fn resolve_collapsed_borders(
                     candidates.push(group.2[TOP]);
                 }
             }
-            if line == 0 {
-                candidates.push(table_borders[TOP]);
-            }
-            if line == rows {
-                candidates.push(table_borders[BOTTOM]);
+            if line == 0 || line == rows {
+                let side = if line == 0 { TOP } else { BOTTOM };
+                if let Some(Some(col)) = column_borders.columns.get(column) {
+                    candidates.push(col[side]);
+                }
+                candidates.extend(
+                    column_borders
+                        .groups
+                        .iter()
+                        .filter(|group| (group.0..=group.1).contains(&column))
+                        .map(|group| group.2[side]),
+                );
+                candidates.push(table_borders[side]);
             }
             horizontal.push(resolve_edge(&candidates));
         }
@@ -1013,7 +1025,29 @@ fn resolve_collapsed_borders(
                 let side = if line == 0 { start } else { end };
                 candidates.extend(row_sides[row].map(|row| row[side]));
                 candidates.extend(group_of_row[row].map(|group| group.2[side]));
-                candidates.push(table_borders[side]);
+            }
+            let column_before = line.checked_sub(1);
+            let column_after = (line < columns).then_some(line);
+            candidates.extend(
+                column_before
+                    .and_then(|column| column_borders.columns.get(column).copied().flatten())
+                    .map(|col| col[end]),
+            );
+            candidates.extend(
+                column_after
+                    .and_then(|column| column_borders.columns.get(column).copied().flatten())
+                    .map(|col| col[start]),
+            );
+            for group in &column_borders.groups {
+                if column_before == Some(group.1) {
+                    candidates.push(group.2[end]);
+                }
+                if column_after == Some(group.0) {
+                    candidates.push(group.2[start]);
+                }
+            }
+            if line == 0 || line == columns {
+                candidates.push(table_borders[if line == 0 { start } else { end }]);
             }
             vertical.push(resolve_edge(&candidates));
         }
@@ -1107,7 +1141,7 @@ impl TableCollector {
                 let group_borders = (self.collapse && display.inside() != DisplayInside::Contents)
                     .then(|| {
                         node.primary_styles()
-                            .map(|s| border_candidates(&s, 2, node_id))
+                            .map(|s| border_candidates(&s, 4, node_id))
                     })
                     .flatten();
                 let first_row = self.row;
@@ -1143,7 +1177,7 @@ impl TableCollector {
                     .collapse
                     .then(|| {
                         node.primary_styles()
-                            .map(|s| border_candidates(&s, 3, node_id))
+                            .map(|s| border_candidates(&s, 5, node_id))
                     })
                     .flatten();
                 let height = node.primary_styles().and_then(|s| {
@@ -1221,7 +1255,7 @@ impl TableCollector {
             let stylo_style = node.primary_styles().unwrap();
             (
                 table_taffy_style(&stylo_style, self.wm),
-                border_candidates(&stylo_style, 4, node_id),
+                border_candidates(&stylo_style, 6, node_id),
             )
         };
 
@@ -1799,14 +1833,21 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(edge.style, BorderStyle::Double);
-        // Then origin: the cell beats the row and the table.
+        // Then origin: cell, row, row group, column, column group, table.
         let edge = resolve_edge(&[
             candidate(1.0, BorderStyle::Solid, 1),
-            candidate(1.0, BorderStyle::Solid, 4),
-            candidate(1.0, BorderStyle::Solid, 3),
+            candidate(1.0, BorderStyle::Solid, 6),
+            candidate(1.0, BorderStyle::Solid, 5),
         ])
         .unwrap();
-        assert_eq!(edge.source, NodeId::from_u64(4));
+        assert_eq!(edge.source, NodeId::from_u64(6));
+        let edge = resolve_edge(&[
+            candidate(1.0, BorderStyle::Solid, 2),
+            candidate(1.0, BorderStyle::Solid, 3),
+            candidate(1.0, BorderStyle::Solid, 1),
+        ])
+        .unwrap();
+        assert_eq!(edge.source, NodeId::from_u64(3));
         // `none` never paints.
         assert_eq!(resolve_edge(&[candidate(3.0, BorderStyle::None, 4)]), None);
     }

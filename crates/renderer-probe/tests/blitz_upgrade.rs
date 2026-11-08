@@ -946,6 +946,34 @@ fn positioned_children_of_collapsed_tables_keep_their_border() {
 }
 
 #[test]
+fn column_and_column_group_borders_collapse_with_cells() {
+    // Column group borders join collapsed border resolution (CSS 2.1
+    // §17.6.2.1), here between the first group's column and the second's.
+    let mut doc = document(
+        "<table style='border-collapse:collapse'>
+         <colgroup style='border-right:4px solid rgb(255,0,0)'><col></colgroup>
+         <colgroup><col><col></colgroup>
+         <tr><td style='width:30px;height:20px'></td><td style='width:30px'></td><td style='width:30px'></td></tr>
+         </table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    let red: Vec<usize> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(_, pixel)| **pixel == [255, 0, 0, 255])
+        .map(|(index, _)| index % 400)
+        .collect();
+    let (min, max) = (red.iter().min().unwrap(), red.iter().max().unwrap());
+    assert!(*min >= 28 && *max <= 35, "red columns {min}..={max}");
+}
+
+#[test]
 fn column_groups_without_columns_span_their_columns() {
     // `<colgroup span=2 width=50>` without `<col>` children stands for two
     // 50px columns, as in browsers.
