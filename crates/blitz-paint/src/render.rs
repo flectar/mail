@@ -891,7 +891,12 @@ impl ElementCx<'_, '_> {
                     );
                 }
             }
-            let bounds = cached.as_ref().and_then(|cache| cache.get(&self.node.id));
+            // A cache that missed a relayout no longer matches the lines; paint
+            // them all rather than cull with stale bounds.
+            let bounds = cached
+                .as_ref()
+                .and_then(|cache| cache.get(&self.node.id))
+                .filter(|bounds| bounds.len() == text_layout.layout.len());
             let lines = text_layout
                 .layout
                 .lines()
@@ -900,7 +905,7 @@ impl ElementCx<'_, '_> {
                     let outside = viewport
                         .zip(bounds)
                         .and_then(|(viewport, bounds)| {
-                            bounds[index].map(|bounds| {
+                            bounds.get(index).copied().flatten().map(|bounds| {
                                 let bounds = transform.transform_rect_bbox(bounds);
                                 bounds.is_finite()
                                     && (bounds.x1 < viewport.x0

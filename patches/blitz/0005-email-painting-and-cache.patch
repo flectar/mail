@@ -87,7 +87,7 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index 407fd1a..000b34c 100644
+index 407fd1a..f246bfe 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
 @@ -41,69 +41,18 @@ use style::{
@@ -248,7 +248,7 @@ index 407fd1a..000b34c 100644
              alpha_type: peniko::ImageAlphaType::Alpha,
          },
          sampler: ImageSampler {
-@@ -863,16 +841,79 @@ impl ElementCx<'_, '_> {
+@@ -863,16 +841,84 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -299,7 +299,12 @@ index 407fd1a..000b34c 100644
 +                    );
 +                }
 +            }
-+            let bounds = cached.as_ref().and_then(|cache| cache.get(&self.node.id));
++            // A cache that missed a relayout no longer matches the lines; paint
++            // them all rather than cull with stale bounds.
++            let bounds = cached
++                .as_ref()
++                .and_then(|cache| cache.get(&self.node.id))
++                .filter(|bounds| bounds.len() == text_layout.layout.len());
 +            let lines = text_layout
 +                .layout
 +                .lines()
@@ -308,7 +313,7 @@ index 407fd1a..000b34c 100644
 +                    let outside = viewport
 +                        .zip(bounds)
 +                        .and_then(|(viewport, bounds)| {
-+                            bounds[index].map(|bounds| {
++                            bounds.get(index).copied().flatten().map(|bounds| {
 +                                let bounds = transform.transform_rect_bbox(bounds);
 +                                bounds.is_finite()
 +                                    && (bounds.x1 < viewport.x0
@@ -332,7 +337,7 @@ index 407fd1a..000b34c 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -884,16 +925,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +930,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -351,7 +356,7 @@ index 407fd1a..000b34c 100644
              );
          }
      }
-@@ -960,6 +1001,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +1006,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -359,7 +364,7 @@ index 407fd1a..000b34c 100644
              );
          }
      }
-@@ -1015,6 +1057,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1062,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -367,7 +372,7 @@ index 407fd1a..000b34c 100644
              );
          }
      }
-@@ -1206,8 +1249,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1254,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
@@ -787,7 +792,7 @@ index c7ecb2e..9eb7bb4 100644
  
      /// ❌ dotted - Defines a dotted border
 diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
-index 8887f03..5018817 100644
+index 8887f03..6be7e3a 100644
 --- a/crates/blitz-paint/src/text.rs
 +++ b/crates/blitz-paint/src/text.rs
 @@ -5,6 +5,7 @@ use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
@@ -887,7 +892,7 @@ index 8887f03..5018817 100644
          }
      }
  }
-@@ -249,6 +276,100 @@ pub(crate) struct DrawTextContext {
+@@ -249,6 +276,103 @@ pub(crate) struct DrawTextContext {
      path_scratch: Vec<NodeId>,
      deco_boxes: Vec<LineDecoration>,
      win_ascent_ratios: WinAscentCache,
@@ -959,9 +964,12 @@ index 8887f03..5018817 100644
 +                let font_bounds = (*fonts
 +                    .entry((font.data.id(), font.index))
 +                    .or_insert_with(|| font_outline_bounds(font)))?;
++                // Some web fonts draw past their `head` bounding box, so allow a
++                // margin that grows with the font size.
++                let margin = (f64::from(run.font_size()) * 0.25).max(2.0);
 +                let glyph_bounds = Affine::scale(run.font_size() as f64)
 +                    .transform_rect_bbox(font_bounds)
-+                    .inflate(2.0, 2.0);
++                    .inflate(margin, margin);
 +                let synthesis = run
 +                    .synthesis()
 +                    .skew()
@@ -988,7 +996,7 @@ index 8887f03..5018817 100644
  }
  
  /// Resolve the CSS `text-decoration-thickness` to a device-pixel size.
-@@ -562,6 +683,7 @@ fn flush_line_decorations(
+@@ -562,6 +686,7 @@ fn flush_line_decorations(
      }
  }
  
@@ -996,7 +1004,7 @@ index 8887f03..5018817 100644
  pub(crate) fn stroke_text<'a>(
      scene: &mut impl PaintScene,
      lines: impl Iterator<Item = Line<'a, TextBrush>>,
-@@ -570,12 +692,14 @@ pub(crate) fn stroke_text<'a>(
+@@ -570,12 +695,14 @@ pub(crate) fn stroke_text<'a>(
      scale: f64,
      inline_root_id: NodeId,
      context: &mut DrawTextContext,
@@ -1011,7 +1019,7 @@ index 8887f03..5018817 100644
      } = context;
      stack.clear();
      path_scratch.clear();
-@@ -644,24 +768,65 @@ pub(crate) fn stroke_text<'a>(
+@@ -644,24 +771,65 @@ pub(crate) fn stroke_text<'a>(
                      kurbo::Vec2::default()
                  };
  

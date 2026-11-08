@@ -344,9 +344,12 @@ pub(crate) fn line_paint_bounds(
                 let font_bounds = (*fonts
                     .entry((font.data.id(), font.index))
                     .or_insert_with(|| font_outline_bounds(font)))?;
+                // Some web fonts draw past their `head` bounding box, so allow a
+                // margin that grows with the font size.
+                let margin = (f64::from(run.font_size()) * 0.25).max(2.0);
                 let glyph_bounds = Affine::scale(run.font_size() as f64)
                     .transform_rect_bbox(font_bounds)
-                    .inflate(2.0, 2.0);
+                    .inflate(margin, margin);
                 let synthesis = run
                     .synthesis()
                     .skew()

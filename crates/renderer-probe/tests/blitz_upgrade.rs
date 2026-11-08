@@ -759,3 +759,20 @@ fn table_align_maps_only_html_values() {
     close(node(&doc, "#m").final_layout().location.x, 0.0);
     close(node(&doc, "#c").final_layout().location.x, 150.0);
 }
+
+#[test]
+fn a_stale_line_cache_does_not_break_painting() {
+    // Callers must clear the cache after a relayout. If one does not, painting
+    // must still not index past the lines a relayout added.
+    let text = "word ".repeat(200);
+    let mut doc = document(&format!("<p id='p' style='width:380px'>{text}</p>"));
+    let cache = blitz_paint::PaintCache::default();
+    let mut scene = anyrender::Scene::default();
+    blitz_paint::paint_scene_cached(&mut scene, &mut doc, 1.0, 400, 300, 0, 0, &cache);
+    doc.add_user_agent_stylesheet(blitz_dom::UserAgentStylesheet::parse(
+        "p { width: 100px !important }",
+    ));
+    doc.resolve(0.0);
+    let mut scene = anyrender::Scene::default();
+    blitz_paint::paint_scene_cached(&mut scene, &mut doc, 1.0, 400, 300, 0, 0, &cache);
+}
