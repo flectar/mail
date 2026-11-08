@@ -86,6 +86,9 @@ export global I18n {
     pure callback notification-mark-read() -> string;
     pure callback notification-archive() -> string;
     pure callback notification-delete() -> string;
+    // The line a desktop shows for the app while it runs with its window
+    // closed (GNOME's Background Apps).
+    pure callback background-status() -> string;
     pure callback last-contacted(string) -> string;
     pure callback loading-local-data() -> string;
     pure callback local-data-ready() -> string;
@@ -206,6 +209,7 @@ export global I18n {
     notification-mark-read() => { return @tr("Mark as read"); }
     notification-archive() => { return @tr("Archive"); }
     notification-delete() => { return @tr("Delete"); }
+    background-status() => { return @tr("Checking for new mail"); }
     last-contacted(date) => { return @tr("Last contacted {}", date); }
     loading-local-data() => { return @tr("Loading local data…"); }
     local-data-ready() => { return @tr("Local data ready."); }
@@ -347,6 +351,8 @@ export global I18n {
         if (key == "Saving close behavior…") { return @tr("Saving close behavior…"); }
         if (key == "Closing the window will now keep Flectar Mail in the tray.") { return @tr("Closing the window will now keep Flectar Mail in the tray."); }
         if (key == "Closing the window will now quit Flectar Mail.") { return @tr("Closing the window will now quit Flectar Mail."); }
+        if (key == "Closing the window will now keep Flectar Mail running in the background.") { return @tr("Closing the window will now keep Flectar Mail running in the background."); }
+        if (key == "Your desktop did not allow Flectar Mail to run in the background.") { return @tr("Your desktop did not allow Flectar Mail to run in the background."); }
         if (key == "Could not save close behavior: {}") { return @tr("Could not save close behavior: {}", argument); }
         if (key == "Flectar Mail will start when you sign in.") { return @tr("Flectar Mail will start when you sign in."); }
         if (key == "Flectar Mail is now your default email app.") { return @tr("Flectar Mail is now your default email app."); }
@@ -1072,6 +1078,8 @@ export component AppWindow inherits Window {
     in-out property <bool> close_to_tray: false;
     in-out property <bool> launch_at_login: false;
     in property <bool> launch_at_login_available: false;
+    // False where closing to the background shows no tray icon (the Flatpak).
+    in property <bool> tray_supported: true;
     in-out property <bool> account_setup_in_progress: false;
     in-out property <bool> account_form_open: false;
     in-out property <bool> oauth_in_progress: false;
@@ -2024,6 +2032,7 @@ export component AppWindow inherits Window {
             close_to_tray <=> root.close_to_tray;
             launch_at_login <=> root.launch_at_login;
             launch_at_login_available: root.launch_at_login_available;
+            tray_supported: root.tray_supported;
             remote-images-enabled <=> root.remote-images-enabled;
             account_email <=> root.account_email;
             account_username <=> root.account_username;

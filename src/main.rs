@@ -1824,14 +1824,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // the system picker on mobile. The document entry points (compose
     // attachments, account backups, database snapshots) stay available.
     app.set_document_apis_supported(true);
-    // A sign-in launch stays in the tray only when the user keeps the app
-    // there and a tray can actually show it; otherwise the window opens. So
-    // does a launch for a click on a notification: a button needs no window,
-    // and a click on the notification itself shows it.
+    // A sign-in launch stays hidden only when the user keeps the app running
+    // with its window closed and has a way back to it; otherwise the window
+    // opens. So does a launch for a click on a notification: a button needs
+    // no window, and a click on the notification itself shows it.
     #[cfg(desktop)]
     let start_hidden = (background_launch || notifications::launched_for_click())
         && startup_presentation.close_to_tray
-        && window_controller::tray_host_available(&runtime);
+        && window_controller::can_start_hidden(&runtime);
     #[cfg(mobile)]
     let start_hidden = false;
     if start_hidden {
@@ -1913,7 +1913,7 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     if start_hidden {
         app.set_close_to_tray(true);
     }
-    let tray = create_and_register_window_lifecycle(&app)?;
+    let tray = create_and_register_window_lifecycle(&app, &runtime)?;
     #[cfg(desktop)]
     if let Some(instance) = instance.as_mut() {
         let app = app.as_weak();
@@ -4486,12 +4486,16 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
 
                     if let Some(settings) = settings.as_ref() {
                         apply_settings(&app, settings);
-                        #[cfg(any(mobile, feature = "flatpak"))]
-                        app.set_close_to_tray(false);
                         if let Some(tray) =
                             startup_tray.as_ref().and_then(|tray| tray.upgrade())
                         {
                             tray.set_enabled(app.get_close_to_tray());
+                        }
+                        // A start in the background, now in the user's
+                        // language.
+                        #[cfg(feature = "flatpak")]
+                        if app.get_close_to_tray() && !app.window().is_visible() {
+                            window_controller::describe_background(&app, &startup_runtime);
                         }
                     }
                     app.set_remote_images_enabled(
@@ -8371,9 +8375,11 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     // tray participates in the same process-wide event loop. This is Slint's
     // documented multi-component pattern; calling AppWindow::run() here would
     // redundantly show the main window a second time. A start in the tray has
-    // no visible window, so only an explicit quit may end the loop.
+    // no visible window, so only an explicit quit may end the loop. Neither
+    // does the Flatpak's closed window, with no tray icon to keep the loop
+    // running in the background; every way out of the app quits explicitly.
     startup_metrics.emit("event_loop_entered", serde_json::Value::Null);
-    let event_loop_result = if benchmark_tray || start_hidden {
+    let event_loop_result = if benchmark_tray || start_hidden || cfg!(feature = "flatpak") {
         slint::run_event_loop_until_quit()
     } else {
         slint::run_event_loop()

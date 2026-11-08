@@ -665,10 +665,7 @@ pub(super) fn restore_account_backup(
     app.set_suggest_learned_contacts(settings.suggest_learned_contacts);
     state.borrow_mut().mark_read_on_open = settings.mark_read_on_open;
     app.set_remote_images_enabled(settings.load_remote_images && cfg!(feature = "remote-content"));
-    #[cfg(not(any(mobile, feature = "flatpak")))]
-    app.set_close_to_tray(settings.close_to_tray);
-    #[cfg(any(mobile, feature = "flatpak"))]
-    app.set_close_to_tray(false);
+    app.set_close_to_tray(settings.close_to_tray && !cfg!(mobile));
     Ok(restore)
 }
 

@@ -299,6 +299,9 @@ pub(crate) enum Request {
     /// Bring the window up, as a desktop asks the app over D-Bus.
     #[cfg_attr(not(all(linux_desktop, feature = "flatpak")), allow(dead_code))]
     Raise(Option<String>),
+    /// End the app, as GNOME's Background Apps asks over D-Bus.
+    #[cfg_attr(not(all(linux_desktop, feature = "flatpak")), allow(dead_code))]
+    Quit,
 }
 
 type RequestHandler = Arc<dyn Fn(Request) + Send + Sync>;
@@ -338,6 +341,12 @@ pub fn respond(response: Response) {
 #[cfg_attr(not(all(linux_desktop, feature = "flatpak")), allow(dead_code))]
 pub(crate) fn raise(activation_token: Option<String>) {
     request(Request::Raise(activation_token));
+}
+
+/// End the app, from any thread.
+#[cfg_attr(not(all(linux_desktop, feature = "flatpak")), allow(dead_code))]
+pub(crate) fn quit() {
+    request(Request::Quit);
 }
 
 /// Take the requests from now on, starting with the ones that waited.

@@ -401,7 +401,7 @@ mod imp {
 #[cfg(feature = "flatpak")]
 mod imp {
     use super::{APP_ID, Alert, AlertId, CALL_TIMEOUT, Failure, FixedWords, body_text};
-    use crate::notifications::{Act, Response, parse_payload, payload, raise, respond};
+    use crate::notifications::{Act, Response, parse_payload, payload, quit, raise, respond};
     use ashpd::{
         desktop::notification::{Button, Notification, NotificationProxy, Priority},
         zbus, zvariant,
@@ -522,7 +522,9 @@ mod imp {
     }
 
     /// `org.freedesktop.Application`, through which the desktop hands the app
-    /// a click on one of its notifications.
+    /// a click on one of its notifications. GNOME's Background Apps also
+    /// raises the window with it, and ends the app with its `quit` action
+    /// before resorting to `flatpak kill`.
     struct Application;
 
     #[zbus::interface(name = "org.freedesktop.Application")]
@@ -535,18 +537,54 @@ mod imp {
             raise(activation_token(&platform_data));
         }
 
+        /// An unknown action is an error, as GLib answers: a caller such as
+        /// GNOME's Background Apps then falls back to ending the app itself.
         fn activate_action(
             &self,
             action_name: String,
             parameter: Vec<zvariant::OwnedValue>,
             platform_data: HashMap<String, zvariant::OwnedValue>,
-        ) {
-            if action_name == ACTION {
-                deliver(
+        ) -> zbus::fdo::Result<()> {
+            match action_name.as_str() {
+                ACTION => deliver(
                     parameter.first().and_then(|value| text(value)),
                     &platform_data,
-                );
+                ),
+                "quit" => quit(),
+                _ => {
+                    return Err(zbus::fdo::Error::InvalidArgs(format!(
+                        "Unknown action '{action_name}'"
+                    )));
+                }
             }
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{Application, HashMap};
+        use crate::notifications::{Request, serve_requests};
+        use std::sync::{Mutex, mpsc};
+
+        /// GNOME's Background Apps ends the app with `quit`, and resorts to
+        /// `flatpak kill` only when the call fails.
+        #[test]
+        fn the_desktop_can_quit_the_app_and_hears_of_unknown_actions() {
+            let (requests, received) = mpsc::channel();
+            let requests = Mutex::new(requests);
+            serve_requests(move |request| {
+                let _ = requests.lock().unwrap().send(request);
+            });
+
+            let quit = Application.activate_action("quit".into(), Vec::new(), HashMap::new());
+            assert!(quit.is_ok());
+            assert_eq!(received.try_recv(), Ok(Request::Quit));
+
+            let unknown =
+                Application.activate_action("new-window".into(), Vec::new(), HashMap::new());
+            assert!(unknown.is_err());
+            assert!(received.try_recv().is_err());
         }
     }
 }

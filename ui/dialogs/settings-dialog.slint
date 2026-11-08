@@ -505,6 +505,9 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> close_to_tray: false;
     in-out property <bool> launch_at_login: false;
     in property <bool> launch_at_login_available: false;
+    // False where closing to the background shows no tray icon (the Flatpak):
+    // opening the app again brings its window back.
+    in property <bool> tray_supported: true;
     in-out property <string> account_email: "";
     in-out property <string> account_username: "";
     in-out property <string> account_password: "";
@@ -1356,9 +1359,9 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 16px;
                                     VerticalBox {
                                         spacing: 5px;
-                                        tray-title := Text { height: max(20px, self.preferred-height); text: @tr("Keep running in system tray"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
+                                        tray-title := Text { height: max(20px, self.preferred-height); text: root.tray_supported ? @tr("Keep running in system tray") : @tr("Keep running in the background"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
                                         tray-description := Text { height: max(17px, self.preferred-height); text: @tr("Closing the window hides Flectar Mail while mail continues syncing."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
-                                        tray-note := Text { height: max(16px, self.preferred-height); text: @tr("Disabled by default; Quit from the tray menu stops the app."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
+                                        tray-note := Text { height: max(16px, self.preferred-height); text: root.tray_supported ? @tr("Disabled by default; Quit from the tray menu stops the app.") : @tr("Disabled by default; open Flectar Mail again to bring its window back."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                     }
                                     Rectangle { horizontal-stretch: 1; }
                                     Switch {
@@ -1385,7 +1388,7 @@ export component SettingsDialog inherits Rectangle {
                                     VerticalBox {
                                         spacing: 5px;
                                         login-title := Text { height: max(20px, self.preferred-height); text: @tr("Start automatically"); color: root.heading; font-size: TypeScale.subtitle; font-weight: 700; }
-                                        login-description := Text { height: max(17px, self.preferred-height); text: root.close_to_tray ? @tr("Starts Flectar Mail in the system tray when you sign in.") : @tr("Opens Flectar Mail when you sign in."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
+                                        login-description := Text { height: max(17px, self.preferred-height); text: !root.close_to_tray ? @tr("Opens Flectar Mail when you sign in.") : root.tray_supported ? @tr("Starts Flectar Mail in the system tray when you sign in.") : @tr("Starts Flectar Mail in the background when you sign in."); color: root.faint-text; font-size: TypeScale.secondary; wrap: word-wrap; }
                                         login-note := Text { height: max(16px, self.preferred-height); text: @tr("Disabled by default; also listed in your system's startup apps."); color: root.faint-text; font-size: TypeScale.caption; wrap: word-wrap; }
                                     }
                                     Rectangle { horizontal-stretch: 1; }

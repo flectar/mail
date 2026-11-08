@@ -69,6 +69,7 @@ pub(crate) fn attach(
             Request::Raise(activation_token) => {
                 crate::window_controller::activate(&app, activation_token);
             }
+            Request::Quit => crate::window_controller::quit(&app),
         });
     });
 }
