@@ -41,6 +41,10 @@ use style::{
 };
 
 use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
+
+/// How far past the viewport (in CSS px) elements are still painted, for ink that
+/// their boxes leave out.
+const CULL_MARGIN: f64 = 64.0;
 use peniko::{self, Fill, ImageData, ImageSampler};
 use style::values::generics::color::GenericColor;
 use taffy::Layout;
@@ -175,8 +179,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
 
         // The root clip rectangle is the viewport (in screen coordinates, with the
         // initial offset already subtracted). Elements outside of this are culled, and
-        // scrollports narrow this rectangle further for their descendants.
-        let viewport_clip_rect = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
+        // scrollports narrow this rectangle further for their descendants. It only
+        // culls, so it extends past the viewport by a margin: boxes and their scrollable
+        // overflow leave out ink such as outlines and glyphs that overflow a short
+        // `line-height`, which would otherwise be cut off at the edge of a tile.
+        let margin = CULL_MARGIN * self.scale;
+        let viewport_clip_rect = Rect::new(
+            -margin,
+            -margin,
+            self.width as f64 + margin,
+            self.height as f64 + margin,
+        );
 
         self.render_element(
             scene,
@@ -339,7 +352,22 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             x: -self.initial_x,
             y: -self.initial_y,
         }) * transform;
-        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(border_box));
+        // Outer shadows paint outside the box, as far as `draw_outset_box_shadow` reaches.
+        let ink_box = effects
+            .box_shadow
+            .0
+            .iter()
+            .filter(|shadow| !shadow.inset)
+            .fold(border_box, |ink, shadow| {
+                let offset = Vec2::new(
+                    shadow.base.horizontal.px() as f64,
+                    shadow.base.vertical.px() as f64,
+                ) * self.scale;
+                let reach =
+                    (shadow.spread.px() as f64 + shadow.base.blur.px() as f64 * 2.5) * self.scale;
+                ink.union(border_box.inflate(reach, reach) + offset)
+            });
+        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(ink_box));
 
         // Cull elements that fall entirely outside the current clip rectangle. In addition to
         // the viewport, `clip_rect` is narrowed by any ancestor scrollport (see below), so this

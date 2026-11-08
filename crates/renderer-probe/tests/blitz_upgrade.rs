@@ -615,3 +615,21 @@ fn vertical_margin_percentages_of_floats_use_the_width() {
     );
     close(node(&doc, "#f").final_layout().location.y, 40.0);
 }
+
+#[test]
+fn tiles_keep_ink_that_overflows_from_the_tile_above() {
+    // The reader paints in tiles. A box ending 2px above this tile has a
+    // shadow reaching 10px into it, which must not be culled with the box.
+    let mut doc = document(
+        "<div style='height:500px'></div>
+         <div style='height:10px;box-shadow:0 12px 0 rgb(255,0,0)'></div>
+         <div style='height:300px'></div>",
+    );
+    doc.set_viewport_scroll(blitz_dom::Point { x: 0.0, y: 512.0 });
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    assert_eq!(rows_with(&pixels, [255, 0, 0, 255]), Some((0, 9)));
+}

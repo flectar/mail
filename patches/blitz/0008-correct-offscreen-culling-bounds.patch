@@ -1,8 +1,8 @@
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index bd70c0e..e76f881 100644
+index 000b34c..399f510 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
-@@ -312,8 +312,13 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -325,8 +325,13 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
              ..
          } = *node.final_layout();
          let box_position = Vec2::new(location.x as f64, location.y as f64) * self.scale;

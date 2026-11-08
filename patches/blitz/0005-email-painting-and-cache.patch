@@ -87,10 +87,18 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index 407fd1a..bd70c0e 100644
+index 407fd1a..000b34c 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
-@@ -45,65 +45,10 @@ use peniko::{self, Fill, ImageData, ImageSampler};
+@@ -41,69 +41,18 @@ use style::{
+ };
+ 
+ use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
++
++/// How far past the viewport (in CSS px) elements are still painted, for ink that
++/// their boxes leave out.
++const CULL_MARGIN: f64 = 64.0;
+ use peniko::{self, Fill, ImageData, ImageSampler};
  use style::values::generics::color::GenericColor;
  use taffy::Layout;
  
@@ -157,7 +165,7 @@ index 407fd1a..bd70c0e 100644
      /// Input parameters (read only) for generating the Scene
      pub(crate) dom: &'dom BaseDocument,
      pub(crate) scale: f64,
-@@ -149,6 +94,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -149,6 +98,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
          let root_element_id = dom.try_root_element().map(|el| el.id);
  
          Self {
@@ -165,7 +173,51 @@ index 407fd1a..bd70c0e 100644
              dom,
              scale,
              width,
-@@ -529,7 +475,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -229,8 +179,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+ 
+         // The root clip rectangle is the viewport (in screen coordinates, with the
+         // initial offset already subtracted). Elements outside of this are culled, and
+-        // scrollports narrow this rectangle further for their descendants.
+-        let viewport_clip_rect = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
++        // scrollports narrow this rectangle further for their descendants. It only
++        // culls, so it extends past the viewport by a margin: boxes and their scrollable
++        // overflow leave out ink such as outlines and glyphs that overflow a short
++        // `line-height`, which would otherwise be cut off at the edge of a tile.
++        let margin = CULL_MARGIN * self.scale;
++        let viewport_clip_rect = Rect::new(
++            -margin,
++            -margin,
++            self.width as f64 + margin,
++            self.height as f64 + margin,
++        );
+ 
+         self.render_element(
+             scene,
+@@ -388,7 +347,22 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+             x: -self.initial_x,
+             y: -self.initial_y,
+         }) * transform;
+-        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(border_box));
++        // Outer shadows paint outside the box, as far as `draw_outset_box_shadow` reaches.
++        let ink_box = effects
++            .box_shadow
++            .0
++            .iter()
++            .filter(|shadow| !shadow.inset)
++            .fold(border_box, |ink, shadow| {
++                let offset = Vec2::new(
++                    shadow.base.horizontal.px() as f64,
++                    shadow.base.vertical.px() as f64,
++                ) * self.scale;
++                let reach =
++                    (shadow.spread.px() as f64 + shadow.base.blur.px() as f64 * 2.5) * self.scale;
++                ink.union(border_box.inflate(reach, reach) + offset)
++            });
++        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(ink_box));
+ 
+         // Cull elements that fall entirely outside the current clip rectangle. In addition to
+         // the viewport, `clip_rect` is narrowed by any ancestor scrollport (see below), so this
+@@ -529,7 +503,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                          cx.draw_background(scene);
                          cx.draw_inset_box_shadow(scene);
                          cx.draw_table_row_backgrounds(scene);
@@ -173,7 +225,7 @@ index 407fd1a..bd70c0e 100644
                          cx.draw_border(scene);
                          cx.stroke_devtools(scene);
  
-@@ -574,6 +519,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -574,6 +547,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                              },
                          );
  
@@ -185,7 +237,7 @@ index 407fd1a..bd70c0e 100644
                          // Overlay scrollbars, drawn unscrolled above the
                          // clipped content.
                          #[cfg(feature = "scrollbars")]
-@@ -685,8 +635,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
+@@ -685,8 +663,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
          image: ImageData {
              data: image.data.clone(),
              format: peniko::ImageFormat::Rgba8,
@@ -196,7 +248,7 @@ index 407fd1a..bd70c0e 100644
              alpha_type: peniko::ImageAlphaType::Alpha,
          },
          sampler: ImageSampler {
-@@ -863,16 +813,79 @@ impl ElementCx<'_, '_> {
+@@ -863,16 +841,79 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -280,7 +332,7 @@ index 407fd1a..bd70c0e 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -884,16 +897,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +925,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -299,7 +351,7 @@ index 407fd1a..bd70c0e 100644
              );
          }
      }
-@@ -960,6 +973,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +1001,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -307,7 +359,7 @@ index 407fd1a..bd70c0e 100644
              );
          }
      }
-@@ -1015,6 +1029,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1057,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -315,7 +367,7 @@ index 407fd1a..bd70c0e 100644
              );
          }
      }
-@@ -1206,8 +1221,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1249,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
