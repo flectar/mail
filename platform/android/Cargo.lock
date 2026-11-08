@@ -2021,6 +2021,7 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "flectar-mail-sync-client",
+ "flectar-mail-sync-crypto",
  "futures",
  "hostname",
  "jmap-client",

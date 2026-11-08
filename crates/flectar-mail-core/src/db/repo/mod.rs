@@ -20,6 +20,7 @@ pub mod reply_reminders;
 pub mod search;
 pub mod sender_identities;
 pub mod settings;
+pub mod sign_ins;
 pub mod snippets;
 pub mod snoozes;
 pub mod splits;

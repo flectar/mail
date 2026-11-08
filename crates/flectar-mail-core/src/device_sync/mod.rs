@@ -12,6 +12,7 @@
 mod collections;
 mod merge;
 mod scheduled;
+mod sign_ins;
 mod store;
 
 use crate::Core;
@@ -888,6 +889,8 @@ impl Core {
         let Some(client) = service.client() else {
             return Ok(false);
         };
+        // Passwords and sign-ins that changed here go up with this round.
+        self.share_sign_ins(&client).await;
 
         let names = {
             let settings = self.get_settings().await?;
@@ -1048,6 +1051,8 @@ impl Core {
             status.last_synced_at = Some(now_ms());
         }
         self.refresh_sync_devices().await;
+        // Accounts other devices shared a sign-in for start syncing here.
+        self.install_sign_ins(&client).await;
         let billing_due = lock(&service.billing_checked)
             .is_none_or(|checked| checked.elapsed() >= BILLING_REFRESH);
         if billing_due || report.payment_required != was_paused {
@@ -1456,6 +1461,25 @@ impl Core {
 
     /// Stop syncing on this device and leave the group. The app's data
     /// stays here; the other devices keep syncing.
+    /// Sync passwords and sign-ins, or stop, on every device of the group:
+    /// the setting syncs too. Off, their records go from the server; on,
+    /// each device reads its credential store again and shares them.
+    pub async fn device_sync_set_sign_ins(&self, on: bool) -> Result<()> {
+        let mut settings = self.get_settings().await?;
+        if settings.sync_sign_ins == on {
+            return Ok(());
+        }
+        settings.sync_sign_ins = on;
+        self.set_settings(settings).await?;
+        if on {
+            self.db
+                .write(|conn| crate::db::repo::sign_ins::recheck_all(conn))
+                .await?;
+        }
+        self.device_sync_now();
+        Ok(())
+    }
+
     pub async fn device_sync_turn_off(&self) -> Result<()> {
         let mut departure = scheduled::Departure::Alone;
         if let Some(client) = self.sync_service().client() {

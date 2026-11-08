@@ -55,6 +55,7 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/036_shared_send_messages.sql")),
     Migration::Plain(include_str!("migrations/037_shared_send_files.sql")),
     Migration::Plain(include_str!("migrations/038_jmap_delayed_send.sql")),
+    Migration::Plain(include_str!("migrations/039_sign_in_sync.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -382,6 +383,8 @@ mod tests {
             "reply_reminders",
             "route_cache",
             "sender_identities",
+            "sign_in_arrivals",
+            "sign_in_shares",
             "snippets",
             "snoozes",
             "split_rules",

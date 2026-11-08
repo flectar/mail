@@ -27,6 +27,7 @@ pub(crate) const TEMPLATE: &str = "template";
 pub(crate) const SNOOZE: &str = "snooze";
 pub(crate) const SCHEDULED: &str = "scheduled";
 pub(crate) const REMINDER: &str = "reminder";
+pub(crate) const SIGN_IN: &str = "signin";
 
 /// The largest template body that syncs, well under the server's record
 /// limit: one record too large would stop every upload.
@@ -39,7 +40,7 @@ const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
-        | REMINDER => Some(1),
+        | REMINDER | SIGN_IN => Some(1),
         _ => None,
     }
 }
@@ -74,6 +75,7 @@ pub(crate) const SYNCED_PREFERENCES: &[&str] = &[
     "collectIncomingContacts",
     "suggestLearnedContacts",
     "showAccountBadges",
+    "syncSignIns",
 ];
 
 /// Record ids of named items, derived by the sync client from the group's
@@ -371,6 +373,20 @@ pub(crate) fn snapshot(
         );
     }
 
+    // Passwords and sign-ins, sealed for the group (sign_ins.rs). Turned
+    // off, they go from every device.
+    if settings.sync_sign_ins {
+        for share in repo::sign_ins::shares(conn)? {
+            let (Some(id), Some(account)) = (share.record_id, ids.by_local.get(&share.account_id))
+            else {
+                continue;
+            };
+            if let Some(body) = super::sign_ins::body(&share, account) {
+                records.insert(id, entry(SIGN_IN, body));
+            }
+        }
+    }
+
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
 }
@@ -666,6 +682,7 @@ fn apply_put(
         SNOOZE => apply_snooze(conn, id, &entry.body, applied),
         SCHEDULED => apply_scheduled(conn, id, &entry.body, applied),
         REMINDER => apply_reminder(conn, id, &entry.body, applied),
+        SIGN_IN => apply_sign_in(conn, id, &entry.body),
         // Other devices describe themselves; the app reads them from the
         // mirror, and only each device writes its own.
         DEVICE => Ok(Outcome::Ignored),
@@ -916,6 +933,33 @@ fn apply_snooze(
 /// Take on a reply reminder another device set or moved. It is kept before
 /// its message arrives here, and its conversation comes back then if nobody
 /// replied.
+/// Another device's password or sign-in: kept sealed until the install step
+/// moves it into the credential store (sign_ins.rs).
+fn apply_sign_in(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outcome> {
+    let Some(record) = super::sign_ins::parse(body) else {
+        return Ok(Outcome::Ignored);
+    };
+    let Some(account_id) = account_ids(conn)?.by_sync.get(record.account).copied() else {
+        return Ok(Outcome::Waiting);
+    };
+    match record.sealed {
+        Some(sealed) => repo::sign_ins::put_arrival(
+            conn,
+            &repo::sign_ins::Arrival {
+                account_id,
+                kind: record.kind.as_str().into(),
+                family: record.family.into(),
+                record_id: *id,
+                sealed,
+            },
+        )?,
+        // It stopped working on another device: one whose sign-in works
+        // shares that one instead.
+        None => repo::sign_ins::recheck_record(conn, id)?,
+    }
+    Ok(Outcome::Applied)
+}
+
 fn apply_reminder(
     conn: &Connection,
     id: &RecordId,
@@ -1124,6 +1168,12 @@ fn apply_delete(
             if let Some(thread) = repo::reply_reminders::delete(conn, &sync_id_hex(id))? {
                 applied.threads_changed.push(thread);
             }
+        }
+        // Turned off, or its account went. Credentials already stored here
+        // stay: they are this device's sign-in now.
+        SIGN_IN => {
+            repo::sign_ins::drop_arrivals_of_record(conn, id)?;
+            repo::sign_ins::forget_record(conn, id)?;
         }
         // Preferences are never deleted, and device records go with their
         // device.

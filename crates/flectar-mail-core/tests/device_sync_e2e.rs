@@ -111,12 +111,13 @@ async fn start_server_with(env: &[(&str, &str)]) -> Option<Server> {
 }
 
 async fn start_core(dir: &std::path::Path) -> Core {
-    Core::start_mail_ui_with_credentials(
-        Paths::for_tests(dir),
-        Arc::new(MemoryCredentials::default()),
-    )
-    .await
-    .unwrap()
+    start_core_with(dir, Arc::new(MemoryCredentials::default())).await
+}
+
+async fn start_core_with(dir: &std::path::Path, credentials: Arc<MemoryCredentials>) -> Core {
+    Core::start_mail_ui_with_credentials(Paths::for_tests(dir), credentials)
+        .await
+        .unwrap()
 }
 
 fn imap_account(email: &str) -> PortableAccountConfig {
@@ -832,4 +833,93 @@ async fn a_large_imap_message_waits_in_a_file_until_a_device_sends_it() {
     laptop.device_sync_run().await.unwrap();
     assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Removed);
     assert_eq!(send_of(&laptop).await.unwrap().0, "cancelled");
+}
+
+/// Whether `needle` appears in any of the database's files.
+fn database_holds(dir: &std::path::Path, needle: &[u8]) -> bool {
+    let db = Paths::for_tests(dir).db_file();
+    ["", "-wal", "-shm"].iter().any(|suffix| {
+        let mut path = db.clone().into_os_string();
+        path.push(suffix);
+        std::fs::read(&path).is_ok_and(|bytes| bytes.windows(needle.len()).any(|w| w == needle))
+    })
+}
+
+/// With the recovery code alone, a new device has its accounts signed in:
+/// their passwords travel end-to-end encrypted, straight into its credential
+/// store, and never sit readable in either device's database.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_restored_device_has_its_accounts_signed_in() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop_keys = Arc::new(MemoryCredentials::default());
+    let phone_keys = Arc::new(MemoryCredentials::default());
+    let laptop = start_core_with(laptop_dir.path(), laptop_keys.clone()).await;
+    let phone = start_core_with(phone_dir.path(), phone_keys.clone()).await;
+
+    // Signed in on the laptop.
+    laptop
+        .import_account_configs(vec![imap_account("me@example.com")])
+        .await
+        .unwrap();
+    let account = laptop.list_accounts().await.unwrap()[0].id;
+    let password = "correct-horse-battery-7";
+    laptop_keys
+        .store(account, Slot::Password, password)
+        .unwrap();
+    laptop
+        .db
+        .write(move |conn| {
+            flectar_mail_core::db::repo::accounts::set_sync_state(conn, account, "idle")
+        })
+        .await
+        .unwrap();
+    let words = laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    laptop.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+
+    // A new phone, with the recovery code alone.
+    phone
+        .device_sync_recover(Some(server.url.clone()), words)
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    phone.device_sync_run().await.unwrap();
+    let arrived = phone.list_accounts().await.unwrap();
+    assert_eq!(arrived.len(), 1);
+    assert_eq!(
+        phone_keys.load(arrived[0].id, Slot::Password).unwrap(),
+        password,
+        "in the phone's credential store"
+    );
+    assert_ne!(arrived[0].sync_state, "needs_reauth", "it syncs at once");
+
+    // Nowhere readable but the credential stores.
+    for dir in [laptop_dir.path(), phone_dir.path()] {
+        assert!(!database_holds(dir, password.as_bytes()));
+    }
+
+    // A new password on the phone reaches the laptop, as saving it in the
+    // account editor does after the server accepts it.
+    let phone_account = arrived[0].id;
+    phone_keys
+        .store(phone_account, Slot::Password, "new-password-8")
+        .unwrap();
+    phone
+        .db
+        .write(move |conn| flectar_mail_core::db::repo::sign_ins::mark_fresh(conn, phone_account))
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(
+        laptop_keys.load(account, Slot::Password).unwrap(),
+        "new-password-8"
+    );
 }

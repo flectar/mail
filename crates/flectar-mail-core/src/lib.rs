@@ -2025,6 +2025,8 @@ impl Core {
             }
             return Err(error);
         }
+        // A new or changed password goes to the user's other devices.
+        self.share_fresh_sign_in(id).await;
 
         if is_new_account
             && let Err(error) = self
@@ -2329,10 +2331,18 @@ impl Core {
     ) -> Result<Account> {
         let account_id = account.id;
         self.store_sign_in(&account, outcome).await?;
+        self.resume_account(account_id).await?;
+        self.db
+            .read(move |conn| repo::accounts::get(conn, account_id))
+            .await?
+            .ok_or_else(|| CoreError::NotFound("account".into()))
+    }
 
-        // Clear needs_reauth and wake the actor. The reauth pause loop retries
-        // its connect on the next SyncNow; if no actor is live (e.g. reauth
-        // right after launch), spawn one so the fresh tokens take effect.
+    /// The account has its credentials again: clear `needs_reauth` and wake
+    /// its sync. The reauth pause loop retries its connect on the next
+    /// SyncNow; if no actor is live (e.g. right after launch), one starts so
+    /// the credentials take effect.
+    pub(crate) async fn resume_account(&self, account_id: i64) -> Result<()> {
         self.db
             .write(move |conn| repo::accounts::set_sync_state(conn, account_id, "idle"))
             .await?;
@@ -2349,11 +2359,17 @@ impl Core {
                 .ok_or_else(|| CoreError::NotFound("account".into()))?;
             self.spawn_actor(cfg).await;
         }
+        Ok(())
+    }
 
-        self.db
-            .read(move |conn| repo::accounts::get(conn, account_id))
-            .await?
-            .ok_or_else(|| CoreError::NotFound("account".into()))
+    /// A password or sign-in was entered here: Flectar Mail Sync shares it
+    /// with the user's other devices.
+    async fn share_fresh_sign_in(&self, account_id: i64) {
+        let _ = self
+            .db
+            .write(move |conn| repo::sign_ins::mark_fresh(conn, account_id))
+            .await;
+        self.device_sync_now();
     }
 
     /// Store the tokens and profile of a sign-in for an existing account.
@@ -2410,6 +2426,9 @@ impl Core {
         // could not be stored.
         if respelled {
             self.restart_actor(account_id).await;
+        }
+        if stored.is_ok() {
+            self.share_fresh_sign_in(account_id).await;
         }
         stored
     }

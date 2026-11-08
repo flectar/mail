@@ -2042,6 +2042,10 @@ pub struct Settings {
     /// Show which account each mail-list row belongs to with a color marker.
     #[serde(default)]
     pub show_account_badges: bool,
+    /// Flectar Mail Sync carries passwords and sign-ins between the user's
+    /// devices too, end-to-end encrypted, so accounts arrive signed in.
+    #[serde(default = "default_true")]
+    pub sync_sign_ins: bool,
     /// Per-account marker color (hex), keyed by stringified account id.
     /// Missing = the UI derives a stable hue from the address.
     #[serde(default)]
@@ -2237,6 +2241,7 @@ impl Default for Settings {
             signature_defaults: std::collections::HashMap::new(),
             account_themes: std::collections::HashMap::new(),
             show_account_badges: false,
+            sync_sign_ins: true,
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
