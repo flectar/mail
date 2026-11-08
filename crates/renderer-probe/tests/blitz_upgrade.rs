@@ -776,3 +776,19 @@ fn a_stale_line_cache_does_not_break_painting() {
     let mut scene = anyrender::Scene::default();
     blitz_paint::paint_scene_cached(&mut scene, &mut doc, 1.0, 400, 300, 0, 0, &cache);
 }
+
+#[test]
+fn copied_text_keeps_cells_and_paragraphs_apart() {
+    // Like innerText: a tab between the cells of a row and a blank line around
+    // paragraphs, so a copied receipt keeps its columns.
+    let mut doc = document(
+        "<p id='a'>Receipt</p><table><tr><td>Item</td><td>$5</td></tr></table><p id='b'>Thanks</p>",
+    );
+    let first = doc.query_selector("#a").unwrap().unwrap();
+    let last = doc.query_selector("#b").unwrap().unwrap();
+    doc.set_text_selection(first, 0, last, "Thanks".len());
+    assert_eq!(
+        doc.get_selected_text().as_deref(),
+        Some("Receipt\n\nItem\t$5\n\nThanks")
+    );
+}

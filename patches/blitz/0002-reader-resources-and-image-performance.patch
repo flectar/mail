@@ -20,7 +20,7 @@ index 4686b12..f6ad6a0 100644
              base_url: None,
              ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 96d7ed0..215538e 100644
+index 96d7ed0..cb62be6 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
 @@ -225,7 +225,63 @@ pub enum DocumentEvent {
@@ -189,20 +189,78 @@ index 96d7ed0..215538e 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2646,9 +2755,11 @@ impl BaseDocument {
-             }
+@@ -2636,19 +2745,23 @@ impl BaseDocument {
+         }
  
-             if !result.is_empty() {
+         let mut result = String::new();
++        let mut previous = None;
+         for (node_id, start, end) in &ranges {
+             let node = self.get_node(*node_id)?;
+             let element_data = node.element_data()?;
+             let inline_layout = element_data.inline_layout_data.as_ref()?;
+ 
+-            if *end > inline_layout.text.len() {
++            let Some(text) = inline_layout.text.get(*start..*end) else {
++                continue;
++            };
++            if text.is_empty() {
+                 continue;
+             }
+-
+-            if !result.is_empty() {
 -                result.push(' ');
-+                result.push('\n');
-+            }
-+            if let Some(text) = inline_layout.text.get(*start..*end) {
-+                result.push_str(text);
++            if let Some(previous) = previous {
++                result.push_str(self.selection_separator(previous, *node_id));
              }
 -            result.push_str(&inline_layout.text[*start..*end]);
++            result.push_str(text);
++            previous = Some(*node_id);
          }
  
          if result.is_empty() {
+@@ -2658,6 +2771,42 @@ impl BaseDocument {
+         }
+     }
+ 
++    /// What separates the selected text of two consecutive inline formatting
++    /// contexts, as `innerText` and browsers' `Selection.toString()` do: a tab
++    /// between cells of one row, a blank line around a paragraph, and a line
++    /// break between other blocks.
++    fn selection_separator(&self, previous: NodeId, next: NodeId) -> &'static str {
++        use style::values::specified::box_::DisplayInside;
++        let ancestor = |id: NodeId, matches: &dyn Fn(&Node) -> bool| {
++            let mut current = Some(id);
++            while let Some(id) = current {
++                let node = self.get_node(id)?;
++                if matches(node) {
++                    return Some(id);
++                }
++                current = node.parent;
++            }
++            None
++        };
++        let cell = |id| {
++            ancestor(id, &|node| {
++                node.display_style()
++                    .is_some_and(|display| display.inside() == DisplayInside::TableCell)
++            })
++        };
++        let paragraph = |id| {
++            ancestor(id, &|node| {
++                node.data.is_element_with_tag_name(&local_name!("p"))
++            })
++        };
++        let parent = |id: NodeId| self.get_node(id).and_then(|node| node.parent);
++        match (cell(previous), cell(next)) {
++            (Some(a), Some(b)) if a != b && parent(a) == parent(b) => "\t",
++            _ if paragraph(previous) != paragraph(next) => "\n\n",
++            _ => "\n",
++        }
++    }
++
+     /// Get all selection ranges as Vec<(node_id, start_offset, end_offset)>.
+     /// Returns empty vec if no selection.
+     pub fn get_text_selection_ranges(&self) -> Vec<(NodeId, usize, usize)> {
 diff --git a/crates/blitz-dom/src/iframe.rs b/crates/blitz-dom/src/iframe.rs
 index c439fa8..0301fb6 100644
 --- a/crates/blitz-dom/src/iframe.rs

@@ -2741,27 +2741,65 @@ impl BaseDocument {
         }
 
         let mut result = String::new();
+        let mut previous = None;
         for (node_id, start, end) in &ranges {
             let node = self.get_node(*node_id)?;
             let element_data = node.element_data()?;
             let inline_layout = element_data.inline_layout_data.as_ref()?;
 
-            if *end > inline_layout.text.len() {
+            let Some(text) = inline_layout.text.get(*start..*end) else {
+                continue;
+            };
+            if text.is_empty() {
                 continue;
             }
-
-            if !result.is_empty() {
-                result.push('\n');
+            if let Some(previous) = previous {
+                result.push_str(self.selection_separator(previous, *node_id));
             }
-            if let Some(text) = inline_layout.text.get(*start..*end) {
-                result.push_str(text);
-            }
+            result.push_str(text);
+            previous = Some(*node_id);
         }
 
         if result.is_empty() {
             None
         } else {
             Some(result)
+        }
+    }
+
+    /// What separates the selected text of two consecutive inline formatting
+    /// contexts, as `innerText` and browsers' `Selection.toString()` do: a tab
+    /// between cells of one row, a blank line around a paragraph, and a line
+    /// break between other blocks.
+    fn selection_separator(&self, previous: NodeId, next: NodeId) -> &'static str {
+        use style::values::specified::box_::DisplayInside;
+        let ancestor = |id: NodeId, matches: &dyn Fn(&Node) -> bool| {
+            let mut current = Some(id);
+            while let Some(id) = current {
+                let node = self.get_node(id)?;
+                if matches(node) {
+                    return Some(id);
+                }
+                current = node.parent;
+            }
+            None
+        };
+        let cell = |id| {
+            ancestor(id, &|node| {
+                node.display_style()
+                    .is_some_and(|display| display.inside() == DisplayInside::TableCell)
+            })
+        };
+        let paragraph = |id| {
+            ancestor(id, &|node| {
+                node.data.is_element_with_tag_name(&local_name!("p"))
+            })
+        };
+        let parent = |id: NodeId| self.get_node(id).and_then(|node| node.parent);
+        match (cell(previous), cell(next)) {
+            (Some(a), Some(b)) if a != b && parent(a) == parent(b) => "\t",
+            _ if paragraph(previous) != paragraph(next) => "\n\n",
+            _ => "\n",
         }
     }
 
