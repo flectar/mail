@@ -944,3 +944,15 @@ fn positioned_children_of_collapsed_tables_keep_their_border() {
     );
     assert!(rows_with(&pixels, [255, 0, 0, 255]).is_some());
 }
+
+#[test]
+fn column_groups_without_columns_span_their_columns() {
+    // `<colgroup span=2 width=50>` without `<col>` children stands for two
+    // 50px columns, as in browsers.
+    let doc = document(
+        "<table style='border-spacing:0'><colgroup span='2' width='50'></colgroup>
+         <tr><td id='a'>a</td><td id='b'>b</td><td id='c'>c</td></tr></table>",
+    );
+    close(node(&doc, "#a").final_layout().size.width, 50.0);
+    close(node(&doc, "#b").final_layout().size.width, 50.0);
+}

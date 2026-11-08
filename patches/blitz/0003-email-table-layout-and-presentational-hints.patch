@@ -145,7 +145,7 @@ index 0a5fbc1..82273f1 100644
                      // static position is the top-left of the table's content box.
                      let context = table_wrapper.ctx;
 diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
-index 30b96f0..73d67be 100644
+index 30b96f0..23b5f9f 100644
 --- a/crates/blitz-dom/src/layout/table.rs
 +++ b/crates/blitz-dom/src/layout/table.rs
 @@ -1,11 +1,12 @@
@@ -383,7 +383,7 @@ index 30b96f0..73d67be 100644
 +    /// The edge on vertical line `line` (0..=columns) beside `row`.
 +    pub fn vertical(&self, row: usize, line: usize) -> Option<&CollapsedEdge> {
 +        self.vertical.get(row * (self.columns + 1) + line)?.as_ref()
-     }
++    }
 +}
 +
 +const TOP: usize = 0;
@@ -426,11 +426,7 @@ index 30b96f0..73d67be 100644
 +        side(LEFT, border.border_left_width.0, border.border_left_style),
 +    ]
 +}
- 
--    fn place(&mut self, colspan: u16, rowspan: u16) {
--        let end = self.col + colspan;
--        if self.rowspans.len() < end as usize {
--            self.rowspans.resize(end as usize, 0);
++
 +/// The style precedence of CSS 2.1 §17.6.2.1, from `double` down to `inset`.
 +fn style_rank(style: BorderStyle) -> u8 {
 +    match style {
@@ -443,9 +439,13 @@ index 30b96f0..73d67be 100644
 +        BorderStyle::Groove => 2,
 +        BorderStyle::Inset => 1,
 +        BorderStyle::None | BorderStyle::Hidden => 0,
-+    }
+     }
 +}
-+
+ 
+-    fn place(&mut self, colspan: u16, rowspan: u16) {
+-        let end = self.col + colspan;
+-        if self.rowspans.len() < end as usize {
+-            self.rowspans.resize(end as usize, 0);
 +/// CSS 2.1 §17.6.2.1 border conflict resolution.
 +fn resolve_edge(candidates: &[BorderCandidate]) -> Option<CollapsedEdge> {
 +    let mut best: Option<&BorderCandidate> = None;
@@ -453,12 +453,12 @@ index 30b96f0..73d67be 100644
 +        // `hidden` suppresses every other border on the edge.
 +        if candidate.style == BorderStyle::Hidden {
 +            return None;
++        }
++        if candidate.style == BorderStyle::None || candidate.width <= 0.0 {
++            continue;
          }
 -        for remaining in &mut self.rowspans[self.col as usize..end as usize] {
 -            *remaining = rowspan - 1;
-+        if candidate.style == BorderStyle::None || candidate.width <= 0.0 {
-+            continue;
-+        }
 +        let wins = best.is_none_or(|best| {
 +            (
 +                candidate.width,
@@ -635,7 +635,7 @@ index 30b96f0..73d67be 100644
 +        row_borders: Vec::new(),
 +        groups: Vec::new(),
 +        columns: 0,
-     };
++    };
 +    // Only the first header group renders before the other rows and only the
 +    // first footer group after them; later ones are ordinary row groups in
 +    // document order (CSS 2.1 §17.2).
@@ -644,7 +644,7 @@ index 30b96f0..73d67be 100644
 +            .iter()
 +            .copied()
 +            .find(|&id| doc.nodes[id].display_style().map(|d| d.inside()) == Some(inside))
-+    };
+     };
 +    let header = first_group(doc, DisplayInside::TableHeaderGroup);
 +    let footer = first_group(doc, DisplayInside::TableFooterGroup);
      for order in 0..3 {
@@ -735,9 +735,7 @@ index 30b96f0..73d67be 100644
 -                percent_plus_length(&mut calc_values, percent, extra)
 -            }
 -        };
-+    let cell_columns = column_count;
-+    column_count = column_count.max(column_sizes.len());
- 
+-
 -        for column in column_sizes.iter_mut() {
 -            if column.max.is_auto() {
 -                *column = remaining_column;
@@ -745,7 +743,9 @@ index 30b96f0..73d67be 100644
 -                *column = percent_track(column.max.into_raw().value(), 0.0);
 -            }
 -        }
--
++    let cell_columns = column_count;
++    column_count = column_count.max(column_sizes.len());
+ 
 -        // Percentage widths on cells apply to the cell's content box, so the
 -        // cell's horizontal padding and border must be added to the column width.
 -        for (col_idx, percent, extra) in percent_columns {
@@ -1101,35 +1101,74 @@ index 30b96f0..73d67be 100644
          },
          layout_children,
      )
-@@ -471,7 +826,7 @@ fn collect_columns(
-                 .and_then(|val| val.parse::<u16>().ok())
-                 .map(|v| v.max(1))
-                 .unwrap_or(1);
+@@ -460,301 +815,616 @@ fn collect_columns(
+                 collect_columns(doc, child_id, wm, columns, column_sizes);
+             }
+             doc.nodes[node_id].children = children;
++            if columns.len() == first_column {
++                // Without column children, a column group spans its own
++                // columns (HTML `colgroup span`), sized like a `<col>`.
++                push_columns(&doc.nodes[node_id], wm, columns, column_sizes);
++            }
+             for column in &mut columns[first_column..] {
+                 column.group.get_or_insert(node_id);
+             }
+         }
+-        DisplayInside::TableColumn => {
+-            let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
+-            let span: u16 = node
+-                .attr(local_name!("span"))
+-                .and_then(|val| val.parse::<u16>().ok())
+-                .map(|v| v.max(1))
+-                .unwrap_or(1);
 -            let column: TrackSizingFunction = match style.size.width.tag() {
-+            let column: TrackSizingFunction = match style.size().width.tag() {
-                 taffy::CompactLength::LENGTH_TAG => {
-                     // A definite `max-width` clamps the column width; a zero width is treated as auto
-                     let mut width = style.size.width.value();
-@@ -491,9 +846,9 @@ fn collect_columns(
-                 _ => style_helpers::auto(),
-             };
-             // A definite `min-width` on a column acts as a floor on its width
+-                taffy::CompactLength::LENGTH_TAG => {
+-                    // A definite `max-width` clamps the column width; a zero width is treated as auto
+-                    let mut width = style.size.width.value();
+-                    if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
+-                        width = width.min(style.max_size.width.into_raw().value());
+-                    }
+-                    if width > 0.0 {
+-                        style_helpers::length(width)
+-                    } else {
+-                        style_helpers::auto()
+-                    }
+-                }
+-                taffy::CompactLength::PERCENT_TAG => {
+-                    style_helpers::percent(style.size.width.value())
+-                }
+-                // Browsers treat calc() widths on columns as auto
+-                _ => style_helpers::auto(),
+-            };
+-            // A definite `min-width` on a column acts as a floor on its width
 -            let column = match style.min_size.width.into_raw().tag() {
-+            let column = match style.min_size().width.into_raw().tag() {
-                 taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
+-                taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
 -                    style_helpers::length(style.min_size.width.into_raw().value()),
-+                    style_helpers::length(style.min_size().width.into_raw().value()),
-                     style_helpers::auto(),
-                 ),
-                 _ => column,
-@@ -511,250 +866,512 @@ fn collect_columns(
+-                    style_helpers::auto(),
+-                ),
+-                _ => column,
+-            };
+-            for _ in 0..span {
+-                columns.push(TableColumn {
+-                    node_id,
+-                    group: None,
+-                });
+-                column_sizes.push(column);
+-            }
+-        }
++        DisplayInside::TableColumn => push_columns(node, wm, columns, column_sizes),
+         _ => {}
+     }
  }
  
- #[allow(clippy::too_many_arguments)]
+-#[allow(clippy::too_many_arguments)]
 -fn collect_table_cells(
 -    doc: &mut BaseDocument,
 -    node_id: NodeId,
--    wm: WritingMode,
++/// The columns a `<col>` (or a column group without columns) stands for.
++fn push_columns(
++    node: &crate::node::Node,
+     wm: WritingMode,
 -    is_fixed: bool,
 -    border_collapse: BorderCollapse,
 -    row: &mut u16,
@@ -1140,11 +1179,103 @@ index 30b96f0..73d67be 100644
 -    columns: &mut Vec<TrackSizingFunction>,
 -    first_cell_border: &mut Option<ServoArc<Border>>,
 -    percent_columns: &mut Vec<(u16, f32, f32)>,
--) {
++    columns: &mut Vec<TableColumn>,
++    column_sizes: &mut Vec<TrackSizingFunction>,
+ ) {
 -    let node = &mut doc.nodes[node_id];
 -
 -    if !node.is_element() {
 -        return;
++    let node_id = node.id;
++    let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
++    let span: u16 = node
++        .attr(local_name!("span"))
++        .and_then(|val| val.parse::<u16>().ok())
++        .map(|v| v.clamp(1, MAX_COLSPAN))
++        .unwrap_or(1);
++    let column: TrackSizingFunction = match style.size().width.tag() {
++        taffy::CompactLength::LENGTH_TAG => {
++            // A definite `max-width` clamps the column width; a zero width is treated as auto
++            let mut width = style.size.width.value();
++            if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
++                width = width.min(style.max_size.width.into_raw().value());
++            }
++            if width > 0.0 {
++                style_helpers::length(width)
++            } else {
++                style_helpers::auto()
++            }
++        }
++        taffy::CompactLength::PERCENT_TAG => style_helpers::percent(style.size.width.value()),
++        // Browsers treat calc() widths on columns as auto
++        _ => style_helpers::auto(),
++    };
++    // A definite `min-width` on a column acts as a floor on its width
++    let column = match style.min_size().width.into_raw().tag() {
++        taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
++            style_helpers::length(style.min_size().width.into_raw().value()),
++            style_helpers::auto(),
++        ),
++        _ => column,
++    };
++    for _ in 0..span {
++        columns.push(TableColumn {
++            node_id,
++            group: None,
++        });
++        column_sizes.push(column);
+     }
++}
+ 
+-    let Some(display) = node.display_style() else {
+-        #[cfg(feature = "tracing")]
+-        tracing::info!("Ignoring table descendent because it has no styles");
+-        return;
++/// The border candidates of the table's columns and column groups.
++struct ColumnBorders {
++    /// Per column, its `<col>`'s borders, as if each column it spans were a
++    /// box of its own (as Blink merges them).
++    columns: Vec<Option<[BorderCandidate; 4]>>,
++    /// Each column group's first and last column and its borders.
++    groups: Vec<(usize, usize, [BorderCandidate; 4])>,
++}
++
++fn column_border_candidates(doc: &BaseDocument, columns: &[TableColumn]) -> ColumnBorders {
++    let candidates = |node_id: NodeId, origin: u8| {
++        doc.nodes[node_id]
++            .primary_styles()
++            .map(|style| border_candidates(&style, origin, node_id))
+     };
++    let mut groups: Vec<(usize, usize, [BorderCandidate; 4])> = Vec::new();
++    let mut previous_group = None;
++    for (index, column) in columns.iter().enumerate() {
++        if column.group.is_some() && column.group == previous_group {
++            if let Some(group) = groups.last_mut() {
++                group.1 = index;
++            }
++        } else if let Some(group) = column.group.and_then(|group| candidates(group, 2)) {
++            groups.push((index, index, group));
++        }
++        previous_group = column.group;
++    }
++    ColumnBorders {
++        columns: columns
++            .iter()
++            // A column group without columns stands for its own columns.
++            .map(|column| {
++                (Some(column.node_id) != column.group)
++                    .then(|| candidates(column.node_id, 3))
++                    .flatten()
++            })
++            .collect(),
++        groups,
++    }
++}
+ 
+-    if display.outside() == DisplayOutside::None {
+-        node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
+-        return;
++#[allow(clippy::too_many_arguments)]
 +fn resolve_collapsed_borders(
 +    rows: usize,
 +    columns: usize,
@@ -1170,30 +1301,21 @@ index 30b96f0..73d67be 100644
 +            }
 +        }
      }
--
--    let Some(display) = node.display_style() else {
--        #[cfg(feature = "tracing")]
--        tracing::info!("Ignoring table descendent because it has no styles");
--        return;
 +    let owner = |row: usize, column: usize| {
 +        let owner = owners[row * columns + column];
 +        (owner != EMPTY).then_some(owner as usize)
-     };
++    };
  
--    if display.outside() == DisplayOutside::None {
--        node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
--        return;
-+    let mut row_sides: Vec<Option<&[BorderCandidate; 4]>> = vec![None; rows];
-+    for (row, borders) in row_borders {
-+        row_sides[usize::from(*row)] = Some(borders);
-     }
--
 -    // Absolutely positioned boxes are out-of-flow: they are laid out by their containing
 -    // block rather than as part of the table grid.
 -    let position = node.primary_styles().unwrap().clone_position();
 -    if position.is_absolutely_positioned() {
 -        oof_children.push((node_id, stylo_taffy::convert::position(position)));
 -        return;
++    let mut row_sides: Vec<Option<&[BorderCandidate; 4]>> = vec![None; rows];
++    for (row, borders) in row_borders {
++        row_sides[usize::from(*row)] = Some(borders);
++    }
 +    let mut group_of_row: Vec<Option<&(u16, u16, [BorderCandidate; 4])>> = vec![None; rows];
 +    for group in groups {
 +        for row in group.0..=group.1 {
@@ -1248,14 +1370,14 @@ index 30b96f0..73d67be 100644
 +                if let Some(group) = group_of_row[line - 1].filter(|g| usize::from(g.1) == line - 1)
 +                {
 +                    candidates.push(group.2[BOTTOM]);
-+                }
-+            }
+                 }
+             }
 +            if line < rows {
 +                candidates.extend(row_sides[line].map(|row| row[TOP]));
 +                if let Some(group) = group_of_row[line].filter(|g| usize::from(g.0) == line) {
 +                    candidates.push(group.2[TOP]);
-                 }
-             }
++                }
++            }
 +            if line == 0 {
 +                candidates.push(table_borders[TOP]);
 +            }
@@ -1309,17 +1431,7 @@ index 30b96f0..73d67be 100644
 +                continue;
              }
 -            doc.nodes[node_id].children = children;
-+            candidates.clear();
-+            candidates.extend(left.map(|cell| cell_borders[cell][end]));
-+            candidates.extend(right.map(|cell| cell_borders[cell][start]));
-+            if line == 0 || line == columns {
-+                let side = if line == 0 { start } else { end };
-+                candidates.extend(row_sides[row].map(|row| row[side]));
-+                candidates.extend(group_of_row[row].map(|group| group.2[side]));
-+                candidates.push(table_borders[side]);
-+            }
-+            vertical.push(resolve_edge(&candidates));
-         }
+-        }
 -        DisplayInside::TableCell => {
 -            // node.remove_damage(CONSTRUCT_DESCENDENT | CONSTRUCT_FC | CONSTRUCT_BOX);
 -            let stylo_style = &node.primary_styles().unwrap();
@@ -1334,12 +1446,26 @@ index 30b96f0..73d67be 100644
 -                .unwrap_or(1);
 -            let mut style = table_taffy_style(stylo_style, wm);
 -            let col = cursor.next_free();
-+    }
- 
+-
 -            // In the collapsed borders model the borders are laid out as gutters between
 -            // the cells (see the table's `gap`) rather than as part of the cells
 -            if border_collapse == BorderCollapse::Collapse {
 -                style.border = taffy::Rect::ZERO.map(style_helpers::length);
++            candidates.clear();
++            candidates.extend(left.map(|cell| cell_borders[cell][end]));
++            candidates.extend(right.map(|cell| cell_borders[cell][start]));
++            if line == 0 || line == columns {
++                let side = if line == 0 { start } else { end };
++                candidates.extend(row_sides[row].map(|row| row[side]));
++                candidates.extend(group_of_row[row].map(|group| group.2[side]));
++                candidates.push(table_borders[side]);
+             }
++            vertical.push(resolve_edge(&candidates));
++        }
++    }
+ 
+-            if first_cell_border.is_none() {
+-                *first_cell_border = Some(stylo_style.clone_border());
 -            }
 +    let borders = CollapsedBorders {
 +        rows,
@@ -1348,8 +1474,11 @@ index 30b96f0..73d67be 100644
 +        vertical,
 +    };
  
--            if first_cell_border.is_none() {
--                *first_cell_border = Some(stylo_style.clone_border());
+-            // In the fixed table layout algorithm the widths of columns are not
+-            // affected by cell contents, so cells must not impose a min-content
+-            // floor on their tracks.
+-            if is_fixed {
+-                style.min_size.width = style_helpers::length(0.0);
 -            }
 +    for cell in cells.iter_mut() {
 +        let (first_row, first_column) = (usize::from(cell.row), usize::from(cell.column));
@@ -1388,15 +1517,6 @@ index 30b96f0..73d67be 100644
 +        cell.collapsed_border = Some(half);
 +    }
  
--            // In the fixed table layout algorithm the widths of columns are not
--            // affected by cell contents, so cells must not impose a min-content
--            // floor on their tracks.
--            if is_fixed {
--                style.min_size.width = style_helpers::length(0.0);
--            }
-+    borders
-+}
- 
 -            // Column widths from `<col>` elements take precedence over cell widths
 -            let col_needs_width =
 -                (col as usize) >= columns.len() || columns[col as usize].max.is_auto();
@@ -1412,6 +1532,9 @@ index 30b96f0..73d67be 100644
 -                            ),
 -                            taffy::BoxSizing::BorderBox => style_helpers::length(len),
 -                        }
++    borders
++}
++
 +impl TableCollector {
 +    fn start_row(&mut self) {
 +        self.row = self.row.saturating_add(1).min(MAX_GRID_LINE);
@@ -1570,7 +1693,9 @@ index 30b96f0..73d67be 100644
 +            }
 +        }
 +    }
-+
+ 
+-            // The margin properties do not apply to table-internal elements
+-            style.margin = taffy::Rect::ZERO.map(style_helpers::length);
 +    fn push_cell(&mut self, doc: &mut BaseDocument, node_id: NodeId, use_spans: bool) {
 +        // A table without an explicit row still gets an anonymous first row.
 +        if self.row == 0 {
@@ -1600,9 +1725,6 @@ index 30b96f0..73d67be 100644
 +            )
 +        };
  
--            // The margin properties do not apply to table-internal elements
--            style.margin = taffy::Rect::ZERO.map(style_helpers::length);
--
 -            // Let Taffy auto-place the column. Combined with
 -            // `grid_auto_flow: RowDense` set on the table root, each cell
 -            // scans from the first track in its row for a free position,
@@ -1693,13 +1815,6 @@ index 30b96f0..73d67be 100644
 +        self.cell_borders.push(borders);
 +    }
 +}
-+
-+/// Which authored columns absorb a definite-width table's excess width.
-+#[derive(Debug, Clone, Copy)]
-+struct Growth {
-+    lengths: bool,
-+    percents: bool,
-+}
  
 -            style.size.width = style_helpers::auto();
 -            cells.push(TableCell {
@@ -1708,6 +1823,14 @@ index 30b96f0..73d67be 100644
 -                column: col,
 -                style,
 -            });
++/// Which authored columns absorb a definite-width table's excess width.
++#[derive(Debug, Clone, Copy)]
++struct Growth {
++    lengths: bool,
++    percents: bool,
++}
+ 
+-            cursor.place(colspan, rowspan);
 +/// What the cells of one column ask for, before it becomes a grid track.
 +#[derive(Debug, Clone, Default)]
 +pub(crate) struct ColumnHint {
@@ -1719,8 +1842,7 @@ index 30b96f0..73d67be 100644
 +    /// A `calc()` width, which only fixed layout resolves.
 +    calc: Option<taffy::Dimension>,
 +}
- 
--            cursor.place(colspan, rowspan);
++
 +impl ColumnHint {
 +    fn from_cell(cell: &TableCell) -> Self {
 +        let style = &cell.style;
@@ -1845,7 +1967,7 @@ index 30b96f0..73d67be 100644
  }
  
  pub struct RangeIter(Range<usize>);
-@@ -817,8 +1434,249 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
+@@ -817,8 +1487,249 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
          inputs: taffy::tree::LayoutInput,
      ) -> taffy::LayoutOutput {
          let cell = &self.ctx.cells[usize::from(node_id)];
@@ -2097,7 +2219,7 @@ index 30b96f0..73d67be 100644
      }
  }
  
-@@ -849,3 +1707,73 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
+@@ -849,3 +1760,73 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
          *self.ctx.computed_grid_info.borrow_mut() = Some(detailed_grid_info);
      }
  }

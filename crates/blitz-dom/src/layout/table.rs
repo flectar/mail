@@ -815,53 +815,106 @@ fn collect_columns(
                 collect_columns(doc, child_id, wm, columns, column_sizes);
             }
             doc.nodes[node_id].children = children;
+            if columns.len() == first_column {
+                // Without column children, a column group spans its own
+                // columns (HTML `colgroup span`), sized like a `<col>`.
+                push_columns(&doc.nodes[node_id], wm, columns, column_sizes);
+            }
             for column in &mut columns[first_column..] {
                 column.group.get_or_insert(node_id);
             }
         }
-        DisplayInside::TableColumn => {
-            let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
-            let span: u16 = node
-                .attr(local_name!("span"))
-                .and_then(|val| val.parse::<u16>().ok())
-                .map(|v| v.max(1))
-                .unwrap_or(1);
-            let column: TrackSizingFunction = match style.size().width.tag() {
-                taffy::CompactLength::LENGTH_TAG => {
-                    // A definite `max-width` clamps the column width; a zero width is treated as auto
-                    let mut width = style.size.width.value();
-                    if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
-                        width = width.min(style.max_size.width.into_raw().value());
-                    }
-                    if width > 0.0 {
-                        style_helpers::length(width)
-                    } else {
-                        style_helpers::auto()
-                    }
-                }
-                taffy::CompactLength::PERCENT_TAG => {
-                    style_helpers::percent(style.size.width.value())
-                }
-                // Browsers treat calc() widths on columns as auto
-                _ => style_helpers::auto(),
-            };
-            // A definite `min-width` on a column acts as a floor on its width
-            let column = match style.min_size().width.into_raw().tag() {
-                taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
-                    style_helpers::length(style.min_size().width.into_raw().value()),
-                    style_helpers::auto(),
-                ),
-                _ => column,
-            };
-            for _ in 0..span {
-                columns.push(TableColumn {
-                    node_id,
-                    group: None,
-                });
-                column_sizes.push(column);
+        DisplayInside::TableColumn => push_columns(node, wm, columns, column_sizes),
+        _ => {}
+    }
+}
+
+/// The columns a `<col>` (or a column group without columns) stands for.
+fn push_columns(
+    node: &crate::node::Node,
+    wm: WritingMode,
+    columns: &mut Vec<TableColumn>,
+    column_sizes: &mut Vec<TrackSizingFunction>,
+) {
+    let node_id = node.id;
+    let style = table_taffy_style(&node.primary_styles().unwrap(), wm);
+    let span: u16 = node
+        .attr(local_name!("span"))
+        .and_then(|val| val.parse::<u16>().ok())
+        .map(|v| v.clamp(1, MAX_COLSPAN))
+        .unwrap_or(1);
+    let column: TrackSizingFunction = match style.size().width.tag() {
+        taffy::CompactLength::LENGTH_TAG => {
+            // A definite `max-width` clamps the column width; a zero width is treated as auto
+            let mut width = style.size.width.value();
+            if style.max_size.width.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
+                width = width.min(style.max_size.width.into_raw().value());
+            }
+            if width > 0.0 {
+                style_helpers::length(width)
+            } else {
+                style_helpers::auto()
             }
         }
-        _ => {}
+        taffy::CompactLength::PERCENT_TAG => style_helpers::percent(style.size.width.value()),
+        // Browsers treat calc() widths on columns as auto
+        _ => style_helpers::auto(),
+    };
+    // A definite `min-width` on a column acts as a floor on its width
+    let column = match style.min_size().width.into_raw().tag() {
+        taffy::CompactLength::LENGTH_TAG if column.max.is_auto() => style_helpers::minmax(
+            style_helpers::length(style.min_size().width.into_raw().value()),
+            style_helpers::auto(),
+        ),
+        _ => column,
+    };
+    for _ in 0..span {
+        columns.push(TableColumn {
+            node_id,
+            group: None,
+        });
+        column_sizes.push(column);
+    }
+}
+
+/// The border candidates of the table's columns and column groups.
+struct ColumnBorders {
+    /// Per column, its `<col>`'s borders, as if each column it spans were a
+    /// box of its own (as Blink merges them).
+    columns: Vec<Option<[BorderCandidate; 4]>>,
+    /// Each column group's first and last column and its borders.
+    groups: Vec<(usize, usize, [BorderCandidate; 4])>,
+}
+
+fn column_border_candidates(doc: &BaseDocument, columns: &[TableColumn]) -> ColumnBorders {
+    let candidates = |node_id: NodeId, origin: u8| {
+        doc.nodes[node_id]
+            .primary_styles()
+            .map(|style| border_candidates(&style, origin, node_id))
+    };
+    let mut groups: Vec<(usize, usize, [BorderCandidate; 4])> = Vec::new();
+    let mut previous_group = None;
+    for (index, column) in columns.iter().enumerate() {
+        if column.group.is_some() && column.group == previous_group {
+            if let Some(group) = groups.last_mut() {
+                group.1 = index;
+            }
+        } else if let Some(group) = column.group.and_then(|group| candidates(group, 2)) {
+            groups.push((index, index, group));
+        }
+        previous_group = column.group;
+    }
+    ColumnBorders {
+        columns: columns
+            .iter()
+            // A column group without columns stands for its own columns.
+            .map(|column| {
+                (Some(column.node_id) != column.group)
+                    .then(|| candidates(column.node_id, 3))
+                    .flatten()
+            })
+            .collect(),
+        groups,
     }
 }
 
