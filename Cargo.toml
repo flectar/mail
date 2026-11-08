@@ -239,10 +239,12 @@ auto_link_exclude_list = [
 # `wayland_client::backend`; the direct dependency guarantees its
 # `client_system` feature, which attaching to winit's display requires.
 # `slint-build`, iOS-only `cc`, and Windows-only `winresource` are consumed by build.rs.
+# Windows-only `windows-core` is named only by what `windows::core::implement`
+# expands to.
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases"]
+ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "windows-core"]
 
 # tests/text_fit.rs measures laid-out text through Slint's item tree, which
 # only the internal crate exposes. It must stay on the version `slint` uses.
