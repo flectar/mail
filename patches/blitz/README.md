@@ -25,9 +25,12 @@ desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 | 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, and a non-looping height-limit failure. |
 | 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and unhinted email glyphs. |
 | 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |
+| 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
 
-None of these is upstream yet. Upstream main adds `cellspacing` and
-`cellpadding` hints (#1366), which overlap 0003.
+0001–0006 are not upstream yet. Upstream main adds `cellspacing` and
+`cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
+and the `<link>` part of #1318; its `@import` change is local. Drop the
+backported parts when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
