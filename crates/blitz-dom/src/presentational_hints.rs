@@ -202,7 +202,12 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
         let value = attr.value.as_str();
 
         match name {
-            "align" => align_hint(tag, is_embedded, value, css),
+            "align" => align_hint(
+                tag,
+                is_embedded && *tag != local_name!("video") && *tag != local_name!("marquee"),
+                value,
+                css,
+            ),
             "valign"
                 if is_cell
                     || *tag == local_name!("tr")
@@ -214,7 +219,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
             {
                 let keyword = match value.trim().to_ascii_lowercase().as_str() {
                     "top" => "top",
-                    "middle" | "center" => "middle",
+                    "middle" => "middle",
                     "bottom" => "bottom",
                     "baseline" => "baseline",
                     _ => continue,
@@ -227,7 +232,6 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                 let maps_to_dimension = is_embedded
                     || is_cell
                     || *tag == local_name!("table")
-                    || *tag == local_name!("tr")
                     || if is_width {
                         *tag == local_name!("col")
                             || *tag == local_name!("colgroup")
@@ -236,6 +240,7 @@ fn collect(node: &Node, elem: &ElementData, css: &mut String) {
                         *tag == local_name!("thead")
                             || *tag == local_name!("tbody")
                             || *tag == local_name!("tfoot")
+                            || *tag == local_name!("tr")
                     };
                 if maps_to_dimension {
                     // `table width` and `td`/`th` in both axes use the
@@ -359,7 +364,7 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
         css.push_str(match value.as_str() {
             "left" => "float:left;",
             "right" => "float:right;",
-            "center" | "middle" => "margin-left:auto;margin-right:auto;",
+            "center" => "margin-left:auto;margin-right:auto;",
             _ => "",
         });
     } else if is_embedded {
@@ -367,7 +372,9 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "left" => "float:left;",
             "right" => "float:right;",
             "top" => "vertical-align:top;",
-            "middle" | "absmiddle" | "abscenter" => "vertical-align:middle;",
+            // The spec wants the element's middle on the parent's baseline, which
+            // Stylo cannot express outside Gecko; `middle` is the closest value.
+            "middle" | "center" | "absmiddle" | "abscenter" => "vertical-align:middle;",
             "bottom" | "baseline" => "vertical-align:baseline;",
             "texttop" => "vertical-align:text-top;",
             "absbottom" => "vertical-align:bottom;",
@@ -380,8 +387,12 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "center" => "margin-left:auto;margin-right:auto;",
             _ => "",
         });
+    } else if *tag == local_name!("caption") {
+        // Only `bottom` maps; other values leave the caption's text alone.
+        if value == "bottom" {
+            css.push_str("caption-side:bottom;");
+        }
     } else if *tag == local_name!("div")
-        || *tag == local_name!("caption")
         || *tag == local_name!("thead")
         || *tag == local_name!("tbody")
         || *tag == local_name!("tfoot")
@@ -396,6 +407,7 @@ fn align_hint(tag: &markup5ever::LocalName, is_embedded: bool, value: &str, css:
             "right" => "text-align:-moz-right;",
             "center" | "middle" => "text-align:-moz-center;",
             "justify" => "text-align:justify;",
+            "absmiddle" if *tag != local_name!("div") => "text-align:center;",
             _ => "",
         });
     } else if *tag == local_name!("p")

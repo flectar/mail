@@ -748,3 +748,14 @@ fn wider_collapsed_edges_own_their_joints() {
         );
     }
 }
+
+#[test]
+fn table_align_maps_only_html_values() {
+    // HTML maps table `align` left, right and center; `middle` is not one of them.
+    let doc = document(
+        "<div style='width:400px'><table id='m' align='middle' style='width:100px'><tr><td></td></tr></table>
+         <table id='c' align='center' style='width:100px'><tr><td></td></tr></table></div>",
+    );
+    close(node(&doc, "#m").final_layout().location.x, 0.0);
+    close(node(&doc, "#c").final_layout().location.x, 150.0);
+}
