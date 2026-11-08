@@ -42,7 +42,7 @@ pub(crate) fn watch_memory_pressure() {
 
 /// libmalloc on iOS returns freed pages to the system on its own, and its
 /// pressure-relief call does nothing there.
-pub(crate) fn purge_allocator(_urgent: bool) {}
+pub(crate) fn purge_allocator(_purge: crate::memory::Purge) {}
 
 /// Build the platform context for the process launcher in src/desktop.rs.
 pub fn launch_context() -> Result<crate::PlatformContext, flectar_mail_core::error::CoreError> {

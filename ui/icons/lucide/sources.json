@@ -75,6 +75,9 @@
     "download.svg": {
       "source": "download"
     },
+    "external-link.svg": {
+      "source": "external-link"
+    },
     "eye.svg": {
       "source": "eye"
     },
@@ -182,6 +185,9 @@
     },
     "share.svg": {
       "source": "share-2"
+    },
+    "shield.svg": {
+      "source": "shield"
     },
     "sidebar-collapse.svg": {
       "source": "panel-left-close"
@@ -332,6 +338,10 @@
     "ellipsis": {
       "path": "sources/ellipsis.svg",
       "sha256": "98a57ae67ca5f122d5cd517332f52b78ce7e685801b954c9d8c02f1a7ab8d939"
+    },
+    "external-link": {
+      "path": "sources/external-link.svg",
+      "sha256": "d53efae83941d0b82bd9a0763f8e703767f45fc880625aa06614cf71bf89045d"
     },
     "eye": {
       "path": "sources/eye.svg",
@@ -540,6 +550,10 @@
     "share-2": {
       "path": "sources/share-2.svg",
       "sha256": "79044911436f7f4ce4741ad86a207cdd8407ad4763a5e41df170edc2a73ae4ae"
+    },
+    "shield": {
+      "path": "sources/shield.svg",
+      "sha256": "f2fd5ad159c52fe8e17b28b535ae1e74b4ef4a637c4fe12112235dc64528460f"
     },
     "sliders-horizontal": {
       "path": "sources/sliders-horizontal.svg",

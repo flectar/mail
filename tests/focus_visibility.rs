@@ -6,15 +6,20 @@ use std::{cell::Cell, rc::Rc};
 
 slint::slint! {
     import { Button } from "../ui/components/button.slint";
-    import { IconButton } from "../ui/components/controls.slint";
+    import { IconButton, TextLink } from "../ui/components/controls.slint";
+    import { SettingsLinkRow } from "../ui/components/settings-components.slint";
 
     export component FocusHarness inherits Window {
         preferred-width: 240px;
-        preferred-height: 160px;
+        preferred-height: 260px;
         out property <bool> button-ring: labeled.focus-visible;
         out property <bool> icon-ring: icon.focus-visible;
+        out property <bool> link-ring: link.focus-visible;
+        out property <bool> text-link-ring: text-link.focus-visible;
         callback button-activated();
         callback icon-activated();
+        callback link-activated();
+        callback text-link-activated();
 
         labeled := Button {
             x: 20px; y: 20px; width: 140px;
@@ -25,6 +30,17 @@ slint::slint! {
             x: 20px; y: 80px;
             tooltip-text: "More";
             clicked => { root.icon-activated(); }
+        }
+        link := SettingsLinkRow {
+            x: 20px; y: 130px; width: 200px;
+            text: "Website";
+            description: "Opens in the browser";
+            clicked => { root.link-activated(); }
+        }
+        text-link := TextLink {
+            x: 20px; y: 196px;
+            text: "Privacy policy";
+            clicked => { root.text-link-activated(); }
         }
     }
 }
@@ -42,15 +58,21 @@ fn pointer_activation_hides_rings_and_keyboard_use_restores_them() {
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
     slint::platform::set_platform(Box::new(Headless(window))).unwrap();
     let ui = FocusHarness::new().unwrap();
-    ui.window().set_size(slint::PhysicalSize::new(240, 160));
+    ui.window().set_size(slint::PhysicalSize::new(240, 260));
     ui.show().unwrap();
 
     let button_clicks = Rc::new(Cell::new(0));
     let icon_clicks = Rc::new(Cell::new(0));
+    let link_clicks = Rc::new(Cell::new(0));
+    let text_link_clicks = Rc::new(Cell::new(0));
     let count = button_clicks.clone();
     ui.on_button_activated(move || count.set(count.get() + 1));
     let count = icon_clicks.clone();
     ui.on_icon_activated(move || count.set(count.get() + 1));
+    let count = link_clicks.clone();
+    ui.on_link_activated(move || count.set(count.get() + 1));
+    let count = text_link_clicks.clone();
+    ui.on_text_link_activated(move || count.set(count.get() + 1));
 
     let pointer = |x, y| {
         let position = slint::LogicalPosition::new(x, y);
@@ -101,5 +123,33 @@ fn pointer_activation_hides_rings_and_keyboard_use_restores_them() {
     assert!(
         !ui.get_icon_ring(),
         "an icon click must clear its keyboard ring"
+    );
+
+    key(slint::platform::Key::Tab.into());
+    assert!(ui.get_link_ring(), "Tab must reach a settings link");
+    key(slint::platform::Key::Return.into());
+    assert_eq!(link_clicks.get(), 1, "Return opens the focused link");
+
+    pointer(120.0, 150.0);
+    assert_eq!(link_clicks.get(), 2);
+    assert!(
+        !ui.get_link_ring(),
+        "a link click must clear its keyboard ring"
+    );
+
+    key(slint::platform::Key::Tab.into());
+    assert!(ui.get_text_link_ring(), "Tab must reach a text link");
+    key(slint::platform::Key::Space.into());
+    assert_eq!(
+        text_link_clicks.get(),
+        1,
+        "Space opens the focused text link"
+    );
+
+    pointer(40.0, 218.0);
+    assert_eq!(text_link_clicks.get(), 2);
+    assert!(
+        !ui.get_text_link_ring(),
+        "a text link click must clear its keyboard ring"
     );
 }

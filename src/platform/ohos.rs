@@ -43,7 +43,7 @@ pub(crate) fn watch_memory_pressure() {}
 
 /// OpenHarmony's C library stubs `mallopt` and has no `malloc_trim`, so only
 /// the app's own caches can be released.
-pub(crate) fn purge_allocator(_urgent: bool) {}
+pub(crate) fn purge_allocator(_purge: crate::memory::Purge) {}
 
 pub(crate) fn pdfium_library() -> Result<PathBuf, String> {
     PDFIUM_LIBRARY

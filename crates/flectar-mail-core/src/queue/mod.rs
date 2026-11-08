@@ -224,20 +224,12 @@ async fn execute_actions(
 fn is_permanent(error: &CoreError) -> bool {
     match error {
         CoreError::NotFound(_) => true,
-        // Tagged NO/BAD responses reject the command itself. Async IMAP has
-        // used both `NO ...` and `no: ...` display forms across versions.
-        CoreError::Imap(message) => {
-            let message = message.trim().to_ascii_lowercase();
-            if message.starts_with("this imap server does not support safe permanent deletion") {
-                return true;
-            }
-            ["no", "bad"].iter().any(|status| {
-                message == *status
-                    || message
-                        .strip_prefix(status)
-                        .is_some_and(|tail| matches!(tail.chars().next(), Some(' ' | ':' | '[')))
-            })
-        }
+        // A tagged NO or BAD turns down the command itself.
+        CoreError::ImapRefused(_) => true,
+        CoreError::Imap(message) => message
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("this imap server does not support safe permanent deletion"),
         // All SMTP 5xx replies are permanent failures of the current request.
         CoreError::Smtp(message) => has_permanent_smtp_reply(message),
         _ => false,
@@ -755,7 +747,7 @@ async fn remove_transferred(
         let uidplus = session
             .capabilities()
             .await
-            .map_err(|error| CoreError::Imap(error.to_string()))?
+            .map_err(imap::command_error)?
             .has_str("UIDPLUS");
         let trash = ctx
             .db
@@ -1425,12 +1417,14 @@ mod tests {
 
     #[test]
     fn command_rejections_are_permanent_but_transport_errors_retry() {
-        assert!(is_permanent(&CoreError::Imap(
+        assert!(is_permanent(&CoreError::ImapRefused(
             "NO [NOPERM] permission denied".into()
         )));
-        assert!(is_permanent(&CoreError::Imap(
-            "bad: invalid command".into()
+        assert!(is_permanent(&CoreError::ImapRefused(
+            "BAD invalid command".into()
         )));
+        // Only the server's own NO or BAD says so, not words of ours.
+        assert!(!is_permanent(&CoreError::Imap("no IMAP session".into())));
         assert!(is_permanent(&CoreError::Smtp(
             "554 transaction failed".into()
         )));
