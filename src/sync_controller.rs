@@ -10,6 +10,7 @@
 //! through the window's own account updates.
 
 use super::*;
+use crate::documents::{DocumentDialog, DocumentFuture, DocumentProvider};
 use crate::retained_model::RetainedModel;
 use chrono::{Datelike, Timelike};
 use flectar_mail_core::Core;
@@ -20,6 +21,15 @@ use flectar_mail_core::device_sync::{
 use flectar_mail_core::error::CoreError;
 use slint::SharedString;
 use startup::DeviceSyncUpdates;
+use std::{io::Write, path::Path};
+
+/// The name a saved recovery code is offered under. Saving a new code over
+/// an old one replaces it, as it should: the old one no longer works.
+const RECOVERY_FILE_NAME: &str = "flectar-mail-sync-recovery-code.txt";
+
+/// Staged copies of the recovery code start with this, so a copy a crash
+/// left behind during the save dialog goes at the next start.
+const RECOVERY_STAGING_PREFIX: &str = "recovery-code-";
 
 /// The most steps of other pairings kept while the dialog waits to learn
 /// which pairing its request started.
@@ -41,6 +51,8 @@ pub(super) struct SyncController {
     early: RefCell<Vec<(u64, PairingEvent)>>,
     /// Flectar's server was asked what it charges, while sync was off.
     offer_loaded: Cell<bool>,
+    /// The save dialog for the recovery code is open.
+    saving_recovery: Cell<bool>,
 }
 
 impl SyncController {
@@ -52,10 +64,15 @@ impl SyncController {
         state: &Rc<RefCell<InboxState>>,
         runtime: &tokio::runtime::Handle,
         urls: ExternalUrlOpener,
+        documents: Arc<dyn DocumentProvider>,
+        temp_dir: PathBuf,
     ) {
         let ui = app.global::<SyncUi>();
         ui.set_devices(Rc::clone(&self.devices).into());
         ui.set_can_buy(platform::SELLS_SYNC);
+
+        let staging = temp_dir.clone();
+        runtime.spawn_blocking(move || remove_staged_recovery_codes(&staging));
 
         let actions = Actions {
             app: app.as_weak(),
@@ -63,6 +80,8 @@ impl SyncController {
             runtime: runtime.clone(),
             controller: Rc::clone(self),
             urls,
+            documents,
+            temp_dir,
         };
 
         let turn_on = actions.clone();
@@ -85,6 +104,8 @@ impl SyncController {
         ui.on_remove_device(move |id| remove.remove_device(id.to_string()));
         let reset = actions.clone();
         ui.on_reset_recovery(move || reset.reset_recovery());
+        let save = actions.clone();
+        ui.on_save_recovery_code(move |text| save.save_recovery_code(text.to_string()));
         let turn_off = actions.clone();
         ui.on_turn_off(move || turn_off.turn_off());
         let delete = actions.clone();
@@ -249,6 +270,10 @@ struct Actions {
     runtime: tokio::runtime::Handle,
     controller: Rc<SyncController>,
     urls: ExternalUrlOpener,
+    documents: Arc<dyn DocumentProvider>,
+    /// Where a file to save is written first, below the cache directory,
+    /// which every document provider accepts as an export source.
+    temp_dir: PathBuf,
 }
 
 impl Actions {
@@ -455,6 +480,55 @@ impl Actions {
                 Err(error) => show_failure(ui, "reset", &error_text(&error)),
             },
         );
+    }
+
+    /// Save the recovery code as a text file where the user picks, through
+    /// the same pickers as attachments. The staged copy goes as soon as the
+    /// picker is done with it.
+    fn save_recovery_code(&self, text: String) {
+        if self.controller.saving_recovery.replace(true) {
+            return;
+        }
+        let documents = Arc::clone(&self.documents);
+        let temp_dir = self.temp_dir.clone();
+        let core = self.core();
+        let request: DocumentFuture<bool> = Box::pin(async move {
+            let file = tokio::task::spawn_blocking(move || stage_recovery_code(&temp_dir, &text))
+                .await
+                .map_err(|error| error.to_string())?
+                .map_err(|error| error.to_string())?;
+            // Start in the download folder from Settings, as attachments do.
+            let dialog = match core {
+                Some(core) => crate::documents::download_dialog_for(&core).await,
+                None => DocumentDialog::default(),
+            };
+            let dialog = DocumentDialog {
+                title: "Save recovery code".into(),
+                filter: Some(("Text".into(), &["txt"])),
+                ..dialog
+            };
+            documents
+                .export_with(file.to_path_buf(), RECOVERY_FILE_NAME.into(), dialog)
+                .await
+        });
+        let app = self.app.clone();
+        let controller = Rc::clone(&self.controller);
+        crate::documents::run_request(&self.runtime, request, move |result| {
+            controller.saving_recovery.set(false);
+            let Some(app) = app.upgrade() else {
+                return;
+            };
+            let ui = app.global::<SyncUi>();
+            match result {
+                Ok(true) => {
+                    ui.set_recovery_saved(true);
+                    ui.set_recovery_save_error(SharedString::new());
+                }
+                // Cancelled.
+                Ok(false) => {}
+                Err(error) => ui.set_recovery_save_error(error.into()),
+            }
+        });
     }
 
     fn turn_off(&self) {
@@ -785,6 +859,36 @@ fn show_recovery_words(ui: &SyncUi, words: &str) {
     let words: Vec<&str> = words.split_whitespace().collect();
     ui.set_recovery_text(words.join(" ").into());
     ui.set_recovery_words(words_model(&words));
+    ui.set_recovery_saved(false);
+    ui.set_recovery_save_error(SharedString::new());
+}
+
+/// Writes the recovery code's file text below `temp_dir` for a picker to
+/// copy, readable by this user only. The file goes when the path drops.
+fn stage_recovery_code(temp_dir: &Path, text: &str) -> std::io::Result<tempfile::TempPath> {
+    std::fs::create_dir_all(temp_dir)?;
+    let mut file = tempfile::Builder::new()
+        .prefix(RECOVERY_STAGING_PREFIX)
+        .suffix(".txt")
+        .tempfile_in(temp_dir)?;
+    file.write_all(text.as_bytes())?;
+    Ok(file.into_temp_path())
+}
+
+/// Removes staged recovery codes that a crash left behind.
+fn remove_staged_recovery_codes(temp_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(temp_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(RECOVERY_STAGING_PREFIX)
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn words_model<S: AsRef<str>>(words: &[S]) -> ModelRc<SharedString> {
@@ -1157,5 +1261,32 @@ mod tests {
         assert!(!is_today);
         assert!(text.contains("22"), "{text}");
         assert_eq!(last_synced(None, &now), (String::new(), false));
+    }
+
+    #[test]
+    fn a_staged_recovery_code_stays_private_and_never_outlives_its_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let staged = stage_recovery_code(dir.path(), "abandon ability").unwrap();
+        assert_eq!(std::fs::read_to_string(&staged).unwrap(), "abandon ability");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&staged).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0, "{mode:o}");
+        }
+        let path = staged.to_path_buf();
+        drop(staged);
+        assert!(!path.exists());
+
+        // A copy a crash left behind goes at the next start; other files stay.
+        let left = stage_recovery_code(dir.path(), "abandon")
+            .unwrap()
+            .keep()
+            .unwrap();
+        let other = dir.path().join("email-1.html");
+        std::fs::write(&other, "<p></p>").unwrap();
+        remove_staged_recovery_codes(dir.path());
+        assert!(!left.exists());
+        assert!(other.exists());
     }
 }

@@ -31,8 +31,8 @@ export global SyncUi {
     // A request is running; its buttons wait.
     in property <bool> busy;
     // The action that failed last: "turn-on", "server", "remove", "reset",
-    // "turn-off", "delete", "subscribe" or "manage", and why. Empty when the
-    // last one worked.
+    // "turn-off", "delete", "sign-ins", "subscribe" or "manage", and why.
+    // Empty when the last one worked.
     in property <string> failed-action;
     in property <string> failure;
 
@@ -44,6 +44,10 @@ export global SyncUi {
     in-out property <[string]> recovery-words;
     // The same words on one line, for copying.
     in-out property <string> recovery-text;
+    // The words went into a file the user picked.
+    in-out property <bool> recovery-saved;
+    // Why saving them as a file failed. Empty when it didn't.
+    in-out property <string> recovery-save-error;
 
     // The open dialog: "", "join" or "invite".
     in-out property <string> dialog;
@@ -103,6 +107,8 @@ export global SyncUi {
     callback cancel-pairing();
     callback remove-device(string /* id */);
     callback reset-recovery();
+    // Save the recovery code as a text file where the user picks.
+    callback save-recovery-code(string /* the file's text */);
     callback turn-off();
     callback delete-everywhere();
     callback set-sync-sign-ins(bool /* on */);
@@ -1049,6 +1055,12 @@ export component RecoveryWordsDialog inherits SyncModal {
     callback done();
 
     private property <bool> copied;
+    // The saved file: the words on one line, as Copy puts them, so they
+    // paste into another device's recovery code field.
+    private property <string> file-text: @tr("Flectar Mail Sync recovery code") + "\n\n"
+        + SyncUi.recovery-text + "\n\n"
+        + @tr("On a new device, open Settings in Flectar Mail, then Sync, choose Recovery code and enter these 24 words in order.") + "\n\n"
+        + @tr("Anyone who has these words can restore your Flectar Mail Sync, with the accounts, passwords and sign-ins it carries. Keep this file somewhere only you can reach, such as a password manager or a USB drive.") + "\n";
 
     open: SyncUi.recovery-words.length > 0;
     title: @tr("Save your recovery code");
@@ -1057,8 +1069,8 @@ export component RecoveryWordsDialog inherits SyncModal {
 
     Text {
         text: SyncUi.sync-sign-ins
-            ? @tr("If you lose all your devices, these 24 words bring everything back, signed in. Anyone who has them can read your mail and send as you, so keep them offline, such as on paper. Flectar Mail cannot show them again.")
-            : @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so keep them offline, such as on paper. Flectar Mail cannot show them again.");
+            ? @tr("If you lose all your devices, these 24 words bring everything back, signed in. Anyone who has them can read your mail and send as you, so write them down or save them somewhere only you can reach, such as a password manager. Flectar Mail cannot show them again.")
+            : @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so write them down or save them somewhere only you can reach, such as a password manager. Flectar Mail cannot show them again.");
         color: root.body-text;
         font-size: TypeScale.secondary;
         wrap: word-wrap;
@@ -1069,11 +1081,12 @@ export component RecoveryWordsDialog inherits SyncModal {
         secondary-text: root.secondary-text;
         fill: root.fill;
     }
+    // Ways to keep the words, below them, as GitHub and Element place theirs.
     Rectangle {
         height: 32px;
         HorizontalLayout {
             spacing: 8px;
-            alignment: end;
+            alignment: start;
             Button {
                 width: max(110px, self.content-width);
                 height: 32px;
@@ -1091,9 +1104,10 @@ export component RecoveryWordsDialog inherits SyncModal {
             Button {
                 width: max(130px, self.content-width);
                 height: 32px;
-                text: @tr("I saved it");
-                primary: true;
-                clicked => { root.done(); }
+                text: SyncUi.recovery-saved ? @tr("Saved") : @tr("Save as file");
+                icon: SyncUi.recovery-saved ? @image-url("icons/lucide/outline/check.svg") : @image-url("icons/lucide/outline/download.svg");
+                has-icon: true;
+                clicked => { SyncUi.save-recovery-code(root.file-text); }
             }
         }
         words-clipboard := TextInput {
@@ -1105,6 +1119,21 @@ export component RecoveryWordsDialog inherits SyncModal {
             enabled: false;
             read-only: true;
             accessible-role: none;
+        }
+    }
+    if SyncUi.recovery-save-error != "" : Notice {
+        text: @tr("Could not save the file: {}", SyncUi.recovery-save-error);
+        body-text: root.body-text;
+        fill: root.fill;
+    }
+    HorizontalLayout {
+        alignment: end;
+        Button {
+            width: max(130px, self.content-width);
+            height: 32px;
+            text: @tr("I saved it");
+            primary: true;
+            clicked => { root.done(); }
         }
     }
 }

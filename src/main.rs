@@ -7935,7 +7935,14 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     );
 
     import_controller::register_import_callbacks(&app, &platform.documents, &state, &runtime);
-    device_sync.register(&app, &state, &runtime, platform.external_urls.clone());
+    device_sync.register(
+        &app,
+        &state,
+        &runtime,
+        platform.external_urls.clone(),
+        platform.documents.clone(),
+        platform.paths.temp_dir(),
+    );
 
     register_renderer_input_callbacks(
         &app,
