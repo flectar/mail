@@ -679,6 +679,12 @@ impl LayoutPassState<'_> {
         // Out-of-flow candidates bubbled up from this container and its in-flow subtree.
         // These are laid out by the out-of-flow positioning pass (`compute_oof_layout`).
         let mut oof_candidates = OofCandidates::new();
+        // Floats placed in this formatting context, and out-of-flow candidates bubbled
+        // up from them. They move with the content when `align-content` shifts it.
+        #[cfg(feature = "floats")]
+        let mut placed_floats = Vec::new();
+        #[cfg(feature = "floats")]
+        let mut float_oof_candidates = OofCandidates::new();
 
         // Perform inline layout
         #[cfg(feature = "floats")]
@@ -795,9 +801,10 @@ impl LayoutPassState<'_> {
 
                         // Translate anchors from item-relative to container-relative
                         // coordinates and collect candidates bubbled from the float's subtree
+                        placed_floats.push(node_id);
                         if !output.oof_candidates.is_empty() {
                             output.oof_candidates.translate(location);
-                            oof_candidates.append(&mut output.oof_candidates);
+                            float_oof_candidates.append(&mut output.oof_candidates);
                         }
 
                         // dbg!(&layout.size);
@@ -920,9 +927,10 @@ impl LayoutPassState<'_> {
 
         let container_direction = self.nodes[node_id].layout_style().direction();
 
-        // `align-content` aligns the line boxes (as a single unit) within the content box in
-        // the block axis. Floats are positioned relative to the formatting context and are not
-        // moved. The offset is stored on the text layout for painting and hit-testing.
+        // `align-content` aligns the entire contents (as a single unit) within the content box
+        // in the block axis (https://drafts.csswg.org/css-align-3/#distribution-block). This
+        // includes table cells' `vertical-align`. The offset is stored on the text layout for
+        // painting and hit-testing.
         let align_content = BlockContainerStyle::align_content(&self.nodes[node_id].layout_style());
         let block_offset = if align_content.keyword() == taffy::AlignContentKeyword::Normal {
             0.0
@@ -933,6 +941,21 @@ impl LayoutPassState<'_> {
         };
         inline_layout.block_offset = block_offset;
         let line_box_top = container_pb.top + block_offset;
+
+        // Floats belong to the contents when this box roots their formatting context.
+        #[cfg(feature = "floats")]
+        {
+            if is_bfc_root && block_offset != 0.0 {
+                for &float_id in &placed_floats {
+                    self.nodes[float_id].unrounded_layout_mut().location.y += block_offset;
+                }
+                float_oof_candidates.translate(taffy::Point {
+                    x: 0.0,
+                    y: block_offset,
+                });
+            }
+            oof_candidates.append(&mut float_oof_candidates);
+        }
 
         // Store sizes and positions of inline boxes
         let mut ibox_order: u32 = 0;

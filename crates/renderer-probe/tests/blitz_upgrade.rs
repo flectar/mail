@@ -413,3 +413,40 @@ fn image_layout_does_not_depend_on_load_timing() {
         );
     }
 }
+
+/// The first and last pixel rows that contain `color` in a 400px-wide render.
+fn rows_with(pixels: &[u8], color: [u8; 4]) -> Option<(usize, usize)> {
+    let rows: Vec<usize> = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(_, pixel)| **pixel == color)
+        .map(|(index, _)| index / 400)
+        .collect();
+    Some((*rows.first()?, *rows.last()?))
+}
+
+#[test]
+fn middle_aligned_cells_move_text_and_floats_once() {
+    // The 20px line and the float are the cell's contents. In a 100px row
+    // they start 40px down, painted where they were laid out.
+    let mut doc = document(
+        "<table style='border-spacing:0;font:16px/20px sans-serif'><tr>
+         <td style='height:100px;width:50px'></td>
+         <td style='vertical-align:middle'><span style='float:left;width:10px;height:10px;background:#00f'></span><span style='background:#f00'>x</span></td>
+         </tr></table>",
+    );
+    let pixels = render_to_buffer::<VelloCpuImageRenderer, _>(
+        |scene| blitz_paint::paint_scene(scene, &mut doc, 1.0, 400, 300, 0, 0),
+        400,
+        300,
+    );
+    let (text_top, text_bottom) = rows_with(&pixels, [255, 0, 0, 255]).unwrap();
+    let (float_top, _) = rows_with(&pixels, [0, 0, 255, 255]).unwrap();
+    assert!(
+        (text_top + text_bottom).abs_diff(100) <= 4,
+        "text rows {text_top}..{text_bottom}"
+    );
+    assert!(float_top.abs_diff(40) <= 1, "float top {float_top}");
+}

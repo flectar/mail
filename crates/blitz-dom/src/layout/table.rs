@@ -65,7 +65,6 @@ pub struct TableContext {
 pub struct TableCell {
     pub node_id: NodeId,
     style: taffy::Style<Atom>,
-    vertical_align: CellVerticalAlign,
     layout_style: ServoArc<ComputedValues>,
     /// Zero-based slot of the cell's first row and column.
     pub row: u16,
@@ -76,37 +75,6 @@ pub struct TableCell {
     collapsed_border: Option<taffy::Rect<f32>>,
     /// The authored `width`; the grid item itself is always auto-sized.
     authored_width: taffy::Dimension,
-}
-
-/// How a cell positions its content within the height of its row(s).
-///
-/// `baseline` is approximated as `top`: aligning first baselines across a row
-/// would need the cell box itself to move, which would detach its background
-/// from the row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CellVerticalAlign {
-    Top,
-    Middle,
-    Bottom,
-}
-
-impl CellVerticalAlign {
-    fn from_style(style: &ComputedValues) -> Self {
-        use style::values::computed::box_::AlignmentBaseline;
-        use style::values::generics::box_::{BaselineShift, BaselineShiftKeyword};
-        // `vertical-align` is a shorthand: `top`/`bottom` become baseline
-        // shifts, `middle` an alignment baseline.
-        match style.clone_baseline_shift() {
-            BaselineShift::Keyword(BaselineShiftKeyword::Top) => return Self::Top,
-            BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => return Self::Bottom,
-            BaselineShift::Keyword(BaselineShiftKeyword::Center) => return Self::Middle,
-            _ => {}
-        }
-        match style.clone_alignment_baseline() {
-            AlignmentBaseline::Middle => Self::Middle,
-            _ => Self::Top,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1041,12 +1009,11 @@ impl TableCollector {
             .and_then(|val| val.trim().parse::<u16>().ok())
             .map(|v| if v == 0 { MAX_GRID_LINE } else { v })
             .unwrap_or(1);
-        let (mut style, borders, vertical_align) = {
+        let (mut style, borders) = {
             let stylo_style = node.primary_styles().unwrap();
             (
                 table_taffy_style(&stylo_style, self.wm),
                 border_candidates(&stylo_style, 4),
-                CellVerticalAlign::from_style(&stylo_style),
             )
         };
 
@@ -1112,7 +1079,6 @@ impl TableCollector {
         self.cells.push(TableCell {
             node_id,
             style,
-            vertical_align,
             layout_style: node.primary_styles().unwrap().clone(),
             row,
             column: column as u16,
@@ -1302,7 +1268,6 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
     ) -> taffy::LayoutOutput {
         let cell = &self.ctx.cells[usize::from(node_id)];
         let dom_id = cell.node_id;
-        let vertical_align = cell.vertical_align;
         let node_id = crate::taffy_node_id(dom_id);
         let measure_without_width =
             !self.ctx.is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG;
@@ -1311,53 +1276,7 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
             .style_override
             .replace(cell.layout_style.clone());
 
-        let offset = match (vertical_align, inputs.run_mode, inputs.known_dimensions) {
-            (
-                CellVerticalAlign::Middle | CellVerticalAlign::Bottom,
-                taffy::RunMode::PerformLayout,
-                taffy::Size {
-                    width: Some(cell_width),
-                    height: Some(cell_height),
-                },
-            ) => {
-                let content_height = self.cell_content_height(dom_id, cell_width, &inputs);
-                let free = (cell_height - content_height).max(0.0);
-                if vertical_align == CellVerticalAlign::Middle {
-                    free / 2.0
-                } else {
-                    free
-                }
-            }
-            _ => 0.0,
-        };
-
-        let mut output = if offset > 0.0 {
-            // CSS 2.1 places the extra space above the content of a middle or
-            // bottom aligned cell. Lay the cell out with that space as
-            // additional top padding, so block and inline content move as one.
-            let resolved = self.doc.nodes[dom_id]
-                .layout_style()
-                .padding()
-                .top
-                .resolve_or_zero(inputs.parent_size.width, resolve_calc_value);
-            let previous = self.doc.nodes[dom_id].layout_data().style_override.clone();
-            let overridden = self.doc.nodes[dom_id]
-                .layout_data_mut()
-                .style_override
-                .as_mut()
-                .unwrap();
-            ServoArc::make_mut(overridden).mutate_padding().padding_top =
-                style::values::generics::NonNegative(
-                    style::values::computed::LengthPercentage::new_length(
-                        style::values::computed::Length::new(resolved + offset),
-                    ),
-                );
-            let output = self.doc.compute_child_layout(node_id, inputs);
-            self.doc.nodes[dom_id].layout_data_mut().style_override = previous;
-            output
-        } else {
-            self.doc.compute_child_layout(node_id, inputs)
-        };
+        let mut output = self.doc.compute_child_layout(node_id, inputs);
 
         if *self.ctx.relax_text_minimums.borrow()
             && inputs.run_mode == taffy::RunMode::ComputeSize
@@ -1454,50 +1373,6 @@ impl TableTreeWrapper<'_, '_> {
             .resolve_or_zero(None, resolve_calc_value);
         let leading = (start - padding.left - border.left).min(0.0);
         Some(end + padding.right + border.right - leading)
-    }
-
-    /// The border-box height a cell needs for its content at `width`,
-    /// ignoring an authored height, which only sets the row's minimum.
-    fn cell_content_height(
-        &mut self,
-        dom_id: NodeId,
-        width: f32,
-        inputs: &taffy::tree::LayoutInput,
-    ) -> f32 {
-        let measure = taffy::tree::LayoutInput {
-            run_mode: taffy::RunMode::ComputeSize,
-            sizing_mode: taffy::SizingMode::InherentSize,
-            axis: taffy::RequestedAxis::Vertical,
-            known_dimensions: taffy::Size {
-                width: Some(width),
-                height: None,
-            },
-            vertical_margins_are_collapsible: taffy::Line::FALSE,
-            ..*inputs
-        };
-        let node_id = crate::taffy_node_id(dom_id);
-        let style = self.doc.nodes[dom_id].layout_style();
-        let (height, min_height) = (style.size().height, style.min_size().height);
-        drop(style);
-        if height.is_auto() && min_height.is_auto() {
-            // Usually a cache hit from row sizing.
-            return self.doc.compute_child_layout(node_id, measure).size.height;
-        }
-
-        // Measuring without the authored height must not leave that result in
-        // the cell's cache, where it would answer later row-sizing queries.
-        let node = &mut self.doc.nodes[dom_id];
-        node.clear_layout_cache();
-        let previous = node.layout_data().style_override.clone();
-        let overridden = node.layout_data_mut().style_override.as_mut().unwrap();
-        let position = ServoArc::make_mut(overridden).mutate_position();
-        position.height = style::values::generics::length::Size::Auto;
-        position.min_height = style::values::generics::length::Size::Auto;
-        let content_height = self.doc.compute_child_layout(node_id, measure).size.height;
-        let node = &mut self.doc.nodes[dom_id];
-        node.layout_data_mut().style_override = previous;
-        node.clear_layout_cache();
-        content_height
     }
 }
 

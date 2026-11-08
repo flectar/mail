@@ -46,7 +46,7 @@ index 0a5fbc1..f0963ad 100644
                      // static position is the top-left of the table's content box.
                      let context = table_wrapper.ctx;
 diff --git a/crates/blitz-dom/src/layout/table.rs b/crates/blitz-dom/src/layout/table.rs
-index 30b96f0..607eb32 100644
+index 30b96f0..ea31abc 100644
 --- a/crates/blitz-dom/src/layout/table.rs
 +++ b/crates/blitz-dom/src/layout/table.rs
 @@ -1,11 +1,12 @@
@@ -79,7 +79,7 @@ index 30b96f0..607eb32 100644
  
  use super::damage::{CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC};
  use super::resolve_calc_value;
-@@ -35,108 +36,267 @@ pub struct TableTreeWrapper<'a, 'doc> {
+@@ -35,108 +36,235 @@ pub struct TableTreeWrapper<'a, 'doc> {
      pub(crate) ctx: Arc<TableContext>,
  }
  
@@ -129,7 +129,6 @@ index 30b96f0..607eb32 100644
      pub node_id: NodeId,
 -    /// Index (into `TableContext::rows`) of the row the cell originates in
 +    style: taffy::Style<Atom>,
-+    vertical_align: CellVerticalAlign,
 +    layout_style: ServoArc<ComputedValues>,
 +    /// Zero-based slot of the cell's first row and column.
      pub row: u16,
@@ -155,46 +154,6 @@ index 30b96f0..607eb32 100644
 -    num_columns: u16,
 -    /// For each column, the number of further rows it is occupied by a rowspan cell
 -    rowspans: Vec<u16>,
-+/// How a cell positions its content within the height of its row(s).
-+///
-+/// `baseline` is approximated as `top`: aligning first baselines across a row
-+/// would need the cell box itself to move, which would detach its background
-+/// from the row.
-+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-+enum CellVerticalAlign {
-+    Top,
-+    Middle,
-+    Bottom,
- }
- 
--impl ColumnCursor {
--    fn start_row(&mut self) {
--        self.col = 0;
--        for remaining in self.rowspans.iter_mut() {
--            *remaining = remaining.saturating_sub(1);
-+impl CellVerticalAlign {
-+    fn from_style(style: &ComputedValues) -> Self {
-+        use style::values::computed::box_::AlignmentBaseline;
-+        use style::values::generics::box_::{BaselineShift, BaselineShiftKeyword};
-+        // `vertical-align` is a shorthand: `top`/`bottom` become baseline
-+        // shifts, `middle` an alignment baseline.
-+        match style.clone_baseline_shift() {
-+            BaselineShift::Keyword(BaselineShiftKeyword::Top) => return Self::Top,
-+            BaselineShift::Keyword(BaselineShiftKeyword::Bottom) => return Self::Bottom,
-+            BaselineShift::Keyword(BaselineShiftKeyword::Center) => return Self::Middle,
-+            _ => {}
-+        }
-+        match style.clone_alignment_baseline() {
-+            AlignmentBaseline::Middle => Self::Middle,
-+            _ => Self::Top,
-         }
-     }
-+}
- 
--    /// Advance past occupied columns, returning the column of the next cell
--    fn next_free(&mut self) -> u16 {
--        while self.rowspans.get(self.col as usize).is_some_and(|r| *r > 0) {
--            self.col += 1;
 +#[derive(Debug, Clone)]
 +pub struct TableRow {
 +    pub node_id: NodeId,
@@ -204,8 +163,14 @@ index 30b96f0..607eb32 100644
 +    /// Zero-based grid row. A table may also have an anonymous first row for
 +    /// cells outside any `<tr>`, which has no entry here.
 +    pub index: u16,
-+}
-+
+ }
+ 
+-impl ColumnCursor {
+-    fn start_row(&mut self) {
+-        self.col = 0;
+-        for remaining in self.rowspans.iter_mut() {
+-            *remaining = remaining.saturating_sub(1);
+-        }
 +/// One resolved edge of the collapsed border model.
 +#[derive(Debug, Clone, Copy, PartialEq)]
 +pub struct CollapsedEdge {
@@ -246,8 +211,12 @@ index 30b96f0..607eb32 100644
 +    /// The edge on horizontal line `line` (0..=rows) over `column`.
 +    pub fn horizontal(&self, line: usize, column: usize) -> Option<&CollapsedEdge> {
 +        self.horizontal.get(line * self.columns + column)?.as_ref()
-+    }
-+
+     }
+ 
+-    /// Advance past occupied columns, returning the column of the next cell
+-    fn next_free(&mut self) -> u16 {
+-        while self.rowspans.get(self.col as usize).is_some_and(|r| *r > 0) {
+-            self.col += 1;
 +    /// The edge on vertical line `line` (0..=columns) beside `row`.
 +    pub fn vertical(&self, row: usize, line: usize) -> Option<&CollapsedEdge> {
 +        self.vertical.get(row * (self.columns + 1) + line)?.as_ref()
@@ -331,12 +300,12 @@ index 30b96f0..607eb32 100644
 +        // `hidden` suppresses every other border on the edge.
 +        if candidate.style == BorderStyle::Hidden {
 +            return None;
++        }
++        if candidate.style == BorderStyle::None || candidate.width <= 0.0 {
++            continue;
          }
 -        for remaining in &mut self.rowspans[self.col as usize..end as usize] {
 -            *remaining = rowspan - 1;
-+        if candidate.style == BorderStyle::None || candidate.width <= 0.0 {
-+            continue;
-+        }
 +        let wins = best.is_none_or(|best| {
 +            (
 +                candidate.width,
@@ -412,7 +381,7 @@ index 30b96f0..607eb32 100644
  /// The writing mode the table's grid runs in (the table's own)
  #[cfg_attr(not(feature = "writing-mode"), allow(unused_variables))]
  fn table_wm(doc: &BaseDocument, table_root_node_id: NodeId) -> WritingMode {
-@@ -159,14 +319,6 @@ fn table_taffy_style(style: &ComputedValues, table_wm: WritingMode) -> taffy::St
+@@ -159,14 +287,6 @@ fn table_taffy_style(style: &ComputedValues, table_wm: WritingMode) -> taffy::St
      stylo_taffy::to_taffy_style_in(style, table_wm)
  }
  
@@ -427,7 +396,7 @@ index 30b96f0..607eb32 100644
  /// Build a `calc(<percent> + <length>)` track sizing function. The calc value is
  /// boxed and stored in `calc_values` so that the raw pointer Taffy holds stays valid.
  fn percent_plus_length(
-@@ -203,12 +355,6 @@ pub(crate) fn build_table_context(
+@@ -203,12 +323,6 @@ pub(crate) fn build_table_context(
      doc: &mut BaseDocument,
      table_root_node_id: NodeId,
  ) -> (TableContext, Vec<NodeId>) {
@@ -440,7 +409,7 @@ index 30b96f0..607eb32 100644
      let wm = table_wm(doc, table_root_node_id);
      let root_node = &mut doc.nodes[table_root_node_id];
  
-@@ -220,16 +366,12 @@ pub(crate) fn build_table_context(
+@@ -220,16 +334,12 @@ pub(crate) fn build_table_context(
  
      let mut style = table_taffy_style(&stylo_styles, wm);
      style.item_is_table = true;
@@ -459,7 +428,7 @@ index 30b96f0..607eb32 100644
      let is_fixed = match stylo_styles.clone_table_layout() {
          TableLayout::Fixed => !style.size.width.is_auto(),
          TableLayout::Auto => false,
-@@ -237,142 +379,93 @@ pub(crate) fn build_table_context(
+@@ -237,142 +347,93 @@ pub(crate) fn build_table_context(
  
      let border_collapse = stylo_styles.clone_border_collapse();
      let border_spacing = stylo_styles.clone_border_spacing().0;
@@ -593,8 +562,7 @@ index 30b96f0..607eb32 100644
 -                percent_plus_length(&mut calc_values, percent, extra)
 -            }
 -        };
-+    column_count = column_count.max(column_sizes.len());
- 
+-
 -        for column in column_sizes.iter_mut() {
 -            if column.max.is_auto() {
 -                *column = remaining_column;
@@ -602,7 +570,8 @@ index 30b96f0..607eb32 100644
 -                *column = percent_track(column.max.into_raw().value(), 0.0);
 -            }
 -        }
--
++    column_count = column_count.max(column_sizes.len());
+ 
 -        // Percentage widths on cells apply to the cell's content box, so the
 -        // cell's horizontal padding and border must be added to the column width.
 -        for (col_idx, percent, extra) in percent_columns {
@@ -665,7 +634,7 @@ index 30b96f0..607eb32 100644
              style.padding = taffy::Rect {
                  left: style_helpers::length(padding.left + spacing_x),
                  right: style_helpers::length(padding.right + spacing_x),
-@@ -384,36 +477,185 @@ pub(crate) fn build_table_context(
+@@ -384,36 +445,185 @@ pub(crate) fn build_table_context(
                  height: style_helpers::length(spacing_y),
              }
          }
@@ -689,7 +658,9 @@ index 30b96f0..607eb32 100644
 +                    &row_borders,
 +                    &groups,
 +                    &table_borders,
-+                );
+                 );
+-                let y = side_width(border.border_top_width.0, border.border_top_style).max(
+-                    side_width(border.border_bottom_width.0, border.border_bottom_style),
 +                // The table box holds the outer half of its edges.
 +                let outer = |edges: &mut dyn Iterator<Item = Option<&CollapsedEdge>>,
 +                             part: fn(&CollapsedEdge) -> f32| {
@@ -700,18 +671,16 @@ index 30b96f0..607eb32 100644
 +                    &mut (0..rows_n).map(|r| borders.vertical(r, 0)),
 +                    CollapsedEdge::before,
                  );
--                let y = side_width(border.border_top_width.0, border.border_top_style).max(
--                    side_width(border.border_bottom_width.0, border.border_bottom_style),
-+                let end_border = outer(
-+                    &mut (0..rows_n).map(|r| borders.vertical(r, cols_n)),
-+                    CollapsedEdge::after,
-                 );
 -                taffy::Size {
 -                    width: style_helpers::length(x),
 -                    height: style_helpers::length(y),
 -                }
 -            })
 -            .unwrap_or(taffy::Size::ZERO.map(style_helpers::length)),
++                let end_border = outer(
++                    &mut (0..rows_n).map(|r| borders.vertical(r, cols_n)),
++                    CollapsedEdge::after,
++                );
 +                let (left, right) = if rtl {
 +                    (end_border, start_border)
 +                } else {
@@ -785,8 +754,8 @@ index 30b96f0..607eb32 100644
 +        if is_fixed {
 +            cell.style.min_size.width = style_helpers::length(0.0);
 +        }
-+    }
-+
+     }
+ 
 +    // Column widths come from the cells' authored widths, measured with the
 +    // borders the cells actually have (resolved half-edges when collapsed).
 +    // Fixed layout takes its columns from the first row alone. Auto layout
@@ -810,7 +779,7 @@ index 30b96f0..607eb32 100644
 +                hint.merge(&share);
 +            }
 +        }
-     }
++    }
 +    // When every column has an authored length in a table of definite width,
 +    // browsers grow those columns in proportion to the authored widths.
 +    let table_width_is_definite = style.size().width.tag() != taffy::CompactLength::AUTO_TAG;
@@ -823,7 +792,7 @@ index 30b96f0..607eb32 100644
 +        .iter()
 +        .map(|hint| hint.track(is_fixed, grow_lengths).into())
 +        .collect();
- 
++
 +    // Explicit columns take precedence over first-row cell widths in fixed layout.
 +    // Percentages exclude inner spacing and include a content-box cell's padding/border.
 +    let mut calc_values = Vec::new();
@@ -872,7 +841,7 @@ index 30b96f0..607eb32 100644
          .collect();
      let root_node = &mut doc.nodes[table_root_node_id];
      root_node.children = children;
-@@ -422,13 +664,16 @@ pub(crate) fn build_table_context(
+@@ -422,13 +632,16 @@ pub(crate) fn build_table_context(
          TableContext {
              style,
              cells,
@@ -892,7 +861,7 @@ index 30b96f0..607eb32 100644
          },
          layout_children,
      )
-@@ -471,7 +716,7 @@ fn collect_columns(
+@@ -471,7 +684,7 @@ fn collect_columns(
                  .and_then(|val| val.parse::<u16>().ok())
                  .map(|v| v.max(1))
                  .unwrap_or(1);
@@ -901,7 +870,7 @@ index 30b96f0..607eb32 100644
                  taffy::CompactLength::LENGTH_TAG => {
                      // A definite `max-width` clamps the column width; a zero width is treated as auto
                      let mut width = style.size.width.value();
-@@ -491,9 +736,9 @@ fn collect_columns(
+@@ -491,9 +704,9 @@ fn collect_columns(
                  _ => style_helpers::auto(),
              };
              // A definite `min-width` on a column acts as a floor on its width
@@ -913,7 +882,7 @@ index 30b96f0..607eb32 100644
                      style_helpers::auto(),
                  ),
                  _ => column,
-@@ -511,250 +756,489 @@ fn collect_columns(
+@@ -511,250 +724,487 @@ fn collect_columns(
  }
  
  #[allow(clippy::too_many_arguments)]
@@ -1039,14 +1008,14 @@ index 30b96f0..607eb32 100644
 +                if let Some(group) = group_of_row[line - 1].filter(|g| usize::from(g.1) == line - 1)
 +                {
 +                    candidates.push(group.2[BOTTOM]);
-+                }
-+            }
+                 }
+             }
 +            if line < rows {
 +                candidates.extend(row_sides[line].map(|row| row[TOP]));
 +                if let Some(group) = group_of_row[line].filter(|g| usize::from(g.0) == line) {
 +                    candidates.push(group.2[TOP]);
-                 }
-             }
++                }
++            }
 +            if line == 0 {
 +                candidates.push(table_borders[TOP]);
 +            }
@@ -1349,18 +1318,7 @@ index 30b96f0..607eb32 100644
 +            }
 +        }
 +    }
- 
--            // The margin properties do not apply to table-internal elements
--            style.margin = taffy::Rect::ZERO.map(style_helpers::length);
--
--            // Let Taffy auto-place the column. Combined with
--            // `grid_auto_flow: RowDense` set on the table root, each cell
--            // scans from the first track in its row for a free position,
--            // which makes cells automatically skip columns occupied by
--            // rowspan cells from earlier rows.
--            style.grid_column = taffy::Line {
--                start: style_helpers::auto(),
--                end: style_helpers::span(colspan),
++
 +    fn push_cell(&mut self, doc: &mut BaseDocument, node_id: NodeId, use_spans: bool) {
 +        // A table without an explicit row still gets an anonymous first row.
 +        if self.row == 0 {
@@ -1382,15 +1340,25 @@ index 30b96f0..607eb32 100644
 +            .and_then(|val| val.trim().parse::<u16>().ok())
 +            .map(|v| if v == 0 { MAX_GRID_LINE } else { v })
 +            .unwrap_or(1);
-+        let (mut style, borders, vertical_align) = {
++        let (mut style, borders) = {
 +            let stylo_style = node.primary_styles().unwrap();
 +            (
 +                table_taffy_style(&stylo_style, self.wm),
 +                border_candidates(&stylo_style, 4),
-+                CellVerticalAlign::from_style(&stylo_style),
 +            )
 +        };
-+
+ 
+-            // The margin properties do not apply to table-internal elements
+-            style.margin = taffy::Rect::ZERO.map(style_helpers::length);
+-
+-            // Let Taffy auto-place the column. Combined with
+-            // `grid_auto_flow: RowDense` set on the table root, each cell
+-            // scans from the first track in its row for a free position,
+-            // which makes cells automatically skip columns occupied by
+-            // rowspan cells from earlier rows.
+-            style.grid_column = taffy::Line {
+-                start: style_helpers::auto(),
+-                end: style_helpers::span(colspan),
 +        // Skip slots still covered by a rowspan from an earlier row.
 +        let mut column = usize::from(self.col);
 +        while self.occupied.get(column).is_some_and(|&rows| rows > 0) {
@@ -1460,7 +1428,6 @@ index 30b96f0..607eb32 100644
 +        self.cells.push(TableCell {
 +            node_id,
 +            style,
-+            vertical_align,
 +            layout_style: node.primary_styles().unwrap().clone(),
 +            row,
 +            column: column as u16,
@@ -1614,14 +1581,13 @@ index 30b96f0..607eb32 100644
  }
  
  pub struct RangeIter(Range<usize>);
-@@ -817,8 +1301,203 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
+@@ -817,8 +1267,112 @@ impl taffy::LayoutPartialTree for TableTreeWrapper<'_, '_> {
          inputs: taffy::tree::LayoutInput,
      ) -> taffy::LayoutOutput {
          let cell = &self.ctx.cells[usize::from(node_id)];
 -        let node_id = crate::taffy_node_id(cell.node_id);
 -        self.doc.compute_child_layout(node_id, inputs)
 +        let dom_id = cell.node_id;
-+        let vertical_align = cell.vertical_align;
 +        let node_id = crate::taffy_node_id(dom_id);
 +        let measure_without_width =
 +            !self.ctx.is_fixed && cell.authored_width.tag() == taffy::CompactLength::LENGTH_TAG;
@@ -1630,53 +1596,7 @@ index 30b96f0..607eb32 100644
 +            .style_override
 +            .replace(cell.layout_style.clone());
 +
-+        let offset = match (vertical_align, inputs.run_mode, inputs.known_dimensions) {
-+            (
-+                CellVerticalAlign::Middle | CellVerticalAlign::Bottom,
-+                taffy::RunMode::PerformLayout,
-+                taffy::Size {
-+                    width: Some(cell_width),
-+                    height: Some(cell_height),
-+                },
-+            ) => {
-+                let content_height = self.cell_content_height(dom_id, cell_width, &inputs);
-+                let free = (cell_height - content_height).max(0.0);
-+                if vertical_align == CellVerticalAlign::Middle {
-+                    free / 2.0
-+                } else {
-+                    free
-+                }
-+            }
-+            _ => 0.0,
-+        };
-+
-+        let mut output = if offset > 0.0 {
-+            // CSS 2.1 places the extra space above the content of a middle or
-+            // bottom aligned cell. Lay the cell out with that space as
-+            // additional top padding, so block and inline content move as one.
-+            let resolved = self.doc.nodes[dom_id]
-+                .layout_style()
-+                .padding()
-+                .top
-+                .resolve_or_zero(inputs.parent_size.width, resolve_calc_value);
-+            let previous = self.doc.nodes[dom_id].layout_data().style_override.clone();
-+            let overridden = self.doc.nodes[dom_id]
-+                .layout_data_mut()
-+                .style_override
-+                .as_mut()
-+                .unwrap();
-+            ServoArc::make_mut(overridden).mutate_padding().padding_top =
-+                style::values::generics::NonNegative(
-+                    style::values::computed::LengthPercentage::new_length(
-+                        style::values::computed::Length::new(resolved + offset),
-+                    ),
-+                );
-+            let output = self.doc.compute_child_layout(node_id, inputs);
-+            self.doc.nodes[dom_id].layout_data_mut().style_override = previous;
-+            output
-+        } else {
-+            self.doc.compute_child_layout(node_id, inputs)
-+        };
++        let mut output = self.doc.compute_child_layout(node_id, inputs);
 +
 +        if *self.ctx.relax_text_minimums.borrow()
 +            && inputs.run_mode == taffy::RunMode::ComputeSize
@@ -1773,54 +1693,10 @@ index 30b96f0..607eb32 100644
 +            .resolve_or_zero(None, resolve_calc_value);
 +        let leading = (start - padding.left - border.left).min(0.0);
 +        Some(end + padding.right + border.right - leading)
-+    }
-+
-+    /// The border-box height a cell needs for its content at `width`,
-+    /// ignoring an authored height, which only sets the row's minimum.
-+    fn cell_content_height(
-+        &mut self,
-+        dom_id: NodeId,
-+        width: f32,
-+        inputs: &taffy::tree::LayoutInput,
-+    ) -> f32 {
-+        let measure = taffy::tree::LayoutInput {
-+            run_mode: taffy::RunMode::ComputeSize,
-+            sizing_mode: taffy::SizingMode::InherentSize,
-+            axis: taffy::RequestedAxis::Vertical,
-+            known_dimensions: taffy::Size {
-+                width: Some(width),
-+                height: None,
-+            },
-+            vertical_margins_are_collapsible: taffy::Line::FALSE,
-+            ..*inputs
-+        };
-+        let node_id = crate::taffy_node_id(dom_id);
-+        let style = self.doc.nodes[dom_id].layout_style();
-+        let (height, min_height) = (style.size().height, style.min_size().height);
-+        drop(style);
-+        if height.is_auto() && min_height.is_auto() {
-+            // Usually a cache hit from row sizing.
-+            return self.doc.compute_child_layout(node_id, measure).size.height;
-+        }
-+
-+        // Measuring without the authored height must not leave that result in
-+        // the cell's cache, where it would answer later row-sizing queries.
-+        let node = &mut self.doc.nodes[dom_id];
-+        node.clear_layout_cache();
-+        let previous = node.layout_data().style_override.clone();
-+        let overridden = node.layout_data_mut().style_override.as_mut().unwrap();
-+        let position = ServoArc::make_mut(overridden).mutate_position();
-+        position.height = style::values::generics::length::Size::Auto;
-+        position.min_height = style::values::generics::length::Size::Auto;
-+        let content_height = self.doc.compute_child_layout(node_id, measure).size.height;
-+        let node = &mut self.doc.nodes[dom_id];
-+        node.layout_data_mut().style_override = previous;
-+        node.clear_layout_cache();
-+        content_height
      }
  }
  
-@@ -849,3 +1528,65 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
+@@ -849,3 +1403,65 @@ impl taffy::LayoutGridContainer for TableTreeWrapper<'_, '_> {
          *self.ctx.computed_grid_info.borrow_mut() = Some(detailed_grid_info);
      }
  }
