@@ -73,12 +73,15 @@ while waiting for an RPM release built with the compatibility checks above.
 ### Flatpak preview
 
 The Flatpak preview is provided as a standalone test bundle. It is not yet a
-Flathub package and therefore does not receive automatic Flathub updates. Its
-close-to-tray option is disabled until the tray backend can use a sandbox-safe
-D-Bus name. Starting automatically at sign-in goes through the desktop's
-Background portal and opens the window, because there is no tray to start into.
-The app icon stays orange there, because the sandbox cannot change the launcher
-icon on the host.
+Flathub package and therefore does not receive automatic Flathub updates. It has
+no tray icon, because the tray backend can't use a sandbox-safe D-Bus name yet.
+Instead, **Keep running in the background** in Settings → General keeps it
+checking for new mail after you close the window, once the desktop's Background
+portal allows it. Open Flectar Mail again to bring the window back. GNOME also
+lists it under Background Apps in the system menu, where you can quit it.
+Starting automatically at sign-in goes through the same portal, and starts
+without a window while background mode is on. The app icon stays orange there,
+because the sandbox cannot change the launcher icon on the host.
 
 ### Keyring
 
