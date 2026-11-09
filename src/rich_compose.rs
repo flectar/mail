@@ -516,15 +516,26 @@ impl RichComposeDocument {
     }
 
     pub fn body_html(&self) -> Option<String> {
-        if self.text.trim().is_empty() {
+        self.html_for(&self.text)
+    }
+
+    /// The HTML for the text without the blank lines it ends with: what the
+    /// user wrote, above the original a reply quotes.
+    pub fn body_html_above_quote(&self) -> Option<String> {
+        self.html_for(self.text.trim_end_matches(['\r', '\n']))
+    }
+
+    /// The HTML for `text`, the document's text or the start of it.
+    fn html_for(&self, text: &str) -> Option<String> {
+        if text.trim().is_empty() {
             return None;
         }
 
-        let mut html = String::with_capacity(self.text.len());
+        let mut html = String::with_capacity(text.len());
         let mut open = None;
         let mut line_start = 0;
 
-        for line in self.text.split('\n') {
+        for line in text.split('\n') {
             let block = html_line_block(line);
             let skip = block.map_or(0, |(_, bytes)| bytes);
             // Text pasted from Windows ends its lines with CRLF.

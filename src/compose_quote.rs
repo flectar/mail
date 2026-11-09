@@ -94,7 +94,7 @@ impl ComposeQuote {
     /// The message's plain-text and HTML parts with the quote below what
     /// the user wrote. `html` is `None` when they wrote nothing.
     pub(crate) fn below(&self, text: &str, html: Option<String>) -> (String, String) {
-        let text = text.trim_end_matches('\n');
+        let text = text.trim_end_matches(['\r', '\n']);
         let plain = if text.trim().is_empty() {
             self.plain.clone()
         } else {
@@ -256,6 +256,17 @@ mod tests {
             ComposeQuote::split_saved(&html, &text, |own| document.load_html_start(own, &text))
                 .unwrap();
         assert_eq!(document.text(), "Thanks!");
+        assert_eq!(saved, quote);
+
+        // Blank lines the user left at the end, and a tab, reopen too.
+        let mut written = crate::rich_compose::RichComposeDocument::default();
+        written.load("Qty:\t3\n\n\n", 0, 0);
+        let (text, html) = quote.below(written.text(), written.body_html_above_quote());
+        assert_eq!(text, format!("Qty:\t3\n\n{}", quote.plain));
+        let saved =
+            ComposeQuote::split_saved(&html, &text, |own| document.load_html_start(own, &text))
+                .unwrap();
+        assert_eq!(document.text(), "Qty:\t3");
         assert_eq!(saved, quote);
 
         // A reply with nothing written yet is only the quote.

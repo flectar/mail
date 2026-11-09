@@ -1881,7 +1881,13 @@ impl ComposeSession {
             if document.text() != body {
                 document.synchronize(body, body.len() as i32, body.len() as i32);
             }
-            document.body_html()
+            // Blank lines at the end give way to the one above the quote, in
+            // both parts, so a reopened draft finds where the quote starts.
+            if self.quote.borrow().is_some() {
+                document.body_html_above_quote()
+            } else {
+                document.body_html()
+            }
         };
         // The original goes below what the user wrote, in both parts.
         let (body, body_html) = match self.quote.borrow().as_ref() {
