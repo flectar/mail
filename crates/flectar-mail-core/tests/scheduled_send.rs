@@ -1,8 +1,8 @@
 //! Send later on one device: a scheduled draft waits in the Scheduled view,
-//! scheduling it again moves it instead of sending it twice, and cancelling
-//! leaves it a draft. A reply reminder goes with a send, and brings the
-//! conversation back to the inbox. The account's servers are unreachable,
-//! so nothing is ever sent.
+//! scheduling it again moves it instead of sending it twice, cancelling
+//! leaves it a draft, and Send now tries one that failed again. A reply
+//! reminder goes with a send, and brings the conversation back to the inbox.
+//! The account's servers are unreachable, so nothing is ever sent.
 
 use flectar_mail_core::Core;
 use flectar_mail_core::config::Paths;
@@ -161,6 +161,63 @@ async fn a_send_in_the_undo_window_is_not_scheduled() {
     .expect("send");
     assert!(core.scheduled_sends().await.unwrap().is_empty());
     assert_eq!(scheduled_threads(&core).await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn send_now_tries_a_failed_send_again() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed(&db, dead_port()).await;
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+
+    let draft_id = draft(&core, account_id).await;
+    let action_id = core
+        .queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(now_ms() + 3_600_000),
+            remind_at: None,
+        })
+        .await
+        .expect("schedule")
+        .action_id;
+    // Every try failed, and it waits for the user.
+    db.write(move |conn| {
+        conn.execute(
+            "UPDATE pending_actions SET state = 'failed', attempts = 5,
+                    last_error = 'connection refused'
+             WHERE id = ?1",
+            [action_id],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(core.scheduled_sends().await.unwrap()[0].state, "failed");
+
+    assert!(core.send_now(action_id).await.unwrap());
+    let (state, attempts, error, scheduled) = db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT state, attempts, last_error, json_extract(payload, '$.scheduled')
+                 FROM pending_actions WHERE id = ?1",
+                [action_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, bool>(3)?,
+                    ))
+                },
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!((state.as_str(), attempts, error), ("pending", 0, None));
+    assert!(!scheduled, "sent now, it leaves Scheduled");
+    assert!(core.scheduled_sends().await.unwrap().is_empty());
 }
 
 async fn inbox(core: &Core) -> Vec<ThreadSummary> {

@@ -4974,8 +4974,8 @@ impl Core {
     }
 
     /// "Send now": make a queued send due immediately (skip the remaining undo
-    /// window) and nudge its actor. Returns false if it was already sent or
-    /// cancelled.
+    /// window) and nudge its actor; one that failed is queued again. Returns
+    /// false if it was already sent or cancelled.
     pub async fn send_now(&self, action_id: i64) -> Result<bool> {
         // Another device's message goes out from there, as it is.
         if self.retime_others_send(action_id, now_ms()).await? {
@@ -4999,6 +4999,30 @@ impl Core {
             .await?;
         if let Some(draft_id) = held {
             self.unhold_send(action_id).await?;
+            self.queue_send(QueueSendArgs {
+                draft_id,
+                send_at: None,
+                remind_at: None,
+            })
+            .await?;
+            return Ok(true);
+        }
+        // One that failed is tried again, as a send of its own.
+        let failed = self
+            .db
+            .read(move |conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT message_id FROM pending_actions
+                         WHERE id = ?1 AND kind = 'send' AND state = 'failed'",
+                        [action_id],
+                        |row| row.get::<_, Option<i64>>(0),
+                    )
+                    .optional()?
+                    .flatten())
+            })
+            .await?;
+        if let Some(draft_id) = failed {
             self.queue_send(QueueSendArgs {
                 draft_id,
                 send_at: None,
