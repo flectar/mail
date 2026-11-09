@@ -535,6 +535,10 @@ impl Core {
         if !works_on(kind, &arrival.family, account.provider, this_family()) {
             return Ok(());
         }
+        // Only the kind of sign-in the account uses here, as sharing does.
+        if kind_for(account.auth_kind, account.provider) != Some(kind) {
+            return Ok(());
+        }
         let secret = String::from_utf8(open(secrets, &arrival.sealed)?)
             .map_err(|_| CoreError::Other("a shared sign-in is damaged".into()))?;
         if !travels(kind, &secret) {
