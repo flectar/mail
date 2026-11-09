@@ -127,7 +127,9 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
 /// Whether this build may send people to the web checkout for Flectar Mail Sync.
 /// Sideloaded builds may; an App Store build would need Apple's in-app
 /// purchases.
-pub(crate) const SELLS_SYNC: bool = true;
+pub(crate) fn sells_sync() -> bool {
+    true
+}
 
 /// How this device appears in Flectar Mail Sync's device list: "iPhone" or
 /// "iPad". iOS reports no host name, and the name the user gave the device

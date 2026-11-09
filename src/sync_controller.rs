@@ -74,7 +74,7 @@ impl SyncController {
     ) {
         let ui = app.global::<SyncUi>();
         ui.set_devices(Rc::clone(&self.devices).into());
-        ui.set_can_buy(platform::SELLS_SYNC);
+        ui.set_can_buy(platform::sells_sync());
 
         let staging = temp_dir.clone();
         runtime.spawn_blocking(move || remove_staged_recovery_codes(&staging));

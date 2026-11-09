@@ -112,10 +112,19 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }
 
-/// Whether this build may send people to the web checkout for Flectar Mail Sync.
-/// The APKs on GitHub may. A Google Play build must not: Play requires its
-/// own billing for in-app purchases.
-pub(crate) const SELLS_SYNC: bool = true;
+static SELLS_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether this copy may send people to the web checkout for Flectar Mail
+/// Sync. The APKs on GitHub may. One Google Play installed must not: Play
+/// requires its own billing for in-app purchases.
+pub(crate) fn sells_sync() -> bool {
+    SELLS_SYNC.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Say whether Google Play installed this copy, before the app starts.
+pub fn installed_by_play(play: bool) {
+    SELLS_SYNC.store(!play, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// How this device appears in Flectar Mail Sync's device list: by its model,
 /// such as "Pixel 8", as Chrome names Android devices. Android has no host
