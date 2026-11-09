@@ -8,7 +8,8 @@ use crate::events::CoreEvent;
 use crate::jmap::client::{self, ConnectedClient};
 use crate::models::{AccountConfig, Address, MailProtocol, SenderDeliveryStatus, now_ms, roles};
 use crate::sync::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, configured_sync_interval, set_state, set_state_error,
+    PriorityFetchCmd, SyncCmd, SyncCtx, caught_up, configured_sync_interval, set_state,
+    set_state_error,
 };
 use futures::{FutureExt, Stream, StreamExt};
 use jmap_client::core::error::MethodErrorType;
@@ -122,9 +123,11 @@ async fn actor(
                     ),
                 }
             }
+            let started = now_ms();
             set_state(&ctx, config.id, "syncing").await;
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected, live_since).await?;
+            caught_up(&ctx, config.id, started).await;
             execute_actions(&ctx, &config, &connected).await?;
             // The counts only explain the badges, so they never fail a sync.
             if let Err(error) = sync_mailbox_counts(&ctx, config.id, &connected).await {

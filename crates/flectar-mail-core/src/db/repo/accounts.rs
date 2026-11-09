@@ -555,6 +555,16 @@ pub fn update_sync_state_with_error(
     )? != 0)
 }
 
+/// Note that a sync of the account that started at `started` stored all the
+/// mail its Inbox had by then.
+pub fn set_caught_up(conn: &Connection, id: i64, started: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE accounts SET caught_up_at = ?2 WHERE id = ?1",
+        params![id, started],
+    )?;
+    Ok(())
+}
+
 /// Move one account before or after another and compact the persisted order.
 /// A complete rewrite keeps ordering deterministic after any number of moves
 /// and avoids fragile fractional positions.
