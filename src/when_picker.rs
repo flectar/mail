@@ -547,6 +547,17 @@ fn picked_for(
         Picking::Snooze(ids) => snooze(app, state, &ids, Some(at)),
         // The composer sends its message, at that time.
         Picking::Compose => {
+            // A reminder at or before that time would come as it goes out.
+            if compose
+                .remind_at(app)
+                .is_some_and(|remind_at| remind_at <= at.timestamp_millis())
+            {
+                app.set_compose_notice(UiMessage::plain(
+                    "Choose a reminder after the time the message goes out.",
+                ));
+                app.set_compose_notice_is_error(true);
+                return;
+            }
             compose.send_at.set(Some(at.timestamp_millis()));
             app.invoke_save_compose(
                 app.get_compose_account_id(),

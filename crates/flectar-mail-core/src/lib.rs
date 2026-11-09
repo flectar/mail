@@ -5738,6 +5738,15 @@ impl Core {
     }
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
+        // A reminder at or before the time the message goes out would come
+        // as it leaves.
+        if let (Some(send_at), Some(remind_at)) = (args.send_at, args.remind_at)
+            && remind_at <= send_at
+        {
+            return Err(CoreError::Other(
+                "the reminder comes before the message goes out".into(),
+            ));
+        }
         let draft_id = args.draft_id;
         // Moved, or sent now: the mail server's hold on it ends first. The
         // message it held goes out as it is, never rebuilt from this

@@ -164,6 +164,28 @@ async fn a_send_in_the_undo_window_is_not_scheduled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_reminder_comes_after_the_send() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = Paths::for_tests(tmp.path());
+    paths.ensure().unwrap();
+    let db = Db::open(&paths.db_file()).unwrap();
+    let account_id = seed(&db, dead_port()).await;
+    let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+
+    let draft_id = draft(&core, account_id).await;
+    let send_at = now_ms() + 86_400_000;
+    let refused = core
+        .queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(send_at),
+            remind_at: Some(send_at - 3_600_000),
+        })
+        .await;
+    assert!(refused.is_err());
+    assert!(core.scheduled_sends().await.unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn send_now_tries_a_failed_send_again() {
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::for_tests(tmp.path());
