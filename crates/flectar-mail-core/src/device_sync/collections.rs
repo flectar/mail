@@ -174,7 +174,8 @@ fn entry(collection: &str, body: Value) -> Entry {
 }
 
 /// The account's synced settings: everything but how much mail this device
-/// keeps and, for POP3, what it leaves on the server.
+/// keeps, for POP3 what it leaves on the server, and its OpenPGP settings,
+/// whose keys only this device has.
 fn account_body(
     config: &crate::models::AccountConfig,
     settings: &Settings,
@@ -184,6 +185,7 @@ fn account_body(
     if let Some(account_settings) = body.get_mut("settings").and_then(Value::as_object_mut) {
         account_settings.remove("mailHistory");
         account_settings.remove("keepOnServer");
+        account_settings.remove("security");
     }
     let key = config.id.to_string();
     let object = body
@@ -787,6 +789,8 @@ fn apply_account(
             // chooses otherwise here: another device may still need it.
             let mut account_settings = config.settings.clone();
             account_settings.keep_on_server = Default::default();
+            // Signing and encrypting need this device's own keys.
+            account_settings.security = Default::default();
             let local_id = repo::accounts::insert_with_sync_state(
                 conn,
                 &repo::accounts::NewAccount {
@@ -1085,12 +1089,13 @@ fn set_or_remove(
     }
 }
 
-/// The synced account settings over this device's own mail history and POP3
-/// retention.
+/// The synced account settings over this device's own mail history, POP3
+/// retention and OpenPGP settings.
 fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) -> AccountSettings {
     AccountSettings {
         mail_history: current.mail_history,
         keep_on_server: current.keep_on_server,
+        security: current.security.clone(),
         ..synced.clone()
     }
 }
@@ -1964,6 +1969,27 @@ mod tests {
             0
         );
         assert_eq!(repo::sign_ins::arrivals(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn openpgp_settings_stay_on_their_device() {
+        let conn = testutil::conn();
+        let id = account(&conn, "me@example.com", &"a".repeat(32));
+        let mut config = repo::accounts::get_config(&conn, id).unwrap().unwrap();
+        config.settings.security.sign_by_default = true;
+        config.settings.security.signing_fingerprint = "F".repeat(40);
+        let body = account_body(&config, &Settings::default(), 0).unwrap();
+        assert!(body["settings"].get("security").is_none(), "{body}");
+
+        // Another device's settings leave this device's own alone.
+        let mut synced = config.settings.clone();
+        synced.security = Default::default();
+        let mut current = config.settings.clone();
+        current.security.require_encryption = true;
+        assert_eq!(
+            merged_account_settings(&current, &synced).security,
+            current.security
+        );
     }
 
     #[test]
