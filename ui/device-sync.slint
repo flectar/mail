@@ -580,7 +580,7 @@ export component SyncSettingsPage inherits VerticalBox {
     private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error" || SyncUi.state == "payment";
     private property <bool> paused: SyncUi.state == "payment";
     // The offer applies to Flectar's server, not to one typed in.
-    private property <bool> offered: SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
+    private property <bool> offered: SyncUi.can-buy && SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
     private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended");
     // The subscription card shows the page that manages a subscription.
     private property <bool> can-manage: SyncUi.can-buy && !root.can-subscribe && SyncUi.billing != "free";
@@ -790,7 +790,7 @@ export component SyncSettingsPage inherits VerticalBox {
         note: SyncUi.billing == "trial" ? ""
             : SyncUi.billing == "free" ? @tr("Your code makes sync free on all your devices.")
             : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended" ? @tr("Changes wait on each device; nothing is lost.")
-            : SyncUi.billing == "active" && SyncUi.free-until != "" && SyncUi.billing-renews ? @tr("A code makes sync free until {}. Turn off renewal in Manage so you aren't charged before then.", SyncUi.free-until)
+            : SyncUi.billing == "active" && SyncUi.free-until != "" && SyncUi.billing-renews && SyncUi.can-buy ? @tr("A code makes sync free until {}. Turn off renewal in Manage so you aren't charged before then.", SyncUi.free-until)
             : SyncUi.billing == "active" && SyncUi.free-until != "" ? @tr("Then free until {}, with your code.", SyncUi.free-until)
             : SyncUi.billing == "past-due"
                 ? (SyncUi.can-buy ? @tr("Sync keeps going while the payment is tried again. Update your payment method to keep it.") : @tr("Sync keeps going while the payment is tried again."))
