@@ -231,22 +231,29 @@ fn fingerprint(secrets: &Secrets, secret: &[u8]) -> Result<Vec<u8>> {
     Ok(flectar_mail_sync_crypto::hkdf_sha256(&key, &[FINGERPRINT_LABEL, secret]).to_vec())
 }
 
-/// The record body of a share, if it has anything to say.
+/// The record body of a share, if it has anything to say. Every field is
+/// there, null when empty.
 pub(super) fn body(share: &Share, account_sync_id: &str) -> Option<Value> {
-    let mut body = json!({
+    let (sealed, rejected) = if share.stale {
+        let rejected = share
+            .fingerprint
+            .as_ref()
+            .map(|rejected| STANDARD.encode(rejected));
+        (Value::Null, json!(rejected))
+    } else {
+        (
+            serde_json::from_str(share.sealed.as_deref()?).ok()?,
+            Value::Null,
+        )
+    };
+    Some(json!({
         "account": account_sync_id,
         "kind": share.kind,
         "family": share.family,
-    });
-    if share.stale {
-        body["stale"] = json!(true);
-        if let Some(rejected) = &share.fingerprint {
-            body["rejected"] = json!(STANDARD.encode(rejected));
-        }
-    } else {
-        body["sealed"] = serde_json::from_str(share.sealed.as_deref()?).ok()?;
-    }
-    Some(body)
+        "stale": share.stale,
+        "rejected": rejected,
+        "sealed": sealed,
+    }))
 }
 
 /// What a sign-in record says.
@@ -684,7 +691,7 @@ mod tests {
             ..stale.clone()
         };
         let body = super::body(&failed, "aa").unwrap();
-        assert!(body.get("sealed").is_none());
+        assert!(body["sealed"].is_null());
         assert_eq!(parse(&body).unwrap().rejected, Some(vec![7; 32]));
         // Nothing to say without a secret.
         assert!(

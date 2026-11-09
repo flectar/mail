@@ -186,9 +186,11 @@ pub(super) fn parse(body: &Value) -> Option<Record<'_>> {
 }
 
 /// The record body of a shared send of the account with sync id `account`,
-/// with the IMAP or POP3 message, or file and preview, it carries.
+/// with the IMAP or POP3 message, or file and preview, it carries. Every
+/// field is there, null when empty.
 pub(super) fn body(send: &SyncedSend, account: &str, carried: Carried) -> Value {
-    let mut body = json!({
+    let base64 = &base64::engine::general_purpose::STANDARD;
+    json!({
         "account": account,
         "messageId": send.message_id,
         "sendAt": send.send_at,
@@ -200,21 +202,12 @@ pub(super) fn body(send: &SyncedSend, account: &str, carried: Carried) -> Value 
             (Some(device), Some(until)) => json!({"device": device, "until": until}),
             _ => Value::Null,
         },
-    });
-    let base64 = &base64::engine::general_purpose::STANDARD;
-    if let Some(mime) = carried.mime {
-        body["mime"] = json!(base64.encode(mime));
-    }
-    if let Some(file) = carried
-        .file
-        .and_then(|file| serde_json::from_str::<Value>(file).ok())
-    {
-        body["file"] = file;
-    }
-    if let Some(preview) = carried.preview {
-        body["preview"] = json!(base64.encode(preview));
-    }
-    body
+        "mime": carried.mime.map(|mime| base64.encode(mime)),
+        "file": carried
+            .file
+            .and_then(|file| serde_json::from_str::<Value>(file).ok()),
+        "preview": carried.preview.map(|preview| base64.encode(preview)),
+    })
 }
 
 /// Settle a merge of this device's change to a shared send with another

@@ -34,9 +34,11 @@ pub(crate) const SIGN_IN: &str = "signin";
 const MAX_TEMPLATE_BYTES: usize = 192 * 1024;
 
 /// The schema this version writes and reads for `collection`, or `None` for
-/// a collection it does not know. A version that changes what a record
-/// holds raises its collection's schema: records with a newer schema stay
-/// unread here, and this device leaves them alone until it updates.
+/// a collection it does not know. A version that adds fields keeps the
+/// schema: older versions keep the fields they don't know when they rewrite
+/// a record (see [`keep_unknown_fields`]). One that changes what existing
+/// fields mean raises it: records with a newer schema stay unread here, and
+/// this device leaves them alone until it updates.
 pub(crate) fn schema(collection: &str) -> Option<u32> {
     match collection {
         PREF | ACCOUNT | SIGNATURE | PROFILE | DEVICE | TEMPLATE | SNOOZE | SCHEDULED
@@ -173,9 +175,13 @@ fn entry(collection: &str, body: Value) -> Entry {
     }
 }
 
-/// The account's synced settings: everything but how much mail this device
-/// keeps, for POP3 what it leaves on the server, and its OpenPGP settings,
-/// whose keys only this device has.
+/// Account settings each device keeps to itself: how much mail it keeps,
+/// for POP3 what it leaves on the server, and its OpenPGP settings, whose
+/// keys only that device has.
+const PER_DEVICE_ACCOUNT_SETTINGS: &[&str] = &["mailHistory", "keepOnServer", "security"];
+
+/// The account's synced settings: all but the ones each device keeps to
+/// itself. Every field is there, null when empty.
 fn account_body(
     config: &crate::models::AccountConfig,
     settings: &Settings,
@@ -183,28 +189,62 @@ fn account_body(
 ) -> Result<Value> {
     let mut body = serde_json::to_value(PortableAccountConfig::from(config))?;
     if let Some(account_settings) = body.get_mut("settings").and_then(Value::as_object_mut) {
-        account_settings.remove("mailHistory");
-        account_settings.remove("keepOnServer");
-        account_settings.remove("security");
+        for key in PER_DEVICE_ACCOUNT_SETTINGS {
+            account_settings.remove(*key);
+        }
     }
     let key = config.id.to_string();
     let object = body
         .as_object_mut()
         .expect("an account config serializes to an object");
-    if let Some(color) = settings.account_colors.get(&key) {
-        object.insert("color".into(), json!(color));
-    }
-    if let Some(name) = settings.account_short_names.get(&key) {
-        object.insert("shortName".into(), json!(name));
-    }
-    if let Some(theme) = settings.account_themes.get(&key) {
-        object.insert("theme".into(), json!(theme));
-    }
-    if let Some(defaults) = settings.signature_defaults.get(&key) {
-        object.insert("signatureDefaults".into(), serde_json::to_value(defaults)?);
-    }
+    object.insert("color".into(), json!(settings.account_colors.get(&key)));
+    object.insert(
+        "shortName".into(),
+        json!(settings.account_short_names.get(&key)),
+    );
+    object.insert("theme".into(), json!(settings.account_themes.get(&key)));
+    object.insert(
+        "signatureDefaults".into(),
+        serde_json::to_value(settings.signature_defaults.get(&key))?,
+    );
     object.insert("sortOrder".into(), json!(sort_order));
     Ok(body)
+}
+
+/// Keep the fields of the server's copy that this version doesn't know, as
+/// the protocol asks: a newer version's fields survive this device's
+/// rewrite instead of bouncing between versions. Every body this version
+/// writes holds all the fields it knows, null when empty, so a field
+/// missing from it is one this version doesn't know. Each device writes
+/// all of its own record.
+fn keep_unknown_fields(entry: &mut Entry, mirrored: &Entry) {
+    if entry.collection == DEVICE
+        || entry.collection != mirrored.collection
+        || entry.schema != mirrored.schema
+    {
+        return;
+    }
+    carry_unknown(&mut entry.body, &mirrored.body, &[]);
+    if entry.collection == ACCOUNT
+        && let (Some(settings), Some(theirs)) = (
+            entry.body.get_mut("settings"),
+            mirrored.body.get("settings"),
+        )
+    {
+        carry_unknown(settings, theirs, PER_DEVICE_ACCOUNT_SETTINGS);
+    }
+}
+
+/// Copy into `local` the fields of `mirrored` it doesn't have, but `skip`.
+fn carry_unknown(local: &mut Value, mirrored: &Value, skip: &[&str]) {
+    let (Some(local), Some(mirrored)) = (local.as_object_mut(), mirrored.as_object()) else {
+        return;
+    };
+    for (key, value) in mirrored {
+        if !local.contains_key(key) && !skip.contains(&key.as_str()) {
+            local.insert(key.clone(), value.clone());
+        }
+    }
 }
 
 /// The app's synced items as records, with this device's own record.
@@ -389,6 +429,11 @@ pub(crate) fn snapshot(
         }
     }
 
+    for (id, record) in &mut records {
+        if let Some(mirrored) = mirror.get(id).and_then(|mirrored| mirrored.entry.as_ref()) {
+            keep_unknown_fields(record, mirrored);
+        }
+    }
     records.insert(device.0, entry(DEVICE, device.1));
     Ok(records)
 }
@@ -1422,6 +1467,106 @@ mod tests {
         );
     }
 
+    /// What this device makes of `id`, given what the server has.
+    fn own_record(conn: &Connection, id: RecordId, mirrored: Option<&Entry>) -> Entry {
+        let mut mirror = BTreeMap::new();
+        if let Some(mirrored) = mirrored {
+            mirror.insert(
+                id,
+                Mirrored {
+                    seq: 1,
+                    stamp: None,
+                    entry: Some(mirrored.clone()),
+                },
+            );
+        }
+        let names = Names::default();
+        snapshot(conn, &names, &mirror, ([1; 16], json!({}))).unwrap()[&id].clone()
+    }
+
+    #[test]
+    fn fields_from_a_newer_version_survive_a_change_here() {
+        let conn = testutil::conn();
+        let sync_id = "ab".repeat(16);
+        let local = account(&conn, "ada@example.com", &sync_id);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        // A newer version added a field to accounts, and one to their
+        // settings.
+        let mut theirs = own_record(&conn, id, None);
+        theirs.body["vacationReply"] = json!("Away until Monday");
+        theirs.body["settings"]["archiveAfterDays"] = json!(30);
+
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings
+            .account_short_names
+            .insert(local.to_string(), "Ada".into());
+        repo::settings::set(&conn, &settings).unwrap();
+        let ours = own_record(&conn, id, Some(&theirs));
+        assert_eq!(ours.body["shortName"], "Ada");
+        assert_eq!(ours.body["vacationReply"], "Away until Monday");
+        assert_eq!(ours.body["settings"]["archiveAfterDays"], 30);
+
+        // Unchanged here, it is the server's copy, so it isn't uploaded.
+        settings.account_short_names.clear();
+        repo::settings::set(&conn, &settings).unwrap();
+        assert_eq!(own_record(&conn, id, Some(&theirs)), theirs);
+    }
+
+    #[test]
+    fn a_field_emptied_here_stays_empty() {
+        let conn = testutil::conn();
+        let sync_id = "cd".repeat(16);
+        account(&conn, "bo@example.com", &sync_id);
+        let id = sync_id_bytes(&sync_id).unwrap();
+        let mut theirs = own_record(&conn, id, None);
+        theirs.body["color"] = json!("#ef4444");
+        // Settings each device keeps to itself never travel, even when a
+        // copy on the server has them.
+        theirs.body["settings"]["keepOnServer"] = json!("untilDeleted");
+        let ours = own_record(&conn, id, Some(&theirs));
+        assert!(ours.body["color"].is_null());
+        assert!(ours.body["settings"].get("keepOnServer").is_none());
+    }
+
+    #[test]
+    fn a_preference_this_version_cannot_read_is_left_alone() {
+        let conn = testutil::conn();
+        let id = [6u8; 16];
+        let mut names = Names::default();
+        names.insert(pref_name("timeFormat"), id);
+        let newer = entry(PREF, json!({"key": "timeFormat", "value": "decimal"}));
+        mirror_row(&conn, &id, Some(&newer));
+        let mut mirror = BTreeMap::new();
+        let local = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
+        let incoming = BTreeMap::from([(
+            id,
+            Incoming {
+                previous: None,
+                next: Some(newer.clone()),
+            },
+        )]);
+        let applied = apply(&conn, &incoming, &BTreeMap::new(), &local, &local).unwrap();
+        mirror.insert(
+            id,
+            Mirrored {
+                seq: 1,
+                stamp: None,
+                entry: Some(newer),
+            },
+        );
+        let after = snapshot(&conn, &names, &mirror, ([1; 16], json!({}))).unwrap();
+        settle(&conn, &applied.settled, &after).unwrap();
+        assert_eq!(
+            repo::settings::get(&conn).unwrap().time_format,
+            crate::models::TimeFormat::Automatic
+        );
+        // This device keeps its own choice, without putting it over the
+        // newer one on every other device.
+        let pref = BTreeMap::from([(id, after[&id].clone())]);
+        let clock = Clock::new([1; 16], None);
+        assert_eq!(super::super::store::track(&conn, &pref, &clock).unwrap(), 0);
+    }
+
     #[test]
     fn one_mailbox_added_on_two_devices_ends_under_the_smaller_id() {
         let smaller = "11".repeat(16);
@@ -2011,7 +2156,7 @@ mod tests {
             SIGN_IN,
             json!({
                 "account": "a".repeat(32), "kind": "password", "family": "any",
-                "stale": true, "rejected": rejected,
+                "stale": true, "rejected": rejected, "sealed": null,
             }),
         );
         take(&ours, &stale);
@@ -2025,7 +2170,7 @@ mod tests {
             SIGN_IN,
             json!({
                 "account": "a".repeat(32), "kind": "password", "family": "any",
-                "sealed": {"epoch": 1, "data": "BBBB"},
+                "stale": false, "rejected": null, "sealed": {"epoch": 1, "data": "BBBB"},
             }),
         );
         take(&stale, &working);
