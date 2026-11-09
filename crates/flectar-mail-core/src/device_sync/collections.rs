@@ -760,8 +760,7 @@ fn apply_account(
                 || current.incoming_port != config.incoming_port
                 || current.smtp_host != config.smtp_host
                 || current.smtp_port != config.smtp_port
-                || current.settings.connection != config.settings.connection
-                || current.settings.security != config.settings.security;
+                || current.settings.connection != config.settings.connection;
             conn.execute(
                 "UPDATE accounts SET display_name = ?1, username = ?2, jmap_url = ?3,
                         incoming_host = ?4, incoming_port = ?5, smtp_host = ?6, smtp_port = ?7,
