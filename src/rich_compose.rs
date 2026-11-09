@@ -702,30 +702,14 @@ impl RichComposeDocument {
         }
         self.merge_styles();
 
-        let mut next = 0;
-        while next < self.text.len() {
-            let Some(relative) =
-                self.text[next..].find(|character: char| !character.is_whitespace())
-            else {
-                break;
-            };
-            let start = next + relative;
-            let end = self.text[start..]
-                .find(char::is_whitespace)
-                .map_or(self.text.len(), |relative| start + relative);
-            next = end;
-            let token = self.text[start..end]
-                .trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}']);
-            if token.starts_with("https://") || token.starts_with("http://") {
-                let end = start + token.len();
-                let link = Arc::<str>::from(token);
-                self.edit_styles(start, end, |style| {
-                    if style.link.is_none() || style.link_is_auto {
-                        style.link = Some(link.clone());
-                        style.link_is_auto = true;
-                    }
-                });
-            }
+        for range in typed_urls(&self.text).collect::<Vec<_>>() {
+            let link = Arc::<str>::from(&self.text[range.clone()]);
+            self.edit_styles(range.start, range.end, |style| {
+                if style.link.is_none() || style.link_is_auto {
+                    style.link = Some(link.clone());
+                    style.link_is_auto = true;
+                }
+            });
         }
     }
 
@@ -1665,7 +1649,10 @@ impl HtmlImport {
         if self.lines == 0 {
             return None;
         }
-        // A link written over its own address was found by `auto_link_urls`.
+        // A link written over its own address was found by `auto_link_urls`
+        // where it would link that address again; anywhere else the user
+        // set it by hand.
+        let typed = typed_urls(&self.text).collect::<Vec<_>>();
         let mut index = 0;
         while let Some(run) = self.styles.get(index) {
             let Some(link) = run.style.link.clone() else {
@@ -1679,9 +1666,7 @@ impl HtmlImport {
                     .take_while(|run| run.style.link.as_ref() == Some(&link))
                     .count();
             let end = self.styles[end_index - 1].range.end;
-            if (link.starts_with("https://") || link.starts_with("http://"))
-                && self.text[start..end] == *link
-            {
+            if typed.contains(&(start..end)) && self.text[start..end] == *link {
                 for run in &mut self.styles[index..end_index] {
                     run.style.link_is_auto = true;
                 }
@@ -1703,6 +1688,27 @@ fn import_body_html(html: &str) -> Option<(String, Vec<ComposeStyleRun>)> {
         import.token(token)?;
     }
     import.finish()
+}
+
+/// Where `text` holds web addresses that link themselves: whole words that
+/// start with http:// or https://, less the punctuation that follows them.
+fn typed_urls(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut next = 0;
+    std::iter::from_fn(move || {
+        while next < text.len() {
+            let start = next + text[next..].find(|character: char| !character.is_whitespace())?;
+            let end = text[start..]
+                .find(char::is_whitespace)
+                .map_or(text.len(), |relative| start + relative);
+            next = end;
+            let token =
+                text[start..end].trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}']);
+            if token.starts_with("https://") || token.starts_with("http://") {
+                return Some(start..start + token.len());
+            }
+        }
+        None
+    })
 }
 
 /// The formatting `html` gives `text`, when the HTML holds that text. HTML
@@ -2812,6 +2818,25 @@ mod tests {
         assert_eq!(reopened.body_html(), document.body_html());
         assert_style_coverage(&reopened);
         assert_eq!(reopened.history("undo"), None);
+    }
+
+    #[test]
+    fn a_link_set_by_hand_on_an_address_survives_reopening() {
+        let text = "see (https://a.example) or <https://b.example>";
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        for address in ["https://a.example", "https://b.example"] {
+            let start = text.find(address).unwrap();
+            document.set_link(address, text, start as i32, (start + address.len()) as i32);
+        }
+        let reopened = reopened(&document);
+        assert_eq!(reopened.body_html(), document.body_html());
+        assert!(
+            reopened
+                .body_html()
+                .unwrap()
+                .contains("href=\"https://b.example\"")
+        );
     }
 
     #[test]
