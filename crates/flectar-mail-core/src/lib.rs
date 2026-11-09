@@ -8876,13 +8876,14 @@ impl Core {
                         now,
                         NOTIFICATION_BATCH as i64,
                     )?;
-                    let summarized = repo::notifications::summarized(
+                    let summarized = repo::notifications::joinable_summaries(
                         &tx,
                         settled
                             .claimed
                             .iter()
                             .map(|(_, mail)| mail.account_id)
                             .collect::<std::collections::BTreeSet<_>>(),
+                        now,
                     )?;
                     tx.commit()?;
                     Ok((settled.read, settled.claimed, summarized))

@@ -239,6 +239,12 @@ pub const ROUTE_WAIT_MS: i64 = 60_000;
 /// three days.
 pub const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
+/// How long after an account's summary was last raised new mail still joins
+/// it: the rest of the sync it came from, with the mail whose tab is routed
+/// a little later ([`ROUTE_WAIT_MS`]). Mail after that starts over, on its
+/// own or in a summary of its own: the user may have dismissed the old one.
+pub const SUMMARY_JOIN_MS: i64 = 2 * ROUTE_WAIT_MS;
+
 /// One new-mail notification for the host to raise. The fields are raw
 /// database values, so the host builds the translated title and body itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,8 +274,9 @@ pub struct NewMailNotification {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NotificationBatch {
     pub mail: Vec<NewMailNotification>,
-    /// For each account in `mail`, how many notifications its summary
-    /// already counts from earlier batches.
+    /// For each account in `mail`, how many notifications from earlier
+    /// batches its summary counts while new mail still joins it (see
+    /// [`joinable_summaries`]).
     pub summarized: BTreeMap<i64, u32>,
 }
 
@@ -413,6 +420,37 @@ pub fn summarized(
     let mut counts = BTreeMap::new();
     for account_id in account_ids {
         let count: u32 = stmt.query_row(params![account_id], |row| row.get(0))?;
+        counts.insert(account_id, count);
+    }
+    Ok(counts)
+}
+
+/// How many notifications each of these accounts' summaries counts while new
+/// mail still joins it: the ones raised within [`SUMMARY_JOIN_MS`] of each
+/// other, the last within that of `now`. An older summary counts none.
+pub fn joinable_summaries(
+    conn: &Connection,
+    account_ids: impl IntoIterator<Item = i64>,
+    now: i64,
+) -> Result<BTreeMap<i64, u32>> {
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(delivered_at, created_at) FROM notification_outbox
+         WHERE account_id = ?1 AND state = 'delivered' AND in_summary = 1
+         ORDER BY 1 DESC",
+    )?;
+    let mut counts = BTreeMap::new();
+    for account_id in account_ids {
+        let mut count = 0;
+        let mut later = now;
+        let mut rows = stmt.query(params![account_id])?;
+        while let Some(row) = rows.next()? {
+            let raised: i64 = row.get(0)?;
+            if later.saturating_sub(raised) >= SUMMARY_JOIN_MS {
+                break;
+            }
+            count += 1;
+            later = raised;
+        }
         counts.insert(account_id, count);
     }
     Ok(counts)
@@ -1056,6 +1094,27 @@ mod tests {
         assert!(get(&c, shown_id).unwrap().is_none());
         assert!(get(&c, quiet_id).unwrap().is_none());
         assert!(get(&c, pending_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn mail_joins_a_summary_only_while_its_sync_lasts() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        delivered(&c, "a@test.dev", true);
+        delivered(&c, "b@test.dev", true);
+        let joining = |now| joinable_summaries(&c, [1], now).unwrap()[&1];
+        assert_eq!(joining(30 + SUMMARY_JOIN_MS - 1), 2);
+        assert_eq!(joining(30 + SUMMARY_JOIN_MS), 0);
+
+        // A later burst's summary counts only its own mail, while taking it
+        // back still waits for all the mail a summary counted.
+        let later = 30 + 10 * SUMMARY_JOIN_MS;
+        let (_, message_id) = testutil::seed_message(&c, "c@test.dev", "Hi", false);
+        let id = enqueue_at(&c, message_id, false, later).unwrap();
+        assert!(try_claim(&c, id, later).unwrap());
+        assert!(mark_delivered(&c, id, true, later).unwrap());
+        assert_eq!(joining(later + SUMMARY_JOIN_MS - 1), 1);
+        assert_eq!(summarized(&c, [1]).unwrap(), BTreeMap::from([(1, 3)]));
     }
 
     #[test]
