@@ -1035,6 +1035,30 @@ impl Core {
         });
         let clock: Arc<Clock> = Arc::clone(client.clock());
 
+        // Most checks find nothing new. Look first on a reader, so the app's
+        // writer isn't held while every synced item is read and hashed.
+        if !pull {
+            let names = names.clone();
+            let device_body = device_body.clone();
+            let paused = lock(&service.status).state == DeviceSyncState::PaymentRequired;
+            let idle = self
+                .db
+                .read(move |conn| {
+                    if store::adopting(conn)? != Some(false) {
+                        return Ok(false);
+                    }
+                    let mirror = store::load_mirror(conn)?;
+                    let local =
+                        collections::snapshot(conn, &names, &mirror, (device_id, device_body))?;
+                    Ok(!store::untracked(conn, &local)?
+                        && (paused || store::outbox_is_empty(conn)?))
+                })
+                .await?;
+            if idle {
+                return Ok(false);
+            }
+        }
+
         let (mut run, local_before, mirror_before, queued, adopting) = {
             let names = names.clone();
             let device_body = device_body.clone();

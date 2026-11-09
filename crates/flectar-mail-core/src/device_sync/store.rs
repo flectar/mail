@@ -55,6 +55,25 @@ pub(crate) fn cursor(conn: &Connection) -> Result<Option<u64>> {
         .map(to_u64))
 }
 
+/// Whether this device is taking on the group's items after joining:
+/// `None` while sync is off.
+pub(crate) fn adopting(conn: &Connection) -> Result<Option<bool>> {
+    Ok(conn
+        .query_row("SELECT adopting FROM device_sync WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .optional()?)
+}
+
+/// Whether local changes wait for the server.
+pub(crate) fn outbox_is_empty(conn: &Connection) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT NOT EXISTS (SELECT 1 FROM device_sync_outbox)",
+        [],
+        |row| row.get(0),
+    )?)
+}
+
 pub(crate) fn load_row(conn: &Connection) -> Result<Option<SyncRow>> {
     let row = conn
         .query_row(
@@ -334,6 +353,16 @@ pub(crate) fn has_pending(conn: &Connection, id: &RecordId) -> Result<bool> {
 
 /// Record local changes: compare the app's items with the hashes of the last
 /// check, and queue an upload for each one that changed or vanished.
+/// Whether [`track`] has anything to look at: an item that changed since
+/// the last check, or one that went.
+pub(crate) fn untracked(conn: &Connection, local: &BTreeMap<RecordId, Entry>) -> Result<bool> {
+    let hashes = load_local_hashes(conn)?;
+    Ok(local
+        .iter()
+        .any(|(id, entry)| hashes.get(id) != Some(&body_hash(entry)))
+        || hashes.keys().any(|id| !local.contains_key(id)))
+}
+
 pub(crate) fn track(
     conn: &Connection,
     local: &BTreeMap<RecordId, Entry>,
@@ -422,15 +451,23 @@ pub(crate) struct RunStore {
     pub chain: Option<Vec<ChainOp>>,
     pub secrets: Option<Secrets>,
     clock: Arc<Clock>,
+    /// The mirror and outbox as loaded: [`RunStore::save`] writes only what
+    /// the run changed.
+    loaded_mirror: BTreeMap<RecordId, Mirrored>,
+    loaded_outbox: BTreeMap<RecordId, Pending>,
 }
 
 impl RunStore {
     pub fn load(conn: &Connection, row: &SyncRow, clock: Arc<Clock>) -> Result<Self> {
+        let mirror = load_mirror(conn)?;
+        let outbox = load_outbox(conn)?;
         Ok(Self {
             cursor: row.cursor,
             seen: row.seen,
-            mirror: load_mirror(conn)?,
-            outbox: load_outbox(conn)?,
+            loaded_mirror: mirror.clone(),
+            loaded_outbox: outbox.clone(),
+            mirror,
+            outbox,
             incoming: BTreeMap::new(),
             chain: None,
             secrets: None,
@@ -468,13 +505,23 @@ impl RunStore {
                 params![serde_json::to_string(chain)?],
             )?;
         }
-        conn.execute("DELETE FROM device_sync_mirror", [])?;
+        // Only the rows the run changed: most runs take on a few records of
+        // many.
         let mut insert = conn.prepare(
-            "INSERT INTO device_sync_mirror
+            "INSERT OR REPLACE INTO device_sync_mirror
                (record_id, seq, stamp_ms, stamp_counter, stamp_device, collection, schema, body)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
+        let mut remove = conn.prepare("DELETE FROM device_sync_mirror WHERE record_id = ?1")?;
+        for id in self.loaded_mirror.keys() {
+            if !self.mirror.contains_key(id) {
+                remove.execute(params![&id[..]])?;
+            }
+        }
         for (id, mirrored) in &self.mirror {
+            if self.loaded_mirror.get(id) == Some(mirrored) {
+                continue;
+            }
             let (collection, schema, body) = match &mirrored.entry {
                 Some(entry) => (
                     Some(entry.collection.as_str()),
@@ -494,8 +541,16 @@ impl RunStore {
                 body
             ])?;
         }
-        conn.execute("DELETE FROM device_sync_outbox", [])?;
+        let mut remove = conn.prepare("DELETE FROM device_sync_outbox WHERE record_id = ?1")?;
+        for id in self.loaded_outbox.keys() {
+            if !self.outbox.contains_key(id) {
+                remove.execute(params![&id[..]])?;
+            }
+        }
         for pending in self.outbox.values() {
+            if self.loaded_outbox.get(&pending.record_id) == Some(pending) {
+                continue;
+            }
             let collection = pending
                 .entry
                 .as_ref()
@@ -706,5 +761,84 @@ impl Store for RunStore {
     fn save_secrets(&mut self, secrets: &Secrets) -> std::result::Result<(), StoreError> {
         self.secrets = Some(secrets.clone());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::testutil;
+    use serde_json::json;
+
+    fn pref(value: &str) -> Entry {
+        Entry {
+            collection: "pref".into(),
+            schema: 1,
+            body: json!({"key": "theme", "value": value}),
+        }
+    }
+
+    #[test]
+    fn a_run_saves_only_the_records_it_changed() {
+        let conn = testutil::conn();
+        create_row(&conn, "https://sync.test", &[], false, 1).unwrap();
+        let (kept, changed, sent) = ([1u8; 16], [2u8; 16], [3u8; 16]);
+        for id in [kept, changed] {
+            conn.execute(
+                "INSERT INTO device_sync_mirror (record_id, seq, collection, schema, body)
+                 VALUES (?1, 1, 'pref', 1, '{}')",
+                params![&id[..]],
+            )
+            .unwrap();
+        }
+        let stamp = Stamp {
+            ms: 1,
+            counter: 0,
+            device: [7; 16],
+        };
+        save_outbox_entry(
+            &conn,
+            &Pending {
+                record_id: sent,
+                base_seq: 0,
+                stamp,
+                entry: Some(pref("carbon")),
+            },
+            "pref",
+        )
+        .unwrap();
+        let clock = Arc::new(Clock::new([7; 16], None));
+        let row = load_row(&conn).unwrap().unwrap();
+        let mut run = RunStore::load(&conn, &row, Arc::clone(&clock)).unwrap();
+        // A record the run leaves alone is not written back over.
+        conn.execute(
+            "UPDATE device_sync_mirror SET seq = 9 WHERE record_id = ?1",
+            params![&kept[..]],
+        )
+        .unwrap();
+        run.mirror.get_mut(&changed).unwrap().seq = 5;
+        run.outbox.remove(&sent);
+        run.save(&conn, &clock, 2).unwrap();
+        let mirror = load_mirror(&conn).unwrap();
+        assert_eq!(mirror[&changed].seq, 5);
+        assert_eq!(mirror[&kept].seq, 9);
+        assert!(load_outbox(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_check_sees_what_changed_since_the_last() {
+        let conn = testutil::conn();
+        create_row(&conn, "https://sync.test", &[], false, 1).unwrap();
+        let clock = Clock::new([7; 16], None);
+        let id = [4u8; 16];
+        let mut local = BTreeMap::from([(id, pref("carbon"))]);
+        assert!(untracked(&conn, &local).unwrap());
+        track(&conn, &local, &clock).unwrap();
+        assert!(!untracked(&conn, &local).unwrap());
+        local.insert(id, pref("snow"));
+        assert!(untracked(&conn, &local).unwrap());
+        track(&conn, &local, &clock).unwrap();
+        local.clear();
+        assert!(untracked(&conn, &local).unwrap(), "a deletion counts too");
     }
 }
