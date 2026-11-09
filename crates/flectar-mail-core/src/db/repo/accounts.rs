@@ -565,6 +565,15 @@ pub fn set_caught_up(conn: &Connection, id: i64, started: i64) -> Result<()> {
     Ok(())
 }
 
+/// When each account's last complete sync started, for the accounts that
+/// have had one.
+pub fn caught_up(conn: &Connection) -> Result<std::collections::BTreeMap<i64, i64>> {
+    let mut statement =
+        conn.prepare("SELECT id, caught_up_at FROM accounts WHERE caught_up_at IS NOT NULL")?;
+    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// Move one account before or after another and compact the persisted order.
 /// A complete rewrite keeps ordering deterministic after any number of moves
 /// and avoids fragile fractional positions.
