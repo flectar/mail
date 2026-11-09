@@ -165,11 +165,31 @@ fn append_original(block: &mut String, text: &str, html: Option<&str>) {
                 if line.is_empty() {
                     block.push_str("<br>");
                 } else {
-                    append_escaped(block, line);
+                    append_plain_line(block, line);
                 }
                 block.push_str("</div>");
             }
         }
+    }
+}
+
+/// A line of a plain-text original, keeping its indentation and spacing,
+/// as the reader shows it: spaces HTML would collapse, at the start, after
+/// another space or at the end, become no-break spaces, a tab four of them.
+fn append_plain_line(block: &mut String, line: &str) {
+    let mut after_space = true;
+    let mut characters = line.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\t' => block.push_str("&nbsp;&nbsp;&nbsp;&nbsp;"),
+            ' ' if after_space || characters.peek().is_none() => block.push_str("&nbsp;"),
+            '&' => block.push_str("&amp;"),
+            '<' => block.push_str("&lt;"),
+            '>' => block.push_str("&gt;"),
+            '"' => block.push_str("&quot;"),
+            other => block.push(other),
+        }
+        after_space = matches!(character, ' ' | '\t');
     }
 }
 
@@ -207,6 +227,12 @@ mod tests {
                 .html
                 .ends_with("<div>a &lt; b</div><div><br></div><div>c</div></blockquote></div>")
         );
+        // Indentation and runs of spaces show as the reader shows them.
+        let spaced = ComposeQuote::reply("Maya wrote:", "  indented\tcode  x \nend", None);
+        assert!(spaced.html.ends_with(
+            "<div>&nbsp;&nbsp;indented&nbsp;&nbsp;&nbsp;&nbsp;code &nbsp;x&nbsp;</div>\
+             <div>end</div></blockquote></div>"
+        ));
         let forward = ComposeQuote::forward(
             &[
                 "---------- Forwarded message ----------".to_owned(),
