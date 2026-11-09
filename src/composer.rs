@@ -382,6 +382,12 @@ impl Composers {
     /// main window's composer held.
     fn open(self: &Rc<Self>, app: &AppWindow) -> Option<Rc<ComposeSession>> {
         if let Some(previous) = self.in_app() {
+            // A message being sent keeps its composer until the send ends, so
+            // the result still reaches it.
+            if previous.send_action.get().is_some() {
+                app.set_render_status(UiMessage::plain("Sending message…"));
+                return None;
+            }
             previous.dispose();
         }
         let session = Rc::new(ComposeSession {
