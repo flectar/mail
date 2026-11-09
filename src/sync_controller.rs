@@ -578,7 +578,14 @@ impl Actions {
         let (Some(app), Some(core)) = (self.app.upgrade(), self.core()) else {
             return;
         };
-        if core.device_sync_status().state != DeviceSyncState::Off {
+        // Removed from its group, or the group deleted, sync is off too.
+        if matches!(
+            core.device_sync_status().state,
+            DeviceSyncState::Idle
+                | DeviceSyncState::Syncing
+                | DeviceSyncState::Error(_)
+                | DeviceSyncState::PaymentRequired
+        ) {
             self.runtime.spawn(async move {
                 // The status reports it; failing to reach the server keeps
                 // what was known.
