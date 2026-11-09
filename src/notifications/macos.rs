@@ -13,16 +13,16 @@
 //! when there is mail to show or when they are turned on.
 
 use super::{
-    Act, Alert, AlertId, Availability, Controls, Failure, FixedWords, HostFuture, NotificationHost,
-    Response, parse_payload, payload, respond,
+    Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
+    NotificationHost, Response, parse_payload, payload, respond,
 };
 use block2::RcBlock;
 use objc2::{
-    AnyThread, define_class, msg_send,
+    AnyThread, MainThreadMarker, define_class, msg_send,
     rc::Retained,
     runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject},
 };
-use objc2_app_kit::NSWorkspace;
+use objc2_app_kit::{NSApplication, NSWorkspace};
 use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSSet, NSString, NSURL};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNAuthorizationStatus, UNErrorCode, UNErrorDomain,
@@ -179,7 +179,11 @@ impl NotificationHost for Host {
             });
             UNUserNotificationCenter::currentNotificationCenter()
                 .requestAuthorizationWithOptions_completionHandler(
-                    UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound,
+                    // macOS shows the Dock badge only for an app allowed
+                    // badges; without asking for them, no switch appears.
+                    UNAuthorizationOptions::Alert
+                        | UNAuthorizationOptions::Sound
+                        | UNAuthorizationOptions::Badge,
                     &block,
                 );
         });
@@ -195,7 +199,31 @@ impl NotificationHost for Host {
         Controls {
             settings: true,
             sound: true,
+            badge: true,
         }
+    }
+
+    /// The Dock tile's badge, with the count's digits grouped as the UI
+    /// groups them. AppKit wants its own thread: the window's while the app
+    /// runs, and this one as it quits, once that loop has ended.
+    fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+        let apply = move || {
+            let Some(main_thread) = MainThreadMarker::new() else {
+                return;
+            };
+            let label = badge.map(|badge| {
+                NSString::from_str(&crate::number_format::count(u64::from(badge.count)))
+            });
+            NSApplication::sharedApplication(main_thread)
+                .dockTile()
+                .setBadgeLabel(label.as_deref());
+        };
+        if MainThreadMarker::new().is_some() {
+            apply();
+        } else {
+            let _ = slint::invoke_from_event_loop(apply);
+        }
+        Box::pin(std::future::ready(()))
     }
 
     /// The app's page of Notifications in System Settings. macOS has no

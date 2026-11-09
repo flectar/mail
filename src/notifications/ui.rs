@@ -48,6 +48,7 @@ pub(crate) fn attach(
             let controls = host.controls();
             system.set_settings_openable(controls.settings);
             system.set_sound_fixed(!controls.sound);
+            system.set_badge_supported(controls.badge);
             // Until the system answers.
             system.set_availability("allowed".into());
             let host = Arc::clone(host);
@@ -105,6 +106,15 @@ impl super::Window for Live {
 
     async fn words(&self, summaries: Vec<(u32, Vec<String>)>) -> Option<Words> {
         words(summaries).await
+    }
+
+    async fn badge_description(&self, count: u32) -> Option<String> {
+        with_window(move |app, _| {
+            app.global::<I18n>()
+                .invoke_notification_unread_count(i32::try_from(count).unwrap_or(i32::MAX))
+                .to_string()
+        })
+        .await
     }
 }
 

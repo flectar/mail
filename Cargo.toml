@@ -151,6 +151,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # `windows::core::implement` expands to paths in this crate.
 windows-core = { version = "0.62", default-features = false, features = ["std"] }
@@ -195,7 +196,7 @@ slint = { version = "1.18.1", default-features = false, features = ["backend-win
 # These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }

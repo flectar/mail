@@ -850,6 +850,7 @@ pub(crate) fn apply_settings(app: &AppWindow, settings: &Settings) {
     app.set_download_directory_available(cfg!(desktop));
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
+    app.set_unread_badge_enabled(settings.unread_badge_enabled);
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(match settings.sync_interval_minutes {
         1 | 5 | 15 => settings.sync_interval_minutes as i32,

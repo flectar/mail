@@ -111,6 +111,21 @@ pub trait NotificationHost: Send + Sync + 'static {
     /// Open the system's settings for the app's notifications, where
     /// [`Controls::settings`] says there are such.
     fn open_settings(&self) {}
+    /// Show `badge` on the app icon, or take it off, where
+    /// [`Controls::badge`] says the system shows one. Called when the count
+    /// changes, and with `None` as the app quits on the desktop.
+    fn set_badge(&self, _badge: Option<Badge>) -> HostFuture<()> {
+        Box::pin(std::future::ready(()))
+    }
+}
+
+/// The count of unread mail on the app icon.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Badge {
+    pub count: u32,
+    /// What a screen reader says for it, in the UI's language: "3 unread
+    /// messages".
+    pub description: String,
 }
 
 /// What the system leaves to the app's Settings.
@@ -121,6 +136,8 @@ pub struct Controls {
     pub settings: bool,
     /// The app decides whether its notifications play a sound.
     pub sound: bool,
+    /// The system shows a count the app sets on its icon.
+    pub badge: bool,
 }
 
 impl Default for Controls {
@@ -128,6 +145,7 @@ impl Default for Controls {
         Self {
             settings: false,
             sound: true,
+            badge: false,
         }
     }
 }
@@ -413,6 +431,7 @@ pub(crate) fn spawn_dispatcher(
         }
         let mut pruned_at = None;
         let mut enabled = notifications_enabled(&core).await;
+        let mut badge = None;
         loop {
             if pruned_at.is_none_or(|at: tokio::time::Instant| at.elapsed() >= PRUNE_EVERY) {
                 // Taking back what is stale includes the week-old, which the
@@ -424,6 +443,16 @@ pub(crate) fn spawn_dispatcher(
                 pruned_at = Some(tokio::time::Instant::now());
             }
             let wait = dispatch(&core, host.as_deref(), &ui::Live).await;
+            if let Some(host) = host.as_deref()
+                && host.controls().badge
+            {
+                match core.unread_badge().await {
+                    Ok(count) => update_badge(host, &ui::Live, count, &mut badge).await,
+                    Err(error) => {
+                        tracing::warn!(%error, "notifications: could not count unread mail")
+                    }
+                }
+            }
             tokio::select! {
                 event = next_event(&mut events) => match event {
                     Event::NewMail => {}
@@ -465,12 +494,52 @@ pub(crate) fn withdraw_before_exit(
     let (Some(core), Some(host)) = (core, host) else {
         return;
     };
+    // The time limits are set inside the runtime, whose timer they need: the
+    // window's loop has ended outside it.
     if host.withdraw_at_exit() {
-        let _ = runtime.block_on(tokio::time::timeout(
-            EXIT_WITHDRAW_LIMIT,
-            withdraw(&core, Some(host.as_ref()), Withdraw::All),
-        ));
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(
+                EXIT_WITHDRAW_LIMIT,
+                withdraw(&core, Some(host.as_ref()), Withdraw::All),
+            )
+            .await
+        });
     }
+    // Nothing keeps a desktop badge current once the app is gone; a phone's
+    // stays, as its own background checks update it.
+    if cfg!(desktop) && host.controls().badge {
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(EXIT_WITHDRAW_LIMIT, host.set_badge(None)).await
+        });
+    }
+}
+
+/// Put `count` on the app icon, or nothing for none or zero, unless it is
+/// what `shown` says the icon already has.
+async fn update_badge(
+    host: &dyn NotificationHost,
+    window: &impl Window,
+    count: Option<i64>,
+    shown: &mut Option<Option<u32>>,
+) {
+    let count = count
+        .map(|count| u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX }))
+        .filter(|&count| count > 0);
+    if *shown == Some(count) {
+        return;
+    }
+    let badge = match count {
+        Some(count) => Some(Badge {
+            count,
+            description: window
+                .badge_description(count)
+                .await
+                .unwrap_or_else(|| count.to_string()),
+        }),
+        None => None,
+    };
+    host.set_badge(badge).await;
+    *shown = Some(count);
 }
 
 async fn notifications_enabled(core: &Core) -> bool {
@@ -798,6 +867,9 @@ pub(crate) trait Window {
         &self,
         summaries: Vec<(u32, Vec<String>)>,
     ) -> impl Future<Output = Option<Words>> + Send;
+    /// What a screen reader says for the app icon's count: "3 unread
+    /// messages".
+    fn badge_description(&self, count: u32) -> impl Future<Output = Option<String>> + Send;
 }
 
 /// The translated words of a batch of notifications.
@@ -915,6 +987,7 @@ mod tests {
         answer: Result<(), Failure>,
         availability: Availability,
         asked: std::sync::atomic::AtomicBool,
+        badges: Mutex<Vec<Option<Badge>>>,
     }
 
     impl FakeHost {
@@ -924,7 +997,12 @@ mod tests {
                 answer,
                 availability: Availability::Allowed,
                 asked: std::sync::atomic::AtomicBool::new(false),
+                badges: Mutex::new(Vec::new()),
             }
+        }
+
+        fn badges(&self) -> Vec<Option<Badge>> {
+            self.badges.lock().unwrap().clone()
         }
 
         fn shown(&self) -> Vec<Alert> {
@@ -952,6 +1030,68 @@ mod tests {
             // The user hasn't answered yet.
             Box::pin(std::future::pending())
         }
+
+        fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+            self.badges.lock().unwrap().push(badge);
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    /// A desktop's notification service that takes everything back as the
+    /// app leaves.
+    #[derive(Default)]
+    struct LeavingHost {
+        badges: Mutex<Vec<Option<Badge>>>,
+    }
+
+    impl NotificationHost for LeavingHost {
+        fn show(&self, alerts: Vec<Alert>) -> HostFuture<Vec<Result<(), Failure>>> {
+            Box::pin(std::future::ready(vec![Ok(()); alerts.len()]))
+        }
+
+        fn withdraw(&self, _ids: Vec<AlertId>) -> HostFuture<()> {
+            Box::pin(std::future::ready(()))
+        }
+
+        fn availability(&self) -> HostFuture<Availability> {
+            Box::pin(std::future::ready(Availability::Allowed))
+        }
+
+        fn withdraw_at_exit(&self) -> bool {
+            true
+        }
+
+        fn controls(&self) -> Controls {
+            Controls {
+                badge: true,
+                ..Controls::default()
+            }
+        }
+
+        fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+            self.badges.lock().unwrap().push(badge);
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn leaving_takes_everything_back_from_outside_the_runtime() {
+        // As main.rs calls it, once the window's loop has ended.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let core = runtime
+            .block_on(Core::start(flectar_mail_core::config::Paths::for_tests(
+                profile.path(),
+            )))
+            .unwrap();
+        let host = Arc::new(LeavingHost::default());
+        let shared: Arc<dyn NotificationHost> = host.clone();
+        withdraw_before_exit(runtime.handle(), Some(Arc::new(core)), Some(shared));
+        assert_eq!(host.badges.lock().unwrap().as_slice(), [None]);
     }
 
     /// A window showing these accounts' Inbox, or none at all.
@@ -978,6 +1118,40 @@ mod tests {
                     .collect(),
             })
         }
+
+        async fn badge_description(&self, count: u32) -> Option<String> {
+            self.0.as_ref()?;
+            Some(format!("{count} unread"))
+        }
+    }
+
+    #[tokio::test]
+    async fn the_app_icon_shows_the_count_only_when_it_changes() {
+        let host = FakeHost::new(Ok(()));
+        let window = FakeWindow(Some(BTreeSet::new()));
+        let mut shown = None;
+        let badge = |count| {
+            Some(Badge {
+                count,
+                description: format!("{count} unread"),
+            })
+        };
+        for count in [Some(3), Some(3), Some(0), None, Some(-1), Some(7)] {
+            update_badge(&host, &window, count, &mut shown).await;
+        }
+        // Zero, a negative count and the badge turned off all show none.
+        assert_eq!(host.badges(), vec![badge(3), None, badge(7)]);
+
+        // Without a window yet, the number itself is what is said.
+        let host = FakeHost::new(Ok(()));
+        update_badge(&host, &FakeWindow(None), Some(12), &mut None).await;
+        assert_eq!(
+            host.badges(),
+            vec![Some(Badge {
+                count: 12,
+                description: "12".into(),
+            })]
+        );
     }
 
     fn mail(account_id: i64, message_id: i64, sender: &str, sound: bool) -> NewMailNotification {

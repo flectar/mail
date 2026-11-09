@@ -494,6 +494,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
+    in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
@@ -608,6 +609,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
+    callback save_unread_badge(bool);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -740,7 +742,7 @@ export component SettingsDialog inherits Rectangle {
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Notifications"
-            ? @tr("notifications alerts sounds desktop new mail")
+            ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar")
             : section == "Shortcuts"
             ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
@@ -2502,6 +2504,27 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.notification_sound_enabled = checked;
                                             root.save_notification_settings(root.notifications_enabled, checked, root.notification_scope);
+                                        }
+                                    }
+                                    if SystemNotifications.badge-supported : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if SystemNotifications.badge-supported : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Unread count on the app icon");
+                                        // It counts what notifications cover; docks on Linux
+                                        // show it only where they support counts.
+                                        description: WindowChrome.platform == "linux"
+                                            ? (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox, on docks that show counts.")
+                                                : @tr("Show how many unread Important messages are in your Inbox, on docks that show counts."))
+                                            : (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox.")
+                                                : @tr("Show how many unread Important messages are in your Inbox."));
+                                        checked: root.unread_badge_enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.unread_badge_enabled = checked;
+                                            root.save_unread_badge(checked);
                                         }
                                     }
                                 }

@@ -31,6 +31,19 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+/// The unread count over the taskbar button of a copy without package
+/// identity, which draws its own.
+#[cfg(target_os = "windows")]
+mod taskbar_badge;
+#[cfg(any(test, target_os = "windows"))]
+mod badge_pixels;
+
+/// Show the unread count on the main window's taskbar button, as a copy
+/// without package identity must: Windows' own badges need one.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_taskbar_badge(badge: Option<(u32, String)>) {
+    windows::set_taskbar_badge(badge);
+}
 
 /// The integrated frame is the default; unknown saved values fall back to the
 /// system frame so a window can never start without any controls.
