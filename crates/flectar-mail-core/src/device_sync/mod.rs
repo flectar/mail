@@ -957,7 +957,20 @@ impl Core {
                         let mut stream = Box::pin(stream);
                         while let Some(event) = stream.next().await {
                             match event {
-                                Ok(Event::Seq(_) | Event::Chain(_)) => {
+                                // Every connection starts with the newest
+                                // number: a pull only when this device is
+                                // behind it.
+                                Ok(Event::Seq(high_seq)) => {
+                                    let behind =
+                                        match core.db.read(|conn| store::cursor(conn)).await {
+                                            Ok(Some(cursor)) => high_seq > cursor,
+                                            _ => true,
+                                        };
+                                    if behind {
+                                        core.sync_service().wake.notify_one();
+                                    }
+                                }
+                                Ok(Event::Chain(_)) => {
                                     core.sync_service().wake.notify_one();
                                 }
                                 // A payment, a renewal or a cancellation:

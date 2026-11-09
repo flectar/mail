@@ -44,6 +44,17 @@ fn record_id(bytes: Vec<u8>) -> Result<RecordId> {
         .map_err(|_| CoreError::Other("a stored sync record id is not 16 bytes".into()))
 }
 
+/// The sequence number of the last change this device took on, while sync
+/// is on.
+pub(crate) fn cursor(conn: &Connection) -> Result<Option<u64>> {
+    Ok(conn
+        .query_row("SELECT cursor FROM device_sync WHERE id = 1", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .optional()?
+        .map(to_u64))
+}
+
 pub(crate) fn load_row(conn: &Connection) -> Result<Option<SyncRow>> {
     let row = conn
         .query_row(
