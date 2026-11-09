@@ -130,6 +130,7 @@ pub fn anchor(conn: &Connection, thread_id: i64) -> Result<Value> {
         .query_row(
             "SELECT message_id FROM messages
              WHERE thread_id = ?1 AND message_id IS NOT NULL AND message_id <> ''
+               AND is_draft = 0
              ORDER BY date DESC LIMIT 1",
             params![thread_id],
             |row| row.get(0),
