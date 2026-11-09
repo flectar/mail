@@ -48,6 +48,11 @@ use serde_json::{Value, json};
 /// How long a share goes without reading the credential store again.
 const RECHECK_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// A working sign-in the group has goes round again from a device where it
+/// works once it is this old: each device refreshes its own, and Microsoft
+/// ends a refresh token nobody used for 90 days.
+const RESHARE_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+
 const KEY_LABEL: &[u8] = b"flectar-mail/v1 sign-in";
 const FINGERPRINT_LABEL: &[u8] = b"flectar-mail/v1 sign-in fingerprint";
 
@@ -161,6 +166,29 @@ fn sign_in_wanted(shared: Option<&Record>, digest: &[u8]) -> bool {
             sealed: Some(_), ..
         }) => false,
         Some(Record { rejected, .. }) => rejected.as_deref() != Some(digest),
+    }
+}
+
+/// Whether this device shares its sign-in, with fingerprint `digest`, now:
+/// a password that changed here; a sign-in the user made here again, one
+/// the group wants (see [`sign_in_wanted`]), or a working one the group has
+/// had for so long that its provider may end it.
+fn shares_now(
+    kind: Kind,
+    share: &Share,
+    shared: Option<&Record>,
+    shared_at: Option<i64>,
+    digest: &[u8],
+    now: i64,
+) -> bool {
+    match kind {
+        Kind::Password => share.fingerprint.as_deref() != Some(digest),
+        Kind::Oauth => {
+            share.fresh
+                || sign_in_wanted(shared, digest)
+                || (shared.is_some_and(|record| record.sealed.is_some())
+                    && shared_at.is_some_and(|at| now - at > RESHARE_MS))
+        }
     }
 }
 
@@ -393,19 +421,25 @@ impl Core {
                 let Ok(digest) = fingerprint(secrets, secret.as_bytes()) else {
                     return;
                 };
-                let mirrored = self
+                let (mirrored, shared_at) = self
                     .db
-                    .read(move |conn| store::mirrored_entry(conn, &record_id))
+                    .read(move |conn| {
+                        Ok((
+                            store::mirrored_entry(conn, &record_id)?,
+                            store::mirrored_stamp_ms(conn, &record_id)?,
+                        ))
+                    })
                     .await
-                    .ok()
-                    .flatten();
+                    .unwrap_or_default();
                 let shared = mirrored.as_ref().and_then(|entry| parse(&entry.body));
-                let share_now = match candidate.kind {
-                    Kind::Password => share.fingerprint.as_deref() != Some(digest.as_slice()),
-                    // The user signed in again here, or the group wants it.
-                    Kind::Oauth => share.fresh || sign_in_wanted(shared.as_ref(), &digest),
-                };
-                if share_now {
+                if shares_now(
+                    candidate.kind,
+                    &share,
+                    shared.as_ref(),
+                    shared_at,
+                    &digest,
+                    now,
+                ) {
                     match seal(secrets, secret.as_bytes()) {
                         Ok(sealed) => {
                             share.sealed = Some(sealed);
@@ -567,6 +601,56 @@ impl Core {
             self.resume_account(account_id).await?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod shares {
+    use super::*;
+
+    #[test]
+    fn a_working_sign_in_goes_round_again_before_its_provider_ends_it() {
+        let share = Share::default();
+        let working = Record {
+            account: "aa",
+            kind: Kind::Oauth,
+            family: "desktop",
+            sealed: Some("sealed".into()),
+            rejected: None,
+        };
+        let now = 100 * 24 * 60 * 60 * 1000;
+        let recent = Some(now - 24 * 60 * 60 * 1000);
+        let old = Some(now - RESHARE_MS - 1);
+        assert!(!shares_now(
+            Kind::Oauth,
+            &share,
+            Some(&working),
+            recent,
+            b"mine",
+            now
+        ));
+        assert!(shares_now(
+            Kind::Oauth,
+            &share,
+            Some(&working),
+            old,
+            b"mine",
+            now
+        ));
+        // One that failed elsewhere never goes round again, however old.
+        let stale = Record {
+            sealed: None,
+            rejected: Some(b"mine".to_vec()),
+            ..working
+        };
+        assert!(!shares_now(
+            Kind::Oauth,
+            &share,
+            Some(&stale),
+            old,
+            b"mine",
+            now
+        ));
     }
 }
 

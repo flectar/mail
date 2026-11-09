@@ -283,6 +283,18 @@ pub(crate) fn set_local_hash(
 }
 
 /// The server's version of one record, if it has one.
+/// When the server's version of a record was written, in ms since the epoch.
+pub(crate) fn mirrored_stamp_ms(conn: &Connection, id: &RecordId) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT stamp_ms FROM device_sync_mirror WHERE record_id = ?1",
+            params![&id[..]],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 pub(crate) fn mirrored_entry(conn: &Connection, id: &RecordId) -> Result<Option<Entry>> {
     let row = conn
         .query_row(
