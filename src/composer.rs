@@ -2861,6 +2861,77 @@ mod tests {
     }
 
     #[test]
+    fn a_message_asks_for_its_times_in_the_window_that_shows_it() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        when_picker::register(&app, &composers.state, &composers.runtime);
+        let main = app.global::<ComposerUi>();
+        let main_picker = app.global::<WhenUi>();
+        // The dialog shuts itself before it answers, as a click does.
+        let choose = |picker: &WhenUi<'_>, index: usize| {
+            picker.set_open(false);
+            picker.invoke_choose(i32::try_from(index).unwrap());
+        };
+
+        // A message in the main window asks there.
+        app.invoke_open_compose("first@example.com".into());
+        let first = composers.in_app().unwrap();
+        main.invoke_remind();
+        assert!(main_picker.get_open());
+        assert_eq!(main_picker.get_purpose(), "remind");
+        choose(&main_picker, 0);
+        let reminds = main.get_remind_time();
+        assert_ne!(reminds, "");
+        assert!(first.remind_at.get().is_some());
+
+        // In a window of its own, it keeps its reminder and asks there; the
+        // main window's picker stays shut.
+        main.invoke_pop_out();
+        assert_eq!(
+            main.get_remind_time(),
+            "",
+            "the main window's composer is free"
+        );
+        let popped = first.host().unwrap();
+        let HostRef::Window(window) = &popped else {
+            panic!("the message has a window of its own");
+        };
+        let picker = window.global::<WhenUi>();
+        assert_eq!(popped.ui().get_remind_time(), reminds);
+        popped.ui().invoke_remind();
+        assert!(picker.get_open());
+        assert!(!main_picker.get_open());
+
+        // "Don't remind me" comes last, and ends the reminder.
+        let choices = picker.get_choices();
+        let last = choices.row_count() - 1;
+        assert_eq!(choices.row_data(last).unwrap().kind, "none");
+        choose(&picker, last);
+        assert_eq!(popped.ui().get_remind_time(), "");
+        assert!(first.remind_at.get().is_none());
+
+        // Schedule send asks there too, and refuses a time that a reminder
+        // would come before: tomorrow at eight both times.
+        popped.ui().invoke_remind();
+        choose(&picker, 0);
+        popped.ui().invoke_schedule_send();
+        assert!(picker.get_open());
+        assert_eq!(picker.get_purpose(), "send");
+        choose(&picker, 0);
+        assert_eq!(
+            popped.ui().get_message().key,
+            "Choose a reminder after the time the message goes out."
+        );
+        assert!(popped.ui().get_notice_is_error());
+        assert!(popped.ui().get_open(), "the message stays to choose again");
+        assert!(first.send_at.get().is_none());
+    }
+
+    #[test]
     fn a_reply_shows_its_original_read_only_until_edited_or_removed() {
         let Setup {
             app,
