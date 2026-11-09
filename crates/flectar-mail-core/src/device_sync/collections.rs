@@ -1121,6 +1121,24 @@ fn merged_account_settings(current: &AccountSettings, synced: &AccountSettings) 
     }
 }
 
+/// Whether the account is POP3 and removes downloaded mail from the
+/// server, so some of its mail exists only on this device.
+fn keeps_mail_only_here(conn: &Connection, account_id: i64) -> Result<bool> {
+    use crate::models::KeepOnServer;
+    Ok(
+        repo::accounts::get_config(conn, account_id)?.is_some_and(|config| {
+            config.mail_protocol == MailProtocol::Pop3
+                && matches!(
+                    config.settings.keep_on_server,
+                    KeepOnServer::SevenDays
+                        | KeepOnServer::FourteenDays
+                        | KeepOnServer::ThirtyDays
+                        | KeepOnServer::UntilDownloaded
+                )
+        }),
+    )
+}
+
 /// After a run's records are applied: each record taken on or left alone
 /// keeps the hash of the item as this device now has it, from `local`, a
 /// snapshot taken after applying. An item this device keeps its own way,
@@ -1155,9 +1173,18 @@ fn apply_delete(
                 )
                 .optional()?
             {
-                applied
-                    .follow_ups
-                    .push(FollowUp::RemoveAccount(local_id, sync_id_hex(id)));
+                if keeps_mail_only_here(conn, local_id)? {
+                    // Its mail left the mail server, so only this device has
+                    // it: the account stays here, synced no more.
+                    conn.execute(
+                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
+                        params![local_id],
+                    )?;
+                } else {
+                    applied
+                        .follow_ups
+                        .push(FollowUp::RemoveAccount(local_id, sync_id_hex(id)));
+                }
                 applied.accounts_changed = true;
             }
         }
@@ -2028,6 +2055,56 @@ mod tests {
             merged_account_settings(&current, &synced).security,
             current.security
         );
+    }
+
+    #[test]
+    fn a_pop3_account_whose_mail_left_the_server_stays_when_removed_elsewhere() {
+        let conn = testutil::conn();
+        let removed = |sync: &str| {
+            let mut incoming = BTreeMap::new();
+            incoming.insert(
+                sync_id_bytes(sync).unwrap(),
+                Incoming {
+                    previous: Some(entry(ACCOUNT, json!({"email": "me@example.com"}))),
+                    next: None,
+                },
+            );
+            apply(
+                &conn,
+                &incoming,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+            )
+            .unwrap()
+        };
+
+        let pop = account(&conn, "pop@example.com", &"b".repeat(32));
+        conn.execute(
+            "UPDATE accounts SET mail_protocol = 'pop3',
+                    settings_json = json_set(settings_json, '$.keepOnServer', 'sevenDays')
+             WHERE id = ?1",
+            params![pop],
+        )
+        .unwrap();
+        let applied = removed(&"b".repeat(32));
+        assert!(applied.follow_ups.is_empty(), "its mail stays here");
+        let sync_id: Option<String> = conn
+            .query_row(
+                "SELECT sync_id FROM accounts WHERE id = ?1",
+                params![pop],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(sync_id, None, "synced no more");
+
+        // One whose mail is on the server goes.
+        account(&conn, "imap@example.com", &"c".repeat(32));
+        let applied = removed(&"c".repeat(32));
+        assert!(matches!(
+            applied.follow_ups.as_slice(),
+            [FollowUp::RemoveAccount(..)]
+        ));
     }
 
     #[test]
