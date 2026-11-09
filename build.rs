@@ -11,6 +11,11 @@ fn main() {
         // portals, X11 or a Secret Service.
         linux_desktop: { all(desktop, target_os = "linux", not(target_env = "ohos")) },
         glibc: { all(target_os = "linux", target_env = "gnu") },
+        // New-mail notifications through Apple's User Notifications.
+        user_notifications: { any(target_os = "macos", target_os = "ios") },
+        // The system suspends the app in the background and wakes it to
+        // check for new mail.
+        background_checks: { target_os = "ios" },
     }
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
