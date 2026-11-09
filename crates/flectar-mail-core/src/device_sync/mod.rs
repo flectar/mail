@@ -28,7 +28,7 @@ use flectar_mail_sync_client::{
 };
 use futures::StreamExt;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use store::RecordId;
@@ -270,6 +270,12 @@ pub(crate) struct Service {
     device: Mutex<DeviceDescription>,
     /// When the server was last asked what the group pays.
     billing_checked: Mutex<Option<tokio::time::Instant>>,
+    /// Fired once the window has finished starting, like the accounts wait
+    /// for, so a keyring prompt never lands on top of the intro.
+    ui_ready: Notify,
+    /// Sync is on but its keys couldn't be read yet, say from a locked
+    /// keyring: the loop tries again.
+    resume_pending: AtomicBool,
 }
 
 impl std::fmt::Debug for Service {
@@ -343,6 +349,8 @@ impl Service {
             http,
             client: Mutex::new(None),
             wake: Notify::new(),
+            ui_ready: Notify::new(),
+            resume_pending: AtomicBool::new(false),
             run_lock: tokio::sync::Mutex::new(()),
             share_lock: tokio::sync::Mutex::new(()),
             names: tokio::sync::Mutex::new(Names::default()),
@@ -357,6 +365,11 @@ impl Service {
 
     fn client(&self) -> Option<Arc<SyncClient>> {
         lock(&self.client).clone()
+    }
+
+    /// The window has finished starting.
+    pub(crate) fn notify_ui_ready(&self) {
+        self.ui_ready.notify_one();
     }
 
     fn require_client(&self) -> Result<Arc<SyncClient>> {
@@ -501,10 +514,13 @@ impl Core {
 
     /// Load this device's sync state at startup and run the loop.
     pub(crate) async fn device_sync_loop(&self) {
-        if let Err(error) = self.resume_device_sync().await {
-            tracing::warn!(%error, "could not resume Flectar Mail Sync");
-            self.set_sync_state(DeviceSyncState::Error(error.to_string()));
+        // The keys come from the keyring, which may prompt: wait for the
+        // window, as the accounts do, and go on without one after a minute.
+        tokio::select! {
+            () = self.sync_service().ui_ready.notified() => {}
+            () = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
         }
+        self.try_resume_device_sync().await;
         let mut last_pull = tokio::time::Instant::now() - PULL_INTERVAL;
         loop {
             let woken = tokio::select! {
@@ -512,6 +528,9 @@ impl Core {
                 () = tokio::time::sleep(CHECK_INTERVAL) => false,
             };
             if self.sync_service().client().is_none() {
+                if self.sync_service().resume_pending.load(Ordering::Relaxed) {
+                    self.try_resume_device_sync().await;
+                }
                 continue;
             }
             let pull = woken || last_pull.elapsed() >= PULL_INTERVAL;
@@ -831,6 +850,17 @@ impl Core {
         )))
     }
 
+    async fn try_resume_device_sync(&self) {
+        let service = self.sync_service();
+        service.resume_pending.store(false, Ordering::Relaxed);
+        if let Err(error) = self.resume_device_sync().await {
+            tracing::warn!(%error, "could not resume Flectar Mail Sync");
+            // Everything stays as it was until the keys can be read.
+            service.resume_pending.store(true, Ordering::Relaxed);
+            self.set_sync_state(DeviceSyncState::Error(error.to_string()));
+        }
+    }
+
     async fn resume_device_sync(&self) -> Result<()> {
         let Some(row) = self.db.read(|conn| store::load_row(conn)).await? else {
             return Ok(());
@@ -842,14 +872,16 @@ impl Core {
                 .decode(encoded.trim())
                 .map_err(|_| CoreError::Other("stored Flectar Mail Sync keys are damaged".into()))
                 .and_then(|bytes| Secrets::from_bytes(&bytes).map_err(sync_error))?,
-            Err(error) => {
+            Err(error) if credentials::is_missing(&error) => {
                 // The keys are gone, so this device cannot sign in to its
                 // group again: it has to rejoin.
-                tracing::warn!(%error, "Flectar Mail Sync keys are missing; turning sync off");
+                tracing::warn!("Flectar Mail Sync keys are missing; turning sync off");
                 self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
                     .await?;
                 return Ok(());
             }
+            // Locked or unreachable, such as a keyring not unlocked yet.
+            Err(error) => return Err(error),
         };
         let device = secrets.identity.device_id();
         let floor = flectar_mail_sync_client::Stamp {

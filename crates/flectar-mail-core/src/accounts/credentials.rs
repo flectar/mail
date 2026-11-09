@@ -150,6 +150,12 @@ impl CredentialStore for UnavailableCredentialStore {
     }
 }
 
+/// Whether `error` says the store holds nothing for that slot, as opposed to
+/// a store that is locked or can't be reached right now.
+pub(crate) fn is_missing(error: &CoreError) -> bool {
+    matches!(error, CoreError::Auth(message) if message == "no stored credential")
+}
+
 pub async fn store_async(
     store: CredentialStoreHandle,
     account_id: i64,

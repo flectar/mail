@@ -101,7 +101,7 @@ fn validate_oauth_credentials(credentials: &OAuthCredentialBundle) -> Result<()>
 }
 
 fn is_missing_credential(error: &CoreError) -> bool {
-    matches!(error, CoreError::Auth(message) if message == "no stored credential")
+    crate::accounts::credentials::is_missing(error)
 }
 
 pub fn platform_google_marker(scopes: &[&str]) -> std::result::Result<String, &'static str> {

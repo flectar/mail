@@ -2065,6 +2065,7 @@ impl Core {
     pub fn notify_ui_ready(&self) {
         events::sync_diagnostic("ui_ready", None, "notified");
         self.ui_ready.notify_one();
+        self.device_sync.notify_ui_ready();
     }
 
     /// Free the SQLite page caches of every open store once a burst of work

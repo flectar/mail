@@ -18,15 +18,30 @@ use flectar_mail_core::{
 };
 use std::collections::HashMap;
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Default)]
-struct MemoryCredentials(Mutex<HashMap<(i64, Slot), String>>);
+struct MemoryCredentials {
+    secrets: Mutex<HashMap<(i64, Slot), String>>,
+    /// Like a keyring not unlocked yet: nothing can be read or changed.
+    locked: AtomicBool,
+}
+
+impl MemoryCredentials {
+    fn check(&self) -> Result<()> {
+        if self.locked.load(Ordering::SeqCst) {
+            return Err(CoreError::CredentialStoreUnavailable("locked".into()));
+        }
+        Ok(())
+    }
+}
 
 impl CredentialStore for MemoryCredentials {
     fn store(&self, account_id: i64, slot: Slot, secret: &str) -> Result<()> {
-        self.0
+        self.check()?;
+        self.secrets
             .lock()
             .unwrap()
             .insert((account_id, slot), secret.into());
@@ -34,7 +49,8 @@ impl CredentialStore for MemoryCredentials {
     }
 
     fn load(&self, account_id: i64, slot: Slot) -> Result<String> {
-        self.0
+        self.check()?;
+        self.secrets
             .lock()
             .unwrap()
             .get(&(account_id, slot))
@@ -43,12 +59,14 @@ impl CredentialStore for MemoryCredentials {
     }
 
     fn delete(&self, account_id: i64, slot: Slot) -> Result<()> {
-        self.0.lock().unwrap().remove(&(account_id, slot));
+        self.check()?;
+        self.secrets.lock().unwrap().remove(&(account_id, slot));
         Ok(())
     }
 
     fn delete_all(&self, account_id: i64) -> Result<()> {
-        self.0
+        self.check()?;
+        self.secrets
             .lock()
             .unwrap()
             .retain(|(owner, _), _| *owner != account_id);
@@ -408,6 +426,59 @@ async fn resetting_a_device_leaves_the_others_their_data() {
         1,
         "the laptop left the group"
     );
+}
+
+/// Wait until `done`, for up to ten seconds.
+async fn eventually(mut done: impl FnMut() -> bool) {
+    for _ in 0..200 {
+        if done() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("timed out");
+}
+
+fn runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn a_locked_keyring_at_startup_keeps_sync_on() {
+    let credentials = Arc::new(MemoryCredentials::default());
+    let dir = tempfile::tempdir().unwrap();
+    // Each runtime is one run of the app: dropping it stops every task.
+    let first = runtime();
+    let Some(server) = first.block_on(start_server()) else {
+        return;
+    };
+    first.block_on(async {
+        let laptop = start_core_with(dir.path(), credentials.clone()).await;
+        laptop
+            .device_sync_turn_on(Some(server.url.clone()))
+            .await
+            .unwrap();
+        assert!(laptop.device_sync_run().await.unwrap());
+    });
+    drop(first);
+
+    // The app starts before the keyring is unlocked.
+    credentials.locked.store(true, Ordering::SeqCst);
+    runtime().block_on(async {
+        let laptop = start_core_with(dir.path(), credentials.clone()).await;
+        laptop.notify_ui_ready();
+        eventually(|| matches!(laptop.device_sync_status().state, DeviceSyncState::Error(_))).await;
+
+        // Once it is unlocked, sync carries on where it was.
+        credentials.locked.store(false, Ordering::SeqCst);
+        laptop.device_sync_now();
+        eventually(|| laptop.device_sync_status().state == DeviceSyncState::Idle).await;
+        assert!(laptop.device_sync_run().await.unwrap());
+    });
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
