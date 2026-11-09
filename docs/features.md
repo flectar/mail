@@ -75,14 +75,16 @@ Settings → General.
 
 ## New-mail notifications
 
-Flectar Mail lets you know when new mail reaches your Inbox while it's running:
-one notification per message, with its sender and subject. When more than three
-messages reach one account at once, a single notification sums them up. Choose
-which mail notifies with **Desktop notifications** in Settings → Notifications:
-**Important mail**, the default, leaves out newsletters and other automated
-mail, **All new mail** includes it, and **Off** turns notifications off. Mail
-that came in while Flectar Mail wasn't running waits quietly in the Inbox, and
-mail that reaches the inbox you're looking at simply appears in the list.
+Flectar Mail lets you know when new mail reaches your Inbox while it's running,
+and on iOS when it checks in the background: one notification per message, with
+its sender and subject. When more than three messages reach one account at once,
+a single notification sums them up. Choose which mail notifies with **Desktop
+notifications** in Settings → Notifications (**New mail notifications** on
+iOS): **Important mail**, the default, leaves out newsletters and other
+automated mail, **All new mail** includes it, and **Off** turns notifications
+off. On a computer, mail that came in while Flectar Mail wasn't running waits
+quietly in the Inbox, and mail that reaches the inbox you're looking at simply
+appears in the list.
 
 Click a notification to open its conversation, or use its buttons to mark the
 message as read or move it to the archive, or to the trash for accounts without
@@ -98,17 +100,25 @@ show. If notifications are turned off for Flectar Mail in the system's settings,
 Settings → Notifications says so, and on Windows and macOS its **Open system
 settings** button goes straight there. On Linux, the desktop's notification
 server shows them, or the notification portal in the Flatpak, where the desktop
-also decides whether they play a sound. Android and iOS don't show
-notifications yet.
+also decides whether they play a sound. Android doesn't show notifications yet.
+
+On iOS, Flectar Mail asks for permission once an account is set up. It checks
+for new mail in the background when iOS lets it, which also tells you about mail
+that came in while the app was closed. iOS decides how often from how you use
+the app, so a notification can come well after its mail. It doesn't check while
+Low Power Mode is on or Background App Refresh is off for Flectar Mail, and it
+may not until you open the app again after closing it in the app switcher.
+Settings → Notifications says when iOS isn't checking. Archiving or deleting
+from a notification asks you to unlock the device first.
 
 The app icon shows how many unread messages are in the Inbox, counting the
 same mail as notifications: Important mail, or every message with **All new
 mail**. The number stays until the mail is read, here or on another device;
 turn it off with **Unread count on the app icon** in Settings → Notifications.
-macOS shows it on the Dock when badges are allowed for Flectar Mail in its
-notification settings, Windows on the taskbar button, and Linux on docks that
-show counts, such as KDE Plasma's, Ubuntu Dock and Dash to Dock, elementary
-OS's and Plank.
+macOS shows it on the Dock and iOS on the Home Screen icon when badges are
+allowed for Flectar Mail in its notification settings, Windows on the taskbar
+button, and Linux on docks that show counts, such as KDE Plasma's, Ubuntu Dock
+and Dash to Dock, elementary OS's and Plank.
 
 ## Profiles and account colors
 
