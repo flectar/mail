@@ -4,6 +4,7 @@
 //! main window free to read mail or start another message.
 
 use super::*;
+use crate::rich_compose::{EditMark, EditState};
 use flectar_mail_core::models::{Address, AttachmentMeta, SenderIdentity, Signature};
 use slint::SharedString;
 #[cfg(desktop)]
@@ -31,6 +32,13 @@ pub(super) struct Composers {
     quote_poll_pending: Cell<bool>,
 }
 
+/// An original moved into the message's text by Edit.
+struct EditedQuote {
+    quote: ComposeQuote,
+    expanded: bool,
+    mark: EditMark,
+}
+
 /// One message being written.
 pub(super) struct ComposeSession {
     composers: Weak<Composers>,
@@ -53,6 +61,8 @@ pub(super) struct ComposeSession {
     /// The original could not be drawn, even as text; it is not tried again
     /// until it changes.
     quote_unavailable: Cell<bool>,
+    /// An original moved into the text, while undoing that brings it back.
+    edited_quote: RefCell<Option<EditedQuote>>,
     send_action: Cell<Option<i64>>,
     picking: Cell<bool>,
     /// The signature block this composer inserted, while the user has not
@@ -511,6 +521,7 @@ impl Composers {
             quote: RefCell::default(),
             quote_renderer: RefCell::default(),
             quote_unavailable: Cell::new(false),
+            edited_quote: RefCell::default(),
             send_action: Cell::new(None),
             picking: Cell::new(false),
             signature: RefCell::default(),
@@ -1231,6 +1242,7 @@ impl ComposeSession {
         *self.intent.borrow_mut() = ComposeIntent::default();
         *self.quote.borrow_mut() = None;
         *self.quote_renderer.borrow_mut() = None;
+        *self.edited_quote.borrow_mut() = None;
         *self.signature.borrow_mut() = None;
         if let Some(host) = self.host() {
             match &host {
@@ -1483,20 +1495,26 @@ impl ComposeSession {
             return;
         };
         let ui = host.ui();
-        let Some(quoted) = self
-            .quote
-            .borrow()
-            .as_ref()
-            .map(ComposeQuote::editable_text)
-        else {
+        let Some(quote) = self.quote.borrow().clone() else {
             return;
         };
+        let expanded = ui.get_quote_expanded();
+        let quoted = quote.editable_text();
         self.set_quote(&ui, None);
+        let mut mark = None;
         self.edit(|document| {
             let text = document.text();
             let written = text.trim_end_matches('\n').len();
             let end = text.len();
-            document.replace_unformatted(written..end, &format!("\n\n{quoted}"), written)
+            let selection =
+                document.replace_unformatted(written..end, &format!("\n\n{quoted}"), written);
+            mark = document.mark_last_edit();
+            selection
+        });
+        *self.edited_quote.borrow_mut() = mark.map(|mark| EditedQuote {
+            quote,
+            expanded,
+            mark,
         });
     }
 
@@ -1548,14 +1566,43 @@ impl ComposeSession {
         let Some(host) = self.host() else {
             return;
         };
-        let mut document = self.document.borrow_mut();
-        if let Some(selection) = document.history(direction) {
+        let edit = {
+            let mut document = self.document.borrow_mut();
+            let Some(selection) = document.history(direction) else {
+                return;
+            };
             apply_rich_compose(
                 &host.view(),
                 &document,
                 selection,
                 &mut self.editor.borrow_mut(),
             );
+            self.edited_quote
+                .borrow()
+                .as_ref()
+                .map(|edited| document.edit_state(edited.mark))
+        };
+        // Undoing Edit puts the drawn original back, and redoing it moves the
+        // original into the text again.
+        let ui = host.ui();
+        let shown = self.quote.borrow().is_some();
+        match edit {
+            Some(EditState::Undone) if !shown => {
+                let Some((quote, expanded)) = self
+                    .edited_quote
+                    .borrow()
+                    .as_ref()
+                    .map(|edited| (edited.quote.clone(), edited.expanded))
+                else {
+                    return;
+                };
+                self.set_quote(&ui, Some(quote));
+                ui.set_quote_expanded(expanded);
+                self.render_quote(&host);
+            }
+            Some(EditState::Applied) if shown => self.set_quote(&ui, None),
+            Some(EditState::Gone) => *self.edited_quote.borrow_mut() = None,
+            _ => {}
         }
     }
 
@@ -2688,15 +2735,28 @@ mod tests {
         assert!(session.quote_renderer.borrow().is_none());
 
         // Editing moves the original into the editor as a quote block.
+        ui.set_quote_expanded(true);
         session.edit_quote();
         assert_eq!(ui.get_quote(), "");
-        assert!(
+        let edited = || {
             session
                 .document
                 .borrow()
                 .text()
                 .ends_with("Maya wrote:\n│ First line")
-        );
+        };
+        assert!(edited());
+
+        // Undoing that puts the drawn original back as it was, and redoing
+        // moves it into the text again.
+        session.history("undo");
+        assert!(!edited());
+        assert_eq!(ui.get_quote(), "reply");
+        assert!(ui.get_quote_expanded());
+        assert!(ui.get_quote_tiles().row_count() > 0);
+        session.history("redo");
+        assert!(edited());
+        assert_eq!(ui.get_quote(), "");
 
         session.set_quote(&ui, Some(original()));
         session.remove_quote();

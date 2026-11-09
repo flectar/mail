@@ -4,7 +4,10 @@ use std::{
     cell::RefCell,
     collections::{HashSet, VecDeque},
     ops::Range,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 pub(crate) const BOLD: u8 = 1 << 0;
@@ -87,6 +90,21 @@ struct EditTransaction {
     before_selection: (i32, i32),
     after_selection: (i32, i32),
     retained_bytes: usize,
+    /// Set by [`RichComposeDocument::mark_last_edit`].
+    mark: Option<EditMark>,
+}
+
+/// An edit someone wants to follow through undo and redo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditMark(u64);
+
+/// Where a marked edit stands in the history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditState {
+    Applied,
+    Undone,
+    /// It can no longer be undone or redone.
+    Gone,
 }
 
 /// Estimated bytes owned by the document and its history. This excludes
@@ -415,6 +433,28 @@ impl RichComposeDocument {
         ComposeSelection {
             start: to_i32(start),
             end: to_i32(end),
+        }
+    }
+
+    /// Mark the edit just made, to follow it through undo and redo.
+    pub fn mark_last_edit(&mut self) -> Option<EditMark> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        // Typing that follows is an edit of its own.
+        self.typing_group_active = false;
+        let transaction = self.undo.back_mut()?;
+        let mark = EditMark(NEXT.fetch_add(1, Ordering::Relaxed));
+        transaction.mark = Some(mark);
+        Some(mark)
+    }
+
+    pub fn edit_state(&self, mark: EditMark) -> EditState {
+        let marked = |transaction: &EditTransaction| transaction.mark == Some(mark);
+        if self.undo.iter().any(marked) {
+            EditState::Applied
+        } else if self.redo.iter().any(marked) {
+            EditState::Undone
+        } else {
+            EditState::Gone
         }
     }
 
@@ -868,6 +908,7 @@ impl RichComposeDocument {
             before_selection: before.selection,
             after_selection: self.selection,
             retained_bytes,
+            mark: None,
         });
     }
 
@@ -893,6 +934,7 @@ impl RichComposeDocument {
                 before_selection: before.selection,
                 after_selection: self.selection,
                 retained_bytes,
+                mark: None,
             },
             key_text,
         );
@@ -2386,6 +2428,39 @@ mod tests {
         }
         assert_eq!(document.text().len(), 140);
         assert_style_coverage(&document);
+    }
+
+    #[test]
+    fn a_marked_edit_is_followed_through_undo_redo_and_new_edits() {
+        let mut document = RichComposeDocument::default();
+        document.synchronize_key_edit("T", 1, 1, "T");
+        document.replace_unformatted(1..1, "\n\n│ Original", 1);
+        let mark = document.mark_last_edit().unwrap();
+        assert_eq!(document.edit_state(mark), EditState::Applied);
+
+        // Typing next to it doesn't join it.
+        document.synchronize_key_edit("Ta\n\n│ Original", 2, 2, "a");
+        document.history("undo").unwrap();
+        assert_eq!(document.edit_state(mark), EditState::Applied);
+        document.history("undo").unwrap();
+        assert_eq!(document.text(), "T");
+        assert_eq!(document.edit_state(mark), EditState::Undone);
+        document.history("redo").unwrap();
+        assert_eq!(document.edit_state(mark), EditState::Applied);
+
+        // A new edit after undoing it takes it out of the history.
+        document.history("undo").unwrap();
+        document.synchronize_key_edit("Tb", 2, 2, "b");
+        assert_eq!(document.edit_state(mark), EditState::Gone);
+
+        // So does the history running out.
+        document.replace_unformatted(2..2, "\n\n│ Again", 2);
+        let again = document.mark_last_edit().unwrap();
+        assert_ne!(again, mark);
+        for _ in 0..MAX_HISTORY {
+            document.insert_text("x");
+        }
+        assert_eq!(document.edit_state(again), EditState::Gone);
     }
 
     #[test]
