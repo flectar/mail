@@ -540,7 +540,7 @@ fn profile_accounts<'a>(
 }
 
 /// Work the app must do after the transaction that applied records.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum FollowUp {
     /// Another device removed the account. It left sync with the change, and
     /// its removal is recorded: one that doesn't finish now finishes at the
@@ -564,7 +564,7 @@ enum Outcome {
 }
 
 /// What applying records changed.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Applied {
     pub settings_changed: bool,
     pub accounts_changed: bool,
@@ -646,26 +646,47 @@ pub(crate) fn apply(
                     schema: next.schema,
                     body,
                 };
-                apply_put(conn, &mut settings, &id, &merged, &mut applied)?;
+                if let Err(error) = isolated(
+                    conn,
+                    &mut settings,
+                    &mut applied,
+                    |conn, settings, applied| apply_put(conn, settings, &id, &merged, applied),
+                ) {
+                    tracing::warn!(%error, "a synced item could not be applied");
+                }
             }
             continue;
         }
-        let outcome = match (previous, next) {
-            (_, Some(next)) if !readable(next) => Outcome::Waiting,
-            (_, Some(next)) => apply_put(conn, &mut settings, &id, next, &mut applied)?,
-            (Some(previous), None) => {
-                apply_delete(conn, &mut settings, &id, previous, &mut applied)?;
-                Outcome::Applied
-            }
-            // Deleted while this device was out of the group: its own copy
-            // goes too, rather than coming back for every device.
-            (None, None) => {
-                if let Some(own) = local_before.get(&id) {
-                    apply_delete(conn, &mut settings, &id, own, &mut applied)?;
-                }
-                Outcome::Applied
-            }
-        };
+        let outcome = isolated(
+            conn,
+            &mut settings,
+            &mut applied,
+            |conn, settings, applied| {
+                Ok(match (previous, next) {
+                    (_, Some(next)) if !readable(next) => Outcome::Waiting,
+                    (_, Some(next)) => apply_put(conn, settings, &id, next, applied)?,
+                    (Some(previous), None) => {
+                        apply_delete(conn, settings, &id, previous, applied)?;
+                        Outcome::Applied
+                    }
+                    // Deleted while this device was out of the group: its own
+                    // copy goes too, rather than coming back for every device.
+                    (None, None) => {
+                        if let Some(own) = local_before.get(&id) {
+                            apply_delete(conn, settings, &id, own, applied)?;
+                        }
+                        Outcome::Applied
+                    }
+                })
+            },
+        )
+        // One record this device can't take on must not stop every later
+        // sync: it is left alone until it changes again, like a value this
+        // version can't use.
+        .unwrap_or_else(|error| {
+            tracing::warn!(%error, "a synced item could not be applied");
+            Outcome::Ignored
+        });
         match outcome {
             Outcome::Applied => set_local_hash(conn, &id, next.map(body_hash))?,
             // Not this device's item: it never uploads or deletes it.
@@ -692,6 +713,30 @@ pub(crate) fn apply(
         .threads_changed
         .extend(repo::reply_reminders::attach_waiting(conn)?);
     Ok(applied)
+}
+
+/// Apply one record so that an error undoes only its own changes: to the
+/// database, to `settings` and to `applied`.
+fn isolated<T>(
+    conn: &Connection,
+    settings: &mut Settings,
+    applied: &mut Applied,
+    step: impl FnOnce(&Connection, &mut Settings, &mut Applied) -> Result<T>,
+) -> Result<T> {
+    conn.execute_batch("SAVEPOINT apply_record")?;
+    let (settings_before, applied_before) = (settings.clone(), applied.clone());
+    match step(conn, settings, applied) {
+        Ok(value) => {
+            conn.execute_batch("RELEASE apply_record")?;
+            Ok(value)
+        }
+        Err(error) => {
+            conn.execute_batch("ROLLBACK TO apply_record; RELEASE apply_record")?;
+            *settings = settings_before;
+            *applied = applied_before;
+            Err(error)
+        }
+    }
 }
 
 fn apply_put(
@@ -1998,6 +2043,45 @@ mod tests {
         assert_eq!(settings.mail_profiles[0].id, "their-work");
         assert_eq!(settings.mail_profiles[0].account_ids, [account_id]);
         assert_eq!(settings.active_mail_profile.as_deref(), Some("their-work"));
+    }
+
+    #[test]
+    fn one_item_that_cannot_be_applied_leaves_the_others_and_later_syncs_alone() {
+        let conn = testutil::conn();
+        conn.execute_batch(
+            "CREATE TRIGGER refuse BEFORE INSERT ON snippets
+             BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+        )
+        .unwrap();
+        // The template comes first, so the preference after it shows that
+        // the run carries on past the one that failed.
+        let template = [1u8; 16];
+        let theme = [4u8; 16];
+        let waiting = BTreeMap::from([
+            (
+                template,
+                entry(
+                    TEMPLATE,
+                    json!({"name": "Thanks", "shortcut": null, "subject": null,
+                           "bodyText": "Thanks!"}),
+                ),
+            ),
+            (
+                theme,
+                entry(PREF, json!({"key": "theme", "value": "carbon"})),
+            ),
+        ]);
+        let applied = apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(repo::snippets::list(&conn).unwrap().is_empty());
+        assert_eq!(repo::settings::get(&conn).unwrap().theme, "carbon");
+        assert_eq!(applied.settled.len(), 2, "neither comes back every sync");
     }
 
     #[test]
