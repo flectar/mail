@@ -61,6 +61,8 @@ pub(super) struct ComposeSession {
     /// The original could not be drawn, even as text; it is not tried again
     /// until it changes.
     quote_unavailable: Cell<bool>,
+    /// An original the user left out, which they can still put back.
+    left_out_quote: RefCell<Option<ComposeQuote>>,
     /// An original moved into the text, while undoing that brings it back.
     edited_quote: RefCell<Option<EditedQuote>>,
     send_action: Cell<Option<i64>>,
@@ -419,6 +421,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_code_active(from.get_code_active());
     to.set_active_link_url(from.get_active_link_url());
     to.set_quote(from.get_quote());
+    to.set_quote_left_out(from.get_quote_left_out());
     to.set_quote_text(from.get_quote_text());
     to.set_quote_expanded(from.get_quote_expanded());
     to.set_quote_height(from.get_quote_height());
@@ -521,6 +524,7 @@ impl Composers {
             quote: RefCell::default(),
             quote_renderer: RefCell::default(),
             quote_unavailable: Cell::new(false),
+            left_out_quote: RefCell::default(),
             edited_quote: RefCell::default(),
             send_action: Cell::new(None),
             picking: Cell::new(false),
@@ -1078,6 +1082,7 @@ impl ComposeSession {
         ui.set_subject("".into());
         ui.set_body("".into());
         ui.set_quote("".into());
+        ui.set_quote_left_out("".into());
         ui.set_quote_text("".into());
         ui.set_quote_expanded(false);
         ui.set_quote_tiles(ModelRc::default());
@@ -1242,6 +1247,7 @@ impl ComposeSession {
         *self.intent.borrow_mut() = ComposeIntent::default();
         *self.quote.borrow_mut() = None;
         *self.quote_renderer.borrow_mut() = None;
+        *self.left_out_quote.borrow_mut() = None;
         *self.edited_quote.borrow_mut() = None;
         *self.signature.borrow_mut() = None;
         if let Some(host) = self.host() {
@@ -1421,6 +1427,12 @@ impl ComposeSession {
             }
         });
         let weak = self.reference();
+        ui.on_restore_quote(move || {
+            if let Some(session) = weak.upgrade() {
+                session.restore_quote();
+            }
+        });
+        let weak = self.reference();
         ui.on_delete_template(move |id| {
             weak.upgrade()
                 .is_some_and(|session| session.delete_template(id))
@@ -1483,8 +1495,10 @@ impl ComposeSession {
         ui.set_quote_expanded(quote.as_ref().is_some_and(|quote| quote.forward));
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
+        ui.set_quote_left_out("".into());
         *self.quote_renderer.borrow_mut() = None;
         self.quote_unavailable.set(false);
+        *self.left_out_quote.borrow_mut() = None;
         *self.quote.borrow_mut() = quote;
     }
 
@@ -1518,11 +1532,30 @@ impl ComposeSession {
         });
     }
 
-    /// Leave the original out of this message.
+    /// Leave the original out of this message, until the user puts it back.
     fn remove_quote(&self) {
-        if let Some(host) = self.host() {
-            self.set_quote(&host.ui(), None);
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        let quote = self.quote.borrow_mut().take();
+        self.set_quote(&ui, None);
+        if let Some(quote) = quote {
+            ui.set_quote_left_out(if quote.forward { "forward" } else { "reply" }.into());
+            *self.left_out_quote.borrow_mut() = Some(quote);
         }
+    }
+
+    /// Put a left-out original back below the message.
+    fn restore_quote(&self) {
+        let Some(host) = self.host() else {
+            return;
+        };
+        let Some(quote) = self.left_out_quote.borrow_mut().take() else {
+            return;
+        };
+        self.set_quote(&host.ui(), Some(quote));
+        self.render_quote(&host);
     }
 
     /// Start the message with `text`, as a mail link's body.
@@ -1585,7 +1618,7 @@ impl ComposeSession {
         // Undoing Edit puts the drawn original back, and redoing it moves the
         // original into the text again.
         let ui = host.ui();
-        let shown = self.quote.borrow().is_some();
+        let shown = self.quote.borrow().is_some() || self.left_out_quote.borrow().is_some();
         match edit {
             Some(EditState::Undone) if !shown => {
                 let Some((quote, expanded)) = self
@@ -2758,10 +2791,16 @@ mod tests {
         assert!(edited());
         assert_eq!(ui.get_quote(), "");
 
+        // A removed original stays out of the message until put back.
         session.set_quote(&ui, Some(original()));
         session.remove_quote();
         assert_eq!(ui.get_quote(), "");
         assert!(session.quote.borrow().is_none());
+        assert_eq!(ui.get_quote_left_out(), "reply");
+        session.restore_quote();
+        assert_eq!(ui.get_quote(), "reply");
+        assert_eq!(ui.get_quote_left_out(), "");
+        assert_eq!(session.quote.borrow().as_ref(), Some(&original()));
     }
 
     #[test]

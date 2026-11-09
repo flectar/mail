@@ -51,6 +51,7 @@ export component EmailComposer inherits Rectangle {
     in property <bool> can-pop-out: false;
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
+    in property <string> quote-left-out: "";
     in property <string> quote-text: "";
     in-out property <bool> quote-expanded: false;
     in property <[ComposeEditorTile]> quote-tiles: [];
@@ -75,9 +76,9 @@ export component EmailComposer inherits Rectangle {
     out property <string> editor-preedit-text: body-input.preedit-text;
     // Where the original starts below the editor, for the Rust layout.
     out property <length> quote-top: 14px + root.editor-area-height + 48px;
-    // A message carrying the original keeps a few lines for the reply
-    // above it rather than the whole viewport.
-    private property <length> editor-area-height: root.quote == ""
+    // A message carrying the original, or able to put it back, keeps a few
+    // lines for the reply above it rather than the whole viewport.
+    private property <length> editor-area-height: root.quote == "" && root.quote-left-out == ""
         ? max(root.editor-viewport-height, root.editor-content-height * 1px)
         : max(96px, root.editor-content-height * 1px + 8px);
 
@@ -103,6 +104,7 @@ export component EmailComposer inherits Rectangle {
     callback delete-template(int) -> bool;
     callback edit-quote();
     callback remove-quote();
+    callback restore-quote();
 
     private property <bool> confirm-discard: false;
     private property <bool> link-editor-open: false;
@@ -379,7 +381,7 @@ export component EmailComposer inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 content-width: self.visible-width;
-                content-height: root.quote == ""
+                content-height: root.quote == "" && root.quote-left-out == ""
                     ? max(self.visible-height, root.editor-content-height * 1px + 32px)
                     : max(self.visible-height, root.quote-top + (root.quote-expanded ? root.quote-height * 1px + 16px : 0px));
                 horizontal-scrollbar-policy: always-off;
@@ -582,6 +584,43 @@ export component EmailComposer inherits Rectangle {
                         hover-background: root.control-hover-color;
                         tooltip-text: root.quote == "forward" ? @tr("Remove the forwarded message") : @tr("Remove the quoted message");
                         clicked => { root.remove-quote(); }
+                    }
+                }
+
+                // A left-out original can come back until the message closes.
+                if root.quote == "" && root.quote-left-out != "" : Rectangle {
+                    x: 18px;
+                    y: root.quote-top - 40px;
+                    width: root.editor-width;
+                    height: 32px;
+
+                    restore-touch := TouchArea {
+                        width: parent.width;
+                        mouse-cursor: pointer;
+                        clicked => { root.restore-quote(); }
+                    }
+
+                    Image {
+                        x: 0px;
+                        y: (parent.height - 16px) / 2;
+                        width: 16px;
+                        height: 16px;
+                        source: @image-url("../icons/lucide/outline/undo.svg");
+                        colorize: restore-touch.has-hover ? root.body-color : root.secondary-color;
+                    }
+
+                    Text {
+                        x: 22px;
+                        width: parent.width - 22px;
+                        height: parent.height;
+                        text: root.quote-left-out == "forward" ? @tr("Add the forwarded message back") : @tr("Add the quoted text back");
+                        color: restore-touch.has-hover ? root.body-color : root.secondary-color;
+                        font-size: TypeScale.body;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        accessible-role: button;
+                        accessible-label: self.text;
+                        accessible-action-default => { root.restore-quote(); }
                     }
                 }
 
