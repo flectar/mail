@@ -623,6 +623,35 @@ async fn a_device_that_rejoins_drops_what_was_deleted_meanwhile() {
     assert!(laptop.list_snippets().await.unwrap().is_empty());
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turning_off_with_a_locked_keyring_changes_nothing() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let credentials = Arc::new(MemoryCredentials::default());
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = start_core_with(dir.path(), credentials.clone()).await;
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+
+    // The keys couldn't go, so the device stays in its group, as it was.
+    credentials.locked.store(true, Ordering::SeqCst);
+    assert!(laptop.device_sync_turn_off().await.is_err());
+    assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Idle);
+    credentials.locked.store(false, Ordering::SeqCst);
+    assert!(
+        laptop.device_sync_run().await.unwrap(),
+        "still in its group"
+    );
+
+    laptop.device_sync_turn_off().await.unwrap();
+    assert_eq!(laptop.device_sync_status().state, DeviceSyncState::Off);
+    assert!(credentials.load(0, Slot::DeviceSync).is_err());
+}
+
 #[test]
 fn a_locked_keyring_at_startup_keeps_sync_on() {
     let credentials = Arc::new(MemoryCredentials::default());

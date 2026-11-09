@@ -516,14 +516,16 @@ impl Core {
                 thread_ids: threads,
             });
         }
-        credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await?;
+        let deleted =
+            credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await;
+        // Off here either way: the page says so even if the keys stayed.
         service.refused_uploads.store(false, Ordering::Relaxed);
         *lock(&service.status) = DeviceSyncStatus {
             state,
             ..DeviceSyncStatus::default()
         };
         self.emit_sync_status();
-        Ok(())
+        deleted
     }
 
     /// Load this device's sync state at startup and run the loop.
@@ -1693,6 +1695,9 @@ impl Core {
     }
 
     pub async fn device_sync_turn_off(&self) -> Result<()> {
+        // The keys go too: a store that can't change now, such as a locked
+        // keyring, leaves everything as it is.
+        credentials::check_available_async(self.credentials.clone()).await?;
         let mut departure = scheduled::Departure::Alone;
         if let Some(client) = self.sync_service().client() {
             departure = self.take_back_scheduled_sends(&client).await;
