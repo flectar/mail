@@ -93,6 +93,66 @@ pub fn enqueue_at(
     .ok_or_else(|| CoreError::NotFound(format!("message {message_id}")))
 }
 
+/// Queue notifications for mail that reached an Inbox while no copy of the
+/// app was following its account, so that a check in the background tells of
+/// it as a running app would have. `since` holds, per account, when its last
+/// complete sync before this start began (see
+/// [`super::accounts::caught_up`]). Mail that came in after that, by the
+/// measure a running sync uses ([`crate::sync::ingest::live_since`]), and is
+/// incoming, recent ([`CHIME_RECENT_MS`]) and still new ([`STILL_NEW`]) is
+/// queued, once per conversation as a sync queues it: its newest message,
+/// unless the conversation has a notification for one as new or newer.
+/// Returns the accounts and conversations it queued for.
+pub fn enqueue_missed(
+    conn: &Connection,
+    since: &BTreeMap<i64, i64>,
+    now: i64,
+) -> Result<Vec<(i64, i64)>> {
+    let mut statement = conn.prepare(&format!(
+        "SELECT m.id, m.thread_id, m.is_automated, COALESCE(m.from_addr, '')
+         FROM messages m JOIN accounts a ON a.id = m.account_id
+         WHERE m.account_id = ?1
+           AND m.is_outgoing = 0
+           AND COALESCE(m.internal_date, m.date) >= ?3
+           AND COALESCE(m.internal_date, m.date) > ?4
+           AND {}
+           AND NOT EXISTS (
+                 SELECT 1 FROM notification_outbox o JOIN messages n ON n.id = o.message_id
+                 WHERE o.thread_id = m.thread_id
+                   AND COALESCE(n.internal_date, n.date) >= COALESCE(m.internal_date, m.date))
+         ORDER BY COALESCE(m.internal_date, m.date) DESC, m.id DESC",
+        still_new_condition(2)
+    ))?;
+    let mut queued = Vec::new();
+    for (&account_id, &caught_up_at) in since {
+        // Newest first, so the first message of a conversation is its newest.
+        let mut newest = Vec::new();
+        {
+            let mut threads = std::collections::HashSet::new();
+            let mut rows = statement.query(params![
+                account_id,
+                roles::INBOX,
+                crate::sync::ingest::live_since(caught_up_at),
+                now - CHIME_RECENT_MS,
+            ])?;
+            while let Some(row) = rows.next()? {
+                let thread_id: i64 = row.get(1)?;
+                if threads.insert(thread_id) {
+                    let from: String = row.get(3)?;
+                    let audible = crate::sync::ingest::chime_worthy(row.get(2)?, &from);
+                    newest.push((row.get::<_, i64>(0)?, thread_id, audible));
+                }
+            }
+        }
+        // Oldest first, the order a sync queues them in.
+        for (message_id, thread_id, audible) in newest.into_iter().rev() {
+            enqueue_at(conn, message_id, audible, now)?;
+            queued.push((account_id, thread_id));
+        }
+    }
+    Ok(queued)
+}
+
 /// How a thread currently routes, for notification-scope filtering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RoutedTab {
@@ -1181,5 +1241,153 @@ mod tests {
         assert!(scope_allows(&settings, "other"));
         assert!(scope_allows(&settings, "label:7"));
         assert!(!scope_allows(&settings, "split:1"));
+    }
+
+    /// Unread incoming mail in the Inbox that the server received at `at`,
+    /// in a conversation of its own unless `thread` is given.
+    fn arrived(c: &Connection, from: &str, at: i64, thread: Option<i64>) -> (i64, i64) {
+        let thread_id = thread.unwrap_or_else(|| {
+            c.execute(
+                "INSERT INTO threads (account_id, subject_norm, unread_count, last_message_at)
+                 VALUES (1, 'news', 1, ?1)",
+                params![at],
+            )
+            .unwrap();
+            c.last_insert_rowid()
+        });
+        c.execute(
+            "INSERT INTO messages (thread_id, account_id, folder_id, subject, from_addr, date,
+             internal_date, is_read, is_automated, is_draft, is_outgoing)
+             VALUES (?1, 1, 1, 'News', ?2, ?3, ?3, 0, 0, 0, 0)",
+            params![thread_id, from, at],
+        )
+        .unwrap();
+        (thread_id, c.last_insert_rowid())
+    }
+
+    fn queued(c: &Connection) -> Vec<(i64, bool)> {
+        c.prepare("SELECT notified_message_id, audible FROM notification_outbox ORDER BY id")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn mail_that_came_while_nobody_followed_is_queued_once_per_conversation() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute(
+            "INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, 'Archive', 'archive')",
+            [],
+        )
+        .unwrap();
+        let now = 10 * CHIME_RECENT_MS;
+        let minute = 60_000;
+        let caught_up_at = now - 60 * minute;
+        let since = BTreeMap::from([(1, caught_up_at)]);
+
+        // Stored by the sync that caught up, which said nothing about it.
+        arrived(&c, "old@test.dev", caught_up_at - 2 * minute, None);
+        // Within the minute a server's clock may lag, as a sync counts it.
+        let (_, skewed) = arrived(&c, "skew@test.dev", caught_up_at - minute / 2, None);
+        let (_, person) = arrived(&c, "alice@test.dev", caught_up_at + 10 * minute, None);
+        let (_, robot) = arrived(&c, "noreply@test.dev", caught_up_at + 11 * minute, None);
+        // Two in one conversation: only the newest.
+        let (thread, first) = arrived(&c, "bob@test.dev", caught_up_at + 12 * minute, None);
+        let (_, second) = arrived(
+            &c,
+            "carol@test.dev",
+            caught_up_at + 13 * minute,
+            Some(thread),
+        );
+        // Read, sent, moved out of the Inbox, or already told of.
+        let (_, read) = arrived(&c, "dave@test.dev", caught_up_at + 14 * minute, None);
+        let (_, sent) = arrived(&c, "me@test.dev", caught_up_at + 15 * minute, None);
+        let (_, archived) = arrived(&c, "erin@test.dev", caught_up_at + 16 * minute, None);
+        let (_, told) = arrived(&c, "frank@test.dev", caught_up_at + 17 * minute, None);
+        c.execute_batch(&format!(
+            "UPDATE messages SET is_read = 1 WHERE id = {read};
+             UPDATE messages SET is_outgoing = 1 WHERE id = {sent};
+             UPDATE messages SET folder_id = 2 WHERE id = {archived};"
+        ))
+        .unwrap();
+        enqueue_at(&c, told, true, caught_up_at + 17 * minute).unwrap();
+        // A conversation told of while the app ran gets its newer message.
+        let (earlier_thread, earlier) =
+            arrived(&c, "gina@test.dev", caught_up_at - 30 * minute, None);
+        let (_, followup) = arrived(
+            &c,
+            "gina@test.dev",
+            caught_up_at + 18 * minute,
+            Some(earlier_thread),
+        );
+        enqueue_at(&c, earlier, true, caught_up_at - 30 * minute).unwrap();
+
+        let threads = enqueue_missed(&c, &since, now).unwrap();
+        assert_eq!(threads.len(), 5, "{threads:?}");
+        assert!(threads.contains(&(1, thread)));
+        assert!(threads.contains(&(1, earlier_thread)));
+        assert_eq!(
+            queued(&c),
+            [
+                (told, true),
+                (earlier, true),
+                (skewed, true),
+                (person, true),
+                (robot, false),
+                (second, true),
+                (followup, true),
+            ]
+        );
+        assert!(!queued(&c).iter().any(|&(id, _)| id == first));
+
+        // Queued once: a second look finds nothing more.
+        assert!(enqueue_missed(&c, &since, now).unwrap().is_empty());
+        // Nor for an account that was never caught up.
+        assert!(
+            enqueue_missed(&c, &BTreeMap::new(), now)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missed_mail_stays_within_the_day_a_sync_tells_of() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        let now = 10 * CHIME_RECENT_MS;
+        let hour = 60 * 60_000;
+        // Last followed three days ago.
+        let since = BTreeMap::from([(1, now - 72 * hour)]);
+        arrived(&c, "old@test.dev", now - 25 * hour, None);
+        let (_, recent) = arrived(&c, "new@test.dev", now - 2 * hour, None);
+
+        enqueue_missed(&c, &since, now).unwrap();
+        assert_eq!(queued(&c), [(recent, true)]);
+    }
+
+    #[test]
+    fn missed_gmail_mail_counts_while_it_carries_the_inbox_label() {
+        let c = testutil::conn();
+        testutil::seed_account(&c);
+        c.execute_batch(
+            "UPDATE accounts SET provider = 'gmail', mail_protocol = 'gmail', auth_kind = 'oauth2';
+             INSERT INTO folders (id, account_id, path, role) VALUES (2, 1, '[Gmail]/All Mail', 'all');",
+        )
+        .unwrap();
+        let now = 10 * CHIME_RECENT_MS;
+        let since = BTreeMap::from([(1, now - 60 * 60_000)]);
+        let (_, labelled) = arrived(&c, "a@test.dev", now - 30 * 60_000, None);
+        let (_, archived) = arrived(&c, "b@test.dev", now - 20 * 60_000, None);
+        c.execute_batch(&format!(
+            "UPDATE messages SET folder_id = 2 WHERE id IN ({labelled}, {archived});
+             INSERT INTO message_folders (message_id, folder_id) VALUES ({labelled}, 1);"
+        ))
+        .unwrap();
+
+        enqueue_missed(&c, &since, now).unwrap();
+        assert_eq!(queued(&c), [(labelled, true)]);
     }
 }

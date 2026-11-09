@@ -1,0 +1,196 @@
+import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow, LocalizedMessage } from "../models.slint";
+import { AppTheme } from "../design-system.slint";
+import { EmailComposer } from "email-composer.slint";
+
+// One message being written: its fields, the editor surface and the actions
+// it asks the application for. Every window has its own copy of a global, so
+// the main window's copy drives the composer it shows and each composer
+// window drives the message moved into it.
+export global ComposerUi {
+    in-out property <bool> open: false;
+    in property <string> mode: "new";
+    in-out property <string> to: "";
+    in-out property <string> cc: "";
+    in-out property <string> bcc: "";
+    in-out property <string> subject: "";
+    in-out property <string> body: "";
+    in property <bool> sending: false;
+    in property <[AccountRow]> accounts: [];
+    in-out property <int> account-id: -1;
+    in-out property <string> from-label: @tr("No connected account");
+    in property <[ComposeContact]> contact-suggestions: [];
+    in property <[ComposeAttachment]> attachments: [];
+    in property <string> attachment-summary: "";
+    in property <[EmailTemplateRow]> templates: [];
+    in property <LocalizedMessage> message;
+    in property <bool> notice-is-error: false;
+    in property <int> selection-start: 0;
+    in property <int> selection-end: 0;
+    in property <[ComposeEditorTile]> editor-tiles: [];
+    in property <float> editor-content-height: 18;
+    in property <float> editor-caret-x: 0;
+    in property <float> editor-caret-y: 0;
+    in property <float> editor-caret-height: 18;
+    in property <bool> bold-active: false;
+    in property <bool> italic-active: false;
+    in property <bool> underline-active: false;
+    in property <bool> strike-active: false;
+    in property <bool> code-active: false;
+    in property <string> active-link-url: "";
+    // On the desktop a message can move into a window of its own.
+    in property <bool> can-pop-out: false;
+    // "reply" or "forward" while the message carries the original below the
+    // editor; empty otherwise.
+    in property <string> quote: "";
+    // "reply" or "forward" while the user has left that original out and
+    // can still put it back.
+    in property <string> quote-left-out: "";
+    // The original as text, for screen readers.
+    in property <string> quote-text: "";
+    in-out property <bool> quote-expanded: false;
+    // The original, drawn read-only by the reader's renderer.
+    in property <[ComposeEditorTile]> quote-tiles: [];
+    in property <float> quote-height: 0;
+    // Published by the editor surface for the Rust layout.
+    in-out property <length> editor-width;
+    in-out property <length> editor-viewport-height;
+    in-out property <length> editor-scroll-y;
+    in-out property <string> editor-preedit-text;
+    in-out property <length> quote-top;
+    out property <color> editor-text-color: AppTheme.body;
+    out property <color> editor-link-color: AppTheme.accent;
+    out property <color> editor-selection-color: AppTheme.accent;
+    out property <color> editor-selected-text-color: white;
+
+    callback close();
+    callback pop-out();
+    callback save(int, string, string, string, string, string, bool);
+    callback pick-attachments();
+    callback remove-attachment(int);
+    callback format(string, string, int, int);
+    callback link(string, string, int, int);
+    callback edit-body(string, int, int, string);
+    callback update-selection(string, int, int);
+    callback history(string);
+    callback editor-pointer-event(float, float, string, bool, bool, bool, bool);
+    callback editor-key-event(string, bool, bool, bool, bool) -> bool;
+    callback editor-layout-changed();
+    callback search-contacts(string, int);
+    callback select-contact(int, string) -> string;
+    callback refresh-templates();
+    callback use-template(int) -> bool;
+    callback save-template(int, string, string, string, string) -> bool;
+    callback delete-template(int) -> bool;
+    callback edit-quote();
+    callback remove-quote();
+    callback restore-quote();
+}
+
+// The composer bound to its window's ComposerUi and the application theme.
+export component BoundComposer inherits EmailComposer {
+    open: ComposerUi.open;
+    mode: ComposerUi.mode;
+    to <=> ComposerUi.to;
+    cc <=> ComposerUi.cc;
+    bcc <=> ComposerUi.bcc;
+    subject <=> ComposerUi.subject;
+    body <=> ComposerUi.body;
+    sending: ComposerUi.sending;
+    accounts: ComposerUi.accounts;
+    selected-account-id <=> ComposerUi.account-id;
+    contact-suggestions: ComposerUi.contact-suggestions;
+    attachments: ComposerUi.attachments;
+    templates: ComposerUi.templates;
+    attachment-summary: ComposerUi.attachment-summary;
+    from-label <=> ComposerUi.from-label;
+    notice-is-error: ComposerUi.notice-is-error;
+    selection-start: ComposerUi.selection-start;
+    selection-end: ComposerUi.selection-end;
+    editor-tiles: ComposerUi.editor-tiles;
+    editor-content-height: ComposerUi.editor-content-height;
+    editor-caret-x: ComposerUi.editor-caret-x;
+    editor-caret-y: ComposerUi.editor-caret-y;
+    editor-caret-height: ComposerUi.editor-caret-height;
+    bold-active: ComposerUi.bold-active;
+    italic-active: ComposerUi.italic-active;
+    underline-active: ComposerUi.underline-active;
+    strike-active: ComposerUi.strike-active;
+    code-active: ComposerUi.code-active;
+    active-link-url: ComposerUi.active-link-url;
+    can-pop-out: ComposerUi.can-pop-out;
+    quote: ComposerUi.quote;
+    quote-left-out: ComposerUi.quote-left-out;
+    quote-text: ComposerUi.quote-text;
+    quote-expanded <=> ComposerUi.quote-expanded;
+    quote-tiles: ComposerUi.quote-tiles;
+    quote-height: ComposerUi.quote-height;
+    background-color: AppTheme.surface;
+    raised-color: AppTheme.surface-raised;
+    control-color: AppTheme.control-bg;
+    control-hover-color: AppTheme.muted-control-bg;
+    frame-border-color: AppTheme.border;
+    subtle-border-color: AppTheme.border-subtle;
+    title-color: AppTheme.title;
+    body-color: AppTheme.body;
+    secondary-color: AppTheme.secondary;
+    muted-color: AppTheme.muted;
+    accent-color: AppTheme.accent;
+    accent-background: AppTheme.accent-soft;
+
+    close => { ComposerUi.close(); }
+    pop-out => { ComposerUi.pop-out(); }
+    submit(send-now) => {
+        ComposerUi.save(
+            ComposerUi.account-id,
+            ComposerUi.to,
+            ComposerUi.cc,
+            ComposerUi.bcc,
+            ComposerUi.subject,
+            ComposerUi.body,
+            send-now,
+        );
+    }
+    pick-attachments => { ComposerUi.pick-attachments(); }
+    remove-attachment(index) => { ComposerUi.remove-attachment(index); }
+    format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }
+    link-requested(url, body, anchor, cursor) => { ComposerUi.link(url, body, anchor, cursor); }
+    body-edited(body, anchor, cursor, key-text) => { ComposerUi.edit-body(body, anchor, cursor, key-text); }
+    selection-changed(body, anchor, cursor) => { ComposerUi.update-selection(body, anchor, cursor); }
+    history-requested(direction) => { ComposerUi.history(direction); }
+    editor-pointer-event(x, y, kind, control, shift, alt, meta) => {
+        ComposerUi.editor-pointer-event(x, y, kind, control, shift, alt, meta);
+    }
+    editor-key-event(key, control, shift, alt, meta) => {
+        ComposerUi.editor-key-event(key, control, shift, alt, meta)
+    }
+    editor-layout-changed => { root.publish-layout(); }
+    search-contacts(query, account-id) => { ComposerUi.search-contacts(query, account-id); }
+    select-contact(index, recipients) => ComposerUi.select-contact(index, recipients);
+    refresh-templates => { ComposerUi.refresh-templates(); }
+    use-template(id) => ComposerUi.use-template(id);
+    save-template(id, name, shortcut, subject, body) => ComposerUi.save-template(id, name, shortcut, subject, body);
+    delete-template(id) => ComposerUi.delete-template(id);
+    edit-quote => { ComposerUi.edit-quote(); }
+    remove-quote => { ComposerUi.remove-quote(); }
+    restore-quote => { ComposerUi.restore-quote(); }
+
+    function publish-layout() {
+        ComposerUi.editor-width = root.editor-width;
+        ComposerUi.editor-viewport-height = root.editor-viewport-height;
+        ComposerUi.editor-scroll-y = root.editor-scroll-y;
+        ComposerUi.editor-preedit-text = root.editor-preedit-text;
+        ComposerUi.quote-top = root.quote-top;
+        ComposerUi.editor-layout-changed();
+    }
+
+    // A new composer's first layout is not a property change; publish it
+    // once after instantiation as well as on later resizes.
+    Timer {
+        interval: 1ms;
+        running: true;
+        triggered => {
+            self.running = false;
+            root.publish-layout();
+        }
+    }
+}

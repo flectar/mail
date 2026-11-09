@@ -1280,6 +1280,20 @@ pub(crate) async fn set_state_error(ctx: &SyncCtx, account_id: i64, state: &str,
     set_state_inner(ctx, account_id, state, Some(error)).await;
 }
 
+/// Note that a sync of the account that started at `started` stored all the
+/// mail its Inbox had by then. A check in the background tells of what
+/// arrives after it while the app isn't running (see
+/// `Core::announce_missed`).
+pub(crate) async fn caught_up(ctx: &SyncCtx, account_id: i64, started: i64) {
+    let noted = ctx
+        .db
+        .write(move |conn| repo::accounts::set_caught_up(conn, account_id, started))
+        .await;
+    if let Err(error) = noted {
+        tracing::warn!(account_id, %error, "could not note how far a sync caught up");
+    }
+}
+
 async fn set_state_inner(ctx: &SyncCtx, account_id: i64, state: &str, error: Option<&str>) {
     let st = state.to_string();
     let error = error.map(str::to_owned);
@@ -1469,6 +1483,7 @@ async fn run_cycle(
         inbox_pushed,
     } = mode;
     let account_id = config.id;
+    let started = now_ms();
 
     // The folder list: first thing, then once it is FOLDER_LIST_INTERVAL old.
     let listed_now = !immediate_follow_up && listing.due(tokio::time::Instant::now());
@@ -1545,6 +1560,9 @@ async fn run_cycle(
             inbox_baseline,
         )
         .await?;
+        if !inbox_forward_remaining {
+            caught_up(ctx, account_id, started).await;
+        }
     }
 
     // A manual Sync Now resolves at the foreground Inbox boundary. Finish any

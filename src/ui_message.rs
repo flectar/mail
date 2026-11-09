@@ -5,7 +5,7 @@
 //! language changes. This also prevents background workers from formatting
 //! user-facing English before an update reaches the UI thread.
 
-use crate::{AppWindow, I18n, LocalizedMessage};
+use crate::{AppWindow, ComposerUi, I18n, LocalizedMessage};
 use slint::{ComponentHandle, SharedString};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -89,8 +89,15 @@ pub(crate) trait AppWindowMessages {
     fn set_contact_save_status(&self, message: UiMessage);
     fn set_render_status(&self, message: UiMessage);
     fn set_sync_status(&self, message: UiMessage);
-    fn set_compose_notice(&self, message: UiMessage);
     fn set_mail_export_status(&self, message: UiMessage);
+}
+
+impl ComposerUi<'_> {
+    /// The line under a composer's fields; an error shows as one.
+    pub(crate) fn set_notice(&self, message: UiMessage, error: bool) {
+        self.set_message(message.as_slint());
+        self.set_notice_is_error(error);
+    }
 }
 
 impl AppWindowMessages for AppWindow {
@@ -108,10 +115,6 @@ impl AppWindowMessages for AppWindow {
 
     fn set_sync_status(&self, message: UiMessage) {
         self.set_sync_message(message.as_slint());
-    }
-
-    fn set_compose_notice(&self, message: UiMessage) {
-        self.set_compose_message(message.as_slint());
     }
 
     fn set_mail_export_status(&self, message: UiMessage) {

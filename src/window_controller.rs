@@ -37,6 +37,9 @@ struct Lifecycle {
     first_show: RefCell<Vec<Box<dyn FnOnce()>>>,
     /// Maximized and full-screen state when the window was hidden.
     hidden_state: Cell<(bool, bool)>,
+    /// The main window was closed while messages were being written in
+    /// their own windows; the application ends when the last one closes.
+    quit_after_composers: Cell<bool>,
 }
 
 pub(super) fn create_and_register_window_lifecycle(
@@ -102,6 +105,10 @@ pub(super) fn create_and_register_window_lifecycle(
             #[cfg(feature = "flatpak")]
             describe_background(&app, &runtime);
             slint::CloseRequestResponse::HideWindow
+        } else if composer::open_windows() > 0 {
+            LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.set(true));
+            prepare_for_tray(&app);
+            slint::CloseRequestResponse::HideWindow
         } else {
             let _ = slint::quit_event_loop();
             slint::CloseRequestResponse::HideWindow
@@ -138,7 +145,18 @@ pub(super) fn prepare_for_tray(app: &AppWindow) {
     slint::Timer::single_shot(TRIM_DELAY, release_free_memory);
 }
 
+/// A composer window closed. Once the last one is gone, a main window that
+/// was closed while they were open ends the application.
+pub(super) fn composer_closed() {
+    if LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.get())
+        && composer::open_windows() == 0
+    {
+        let _ = slint::quit_event_loop();
+    }
+}
+
 pub(super) fn show_from_tray(app: &AppWindow) {
+    LIFECYCLE.with(|lifecycle| lifecycle.quit_after_composers.set(false));
     crate::window_chrome::before_show();
     if let Err(error) = app.show() {
         eprintln!("could not restore window: {error}");

@@ -156,8 +156,9 @@ AltStore or SideStore refreshes them or you install them again, and only three
 can be installed at once, counting AltStore or SideStore. A paid Apple
 Developer Program membership extends this to a year.
 
-Mail syncs while the app is open; it doesn't check in the background or show
-notifications on iOS yet.
+Flectar Mail checks for new mail in the background when iOS lets it, and shows
+notifications for it, as
+[New-mail notifications](features.md#new-mail-notifications) describes.
 
 Releases built with Flectar's iOS registrations sign in to Gmail and Outlook
 directly. Your own keys in **Sign-in settings** must be iOS registrations: a

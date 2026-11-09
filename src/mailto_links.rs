@@ -2,10 +2,11 @@
 //! system when Flectar Mail is the default email app.
 //!
 //! Links wait until the mail store is ready and an account can send, then
-//! each opens the composer pre-filled for the user to review; nothing is sent
-//! on a link's behalf. The composer holds one message, so a link never
-//! replaces what the user is writing: a blank composer is reused, anything
-//! else is saved to Drafts first, where other clients open another window.
+//! each opens the main window's composer pre-filled for the user to review;
+//! nothing is sent on a link's behalf. That composer holds one message, so a
+//! link never replaces what the user is writing: a blank composer is reused,
+//! anything else is saved to Drafts first. Messages moved into windows of
+//! their own are left alone.
 
 use super::*;
 use flectar_mail_core::mailto::{self, Mailbox, Mailto};
@@ -57,16 +58,6 @@ pub(crate) fn launch_links(
     (!links.is_empty()).then_some(links)
 }
 
-/// What opening a link needs from the rest of the application.
-#[derive(Clone)]
-pub(super) struct Composer {
-    pub(super) state: Rc<RefCell<InboxState>>,
-    pub(super) runtime: tokio::runtime::Handle,
-    pub(super) intent: Rc<RefCell<ComposeIntent>>,
-    pub(super) document: Rc<RefCell<RichComposeDocument>>,
-    pub(super) editor: Rc<RefCell<LazyComposeEditor>>,
-}
-
 /// How long a link waits for the open message's sender identity, which
 /// loads just after the composer opens, before saving that message anyway.
 const IDENTITY_RETRY: Duration = Duration::from_millis(100);
@@ -75,7 +66,7 @@ const IDENTITY_RETRIES: u32 = 50;
 #[derive(Default)]
 struct Links {
     pending: VecDeque<Mailto>,
-    composer: Option<Composer>,
+    composers: Option<Rc<composer::Composers>>,
     scheduled: bool,
     /// Retries spent waiting for the open message's sender identity.
     identity_waits: u32,
@@ -85,9 +76,9 @@ thread_local! {
     static LINKS: RefCell<Links> = RefCell::default();
 }
 
-/// Connect the composer. Links received before this wait for it.
-pub(super) fn install(app: &AppWindow, composer: Composer) {
-    LINKS.with(|links| links.borrow_mut().composer = Some(composer));
+/// Connect the composers. Links received before this wait for them.
+pub(super) fn install(app: &AppWindow, composers: Rc<composer::Composers>) {
+    LINKS.with(|links| links.borrow_mut().composers = Some(composers));
     open_pending_soon(app);
 }
 
@@ -174,21 +165,21 @@ fn open_pending_after(app: &AppWindow, delay: Duration) {
 }
 
 fn open_pending(app: &AppWindow) {
-    while let Some((message, composer)) = LINKS.with(|links| {
+    while let Some((message, composers)) = LINKS.with(|links| {
         let links = links.borrow();
-        Some((links.pending.front()?.clone(), links.composer.clone()?))
+        Some((links.pending.front()?.clone(), links.composers.clone()?))
     }) {
         if !app.get_startup_ready() {
             return;
         }
-        if composer.state.borrow().connected_accounts.is_empty() {
+        if !composers.can_send() {
             // Without an account to send from, a link is dropped, as
             // Thunderbird does, rather than opening much later.
             LINKS.with(|links| links.borrow_mut().pending.clear());
             app.set_sync_status(UiMessage::plain("Add an account to send mail."));
             return;
         }
-        let saved_previous = match make_room(app) {
+        let saved_previous = match make_room(app, &composers) {
             Room::Free => false,
             Room::Saved => true,
             Room::Busy => return,
@@ -199,7 +190,7 @@ fn open_pending(app: &AppWindow) {
             }
         };
         LINKS.with(|links| links.borrow_mut().identity_waits = 0);
-        if !compose(app, &composer, &message, saved_previous) {
+        if !compose(app, &composers, &message, saved_previous) {
             return;
         }
         LINKS.with(|links| links.borrow_mut().pending.pop_front());
@@ -220,38 +211,39 @@ enum Room {
 }
 
 /// Close a blank composer, or save what the user is writing to Drafts.
-fn make_room(app: &AppWindow) -> Room {
-    if !app.get_compose_open() {
+fn make_room(app: &AppWindow, composers: &Rc<composer::Composers>) -> Room {
+    let Some(session) = composers.in_app() else {
         return Room::Free;
-    }
-    if app.get_compose_sending() {
+    };
+    let Some(host) = session.host() else {
+        return Room::Free;
+    };
+    let ui = host.ui();
+    if ui.get_sending() {
         return Room::Busy;
     }
-    if composer_is_blank(app) {
-        app.invoke_close_compose();
-        return if app.get_compose_open() {
+    if session.is_blank() {
+        ui.invoke_close();
+        return if ui.get_open() {
             Room::Busy
         } else {
             Room::Free
         };
     }
-    let identity_loading = app
-        .global::<AccountMailPreferences>()
-        .get_composer_sender_email()
-        .is_empty();
+    let identity_loading = host.preferences().get_composer_sender_email().is_empty();
     if identity_loading && LINKS.with(|links| links.borrow().identity_waits) < IDENTITY_RETRIES {
         return Room::IdentityLoading;
     }
-    app.invoke_save_compose(
-        app.get_compose_account_id(),
-        app.get_compose_to(),
-        app.get_compose_cc(),
-        app.get_compose_bcc(),
-        app.get_compose_subject(),
-        app.get_compose_body(),
+    ui.invoke_save(
+        ui.get_account_id(),
+        ui.get_to(),
+        ui.get_cc(),
+        ui.get_bcc(),
+        ui.get_subject(),
+        ui.get_body(),
         false,
     );
-    if app.get_compose_open() {
+    if ui.get_open() {
         app.set_sync_status(UiMessage::plain(
             "The email link will open when you close this message.",
         ));
@@ -260,77 +252,58 @@ fn make_room(app: &AppWindow) -> Room {
     Room::Saved
 }
 
-/// Nothing the user wrote: empty fields, no attachments, and at most the
-/// signature the composer inserted.
-fn composer_is_blank(app: &AppWindow) -> bool {
-    [
-        app.get_compose_to(),
-        app.get_compose_cc(),
-        app.get_compose_bcc(),
-        app.get_compose_subject(),
-    ]
-    .iter()
-    .all(|text| text.trim().is_empty())
-        && app.get_compose_attachments().row_count() == 0
-        && account_mail_preferences::only_inserted_signature(&app.get_compose_body())
-}
-
-fn compose(app: &AppWindow, composer: &Composer, message: &Mailto, saved_previous: bool) -> bool {
-    app.invoke_open_compose();
-    if !app.get_compose_open() {
+fn compose(
+    app: &AppWindow,
+    composers: &Rc<composer::Composers>,
+    message: &Mailto,
+    saved_previous: bool,
+) -> bool {
+    let Some(session) = composers.open_new(app, "") else {
         return false;
-    }
-    app.set_compose_to(recipient_field(&message.to).into());
-    app.set_compose_cc(recipient_field(&message.cc).into());
-    app.set_compose_bcc(recipient_field(&message.bcc).into());
+    };
+    let Some(host) = session.host() else {
+        return false;
+    };
+    let ui = host.ui();
+    ui.set_to(recipient_field(&message.to).into());
+    ui.set_cc(recipient_field(&message.cc).into());
+    ui.set_bcc(recipient_field(&message.bcc).into());
     if let Some(subject) = &message.subject {
-        app.set_compose_subject(subject.into());
+        ui.set_subject(subject.into());
     }
     if let Some(body) = &message.body {
-        let mut document = composer.document.borrow_mut();
-        let selection = document.load(body, 0, 0);
-        apply_rich_compose(app, &document, selection, &mut composer.editor.borrow_mut());
+        session.load_text(body);
     }
     if let Some(header_id) = &message.in_reply_to {
-        thread_reply(app, composer, header_id);
+        // Make the message a reply to the one the link names. When the
+        // account it is written from has that message, the reply threads
+        // with it like any other; otherwise its Message-ID still goes into
+        // In-Reply-To and References, as a mailing list archive's reply link
+        // expects. The sending account is never changed for a link.
+        let parent = composers.message_by_header_id(i64::from(ui.get_account_id()), header_id);
+        let mut intent = session.intent.borrow_mut();
+        intent.mode = "reply".to_owned();
+        match parent {
+            Some(parent) => intent.in_reply_to_message_id = Some(parent),
+            None => intent.in_reply_to_header = Some(header_id.clone()),
+        }
+        ui.set_mode("reply".into());
     }
     if !message.attachment_requests.is_empty() {
-        app.set_compose_notice(UiMessage::detail(
-            "Files from links are never attached for you. Attach them yourself if you trust them: {}",
-            message.attachment_requests.join(", "),
-        ));
-        app.set_compose_notice_is_error(false);
+        ui.set_notice(
+            UiMessage::detail(
+                "Files from links are never attached for you. Attach them yourself if you trust them: {}",
+                message.attachment_requests.join(", "),
+            ),
+            false,
+        );
     } else if saved_previous {
-        app.set_compose_notice(UiMessage::plain(
-            "The message you were writing was saved to Drafts.",
-        ));
-        app.set_compose_notice_is_error(false);
+        ui.set_notice(
+            UiMessage::plain("The message you were writing was saved to Drafts."),
+            false,
+        );
     }
     true
-}
-
-/// Make the message a reply to the one the link names. When the account it
-/// is written from has that message, the reply threads with it like any
-/// other; otherwise its Message-ID still goes into In-Reply-To and
-/// References, as a mailing list archive's reply link expects. The sending
-/// account is never changed for a link.
-fn thread_reply(app: &AppWindow, composer: &Composer, header_id: &str) {
-    let account_id = i64::from(app.get_compose_account_id());
-    let core = composer.state.borrow().core.clone();
-    let parent = core.and_then(|core| {
-        composer
-            .runtime
-            .block_on(core.message_by_header_id(account_id, header_id))
-            .ok()
-            .flatten()
-    });
-    let mut intent = composer.intent.borrow_mut();
-    intent.mode = "reply".to_owned();
-    match parent {
-        Some(parent) => intent.in_reply_to_message_id = Some(parent),
-        None => intent.in_reply_to_header = Some(header_id.to_owned()),
-    }
-    app.set_compose_mode("reply".into());
 }
 
 /// The composer's recipient syntax: entries separated by commas, each

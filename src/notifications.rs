@@ -19,7 +19,10 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, LazyLock, Mutex, PoisonError,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -31,6 +34,7 @@ use flectar_mail_core::{
 use tokio::sync::{
     Notify,
     broadcast::{self, error::RecvError},
+    watch,
 };
 
 pub use flectar_mail_core::{NewMailNotification, NotificationBatch, NotificationOutcome};
@@ -38,8 +42,8 @@ pub use flectar_mail_core::{NewMailNotification, NotificationBatch, Notification
 #[cfg(target_os = "windows")]
 #[path = "notifications/windows.rs"]
 mod platform;
-#[cfg(target_os = "macos")]
-#[path = "notifications/macos.rs"]
+#[cfg(user_notifications)]
+#[path = "notifications/apple.rs"]
 mod platform;
 #[cfg(linux_desktop)]
 #[path = "notifications/linux.rs"]
@@ -59,12 +63,14 @@ mod platform {
     }
 }
 
-/// The desktop platform's notification service, if this system offers one
-/// the app can use, and whether the system started this process to deliver a
-/// click on one of its notifications. Called once, before the window is
-/// created.
+/// The platform's notification service, if this system offers one the app
+/// can use. Called once, before the window is created.
+#[cfg(any(desktop, user_notifications))]
+pub(crate) use platform::host;
+/// Whether the system started this process to deliver a click on one of its
+/// notifications.
 #[cfg(desktop)]
-pub(crate) use platform::{host, launched_for_click};
+pub(crate) use platform::launched_for_click;
 
 /// Whether the system started this process with `argument` to deliver a
 /// click on a notification. Only Windows passes arguments of its own.
@@ -111,6 +117,21 @@ pub trait NotificationHost: Send + Sync + 'static {
     /// Open the system's settings for the app's notifications, where
     /// [`Controls::settings`] says there are such.
     fn open_settings(&self) {}
+    /// Show `badge` on the app icon, or take it off, where
+    /// [`Controls::badge`] says the system shows one. Called when the count
+    /// changes, and with `None` as the app quits on the desktop.
+    fn set_badge(&self, _badge: Option<Badge>) -> HostFuture<()> {
+        Box::pin(std::future::ready(()))
+    }
+}
+
+/// The count of unread mail on the app icon.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Badge {
+    pub count: u32,
+    /// What a screen reader says for it, in the UI's language: "3 unread
+    /// messages".
+    pub description: String,
 }
 
 /// What the system leaves to the app's Settings.
@@ -121,6 +142,8 @@ pub struct Controls {
     pub settings: bool,
     /// The app decides whether its notifications play a sound.
     pub sound: bool,
+    /// The system shows a count the app sets on its icon.
+    pub badge: bool,
 }
 
 impl Default for Controls {
@@ -128,6 +151,7 @@ impl Default for Controls {
         Self {
             settings: false,
             sound: true,
+            badge: false,
         }
     }
 }
@@ -343,9 +367,214 @@ fn request(request: Request) {
     handler(request);
 }
 
-/// Report a click or button on a notification, from any thread.
+/// Report a click or button on a notification, from any thread. A click
+/// goes to the window; a button's action needs only the mail store.
 pub fn respond(response: Response) {
-    request(Request::Respond(response));
+    match response.act {
+        Act::Open => request(Request::Respond(response)),
+        act => {
+            if let Some(message_id) = response.route.message_id {
+                with_core(move |runtime, core| {
+                    let core = Arc::clone(core);
+                    runtime.spawn(async move {
+                        act_on(&core, act, message_id).await;
+                    });
+                });
+            }
+        }
+    }
+}
+
+/// How long the app stays awake in the background for a button's action to
+/// reach the server, within the half minute or so iOS allows. What doesn't
+/// make it goes out once the app runs again.
+#[cfg(background_checks)]
+const ACT_LIMIT: Duration = Duration::from_secs(25);
+
+/// Report a click or button on a notification, as [`respond`], where the
+/// system may suspend the app soon after it hears the response was handled.
+/// `done` says so once a click went to the window, or once a button's action
+/// is saved; the app then stays awake for it to reach the server
+/// ([`ACT_LIMIT`]).
+#[cfg(background_checks)]
+pub fn respond_then(response: Response, done: impl FnOnce() + Send + 'static) {
+    match (response.act, response.route.message_id) {
+        (Act::Open, _) | (_, None) => {
+            respond(response);
+            done();
+        }
+        (act, Some(message_id)) => {
+            let awake = crate::platform::stay_awake();
+            with_core(move |runtime, core| {
+                let core = Arc::clone(core);
+                runtime.spawn(async move {
+                    let queued = act_on(&core, act, message_id).await;
+                    done();
+                    if let Some(action_ids) = queued {
+                        // A launch for the button starts the accounts that
+                        // carry it out; there may be no window to start them.
+                        let sent = tokio::time::timeout(ACT_LIMIT, async {
+                            core.start_accounts_now().await;
+                            core.wait_for_actions(action_ids).await
+                        })
+                        .await;
+                        if !matches!(sent, Ok(Ok(()))) {
+                            tracing::info!("notifications: the action goes out on the next run");
+                        }
+                    }
+                    drop(awake);
+                });
+            });
+        }
+    }
+}
+
+/// Carry out a button's action on the message; the actions it queued.
+async fn act_on(core: &Core, act: Act, message_id: i64) -> Option<Vec<i64>> {
+    let kind = match act {
+        Act::Open => return None,
+        Act::MarkRead => ActionKind::MarkRead,
+        Act::Archive => ActionKind::Archive,
+        Act::Delete => ActionKind::Trash,
+    };
+    match core
+        .perform_action(PerformActionArgs {
+            kind,
+            target: ActionTarget::Messages(vec![message_id]),
+            params: None,
+        })
+        .await
+    {
+        Ok(result) => Some(result.action_ids),
+        Err(error) => {
+            tracing::warn!(%error, "notifications: the action failed");
+            None
+        }
+    }
+}
+
+/// What the system asks of the app outside its window, waiting for the mail
+/// store: a button on a notification, a check for new mail in the
+/// background.
+type Errand = Box<dyn FnOnce(&tokio::runtime::Handle, &Arc<Core>) + Send>;
+
+struct Errands {
+    ready: Option<(tokio::runtime::Handle, Arc<Core>)>,
+    waiting: Vec<Errand>,
+}
+
+static ERRANDS: Mutex<Errands> = Mutex::new(Errands {
+    ready: None,
+    waiting: Vec::new(),
+});
+
+/// Run `errand` with the runtime and the mail store: now if it is open,
+/// otherwise once it opens.
+fn with_core(errand: impl FnOnce(&tokio::runtime::Handle, &Arc<Core>) + Send + 'static) {
+    let (runtime, core) = {
+        let mut errands = ERRANDS.lock().unwrap_or_else(PoisonError::into_inner);
+        match &errands.ready {
+            Some(ready) => ready.clone(),
+            None => {
+                errands.waiting.push(Box::new(errand));
+                return;
+            }
+        }
+    };
+    errand(&runtime, &core);
+}
+
+/// The mail store opened: run the errands that waited for it, in order.
+fn core_opened(runtime: &tokio::runtime::Handle, core: &Arc<Core>) {
+    let waiting = {
+        let mut errands = ERRANDS.lock().unwrap_or_else(PoisonError::into_inner);
+        errands.ready = Some((runtime.clone(), Arc::clone(core)));
+        std::mem::take(&mut errands.waiting)
+    };
+    for errand in waiting {
+        errand(runtime, core);
+    }
+}
+
+/// The user brought the app to the foreground, where the Inbox shows what
+/// came while it wasn't running: that is no news for a check in the
+/// background ([`flectar_mail_core::Core::forget_missed`]).
+#[cfg(background_checks)]
+pub(crate) fn app_became_active() {
+    with_core(|_, core| core.forget_missed());
+}
+
+/// Stops a [`check_in_background`].
+#[cfg_attr(not(background_checks), allow(dead_code))]
+pub(crate) struct BackgroundCheck(tokio::sync::watch::Sender<bool>);
+
+#[cfg_attr(not(background_checks), allow(dead_code))]
+impl BackgroundCheck {
+    /// The system wants its time back: stop, and say the check failed.
+    pub(crate) fn cancel(&self) {
+        self.0.send_replace(true);
+    }
+}
+
+/// Check every account for new mail and tell of it, for a system that wakes
+/// the app in the background to do so: start the accounts, and once each
+/// one's Inbox is in, show what came while the app wasn't running and take
+/// back what was read elsewhere, with the app icon's count brought up to
+/// date. Calls `done` once, with whether every account was checked, `false`
+/// when cancelled.
+#[cfg_attr(not(background_checks), allow(dead_code))]
+pub(crate) fn check_in_background(done: impl FnOnce(bool) + Send + 'static) -> BackgroundCheck {
+    let (cancel, mut cancelled) = tokio::sync::watch::channel(false);
+    with_core(move |runtime, core| {
+        let core = Arc::clone(core);
+        runtime.spawn(async move {
+            let checked = tokio::select! {
+                checked = check_accounts(core) => checked,
+                _ = cancelled.wait_for(|&cancelled| cancelled) => false,
+            };
+            done(checked);
+        });
+    });
+    BackgroundCheck(cancel)
+}
+
+#[cfg_attr(not(background_checks), allow(dead_code))]
+async fn check_accounts(core: Arc<Core>) -> bool {
+    core.start_accounts_now().await;
+    let accounts = match core.list_accounts().await {
+        Ok(accounts) => accounts,
+        Err(error) => {
+            tracing::warn!(%error, "notifications: could not list the accounts to check");
+            return false;
+        }
+    };
+    // Each account tells of its mail as soon as it is in: the system may end
+    // the check before a slow server answers. Dropping the set stops them.
+    let mut checks = tokio::task::JoinSet::new();
+    for account in accounts {
+        let core = Arc::clone(&core);
+        checks.spawn(async move {
+            let checked = core.sync_accounts(Some(&[account.id])).await;
+            if let Err(error) = &checked {
+                tracing::info!(account_id = account.id, %error, "notifications: background check failed");
+            }
+            if let Err(error) = core.announce_missed().await {
+                tracing::warn!(%error, "notifications: could not queue missed mail");
+            }
+            flush().await;
+            checked.is_ok()
+        });
+    }
+    if checks.is_empty() {
+        // Still send what is due and bring the count up to date.
+        flush().await;
+        return true;
+    }
+    let mut every = true;
+    while let Some(checked) = checks.join_next().await {
+        every &= checked.unwrap_or(false);
+    }
+    every
 }
 
 /// Bring the window up with the desktop's activation token, from any thread.
@@ -398,6 +627,36 @@ pub(crate) fn preferences_changed() {
     PREFERENCES.notify_one();
 }
 
+/// Whether the user wants anything a check in the background brings:
+/// notifications, or the count on the app icon. Kept by the dispatcher.
+static BACKGROUND_CHECKS_WANTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether to ask the system to wake the app now and then to check for new
+/// mail.
+#[cfg(background_checks)]
+pub(crate) fn background_checks_wanted() -> bool {
+    BACKGROUND_CHECKS_WANTED.load(Ordering::Relaxed)
+}
+
+/// Wakes the dispatcher for a [`flush`].
+static FLUSH: Notify = Notify::const_new();
+/// How many flushes were asked for, and up to which one the dispatcher's
+/// passes have served: a pass serves those asked before it started.
+static FLUSHES_ASKED: AtomicU64 = AtomicU64::new(0);
+static FLUSHES_SERVED: LazyLock<watch::Sender<u64>> = LazyLock::new(|| watch::Sender::new(0));
+
+/// Have the dispatcher take back what is stale, show what is due and bring
+/// the app icon's count up to date, and wait until it has.
+#[cfg_attr(not(background_checks), allow(dead_code))]
+async fn flush() {
+    let ticket = FLUSHES_ASKED.fetch_add(1, Ordering::AcqRel) + 1;
+    FLUSH.notify_one();
+    let _ = FLUSHES_SERVED
+        .subscribe()
+        .wait_for(|&served| served >= ticket)
+        .await;
+}
+
 /// Show new-mail notifications through `host`, take them back once their mail
 /// is no longer new, and forget old records. Without a host, new mail is
 /// settled as shown nowhere, so nothing piles up.
@@ -406,14 +665,32 @@ pub(crate) fn spawn_dispatcher(
     core: Arc<Core>,
     host: Option<Arc<dyn NotificationHost>>,
 ) {
+    dispatch_through(runtime, core, host, ui::Live);
+}
+
+/// The dispatcher, asking `window` what the app shows.
+fn dispatch_through(
+    runtime: &tokio::runtime::Handle,
+    core: Arc<Core>,
+    host: Option<Arc<dyn NotificationHost>>,
+    window: impl Window + Send + Sync + 'static,
+) {
     let mut events = core.bus.subscribe();
+    core_opened(runtime, &core);
     runtime.spawn(async move {
         if let Err(error) = core.recover_notification_deliveries().await {
             tracing::warn!(%error, "notifications: could not recover interrupted deliveries");
         }
         let mut pruned_at = None;
         let mut enabled = notifications_enabled(&core).await;
+        let mut badge = None;
+        let mut flushed = 0;
         loop {
+            let flushing = FLUSHES_ASKED.load(Ordering::Acquire);
+            if flushing > flushed {
+                // Mail read elsewhere while the app was away.
+                withdraw(&core, host.as_deref(), Withdraw::Stale).await;
+            }
             if pruned_at.is_none_or(|at: tokio::time::Instant| at.elapsed() >= PRUNE_EVERY) {
                 // Taking back what is stale includes the week-old, which the
                 // pruning would otherwise leave on screen for good.
@@ -423,7 +700,26 @@ pub(crate) fn spawn_dispatcher(
                 }
                 pruned_at = Some(tokio::time::Instant::now());
             }
-            let wait = dispatch(&core, host.as_deref(), &ui::Live).await;
+            let wait = dispatch(&core, host.as_deref(), &window).await;
+            let mut counting = false;
+            if let Some(host) = host.as_deref()
+                && host.controls().badge
+            {
+                match core.unread_badge().await {
+                    Ok(count) => {
+                        // None while the setting is off.
+                        counting = count.is_some();
+                        update_badge(host, &window, count, &mut badge).await;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "notifications: could not count unread mail")
+                    }
+                }
+            }
+            BACKGROUND_CHECKS_WANTED
+                .store(host.is_some() && (enabled || counting), Ordering::Relaxed);
+            flushed = flushing;
+            FLUSHES_SERVED.send_replace(flushed);
             tokio::select! {
                 event = next_event(&mut events) => match event {
                     Event::NewMail => {}
@@ -447,6 +743,7 @@ pub(crate) fn spawn_dispatcher(
                     }
                     enabled = now_enabled;
                 }
+                () = FLUSH.notified() => {}
                 () = sleep(wait) => {}
                 () = tokio::time::sleep(PRUNE_EVERY) => {}
             }
@@ -465,12 +762,52 @@ pub(crate) fn withdraw_before_exit(
     let (Some(core), Some(host)) = (core, host) else {
         return;
     };
+    // The time limits are set inside the runtime, whose timer they need: the
+    // window's loop has ended outside it.
     if host.withdraw_at_exit() {
-        let _ = runtime.block_on(tokio::time::timeout(
-            EXIT_WITHDRAW_LIMIT,
-            withdraw(&core, Some(host.as_ref()), Withdraw::All),
-        ));
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(
+                EXIT_WITHDRAW_LIMIT,
+                withdraw(&core, Some(host.as_ref()), Withdraw::All),
+            )
+            .await
+        });
     }
+    // Nothing keeps a desktop badge current once the app is gone; a phone's
+    // stays, as its own background checks update it.
+    if cfg!(desktop) && host.controls().badge {
+        let _ = runtime.block_on(async {
+            tokio::time::timeout(EXIT_WITHDRAW_LIMIT, host.set_badge(None)).await
+        });
+    }
+}
+
+/// Put `count` on the app icon, or nothing for none or zero, unless it is
+/// what `shown` says the icon already has.
+async fn update_badge(
+    host: &dyn NotificationHost,
+    window: &impl Window,
+    count: Option<i64>,
+    shown: &mut Option<Option<u32>>,
+) {
+    let count = count
+        .map(|count| u32::try_from(count).unwrap_or(if count < 0 { 0 } else { u32::MAX }))
+        .filter(|&count| count > 0);
+    if *shown == Some(count) {
+        return;
+    }
+    let badge = match count {
+        Some(count) => Some(Badge {
+            count,
+            description: window
+                .badge_description(count)
+                .await
+                .unwrap_or_else(|| count.to_string()),
+        }),
+        None => None,
+    };
+    host.set_badge(badge).await;
+    *shown = Some(count);
 }
 
 async fn notifications_enabled(core: &Core) -> bool {
@@ -598,8 +935,12 @@ async fn present(
     let count = batch.mail.len();
     if host.availability().await == Availability::NotAsked {
         // Ask in context, as the mail arrives, and keep the mail until the
-        // user answered: the system refuses it meanwhile.
-        drop(host.request_permission());
+        // user answered: the system refuses it meanwhile. A phone asks once
+        // the app is in front with an account (ui::ask_for_permission), as
+        // this may run in the background.
+        if cfg!(not(background_checks)) {
+            drop(host.request_permission());
+        }
         return vec![
             NotificationOutcome::Retry(
                 "waiting for the user to allow notifications".into()
@@ -798,6 +1139,9 @@ pub(crate) trait Window {
         &self,
         summaries: Vec<(u32, Vec<String>)>,
     ) -> impl Future<Output = Option<Words>> + Send;
+    /// What a screen reader says for the app icon's count: "3 unread
+    /// messages".
+    fn badge_description(&self, count: u32) -> impl Future<Output = Option<String>> + Send;
 }
 
 /// The translated words of a batch of notifications.
@@ -821,22 +1165,10 @@ pub struct FixedWords {
     pub delete: String,
 }
 
-/// The window's side: what it shows, the words in its language, opening
-/// conversations and acting on messages.
+/// The window's side: what it shows, the words in its language, and opening
+/// conversations.
 #[path = "notifications/ui.rs"]
 pub(crate) mod ui;
-
-/// Carry out a notification button on its message.
-async fn act(core: &Core, kind: ActionKind, message_id: i64) -> Result<(), String> {
-    core.perform_action(PerformActionArgs {
-        kind,
-        target: ActionTarget::Messages(vec![message_id]),
-        params: None,
-    })
-    .await
-    .map(|_| ())
-    .map_err(|error| error.to_string())
-}
 
 #[cfg(test)]
 mod tests {
@@ -915,6 +1247,7 @@ mod tests {
         answer: Result<(), Failure>,
         availability: Availability,
         asked: std::sync::atomic::AtomicBool,
+        badges: Mutex<Vec<Option<Badge>>>,
     }
 
     impl FakeHost {
@@ -924,7 +1257,12 @@ mod tests {
                 answer,
                 availability: Availability::Allowed,
                 asked: std::sync::atomic::AtomicBool::new(false),
+                badges: Mutex::new(Vec::new()),
             }
+        }
+
+        fn badges(&self) -> Vec<Option<Badge>> {
+            self.badges.lock().unwrap().clone()
         }
 
         fn shown(&self) -> Vec<Alert> {
@@ -952,6 +1290,146 @@ mod tests {
             // The user hasn't answered yet.
             Box::pin(std::future::pending())
         }
+
+        fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+            self.badges.lock().unwrap().push(badge);
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    /// A desktop's notification service that takes everything back as the
+    /// app leaves.
+    #[derive(Default)]
+    struct LeavingHost {
+        badges: Mutex<Vec<Option<Badge>>>,
+    }
+
+    impl NotificationHost for LeavingHost {
+        fn show(&self, alerts: Vec<Alert>) -> HostFuture<Vec<Result<(), Failure>>> {
+            Box::pin(std::future::ready(vec![Ok(()); alerts.len()]))
+        }
+
+        fn withdraw(&self, _ids: Vec<AlertId>) -> HostFuture<()> {
+            Box::pin(std::future::ready(()))
+        }
+
+        fn availability(&self) -> HostFuture<Availability> {
+            Box::pin(std::future::ready(Availability::Allowed))
+        }
+
+        fn withdraw_at_exit(&self) -> bool {
+            true
+        }
+
+        fn controls(&self) -> Controls {
+            Controls {
+                badge: true,
+                ..Controls::default()
+            }
+        }
+
+        fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+            self.badges.lock().unwrap().push(badge);
+            Box::pin(std::future::ready(()))
+        }
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn leaving_takes_everything_back_from_outside_the_runtime() {
+        // As main.rs calls it, once the window's loop has ended.
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let profile = tempfile::tempdir().unwrap();
+        let core = runtime
+            .block_on(Core::start(flectar_mail_core::config::Paths::for_tests(
+                profile.path(),
+            )))
+            .unwrap();
+        let host = Arc::new(LeavingHost::default());
+        let shared: Arc<dyn NotificationHost> = host.clone();
+        withdraw_before_exit(runtime.handle(), Some(Arc::new(core)), Some(shared));
+        assert_eq!(host.badges.lock().unwrap().as_slice(), [None]);
+    }
+
+    /// What a phone's check in the background does when no server answers:
+    /// the mail that came in after the last run caught up is still told of.
+    #[cfg(desktop)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_background_check_tells_of_mail_that_came_while_closed() {
+        let profile = tempfile::tempdir().unwrap();
+        let paths = flectar_mail_core::config::Paths::for_tests(profile.path());
+        // A POP3 account whose server refuses the connection.
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let minute = 60_000;
+        let now = now_ms();
+        let (caught_up_at, arrived) = (now - 60 * minute, now - 10 * minute);
+        let message_id = {
+            let db = flectar_mail_core::db::Db::open(&paths.db_file()).unwrap();
+            db.write(move |conn| {
+                conn.execute_batch(&format!(
+                    "INSERT INTO accounts (id, email, provider, auth_kind, username,
+                       incoming_host, incoming_port, smtp_host, smtp_port, created_at,
+                       mail_protocol, settings_json, caught_up_at)
+                     VALUES (1, 'me@test.dev', 'generic', 'password', 'me', '127.0.0.1', {port},
+                       '127.0.0.1', {port}, 0, 'pop3',
+                       '{{\"connection\":{{\"incomingSecurity\":\"none\",\"smtpSecurity\":\"none\"}}}}',
+                       {caught_up_at});
+                     INSERT INTO folders (id, account_id, path, role) VALUES (1, 1, 'INBOX', 'inbox');
+                     INSERT INTO threads (id, account_id, subject_norm, unread_count, last_message_at)
+                     VALUES (1, 1, 'lunch', 1, {arrived});
+                     INSERT INTO messages (thread_id, account_id, folder_id, subject, from_name,
+                       from_addr, date, internal_date, is_read, is_automated, is_draft, is_outgoing)
+                     VALUES (1, 1, 1, 'Lunch?', 'Ana', 'ana@test.dev', {arrived}, {arrived}, 0, 0, 0, 0);"
+                ))?;
+                Ok(conn.last_insert_rowid())
+            })
+            .await
+            .unwrap()
+        };
+
+        let core = Core::start_mail_ui_with_credentials(
+            paths,
+            Arc::new(
+                flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore::new(
+                    profile.path().join("credentials.json"),
+                ),
+            ),
+        )
+        .await
+        .unwrap();
+        let host = Arc::new(FakeHost::new(Ok(())));
+        let shared: Arc<dyn NotificationHost> = host.clone();
+        dispatch_through(
+            &tokio::runtime::Handle::current(),
+            Arc::new(core),
+            Some(shared),
+            FakeWindow(Some(BTreeSet::new())),
+        );
+        let (checked, done) = tokio::sync::oneshot::channel();
+        let _check = check_in_background(move |every| {
+            let _ = checked.send(every);
+        });
+        let every = tokio::time::timeout(Duration::from_secs(30), done)
+            .await
+            .expect("the check ended")
+            .unwrap();
+
+        assert!(!every, "the server refused the connection");
+        let shown = host.shown();
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        assert_eq!(
+            shown[0].id,
+            AlertId::Message {
+                account_id: 1,
+                message_id,
+            }
+        );
+        assert_eq!(shown[0].title, "Ana");
     }
 
     /// A window showing these accounts' Inbox, or none at all.
@@ -978,6 +1456,40 @@ mod tests {
                     .collect(),
             })
         }
+
+        async fn badge_description(&self, count: u32) -> Option<String> {
+            self.0.as_ref()?;
+            Some(format!("{count} unread"))
+        }
+    }
+
+    #[tokio::test]
+    async fn the_app_icon_shows_the_count_only_when_it_changes() {
+        let host = FakeHost::new(Ok(()));
+        let window = FakeWindow(Some(BTreeSet::new()));
+        let mut shown = None;
+        let badge = |count| {
+            Some(Badge {
+                count,
+                description: format!("{count} unread"),
+            })
+        };
+        for count in [Some(3), Some(3), Some(0), None, Some(-1), Some(7)] {
+            update_badge(&host, &window, count, &mut shown).await;
+        }
+        // Zero, a negative count and the badge turned off all show none.
+        assert_eq!(host.badges(), vec![badge(3), None, badge(7)]);
+
+        // Without a window yet, the number itself is what is said.
+        let host = FakeHost::new(Ok(()));
+        update_badge(&host, &FakeWindow(None), Some(12), &mut None).await;
+        assert_eq!(
+            host.badges(),
+            vec![Some(Badge {
+                count: 12,
+                description: "12".into(),
+            })]
+        );
     }
 
     fn mail(account_id: i64, message_id: i64, sender: &str, sound: bool) -> NewMailNotification {

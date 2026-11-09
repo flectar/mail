@@ -15,11 +15,11 @@
 use flectar_mail::{
     AccountImport, AccountRow, AppIcon, AppTheme, AppWindow, CalendarAgendaRow,
     CalendarConnectionRow, CalendarDay, CalendarEventRow, CalendarSourceRow, CalendarWeekDay,
-    ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind, ContactSyncState,
-    ContactValueRow, EmailRow, ImportAccountRow, ImportFailureRow, ImportFindingRow,
-    ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments, MailLabelRow,
-    MailListEntry, MailProfileRow, MailboxRow, MotionSettings, ProfileMemberRow, SidebarRow,
-    SidebarRowKind, StorageUsageRow, ThreadMessageRow,
+    ComposerUi, ContactAccountRow, ContactRow, ContactSidebarRow, ContactSidebarRowKind,
+    ContactSyncState, ContactValueRow, EmailRow, ImportAccountRow, ImportFailureRow,
+    ImportFindingRow, ImportProfileRow, LocalizedMessage, MailAttachment, MailAttachments,
+    MailLabelRow, MailListEntry, MailProfileRow, MailboxRow, MotionSettings, ProfileMemberRow,
+    SidebarRow, SidebarRowKind, StorageUsageRow, ThreadMessageRow,
 };
 use i_slint_core::accessibility::{
     AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
@@ -693,7 +693,7 @@ fn reset(app: &AppWindow) {
     app.set_contact_source("Personal · jamie.rivera@example.com".into());
     app.set_contact_sync(ContactSyncState::Pending);
     app.set_settings_tab("General".into());
-    app.set_compose_open(false);
+    app.global::<ComposerUi>().set_open(false);
     app.set_calendar_editor_open(false);
     app.set_rendering_info_open(false);
     app.set_oauth_setup_open(false);
@@ -1029,9 +1029,10 @@ fn states() -> Vec<State> {
         }),
         state("files", |app| app.set_active_view("files".into())),
         state("compose", |app| {
-            app.set_compose_to("jamie.rivera@example.com".into());
-            app.set_compose_subject("Re: Quarterly planning notes".into());
-            app.set_compose_open(true);
+            let composer = app.global::<ComposerUi>();
+            composer.set_to("jamie.rivera@example.com".into());
+            composer.set_subject("Re: Quarterly planning notes".into());
+            composer.set_open(true);
         }),
         state("rendering info", |app| app.set_rendering_info_open(true)),
         state("oauth setup", |app| app.set_oauth_setup_open(true)),

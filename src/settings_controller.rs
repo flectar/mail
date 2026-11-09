@@ -85,6 +85,30 @@ pub(super) fn register_settings_preference_callbacks(
     });
 
     let app_weak = app.as_weak();
+    let state_for_badge = Rc::clone(state);
+    let runtime_for_badge = runtime.clone();
+    app.on_save_unread_badge(move |enabled| {
+        let Some(app) = app_weak.upgrade() else {
+            return;
+        };
+        let Some(core) = state_for_badge.borrow().core.clone() else {
+            app.set_sync_status(UiMessage::plain(
+                "Notification preferences are active for this session.",
+            ));
+            return;
+        };
+        match runtime_for_badge.block_on(core.set_unread_badge(enabled)) {
+            Ok(()) => {
+                crate::notifications::preferences_changed();
+                app.set_sync_status(UiMessage::plain("Notification preferences saved."));
+            }
+            Err(error) => {
+                app.set_sync_status(UiMessage::detail("Could not save notifications: {}", error))
+            }
+        }
+    });
+
+    let app_weak = app.as_weak();
     let state_for_sync_interval = Rc::clone(state);
     let runtime_for_sync_interval = runtime.clone();
     app.on_save_sync_interval(move |minutes| {

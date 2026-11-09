@@ -183,6 +183,25 @@ pub fn due_calendar(
     Ok(rows)
 }
 
+/// How many of these actions are still to be tried, or being tried: waiting
+/// without an error from an earlier try, or in flight. One that is gone
+/// counts as tried.
+pub fn untried(conn: &Connection, ids: &[i64]) -> Result<usize> {
+    let mut statement = conn.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+                        WHERE id = ?1
+                          AND (state = 'inflight'
+                               OR (state = 'pending' AND last_error IS NULL)))",
+    )?;
+    let mut untried = 0;
+    for id in ids {
+        if statement.query_row(params![id], |row| row.get::<_, bool>(0))? {
+            untried += 1;
+        }
+    }
+    Ok(untried)
+}
+
 pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
@@ -437,6 +456,38 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn an_action_counts_as_tried_once_it_ended_or_failed_once() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let action = || {
+            enqueue(
+                &conn,
+                1,
+                "archive",
+                None,
+                None,
+                &serde_json::json!({}),
+                None,
+            )
+            .unwrap()
+        };
+        let (waiting, inflight, done, failed, retrying) =
+            (action(), action(), action(), action(), action());
+        conn.execute_batch(&format!(
+            "UPDATE pending_actions SET state = 'inflight' WHERE id = {inflight};
+             UPDATE pending_actions SET state = 'done' WHERE id = {done};
+             UPDATE pending_actions SET state = 'failed', last_error = 'refused' WHERE id = {failed};
+             UPDATE pending_actions SET last_error = 'offline', not_before = 9 WHERE id = {retrying};"
+        ))
+        .unwrap();
+
+        assert_eq!(untried(&conn, &[waiting, inflight]).unwrap(), 2);
+        assert_eq!(untried(&conn, &[done, failed, retrying]).unwrap(), 0);
+        // One that is gone was tried, by whoever removed it.
+        assert_eq!(untried(&conn, &[999]).unwrap(), 0);
+    }
 
     #[test]
     fn due_is_stable_and_has_due_ignores_future_and_calendar_actions() {

@@ -82,7 +82,7 @@ fn status(app: &AppWindow, result: Result<(), String>, success: &str) {
             Err(e) => e.into(),
         });
 }
-fn choices(settings: &Settings, account_id: i64) -> Vec<Signature> {
+pub(super) fn choices(settings: &Settings, account_id: i64) -> Vec<Signature> {
     settings
         .signature_list
         .iter()
@@ -127,7 +127,7 @@ fn project(app: &AppWindow, settings: &Settings, account_id: i64) {
     ui.set_reply_index(index(defaults.reply_id));
 }
 
-fn identity_label(identity: &SenderIdentity) -> String {
+pub(super) fn identity_label(identity: &SenderIdentity) -> String {
     match identity
         .display_name
         .as_deref()
@@ -282,7 +282,7 @@ async fn refreshed_preferences(
 /// The composer reads saved identities so opening it never waits on the
 /// network. Account sync keeps them current and submission re-validates the
 /// chosen From address.
-async fn cached_preferences(
+pub(super) async fn cached_preferences(
     core: &Core,
     account_id: i64,
 ) -> Result<(Settings, Vec<AccountConfig>, Vec<SenderIdentity>), String> {
@@ -298,8 +298,6 @@ pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
-    document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<LazyComposeEditor>>,
 ) {
     let ui = app.global::<AccountMailPreferences>();
     ui.set_desktop_supported(!cfg!(mobile));
@@ -767,7 +765,6 @@ pub(super) fn register(
         );
     });
     register_keys_and_reader(app, state, &tasks);
-    register_composer(app, state, &tasks, document, editor);
 }
 
 fn show_message(app: &AppWindow, message: OpenedMessage, memory: &Arc<std::sync::Mutex<Vec<u8>>>) {
@@ -1034,253 +1031,77 @@ async fn export_message(_: Vec<u8>) -> Result<(), String> {
     Err("Message export is unavailable on this platform.".into())
 }
 
-fn register_composer(
-    app: &AppWindow,
-    state: &Rc<RefCell<InboxState>>,
-    tasks: &UiWork,
-    document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<LazyComposeEditor>>,
-) {
-    // Only replace the exact unedited block we inserted. User edits are never
-    // discarded when switching identity or selecting a different signature.
-    let inserted = MANAGED_SIGNATURE.with(Rc::clone);
-    let available = Rc::new(RefCell::new(Vec::<Signature>::new()));
-    let ui = app.global::<AccountMailPreferences>();
-    let reset = inserted.clone();
-    let generation = Rc::new(Cell::new(0_u64));
-    let reset_generation = generation.clone();
-    let reset_list = available.clone();
-    let weak = app.as_weak();
-    ui.on_composer_reset(move || {
-        reset_generation.set(reset_generation.get().wrapping_add(1));
-        *reset.borrow_mut() = None;
-        reset_list.borrow_mut().clear();
-        if let Some(app) = weak.upgrade() {
-            let ui = app.global::<AccountMailPreferences>();
-            ui.set_composer_signature_names(ModelRc::default());
-            ui.set_composer_signature_index(0);
-            ui.set_composer_sender_identities(ModelRc::default());
-            ui.set_composer_sender_names(ModelRc::default());
-            ui.set_composer_sender_index(0);
-            ui.set_composer_sender_email("".into());
-            ui.set_composer_security("".into());
-            ui.set_composer_preferences_ready(false);
+/// The verified identities a composer may send from. A reply to an address
+/// under a server wildcard (`*@domain`) answers from that exact address.
+pub(super) fn selectable_identities(
+    all: Vec<SenderIdentity>,
+    requested: &str,
+) -> Vec<SenderIdentity> {
+    let mut selectable = verified_identities(&all);
+    if !requested.is_empty()
+        && !selectable
+            .iter()
+            .any(|identity| identity.email.eq_ignore_ascii_case(requested))
+        && let Some(wildcard) = all.iter().find(|identity| {
+            identity.is_verified() && identity.is_wildcard() && identity.authorizes(requested)
+        })
+    {
+        selectable.push(SenderIdentity {
+            email: requested.to_owned(),
+            is_primary: false,
+            is_provider_default: false,
+            ..wildcard.clone()
+        });
+    }
+    selectable
+}
+
+/// The sender a composer starts with: the address it was asked for, the
+/// account's default, the provider's default, then the primary address.
+pub(super) fn sender_index(
+    identities: &[SenderIdentity],
+    requested: &str,
+    default_email: Option<&str>,
+) -> usize {
+    (!requested.is_empty())
+        .then(|| {
+            identities
+                .iter()
+                .position(|identity| identity.email.eq_ignore_ascii_case(requested))
+        })
+        .flatten()
+        .or_else(|| {
+            default_email.and_then(|email| {
+                identities
+                    .iter()
+                    .position(|identity| identity.email.eq_ignore_ascii_case(email))
+            })
+        })
+        .or_else(|| {
+            identities
+                .iter()
+                .position(|identity| identity.is_provider_default)
+        })
+        .or_else(|| identities.iter().position(|identity| identity.is_primary))
+        .unwrap_or(0)
+}
+
+/// What the composer says about end-to-end encryption for its account.
+pub(super) fn security_summary(policy: &MailSecurity) -> &'static str {
+    if policy.require_encryption {
+        if policy.sign_by_default {
+            "OpenPGP: encryption required · digitally signed"
+        } else {
+            "OpenPGP: encryption required"
         }
-    });
-    let weak = app.as_weak();
-    let state = state.clone();
-    let work = tasks.clone();
-    let list = available.clone();
-    let managed = inserted.clone();
-    ui.on_composer_account_changed(move |account_id| {
-        let Some(app) = weak.upgrade() else { return };
-        let ui = app.global::<AccountMailPreferences>();
-        ui.set_composer_preferences_ready(false);
-        ui.set_composer_signature_names(ModelRc::default());
-        ui.set_composer_sender_identities(ModelRc::default());
-        ui.set_composer_sender_names(ModelRc::default());
-        ui.set_composer_security("".into());
-        let Some(core) = core(&state) else { return };
-        generation.set(generation.get().wrapping_add(1));
-        let generation = generation.clone();
-        let expected = generation.get();
-        let list = list.clone();
-        let managed = managed.clone();
-        work.spawn(
-            &app,
-            false,
-            async move { cached_preferences(&core, i64::from(account_id)).await },
-            move |app, result| {
-                if generation.get() != expected || app.get_compose_account_id() != account_id {
-                    return;
-                }
-                let ui = app.global::<AccountMailPreferences>();
-                match result {
-                    Ok((settings, configs, identities)) => {
-                        let Some(config) = configs
-                            .iter()
-                            .find(|config| config.id == i64::from(account_id))
-                        else {
-                            return;
-                        };
-                        let requested = ui.get_composer_sender_email().to_string();
-                        let identities = {
-                            let all = identities;
-                            let mut selectable = verified_identities(&all);
-                            // A reply to an address under a server wildcard
-                            // (`*@domain`) answers from that exact address.
-                            if !requested.is_empty()
-                                && !selectable
-                                    .iter()
-                                    .any(|identity| identity.email.eq_ignore_ascii_case(&requested))
-                                && let Some(wildcard) = all.iter().find(|identity| {
-                                    identity.is_verified()
-                                        && identity.is_wildcard()
-                                        && identity.authorizes(&requested)
-                                })
-                            {
-                                selectable.push(SenderIdentity {
-                                    email: requested.clone(),
-                                    is_primary: false,
-                                    is_provider_default: false,
-                                    ..wildcard.clone()
-                                });
-                            }
-                            selectable
-                        };
-                        let sender_choices = identities
-                            .iter()
-                            .map(|identity| SenderIdentityChoice {
-                                email: identity.email.clone().into(),
-                                label: identity_label(identity).into(),
-                            })
-                            .collect::<Vec<_>>();
-                        ui.set_composer_sender_names(ModelRc::new(VecModel::from(
-                            sender_choices
-                                .iter()
-                                .map(|identity| identity.label.clone())
-                                .collect::<Vec<_>>(),
-                        )));
-                        ui.set_composer_sender_identities(ModelRc::new(VecModel::from(
-                            sender_choices,
-                        )));
-                        let default_email = config.settings.default_sender_email.as_deref();
-                        let sender_index = (!requested.is_empty())
-                            .then(|| {
-                                identities.iter().position(|identity| {
-                                    identity.email.eq_ignore_ascii_case(&requested)
-                                })
-                            })
-                            .flatten()
-                            .or_else(|| {
-                                default_email.and_then(|email| {
-                                    identities.iter().position(|identity| {
-                                        identity.email.eq_ignore_ascii_case(email)
-                                    })
-                                })
-                            })
-                            .or_else(|| {
-                                identities
-                                    .iter()
-                                    .position(|identity| identity.is_provider_default)
-                            })
-                            .or_else(|| identities.iter().position(|identity| identity.is_primary))
-                            .unwrap_or(0);
-                        ui.set_composer_preferences_ready(true);
-                        ui.invoke_composer_sender(i32::try_from(sender_index).unwrap_or(0));
-                        let signatures = choices(&settings, i64::from(account_id));
-                        let mut names = vec![SharedString::from("No signature")];
-                        names.extend(signatures.iter().map(|s| SharedString::from(&s.name)));
-                        ui.set_composer_signature_names(ModelRc::new(VecModel::from(names)));
-                        *list.borrow_mut() = signatures.clone();
-                        let p = &config.settings.security;
-                        ui.set_composer_security(
-                            if p.require_encryption {
-                                if p.sign_by_default {
-                                    "OpenPGP: encryption required · digitally signed"
-                                } else {
-                                    "OpenPGP: encryption required"
-                                }
-                            } else if p.sign_by_default {
-                                "OpenPGP: digitally signed · not encrypted"
-                            } else {
-                                "Message is not end-to-end encrypted"
-                            }
-                            .into(),
-                        );
-                        // A draft, and a message edited as new, have
-                        // whatever signature they had.
-                        if matches!(app.get_compose_mode().as_str(), "draft" | "edit_as_new") {
-                            *managed.borrow_mut() = None;
-                            ui.set_composer_signature_index(0);
-                            return;
-                        }
-                        // A cleared composer starts a fresh insertion lifecycle.
-                        if app.get_compose_body().is_empty() {
-                            *managed.borrow_mut() = None;
-                        }
-                        let defaults = settings
-                            .signature_defaults
-                            .get(&account_id.to_string())
-                            .cloned()
-                            .unwrap_or_default();
-                        let id = if app.get_compose_mode() == "new" {
-                            defaults.new_id
-                        } else {
-                            defaults.reply_id
-                        };
-                        let index = signatures
-                            .iter()
-                            .position(|s| Some(&s.id) == id.as_ref())
-                            .map_or(0, |i| i as i32 + 1);
-                        ui.invoke_composer_signature(index);
-                    }
-                    Err(e) => {
-                        app.set_compose_notice(UiMessage::detail(
-                            "Could not load account preferences: {}",
-                            e,
-                        ));
-                        app.set_compose_notice_is_error(true);
-                    }
-                }
-            },
-        );
-    });
-    let weak = app.as_weak();
-    ui.on_composer_sender(move |index| {
-        let Some(app) = weak.upgrade() else { return };
-        let ui = app.global::<AccountMailPreferences>();
-        let Some(identity) = usize::try_from(index)
-            .ok()
-            .and_then(|index| ui.get_composer_sender_identities().row_data(index))
-        else {
-            return;
-        };
-        ui.set_composer_sender_index(index);
-        ui.set_composer_sender_email(identity.email);
-    });
-    let weak = app.as_weak();
-    let document = document.clone();
-    let editor = editor.clone();
-    ui.on_composer_signature(move |index| {
-        let Some(app) = weak.upgrade() else { return }; let mut document = document.borrow_mut();
-        let current = document.text().to_owned();
-        let old = inserted.borrow().clone();
-        let body = match remove_managed_signature(&current, old.as_deref()) {
-            Ok(body) => body,
-            Err(()) if index == 0 => {
-                *inserted.borrow_mut() = None;
-                app.global::<AccountMailPreferences>().set_composer_signature_index(0);
-                return;
-            }
-            Err(()) => {
-                app.set_compose_notice(UiMessage::plain("Your edited signature was preserved. Choose No signature to keep it as message text before inserting another."));
-                app.set_compose_notice_is_error(true); return;
-            }
-        };
-        let signature = usize::try_from(index - 1).ok().and_then(|i| available.borrow().get(i).cloned());
-        let text = signature.as_ref().map(flectar_mail_core::signatures::plain_text).unwrap_or_default();
-        let new_body = flectar_mail_core::signatures::insert(&body, &text);
-        *inserted.borrow_mut() = if text.is_empty() { None } else { Some(format!("\n\n-- \n{}", text.trim())) };
-        let selection = document.synchronize(&new_body, 0, 0);
-        apply_rich_compose(&app, &document, selection, &mut editor.borrow_mut());
-        app.global::<AccountMailPreferences>().set_composer_signature_index(index);
-    });
+    } else if policy.sign_by_default {
+        "OpenPGP: digitally signed · not encrypted"
+    } else {
+        "Message is not end-to-end encrypted"
+    }
 }
 
-thread_local! {
-    /// The signature block the composer inserted and the user has not edited.
-    static MANAGED_SIGNATURE: Rc<RefCell<Option<String>>> = Rc::default();
-}
-
-/// Whether `body` holds nothing but the signature the composer inserted, so a
-/// message the user has not started counts as blank.
-pub(super) fn only_inserted_signature(body: &str) -> bool {
-    let managed = MANAGED_SIGNATURE.with(|managed| managed.borrow().clone());
-    remove_managed_signature(body, managed.as_deref()).is_ok_and(|rest| rest.trim().is_empty())
-}
-
-fn remove_managed_signature(body: &str, managed: Option<&str>) -> Result<String, ()> {
+pub(super) fn remove_managed_signature(body: &str, managed: Option<&str>) -> Result<String, ()> {
     match managed {
         None => Ok(body.to_owned()),
         Some(block) if body.matches(block).count() == 1 => Ok(body.replacen(block, "", 1)),

@@ -656,6 +656,7 @@ pub(super) fn restore_account_backup(
     ) as f32);
     app.set_notifications_enabled(settings.notifications_enabled);
     app.set_notification_sound_enabled(settings.sound_enabled);
+    app.set_unread_badge_enabled(settings.unread_badge_enabled);
     app.set_notification_scope(settings.notification_scope.clone().into());
     app.set_sync_interval_minutes(settings.sync_interval_minutes as i32);
     app.set_mark_read_on_open(settings.mark_read_on_open);
@@ -1643,6 +1644,7 @@ pub(super) fn register_data_management_callbacks(
                     app.set_workspace_list_pane_width(MIN_WORKSPACE_LIST_PANE_WIDTH as f32);
                     app.set_notifications_enabled(true);
                     app.set_notification_sound_enabled(true);
+                    app.set_unread_badge_enabled(true);
                     app.set_notification_scope("important".into());
                     app.set_sync_interval_minutes(5);
                     app.set_mark_read_on_open(true);

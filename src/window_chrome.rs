@@ -31,6 +31,19 @@ mod linux;
 mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
+/// The unread count over the taskbar button of a copy without package
+/// identity, which draws its own.
+#[cfg(target_os = "windows")]
+mod taskbar_badge;
+#[cfg(any(test, target_os = "windows"))]
+mod badge_pixels;
+
+/// Show the unread count on the main window's taskbar button, as a copy
+/// without package identity must: Windows' own badges need one.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_taskbar_badge(badge: Option<(u32, String)>) {
+    windows::set_taskbar_badge(badge);
+}
 
 /// The integrated frame is the default; unknown saved values fall back to the
 /// system frame so a window can never start without any controls.
@@ -84,22 +97,44 @@ pub(crate) const PLATFORM: &str = if cfg!(target_os = "windows") {
 
 thread_local! {
     static STARTUP_FRAME: Cell<WindowFrame> = const { Cell::new(WindowFrame::System) };
+    /// Set while a composer window is being created.
+    #[cfg(desktop)]
+    static CREATING_COMPOSER: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Native window attributes for the main window, applied by the backend
-/// selector before the window is created.
+/// selector before the window is created. Composer windows keep the
+/// platform's own frame.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[cfg_attr(target_os = "windows", allow(unused_variables))]
 pub(crate) fn window_attributes(
     startup: WindowFrame,
 ) -> impl Fn(winit::window::WindowAttributes) -> winit::window::WindowAttributes + 'static {
     move |attributes| {
+        if CREATING_COMPOSER.get() {
+            #[cfg(target_os = "windows")]
+            let attributes = windows::composer_window_attributes(attributes);
+            return attributes;
+        }
         #[cfg(target_os = "windows")]
         let attributes = windows::window_attributes(attributes);
         #[cfg(target_os = "macos")]
         let attributes = macos::window_attributes(attributes, startup);
         attributes
     }
+}
+
+/// Create a composer window. The winit backend applies the attributes hook
+/// while the component creates its window, so the hook can tell the two
+/// kinds apart: only the main window gets the integrated frame.
+#[cfg(desktop)]
+pub(crate) fn composer_window<T>(
+    create: impl FnOnce() -> Result<T, slint::PlatformError>,
+) -> Result<T, slint::PlatformError> {
+    CREATING_COMPOSER.set(true);
+    let window = create();
+    CREATING_COMPOSER.set(false);
+    window
 }
 
 /// Prepare platform hooks that must observe native window creation. Call
@@ -157,6 +192,27 @@ pub(crate) fn is_quit(
         && modifiers == winit::keyboard::ModifiersState::CONTROL
 }
 
+/// Quit for Control+Q pressed in any of the app's windows, as GNOME and KDE
+/// have it. Messages being written go to Drafts as the app ends; only the
+/// calendar editor's unsaved changes keep it from quitting. Control+Q is the
+/// only way out of a Flatpak running in the background where the desktop
+/// lists no background apps. Returns whether it quit.
+#[cfg(linux_desktop)]
+pub(crate) fn quit_key(
+    app: &AppWindow,
+    event: &winit::event::KeyEvent,
+    modifiers: winit::keyboard::ModifiersState,
+) -> bool {
+    let quits = event.state.is_pressed()
+        && !event.repeat
+        && is_quit(&event.logical_key, modifiers)
+        && !app.get_calendar_editor_open();
+    if quits {
+        crate::window_controller::quit(app);
+    }
+    quits
+}
+
 #[cfg(desktop)]
 fn register_desktop_events(app: &AppWindow) {
     let chrome = app.global::<WindowChrome>();
@@ -183,29 +239,20 @@ fn register_desktop_events(app: &AppWindow) {
         if !matches!(event, winit::event::WindowEvent::RedrawRequested) {
             crate::memory::release_free_heap_when_idle();
         }
+        #[cfg(linux_desktop)]
+        if let winit::event::WindowEvent::KeyboardInput { event, .. } = event
+            && quit_key(&app, event, modifiers.get())
+        {
+            return EventResult::PreventDefault;
+        }
         match event {
             winit::event::WindowEvent::ModifiersChanged(state) => modifiers.set(state.state()),
-            // Control+Q quits from anywhere, as GNOME and KDE have it, except
-            // over writing that the composer or calendar editor hasn't saved.
-            // It is the only way out of a Flatpak running in the background
-            // where the desktop lists no background apps.
-            #[cfg(linux_desktop)]
-            winit::event::WindowEvent::KeyboardInput { event, .. }
-                if event.state.is_pressed()
-                    && !event.repeat
-                    && is_quit(&event.logical_key, modifiers.get())
-                    && !app.get_compose_open()
-                    && !app.get_calendar_editor_open() =>
-            {
-                crate::window_controller::quit(&app);
-                return EventResult::PreventDefault;
-            }
             // Tab shortcuts work wherever focus is, as in a browser, except in
             // the composer and the calendar editor, which keep their keys.
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
-                    && !app.get_compose_open()
+                    && !app.global::<crate::ComposerUi>().get_open()
                     && !app.get_calendar_editor_open() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {

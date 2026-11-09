@@ -16,8 +16,8 @@
 //! The toasts are shown from that thread too.
 
 use super::{
-    Act, Alert, AlertId, Availability, Controls, Failure, HostFuture, NotificationHost, Response,
-    parse_payload, payload, respond,
+    Act, Alert, AlertId, Availability, Badge, Controls, Failure, HostFuture, NotificationHost,
+    Response, parse_payload, payload, respond,
 };
 use crate::platform::windows_install::{command_executable, package_family_name, same_file};
 use std::{
@@ -28,8 +28,8 @@ use tokio::sync::oneshot;
 use windows::{
     Data::Xml::Dom::XmlDocument,
     UI::Notifications::{
-        NotificationSetting, ToastNotification, ToastNotificationHistory, ToastNotificationManager,
-        ToastNotifier,
+        BadgeNotification, BadgeUpdateManager, NotificationSetting, ToastNotification,
+        ToastNotificationHistory, ToastNotificationManager, ToastNotifier,
     },
     Win32::{
         Foundation::{CLASS_E_NOAGGREGATION, E_POINTER},
@@ -158,7 +158,10 @@ pub(crate) fn host() -> Option<Arc<dyn NotificationHost>> {
         tracing::warn!(%error, "notifications: could not start the toast thread");
         return None;
     }
-    Some(Arc::new(Host { jobs }))
+    Some(Arc::new(Host {
+        jobs,
+        packaged: matches!(install, Install::Packaged { .. }),
+    }))
 }
 
 /// Work for the toast thread, with where its answer goes.
@@ -166,10 +169,13 @@ enum Job {
     Show(Vec<Alert>, oneshot::Sender<Vec<Result<(), Failure>>>),
     Withdraw(Vec<AlertId>, oneshot::Sender<()>),
     Availability(oneshot::Sender<Availability>),
+    Badge(Option<u32>, oneshot::Sender<()>),
 }
 
 struct Host {
     jobs: mpsc::Sender<Job>,
+    /// Runs from the Store package, which has Windows' own badges.
+    packaged: bool,
 }
 
 impl Host {
@@ -207,7 +213,23 @@ impl NotificationHost for Host {
         Controls {
             settings: true,
             sound: true,
+            badge: true,
         }
+    }
+
+    /// The Store package has Windows' own badge, which stays while the app
+    /// is closed and so is cleared as it quits. Other copies draw a count
+    /// over the main window's taskbar button, on the window's thread; it goes
+    /// with the window.
+    fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+        if self.packaged {
+            let count = badge.map(|badge| badge.count);
+            return self.ask(|answer| Job::Badge(count, answer), ());
+        }
+        let badge = badge.map(|badge| (badge.count, badge.description));
+        let _ =
+            slint::invoke_from_event_loop(move || crate::window_chrome::set_taskbar_badge(badge));
+        Box::pin(std::future::ready(()))
     }
 
     fn open_settings(&self) {
@@ -261,6 +283,12 @@ fn serve(install: &Install, jobs: &mpsc::Receiver<Job>) {
             Job::Withdraw(ids, answer) => {
                 for id in ids {
                     toasts.withdraw(id);
+                }
+                let _ = answer.send(());
+            }
+            Job::Badge(count, answer) => {
+                if let Err(error) = system_badge(count) {
+                    tracing::debug!(%error, "notifications: could not set the app's badge");
                 }
                 let _ = answer.send(());
             }
@@ -355,6 +383,18 @@ impl Toasts {
             tracing::debug!(%error, "notifications: could not withdraw a toast");
         }
     }
+}
+
+/// Windows' own badge on the Store package's taskbar button and tiles: the
+/// number, which Windows shows as 99+ beyond that, or none.
+fn system_badge(count: Option<u32>) -> windows::core::Result<()> {
+    let updater = BadgeUpdateManager::CreateBadgeUpdaterForApplication()?;
+    let Some(count) = count else {
+        return updater.Clear();
+    };
+    let document = XmlDocument::new()?;
+    document.LoadXml(&HSTRING::from(format!("<badge value=\"{count}\"/>")))?;
+    updater.Update(&BadgeNotification::CreateBadgeNotification(&document)?)
 }
 
 /// A toast's tag and group, each under the 64 characters Windows allows: the

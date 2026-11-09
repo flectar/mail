@@ -41,13 +41,16 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IsZoomed, NCCALCSIZE_PARAMS, PostMessageW, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
     SM_CXPADDEDBORDER, SM_CYSIZEFRAME, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
     SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos, SetWindowsHookExW,
-    UnhookWindowsHookEx, WH_CBT, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCDESTROY, WM_NCHITTEST,
+    UnhookWindowsHookEx, WH_CBT, WM_DPICHANGED, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCDESTROY,
+    WM_NCHITTEST,
     WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
     WM_SYSCOMMAND, WS_CAPTION,
 };
 
 /// Window class that identifies the main window during creation.
 const CLASS_NAME: &str = "FlectarMailWindow";
+/// Window class of composer windows.
+const COMPOSER_CLASS_NAME: &str = "FlectarMailComposer";
 /// Winit's class for windows created without the attributes hook.
 const WINIT_CLASS_NAME: &str = "Window Class";
 const SUBCLASS_ID: usize = 0x464d_6169; // "FMai"
@@ -117,6 +120,12 @@ thread_local! {
 
 pub(super) fn window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     attributes.with_class_name(CLASS_NAME)
+}
+
+/// Composer windows have their own class, so the creation hook never takes
+/// one for the main window.
+pub(super) fn composer_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
+    attributes.with_class_name(COMPOSER_CLASS_NAME)
 }
 
 pub(super) fn prepare(startup: WindowFrame) {
@@ -264,6 +273,9 @@ unsafe extern "system" fn subclass_proc(
         // SAFETY: the hook was installed by `prepare` on this thread.
         unsafe { UnhookWindowsHookEx(hook) };
     }
+    if message == super::taskbar_badge::button_created_message() || message == WM_DPICHANGED {
+        super::taskbar_badge::apply(hwnd);
+    }
     if message == WM_NCDESTROY {
         STATE.with(|state| state.hwnd.set(null_mut()));
         // SAFETY: removing this module's own subclass from its window.
@@ -276,6 +288,12 @@ unsafe extern "system" fn subclass_proc(
     }
     // SAFETY: forwarding to winit's window procedure.
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// Show the unread count on the main window's taskbar button, and keep it
+/// there as the taskbar recreates the button or the window changes DPI.
+pub(super) fn set_taskbar_badge(badge: Option<(u32, String)>) {
+    super::taskbar_badge::set(STATE.with(|state| state.hwnd.get()), badge);
 }
 
 /// Full-screen windows have no caption style and keep default handling.

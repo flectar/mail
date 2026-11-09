@@ -25,6 +25,8 @@ these aliases with [`cfg_aliases`](https://crates.io/crates/cfg_aliases):
 | `desktop` | `not(mobile)` |
 | `linux_desktop` | A Linux desktop session (portals, X11/Wayland, Secret Service). Excludes OpenHarmony, which also reports `target_os = "linux"`. |
 | `glibc` | Linux with the GNU C library. |
+| `user_notifications` | New-mail notifications through Apple's User Notifications framework (macOS, iOS). |
+| `background_checks` | The system suspends the app in the background and wakes it to check for new mail (iOS). |
 | `rename_noreplace` | Core only: kernels with an atomic no-replace directory rename. |
 | `secret_service` | Core only: desktops where `keyring` stores secrets through the freedesktop Secret Service (Linux, FreeBSD and OpenBSD, not OpenHarmony). |
 
@@ -53,7 +55,7 @@ host-provided service:
 | `credentials` | System keychain (`SystemCredentialStore`) | Implements `CredentialStore` with the platform keystore |
 | `oauth_redirects` | Loopback redirect broker | Implements `OAuthRedirectBroker` (app links, custom schemes) |
 | `external_urls` | System URL launcher | `ExternalUrlOpener::new` with the host's native URL bridge |
-| `notifications` | `None`; `run` creates the platform's own (toasts, User Notifications, the freedesktop server or the portal) | A `NotificationHost` that shows, withdraws and reports on notifications, or `None` where the host has none. The shared app decides what to show, sums up bursts and translates the text; the host lays each notification out, says per notification whether the system took it, and reports clicks and buttons through `respond` |
+| `notifications` | `None`; `run` creates the platform's own (toasts, User Notifications, the freedesktop server or the portal) | A `NotificationHost` that shows, withdraws and reports on notifications, or `None` where the host has none. The shared app decides what to show, sums up bursts and translates the text; the host lays each notification out, says per notification whether the system took it, and reports clicks and buttons through `respond`, or `respond_then` where the system suspends the app soon after. Where the system wakes the app to check for mail (`background_checks`), the host calls `check_in_background` when it does and `app_became_active` when the app comes to the front |
 
 Mobile hosts use `PlatformContext::app_private(data_root, cache_dir, documents,
 credentials, oauth_redirects)`, which keeps durable data below

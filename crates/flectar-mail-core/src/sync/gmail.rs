@@ -7,8 +7,8 @@
 //! pending-action queue remain provider-neutral and fully offline-first.
 
 use super::engine::{
-    PriorityFetchCmd, SyncCmd, SyncCtx, configured_sync_interval, emit_sync_status, set_state,
-    set_state_error,
+    PriorityFetchCmd, SyncCmd, SyncCtx, caught_up, configured_sync_interval, emit_sync_status,
+    set_state, set_state_error,
 };
 use crate::db::repo::{self, messages::NewMessage};
 use crate::error::{CoreError, Result};
@@ -2556,6 +2556,7 @@ async fn sync_once(
     live_since: i64,
 ) -> Result<bool> {
     let account_id = config.id;
+    let started = now_ms();
     let mut state = ctx
         .db
         .read(move |conn| repo::gmail::state(conn, account_id))
@@ -2763,6 +2764,10 @@ async fn sync_once(
         .await?;
     if page.next_page_token.is_none() && !page.affected_threads.is_empty() {
         sync_draft_map(ctx, config, api).await?;
+    }
+    if page.next_page_token.is_none() {
+        // The history ran out: everything up to this pass is stored.
+        caught_up(ctx, account_id, started).await;
     }
     Ok(true)
 }

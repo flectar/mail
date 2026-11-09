@@ -79,6 +79,8 @@ html5ever = "0.40"
 # Snapshot archives one verified database snapshot for the document provider.
 zip = { version = "9.0.4", default-features = false }
 cssparser = "0.38"
+# A quoted original keeps the look its style sheets gave it, as inline styles.
+css-inline = { version = "0.23", default-features = false }
 # Match Blitz's Stylo version when adapting resolved CSS colors and gradients.
 style = { package = "stylo", version = "=0.22.0" }
 style_traits = { package = "stylo_traits", version = "=0.22.0" }
@@ -151,6 +153,7 @@ windows = { version = "0.62", default-features = false, features = [
     "Win32_System_Com",
     "Win32_UI_Notifications",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 # `windows::core::implement` expands to paths in this crate.
 windows-core = { version = "0.62", default-features = false, features = ["std"] }
@@ -195,13 +198,19 @@ slint = { version = "1.18.1", default-features = false, features = ["backend-win
 # These AppKit bindings are already in the build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSDockTile", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
-# New-mail notifications.
+
+# New-mail notifications through Apple's User Notifications. This is
+# `user_notifications`; keep it in step with the alias in build.rs.
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
+objc2 = { version = "0.6", default-features = false, features = ["std"] }
+block2 = { version = "0.6", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSSet", "NSString"] }
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
 
 # Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and

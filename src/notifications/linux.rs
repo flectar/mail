@@ -8,11 +8,14 @@
 //! 1.20, and GNOME's portal backend plays no sound.
 //!
 //! Both use the session bus connection ashpd keeps for the other portals, so
-//! notifications add no connection and no thread where a portal runs.
+//! notifications add no connection and no thread where a portal runs. So does
+//! the count on the app's icon.
 
 use super::{
-    Alert, AlertId, Availability, Controls, Failure, FixedWords, HostFuture, NotificationHost,
+    Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
+    NotificationHost,
 };
+use ashpd::zbus;
 use std::{
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
@@ -40,6 +43,7 @@ struct Host(Arc<Shared>);
 struct Shared {
     service: tokio::sync::Mutex<Option<Arc<imp::Service>>>,
     words: Arc<Mutex<FixedWords>>,
+    launcher: badge::Launcher,
 }
 
 impl Shared {
@@ -112,6 +116,191 @@ impl NotificationHost for Host {
         Controls {
             settings: false,
             sound: !cfg!(feature = "flatpak"),
+            badge: true,
+        }
+    }
+
+    fn set_badge(&self, badge: Option<Badge>) -> HostFuture<()> {
+        let shared = Arc::clone(&self.0);
+        Box::pin(async move { shared.launcher.show(badge.map(|badge| badge.count)).await })
+    }
+}
+
+/// The session bus connection ashpd shares with the other portals, or a new
+/// one where no portal runs.
+async fn session_bus() -> Option<zbus::Connection> {
+    let portal =
+        tokio::time::timeout(CALL_TIMEOUT, ashpd::desktop::settings::Settings::new()).await;
+    match portal {
+        Ok(Ok(settings)) => Some(settings.connection().clone()),
+        _ => zbus::Connection::session().await.ok(),
+    }
+}
+
+/// The count on the app's icon, for docks that show one: KDE Plasma's task
+/// manager, Ubuntu Dock and Dash to Dock, elementary's dock and Plank. They
+/// listen for the launcher entry broadcast Unity introduced, which needs no
+/// permission, even in the Flatpak. Telling a dock that starts later, as
+/// docks restart with the shell, takes watching the name it owns, which the
+/// Flatpak may with `--talk-name=com.canonical.Unity`.
+mod badge {
+    use super::{APP_ID, session_bus, zbus};
+    use ashpd::zvariant::Value;
+    use futures_util::StreamExt;
+    use std::{
+        collections::HashMap,
+        ffi::OsStr,
+        path::Path,
+        sync::{Arc, Mutex, PoisonError},
+    };
+
+    const INTERFACE: &str = "com.canonical.Unity.LauncherEntry";
+    const PATH: &str = "/com/flectar/mail/LauncherEntry";
+    /// The name a dock that shows counts owns.
+    const DOCK: &str = "com.canonical.Unity";
+
+    #[derive(Default)]
+    pub(super) struct Launcher {
+        /// Connects on first use; `None` without a session bus.
+        connection: tokio::sync::OnceCell<Option<zbus::Connection>>,
+        /// The count shown, for a dock that starts later.
+        count: Arc<Mutex<Option<u32>>>,
+    }
+
+    impl Launcher {
+        /// Show `count` on the icon, or none. Returns once it is sent, so
+        /// the one sent as the app quits goes out before it does.
+        pub(super) async fn show(&self, count: Option<u32>) {
+            *self.count.lock().unwrap_or_else(PoisonError::into_inner) = count;
+            let connection = self
+                .connection
+                .get_or_init(|| async {
+                    let connection = session_bus().await?;
+                    tokio::spawn(tell_new_docks(connection.clone(), Arc::clone(&self.count)));
+                    Some(connection)
+                })
+                .await;
+            if let Some(connection) = connection
+                && let Err(error) = update(connection, count).await
+            {
+                tracing::debug!(%error, "notifications: could not update the count on the icon");
+            }
+        }
+    }
+
+    /// Tell each dock that takes the name the count shown now.
+    async fn tell_new_docks(connection: zbus::Connection, count: Arc<Mutex<Option<u32>>>) {
+        let Ok(bus) = zbus::fdo::DBusProxy::new(&connection).await else {
+            return;
+        };
+        let Ok(mut owners) = bus.receive_name_owner_changed_with_args(&[(0, DOCK)]).await else {
+            return;
+        };
+        while let Some(change) = owners.next().await {
+            let started = change
+                .args()
+                .is_ok_and(|args| args.new_owner().as_ref().is_some());
+            if !started {
+                continue;
+            }
+            let shown = *count.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Err(error) = update(&connection, shown).await {
+                tracing::debug!(%error, "notifications: could not tell a dock the count");
+            }
+        }
+    }
+
+    async fn update(connection: &zbus::Connection, count: Option<u32>) -> zbus::Result<()> {
+        let properties = HashMap::from([
+            ("count", Value::from(i64::from(count.unwrap_or(0)))),
+            ("count-visible", Value::from(count.is_some())),
+        ]);
+        connection
+            .emit_signal(
+                None::<&str>,
+                PATH,
+                INTERFACE,
+                "Update",
+                &(app_uri(), properties),
+            )
+            .await
+    }
+
+    /// The desktop entry docks know the app by.
+    fn app_uri() -> String {
+        let launched = std::env::var_os("GIO_LAUNCHED_DESKTOP_FILE");
+        let launched_pid = std::env::var("GIO_LAUNCHED_DESKTOP_FILE_PID").ok();
+        let entry = desktop_entry(
+            std::env::var("FLATPAK_ID").ok().as_deref(),
+            launched.as_deref(),
+            launched_pid.as_deref(),
+            std::process::id(),
+        );
+        format!("application://{entry}")
+    }
+
+    /// The Flatpak's entry is named by its id. An AppImage's is renamed by
+    /// the launcher that installed it, which says, as GLib does, which entry
+    /// it started this very process from; a process started by one that was
+    /// launched so inherits a stale name and the parent's process id.
+    fn desktop_entry(
+        flatpak_id: Option<&str>,
+        launched: Option<&OsStr>,
+        launched_pid: Option<&str>,
+        pid: u32,
+    ) -> String {
+        if let Some(id) = flatpak_id.filter(|id| !id.is_empty()) {
+            return format!("{id}.desktop");
+        }
+        launched
+            .filter(|_| launched_pid.and_then(|launched| launched.parse::<u32>().ok()) == Some(pid))
+            .and_then(|path| Path::new(path).file_name()?.to_str())
+            .filter(|name| name.ends_with(".desktop"))
+            .map_or_else(|| format!("{APP_ID}.desktop"), str::to_owned)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::desktop_entry;
+        use std::ffi::OsStr;
+
+        #[test]
+        fn docks_know_the_app_by_its_desktop_entry() {
+            let renamed = OsStr::new(
+                "/home/a/.local/share/applications/appimagekit_0f3-com.flectar.mail.desktop",
+            );
+            assert_eq!(
+                desktop_entry(None, None, None, 7),
+                "com.flectar.mail.desktop"
+            );
+            assert_eq!(
+                desktop_entry(Some("com.flectar.mail"), Some(renamed), Some("7"), 7),
+                "com.flectar.mail.desktop"
+            );
+            assert_eq!(
+                desktop_entry(None, Some(renamed), Some("7"), 7),
+                "appimagekit_0f3-com.flectar.mail.desktop"
+            );
+            // Inherited from a terminal started from its own entry.
+            assert_eq!(
+                desktop_entry(
+                    None,
+                    Some(OsStr::new(
+                        "/usr/share/applications/org.gnome.Ptyxis.desktop"
+                    )),
+                    Some("3"),
+                    7
+                ),
+                "com.flectar.mail.desktop"
+            );
+            assert_eq!(
+                desktop_entry(None, Some(OsStr::new("/tmp/flectar")), Some("7"), 7),
+                "com.flectar.mail.desktop"
+            );
+            assert_eq!(
+                desktop_entry(Some(""), None, None, 7),
+                "com.flectar.mail.desktop"
+            );
         }
     }
 }
@@ -138,7 +327,9 @@ fn body_text(alert: &Alert) -> String {
 /// The desktop's notification server, org.freedesktop.Notifications.
 #[cfg(not(feature = "flatpak"))]
 mod imp {
-    use super::{APP_ID, Alert, AlertId, CALL_TIMEOUT, Failure, FixedWords, body_text};
+    use super::{
+        APP_ID, Alert, AlertId, CALL_TIMEOUT, Failure, FixedWords, body_text, session_bus,
+    };
     use crate::notifications::{Act, Response, respond};
     use ashpd::{zbus, zvariant};
     use futures_util::StreamExt;
@@ -177,17 +368,6 @@ mod imp {
                 self.ids.remove(&alert.id);
             }
             self.tokens.remove(&id);
-        }
-    }
-
-    /// The session bus connection ashpd shares with the other portals, or a
-    /// new one where no portal runs.
-    async fn session_bus() -> Option<zbus::Connection> {
-        let portal =
-            tokio::time::timeout(CALL_TIMEOUT, ashpd::desktop::settings::Settings::new()).await;
-        match portal {
-            Ok(Ok(settings)) => Some(settings.connection().clone()),
-            _ => zbus::Connection::session().await.ok(),
         }
     }
 

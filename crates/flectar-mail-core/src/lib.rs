@@ -827,6 +827,13 @@ pub struct Core {
     ai_router_lock: Arc<tokio::sync::Mutex<()>>,
     /// Wakes the loop that copies and moves mail to other accounts.
     transfers: Arc<tokio::sync::Notify>,
+    /// Set once the startup has started the account workers.
+    accounts_started: Arc<tokio::sync::watch::Sender<bool>>,
+    /// When each account's last complete sync before this start began: mail
+    /// that came in after it was caught up on silently, so a check in the
+    /// background tells of it instead (see [`Core::announce_missed`]).
+    /// `None` once the user has seen the Inbox.
+    missed_since: Arc<std::sync::Mutex<Option<std::collections::BTreeMap<i64, i64>>>>,
 }
 
 impl Core {
@@ -903,6 +910,9 @@ impl Core {
         let calendar_db = Db::deferred_calendar(paths.calendar_db_file());
         let files_db = Db::deferred_files(paths.files_db_file());
         let bus = EventBus::new();
+        // Read before any account worker starts, as each records how far it
+        // caught up.
+        let missed_since = db.read(|conn| repo::accounts::caught_up(conn)).await?;
         let core = Core {
             db,
             calendar_db,
@@ -923,6 +933,8 @@ impl Core {
             ui_ready: Arc::new(tokio::sync::Notify::new()),
             ai_router_lock: Arc::new(tokio::sync::Mutex::new(())),
             transfers: Arc::new(tokio::sync::Notify::new()),
+            accounts_started: Arc::new(tokio::sync::watch::Sender::new(false)),
+            missed_since: Arc::new(std::sync::Mutex::new(Some(missed_since))),
         };
 
         // Finish any destructive operation interrupted between the mail and
@@ -1044,6 +1056,7 @@ impl Core {
                     Err(e) => {
                         events::sync_diagnostic("startup_accounts", None, e.code());
                         tracing::error!("listing accounts for startup sync: {e}");
+                        core.accounts_started.send_replace(true);
                         return;
                     }
                 };
@@ -1056,6 +1069,7 @@ impl Core {
                     Err(error) => tracing::error!("finding local mail for startup: {error}"),
                 }
                 events::sync_diagnostic("startup_workers", None, "ready");
+                core.accounts_started.send_replace(true);
                 // Calendar sync tasks for accounts with a syncing calendar
                 // connection, once older CalDAV passwords have moved to theirs.
                 if core.paths.calendar_db_file().exists() {
@@ -2054,6 +2068,18 @@ impl Core {
     pub fn notify_ui_ready(&self) {
         events::sync_diagnostic("ui_ready", None, "notified");
         self.ui_ready.notify_one();
+    }
+
+    /// Start the account workers now, without waiting for a window to report
+    /// ready, and return once they run: for a check in the background, where
+    /// no window shows.
+    pub async fn start_accounts_now(&self) {
+        self.notify_ui_ready();
+        let _ = self
+            .accounts_started
+            .subscribe()
+            .wait_for(|started| *started)
+            .await;
     }
 
     /// Free the SQLite page caches of every open store once a burst of work
@@ -4734,8 +4760,37 @@ impl Core {
                 MAX_DRAFT_BODY_BYTES / (1024 * 1024)
             )));
         }
+        // A save replaces the open draft, in place while it is still this
+        // account's draft. Otherwise, as in Thunderbird, it becomes a new
+        // draft: one sent or deleted elsewhere is kept, and one whose From
+        // moved to another account goes there, its old copy removed once the
+        // new one is saved. Only an in-place save may reuse staged files,
+        // since removing the old copy removes its files.
+        let previous = match args.draft_id {
+            Some(id) => {
+                self.db
+                    .read(move |conn| {
+                        Ok(conn
+                            .query_row(
+                                "SELECT account_id, is_draft FROM messages WHERE id = ?1",
+                                rusqlite::params![id],
+                                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
+                            )
+                            .optional()?)
+                    })
+                    .await?
+            }
+            None => None,
+        };
+        let (in_place, replaced) = match (args.draft_id, previous) {
+            (Some(id), Some((account_id, true))) if account_id == args.account_id => {
+                (Some(id), None)
+            }
+            (Some(id), Some((_, true))) => (None, Some(id)),
+            _ => (None, None),
+        };
         let staging_root = self.paths.draft_attachments_dir();
-        let reusable_paths = if let Some(draft_id) = args.draft_id {
+        let reusable_paths = if let Some(draft_id) = in_place {
             self.db
                 .read(move |conn| {
                     let mut statement = conn
@@ -4844,7 +4899,7 @@ impl Core {
                     None => None,
                 };
 
-                let draft_id = match args.draft_id {
+                let draft_id = match in_place {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
@@ -5023,6 +5078,13 @@ impl Core {
         }
         if let Some(account_id) = sync_remote_account {
             self.nudge(Some(account_id), || SyncCmd::RunActions).await;
+        }
+        if let Some(previous) = replaced {
+            // The new copy is saved, so a failure here leaves a duplicate in
+            // the previous account rather than losing the message.
+            if let Err(error) = self.delete_draft(previous).await {
+                tracing::warn!(%error, draft = previous, "kept a moved draft's previous copy");
+            }
         }
         Ok(draft_id)
     }
@@ -8492,6 +8554,23 @@ impl Core {
         self.bus.emit(CoreEvent::MailUpdated { thread_ids: vec![] });
         Ok(count)
     }
+    /// The number for the badge on the app icon, or `None` while the user
+    /// keeps it off: the unread mail in the Inboxes that new-mail
+    /// notifications cover, counted as the sidebar counts it (see
+    /// [`repo::counts::notified_unread`]).
+    pub async fn unread_badge(&self) -> Result<Option<i64>> {
+        let settings = self.get_settings().await?;
+        if !settings.unread_badge_enabled {
+            return Ok(None);
+        }
+        let grouping = settings.mail_grouping();
+        self.db
+            .read(move |conn| {
+                let badges = repo::counts::mailbox_badge_counts(conn, grouping)?;
+                Ok(Some(repo::counts::notified_unread(&badges, &settings)))
+            })
+            .await
+    }
 
     /// Native sidebar badges for all accounts, computed in one grouped query.
     /// They count conversations or messages, as the mail list shows them.
@@ -8983,6 +9062,77 @@ impl Core {
         self.db
             .write(move |conn| repo::notifications::prune(conn, now))
             .await
+    }
+
+    /// Queue new-mail notifications for mail that reached an Inbox while no
+    /// copy of the app was following its account. A start catches up on that
+    /// mail silently, which suits a launch the user sees; a phone that starts
+    /// the app in the background to check for mail calls this after the
+    /// check ([`Self::sync_accounts`]), so the mail shows as it would have
+    /// with the app running. Each message is told of once, and nothing once
+    /// [`Self::forget_missed`] ran. Returns how many notifications it queued.
+    pub async fn announce_missed(&self) -> Result<usize> {
+        let since = self
+            .missed_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let Some(since) = since.filter(|since| !since.is_empty()) else {
+            return Ok(0);
+        };
+        let now = now_ms();
+        let queued = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let queued = repo::notifications::enqueue_missed(&tx, &since, now)?;
+                tx.commit()?;
+                Ok(queued)
+            })
+            .await?;
+        let mut by_account = std::collections::BTreeMap::<i64, Vec<i64>>::new();
+        for &(account_id, thread_id) in &queued {
+            by_account.entry(account_id).or_default().push(thread_id);
+        }
+        for (account_id, thread_ids) in by_account {
+            tracing::info!(
+                account_id,
+                count = thread_ids.len(),
+                "receive: queued notifications for mail that came while the app wasn't running",
+            );
+            self.bus.emit(CoreEvent::MailNew {
+                account_id,
+                thread_ids,
+            });
+        }
+        Ok(queued.len())
+    }
+
+    /// The user has seen the Inbox since this start, so mail caught up on
+    /// then is no news: [`Self::announce_missed`] does nothing from now on.
+    pub fn forget_missed(&self) {
+        self.missed_since
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+    }
+
+    /// Wait until each of these queued actions has been tried: done, failed
+    /// or cancelled, or waiting to be tried again after an error, such as
+    /// while offline. For a host that must say when a notification's button
+    /// has done its work, as a phone suspends the app soon after.
+    pub async fn wait_for_actions(&self, action_ids: Vec<i64>) -> Result<()> {
+        loop {
+            let ids = action_ids.clone();
+            let untried = self
+                .db
+                .read(move |conn| repo::actions::untried(conn, &ids))
+                .await?;
+            if untried == 0 {
+                return Ok(());
+            }
+            tokio::time::sleep(SEND_STATUS_POLL_INTERVAL).await;
+        }
     }
 }
 
@@ -9947,6 +10097,64 @@ mod notification_dispatch_tests {
             second.last_error.as_deref(),
             Some("the host gave no answer")
         );
+    }
+
+    #[tokio::test]
+    async fn mail_that_came_while_the_app_was_closed_is_announced_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::for_tests(tmp.path());
+        let now = now_ms();
+        let minute = 60_000;
+        // An unread message in the Inbox, received while no copy of the app
+        // ran: after the last run caught up, an hour ago.
+        let arrived = |conn: &rusqlite::Connection, subject: &str, at: i64| -> Result<()> {
+            let (_, id) = db::testutil::seed_message(conn, "a@test.dev", subject, false);
+            conn.execute(
+                "UPDATE messages SET internal_date = ?1 WHERE id = ?2",
+                rusqlite::params![at, id],
+            )?;
+            Ok(())
+        };
+        {
+            let db = Db::open(&paths.db_file()).unwrap();
+            db.write(move |conn| {
+                db::testutil::seed_account(conn);
+                repo::accounts::set_caught_up(conn, 1, now - 60 * minute)?;
+                arrived(conn, "While away", now - 10 * minute)
+            })
+            .await
+            .unwrap();
+        }
+
+        let core = Core::start(paths).await.unwrap();
+        let mut events = core.bus.subscribe();
+        assert_eq!(core.announce_missed().await.unwrap(), 1);
+        assert!(matches!(
+            events.try_recv(),
+            Ok(CoreEvent::MailNew { account_id: 1, .. })
+        ));
+        assert_eq!(core.announce_missed().await.unwrap(), 0);
+
+        // Once the user has seen the Inbox, mail caught up on is no news.
+        core.db
+            .write(move |conn| arrived(conn, "Seen in the Inbox", now - 5 * minute))
+            .await
+            .unwrap();
+        core.forget_missed();
+        assert_eq!(core.announce_missed().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn accounts_start_without_a_window_for_a_background_check() {
+        let tmp = tempfile::tempdir().unwrap();
+        let core = Core::start(Paths::for_tests(tmp.path())).await.unwrap();
+        // Well before the minute the start otherwise waits for a window.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            core.start_accounts_now(),
+        )
+        .await
+        .expect("the account workers started");
     }
 
     #[tokio::test]
@@ -11116,8 +11324,19 @@ mod draft_staging_tests {
         tokio::fs::write(&first_source, b"first").await.unwrap();
         tokio::fs::write(&second_source, b"second").await.unwrap();
 
+        // Fail the save after its attachment is staged.
+        core.db
+            .write(|conn| {
+                conn.execute_batch(
+                    "CREATE TRIGGER fail_draft_attachments BEFORE INSERT ON draft_attachments
+                     BEGIN SELECT RAISE(ABORT, 'forced failure'); END;",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         assert!(
-            core.save_draft(draft_args(Some(999_999), &first_source, "first.txt"))
+            core.save_draft(draft_args(None, &first_source, "first.txt"))
                 .await
                 .is_err()
         );
@@ -11127,6 +11346,13 @@ mod draft_staging_tests {
                 .count(),
             0
         );
+        core.db
+            .write(|conn| {
+                conn.execute_batch("DROP TRIGGER fail_draft_attachments")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
 
         let draft_id = core
             .save_draft(draft_args(None, &first_source, "first.txt"))
@@ -11162,6 +11388,149 @@ mod draft_staging_tests {
         assert_ne!(first_staged, second_staged);
         assert!(!std::path::Path::new(&first_staged).exists());
         assert_eq!(std::fs::read(second_staged).unwrap(), b"second");
+    }
+
+    async fn staged_path(core: &Core, draft_id: i64) -> String {
+        core.db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT file_path FROM draft_attachments WHERE draft_id = ?1",
+                    rusqlite::params![draft_id],
+                    |row| row.get::<_, String>(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    }
+
+    async fn subject(core: &Core, message_id: i64) -> String {
+        core.db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT subject FROM messages WHERE id = ?1",
+                    rusqlite::params![message_id],
+                    |row| row.get::<_, String>(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_draft_moves_to_the_account_chosen_in_from() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                conn.execute(
+                    "INSERT INTO accounts (id, email, provider, auth_kind, username,
+                     incoming_host, incoming_port, smtp_host, smtp_port, created_at,
+                     mail_protocol, settings_json)
+                     VALUES (2,'other@test.dev','generic','password','other','h',993,'h',587,0,
+                     'imap','{\"connection\":{\"incomingSecurity\":\"tls\",\"smtpSecurity\":\"tls\"}}')",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("notes.txt");
+        tokio::fs::write(&source, b"notes").await.unwrap();
+        let first = core
+            .save_draft(draft_args(None, &source, "notes.txt"))
+            .await
+            .unwrap();
+        let first_staged = staged_path(&core, first).await;
+
+        // Reopened, the draft lists its staged copy; From now names account 2.
+        let mut moved = draft_args(
+            Some(first),
+            std::path::Path::new(&first_staged),
+            "notes.txt",
+        );
+        moved.account_id = 2;
+        let second = core.save_draft(moved).await.unwrap();
+
+        assert_ne!(second, first);
+        let (account_id, is_draft, first_left) = core
+            .db
+            .read(move |conn| {
+                let (account_id, is_draft) = conn.query_row(
+                    "SELECT account_id, is_draft FROM messages WHERE id = ?1",
+                    rusqlite::params![second],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
+                )?;
+                let first_left = conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE id = ?1)",
+                    rusqlite::params![first],
+                    |row| row.get::<_, bool>(0),
+                )?;
+                Ok((account_id, is_draft, first_left))
+            })
+            .await
+            .unwrap();
+        assert_eq!((account_id, is_draft, first_left), (2, true, false));
+        let second_staged = staged_path(&core, second).await;
+        assert_ne!(second_staged, first_staged);
+        assert_eq!(std::fs::read(second_staged).unwrap(), b"notes");
+        assert!(!std::path::Path::new(&first_staged).exists());
+    }
+
+    #[tokio::test]
+    async fn a_draft_sent_or_deleted_elsewhere_is_saved_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("notes.txt");
+        tokio::fs::write(&source, b"notes").await.unwrap();
+
+        // Deleted while still open, for example from the main window.
+        let deleted = core
+            .save_draft(draft_args(None, &source, "notes.txt"))
+            .await
+            .unwrap();
+        core.delete_draft(deleted).await.unwrap();
+        let mut reopened = draft_args(Some(deleted), &source, "notes.txt");
+        reopened.subject = "still wanted".into();
+        let resaved = core.save_draft(reopened).await.unwrap();
+        // SQLite can hand the freed row id out again, so check the draft itself.
+        assert_eq!(
+            core.get_draft(resaved).await.unwrap().subject,
+            "still wanted"
+        );
+
+        // Sent from another device: the sent message is left as it was.
+        let sent = core
+            .save_draft(draft_args(None, &source, "notes.txt"))
+            .await
+            .unwrap();
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET is_draft = 0 WHERE id = ?1",
+                    rusqlite::params![sent],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut edited = draft_args(Some(sent), &source, "notes.txt");
+        edited.subject = "edited".into();
+        let kept = core.save_draft(edited).await.unwrap();
+        assert_ne!(kept, sent);
+        assert_eq!(subject(&core, sent).await, "bounded draft");
+        assert_eq!(subject(&core, kept).await, "edited");
     }
 }
 

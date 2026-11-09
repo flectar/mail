@@ -119,7 +119,7 @@ fn snapshot_store(
     let sqlite_version = conn.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
     let page_count = conn.pragma_query_value(None, "page_count", |row| row.get(0))?;
     let page_size = conn.pragma_query_value(None, "page_size", |row| row.get(0))?;
-    conn.backup(MAIN_DB, destination, None)?;
+    conn.backup(MAIN_DB, destination, None::<fn(rusqlite::backup::Progress)>)?;
     Ok(DatabaseSnapshotStore {
         file: file.to_owned(),
         schema_version,

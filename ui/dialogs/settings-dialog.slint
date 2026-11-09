@@ -496,6 +496,7 @@ export component SettingsDialog inherits Rectangle {
     in-out property <bool> monochrome_sidebar_icons: false;
     in-out property <bool> notifications_enabled: true;
     in-out property <bool> notification_sound_enabled: true;
+    in-out property <bool> unread_badge_enabled: true;
     in-out property <string> notification_scope: "important";
     in-out property <int> sync_interval_minutes: 5;
     in-out property <bool> mark_read_on_open: true;
@@ -611,6 +612,7 @@ export component SettingsDialog inherits Rectangle {
     callback save_time_format(string);
     callback save_sidebar_icon_style(bool);
     callback save_notification_settings(bool, bool, string);
+    callback save_unread_badge(bool);
     callback save_sync_interval(int);
     callback save_mark_read_on_open(bool);
     callback save_contact_discovery_settings(bool, bool, bool, bool);
@@ -711,6 +713,19 @@ export component SettingsDialog inherits Rectangle {
         : @tr("This system has no notification service running, so notifications can't be shown.");
     private property <bool> notifications-settings-offered: SystemNotifications.availability == "denied"
         && SystemNotifications.settings-openable;
+    // A phone checks for new mail in the background when its system lets
+    // it; desktops follow the accounts while the app runs.
+    private property <string> notifications-title: SystemNotifications.background-checks == ""
+        ? @tr("Desktop notifications") : @tr("New mail notifications");
+    // When the system checks for new mail in the background, for what
+    // notifications and the app icon's count show.
+    private property <bool> background-checks-noted: SystemNotifications.background-checks != ""
+        && (root.notifications_enabled || root.unread_badge_enabled) && !root.notifications-blocked;
+    private property <string> background-checks-text: SystemNotifications.background-checks == "off"
+        ? @tr("Background App Refresh is off for Flectar Mail, so new mail shows up only while the app is open.")
+        : SystemNotifications.background-checks == "low-power"
+        ? @tr("Low Power Mode pauses checking for new mail while Flectar Mail is in the background.")
+        : @tr("iOS decides how often Flectar Mail checks for new mail in the background, so notifications can arrive late.");
     private property <int> language-index: root.language_mode == "en" ? 1
         : root.language_mode == "es" ? 2
         : root.language_mode == "tr" ? 3
@@ -744,7 +759,7 @@ export component SettingsDialog inherits Rectangle {
             : section == "Contacts"
             ? @tr("contacts people suggestions autocomplete recipients senders address book privacy clear")
             : section == "Notifications"
-            ? @tr("notifications alerts sounds desktop new mail")
+            ? @tr("notifications alerts sounds desktop new mail unread count badge app icon dock taskbar background app refresh low power mode")
             : section == "Shortcuts"
             ? @tr("shortcuts keyboard keys compose search archive spam junk trash delete navigation messages reading find zoom caret tabs")
             : section == "Data"
@@ -1500,7 +1515,7 @@ export component SettingsDialog inherits Rectangle {
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     if SystemNotifications.availability != "" : SettingsSelectRow {
                                         compact: root.compact;
-                                        title: @tr("Desktop notifications");
+                                        title: root.notifications-title;
                                         description: @tr("Choose which incoming messages can alert you.");
                                         choices: root.notification-options;
                                         selected-index: root.notification-index;
@@ -2445,7 +2460,7 @@ export component SettingsDialog inherits Rectangle {
                                     spacing: 4px;
                                     SettingsSelectRow {
                                         compact: root.compact;
-                                        title: @tr("Desktop notifications");
+                                        title: root.notifications-title;
                                         description: @tr("Choose which incoming messages can alert you.");
                                         choices: root.notification-options;
                                         selected-index: root.notification-index;
@@ -2492,6 +2507,44 @@ export component SettingsDialog inherits Rectangle {
                                             clicked => { SystemNotifications.open-settings(); }
                                         }
                                     }
+                                    // When new mail can show, where the system decides.
+                                    if root.background-checks-noted && !root.compact : HorizontalBox {
+                                        padding-top: 0px;
+                                        spacing: 20px;
+                                        VerticalBox {
+                                            padding-top: 0px;
+                                            padding-bottom: 0px;
+                                            horizontal-stretch: 1;
+                                            Text {
+                                                text: root.background-checks-text;
+                                                color: root.faint-text;
+                                                font-size: TypeScale.caption;
+                                                vertical-alignment: center;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                        if SystemNotifications.background-checks == "off" : Button {
+                                            width: max(132px, self.content-width);
+                                            height: 32px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-app-settings(); }
+                                        }
+                                    }
+                                    if root.background-checks-noted && root.compact : VerticalBox {
+                                        padding: 8px;
+                                        spacing: 7px;
+                                        Text {
+                                            text: root.background-checks-text;
+                                            color: root.faint-text;
+                                            font-size: TypeScale.caption;
+                                            wrap: word-wrap;
+                                        }
+                                        if SystemNotifications.background-checks == "off" : Button {
+                                            height: 36px;
+                                            text: @tr("Open system settings");
+                                            clicked => { SystemNotifications.open-app-settings(); }
+                                        }
+                                    }
                                     Rectangle { height: 1px; background: root.border-subtle; }
                                     SettingsSwitchRow {
                                         compact: root.compact;
@@ -2506,6 +2559,27 @@ export component SettingsDialog inherits Rectangle {
                                         toggled(checked) => {
                                             root.notification_sound_enabled = checked;
                                             root.save_notification_settings(root.notifications_enabled, checked, root.notification_scope);
+                                        }
+                                    }
+                                    if SystemNotifications.badge-supported : Rectangle { height: 1px; background: root.border-subtle; }
+                                    if SystemNotifications.badge-supported : SettingsSwitchRow {
+                                        compact: root.compact;
+                                        title: @tr("Unread count on the app icon");
+                                        // It counts what notifications cover; docks on Linux
+                                        // show it only where they support counts.
+                                        description: WindowChrome.platform == "linux"
+                                            ? (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox, on docks that show counts.")
+                                                : @tr("Show how many unread Important messages are in your Inbox, on docks that show counts."))
+                                            : (root.notification_scope == "all"
+                                                ? @tr("Show how many unread messages are in your Inbox.")
+                                                : @tr("Show how many unread Important messages are in your Inbox."));
+                                        checked: root.unread_badge_enabled;
+                                        title-color: root.heading;
+                                        description-color: root.faint-text;
+                                        toggled(checked) => {
+                                            root.unread_badge_enabled = checked;
+                                            root.save_unread_badge(checked);
                                         }
                                     }
                                 }

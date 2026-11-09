@@ -99,6 +99,7 @@ pub(super) fn register_renderer_input_callbacks(
             if renderer.borrow_mut().set_appearance(colors) {
                 repaint_reader(&app, &renderer, gpu);
             }
+            crate::composer::message_colors_changed(&app);
         });
     });
     let weak = app.as_weak();
