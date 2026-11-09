@@ -724,6 +724,9 @@ fn apply_put(
                 name: name.to_owned(),
                 html: crate::signatures::sanitize_html(html),
             };
+            if joining(conn)? {
+                adopt_signature_twin(settings, &signature);
+            }
             match settings
                 .signature_list
                 .iter_mut()
@@ -751,12 +754,15 @@ fn apply_put(
                 .flatten()
                 .filter_map(|account| ids.by_sync.get(account.as_str()?).copied())
                 .collect();
-            let profile = MailProfile {
+            let mut profile = MailProfile {
                 id: profile_id.to_owned(),
                 name: name.to_owned(),
                 color: color.to_owned(),
                 account_ids,
             };
+            if joining(conn)? {
+                adopt_profile_twin(settings, &mut profile);
+            }
             // An account belongs to one profile at most.
             for other in settings
                 .mail_profiles
@@ -968,6 +974,9 @@ fn apply_template(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outc
         .and_then(Value::as_str)
         .filter(|shortcut| !shortcut.is_empty());
     let sync_id = sync_id_hex(id);
+    if joining(conn)? {
+        adopt_template_twin(conn, &sync_id, name, subject, body_text)?;
+    }
     if let Some(wanted) = shortcut {
         let holder: Option<(i64, Option<String>)> = conn
             .query_row(
@@ -1001,6 +1010,114 @@ fn apply_template(conn: &Connection, id: &RecordId, body: &Value) -> Result<Outc
         )?;
     }
     Ok(Outcome::Applied)
+}
+
+/// Whether this device is joining a group: its first run takes the group's
+/// items before it uploads any of its own.
+fn joining(conn: &Connection) -> Result<bool> {
+    Ok(conn
+        .query_row("SELECT adopting FROM device_sync WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// Joining a group, the same template made here becomes the group's, rather
+/// than both syncing.
+fn adopt_template_twin(
+    conn: &Connection,
+    sync_id: &str,
+    name: &str,
+    subject: Option<&str>,
+    body_text: &str,
+) -> Result<()> {
+    let known: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM snippets WHERE sync_id = ?1)",
+        params![sync_id],
+        |row| row.get(0),
+    )?;
+    if known {
+        return Ok(());
+    }
+    let mut statement = conn.prepare(
+        "SELECT id, sync_id FROM snippets
+         WHERE name = ?1 AND subject IS ?2 AND body_text = ?3 ORDER BY id",
+    )?;
+    let twins = statement
+        .query_map(params![name, subject, body_text], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (twin, twin_sync_id) in twins {
+        if let Some(twin_sync_id) = twin_sync_id
+            && server_knows(conn, &twin_sync_id)?
+        {
+            continue;
+        }
+        conn.execute(
+            "UPDATE snippets SET sync_id = ?1 WHERE id = ?2",
+            params![sync_id, twin],
+        )?;
+        break;
+    }
+    Ok(())
+}
+
+/// Joining a group, the same signature made here takes the group's id, and
+/// so do the defaults that name it.
+fn adopt_signature_twin(settings: &mut Settings, signature: &Signature) {
+    if settings
+        .signature_list
+        .iter()
+        .any(|existing| existing.id == signature.id)
+    {
+        return;
+    }
+    let Some(twin) = settings.signature_list.iter_mut().find(|existing| {
+        existing.account_id == signature.account_id
+            && existing.name == signature.name
+            && existing.html == signature.html
+    }) else {
+        return;
+    };
+    let old = std::mem::replace(&mut twin.id, signature.id.clone());
+    for defaults in settings.signature_defaults.values_mut() {
+        for named in [&mut defaults.new_id, &mut defaults.reply_id] {
+            if named.as_deref() == Some(old.as_str()) {
+                *named = Some(signature.id.clone());
+            }
+        }
+    }
+}
+
+/// Joining a group, the profile of the same name made here becomes the
+/// group's: it takes the group's id and keeps its own accounts too.
+fn adopt_profile_twin(settings: &mut Settings, profile: &mut MailProfile) {
+    if settings
+        .mail_profiles
+        .iter()
+        .any(|existing| existing.id == profile.id)
+    {
+        return;
+    }
+    let name = profile.name.trim().to_lowercase();
+    let Some(twin) = settings
+        .mail_profiles
+        .iter_mut()
+        .find(|existing| existing.name.trim().to_lowercase() == name)
+    else {
+        return;
+    };
+    let old = std::mem::replace(&mut twin.id, profile.id.clone());
+    for account in &twin.account_ids {
+        if !profile.account_ids.contains(account) {
+            profile.account_ids.push(*account);
+        }
+    }
+    if settings.active_mail_profile.as_deref() == Some(old.as_str()) {
+        settings.active_mail_profile = Some(profile.id.clone());
+    }
 }
 
 /// Snooze a conversation as another device did. The shared snooze is kept
@@ -1765,6 +1882,98 @@ mod tests {
             )
             .unwrap();
         assert_eq!((name.as_str(), subject.as_str()), ("Thank you", "Hi"));
+    }
+
+    #[test]
+    fn joining_a_group_takes_its_copy_of_items_made_here_too() {
+        let conn = testutil::conn();
+        conn.execute(
+            "INSERT INTO device_sync (id, server_url, chain, adopting, created_at)
+             VALUES (1, 'https://sync.example', '{}', 1, 0)",
+            [],
+        )
+        .unwrap();
+        template(&conn, "Thanks", Some("ty"), &"ab".repeat(16));
+        let account_id = account(&conn, "me@example.com", &"e".repeat(32));
+        let html = crate::signatures::sanitize_html("<p>Ada</p>");
+        let mut settings = repo::settings::get(&conn).unwrap();
+        settings.signature_list.push(Signature {
+            id: "mine".into(),
+            account_id,
+            name: "Work".into(),
+            html: html.clone(),
+        });
+        settings.signature_defaults.insert(
+            account_id.to_string(),
+            SignatureDefaults {
+                new_id: Some("mine".into()),
+                reply_id: None,
+            },
+        );
+        settings.mail_profiles.push(MailProfile {
+            id: "my-work".into(),
+            name: "Work".into(),
+            color: "#8b5cf6".into(),
+            account_ids: vec![account_id],
+        });
+        settings.active_mail_profile = Some("my-work".into());
+        repo::settings::set(&conn, &settings).unwrap();
+
+        let group_template = "cd".repeat(16);
+        let waiting = BTreeMap::from([
+            (
+                sync_id_bytes(&group_template).unwrap(),
+                entry(
+                    TEMPLATE,
+                    json!({"name": "Thanks", "shortcut": "ty", "subject": "Hello",
+                           "bodyText": "Thanks!"}),
+                ),
+            ),
+            (
+                [7; 16],
+                entry(
+                    SIGNATURE,
+                    json!({"id": "theirs", "account": "e".repeat(32), "name": "Work",
+                           "html": html}),
+                ),
+            ),
+            (
+                [8; 16],
+                entry(
+                    PROFILE,
+                    json!({"id": "their-work", "name": "work", "color": "#8b5cf6",
+                           "accounts": []}),
+                ),
+            ),
+        ]);
+        apply(
+            &conn,
+            &BTreeMap::new(),
+            &waiting,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+        assert_eq!(repo::snippets::list(&conn).unwrap().len(), 1);
+        assert_eq!(shortcut_of(&conn, &group_template).as_deref(), Some("ty"));
+        let settings = repo::settings::get(&conn).unwrap();
+        let signatures: Vec<&str> = settings
+            .signature_list
+            .iter()
+            .map(|signature| signature.id.as_str())
+            .collect();
+        assert_eq!(signatures, ["theirs"]);
+        assert_eq!(
+            settings.signature_defaults[&account_id.to_string()]
+                .new_id
+                .as_deref(),
+            Some("theirs")
+        );
+        assert_eq!(settings.mail_profiles.len(), 1);
+        assert_eq!(settings.mail_profiles[0].id, "their-work");
+        assert_eq!(settings.mail_profiles[0].account_ids, [account_id]);
+        assert_eq!(settings.active_mail_profile.as_deref(), Some("their-work"));
     }
 
     #[test]
