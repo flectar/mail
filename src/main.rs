@@ -56,7 +56,10 @@ pub use notifications::{
 };
 mod number_format;
 mod privacy_consent;
-pub use privacy_consent::PrivacyConsent;
+pub use privacy_consent::{
+    PrivacyConsent, install_language_handler, install_theme_handler, sync_pending_language,
+    sync_pending_theme,
+};
 mod oauth_browser;
 #[cfg(test)]
 mod on_screen_surface_tests;
@@ -1184,6 +1187,7 @@ fn apply_language(app: &AppWindow, preference: &str) {
     }
     app.set_language_mode(language_mode.into());
     app.set_privacy_policy_url(privacy_policy_url(selected).into());
+    privacy_consent::sync_app_language(language_mode, selected);
     date_format::reload(app);
     notifications::ui::language_changed(app);
 }

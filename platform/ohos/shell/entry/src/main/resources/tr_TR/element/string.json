@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "privacy_consent_title",
+      "value": "Gizlilik Politikası"
+    },
+    {
+      "name": "privacy_consent_intro",
+      "value": "Flectar Mail e-postalarınızı bu cihazda işler. Devam etmeden önce verilerinizin nasıl işlendiğini inceleyin."
+    },
+    {
+      "name": "privacy_consent_bullet_local",
+      "value": "Postalar, ekler, kişiler ve takvimler bu cihazda kalır."
+    },
+    {
+      "name": "privacy_consent_bullet_clipboard",
+      "value": "Pano yalnızca siz yapıştırdığınızda okunur."
+    },
+    {
+      "name": "privacy_consent_bullet_withdraw",
+      "value": "Onayı Ayarlar → Hakkında bölümünden geri çekebilirsiniz."
+    },
+    {
+      "name": "privacy_consent_view_policy",
+      "value": "Gizlilik politikasını görüntüle"
+    },
+    {
+      "name": "privacy_consent_agree",
+      "value": "Kabul et ve devam et"
+    },
+    {
+      "name": "privacy_consent_decline",
+      "value": "Reddet"
+    }
+  ]
+}

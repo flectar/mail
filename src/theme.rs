@@ -1,6 +1,6 @@
 //! Runtime helpers for the Slint theme editor.
 
-use crate::{AppWindow, ThemeUtilities};
+use crate::{AppTheme, AppWindow, ThemeUtilities};
 use slint::{Color, ComponentHandle};
 
 pub(crate) fn register_theme_utilities(app: &AppWindow) {
@@ -17,6 +17,44 @@ pub(crate) fn color_to_hex(color: Color) -> String {
         color.green(),
         color.blue()
     )
+}
+
+/// Schedule the consent snapshot for after the current UI event.
+///
+/// A settings control updates its own property before raising the save
+/// callback, and the mode reaches `AppTheme` through two-way bindings. Reading
+/// the palette inside the callback can therefore observe the previous scheme
+/// (for example purple in light mode while the user just switched to dark).
+/// Running on the next event loop turn lets the bindings settle first.
+pub(crate) fn schedule_consent_theme_sync(app: &AppWindow) {
+    let app = app.as_weak();
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(app) = app.upgrade() {
+            sync_consent_theme(&app);
+        }
+    });
+}
+
+/// Send the effective theme to the OHOS consent page. The ArkTS page runs
+/// before the shared window exists on first launch, so it persists this
+/// snapshot for the next gate instead of reading Slint state directly.
+pub(crate) fn sync_consent_theme(app: &AppWindow) {
+    let theme = app.global::<AppTheme>();
+    let payload = serde_json::json!({
+        "dark": theme.get_dark(),
+        "page_bg": color_to_hex(theme.get_page_bg()),
+        "surface": color_to_hex(theme.get_surface()),
+        "title": color_to_hex(theme.get_title()),
+        "body": color_to_hex(theme.get_body()),
+        "secondary": color_to_hex(theme.get_secondary()),
+        "border": color_to_hex(theme.get_border()),
+        "border_subtle": color_to_hex(theme.get_border_subtle()),
+        "accent": color_to_hex(theme.get_accent()),
+        "accent_soft": color_to_hex(theme.get_accent_soft()),
+        "primary": color_to_hex(theme.get_primary()),
+    })
+    .to_string();
+    crate::privacy_consent::sync_consent_theme(&payload);
 }
 
 pub(crate) fn parse_hex_color(value: &str) -> Option<Color> {

@@ -1,0 +1,48 @@
+{
+  "string": [
+    {
+      "name": "pasteboard_permission_reason",
+      "value": "用于将剪贴板中的文本粘贴到邮件正文、主题和收件人输入框。"
+    },
+    {
+      "name": "notification_new_mail",
+      "value": "新邮件"
+    },
+    {
+      "name": "notification_no_subject",
+      "value": "（无主题）"
+    },
+    {
+      "name": "privacy_consent_title",
+      "value": "隐私政策"
+    },
+    {
+      "name": "privacy_consent_intro",
+      "value": "Flectar Mail 在本机处理您的邮件。继续前请了解您的数据如何被处理。"
+    },
+    {
+      "name": "privacy_consent_bullet_local",
+      "value": "邮件、附件、联系人和日历数据都保留在本机。"
+    },
+    {
+      "name": "privacy_consent_bullet_clipboard",
+      "value": "剪贴板仅在您主动粘贴时读取纯文本。"
+    },
+    {
+      "name": "privacy_consent_bullet_withdraw",
+      "value": "您可以在“设置 → 关于”中撤回同意。"
+    },
+    {
+      "name": "privacy_consent_view_policy",
+      "value": "查看隐私政策"
+    },
+    {
+      "name": "privacy_consent_agree",
+      "value": "同意并继续"
+    },
+    {
+      "name": "privacy_consent_decline",
+      "value": "不同意"
+    }
+  ]
+}

@@ -32,6 +32,9 @@ static HIDE_IME: AtomicUsize = AtomicUsize::new(0);
 static IME_UPDATE_CURSOR: AtomicUsize = AtomicUsize::new(0);
 static REQUEST_PASTEBOARD: AtomicUsize = AtomicUsize::new(0);
 static NOTIFY: AtomicUsize = AtomicUsize::new(0);
+static WITHDRAW_PRIVACY: AtomicUsize = AtomicUsize::new(0);
+static SET_APP_LANGUAGE: AtomicUsize = AtomicUsize::new(0);
+static SET_CONSENT_THEME: AtomicUsize = AtomicUsize::new(0);
 
 /// Request ids for the callback-based picker flows.
 static NEXT_REQUEST: AtomicI64 = AtomicI64::new(1);
@@ -130,6 +133,31 @@ pub(super) unsafe extern "C" fn set_bridge(
             call_zero_arg,
         );
         install_property(env, argv[0], b"notify\0", &NOTIFY, call_notify);
+        install_property(
+            env,
+            argv[0],
+            b"withdrawPrivacyConsent\0",
+            &WITHDRAW_PRIVACY,
+            call_zero_arg,
+        );
+        install_property(
+            env,
+            argv[0],
+            b"setAppPreferredLanguage\0",
+            &SET_APP_LANGUAGE,
+            call_string_arg,
+        );
+        install_property(
+            env,
+            argv[0],
+            b"setConsentTheme\0",
+            &SET_CONSENT_THEME,
+            call_theme_json,
+        );
+        // Startup can apply the saved UI language before ArkTS has installed
+        // its bridge callbacks; replay it now that this closure is available.
+        flectar_mail::sync_pending_language();
+        flectar_mail::sync_pending_theme();
         undefined(env)
     }
 }
@@ -425,6 +453,24 @@ pub(super) fn request_pasteboard() {
     let _ = call_closure(&REQUEST_PASTEBOARD, "requestPasteboard", ());
 }
 
+/// Ask the ArkTS page to clear the stored consent and stop the app.
+pub(super) fn withdraw_privacy_consent() -> Result<(), String> {
+    call_closure(&WITHDRAW_PRIVACY, "withdrawPrivacyConsent", ())
+}
+
+/// Set the HarmonyOS app-preferred language so ArkTS resources load in the
+/// same language as the Slint UI on the next cold start.
+pub(super) fn set_app_language(language: &str) -> Result<(), String> {
+    let language = CString::new(language).map_err(|_| "app language is malformed".to_owned())?;
+    call_closure(&SET_APP_LANGUAGE, "setAppPreferredLanguage", language)
+}
+
+/// Hand the effective shared theme to the ArkTS consent page.
+pub(super) fn set_consent_theme(theme_json: &str) -> Result<(), String> {
+    let theme = CString::new(theme_json).map_err(|_| "consent theme is malformed".to_owned())?;
+    call_closure(&SET_CONSENT_THEME, "setConsentTheme", theme)
+}
+
 /// `setClipboardText(text)`: the ArkTS page read the system pasteboard on the
 /// UI thread. Empty text invalidates the cache.
 pub(super) unsafe extern "C" fn set_clipboard_text(
@@ -697,6 +743,44 @@ unsafe extern "C" fn call_open_url(
             return;
         };
         call_with_args(env, js_callback, &[argument], "openUrl");
+    }
+}
+
+/// JS-thread half of [`set_app_language`].
+unsafe extern "C" fn call_string_arg(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `CString` boxed in `set_app_language`; this callback
+    // owns it.
+    let language = unsafe { Box::from_raw(data.cast::<CString>()) };
+    // SAFETY: NAPI calls are made on the JS thread with live handles.
+    unsafe {
+        let Some(argument) = string_value(env, language.as_bytes()) else {
+            return;
+        };
+        call_with_args(env, js_callback, &[argument], "setAppPreferredLanguage");
+    }
+}
+
+/// JS-thread half of [`set_consent_theme`].
+unsafe extern "C" fn call_theme_json(
+    env: napi_env,
+    js_callback: napi_value,
+    _context: *mut c_void,
+    data: *mut c_void,
+) {
+    // SAFETY: `data` is the `CString` boxed in `set_consent_theme`; this
+    // callback owns it.
+    let theme = unsafe { Box::from_raw(data.cast::<CString>()) };
+    // SAFETY: NAPI calls are made on the JS thread with live handles.
+    unsafe {
+        let Some(argument) = string_value(env, theme.as_bytes()) else {
+            return;
+        };
+        call_with_args(env, js_callback, &[argument], "setConsentTheme");
     }
 }
 

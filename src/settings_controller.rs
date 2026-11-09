@@ -308,6 +308,7 @@ pub(super) fn register_settings_preference_callbacks(
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        crate::theme::schedule_consent_theme_sync(&app);
         let Some(core) = state_for_theme.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain("Theme updated for this session."));
             return;
@@ -403,6 +404,7 @@ pub(super) fn register_settings_preference_callbacks(
         let Some(app) = app_weak.upgrade() else {
             return;
         };
+        crate::theme::schedule_consent_theme_sync(&app);
         let Some(core) = state_for_theme_preset.borrow().core.clone() else {
             app.set_sync_status(UiMessage::plain("Theme palette updated for this session."));
             return;
@@ -494,6 +496,7 @@ pub(super) fn register_settings_preference_callbacks(
             let Some(app) = app_weak.upgrade() else {
                 return false;
             };
+            crate::theme::schedule_consent_theme_sync(&app);
             let custom_theme = CustomTheme {
                 light_primary: theme::color_to_hex(light_primary),
                 light_page_background: theme::color_to_hex(light_page),

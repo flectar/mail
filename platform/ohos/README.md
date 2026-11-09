@@ -163,8 +163,22 @@ handled (and asserted) in the script, do not "simplify" them away:
   then scroll without any application-side change).
 - **Privacy**: Flectar publishes the app-specific policy at
   `https://flectar.com/mail/privacy/`. The shared app links it from the
-  welcome screen and Settings > About, in the UI language; a consent flow is
-  tracked separately from this port.
+  welcome screen and Settings > About, in the UI language. This port also
+  shows a first-launch consent screen before the XComponent (and therefore
+  any mail processing) starts; the consent is stored in ArkData preferences.
+  The screen links to the hosted policy, using the localized pages for
+  Chinese, Turkish, Spanish and Russian when the system language matches, and
+  the English page otherwise. All Chinese locales, including Traditional
+  Chinese locales, use the Simplified Chinese page. Consent copy comes from
+  HarmonyOS string resources (English, Simplified Chinese, Spanish, Turkish
+  and Russian, with English as the base fallback), and the screen follows the
+  effective app theme (preset, custom palette and light or dark mode).
+  Changing the app language also updates the HarmonyOS app-preferred
+  language, so consent resources match the shared UI on the next cold start.
+  The notification permission is requested only after consent has been
+  accepted, not from the ability's page-load callback. Settings → About can
+  withdraw the consent; the preference is cleared and the app exits, leaving
+  local data for the separate delete action.
 - **Clipboard**: copying needs no permission, but pasting reads the system
   pasteboard and therefore requires `ohos.permission.READ_PASTEBOARD`, an ACL
   (restricted) permission. The module declares it and the page requests it on
