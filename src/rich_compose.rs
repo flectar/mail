@@ -491,7 +491,9 @@ impl RichComposeDocument {
         for line in self.text.split('\n') {
             let block = html_line_block(line);
             let skip = block.map_or(0, |(_, bytes)| bytes);
-            let content = line_start + skip..line_start + line.len();
+            // Text pasted from Windows ends its lines with CRLF.
+            let end = line_start + line.strip_suffix('\r').unwrap_or(line).len();
+            let content = (line_start + skip).min(end)..end;
             match block.map(|(block, _)| block) {
                 Some(LineBlock::Bullet) => {
                     if open != Some(OpenHtmlBlock::Bullets) {
@@ -1294,13 +1296,21 @@ enum OpenHtmlBlock {
     Quote,
 }
 
-/// A numbered line whose number does not fit an HTML list stays a paragraph.
+/// A numbered line stays a paragraph when an HTML list would show another
+/// number: one written with leading zeros, or past what lists count to.
 fn html_line_block(line: &str) -> Option<(LineBlock, usize)> {
     let (kind, bytes) = block_prefix_text(line)?;
     let block = match kind {
         BlockKind::Bullet => LineBlock::Bullet,
         BlockKind::Quote => LineBlock::Quote,
-        BlockKind::Number => LineBlock::Number(line[..bytes - 2].parse().ok()?),
+        BlockKind::Number => {
+            let digits = &line[..bytes - 2];
+            if digits.len() > 1 && digits.starts_with('0') {
+                return None;
+            }
+            let number = digits.parse::<i32>().ok()?;
+            LineBlock::Number(u32::try_from(number).ok()?)
+        }
     };
     Some((block, bytes))
 }
@@ -2717,6 +2727,31 @@ mod tests {
             html_for("99999999999. too long for a list"),
             "<div>99999999999. too long for a list</div>"
         );
+        // Lists count in signed 32 bits, and leading zeros show as typed.
+        assert_eq!(
+            html_for("2147483647. last"),
+            "<ol start=\"2147483647\"><li>last</li></ol>"
+        );
+        assert_eq!(
+            html_for("4155550123. Call me"),
+            "<div>4155550123. Call me</div>"
+        );
+        assert_eq!(
+            html_for("01. Intro\n02. Scope\n0. Zero"),
+            "<div>01. Intro</div><div>02. Scope</div><ol start=\"0\"><li>Zero</li></ol>"
+        );
+    }
+
+    #[test]
+    fn crlf_line_ends_keep_their_blank_lines() {
+        let text = "Para one\r\n\r\n1. item\r\nPara two";
+        assert_eq!(
+            html_for(text),
+            "<div>Para one</div><div><br></div><ol><li>item</li></ol><div>Para two</div>"
+        );
+        let mut document = RichComposeDocument::default();
+        document.load(text, 0, 0);
+        assert_eq!(reopened(&document).text(), text);
     }
 
     #[test]
