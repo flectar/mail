@@ -537,8 +537,9 @@ fn downsampled_images_keep_intrinsic_layout_and_background_scale() {
         let mut r = GpuEmailRenderer::default();
         r.set_email(prepare_email_html_with_provider(html, Some(provider.clone())).unwrap());
         let mut bytes = std::io::Cursor::new(Vec::new());
-        let original = image::RgbImage::from_fn(3000, 300, |x, _| {
-            if x < 1500 {
+        // 4.5 MP, past the decoded pixel budget, so both formats are reduced.
+        let original = image::RgbImage::from_fn(4096, 1100, |x, _| {
+            if x < 2048 {
                 image::Rgb([230, 0, 0])
             } else {
                 image::Rgb([0, 0, 230])
@@ -553,8 +554,9 @@ fn downsampled_images_keep_intrinsic_layout_and_background_scale() {
             .get_node(doc.get_element_by_id("natural").unwrap())
             .unwrap();
         let decoded = node.element_data().unwrap().raster_image_data().unwrap();
-        assert_eq!((decoded.width, decoded.height), (3000, 300));
-        assert!(decoded.pixel_width <= 2048);
+        assert_eq!((decoded.width, decoded.height), (4096, 1100));
+        assert!(decoded.pixel_width < decoded.width);
+        assert!(u64::from(decoded.pixel_width) * u64::from(decoded.pixel_height) <= 2048 * 2048);
         assert_eq!(
             decoded.data.len(),
             (decoded.pixel_width * decoded.pixel_height * 4) as usize
@@ -563,7 +565,7 @@ fn downsampled_images_keep_intrinsic_layout_and_background_scale() {
         // Its original aspect ratio must survive decoder scaling.
         let size = node.final_layout().size;
         assert_eq!(size.width, 700.0);
-        assert!((size.height - 70.0).abs() <= 1.0);
+        assert!((size.height - 188.0).abs() <= 1.0);
         let background = doc
             .get_node(doc.get_element_by_id("background").unwrap())
             .unwrap();
@@ -1450,4 +1452,21 @@ fn notification_table_keeps_name_and_heading_readable() {
         "notification heading should have a useful line width, width={}",
         heading.final_layout().size.width
     );
+}
+
+#[test]
+fn relative_resource_urls_do_not_fail_the_message() {
+    // The reader has no base URL, so relative image and @import URLs cannot be
+    // resolved. They are skipped like failed loads; the message still renders.
+    let html = r#"<html><head><style>@import url(fonts/brand.css); p { color: #123456 }</style></head>
+        <body><img src="images/logo.png" alt="Logo" width="120" height="40"><p>Order shipped</p></body></html>"#;
+    let renderer = GpuEmailRenderer::default();
+    for html in [
+        html.to_owned(),
+        flectar_mail_core::mime::sanitize_html(html),
+    ] {
+        let prepared = renderer.prepare_email_html(&html, false).unwrap();
+        assert!(prepared.notice.is_none());
+        assert!(prepared.plain_text.contains("Order shipped"));
+    }
 }

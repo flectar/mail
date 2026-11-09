@@ -95,7 +95,9 @@ pub use blitz_traits::node_id::NodeId;
 // Re-export taffy: it is part of blitz-dom's public API (e.g. `Node::style`,
 // `Node::final_layout`)
 pub use config::{DocumentConfig, StyleThreading};
-pub use document::{BaseDocument, BoundingRect, DocGuard, DocGuardMut, Document, PlainDocument};
+pub use document::{
+    BaseDocument, BoundingRect, DocGuard, DocGuardMut, Document, PlainDocument, UserAgentStylesheet,
+};
 pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,
@@ -158,6 +160,3 @@ pub fn build_single_font_ctx(font_data: &[u8]) -> FontContext {
     }
     ctx
 }
-
-// Host integrations use computed visibility when projecting native semantics.
-pub use style::computed_values::visibility::T as Visibility;

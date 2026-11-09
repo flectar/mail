@@ -3,7 +3,7 @@ use selectors::context::QuirksMode;
 use std::sync::atomic::Ordering as Ao;
 use std::{
     io::Cursor,
-    sync::{Arc, atomic::AtomicUsize, mpsc::SyncSender},
+    sync::{Arc, atomic::AtomicUsize, mpsc::Sender},
 };
 use style::{
     font_face::{FontFaceSourceFormat, FontFaceSourceFormatKeyword, FontStyleRange, Source},
@@ -76,14 +76,14 @@ pub(crate) struct ResourceHandler<T: Send + Sync + 'static> {
     doc_id: usize,
     request_id: usize,
     node_id: Option<NodeId>,
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     shell_provider: Arc<dyn ShellProvider>,
     data: T,
 }
 
 impl<T: Send + Sync + 'static> ResourceHandler<T> {
     pub(crate) fn new(
-        tx: SyncSender<DocumentEvent>,
+        tx: Sender<DocumentEvent>,
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
@@ -101,7 +101,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
     }
 
     pub(crate) fn boxed(
-        tx: SyncSender<DocumentEvent>,
+        tx: Sender<DocumentEvent>,
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
@@ -187,7 +187,7 @@ const MAX_IMPORT_DEPTH: usize = 16;
 
 #[derive(Clone)]
 pub(crate) struct StylesheetLoader {
-    pub(crate) tx: SyncSender<DocumentEvent>,
+    pub(crate) tx: Sender<DocumentEvent>,
     pub(crate) doc_id: usize,
     pub(crate) net_provider: Arc<dyn NetProvider>,
     pub(crate) shell_provider: Arc<dyn ShellProvider>,
@@ -206,7 +206,12 @@ impl ServoStylesheetLoader for StylesheetLoader {
         supports: Option<ImportSupportsCondition>,
         layer: ImportLayer,
     ) -> ServoArc<Locked<ImportRule>> {
-        if self.import_depth >= MAX_IMPORT_DEPTH || !supports.as_ref().is_none_or(|s| s.enabled) {
+        // An unresolvable URL (e.g. a relative URL in a document without a base URL)
+        // cannot be fetched, so the import is refused like one nested too deeply.
+        if self.import_depth >= MAX_IMPORT_DEPTH
+            || !supports.as_ref().is_none_or(|s| s.enabled)
+            || url.url().is_none()
+        {
             return ServoArc::new(lock.wrap(ImportRule {
                 url,
                 stylesheet: ImportSheet::new_refused(),
@@ -383,7 +388,7 @@ impl FontFaceHandler {
 /// Fetch the fonts of all `@font-face` rules in `sheet`
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_font_face(
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     doc_id: usize,
     node_id: Option<NodeId>,
     sheet: &Stylesheet,
@@ -408,7 +413,7 @@ pub(crate) fn fetch_font_face(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_font_face_rules<'a>(
     rules: impl Iterator<Item = &'a CssRule>,
-    tx: SyncSender<DocumentEvent>,
+    tx: Sender<DocumentEvent>,
     doc_id: usize,
     node_id: Option<NodeId>,
     network_provider: &Arc<dyn NetProvider>,
@@ -578,28 +583,36 @@ impl NetHandler for ResourceHandler<ImageHandler> {
 
 impl ImageHandler {
     fn parse(&self, bytes: Bytes) -> Result<Resource, String> {
-        if let Some(limits) = self.limits {
-            return limits
-                .decode(&bytes)
-                .map(|image| Resource::Raster(self.kind, image));
-        }
-        let image_err = match image::ImageReader::new(Cursor::new(&bytes))
-            .with_guessed_format()
-            .expect("IO errors impossible with Cursor")
-            .decode()
-        {
-            Ok(image) => {
-                let width = image.width();
-                let height = image.height();
-                let raw_rgba8_data = image.into_rgba8().into_raw();
-                return Ok(Resource::Image(
-                    self.kind,
-                    width,
-                    height,
-                    Arc::new(raw_rgba8_data),
-                ));
+        let image_err = if let Some(limits) = self.limits {
+            // The limits bound raster decoding. Bytes in no raster format may
+            // still be an SVG, which is parsed below as without limits.
+            match image::guess_format(&bytes) {
+                Ok(_) => {
+                    return limits
+                        .decode(&bytes)
+                        .map(|image| Resource::Raster(self.kind, image));
+                }
+                Err(e) => e.to_string(),
             }
-            Err(e) => e.to_string(),
+        } else {
+            match image::ImageReader::new(Cursor::new(&bytes))
+                .with_guessed_format()
+                .expect("IO errors impossible with Cursor")
+                .decode()
+            {
+                Ok(image) => {
+                    let width = image.width();
+                    let height = image.height();
+                    let raw_rgba8_data = image.into_rgba8().into_raw();
+                    return Ok(Resource::Image(
+                        self.kind,
+                        width,
+                        height,
+                        Arc::new(raw_rgba8_data),
+                    ));
+                }
+                Err(e) => e.to_string(),
+            }
         };
 
         #[cfg(feature = "svg")]

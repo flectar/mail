@@ -259,7 +259,8 @@ impl ElementCx<'_, '_> {
         for row in &table.rows {
             row_colors.resize(usize::from(row.index) + 1, [None, None]);
             row_colors[usize::from(row.index)] = [
-                row.group.and_then(background_color), background_color(row.node_id),
+                row.group.and_then(background_color),
+                background_color(row.node_id),
             ];
         }
         let has_color =
@@ -381,8 +382,6 @@ impl ElementCx<'_, '_> {
 
     #[cfg(feature = "svg")]
     fn draw_svg_image_layer(&self, scene: &mut impl PaintScene, layer: &ImageLayerStyles) {
-        use kurbo::Affine;
-
         let Some(bg_image) = layer.image_data else {
             return;
         };
@@ -403,8 +402,6 @@ impl ElementCx<'_, '_> {
 
         let frame_w = (origin_rect.width() / self.scale) as f32;
         let frame_h = (origin_rect.height() / self.scale) as f32;
-
-        let svg_size = svg.tree.size();
 
         // Size the SVG per the CSS default sizing algorithm
         // (https://drafts.csswg.org/css-images/#default-sizing). An SVG image
@@ -434,8 +431,11 @@ impl ElementCx<'_, '_> {
             return;
         }
 
-        let x_ratio = (bg_size.width / svg_size.width() as f64) * self.scale;
-        let y_ratio = (bg_size.height / svg_size.height() as f64) * self.scale;
+        let viewport = super::svg_viewport_affine(
+            svg,
+            (bg_size.width * self.scale) as f32,
+            (bg_size.height * self.scale) as f32,
+        );
 
         let bg_pos = compute_layer_position(
             layer,
@@ -448,7 +448,7 @@ impl ElementCx<'_, '_> {
                 origin_rect.x0 + bg_pos.x * self.scale,
                 origin_rect.y0 + bg_pos.y * self.scale,
             ))
-            * Affine::scale_non_uniform(x_ratio, y_ratio);
+            * viewport;
 
         anyrender_svg::render_svg_tree(scene, &svg.tree, transform);
     }
@@ -515,6 +515,13 @@ impl ElementCx<'_, '_> {
             });
         let tile_rect = Rect::new(0.0, 0.0, x.rect_len, y.rect_len);
 
+        // `Repeat` and `Round` fill the whole area with one rect and let the
+        // brush repeat the image, so those axes need `Extend::Repeat`. The
+        // other axes paint each tile once and keep the `<img>` brush's `Pad`.
+        let mut brush = to_peniko_image(image_data, quality);
+        brush.sampler.x_extend = brush_extend(*repeat_x);
+        brush.sampler.y_extend = brush_extend(*repeat_y);
+
         for hc in 0..y.count {
             for wc in 0..x.count {
                 let transform = transform.then_translate(Vec2 {
@@ -525,7 +532,7 @@ impl ElementCx<'_, '_> {
                 scene.fill(
                     peniko::Fill::NonZero,
                     transform,
-                    to_peniko_image(image_data, quality).as_ref(),
+                    brush.as_ref(),
                     Some(Affine::scale_non_uniform(
                         image_data.width as f64 / image_data.pixel_width as f64,
                         image_data.height as f64 / image_data.pixel_height as f64,
@@ -840,6 +847,16 @@ struct AxisTiling {
 ///
 /// The fill rect is in image pixel coordinates (the drawing transform is
 /// pre-scaled by `ratio`), while translations are in device pixels.
+/// How a background image brush extends along an axis with this repeat.
+fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
+    use BackgroundRepeatKeyword::*;
+
+    match repeat {
+        Repeat | Round => peniko::Extend::Repeat,
+        Space | NoRepeat => peniko::Extend::Pad,
+    }
+}
+
 fn raster_axis_tiling(
     repeat: BackgroundRepeatKeyword,
     origin_start: f64,

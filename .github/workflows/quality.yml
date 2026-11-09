@@ -281,10 +281,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint the opt-in model runtime
         run: cargo clippy -p flectar-mail-core --all-targets --locked --features local-embeddings -- -D warnings
-      - name: Verify the Candle ZIP compatibility patch
-        run: python3 scripts/verify-candle.py
-      - name: Test embedding archive compatibility
-        run: cargo test -p flectar-mail-core --locked --features local-embeddings --test embedding_archives
       - name: Test the opt-in model runtime
         run: cargo test -p flectar-mail-core --lib --locked --features local-embeddings
 

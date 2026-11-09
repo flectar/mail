@@ -1087,6 +1087,9 @@ static SANITIZER: Lazy<ammonia::Builder<'static>> = Lazy::new(|| {
         "cellspacing",
         "bgcolor",
         "color",
+        // Text direction, as on every element in browsers' and other mail
+        // clients' sanitizers: right-to-left mail depends on it.
+        "dir",
     ])
     .add_tags([
         "html", "head", "body", "meta", "title", "table", "thead", "tbody", "tfoot", "tr", "td",
@@ -2885,6 +2888,28 @@ mod tests {
                 < cleaned
                     .find("Hidden preview")
                     .expect("body should follow head"),
+            "cleaned: {cleaned}"
+        );
+    }
+
+    #[test]
+    fn sanitizing_html_keeps_text_direction() {
+        let cleaned = sanitize_html(
+            r#"<html dir="rtl"><body dir="rtl"><p dir="rtl">שלום</p><div dir="ltr">Hello</div><span dir="auto">x</span></body></html>"#,
+        );
+
+        assert!(
+            cleaned.starts_with(r#"<html dir="rtl">"#),
+            "cleaned: {cleaned}"
+        );
+        assert!(
+            cleaned.contains(r#"<body dir="rtl">"#),
+            "cleaned: {cleaned}"
+        );
+        assert!(cleaned.contains(r#"<p dir="rtl">"#), "cleaned: {cleaned}");
+        assert!(cleaned.contains(r#"<div dir="ltr">"#), "cleaned: {cleaned}");
+        assert!(
+            cleaned.contains(r#"<span dir="auto">"#),
             "cleaned: {cleaned}"
         );
     }

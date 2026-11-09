@@ -1,9 +1,9 @@
 use super::*;
+use style::computed_values::visibility::T as Visibility;
 
 pub(super) fn visible(node: &blitz_dom::Node) -> bool {
     node.primary_styles().is_none_or(|style| {
-        !style.clone_display().is_none()
-            && style.clone_visibility() == blitz_dom::Visibility::Visible
+        !style.clone_display().is_none() && style.clone_visibility() == Visibility::Visible
     })
 }
 fn excluded(node: &blitz_dom::Node) -> bool {

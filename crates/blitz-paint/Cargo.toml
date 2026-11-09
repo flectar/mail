@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.91.0"
 name = "blitz-paint"
-version = "0.3.0-beta.3"
+version = "0.3.0-beta.4"
 build = false
 autolib = false
 autobins = false
@@ -37,7 +37,6 @@ font-embolden = []
 scrollbars = ["blitz-dom/scrollbars"]
 svg = [
     "dep:anyrender_svg",
-    "dep:usvg",
     "blitz-dom/svg",
 ]
 tracing = ["dep:tracing"]
@@ -54,11 +53,11 @@ version = "0.15.0"
 optional = true
 
 [dependencies.blitz-dom]
-version = "=0.3.0-beta.3"
+version = "=0.3.0-beta.4"
 default-features = false
 
 [dependencies.blitz-traits]
-version = "=0.3.0-beta.3"
+version = "=0.3.0-beta.4"
 default-features = false
 
 [dependencies.bytemuck]
@@ -109,8 +108,4 @@ default-features = false
 
 [dependencies.tracing]
 version = "0.1.40"
-optional = true
-
-[dependencies.usvg]
-version = "0.48.1"
 optional = true

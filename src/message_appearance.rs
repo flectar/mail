@@ -6,7 +6,7 @@
 //! untouched. UA !important declarations also cover legacy bgcolor attributes
 //! and inline !important styles without rewriting the message.
 use blitz_dom::{
-    QualName, ns,
+    QualName, UserAgentStylesheet, ns,
     util::{Color, ToColorColor},
 };
 use blitz_html::HtmlDocument;
@@ -166,7 +166,8 @@ impl Backdrop {
 pub(crate) struct AppearanceDocument {
     pub colors: EmailAppearance,
     base: String,
-    overrides: String,
+    base_sheet: Option<UserAgentStylesheet>,
+    overrides: Option<UserAgentStylesheet>,
     indexed: bool,
 }
 
@@ -179,9 +180,8 @@ impl AppearanceDocument {
     }
 
     pub fn resolve(&mut self, document: &mut HtmlDocument) {
-        if !self.overrides.is_empty() {
-            document.remove_user_agent_stylesheet(&self.overrides);
-            self.overrides.clear();
+        if let Some(overrides) = self.overrides.take() {
+            document.remove_user_agent_stylesheet(&overrides);
         }
         let base = if self.colors.original {
             String::new()
@@ -192,11 +192,13 @@ impl AppearanceDocument {
             )
         };
         if base != self.base {
-            if !self.base.is_empty() {
-                document.remove_user_agent_stylesheet(&self.base);
+            if let Some(sheet) = self.base_sheet.take() {
+                document.remove_user_agent_stylesheet(&sheet);
             }
             if !base.is_empty() {
-                document.add_user_agent_stylesheet(&base);
+                let sheet = UserAgentStylesheet::parse(&base);
+                document.add_user_agent_stylesheet(sheet.clone());
+                self.base_sheet = Some(sheet);
             }
             self.base = base;
         }
@@ -233,9 +235,11 @@ impl AppearanceDocument {
         if self.colors.original {
             return;
         }
-        self.overrides = self.stylesheet(document);
-        if !self.overrides.is_empty() {
-            document.add_user_agent_stylesheet(&self.overrides);
+        let overrides = self.stylesheet(document);
+        if !overrides.is_empty() {
+            let sheet = UserAgentStylesheet::parse(&overrides);
+            document.add_user_agent_stylesheet(sheet.clone());
+            self.overrides = Some(sheet);
             document.resolve(0.0);
         }
     }

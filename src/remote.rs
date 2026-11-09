@@ -37,7 +37,11 @@ const MAX_IMAGE_PIXELS: u64 = 8 * 1024 * 1024;
 // safe while PNG/GIF/WebP keep the stricter limits above.
 const MAX_JPEG_SOURCE_DIMENSION: u32 = 16_384;
 const MAX_JPEG_SOURCE_PIXELS: u64 = 64 * 1024 * 1024;
-const MAX_DECODED_DIMENSION: u32 = 2048;
+// Decoded images keep at most this many pixels, the memory of a 2048 x 2048
+// image, so tall and wide images keep their detail. Their longer side stays
+// within the GPU renderer's image atlas.
+const MAX_DECODED_DIMENSION: u32 = 4096;
+const MAX_DECODED_PIXELS: u64 = 2048 * 2048;
 const MAX_DOCUMENT_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_DOCUMENT_PIXELS: u64 = 16 * 1024 * 1024;
 const MAX_DOCUMENT_REQUESTS: u8 = 64;
@@ -51,6 +55,7 @@ pub(crate) fn image_decode_limits() -> blitz_dom::net::ImageDecodeLimits {
         max_jpeg_source_pixels: MAX_JPEG_SOURCE_PIXELS,
         max_alloc: MAX_IMAGE_PIXELS * 4,
         target_dimension: MAX_DECODED_DIMENSION,
+        target_pixels: MAX_DECODED_PIXELS,
     }
 }
 
@@ -239,8 +244,8 @@ impl NetProvider for LimitedImageProvider {
                 let url = request.url.to_string();
                 let ledger = ledger.clone();
                 let decode_waker = waker.clone();
-                // Decode and the bounded Blitz response queue may block. Keep
-                // both off Tokio's async executor and hold the work permit.
+                // Decoding may block. Keep it off Tokio's async executor and
+                // hold the work permit.
                 tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     let _decode_permit = decode_permit;
@@ -500,11 +505,10 @@ fn validated_image_work(bytes: &[u8]) -> Option<ImageWorkEstimate> {
         && height <= max_dimension
         && pixels <= max_pixels)
         .then(|| {
-            // Charge a conservative upper bound on retained decoded pixels,
-            // rather than the source pixels discarded by downsampling.
-            let longest = width.max(height).max(MAX_DECODED_DIMENSION) as u64;
-            (u64::from(width) * u64::from(MAX_DECODED_DIMENSION)).div_ceil(longest)
-                * (u64::from(height) * u64::from(MAX_DECODED_DIMENSION)).div_ceil(longest)
+            // Charge the retained decoded pixels, rather than the source
+            // pixels discarded by downsampling.
+            let (width, height) = image_decode_limits().target_size(width, height);
+            u64::from(width) * u64::from(height)
         })
         .and_then(|retained_pixels| {
             // The decoder may hold its source buffer, a resize intermediate,
@@ -850,7 +854,9 @@ mod tests {
 
         assert!(decoded.pixel_width <= MAX_DECODED_DIMENSION);
         assert!(decoded.pixel_height <= MAX_DECODED_DIMENSION);
-        assert!(budget >= u64::from(decoded.pixel_width) * u64::from(decoded.pixel_height));
+        let retained = u64::from(decoded.pixel_width) * u64::from(decoded.pixel_height);
+        assert!(retained <= MAX_DECODED_PIXELS);
+        assert!(budget >= retained);
     }
 
     #[test]

@@ -7,12 +7,6 @@ repository = "https://github.com/flectar/mail"
 homepage = "https://flectar.com"
 publish = false
 
-# Exercise the vendored ZIP compatibility patch with the application's lockfile.
-[[test]]
-name = "embedding_archives"
-path = "../candle-core/tests/serialization_tests.rs"
-required-features = ["local-embeddings"]
-
 [features]
 # Keep the protocol/database core lean by default. Hosts that expose semantic
 # search opt in explicitly; mail-only applications should never compile or
@@ -64,7 +58,7 @@ rusqlite = { version = "0.40", features = ["backup", "bundled", "functions"] }
 candle-core = { version = "0.11", optional = true }
 candle-nn = { version = "0.11", optional = true }
 candle-transformers = { version = "0.11", optional = true }
-tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"], optional = true }
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"], optional = true }
 hf-hub = { version = "1", default-features = false, features = ["rustls-tls"], optional = true }
 
 # auth

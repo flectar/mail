@@ -1,6 +1,6 @@
 # Emoji presentation backport
 
-Slint 1.18.1 still uses patched Parley 0.11.1. Blitz 0.3.0-beta.3 uses
+Slint 1.18.1 still uses patched Parley 0.11.1. Blitz 0.3.0-beta.4 uses
 upstream Parley 0.12.0, which already includes
 [Parley #811](https://github.com/linebender/parley/pull/811),
 which fixes [#744](https://github.com/linebender/parley/issues/744). Plain

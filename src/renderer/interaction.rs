@@ -133,6 +133,9 @@ impl GpuEmailRenderer {
         self.paint_dirty = true;
     }
     pub(super) fn move_selection(&mut self, key: Key, mods: InputModifiers) {
+        let Key::Named(key) = key else {
+            return;
+        };
         let Some(email) = self.email.as_mut() else {
             return;
         };
@@ -162,21 +165,24 @@ impl GpuEmailRenderer {
         let selection = Selection::from_byte_index(&inline.layout, offset, Affinity::Downstream);
         let word = mods.control || mods.alt || mods.meta;
         let next = match key {
-            Key::ArrowLeft if word => selection.previous_visual_word(&inline.layout, false),
-            Key::ArrowRight if word => selection.next_visual_word(&inline.layout, false),
-            Key::ArrowLeft => selection.previous_visual(&inline.layout, false),
-            Key::ArrowRight => selection.next_visual(&inline.layout, false),
-            Key::ArrowUp => selection.previous_line(&inline.layout, false),
-            Key::ArrowDown => selection.next_line(&inline.layout, false),
-            Key::Home => selection.line_start(&inline.layout, false),
-            Key::End => selection.line_end(&inline.layout, false),
-            Key::PageUp => selection.move_lines(&inline.layout, -20, false),
-            Key::PageDown => selection.move_lines(&inline.layout, 20, false),
+            NamedKey::ArrowLeft if word => selection.previous_visual_word(&inline.layout, false),
+            NamedKey::ArrowRight if word => selection.next_visual_word(&inline.layout, false),
+            NamedKey::ArrowLeft => selection.previous_visual(&inline.layout, false),
+            NamedKey::ArrowRight => selection.next_visual(&inline.layout, false),
+            NamedKey::ArrowUp => selection.previous_line(&inline.layout, false),
+            NamedKey::ArrowDown => selection.next_line(&inline.layout, false),
+            NamedKey::Home => selection.line_start(&inline.layout, false),
+            NamedKey::End => selection.line_end(&inline.layout, false),
+            NamedKey::PageUp => selection.move_lines(&inline.layout, -20, false),
+            NamedKey::PageDown => selection.move_lines(&inline.layout, 20, false),
             _ => return,
         };
         let mut focus = (id, next.focus().index());
-        let backwards = matches!(key, Key::ArrowLeft | Key::ArrowUp | Key::PageUp | Key::Home);
-        if word && matches!(key, Key::Home | Key::End) {
+        let backwards = matches!(
+            key,
+            NamedKey::ArrowLeft | NamedKey::ArrowUp | NamedKey::PageUp | NamedKey::Home
+        );
+        if word && matches!(key, NamedKey::Home | NamedKey::End) {
             let target = if backwards {
                 first
             } else {

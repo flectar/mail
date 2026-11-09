@@ -1,24 +1,36 @@
 diff --git a/crates/blitz-dom/src/config.rs b/crates/blitz-dom/src/config.rs
-index f1a9a5e..cd6d9d0 100644
+index 4686b12..f6ad6a0 100644
 --- a/crates/blitz-dom/src/config.rs
 +++ b/crates/blitz-dom/src/config.rs
-@@ -31,6 +31,8 @@ pub enum StyleThreading {
+@@ -30,6 +30,8 @@ pub enum StyleThreading {
+ 
  /// Options used when constructing a [`BaseDocument`](crate::BaseDocument)
- #[derive(Default)]
  pub struct DocumentConfig {
 +    /// Optional bounded raster decoding for untrusted email content.
 +    pub image_decode_limits: Option<crate::net::ImageDecodeLimits>,
      /// The initial `Viewport`
      pub viewport: Option<Viewport>,
      /// The base url which relative URLs are resolved against
+@@ -73,6 +75,7 @@ pub struct DocumentConfig {
+ impl Default for DocumentConfig {
+     fn default() -> Self {
+         Self {
++            image_decode_limits: None,
+             viewport: None,
+             base_url: None,
+             ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 1db0b4d..e301989 100644
+index 96d7ed0..a42379e 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -194,7 +194,31 @@ pub enum DocumentEvent {
+@@ -225,7 +225,70 @@ pub enum DocumentEvent {
      },
  }
  
++/// How many repainted nodes a document keeps before treating the whole
++/// document as damaged.
++const MAX_PAINT_UPDATES: usize = 4096;
++
 +/// Damage from delivered resources. Paint-only updates preserve resolved layout.
 +#[derive(Default, Debug)]
 +pub struct ResourceUpdates {
@@ -27,48 +39,78 @@ index 1db0b4d..e301989 100644
 +    pub paint_nodes: Vec<NodeId>,
 +}
 +
-+fn image_has_fixed_size(node: &Node) -> bool {
++/// Whether an image's layout cannot depend on its pixels, so a decoded image
++/// only needs a repaint. Its width and height must be fixed lengths, and its
++/// last layout must have used exactly those sizes: when a min/max constraint
++/// applies (such as a reader's `img { max-width: 100% }` in a narrow column),
++/// replaced sizing brings in the natural aspect ratio. Flex and grid items are
++/// excluded because their automatic minimum size depends on the image, as in
++/// Blink's `LayoutImage::NeedsLayoutOnNaturalSizeChange`.
++fn image_has_fixed_size(doc: &BaseDocument, node: &Node) -> bool {
++    use style::values::specified::box_::DisplayInside;
 +    use taffy::CoreStyle as _;
 +    if node.primary_styles().is_none() {
 +        return false;
 +    }
-+    let size = node.layout_style().size();
-+    size.width
-+        .into_option()
-+        .is_some_and(|v| v.is_finite() && v > 0.0)
-+        && size
-+            .height
-+            .into_option()
-+            .is_some_and(|v| v.is_finite() && v > 0.0)
++    let in_flex_or_grid = node
++        .layout_parent
++        .get()
++        .and_then(|id| doc.get_node(id))
++        .and_then(|parent| parent.display_style())
++        .is_some_and(|display| {
++            matches!(display.inside(), DisplayInside::Flex | DisplayInside::Grid)
++        });
++    if in_flex_or_grid {
++        return false;
++    }
++    let style = node.layout_style();
++    let size = style.size();
++    let (Some(width), Some(height)) = (size.width.into_option(), size.height.into_option()) else {
++        return false;
++    };
++    if !(width.is_finite() && width > 0.0 && height.is_finite() && height > 0.0) {
++        return false;
++    }
++    let border_box = style.box_sizing() == taffy::BoxSizing::BorderBox;
++    drop(style);
++    let layout = node.unrounded_layout();
++    let (width, height) = if border_box {
++        (width, height)
++    } else {
++        let (padding, border) = (layout.padding, layout.border);
++        (
++            width + padding.left + padding.right + border.left + border.right,
++            height + padding.top + padding.bottom + border.top + border.bottom,
++        )
++    };
++    (layout.size.width - width).abs() < 0.01 && (layout.size.height - height).abs() < 0.01
 +}
 +
  pub struct BaseDocument {
 +    pub(crate) image_decode_limits: Option<crate::net::ImageDecodeLimits>,
++    /// Damage from resource events handled since the embedder last drained
++    /// it, including events that `resolve` handled.
++    resource_updates: ResourceUpdates,
      /// ID of the document
      id: usize,
  
-@@ -440,6 +464,7 @@ impl BaseDocument {
-         let (tx, rx) = sync_channel(DOCUMENT_EVENT_QUEUE_CAPACITY);
+@@ -468,6 +531,8 @@ impl BaseDocument {
+         let (tx, rx) = channel();
  
          let mut doc = Self {
 +            image_decode_limits: config.image_decode_limits,
++            resource_updates: ResourceUpdates::default(),
              id,
              tx,
              rx: Some(rx),
-@@ -1231,16 +1256,58 @@ impl BaseDocument {
+@@ -1256,17 +1321,75 @@ impl BaseDocument {
+         }
      }
  
++    /// Handle pending resource events. Their damage accumulates until
++    /// `drain_pending_updates` takes it.
      pub fn handle_messages(&mut self) {
-+        self.drain_pending_messages();
-+    }
-+
-+    /// Drain resource events, reporting whether layout may have changed.
-+    pub fn drain_pending_messages(&mut self) -> bool {
-+        self.drain_pending_updates().changed
-+    }
-+
-+    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
-+        let mut updates = ResourceUpdates::default();
++        let mut updates = std::mem::take(&mut self.resource_updates);
          // Remove event Reciever from the Document so that we can process events
          // without holding a borrow to the Document
          let rx = self.rx.take().unwrap();
@@ -89,7 +131,7 @@ index 1db0b4d..e301989 100644
 +                                    if matches!(kind, ImageType::Image)
 +                                        && self
 +                                            .get_node(id)
-+                                            .is_some_and(|node| !image_has_fixed_size(node))
++                                            .is_some_and(|node| !image_has_fixed_size(self, node))
 +                                    {
 +                                        updates.layout = true;
 +                                    }
@@ -108,13 +150,36 @@ index 1db0b4d..e301989 100644
  
          // Put Reciever back
          self.rx = Some(rx);
++        // An embedder that never drains must not grow the list without bound;
++        // past that, everything is damaged anyway.
++        if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
++            updates.paint_nodes.sort_unstable();
++            updates.paint_nodes.dedup();
++            if updates.paint_nodes.len() > MAX_PAINT_UPDATES {
++                updates.paint_nodes.clear();
++                updates.layout = true;
++            }
++        }
++        self.resource_updates = updates;
++    }
++
++    /// Drain resource events, reporting whether layout may have changed.
++    pub fn drain_pending_messages(&mut self) -> bool {
++        self.drain_pending_updates().changed
++    }
++
++    /// Handle pending resource events and take the damage of every event
++    /// handled since the last call, including events `resolve` handled.
++    pub fn drain_pending_updates(&mut self) -> ResourceUpdates {
++        self.handle_messages();
++        let mut updates = std::mem::take(&mut self.resource_updates);
 +        updates.paint_nodes.sort_unstable();
 +        updates.paint_nodes.dedup();
 +        updates
      }
  
      pub fn handle_message(&mut self, msg: DocumentEvent) {
-@@ -1283,6 +1350,11 @@ impl BaseDocument {
+@@ -1309,6 +1432,11 @@ impl BaseDocument {
          };
  
          match resource {
@@ -126,15 +191,17 @@ index 1db0b4d..e301989 100644
              Resource::Css(css) => {
                  let node_id = res.node_id.unwrap();
                  self.add_stylesheet_for_node(css, node_id);
-@@ -1390,6 +1462,7 @@ impl BaseDocument {
+@@ -1410,6 +1538,9 @@ impl BaseDocument {
  
-             match image_type {
-                 ImageType::Image => {
-+                    let fixed_size = image_has_fixed_size(node);
-                     let element = node.element_data_mut().unwrap();
-                     #[cfg(feature = "custom-widget")]
-                     if element.custom_widget_data().is_some() {
-@@ -1398,8 +1471,10 @@ impl BaseDocument {
+         // Apply to all waiting nodes
+         for (node_id, image_type) in waiting_nodes {
++            let fixed_size = self
++                .get_node(node_id)
++                .is_some_and(|node| image_has_fixed_size(self, node));
+             let Some(node) = self.get_node_mut(node_id) else {
+                 continue;
+             };
+@@ -1424,8 +1555,10 @@ impl BaseDocument {
                      element.special_data = SpecialElementData::Image(Box::new(image.clone()));
  
                      // Clear layout cache
@@ -147,22 +214,137 @@ index 1db0b4d..e301989 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2620,9 +2695,11 @@ impl BaseDocument {
-             }
+@@ -2636,19 +2769,24 @@ impl BaseDocument {
+         }
  
-             if !result.is_empty() {
+         let mut result = String::new();
++        let mut previous = None;
+         for (node_id, start, end) in &ranges {
+             let node = self.get_node(*node_id)?;
+             let element_data = node.element_data()?;
+             let inline_layout = element_data.inline_layout_data.as_ref()?;
+ 
+-            if *end > inline_layout.text.len() {
++            if inline_layout.text.get(*start..*end).is_none() {
+                 continue;
+             }
+-
+-            if !result.is_empty() {
 -                result.push(' ');
-+                result.push('\n');
++            let text = self.visible_text(inline_layout, *start..*end);
++            if text.is_empty() {
++                continue;
 +            }
-+            if let Some(text) = inline_layout.text.get(*start..*end) {
-+                result.push_str(text);
++            if let Some(previous) = previous {
++                result.push_str(self.selection_separator(previous, *node_id));
              }
 -            result.push_str(&inline_layout.text[*start..*end]);
++            result.push_str(&text);
++            previous = Some(*node_id);
          }
  
          if result.is_empty() {
+@@ -2658,6 +2796,98 @@ impl BaseDocument {
+         }
+     }
+ 
++    /// The text of `range` in an inline formatting context, leaving out text
++    /// whose `visibility` hides it, as browsers do when copying.
++    fn visible_text(
++        &self,
++        inline_layout: &crate::node::TextLayout,
++        range: std::ops::Range<usize>,
++    ) -> String {
++        use style::computed_values::visibility::T as Visibility;
++        let mut hidden: Vec<std::ops::Range<usize>> = Vec::new();
++        let mut last: Option<(NodeId, bool)> = None;
++        for line in inline_layout.layout.lines() {
++            for run in line.runs() {
++                for cluster in run.clusters() {
++                    let text_range = cluster.text_range();
++                    if text_range.end <= range.start || range.end <= text_range.start {
++                        continue;
++                    }
++                    // A run can mix styles, so each cluster is checked.
++                    let id = cluster.style().brush.id;
++                    let is_hidden = match last {
++                        Some((last_id, is_hidden)) if last_id == id => is_hidden,
++                        _ => {
++                            let is_hidden = self
++                                .get_node(id)
++                                .and_then(|node| node.primary_styles())
++                                .is_some_and(|styles| {
++                                    styles.get_inherited_box().visibility != Visibility::Visible
++                                });
++                            last = Some((id, is_hidden));
++                            is_hidden
++                        }
++                    };
++                    if is_hidden {
++                        hidden
++                            .push(text_range.start.max(range.start)..text_range.end.min(range.end));
++                    }
++                }
++            }
++        }
++        hidden.sort_by_key(|hidden| hidden.start);
++
++        let text = &inline_layout.text;
++        let mut visible = String::new();
++        let mut cursor = range.start;
++        for hidden in hidden {
++            if hidden.start > cursor {
++                visible.push_str(text.get(cursor..hidden.start).unwrap_or_default());
++            }
++            cursor = cursor.max(hidden.end);
++        }
++        if cursor < range.end {
++            visible.push_str(text.get(cursor..range.end).unwrap_or_default());
++        }
++        visible
++    }
++
++    /// What separates the selected text of two consecutive inline formatting
++    /// contexts, as `innerText` and browsers' `Selection.toString()` do: a tab
++    /// between cells of one row, a blank line around a paragraph, and a line
++    /// break between other blocks.
++    fn selection_separator(&self, previous: NodeId, next: NodeId) -> &'static str {
++        use style::values::specified::box_::DisplayInside;
++        let ancestor = |id: NodeId, matches: &dyn Fn(&Node) -> bool| {
++            let mut current = Some(id);
++            while let Some(id) = current {
++                let node = self.get_node(id)?;
++                if matches(node) {
++                    return Some(id);
++                }
++                current = node.parent;
++            }
++            None
++        };
++        let cell = |id| {
++            ancestor(id, &|node| {
++                node.display_style()
++                    .is_some_and(|display| display.inside() == DisplayInside::TableCell)
++            })
++        };
++        let paragraph = |id| {
++            ancestor(id, &|node| {
++                node.data.is_element_with_tag_name(&local_name!("p"))
++            })
++        };
++        let parent = |id: NodeId| self.get_node(id).and_then(|node| node.parent);
++        match (cell(previous), cell(next)) {
++            (Some(a), Some(b)) if a != b && parent(a) == parent(b) => "\t",
++            _ if paragraph(previous) != paragraph(next) => "\n\n",
++            _ => "\n",
++        }
++    }
++
+     /// Get all selection ranges as Vec<(node_id, start_offset, end_offset)>.
+     /// Returns empty vec if no selection.
+     pub fn get_text_selection_ranges(&self) -> Vec<(NodeId, usize, usize)> {
 diff --git a/crates/blitz-dom/src/iframe.rs b/crates/blitz-dom/src/iframe.rs
-index 6fa0f02..03520ae 100644
+index c439fa8..0301fb6 100644
 --- a/crates/blitz-dom/src/iframe.rs
 +++ b/crates/blitz-dom/src/iframe.rs
 @@ -55,6 +55,7 @@ impl BaseDocument {
@@ -172,7 +354,7 @@ index 6fa0f02..03520ae 100644
 +            image_decode_limits: self.image_decode_limits,
              viewport: None,
              base_url,
-             ua_stylesheets: None,
+             ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/layout/damage.rs b/crates/blitz-dom/src/layout/damage.rs
 index aaa5f5e..a48384e 100644
 --- a/crates/blitz-dom/src/layout/damage.rs
@@ -188,10 +370,10 @@ index aaa5f5e..a48384e 100644
                          );
  
 diff --git a/crates/blitz-dom/src/mutator.rs b/crates/blitz-dom/src/mutator.rs
-index 8bd4f9f..2cb27d4 100644
+index feac670..7427db4 100644
 --- a/crates/blitz-dom/src/mutator.rs
 +++ b/crates/blitz-dom/src/mutator.rs
-@@ -1192,7 +1192,8 @@ impl<'doc> DocumentMutator<'doc> {
+@@ -1194,7 +1194,8 @@ impl<'doc> DocumentMutator<'doc> {
                          self.doc.id(),
                          None, // Don't pass node_id, we'll handle it via pending_images
                          self.doc.shell_provider.clone(),
@@ -202,7 +384,7 @@ index 8bd4f9f..2cb27d4 100644
                  );
              }
 diff --git a/crates/blitz-dom/src/net.rs b/crates/blitz-dom/src/net.rs
-index a24ee9f..e9765fa 100644
+index 786b5bd..02b5379 100644
 --- a/crates/blitz-dom/src/net.rs
 +++ b/crates/blitz-dom/src/net.rs
 @@ -24,6 +24,9 @@ use blitz_traits::shell::ShellProvider;
@@ -240,24 +422,65 @@ index a24ee9f..e9765fa 100644
      }
  }
  
-@@ -569,6 +578,11 @@ impl NetHandler for ResourceHandler<ImageHandler> {
+@@ -569,23 +578,36 @@ impl NetHandler for ResourceHandler<ImageHandler> {
  
  impl ImageHandler {
      fn parse(&self, bytes: Bytes) -> Result<Resource, String> {
-+        if let Some(limits) = self.limits {
-+            return limits
-+                .decode(&bytes)
-+                .map(|image| Resource::Raster(self.kind, image));
-+        }
-         let image_err = match image::ImageReader::new(Cursor::new(&bytes))
-             .with_guessed_format()
-             .expect("IO errors impossible with Cursor")
+-        let image_err = match image::ImageReader::new(Cursor::new(&bytes))
+-            .with_guessed_format()
+-            .expect("IO errors impossible with Cursor")
+-            .decode()
+-        {
+-            Ok(image) => {
+-                let width = image.width();
+-                let height = image.height();
+-                let raw_rgba8_data = image.into_rgba8().into_raw();
+-                return Ok(Resource::Image(
+-                    self.kind,
+-                    width,
+-                    height,
+-                    Arc::new(raw_rgba8_data),
+-                ));
++        let image_err = if let Some(limits) = self.limits {
++            // The limits bound raster decoding. Bytes in no raster format may
++            // still be an SVG, which is parsed below as without limits.
++            match image::guess_format(&bytes) {
++                Ok(_) => {
++                    return limits
++                        .decode(&bytes)
++                        .map(|image| Resource::Raster(self.kind, image));
++                }
++                Err(e) => e.to_string(),
++            }
++        } else {
++            match image::ImageReader::new(Cursor::new(&bytes))
++                .with_guessed_format()
++                .expect("IO errors impossible with Cursor")
++                .decode()
++            {
++                Ok(image) => {
++                    let width = image.width();
++                    let height = image.height();
++                    let raw_rgba8_data = image.into_rgba8().into_raw();
++                    return Ok(Resource::Image(
++                        self.kind,
++                        width,
++                        height,
++                        Arc::new(raw_rgba8_data),
++                    ));
++                }
++                Err(e) => e.to_string(),
+             }
+-            Err(e) => e.to_string(),
+         };
+ 
+         #[cfg(feature = "svg")]
 diff --git a/crates/blitz-dom/src/net/image_decode.rs b/crates/blitz-dom/src/net/image_decode.rs
 new file mode 100644
-index 0000000..92aebeb
+index 0000000..0f90e35
 --- /dev/null
 +++ b/crates/blitz-dom/src/net/image_decode.rs
-@@ -0,0 +1,122 @@
+@@ -0,0 +1,236 @@
 +use crate::node::RasterImageData;
 +use image::metadata::Orientation;
 +use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
@@ -269,10 +492,18 @@ index 0000000..92aebeb
 +    pub max_source_pixels: u64,
 +    /// JPEGs can be admitted at a larger source size because the decoder uses
 +    /// native IDCT scaling before allocating the retained pixel buffer.
++    /// Progressive and lossless JPEGs keep full-resolution coefficients while
++    /// decoding, so they are held to `max_source_pixels`.
 +    pub max_jpeg_source_dimension: u32,
 +    pub max_jpeg_source_pixels: u64,
++    /// The largest pixel buffer a JPEG decode may allocate.
 +    pub max_alloc: u64,
++    /// The longest side a decoded image keeps.
 +    pub target_dimension: u32,
++    /// The most pixels a decoded image keeps. Bounding the area rather than
++    /// only the longer side keeps tall and wide images sharp for the same
++    /// memory.
++    pub target_pixels: u64,
 +}
 +
 +impl ImageDecodeLimits {
@@ -300,34 +531,38 @@ index 0000000..92aebeb
 +            || height > max_source_dimension
 +            || u64::from(width) * u64::from(height) > max_source_pixels
 +            || self.target_dimension == 0
++            || self.target_pixels == 0
 +        {
 +            return Err("Image dimensions exceed the document decoder limits".into());
 +        }
 +        // Malformed metadata must not lose an otherwise valid image.
 +        let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
 +
-+        let target = self.target_dimension;
-+        let scaled_jpeg = (is_jpeg && width.max(height) > target)
-+            .then(|| self.decode_scaled_jpeg(bytes, width, height))
-+            .flatten();
++        let target = self.target_size(width, height);
++        let scaled_jpeg = if is_jpeg && target != (width, height) {
++            self.decode_scaled_jpeg(bytes, width, height, target)?
++        } else {
++            None
++        };
 +        let decoded = match scaled_jpeg {
 +            Some(image) => image,
 +            None => {
-+                // The general decoder allocates the full source, so the
-+                // allocation limit still bounds JPEGs that could not be scaled.
 +                let mut limits = image::Limits::default();
 +                limits.max_image_width = Some(max_source_dimension);
 +                limits.max_image_height = Some(max_source_dimension);
 +                limits.max_alloc = Some(self.max_alloc);
 +                decoder.set_limits(limits).map_err(|e| e.to_string())?;
++                // The general decoder allocates the whole source at once, and
++                // `set_limits` does not check that allocation. Other formats are
++                // already bounded by `max_source_pixels`; a JPEG admitted under
++                // the larger JPEG limits must fit `max_alloc` at full size.
++                if is_jpeg && decoder.total_bytes() > self.max_alloc {
++                    return Err("JPEG exceeds the document decoder's allocation limit".into());
++                }
 +                DynamicImage::from_decoder(decoder).map_err(|e| e.to_string())?
 +            }
 +        };
-+        let mut decoded = if decoded.width().max(decoded.height()) > target {
-+            decoded.thumbnail(target, target)
-+        } else {
-+            decoded
-+        };
++        let mut decoded = downscale(decoded, target);
 +        decoded.apply_orientation(orientation);
 +        let (width, height) = match orientation {
 +            Orientation::Rotate90
@@ -346,37 +581,139 @@ index 0000000..92aebeb
 +        Ok(image)
 +    }
 +
-+    /// Decode a large RGB or greyscale JPEG at a reduced size using the
-+    /// decoder's IDCT scaling. `None` defers to the general decoder, which
-+    /// handles everything else (CMYK, streams this decoder rejects).
-+    fn decode_scaled_jpeg(self, bytes: &[u8], width: u32, height: u32) -> Option<DynamicImage> {
++    /// The largest size a `width` x `height` image is decoded to: within both
++    /// the longest side and the pixel budget, keeping its aspect ratio.
++    pub fn target_size(self, width: u32, height: u32) -> (u32, u32) {
++        let (w, h) = (f64::from(width), f64::from(height));
++        let scale = (f64::from(self.target_dimension) / w.max(h))
++            .min((self.target_pixels as f64 / (w * h)).sqrt())
++            .min(1.0);
++        if scale >= 1.0 {
++            return (width, height);
++        }
++        let fit = |side: f64| ((side * scale).floor() as u32).max(1);
++        (fit(w), fit(h))
++    }
++
++    /// Decode a large JPEG at a reduced size using the decoder's IDCT scaling,
++    /// at the smallest reduction that keeps the target resolution and fits
++    /// `max_alloc`. `Ok(None)` defers to the general decoder for streams this
++    /// decoder rejects.
++    fn decode_scaled_jpeg(
++        self,
++        bytes: &[u8],
++        width: u32,
++        height: u32,
++        (target_width, target_height): (u32, u32),
++    ) -> Result<Option<DynamicImage>, String> {
 +        let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(bytes));
 +        decoder.set_max_decoding_buffer_size(self.max_alloc.min(usize::MAX as u64) as usize);
-+        decoder.read_info().ok()?;
-+        let info = decoder.info()?;
-+        if !matches!(
-+            info.pixel_format,
-+            jpeg_decoder::PixelFormat::RGB24 | jpeg_decoder::PixelFormat::L8
-+        ) {
-+            return None;
++        if decoder.read_info().is_err() {
++            return Ok(None);
 +        }
-+        let divisor = width
-+            .max(height)
-+            .div_ceil(self.target_dimension)
-+            .next_power_of_two()
-+            .min(8);
-+        let (w, h) = decoder
-+            .scale(
-+                width.div_ceil(divisor) as u16,
-+                height.div_ceil(divisor) as u16,
-+            )
-+            .ok()?;
-+        let pixels = decoder.decode().ok()?;
-+        Some(match info.pixel_format {
++        let Some(info) = decoder.info() else {
++            return Ok(None);
++        };
++        // Progressive and lossless scans keep every full-resolution coefficient
++        // until the last scan, whatever the output scale. The general decoder
++        // does the same, so these are refused rather than deferred.
++        if info.coding_process != jpeg_decoder::CodingProcess::DctSequential
++            && u64::from(width) * u64::from(height) > self.max_source_pixels
++        {
++            return Err("Progressive JPEG exceeds the document decoder limits".into());
++        }
++        let channels: u64 = match info.pixel_format {
++            jpeg_decoder::PixelFormat::RGB24 => 3,
++            jpeg_decoder::PixelFormat::L8 => 1,
++            jpeg_decoder::PixelFormat::CMYK32 => 4,
++            _ => return Ok(None),
++        };
++        let mut divisor = [8, 4, 2]
++            .into_iter()
++            .find(|&divisor| {
++                width.div_ceil(divisor) >= target_width && height.div_ceil(divisor) >= target_height
++            })
++            .unwrap_or(1);
++        let scaled_bytes = |divisor: u32| {
++            u64::from(width.div_ceil(divisor)) * u64::from(height.div_ceil(divisor)) * channels
++        };
++        while divisor < 8 && scaled_bytes(divisor) > self.max_alloc {
++            divisor *= 2;
++        }
++        let Ok((w, h)) = decoder.scale(
++            width.div_ceil(divisor) as u16,
++            height.div_ceil(divisor) as u16,
++        ) else {
++            return Ok(None);
++        };
++        let Ok(pixels) = decoder.decode() else {
++            return Ok(None);
++        };
++        let (w, h) = (u32::from(w), u32::from(h));
++        Ok(match info.pixel_format {
 +            jpeg_decoder::PixelFormat::RGB24 => {
-+                DynamicImage::ImageRgb8(image::RgbImage::from_raw(w.into(), h.into(), pixels)?)
++                image::RgbImage::from_raw(w, h, pixels).map(DynamicImage::ImageRgb8)
 +            }
-+            _ => DynamicImage::ImageLuma8(image::GrayImage::from_raw(w.into(), h.into(), pixels)?),
++            jpeg_decoder::PixelFormat::CMYK32 => {
++                image::RgbImage::from_raw(w, h, cmyk_to_rgb(&pixels)).map(DynamicImage::ImageRgb8)
++            }
++            _ => image::GrayImage::from_raw(w, h, pixels).map(DynamicImage::ImageLuma8),
 +        })
++    }
++}
++
++/// Convert the decoder's CMYK output to RGB, as `image` did while it decoded
++/// JPEGs with jpeg-decoder.
++fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
++    cmyk.as_chunks::<4>()
++        .0
++        .iter()
++        .flat_map(|pixel| {
++            let k = 255 - u16::from(pixel[3]);
++            [0, 1, 2].map(|channel| ((255 - u16::from(pixel[channel])) * k / 255) as u8)
++        })
++        .collect()
++}
++
++/// Reduce an image to `target`, the size `target_size` gives its source.
++/// Colour is averaged premultiplied, so fully transparent pixels do not
++/// darken the edges of translucent images.
++fn downscale(image: DynamicImage, (target_width, target_height): (u32, u32)) -> DynamicImage {
++    if image.width() <= target_width && image.height() <= target_height {
++        return image;
++    }
++    if !image.color().has_alpha() {
++        return image.thumbnail_exact(target_width, target_height);
++    }
++    let mut rgba = image.into_rgba8();
++    for pixel in rgba.pixels_mut() {
++        let alpha = u16::from(pixel[3]);
++        for channel in &mut pixel.0[..3] {
++            *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
++        }
++    }
++    let mut reduced = DynamicImage::ImageRgba8(rgba)
++        .thumbnail_exact(target_width, target_height)
++        .into_rgba8();
++    for pixel in reduced.pixels_mut() {
++        let alpha = u16::from(pixel[3]);
++        for channel in &mut pixel.0[..3] {
++            if let Some(value) = (u16::from(*channel) * 255 + alpha / 2).checked_div(alpha) {
++                *channel = value.min(255) as u8;
++            }
++        }
++    }
++    DynamicImage::ImageRgba8(reduced)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::cmyk_to_rgb;
++
++    #[test]
++    fn cmyk_ink_converts_to_rgb() {
++        // White paper, full cyan, and full black.
++        let cmyk = [0, 0, 0, 0, 255, 0, 0, 0, 0, 0, 0, 255];
++        assert_eq!(cmyk_to_rgb(&cmyk), [255, 255, 255, 0, 255, 255, 0, 0, 0]);
 +    }
 +}

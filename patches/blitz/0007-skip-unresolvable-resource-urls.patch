@@ -1,0 +1,148 @@
+diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
+index a42379e..bb89de3 100644
+--- a/crates/blitz-dom/src/document.rs
++++ b/crates/blitz-dom/src/document.rs
+@@ -1159,13 +1159,8 @@ impl BaseDocument {
+         node
+     }
+ 
+-    pub(crate) fn resolve_url(&self, raw: &str) -> url::Url {
+-        self.url.resolve_relative(raw).unwrap_or_else(|| {
+-            panic!(
+-                "to be able to resolve {raw} with the base_url: {:?}",
+-                *self.url
+-            )
+-        })
++    pub(crate) fn resolve_url(&self, raw: &str) -> Option<url::Url> {
++        self.url.resolve_relative(raw)
+     }
+ 
+     pub fn print_tree(&self) {
+@@ -1186,8 +1181,9 @@ impl BaseDocument {
+             if element.name.local == local_name!("link") {
+                 if let Some(href) = element.attr(local_name!("href")) {
+                     // println!("Node {node_id} {href} {href_to_reload} {} {}", resolved_href.as_str(), resolved_href.as_str() == url_to_reload);
+-                    if href == href_to_reload {
+-                        let resolved_href = self.resolve_url(href);
++                    if href == href_to_reload
++                        && let Some(resolved_href) = self.resolve_url(href)
++                    {
+                         self.net_provider.fetch(
+                             self.id(),
+                             self.build_request(resolved_href.clone()),
+diff --git a/crates/blitz-dom/src/form.rs b/crates/blitz-dom/src/form.rs
+index 86f5a66..9d1c059 100644
+--- a/crates/blitz-dom/src/form.rs
++++ b/crates/blitz-dom/src/form.rs
+@@ -95,7 +95,9 @@ impl BaseDocument {
+         )
+         .unwrap_or_default();
+ 
+-        let mut parsed_action = self.resolve_url(action);
++        let Some(mut parsed_action) = self.resolve_url(action) else {
++            return;
++        };
+ 
+         let scheme = parsed_action.scheme();
+ 
+diff --git a/crates/blitz-dom/src/mutator.rs b/crates/blitz-dom/src/mutator.rs
+index 7427db4..afc5272 100644
+--- a/crates/blitz-dom/src/mutator.rs
++++ b/crates/blitz-dom/src/mutator.rs
+@@ -1106,7 +1106,9 @@ impl<'doc> DocumentMutator<'doc> {
+             return;
+         }
+ 
+-        let url = self.doc.resolve_url(href);
++        let Some(url) = self.doc.url.resolve_relative(href) else {
++            return;
++        };
+         let handler = ResourceHandler::new(
+             self.doc.tx.clone(),
+             self.doc.id(),
+@@ -1155,8 +1157,9 @@ impl<'doc> DocumentMutator<'doc> {
+     fn load_image(&mut self, target_id: NodeId) {
+         let node = &self.doc.nodes[target_id];
+         if let Some(raw_src) = node.attr(local_name!("src")) {
+-            if !raw_src.is_empty() {
+-                let src = self.doc.resolve_url(raw_src);
++            if !raw_src.is_empty()
++                && let Some(src) = self.doc.resolve_url(raw_src)
++            {
+                 let src_string = src.as_str();
+ 
+                 // Check cache first
+@@ -1368,6 +1371,55 @@ mod test {
+ 
+     use crate::{Attribute, BaseDocument, DocumentConfig, ElementData, NodeData, qual_name};
+ 
++    #[test]
++    fn unresolvable_relative_urls_are_skipped() {
++        // Without a base url, relative urls cannot be resolved against the default
++        // `data:` document url. Loading such resources should be skipped, not panic.
++        let mut document = BaseDocument::new(DocumentConfig::default());
++        let root_id = document.root_node().id;
++        let attr = |name, value: &str| Attribute {
++            name,
++            value: value.to_string(),
++        };
++
++        let mut mutator = document.mutate();
++        let html = mutator.create_element(qual_name!("html"), vec![]);
++        let img = mutator.create_element(
++            qual_name!("img"),
++            vec![attr(qual_name!("src"), "image.png")],
++        );
++        let link = mutator.create_element(
++            qual_name!("link"),
++            vec![
++                attr(qual_name!("rel"), "stylesheet"),
++                attr(qual_name!("href"), "style.css"),
++            ],
++        );
++        mutator.append_children(html, &[img, link]);
++        mutator.append_children(root_id, &[html]);
++        mutator.set_attribute(img, qual_name!("src"), "other.png");
++        drop(mutator);
++
++        document.resolve(0.0);
++    }
++
++    #[test]
++    fn unresolvable_import_urls_are_skipped() {
++        let mut document = BaseDocument::new(DocumentConfig::default());
++        let root_id = document.root_node().id;
++
++        let mut mutator = document.mutate();
++        let html = mutator.create_element(qual_name!("html"), vec![]);
++        let style = mutator.create_element(qual_name!("style"), vec![]);
++        let css = mutator.create_text_node("@import url(fonts.css); html { color: red }");
++        mutator.append_children(style, &[css]);
++        mutator.append_children(html, &[style]);
++        mutator.append_children(root_id, &[html]);
++        drop(mutator);
++
++        document.resolve(0.0);
++    }
++
+     #[test]
+     fn media_type_defaults_to_screen() {
+         let mut document = BaseDocument::new(DocumentConfig::default());
+diff --git a/crates/blitz-dom/src/net.rs b/crates/blitz-dom/src/net.rs
+index 02b5379..7337367 100644
+--- a/crates/blitz-dom/src/net.rs
++++ b/crates/blitz-dom/src/net.rs
+@@ -206,7 +206,12 @@ impl ServoStylesheetLoader for StylesheetLoader {
+         supports: Option<ImportSupportsCondition>,
+         layer: ImportLayer,
+     ) -> ServoArc<Locked<ImportRule>> {
+-        if self.import_depth >= MAX_IMPORT_DEPTH || !supports.as_ref().is_none_or(|s| s.enabled) {
++        // An unresolvable URL (e.g. a relative URL in a document without a base URL)
++        // cannot be fetched, so the import is refused like one nested too deeply.
++        if self.import_depth >= MAX_IMPORT_DEPTH
++            || !supports.as_ref().is_none_or(|s| s.enabled)
++            || url.url().is_none()
++        {
+             return ServoArc::new(lock.wrap(ImportRule {
+                 url,
+                 stylesheet: ImportSheet::new_refused(),

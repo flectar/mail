@@ -41,6 +41,10 @@ use style::{
 };
 
 use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
+
+/// How far past the viewport (in CSS px) elements are still painted, for ink that
+/// their boxes leave out.
+const CULL_MARGIN: f64 = 64.0;
 use peniko::{self, Fill, ImageData, ImageSampler};
 use style::values::generics::color::GenericColor;
 use taffy::Layout;
@@ -175,8 +179,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
 
         // The root clip rectangle is the viewport (in screen coordinates, with the
         // initial offset already subtracted). Elements outside of this are culled, and
-        // scrollports narrow this rectangle further for their descendants.
-        let viewport_clip_rect = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
+        // scrollports narrow this rectangle further for their descendants. It only
+        // culls, so it extends past the viewport by a margin: boxes and their scrollable
+        // overflow leave out ink such as outlines and glyphs that overflow a short
+        // `line-height`, which would otherwise be cut off at the edge of a tile.
+        let margin = CULL_MARGIN * self.scale;
+        let viewport_clip_rect = Rect::new(
+            -margin,
+            -margin,
+            self.width as f64 + margin,
+            self.height as f64 + margin,
+        );
 
         self.render_element(
             scene,
@@ -312,8 +325,13 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             ..
         } = *node.final_layout();
         let box_position = Vec2::new(location.x as f64, location.y as f64) * self.scale;
-        let box_size = Size::new(size.width as f64, size.height as f64);
-        let border_box = Rect::from_origin_size(box_position.to_point(), box_size);
+        // Element-local and scaled, like `scrollable_overflow`: `transform` below
+        // already applies `box_position`.
+        let box_size = Size::new(
+            size.width as f64 * self.scale,
+            size.height as f64 * self.scale,
+        );
+        let border_box = Rect::from_origin_size(Point::ORIGIN, box_size);
         let scaled_pb = (padding + border).map(f64::from);
         let content_position = kurbo::Point {
             x: scaled_pb.left,
@@ -334,7 +352,22 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             x: -self.initial_x,
             y: -self.initial_y,
         }) * transform;
-        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(border_box));
+        // Outer shadows paint outside the box, as far as `draw_outset_box_shadow` reaches.
+        let ink_box = effects
+            .box_shadow
+            .0
+            .iter()
+            .filter(|shadow| !shadow.inset)
+            .fold(border_box, |ink, shadow| {
+                let offset = Vec2::new(
+                    shadow.base.horizontal.px() as f64,
+                    shadow.base.vertical.px() as f64,
+                ) * self.scale;
+                let reach =
+                    (shadow.spread.px() as f64 + shadow.base.blur.px() as f64 * 2.5) * self.scale;
+                ink.union(border_box.inflate(reach, reach) + offset)
+            });
+        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(ink_box));
 
         // Cull elements that fall entirely outside the current clip rectangle. In addition to
         // the viewport, `clip_rect` is narrowed by any ancestor scrollport (see below), so this
@@ -602,7 +635,10 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
             element,
             transform,
             #[cfg(feature = "svg")]
-            svg: element.svg_data(),
+            svg: match element.image_data() {
+                Some(blitz_dom::node::ImageData::Svg(svg)) => Some(svg),
+                _ => None,
+            },
             text_input: element.text_input_data(),
             list_item: element.list_item_data.as_deref(),
             devtools: self.dom.devtools(),
@@ -619,7 +655,22 @@ fn to_image_quality(image_rendering: ImageRendering) -> peniko::ImageQuality {
     }
 }
 
-/// Ensure that the `resized_image` field has a correctly sized image
+/// The transform from an SVG's rendered tree to a viewport of the given size.
+#[cfg(feature = "svg")]
+fn svg_viewport_affine(svg: &blitz_dom::node::SvgImageData, width: f32, height: f32) -> Affine {
+    let t = svg.viewport_transform(width, height);
+    Affine::new([t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f64::from))
+}
+
+/// The brush an `<img>` is painted with.
+///
+/// The image is clamped (`Extend::Pad`), not repeated: a replaced element is
+/// painted exactly once, and when it is drawn at a non-integer scale the
+/// samples nearest its edges are interpolated with whatever lies beyond
+/// them. With `Repeat` that is the *opposite* edge of the same image, which
+/// shows up as a one pixel line of the far edge's colour along each side.
+/// Pad interpolates with the edge itself, as browsers do for `<img>`.
+/// (Backport of upstream #1201.)
 fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> peniko::ImageBrush {
     peniko::ImageBrush {
         image: ImageData {
@@ -630,8 +681,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
             alpha_type: peniko::ImageAlphaType::Alpha,
         },
         sampler: ImageSampler {
-            x_extend: peniko::Extend::Repeat,
-            y_extend: peniko::Extend::Repeat,
+            x_extend: peniko::Extend::Pad,
+            y_extend: peniko::Extend::Pad,
             quality,
             alpha: 1.0,
         },
@@ -648,7 +699,7 @@ struct ElementCx<'dom, 'a> {
     element: &'dom ElementData,
     transform: Affine,
     #[cfg(feature = "svg")]
-    svg: Option<&'dom usvg::Tree>,
+    svg: Option<&'dom blitz_dom::node::SvgImageData>,
     text_input: Option<&'dom TextInputData>,
     list_item: Option<&'dom ListItemLayout>,
     devtools: &'dom DevtoolSettings,
@@ -807,11 +858,13 @@ impl ElementCx<'_, '_> {
             // Filters can bring offscreen source pixels into the viewport.
             // Keep their source intact, including filters on ancestor boxes.
             let mut ancestor = Some(self.node.id);
+            // In scene space, like the glyphs: a sub-document (an iframe) is
+            // painted at its offset in the parent's scene.
             let mut viewport = Some(Rect::new(
-                0.0,
-                0.0,
-                self.context.width as f64,
-                self.context.height as f64,
+                self.context.initial_x,
+                self.context.initial_y,
+                self.context.initial_x + self.context.width as f64,
+                self.context.initial_y + self.context.height as f64,
             ));
             while let Some(id) = ancestor {
                 let Some(node) = self.context.dom.get_node(id) else {
@@ -848,7 +901,12 @@ impl ElementCx<'_, '_> {
                     );
                 }
             }
-            let bounds = cached.as_ref().and_then(|cache| cache.get(&self.node.id));
+            // A cache that missed a relayout no longer matches the lines; paint
+            // them all rather than cull with stale bounds.
+            let bounds = cached
+                .as_ref()
+                .and_then(|cache| cache.get(&self.node.id))
+                .filter(|bounds| bounds.len() == text_layout.layout.len());
             let lines = text_layout
                 .layout
                 .lines()
@@ -857,7 +915,7 @@ impl ElementCx<'_, '_> {
                     let outside = viewport
                         .zip(bounds)
                         .and_then(|(viewport, bounds)| {
-                            bounds[index].map(|bounds| {
+                            bounds.get(index).copied().flatten().map(|bounds| {
                                 let bounds = transform.transform_rect_bbox(bounds);
                                 bounds.is_finite()
                                     && (bounds.x1 < viewport.x0
@@ -1097,26 +1155,34 @@ impl ElementCx<'_, '_> {
             return;
         };
 
-        let width = self.frame.content_box.width() as u32;
-        let height = self.frame.content_box.height() as u32;
-        let svg_size = svg.size();
+        let width = self.frame.content_box.width() as f32;
+        let height = self.frame.content_box.height() as f32;
+        let svg_size = svg.tree.size();
 
         let x = self.frame.content_box.origin().x;
         let y = self.frame.content_box.origin().y;
 
-        // let object_fit = self.style.clone_object_fit();
+        // An SVG with an aspect ratio but no natural size is sized by the default sizing
+        // algorithm, which for `none` and `scale-down` contains it within the content box.
+        let object_fit = match self.style.clone_object_fit() {
+            ObjectFit::None | ObjectFit::ScaleDown
+                if svg.intrinsic_width().is_none()
+                    && svg.intrinsic_height().is_none()
+                    && svg.viewbox_aspect_ratio().is_some() =>
+            {
+                ObjectFit::Contain
+            }
+            object_fit => object_fit,
+        };
         let object_position = self.style.clone_object_position();
 
         // Apply object-fit algorithm
-        let container_size = taffy::Size {
-            width: width as f32,
-            height: height as f32,
-        };
+        let container_size = taffy::Size { width, height };
         let object_size = taffy::Size {
             width: svg_size.width(),
             height: svg_size.height(),
         };
-        let paint_size = compute_object_fit(container_size, Some(object_size), ObjectFit::Contain);
+        let paint_size = compute_object_fit(container_size, Some(object_size), object_fit);
 
         // Compute object-position
         let x_offset = object_position.horizontal.resolve(
@@ -1128,15 +1194,46 @@ impl ElementCx<'_, '_> {
         let x = x + x_offset.px() as f64;
         let y = y + y_offset.px() as f64;
 
-        let x_scale = paint_size.width as f64 / object_size.width as f64;
-        let y_scale = paint_size.height as f64 / object_size.height as f64;
+        let viewport = svg_viewport_affine(svg, paint_size.width, paint_size.height);
+        let transform = (self.transform * viewport).then_translate(Vec2 { x, y });
 
-        let transform = self
-            .transform
-            .pre_scale_non_uniform(x_scale, y_scale)
-            .then_translate(Vec2 { x, y });
+        self.with_replaced_content_clip(
+            scene,
+            container_size,
+            paint_size,
+            x_offset.px(),
+            y_offset.px(),
+            |scene| {
+                anyrender_svg::render_svg_tree(scene, &svg.tree, transform);
+            },
+        );
+    }
 
-        anyrender_svg::render_svg_tree(scene, svg, transform);
+    /// Clip replaced content to the content box when its object-fit/object-position
+    /// rect overflows it.
+    fn with_replaced_content_clip<S: PaintScene>(
+        &self,
+        scene: &mut S,
+        container_size: taffy::Size<f32>,
+        paint_size: taffy::Size<f32>,
+        x_offset: f32,
+        y_offset: f32,
+        paint: impl FnOnce(&mut S),
+    ) {
+        let overflows = x_offset < 0.0
+            || y_offset < 0.0
+            || x_offset + paint_size.width > container_size.width
+            || y_offset + paint_size.height > container_size.height;
+        self.context.layer_manager.maybe_with_layer(
+            scene,
+            overflows,
+            1.0,
+            self.transform,
+            &self.frame.content_box_path(),
+            None,
+            None,
+            paint,
+        );
     }
 
     fn draw_image(&self, scene: &mut impl PaintScene) {
@@ -1179,7 +1276,16 @@ impl ElementCx<'_, '_> {
                 .pre_translate(Vec2 { x, y })
                 .pre_scale_non_uniform(x_scale, y_scale);
 
-            scene.draw_image(to_peniko_image(image, quality).as_ref(), transform);
+            self.with_replaced_content_clip(
+                scene,
+                container_size,
+                paint_size,
+                x_offset.px(),
+                y_offset.px(),
+                |scene| {
+                    scene.draw_image(to_peniko_image(image, quality).as_ref(), transform);
+                },
+            );
         }
     }
 

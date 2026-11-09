@@ -39,11 +39,8 @@ retained for Slint is documented in [`patches/parley/README.md`](patches/parley/
 
 ## Candle
 
-The optional CPU embedding runtime uses Candle under Apache-2.0. The locally
-patched `candle-core` 0.11.0 retains its upstream license in
-[`crates/candle-core/LICENSE`](crates/candle-core/LICENSE). Its ZIP 9 adaptation,
-source checksum, and removal condition are documented in
-[`patches/candle/README.md`](patches/candle/README.md).
+The optional CPU embedding runtime uses the published Candle crates under
+Apache-2.0. Published packages and checksums are pinned in `Cargo.lock`.
 
 ## Reader integration dependencies
 

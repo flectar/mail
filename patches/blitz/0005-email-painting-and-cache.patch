@@ -87,10 +87,18 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index f1ff10d..237a30d 100644
+index 407fd1a..4766ece 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
-@@ -45,65 +45,10 @@ use peniko::{self, Fill, ImageData, ImageSampler};
+@@ -41,69 +41,18 @@ use style::{
+ };
+ 
+ use kurbo::{self, Affine, Insets, Point, Rect, Shape, Size, Stroke, Vec2};
++
++/// How far past the viewport (in CSS px) elements are still painted, for ink that
++/// their boxes leave out.
++const CULL_MARGIN: f64 = 64.0;
+ use peniko::{self, Fill, ImageData, ImageSampler};
  use style::values::generics::color::GenericColor;
  use taffy::Layout;
  
@@ -157,7 +165,7 @@ index f1ff10d..237a30d 100644
      /// Input parameters (read only) for generating the Scene
      pub(crate) dom: &'dom BaseDocument,
      pub(crate) scale: f64,
-@@ -149,6 +94,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -149,6 +98,7 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
          let root_element_id = dom.try_root_element().map(|el| el.id);
  
          Self {
@@ -165,7 +173,51 @@ index f1ff10d..237a30d 100644
              dom,
              scale,
              width,
-@@ -529,7 +475,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -229,8 +179,17 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+ 
+         // The root clip rectangle is the viewport (in screen coordinates, with the
+         // initial offset already subtracted). Elements outside of this are culled, and
+-        // scrollports narrow this rectangle further for their descendants.
+-        let viewport_clip_rect = Rect::new(0.0, 0.0, self.width as f64, self.height as f64);
++        // scrollports narrow this rectangle further for their descendants. It only
++        // culls, so it extends past the viewport by a margin: boxes and their scrollable
++        // overflow leave out ink such as outlines and glyphs that overflow a short
++        // `line-height`, which would otherwise be cut off at the edge of a tile.
++        let margin = CULL_MARGIN * self.scale;
++        let viewport_clip_rect = Rect::new(
++            -margin,
++            -margin,
++            self.width as f64 + margin,
++            self.height as f64 + margin,
++        );
+ 
+         self.render_element(
+             scene,
+@@ -388,7 +347,22 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+             x: -self.initial_x,
+             y: -self.initial_y,
+         }) * transform;
+-        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(border_box));
++        // Outer shadows paint outside the box, as far as `draw_outset_box_shadow` reaches.
++        let ink_box = effects
++            .box_shadow
++            .0
++            .iter()
++            .filter(|shadow| !shadow.inset)
++            .fold(border_box, |ink, shadow| {
++                let offset = Vec2::new(
++                    shadow.base.horizontal.px() as f64,
++                    shadow.base.vertical.px() as f64,
++                ) * self.scale;
++                let reach =
++                    (shadow.spread.px() as f64 + shadow.base.blur.px() as f64 * 2.5) * self.scale;
++                ink.union(border_box.inflate(reach, reach) + offset)
++            });
++        let screen_bbox = screen_transform.transform_rect_bbox(overflow.union(ink_box));
+ 
+         // Cull elements that fall entirely outside the current clip rectangle. In addition to
+         // the viewport, `clip_rect` is narrowed by any ancestor scrollport (see below), so this
+@@ -529,7 +503,6 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                          cx.draw_background(scene);
                          cx.draw_inset_box_shadow(scene);
                          cx.draw_table_row_backgrounds(scene);
@@ -173,7 +225,7 @@ index f1ff10d..237a30d 100644
                          cx.draw_border(scene);
                          cx.stroke_devtools(scene);
  
-@@ -574,6 +519,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
+@@ -574,6 +547,11 @@ impl<'dom, 'a> BlitzDomPainter<'dom, 'a> {
                              },
                          );
  
@@ -185,7 +237,22 @@ index f1ff10d..237a30d 100644
                          // Overlay scrollbars, drawn unscrolled above the
                          // clipped content.
                          #[cfg(feature = "scrollbars")]
-@@ -675,8 +625,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
+@@ -679,19 +657,27 @@ fn svg_viewport_affine(svg: &blitz_dom::node::SvgImageData, width: f32, height:
+     Affine::new([t.sx, t.ky, t.kx, t.sy, t.tx, t.ty].map(f64::from))
+ }
+ 
+-/// Ensure that the `resized_image` field has a correctly sized image
++/// The brush an `<img>` is painted with.
++///
++/// The image is clamped (`Extend::Pad`), not repeated: a replaced element is
++/// painted exactly once, and when it is drawn at a non-integer scale the
++/// samples nearest its edges are interpolated with whatever lies beyond
++/// them. With `Repeat` that is the *opposite* edge of the same image, which
++/// shows up as a one pixel line of the far edge's colour along each side.
++/// Pad interpolates with the edge itself, as browsers do for `<img>`.
++/// (Backport of upstream #1201.)
+ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> peniko::ImageBrush {
+     peniko::ImageBrush {
          image: ImageData {
              data: image.data.clone(),
              format: peniko::ImageFormat::Rgba8,
@@ -196,7 +263,14 @@ index f1ff10d..237a30d 100644
              alpha_type: peniko::ImageAlphaType::Alpha,
          },
          sampler: ImageSampler {
-@@ -853,16 +803,79 @@ impl ElementCx<'_, '_> {
+-            x_extend: peniko::Extend::Repeat,
+-            y_extend: peniko::Extend::Repeat,
++            x_extend: peniko::Extend::Pad,
++            y_extend: peniko::Extend::Pad,
+             quality,
+             alpha: 1.0,
+         },
+@@ -863,16 +849,86 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -206,11 +280,13 @@ index f1ff10d..237a30d 100644
 +            // Filters can bring offscreen source pixels into the viewport.
 +            // Keep their source intact, including filters on ancestor boxes.
 +            let mut ancestor = Some(self.node.id);
++            // In scene space, like the glyphs: a sub-document (an iframe) is
++            // painted at its offset in the parent's scene.
 +            let mut viewport = Some(Rect::new(
-+                0.0,
-+                0.0,
-+                self.context.width as f64,
-+                self.context.height as f64,
++                self.context.initial_x,
++                self.context.initial_y,
++                self.context.initial_x + self.context.width as f64,
++                self.context.initial_y + self.context.height as f64,
 +            ));
 +            while let Some(id) = ancestor {
 +                let Some(node) = self.context.dom.get_node(id) else {
@@ -247,7 +323,12 @@ index f1ff10d..237a30d 100644
 +                    );
 +                }
 +            }
-+            let bounds = cached.as_ref().and_then(|cache| cache.get(&self.node.id));
++            // A cache that missed a relayout no longer matches the lines; paint
++            // them all rather than cull with stale bounds.
++            let bounds = cached
++                .as_ref()
++                .and_then(|cache| cache.get(&self.node.id))
++                .filter(|bounds| bounds.len() == text_layout.layout.len());
 +            let lines = text_layout
 +                .layout
 +                .lines()
@@ -256,7 +337,7 @@ index f1ff10d..237a30d 100644
 +                    let outside = viewport
 +                        .zip(bounds)
 +                        .and_then(|(viewport, bounds)| {
-+                            bounds[index].map(|bounds| {
++                            bounds.get(index).copied().flatten().map(|bounds| {
 +                                let bounds = transform.transform_rect_bbox(bounds);
 +                                bounds.is_finite()
 +                                    && (bounds.x1 < viewport.x0
@@ -280,7 +361,7 @@ index f1ff10d..237a30d 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -874,16 +887,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +940,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -299,7 +380,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -950,6 +963,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +1016,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -307,7 +388,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -1005,6 +1019,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1072,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -315,7 +396,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -1157,8 +1172,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1264,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
@@ -327,10 +408,10 @@ index f1ff10d..237a30d 100644
                  .transform
                  .pre_translate(Vec2 { x, y })
 diff --git a/crates/blitz-paint/src/render/background.rs b/crates/blitz-paint/src/render/background.rs
-index ba7e5b0..7099236 100644
+index e5e048e..80acec2 100644
 --- a/crates/blitz-paint/src/render/background.rs
 +++ b/crates/blitz-paint/src/render/background.rs
-@@ -255,16 +255,13 @@ impl ElementCx<'_, '_> {
+@@ -255,16 +255,14 @@ impl ElementCx<'_, '_> {
                  ]
              })
              .collect();
@@ -348,17 +429,34 @@ index ba7e5b0..7099236 100644
 +        for row in &table.rows {
 +            row_colors.resize(usize::from(row.index) + 1, [None, None]);
 +            row_colors[usize::from(row.index)] = [
-+                row.group.and_then(background_color), background_color(row.node_id),
++                row.group.and_then(background_color),
++                background_color(row.node_id),
 +            ];
 +        }
          let has_color =
              |colors: &[[Option<Color>; 2]]| colors.iter().flatten().any(Option::is_some);
          if !has_color(&column_colors) && !has_color(&row_colors) {
-@@ -529,7 +526,10 @@ impl ElementCx<'_, '_> {
+@@ -517,6 +515,13 @@ impl ElementCx<'_, '_> {
+             });
+         let tile_rect = Rect::new(0.0, 0.0, x.rect_len, y.rect_len);
+ 
++        // `Repeat` and `Round` fill the whole area with one rect and let the
++        // brush repeat the image, so those axes need `Extend::Repeat`. The
++        // other axes paint each tile once and keep the `<img>` brush's `Pad`.
++        let mut brush = to_peniko_image(image_data, quality);
++        brush.sampler.x_extend = brush_extend(*repeat_x);
++        brush.sampler.y_extend = brush_extend(*repeat_y);
++
+         for hc in 0..y.count {
+             for wc in 0..x.count {
+                 let transform = transform.then_translate(Vec2 {
+@@ -527,8 +532,11 @@ impl ElementCx<'_, '_> {
+                 scene.fill(
                      peniko::Fill::NonZero,
                      transform,
-                     to_peniko_image(image_data, quality).as_ref(),
+-                    to_peniko_image(image_data, quality).as_ref(),
 -                    None,
++                    brush.as_ref(),
 +                    Some(Affine::scale_non_uniform(
 +                        image_data.width as f64 / image_data.pixel_width as f64,
 +                        image_data.height as f64 / image_data.pixel_height as f64,
@@ -366,24 +464,39 @@ index ba7e5b0..7099236 100644
                      &tile_rect,
                  );
              }
+@@ -839,6 +847,16 @@ struct AxisTiling {
+ ///
+ /// The fill rect is in image pixel coordinates (the drawing transform is
+ /// pre-scaled by `ratio`), while translations are in device pixels.
++/// How a background image brush extends along an axis with this repeat.
++fn brush_extend(repeat: BackgroundRepeatKeyword) -> peniko::Extend {
++    use BackgroundRepeatKeyword::*;
++
++    match repeat {
++        Repeat | Round => peniko::Extend::Repeat,
++        Space | NoRepeat => peniko::Extend::Pad,
++    }
++}
++
+ fn raster_axis_tiling(
+     repeat: BackgroundRepeatKeyword,
+     origin_start: f64,
 diff --git a/crates/blitz-paint/src/render/border.rs b/crates/blitz-paint/src/render/border.rs
-index c7ecb2e..65ea196 100644
+index c7ecb2e..da3370f 100644
 --- a/crates/blitz-paint/src/render/border.rs
 +++ b/crates/blitz-paint/src/render/border.rs
-@@ -1,17 +1,17 @@
+@@ -1,17 +1,16 @@
  use anyrender::PaintScene;
 +use blitz_dom::CollapsedEdge;
  use blitz_dom::node::SpecialElementData;
--use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
-+use kurbo::{
-+    Affine, BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2,
-+};
+ use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
  use peniko::{Color, Fill};
  use smallvec::SmallVec;
 -use style::{
 -    computed_values::border_collapse::T as BorderCollapse,
 -    values::computed::{BorderStyle, OutlineStyle},
 -};
++use style::color::AbsoluteColor;
 +use style::values::computed::{BorderStyle, OutlineStyle};
  
  use crate::{
@@ -394,7 +507,28 @@ index c7ecb2e..65ea196 100644
  };
  
  /// A darker version of a colour (mirrors WebKit/Blink's `Color::Dark`): the
-@@ -147,6 +147,9 @@ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<P
+@@ -104,6 +103,20 @@ fn dashed_ratios(thickness: f64, scale: f64) -> (f64, f64) {
+     }
+ }
+ 
++/// The gap that fits a whole number of dashes along an open line of `length`,
++/// starting and ending with a dash, closest to `gap` (Blink's
++/// `SelectBestDashGap`).
++fn best_dash_gap(length: f64, dash: f64, gap: f64) -> f64 {
++    let fewer = ((length + gap) / (dash + gap)).floor().max(2.0);
++    let gap_for = |dashes: f64| (length - dashes * dash) / (dashes - 1.0);
++    let (fewer_gap, more_gap) = (gap_for(fewer), gap_for(fewer + 1.0));
++    if more_gap <= 0.0 || (fewer_gap - gap).abs() < (more_gap - gap).abs() {
++        fewer_gap
++    } else {
++        more_gap
++    }
++}
++
+ /// Return `count` points spaced `spacing` apart (by arc length) along `path`,
+ /// starting at its beginning. Used to place dots along a rounded border.
+ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<Point> {
+@@ -147,6 +160,9 @@ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<P
  impl ElementCx<'_, '_> {
      /// Draw all borders for a node
      pub(crate) fn draw_border(&self, scene: &mut impl PaintScene) {
@@ -404,23 +538,17 @@ index c7ecb2e..65ea196 100644
          let style = &*self.style;
          let border = style.get_border();
          let current_color = style.clone_color();
-@@ -509,83 +512,205 @@ impl ElementCx<'_, '_> {
+@@ -509,83 +525,338 @@ impl ElementCx<'_, '_> {
          scene.pop_layer();
      }
  
 -    pub(crate) fn draw_table_borders(&self, scene: &mut impl PaintScene) {
--        let SpecialElementData::TableRoot(table) = &self.element.special_data else {
--            return;
 +    /// Whether a table paints this element's border in the collapsed model,
-+    /// for the table box itself and for each of its cells.
++    /// for the table box itself and for each of its cells. Out-of-flow
++    /// children take no part in the table grid and keep their own border.
 +    pub(crate) fn border_painted_by_table(&self) -> bool {
-+        let collapsed = |data: &SpecialElementData| {
-+            matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some())
-         };
--        // Borders are only handled at the table level when BorderCollapse::Collapse
--        if table.border_collapse != BorderCollapse::Collapse {
--            return;
--        }
++        let collapsed = |data: &SpecialElementData| matches!(data, SpecialElementData::TableRoot(table) if table.collapsed_borders.is_some());
++        let id = self.node.id;
 +        collapsed(&self.element.special_data)
 +            || self
 +                .node
@@ -428,67 +556,52 @@ index c7ecb2e..65ea196 100644
 +                .get()
 +                .and_then(|parent| self.context.dom.get_node(parent))
 +                .and_then(|parent| parent.element_data())
-+                .is_some_and(|parent| collapsed(&parent.special_data))
++                .is_some_and(|parent| match &parent.special_data {
++                    SpecialElementData::TableRoot(table) => {
++                        table.collapsed_borders.is_some()
++                            && !table.oof_children.iter().any(|&(child, _)| child == id)
++                    }
++                    _ => false,
++                })
 +    }
- 
--        let Some(grid_info) = &mut *table.computed_grid_info.borrow_mut() else {
++
 +    /// Paint the resolved borders of a `border-collapse: collapse` table, on
 +    /// top of its cells' backgrounds. Each edge is centred on its grid line
 +    /// and painted once, merging runs of identical segments so long borders
 +    /// are single shapes without seams.
 +    pub(crate) fn draw_collapsed_table_borders(&self, scene: &mut impl PaintScene) {
-+        let SpecialElementData::TableRoot(table) = &self.element.special_data else {
+         let SpecialElementData::TableRoot(table) = &self.element.special_data else {
              return;
          };
--        let Some(border_style) = table.border_style.as_deref() else {
+-        // Borders are only handled at the table level when BorderCollapse::Collapse
+-        if table.border_collapse != BorderCollapse::Collapse {
 +        let Some(borders) = &table.collapsed_borders else {
-             return;
-         };
--
--        let outer_border_style = self.style.get_border();
--
--        let cols = PhysicalTracks::from_tracks(&grid_info.columns);
--        let rows = PhysicalTracks::from_tracks(&grid_info.rows);
--
--        // TODO: support different colors for different borders
--        let current_color = self.style.clone_color();
--        let border_color = border_style
--            .border_top_color
--            .resolve_to_absolute(&current_color)
--            .as_srgb_color();
--
--        // No need to draw transparent borders (as they won't be visible anyway)
--        if border_color == Color::TRANSPARENT {
-+        let grid_info = table.computed_grid_info.borrow();
-+        let Some(grid_info) = grid_info.as_ref() else {
              return;
 -        }
 -
--        // Border widths are not adjusted for border-style in computed styles,
--        // so a border with `none`/`hidden` style must be treated as zero-width.
--        if border_style.border_top_style.none_or_hidden() {
+-        let Some(grid_info) = &mut *table.computed_grid_info.borrow_mut() else {
 +        };
++        let grid_info = table.computed_grid_info.borrow();
++        let Some(grid_info) = grid_info.as_ref() else {
+             return;
+         };
+-        let Some(border_style) = table.border_style.as_deref() else {
 +        let (columns, rows) = (&grid_info.columns.positions, &grid_info.rows.positions);
 +        let (column_count, row_count) = (borders.columns, borders.rows);
-+        if column_count == 0 || row_count == 0 || columns.len() < column_count || rows.len() < row_count
++        if column_count == 0
++            || row_count == 0
++            || columns.len() < column_count
++            || rows.len() < row_count
 +        {
              return;
-         }
- 
--        // The borders are laid out as the gutters between the tracks, and as the border
--        // of the table around them. Track positions are relative to the table's border box.
--        let border_width = table.style.gap.map(|gap| gap.into_raw().value() as f64);
--        let left = cols.origin() as f64 - border_width.width;
--        let right = (cols.origin() + cols.span()) as f64 + border_width.width;
--        let top = rows.origin() as f64 - border_width.height;
--        let bottom = (rows.origin() + rows.span()) as f64 + border_width.height;
--
--        let mut fill = |x0: f64, y0: f64, x1: f64, y1: f64| {
--            let shape = Rect::new(x0, y0, x1, y1).scale_from_origin(self.scale);
--            scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
++        }
++
 +        let rtl = table.rtl;
 +        // Grid line positions in the table's border box. Vertical lines are
 +        // numbered in column order, which runs right to left in RTL tables.
++        // Layout rounds each cell's position within the table, so rounding the
++        // lines the same way keeps borders on the cells' edges instead of
++        // smearing them across two pixels.
 +        let column_line = |line: usize| -> f64 {
 +            f64::from(match (rtl, line < column_count) {
 +                (false, true) => columns[line].start,
@@ -496,6 +609,7 @@ index c7ecb2e..65ea196 100644
 +                (true, true) => columns[line].end,
 +                (true, false) => columns[column_count - 1].start,
 +            })
++            .round()
 +        };
 +        let row_line = |line: usize| -> f64 {
 +            f64::from(if line < row_count {
@@ -503,35 +617,56 @@ index c7ecb2e..65ea196 100644
 +            } else {
 +                rows[row_count - 1].end
 +            })
++            .round()
 +        };
 +        // The physical extent of a vertical edge to the left and right of its line.
 +        let vertical_extent = |edge: &CollapsedEdge| -> (f64, f64) {
 +            let (before, after) = (f64::from(edge.before()), f64::from(edge.after()));
-+            if rtl { (after, before) } else { (before, after) }
++            if rtl {
++                (after, before)
++            } else {
++                (before, after)
++            }
 +        };
 +        // How far the vertical edges meeting horizontal line `line` at vertical
 +        // line `joint` reach to the left and right, so corners are covered.
 +        let joint_extent = |line: usize, joint: usize| -> (f64, f64) {
-+            let above = line.checked_sub(1).and_then(|row| borders.vertical(row, joint));
-+            let below = (line < row_count).then(|| borders.vertical(line, joint)).flatten();
++            let above = line
++                .checked_sub(1)
++                .and_then(|row| borders.vertical(row, joint));
++            let below = (line < row_count)
++                .then(|| borders.vertical(line, joint))
++                .flatten();
 +            [above, below]
 +                .into_iter()
 +                .flatten()
 +                .map(vertical_extent)
-+                .fold((0.0, 0.0), |(l, r), (el, er)| (f64::max(l, el), f64::max(r, er)))
++                .fold((0.0, 0.0), |(l, r), (el, er)| {
++                    (f64::max(l, el), f64::max(r, er))
++                })
          };
  
--        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
--        // The vertical borders are drawn between them so that no corner is painted twice.
--        if outer_border_style.border_top_style != BorderStyle::Hidden {
--            fill(left, top, right, top + border_width.height);
--        }
--        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
--            fill(left, bottom - border_width.height, right, bottom);
+-        let outer_border_style = self.style.get_border();
++        // Each edge's colour comes from the box that won it, as it is now.
++        let doc = self.context.dom;
++        let painted = |edge: &CollapsedEdge| (*edge, edge.color(doc));
++        // Adjacent edges merge into one run when they paint the same way.
++        // Dashes and dots are laid out per cell edge, as in browsers, so each
++        // edge starts and ends with a dash.
++        let same = |(a, a_color): &(CollapsedEdge, AbsoluteColor),
++                    (b, b_color): &(CollapsedEdge, AbsoluteColor)| {
++            a.width == b.width
++                && a.style == b.style
++                && a_color == b_color
++                && !matches!(a.style, BorderStyle::Dashed | BorderStyle::Dotted)
++        };
+ 
+-        let cols = PhysicalTracks::from_tracks(&grid_info.columns);
+-        let rows = PhysicalTracks::from_tracks(&grid_info.rows);
 +        // Horizontal lines, merged along each line.
 +        for line in 0..=row_count {
 +            let y = row_line(line);
-+            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
++            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
 +            for column in 0..=column_count {
 +                let edge = (column < column_count)
 +                    .then(|| borders.horizontal(line, column))
@@ -545,48 +680,88 @@ index c7ecb2e..65ea196 100644
 +                    } else {
 +                        (start - start_left, end + end_right)
 +                    };
-+                    (*edge, x0, x1)
++                    (painted(edge), x0, x1)
 +                });
 +                run = match (run, segment) {
-+                    (Some((edge, x0, x1)), Some((next, n0, n1))) if edge == next => {
++                    (Some((edge, x0, x1)), Some((next, n0, n1))) if same(&edge, &next) => {
 +                        Some((edge, x0.min(n0), x1.max(n1)))
 +                    }
 +                    (finished, next) => {
-+                        if let Some((edge, x0, x1)) = finished {
++                        if let Some(((edge, color), x0, x1)) = finished {
 +                            let rect = Rect::new(
 +                                x0,
 +                                y - f64::from(edge.before()),
 +                                x1,
 +                                y + f64::from(edge.after()),
 +                            );
-+                            self.fill_collapsed_edge(scene, &edge, rect, true);
++                            self.fill_collapsed_edge(scene, &edge, color, rect, true);
 +                        }
 +                        next
 +                    }
 +                };
 +            }
-         }
--        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
--            fill(left, prev.end as f64, right, next.start as f64);
-+
-+        // Vertical lines, merged down each line.
++        }
+ 
+-        // TODO: support different colors for different borders
+-        let current_color = self.style.clone_color();
+-        let border_color = border_style
+-            .border_top_color
+-            .resolve_to_absolute(&current_color)
+-            .as_srgb_color();
++        // A horizontal edge that outranks the vertical ones meeting it owns their
++        // joint: vertical lines stop at its extent instead of cutting through it.
++        let horizontal_owner = |line: usize, joint: usize| -> Option<&CollapsedEdge> {
++            let left = joint
++                .checked_sub(1)
++                .and_then(|c| borders.horizontal(line, c));
++            let right = (joint < column_count)
++                .then(|| borders.horizontal(line, joint))
++                .flatten();
++            let above = line.checked_sub(1).and_then(|r| borders.vertical(r, joint));
++            let below = (line < row_count)
++                .then(|| borders.vertical(line, joint))
++                .flatten();
++            let owner = [left, right]
++                .into_iter()
++                .flatten()
++                .reduce(|a, b| if b.outranks(a) { b } else { a })?;
++            [above, below]
++                .into_iter()
++                .flatten()
++                .all(|vertical| owner.outranks(vertical))
++                .then_some(owner)
++        };
+ 
+-        // No need to draw transparent borders (as they won't be visible anyway)
+-        if border_color == Color::TRANSPARENT {
+-            return;
++        // Vertical lines, merged down each line where segments touch.
 +        for line in 0..=column_count {
 +            let x = column_line(line);
-+            let mut run: Option<(CollapsedEdge, f64, f64)> = None;
++            let mut run: Option<((CollapsedEdge, AbsoluteColor), f64, f64)> = None;
 +            for row in 0..=row_count {
 +                let segment = (row < row_count)
 +                    .then(|| borders.vertical(row, line))
 +                    .flatten()
-+                    .map(|edge| (*edge, row_line(row), row_line(row + 1)));
++                    .and_then(|edge| {
++                        let y0 = row_line(row)
++                            + horizontal_owner(row, line).map_or(0.0, |h| f64::from(h.after()));
++                        let y1 = row_line(row + 1)
++                            - horizontal_owner(row + 1, line)
++                                .map_or(0.0, |h| f64::from(h.before()));
++                        (y1 > y0).then(|| (painted(edge), y0, y1))
++                    });
 +                run = match (run, segment) {
-+                    (Some((edge, y0, _)), Some((next, _, n1))) if edge == next => {
++                    (Some((edge, y0, y1)), Some((next, n0, n1)))
++                        if same(&edge, &next) && n0 <= y1 =>
++                    {
 +                        Some((edge, y0, n1))
 +                    }
 +                    (finished, next) => {
-+                        if let Some((edge, y0, y1)) = finished {
++                        if let Some(((edge, color), y0, y1)) = finished {
 +                            let (left, right) = vertical_extent(&edge);
 +                            let rect = Rect::new(x - left, y0, x + right, y1);
-+                            self.fill_collapsed_edge(scene, &edge, rect, false);
++                            self.fill_collapsed_edge(scene, &edge, color, rect, false);
 +                        }
 +                        next
 +                    }
@@ -595,26 +770,43 @@ index c7ecb2e..65ea196 100644
          }
 +    }
  
--        // Vertical borders, one segment per row
--        for row in rows.iter() {
--            let (y0, y1) = (row.start as f64, row.end as f64);
--            if outer_border_style.border_left_style != BorderStyle::Hidden {
--                fill(left, y0, left + border_width.width, y1);
-+    /// Fill one merged collapsed edge. Bevelled styles have no single shared
-+    /// light source across a collapsed grid, so they paint as solid lines.
+-        // Border widths are not adjusted for border-style in computed styles,
+-        // so a border with `none`/`hidden` style must be treated as zero-width.
+-        if border_style.border_top_style.none_or_hidden() {
++    /// Fill one merged collapsed edge the way Blink paints collapsed borders
++    /// (`table_painters.cc`): each edge is a top (horizontal) or left
++    /// (vertical) box side, `inset` paints as `ridge` and `outset` as `groove`
++    /// (CSS 2.1 §17.6.3), and patterns are laid out in device pixels.
 +    fn fill_collapsed_edge(
 +        &self,
 +        scene: &mut impl PaintScene,
 +        edge: &CollapsedEdge,
++        color: AbsoluteColor,
 +        rect: Rect,
 +        horizontal: bool,
 +    ) {
-+        let color = edge.color.as_srgb_color();
++        let color = color.as_srgb_color();
++        let rect = rect.scale_from_origin(self.scale);
 +        if color.components[3] <= 0.0 || rect.width() <= 0.0 || rect.height() <= 0.0 {
-+            return;
-+        }
-+        let thickness = if horizontal { rect.height() } else { rect.width() };
-+        let length = if horizontal { rect.width() } else { rect.height() };
+             return;
+         }
+-
+-        // The borders are laid out as the gutters between the tracks, and as the border
+-        // of the table around them. Track positions are relative to the table's border box.
+-        let border_width = table.style.gap.map(|gap| gap.into_raw().value() as f64);
+-        let left = cols.origin() as f64 - border_width.width;
+-        let right = (cols.origin() + cols.span()) as f64 + border_width.width;
+-        let top = rows.origin() as f64 - border_width.height;
+-        let bottom = (rows.origin() + rows.span()) as f64 + border_width.height;
+-
+-        let mut fill = |x0: f64, y0: f64, x1: f64, y1: f64| {
+-            let shape = Rect::new(x0, y0, x1, y1).scale_from_origin(self.scale);
+-            scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
++        let (thickness, length) = if horizontal {
++            (rect.height(), rect.width())
++        } else {
++            (rect.width(), rect.height())
++        };
 +        let piece = |offset: f64, size: f64, cross: f64, cross_size: f64| {
 +            if horizontal {
 +                Rect::new(
@@ -630,49 +822,157 @@ index c7ecb2e..65ea196 100644
 +                    rect.x0 + cross + cross_size,
 +                    rect.y0 + offset + size,
 +                )
++            }
+         };
+ 
+-        // Horizontal borders: the outer edges, then the gutters between adjacent row tracks.
+-        // The vertical borders are drawn between them so that no corner is painted twice.
+-        if outer_border_style.border_top_style != BorderStyle::Hidden {
+-            fill(left, top, right, top + border_width.height);
+-        }
+-        if outer_border_style.border_bottom_style != BorderStyle::Hidden {
+-            fill(left, bottom - border_width.height, right, bottom);
+-        }
+-        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
+-            fill(left, prev.end as f64, right, next.start as f64);
+-        }
++        let style = match edge.style {
++            BorderStyle::Inset => BorderStyle::Ridge,
++            BorderStyle::Outset => BorderStyle::Groove,
++            style => style,
++        };
++        // Blink's `BorderEdge::EffectiveStyle`: too thin to show their detail,
++        // doubles and bevels paint solid.
++        let style = match style {
++            BorderStyle::Double if thickness < 3.0 => BorderStyle::Solid,
++            BorderStyle::Ridge | BorderStyle::Groove if thickness <= 1.0 => BorderStyle::Solid,
++            style => style,
++        };
+ 
+-        // Vertical borders, one segment per row
+-        for row in rows.iter() {
+-            let (y0, y1) = (row.start as f64, row.end as f64);
+-            if outer_border_style.border_left_style != BorderStyle::Hidden {
+-                fill(left, y0, left + border_width.width, y1);
++        let mut path = BezPath::new();
++        match style {
++            BorderStyle::Ridge | BorderStyle::Groove => {
++                // An outer half (rounded up) and an inner half, shaded as the
++                // top or left side of `inset` and `outset` borders.
++                let side = if horizontal { Edge::Top } else { Edge::Left };
++                let (outer, inner) = grooved_edge_colors(color, side, style == BorderStyle::Ridge);
++                let split = (thickness / 2.0).ceil();
++                let mut inner_path = BezPath::new();
++                path.extend(piece(0.0, length, 0.0, split).path_elements(0.1));
++                inner_path.extend(piece(0.0, length, split, thickness - split).path_elements(0.1));
++                scene.fill(Fill::NonZero, self.transform, outer, None, &path);
++                scene.fill(Fill::NonZero, self.transform, inner, None, &inner_path);
++                return;
++            }
++            BorderStyle::Dotted if thickness > 3.0 => {
++                // Round dots, the first and last touching the ends.
++                let radius = thickness / 2.0;
++                let step = if length < 2.0 * thickness {
++                    f64::INFINITY
++                } else {
++                    best_dash_gap(length, thickness, thickness) + thickness
++                };
++                let mut center = radius;
++                while center <= length - radius + 0.01 {
++                    let dot = if horizontal {
++                        Point::new(rect.x0 + center, rect.y0 + radius)
++                    } else {
++                        Point::new(rect.x0 + radius, rect.y0 + center)
++                    };
++                    path.extend(Circle::new(dot, radius).path_elements(0.1));
++                    center += step;
++                }
              }
 -            if outer_border_style.border_right_style != BorderStyle::Hidden {
 -                fill(right - border_width.width, y0, right, y1);
-+        };
-+
-+        let mut path = BezPath::new();
-+        match edge.style {
 +            BorderStyle::Dashed | BorderStyle::Dotted => {
-+                let (dash, gap) = if edge.style == BorderStyle::Dashed {
-+                    (thickness * 3.0, thickness * 3.0)
-+                } else {
-+                    (thickness, thickness)
++                // Thin dots are square dashes as long as they are wide.
++                let (dash, gap) = match style {
++                    BorderStyle::Dashed => {
++                        let (dash, gap) = dashed_ratios(thickness, 1.0);
++                        (dash * thickness, gap * thickness)
++                    }
++                    _ => (thickness, thickness),
 +                };
-+                let period = (dash + gap).max(1.0);
-+                // Centre the pattern so both ends look alike.
-+                let count = ((length + gap) / period).floor().max(1.0);
-+                let lead = ((length - (count * period - gap)) / 2.0).max(0.0);
-+                let mut offset = lead;
-+                while offset < length {
-+                    let size = dash.min(length - offset);
-+                    path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
-+                    offset += period;
++                if length <= 2.0 * dash {
++                    // No room for two dashes: Blink draws a solid line.
++                    path.extend(rect.path_elements(0.1));
++                } else {
++                    // Dashes at both ends, spaced as close to `gap` as fits.
++                    let (dash, gap) = if length <= 2.0 * dash + gap {
++                        let fit = length / (2.0 * dash + gap);
++                        (dash * fit, gap * fit)
++                    } else {
++                        (dash, best_dash_gap(length, dash, gap))
++                    };
++                    let mut offset = 0.0;
++                    while offset < length - 0.01 {
++                        let size = dash.min(length - offset);
++                        path.extend(piece(offset, size, 0.0, thickness).path_elements(0.1));
++                        offset += dash + gap;
++                    }
 +                }
              }
 -            for (prev, next) in cols.iter().zip(cols.iter().skip(1)) {
 -                fill(prev.end as f64, y0, next.start as f64, y1);
-+            BorderStyle::Double if thickness >= 3.0 => {
++            BorderStyle::Double => {
 +                let line = (thickness / 3.0).round().max(1.0);
 +                path.extend(piece(0.0, length, 0.0, line).path_elements(0.1));
 +                path.extend(piece(0.0, length, thickness - line, line).path_elements(0.1));
              }
 +            _ => path.extend(rect.path_elements(0.1)),
          }
-+        path.apply_affine(Affine::scale(self.scale));
 +        scene.fill(Fill::NonZero, self.transform, color, None, &path);
      }
  
      /// ❌ dotted - Defines a dotted border
 diff --git a/crates/blitz-paint/src/text.rs b/crates/blitz-paint/src/text.rs
-index 8887f03..2515abb 100644
+index 8887f03..6be7e3a 100644
 --- a/crates/blitz-paint/src/text.rs
 +++ b/crates/blitz-paint/src/text.rs
-@@ -40,16 +40,33 @@ pub(crate) fn draw_inline_backgrounds<'a>(
+@@ -5,6 +5,7 @@ use parley::{Affinity, Cursor, Layout, Line, PositionedLayoutItem, Selection};
+ use peniko::Fill;
+ use std::collections::HashMap;
+ use style::properties::generated::longhands::text_decoration_style::computed_value::T as TextDecorationStyle;
++use style::properties::generated::longhands::visibility::computed_value::T as StyloVisibility;
+ use style::values::computed::{
+     Length, LengthPercentage, TextDecorationLength, TextDecorationLine, TextUnderlinePosition,
+ };
+@@ -16,12 +17,15 @@ use crate::{FONT_EMBOLDEN_ENABLED, SELECTION_COLOR};
+ /// Draw the backgrounds of inline elements (e.g. `<span style="background: ...">`).
+ ///
+ /// Each glyph run carries the node id of the innermost inline element it belongs to
+-/// (via its brush). We look up that node's `background-color` and, if non-transparent,
+-/// fill a rectangle covering the run's advance and its font's ascent/descent so that the
+-/// background sits behind the text.
++/// (via its brush). Every enclosing inline box paints its own background behind the
++/// run, outermost first, so a transparent inner `<span>` does not hide the background
++/// of the `<a>` around it (email call-to-action labels rely on this).
+ ///
+-/// The inline root's own background is painted separately (as a normal block box), so
+-/// runs belonging to the root are skipped to avoid drawing it twice.
++/// The walk stops at the inline root, whose background is painted as a normal block
++/// box, and at the first box that is not `display: inline`. When the inline root is an
++/// anonymous block, its wrapped children keep their DOM parent, so without that check
++/// the walk would repaint the enclosing block's background behind the text.
++/// `display: contents` boxes paint nothing.
+ pub(crate) fn draw_inline_backgrounds<'a>(
+     scene: &mut impl PaintScene,
+     lines: impl Iterator<Item = Line<'a, TextBrush>>,
+@@ -29,6 +33,7 @@ pub(crate) fn draw_inline_backgrounds<'a>(
+     transform: Affine,
+     inline_root_id: NodeId,
+ ) {
++    let mut backgrounds = Vec::new();
+     for line in lines {
+         for item in line.items() {
+             let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+@@ -40,17 +45,37 @@ pub(crate) fn draw_inline_backgrounds<'a>(
                  continue;
              }
  
@@ -686,13 +986,9 @@ index 8887f03..2515abb 100644
 -                .background_color
 -                .resolve_to_absolute(&current_color)
 -                .as_srgb_color();
-+            // Parley commonly associates a run with its text node. Backgrounds
-+            // used by email CTA links live on an enclosing inline `<a>` or
-+            // `<span>`, so walk toward the inline root until a painted
-+            // background is found. Looking at the run node alone makes white
-+            // button labels appear to vanish on the white message canvas.
+-            if bg_color == Color::TRANSPARENT {
++            backgrounds.clear();
 +            let mut candidate_id = Some(node_id);
-+            let mut bg_color = Color::TRANSPARENT;
 +            while let Some(id) = candidate_id {
 +                if id == inline_root_id {
 +                    break;
@@ -701,22 +997,42 @@ index 8887f03..2515abb 100644
 +                    break;
 +                };
 +                if let Some(styles) = node.primary_styles() {
-+                    let current_color = styles.clone_color();
-+                    bg_color = styles
-+                        .get_background()
-+                        .background_color
-+                        .resolve_to_absolute(&current_color)
-+                        .as_srgb_color();
-+                    if bg_color != Color::TRANSPARENT {
-+                        break;
++                    let display = styles.clone_display();
++                    if !display.is_contents() {
++                        if !display.is_inline_flow() {
++                            break;
++                        }
++                        if styles.get_inherited_box().visibility == StyloVisibility::Visible {
++                            let current_color = styles.clone_color();
++                            let color = styles
++                                .get_background()
++                                .background_color
++                                .resolve_to_absolute(&current_color)
++                                .as_srgb_color();
++                            if color != Color::TRANSPARENT {
++                                backgrounds.push(color);
++                            }
++                        }
 +                    }
 +                }
 +                candidate_id = node.parent;
 +            }
-             if bg_color == Color::TRANSPARENT {
++            if backgrounds.is_empty() {
                  continue;
              }
-@@ -249,6 +266,100 @@ pub(crate) struct DrawTextContext {
+ 
+@@ -62,7 +87,9 @@ pub(crate) fn draw_inline_backgrounds<'a>(
+             let y1 = baseline + metrics.descent as f64;
+             let rect = Rect::new(x, y0, x + w, y1);
+ 
+-            scene.fill(Fill::NonZero, transform, bg_color, None, &rect);
++            for color in backgrounds.iter().rev() {
++                scene.fill(Fill::NonZero, transform, *color, None, &rect);
++            }
+         }
+     }
+ }
+@@ -249,6 +276,103 @@ pub(crate) struct DrawTextContext {
      path_scratch: Vec<NodeId>,
      deco_boxes: Vec<LineDecoration>,
      win_ascent_ratios: WinAscentCache,
@@ -788,9 +1104,12 @@ index 8887f03..2515abb 100644
 +                let font_bounds = (*fonts
 +                    .entry((font.data.id(), font.index))
 +                    .or_insert_with(|| font_outline_bounds(font)))?;
++                // Some web fonts draw past their `head` bounding box, so allow a
++                // margin that grows with the font size.
++                let margin = (f64::from(run.font_size()) * 0.25).max(2.0);
 +                let glyph_bounds = Affine::scale(run.font_size() as f64)
 +                    .transform_rect_bbox(font_bounds)
-+                    .inflate(2.0, 2.0);
++                    .inflate(margin, margin);
 +                let synthesis = run
 +                    .synthesis()
 +                    .skew()
@@ -817,7 +1136,7 @@ index 8887f03..2515abb 100644
  }
  
  /// Resolve the CSS `text-decoration-thickness` to a device-pixel size.
-@@ -562,6 +673,7 @@ fn flush_line_decorations(
+@@ -562,6 +686,7 @@ fn flush_line_decorations(
      }
  }
  
@@ -825,7 +1144,7 @@ index 8887f03..2515abb 100644
  pub(crate) fn stroke_text<'a>(
      scene: &mut impl PaintScene,
      lines: impl Iterator<Item = Line<'a, TextBrush>>,
-@@ -570,12 +682,14 @@ pub(crate) fn stroke_text<'a>(
+@@ -570,12 +695,14 @@ pub(crate) fn stroke_text<'a>(
      scale: f64,
      inline_root_id: NodeId,
      context: &mut DrawTextContext,
@@ -840,7 +1159,7 @@ index 8887f03..2515abb 100644
      } = context;
      stack.clear();
      path_scratch.clear();
-@@ -644,24 +758,69 @@ pub(crate) fn stroke_text<'a>(
+@@ -644,24 +771,65 @@ pub(crate) fn stroke_text<'a>(
                      kurbo::Vec2::default()
                  };
  
@@ -906,11 +1225,7 @@ index 8887f03..2515abb 100644
 +                    scene.draw_glyphs(
 +                        font,
 +                        font_size,
-+                        // Email content is continuously scalable. Drawing the
-+                        // source outlines avoids font-program-specific hinting
-+                        // failures that can turn otherwise valid glyphs into
-+                        // empty paths (notably Segoe UI digits on Windows).
-+                        false, // hint
++                        !FONT_EMBOLDEN_ENABLED, // hint
 +                        bytemuck::cast_slice(run.normalized_coords()),
 +                        embolden,
 +                        Fill::NonZero,
