@@ -23,9 +23,12 @@ use slint::SharedString;
 use startup::DeviceSyncUpdates;
 use std::{io::Write, path::Path};
 
-/// The name a saved recovery code is offered under. Saving a new code over
-/// an old one replaces it, as it should: the old one no longer works.
-const RECOVERY_FILE_NAME: &str = "flectar-mail-sync-recovery-code.txt";
+/// The name a saved recovery code is offered under, with the day: a new code
+/// after a reset doesn't meet the file with the old one, which saving never
+/// replaces, and the newest file is the one that works.
+fn recovery_file_name(today: chrono::NaiveDate) -> String {
+    format!("flectar-mail-sync-recovery-code-{today}.txt")
+}
 
 /// Staged copies of the recovery code start with this, so a copy a crash
 /// left behind during the save dialog goes at the next start.
@@ -518,7 +521,11 @@ impl Actions {
                 ..dialog
             };
             documents
-                .export_with(file.to_path_buf(), RECOVERY_FILE_NAME.into(), dialog)
+                .export_with(
+                    file.to_path_buf(),
+                    recovery_file_name(chrono::Local::now().date_naive()),
+                    dialog,
+                )
                 .await
         });
         let app = self.app.clone();
@@ -1202,6 +1209,15 @@ fn reload_accounts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_recovery_code_is_offered_under_a_name_of_its_own() {
+        let day = chrono::NaiveDate::from_ymd_opt(2026, 11, 9).unwrap();
+        assert_eq!(
+            recovery_file_name(day),
+            "flectar-mail-sync-recovery-code-2026-11-09.txt"
+        );
+    }
 
     #[test]
     fn server_addresses_default_to_https_and_keep_plain_http_local() {
