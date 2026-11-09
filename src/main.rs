@@ -42,9 +42,15 @@ mod memory;
 mod message_appearance;
 mod move_picker;
 mod notifications;
+/// What Android asks of the app without its window.
+#[cfg(background_engine)]
+pub use notifications::engine::{
+    EngineServices, check_for_mail, respond_in_background, stop_check, window_ended,
+    window_starting,
+};
 pub use notifications::{
-    Act, Alert, AlertId, Availability, Failure, FixedWords, HostFuture, NewMailNotification,
-    NotificationHost, Response, Route, parse_payload, payload, respond,
+    Act, Alert, AlertId, Availability, Badge, Controls, Failure, FixedWords, HostFuture,
+    NewMailNotification, NotificationHost, Response, Route, parse_payload, payload, respond,
 };
 mod number_format;
 mod oauth_browser;
@@ -1468,13 +1474,19 @@ impl PlatformContext {
         oauth_redirects: flectar_mail_core::oauth::redirect::OAuthRedirectBrokerHandle,
     ) -> Self {
         Self {
-            paths: Paths::new(data_root.join("data"), cache_dir),
+            paths: Self::app_private_paths(data_root, cache_dir),
             external_urls: ExternalUrlOpener::default(),
             notifications: None,
             documents,
             credentials,
             oauth_redirects,
         }
+    }
+
+    /// The profile in a host-owned sandbox, as [`Self::app_private`] keeps it:
+    /// what a process that runs without the window opens too.
+    pub fn app_private_paths(data_root: PathBuf, cache_dir: PathBuf) -> Paths {
+        Paths::new(data_root.join("data"), cache_dir)
     }
 }
 
@@ -7272,6 +7284,8 @@ pub fn run(platform: PlatformContext) -> Result<(), Box<dyn std::error::Error>> 
     composer::save_open_messages();
     let core = state.borrow().core.as_ref().map(CoreMailSource::file_core);
     notifications::withdraw_before_exit(&runtime, core, platform.notifications.clone());
+    // The runtime ends with this function.
+    notifications::core_closed();
     event_loop_result.map_err(|error| {
         renderer_preferences::startup_error(error, use_wgpu && !gpu_startup_completed.get())
     })?;

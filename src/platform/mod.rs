@@ -25,7 +25,7 @@ mod web_authentication;
 /// Whether the system lets the app check for new mail in the background.
 #[cfg(background_checks)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BackgroundRefresh {
+pub enum BackgroundRefresh {
     On,
     /// Turned off for the app, or not allowed on the device.
     Off,

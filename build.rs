@@ -16,7 +16,10 @@ fn main() {
         user_notifications: { any(target_os = "macos", target_os = "ios") },
         // The system suspends the app in the background and wakes it to
         // check for new mail.
-        background_checks: { target_os = "ios" },
+        background_checks: { any(target_os = "ios", target_os = "android") },
+        // The system may start the app without its window, for a check for
+        // new mail or a button on a notification.
+        background_engine: { target_os = "android" },
     }
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("ios") {
