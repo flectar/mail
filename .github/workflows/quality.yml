@@ -28,6 +28,10 @@ jobs:
     if: github.event_name != 'schedule'
     name: Format, lint, and test
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # The Flectar Mail Sync server image, for the end-to-end sync tests.
+      packages: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Free runner disk space
@@ -169,6 +173,23 @@ jobs:
         run: |
           cargo install slint-tr-extractor --version 1.18.1 --locked
           bash scripts/check-translations.sh
+      - name: Fetch the Flectar Mail Sync server for the end-to-end sync tests
+        # The server is private: its image grants this repository read
+        # access. Where it can't be pulled, as in a fork, the end-to-end sync
+        # tests skip.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
+            && docker create --name sync-server ghcr.io/flectar/mail-sync-server:main > /dev/null; then
+            docker cp sync-server:/usr/local/bin/flectar-mail-sync-server "$RUNNER_TEMP/"
+            docker rm sync-server > /dev/null
+            echo "FLECTAR_MAIL_SYNC_SERVER=$RUNNER_TEMP/flectar-mail-sync-server" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The Flectar Mail Sync server image can't be pulled; the end-to-end sync tests skip."
+          fi
+          docker logout ghcr.io > /dev/null || true
       - name: Run the default test suite
         run: cargo test --workspace --all-targets --locked
       - name: Test the vendored Blitz patches
