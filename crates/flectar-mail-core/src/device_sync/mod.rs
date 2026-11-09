@@ -188,6 +188,13 @@ async fn trial_servers(store: &credentials::CredentialStoreHandle) -> Result<Vec
     }
 }
 
+/// Whether sync waits for a payment: the server refused this device's last
+/// uploads, or the group's trial or paid period ended. A device with nothing
+/// to upload never hears the refusal, so what the group pays counts too.
+fn waits_for_payment(refused: bool, billing: Option<&SyncBilling>) -> bool {
+    refused || billing.is_some_and(|billing| billing.status == SyncBillingStatus::Expired)
+}
+
 fn sync_billing(billing: Billing) -> Option<SyncBilling> {
     if !billing.enabled {
         return None;
@@ -279,6 +286,8 @@ pub(crate) struct Service {
     /// Sync is on but its keys couldn't be read yet, say from a locked
     /// keyring: the loop tries again.
     resume_pending: AtomicBool,
+    /// The server refused this device's last uploads until the group pays.
+    refused_uploads: AtomicBool,
 }
 
 impl std::fmt::Debug for Service {
@@ -354,6 +363,7 @@ impl Service {
             wake: Notify::new(),
             ui_ready: Notify::new(),
             resume_pending: AtomicBool::new(false),
+            refused_uploads: AtomicBool::new(false),
             run_lock: tokio::sync::Mutex::new(()),
             share_lock: tokio::sync::Mutex::new(()),
             names: tokio::sync::Mutex::new(Names::default()),
@@ -507,6 +517,7 @@ impl Core {
             });
         }
         credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await?;
+        service.refused_uploads.store(false, Ordering::Relaxed);
         *lock(&service.status) = DeviceSyncStatus {
             state,
             ..DeviceSyncStatus::default()
@@ -1123,8 +1134,11 @@ impl Core {
         }
 
         {
+            service
+                .refused_uploads
+                .store(report.payment_required, Ordering::Relaxed);
             let mut status = lock(&service.status);
-            status.state = if report.payment_required {
+            status.state = if waits_for_payment(report.payment_required, status.billing.as_ref()) {
                 DeviceSyncState::PaymentRequired
             } else {
                 DeviceSyncState::Idle
@@ -1159,6 +1173,9 @@ impl Core {
                     .await?;
             }
             SyncError::PaymentRequired => {
+                self.sync_service()
+                    .refused_uploads
+                    .store(true, Ordering::Relaxed);
                 self.set_sync_state(DeviceSyncState::PaymentRequired);
                 self.check_billing().await;
             }
@@ -1233,14 +1250,14 @@ impl Core {
         self.emit_sync_status();
     }
 
-    /// This device's id in hex, when a send it schedules now can be shared
-    /// with the user's other devices: sync is on, and the group may upload.
     /// This device's id in its sync group (hex), while sync is on.
     pub(crate) fn sync_device(&self) -> Option<String> {
         let client = self.sync_service().client()?;
         Some(hex(&client.identity().device_id()))
     }
 
+    /// This device's id in hex, when a send it schedules now can be shared
+    /// with the user's other devices: sync is on, and the group may upload.
     pub(crate) fn shared_send_device(&self) -> Option<String> {
         let service = self.sync_service();
         let client = service.client()?;
@@ -1289,7 +1306,23 @@ impl Core {
             self.remember_trial(client.identity().server_url()).await;
         }
         *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
-        lock(&service.status).billing = sync_billing(billing);
+        {
+            let mut status = lock(&service.status);
+            status.billing = sync_billing(billing);
+            // A trial or paid period that ended pauses sync, and a payment
+            // ends the pause, between runs too.
+            if matches!(
+                status.state,
+                DeviceSyncState::Idle | DeviceSyncState::PaymentRequired
+            ) {
+                let refused = service.refused_uploads.load(Ordering::Relaxed);
+                status.state = if waits_for_payment(refused, status.billing.as_ref()) {
+                    DeviceSyncState::PaymentRequired
+                } else {
+                    DeviceSyncState::Idle
+                };
+            }
+        }
         self.emit_sync_status();
         Ok(())
     }
@@ -1757,5 +1790,42 @@ impl Core {
         client.delete_group().await.map_err(sync_error)?;
         self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn billing(status: SyncBillingStatus) -> SyncBilling {
+        SyncBilling {
+            status,
+            trial_ends_at: None,
+            paid_until: None,
+            free_until: None,
+            renews: false,
+            plans: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn sync_waits_for_payment_once_the_trial_ends_even_with_nothing_to_upload() {
+        let expired = billing(SyncBillingStatus::Expired);
+        assert!(waits_for_payment(false, Some(&expired)));
+        // A refusal stands until a run gets through.
+        assert!(waits_for_payment(
+            true,
+            Some(&billing(SyncBillingStatus::Active))
+        ));
+        for status in [
+            SyncBillingStatus::Trial,
+            SyncBillingStatus::Active,
+            SyncBillingStatus::PastDue,
+            SyncBillingStatus::Granted,
+        ] {
+            assert!(!waits_for_payment(false, Some(&billing(status))));
+        }
+        // A server that doesn't charge.
+        assert!(!waits_for_payment(false, None));
     }
 }
