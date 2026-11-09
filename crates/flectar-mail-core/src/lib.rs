@@ -4734,8 +4734,32 @@ impl Core {
                 MAX_DRAFT_BODY_BYTES / (1024 * 1024)
             )));
         }
+        // A save replaces the open draft, in place while it is still this
+        // account's draft. Otherwise, as in Thunderbird, it becomes a new
+        // draft, so one sent or deleted elsewhere is kept. Only an in-place
+        // save may reuse staged files, since the old copy's go with it.
+        let previous = match args.draft_id {
+            Some(id) => {
+                self.db
+                    .read(move |conn| {
+                        Ok(conn
+                            .query_row(
+                                "SELECT account_id, is_draft FROM messages WHERE id = ?1",
+                                rusqlite::params![id],
+                                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
+                            )
+                            .optional()?)
+                    })
+                    .await?
+            }
+            None => None,
+        };
+        let in_place = match (args.draft_id, previous) {
+            (Some(id), Some((account_id, true))) if account_id == args.account_id => Some(id),
+            _ => None,
+        };
         let staging_root = self.paths.draft_attachments_dir();
-        let reusable_paths = if let Some(draft_id) = args.draft_id {
+        let reusable_paths = if let Some(draft_id) = in_place {
             self.db
                 .read(move |conn| {
                     let mut statement = conn
@@ -4844,7 +4868,7 @@ impl Core {
                     None => None,
                 };
 
-                let draft_id = match args.draft_id {
+                let draft_id = match in_place {
                     Some(id) => {
                         let updated = tx.execute(
                             "UPDATE messages SET subject = ?2, to_json = ?3, cc_json = ?4,
@@ -11133,8 +11157,19 @@ mod draft_staging_tests {
         tokio::fs::write(&first_source, b"first").await.unwrap();
         tokio::fs::write(&second_source, b"second").await.unwrap();
 
+        // Fail the save after its attachment is staged.
+        core.db
+            .write(|conn| {
+                conn.execute_batch(
+                    "CREATE TRIGGER fail_draft_attachments BEFORE INSERT ON draft_attachments
+                     BEGIN SELECT RAISE(ABORT, 'forced failure'); END;",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
         assert!(
-            core.save_draft(draft_args(Some(999_999), &first_source, "first.txt"))
+            core.save_draft(draft_args(None, &first_source, "first.txt"))
                 .await
                 .is_err()
         );
@@ -11144,6 +11179,13 @@ mod draft_staging_tests {
                 .count(),
             0
         );
+        core.db
+            .write(|conn| {
+                conn.execute_batch("DROP TRIGGER fail_draft_attachments")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
 
         let draft_id = core
             .save_draft(draft_args(None, &first_source, "first.txt"))
@@ -11179,6 +11221,73 @@ mod draft_staging_tests {
         assert_ne!(first_staged, second_staged);
         assert!(!std::path::Path::new(&first_staged).exists());
         assert_eq!(std::fs::read(second_staged).unwrap(), b"second");
+    }
+
+    async fn subject(core: &Core, message_id: i64) -> String {
+        core.db
+            .read(move |conn| {
+                Ok(conn.query_row(
+                    "SELECT subject FROM messages WHERE id = ?1",
+                    rusqlite::params![message_id],
+                    |row| row.get::<_, String>(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_draft_sent_or_deleted_elsewhere_is_saved_again() {
+        let temp = tempfile::tempdir().unwrap();
+        let core = Core::start_mail_ui(Paths::for_tests(temp.path()))
+            .await
+            .unwrap();
+        core.db
+            .write(|conn| {
+                db::testutil::seed_account(conn);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let source = temp.path().join("notes.txt");
+        tokio::fs::write(&source, b"notes").await.unwrap();
+
+        // Deleted while still open, for example from the main window.
+        let deleted = core
+            .save_draft(draft_args(None, &source, "notes.txt"))
+            .await
+            .unwrap();
+        core.delete_draft(deleted).await.unwrap();
+        let mut reopened = draft_args(Some(deleted), &source, "notes.txt");
+        reopened.subject = "still wanted".into();
+        let resaved = core.save_draft(reopened).await.unwrap();
+        // SQLite can hand the freed row id out again, so check the draft itself.
+        assert_eq!(
+            core.get_draft(resaved).await.unwrap().subject,
+            "still wanted"
+        );
+
+        // Sent from another device: the sent message is left as it was.
+        let sent = core
+            .save_draft(draft_args(None, &source, "notes.txt"))
+            .await
+            .unwrap();
+        core.db
+            .write(move |conn| {
+                conn.execute(
+                    "UPDATE messages SET is_draft = 0 WHERE id = ?1",
+                    rusqlite::params![sent],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut edited = draft_args(Some(sent), &source, "notes.txt");
+        edited.subject = "edited".into();
+        let kept = core.save_draft(edited).await.unwrap();
+        assert_ne!(kept, sent);
+        assert_eq!(subject(&core, sent).await, "bounded draft");
+        assert_eq!(subject(&core, kept).await, "edited");
     }
 }
 
