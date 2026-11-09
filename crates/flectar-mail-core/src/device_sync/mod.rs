@@ -1096,28 +1096,7 @@ impl Core {
         let mut removed = Vec::new();
         for follow_up in applied.follow_ups {
             let result = match follow_up {
-                FollowUp::RemoveAccount(account_id, sync_id) => {
-                    // Another record of the same mailbox may have taken this
-                    // account over in the same run.
-                    let still_ours = self
-                        .db
-                        .read(move |conn| {
-                            use rusqlite::OptionalExtension;
-                            Ok(conn
-                                .query_row(
-                                    "SELECT sync_id FROM accounts WHERE id = ?1",
-                                    rusqlite::params![account_id],
-                                    |row| row.get::<_, Option<String>>(0),
-                                )
-                                .optional()?
-                                .flatten()
-                                .is_some_and(|current| current == sync_id))
-                        })
-                        .await
-                        .unwrap_or(false);
-                    if !still_ours {
-                        continue;
-                    }
+                FollowUp::RemoveAccount(account_id) => {
                     removed.push(account_id);
                     self.remove_account(account_id).await
                 }

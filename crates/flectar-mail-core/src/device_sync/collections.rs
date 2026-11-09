@@ -499,9 +499,10 @@ fn profile_accounts<'a>(
 /// Work the app must do after the transaction that applied records.
 #[derive(Debug)]
 pub(crate) enum FollowUp {
-    /// Another device removed the account: the local id, and the sync id it
-    /// had, which must still be its own when the removal runs.
-    RemoveAccount(i64, String),
+    /// Another device removed the account. It left sync with the change, and
+    /// its removal is recorded: one that doesn't finish now finishes at the
+    /// next start.
+    RemoveAccount(i64),
     /// Another device changed how the account connects.
     RestartAccount(i64),
 }
@@ -1226,9 +1227,20 @@ fn apply_delete(
                         params![local_id],
                     )?;
                 } else {
-                    applied
-                        .follow_ups
-                        .push(FollowUp::RemoveAccount(local_id, sync_id_hex(id)));
+                    // Recorded with the change itself: quitting before the
+                    // removal finishes, or a removal that fails, must never
+                    // bring the account back on every device.
+                    conn.execute(
+                        "UPDATE accounts SET sync_id = NULL WHERE id = ?1",
+                        params![local_id],
+                    )?;
+                    conn.execute(
+                        "INSERT INTO cross_store_operations (kind, account_id, created_at)
+                         VALUES ('remove_account', ?1, ?2)
+                         ON CONFLICT(kind, account_id) DO NOTHING",
+                        params![local_id, crate::models::now_ms()],
+                    )?;
+                    applied.follow_ups.push(FollowUp::RemoveAccount(local_id));
                 }
                 applied.accounts_changed = true;
             }
@@ -2243,13 +2255,23 @@ mod tests {
             .unwrap();
         assert_eq!(sync_id, None, "synced no more");
 
-        // One whose mail is on the server goes.
-        account(&conn, "imap@example.com", &"c".repeat(32));
+        // One whose mail is on the server goes, even if the app quits first.
+        let imap = account(&conn, "imap@example.com", &"c".repeat(32));
         let applied = removed(&"c".repeat(32));
         assert!(matches!(
             applied.follow_ups.as_slice(),
-            [FollowUp::RemoveAccount(..)]
+            [FollowUp::RemoveAccount(id)] if *id == imap
         ));
+        let (sync_id, pending): (Option<String>, i64) = conn
+            .query_row(
+                "SELECT sync_id, (SELECT COUNT(*) FROM cross_store_operations
+                                  WHERE kind = 'remove_account' AND account_id = ?1)
+                 FROM accounts WHERE id = ?1",
+                params![imap],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((sync_id, pending), (None, 1));
     }
 
     #[test]
