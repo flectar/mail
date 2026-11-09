@@ -9,6 +9,7 @@
 
 use super::*;
 use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike, Weekday};
+use slint::SharedString;
 
 fn at_hour(date: NaiveDate, hour: u32) -> Option<chrono::DateTime<Local>> {
     Local
@@ -81,7 +82,7 @@ fn remind_presets(now: chrono::DateTime<Local>) -> Vec<(&'static str, chrono::Da
 
 /// When a preset or picked time is, as the picker and the status line say
 /// it: a time today, otherwise a date and a time.
-fn when_label(at: chrono::DateTime<Local>, now: chrono::DateTime<Local>) -> String {
+pub(super) fn when_label(at: chrono::DateTime<Local>, now: chrono::DateTime<Local>) -> String {
     mail_view_model::upcoming_time(at.timestamp_millis(), &now)
 }
 
@@ -113,38 +114,51 @@ enum Picking {
     Nothing,
     /// Snooze these list rows.
     Snooze(Vec<i32>),
-    /// Schedule the composer's message.
-    Compose,
+    /// When a composer's message goes out, or reminds the user.
+    Composer(composer::Asking),
     /// Move the open scheduled draft.
     Reschedule(i32),
-    /// Remind the user about the composer's message.
-    RemindCompose,
     /// Remind the user about the open conversation.
     RemindOpen(i32),
 }
 
 #[derive(Default)]
-struct Picker {
+pub(super) struct Picker {
     picking: Picking,
     /// The preset times; `None` drops the reminder already set.
     presets: Vec<Option<chrono::DateTime<Local>>>,
 }
 
-/// Open the picker for `picking` with its preset times, and with "Don't
-/// remind me" last when `droppable`.
+/// A window's picker: what the question it shows is for. The main window
+/// has one, and so does each message in a window of its own.
+pub(super) type PickerState = Rc<RefCell<Picker>>;
+
+thread_local! {
+    static MAIN_PICKER: RefCell<Option<PickerState>> = const { RefCell::new(None) };
+}
+
+/// The main window's picker, which its composer asks in too.
+pub(super) fn main_picker() -> Option<PickerState> {
+    MAIN_PICKER.with(|slot| slot.borrow().clone())
+}
+
+/// Open the picker `ui` shows for `picking` with its preset times, and with
+/// "Don't remind me" last when `droppable`. `time_placeholder` shows how a
+/// time is typed here.
 fn open(
-    app: &AppWindow,
+    ui: &WhenUi<'_>,
+    time_placeholder: SharedString,
     picker: &RefCell<Picker>,
     picking: Picking,
     presets: Vec<(&'static str, chrono::DateTime<Local>)>,
     droppable: bool,
 ) {
     let now = Local::now();
-    let ui = app.global::<WhenUi>();
     ui.set_purpose(
-        match picking {
+        match &picking {
             Picking::Snooze(_) => "snooze",
-            Picking::RemindCompose | Picking::RemindOpen(_) => "remind",
+            Picking::RemindOpen(_) => "remind",
+            Picking::Composer(asking) if asking.reminds() => "remind",
             _ => "send",
         }
         .into(),
@@ -171,7 +185,7 @@ fn open(
     let tomorrow = now.date_naive() + chrono::Duration::days(1);
     ui.set_date(tomorrow.format("%Y-%m-%d").to_string().into());
     ui.set_time(date_format::current().time(8, 0).into());
-    ui.set_time_placeholder(app.get_time_format_sample());
+    ui.set_time_placeholder(time_placeholder);
     ui.set_error(Default::default());
     *picker.borrow_mut() = Picker {
         picking,
@@ -180,48 +194,84 @@ fn open(
     ui.set_open(true);
 }
 
-/// The composer's choices from the picker: when its message goes out, once
-/// Schedule send picked a time, and when it reminds the user unless someone
-/// replies. The next send takes them.
-#[derive(Clone)]
-pub(super) struct ComposeTimes {
-    pub send_at: Rc<Cell<Option<i64>>>,
-    pub remind_at: Rc<Cell<Option<i64>>>,
+/// Ask in `ui` when a composer's message goes out, or when it reminds the
+/// user, with "Don't remind me" last when `droppable`.
+pub(super) fn ask(
+    ui: &WhenUi<'_>,
+    time_placeholder: SharedString,
+    picker: &PickerState,
+    asking: composer::Asking,
+    droppable: bool,
+) {
+    let now = Local::now();
+    let presets = if asking.reminds() {
+        remind_presets(now)
+    } else {
+        send_presets(now)
+    };
+    open(
+        ui,
+        time_placeholder,
+        picker,
+        Picking::Composer(asking),
+        presets,
+        droppable,
+    );
 }
 
-impl ComposeTimes {
-    pub(super) fn new() -> Self {
-        Self {
-            send_at: Rc::new(Cell::new(None)),
-            remind_at: Rc::new(Cell::new(None)),
+/// The picker's answer to its open question: the preset at `index`, or
+/// "Don't remind me" as `None`. The question is answered only once.
+fn chosen(
+    picker: &RefCell<Picker>,
+    index: i32,
+) -> Option<(Picking, Option<chrono::DateTime<Local>>)> {
+    let Picker { picking, presets } = std::mem::take(&mut *picker.borrow_mut());
+    let at = usize::try_from(index)
+        .ok()
+        .and_then(|index| presets.get(index).copied())?;
+    Some((picking, at))
+}
+
+/// The picker of a message's window of its own, which only its composer
+/// asks in.
+#[cfg(desktop)]
+pub(super) fn attach(window: &ComposerWindow) -> PickerState {
+    let picker = PickerState::default();
+    let ui = window.global::<WhenUi>();
+    let choose_picker = Rc::clone(&picker);
+    ui.on_choose(move |index| {
+        if let Some((Picking::Composer(asking), at)) = chosen(&choose_picker, index) {
+            composer::answered(asking, at);
         }
-    }
-
-    /// The reply reminder of the message in the composer: one is set only
-    /// while the composer shows it, as a cleared composer shows none.
-    pub(super) fn remind_at(&self, app: &AppWindow) -> Option<i64> {
-        self.remind_at.get().filter(|_| {
-            !app.global::<ReminderUi>()
-                .get_compose_remind_time()
-                .is_empty()
-        })
-    }
-
-    /// "Don't remind me" for the message in the composer.
-    fn clear(&self, app: &AppWindow) {
-        self.remind_at.set(None);
-        app.global::<ReminderUi>()
-            .set_compose_remind_time(Default::default());
-    }
+    });
+    let weak = window.as_weak();
+    let custom_picker = Rc::clone(&picker);
+    ui.on_choose_custom(move |date, time| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let ui = window.global::<WhenUi>();
+        match picked(&date, &time, Local::now()) {
+            Ok(at) => {
+                ui.set_open(false);
+                let Picker { picking, .. } = std::mem::take(&mut *custom_picker.borrow_mut());
+                if let Picking::Composer(asking) = picking {
+                    composer::answered(asking, Some(at));
+                }
+            }
+            Err(error) => ui.set_error(error.into()),
+        }
+    });
+    picker
 }
 
 pub(super) fn register(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
-    compose: &ComposeTimes,
 ) {
-    let picker = Rc::new(RefCell::new(Picker::default()));
+    let picker = PickerState::default();
+    MAIN_PICKER.with(|slot| *slot.borrow_mut() = Some(Rc::clone(&picker)));
     let snooze_ui = app.global::<SnoozeUi>();
     let send_ui = app.global::<SendLaterUi>();
     let when_ui = app.global::<WhenUi>();
@@ -245,7 +295,8 @@ pub(super) fn register(
             return;
         }
         open(
-            &app,
+            &app.global::<WhenUi>(),
+            app.get_time_format_sample(),
             &request_picker,
             Picking::Snooze(ids),
             snooze_presets(Local::now()),
@@ -267,21 +318,6 @@ pub(super) fn register(
     });
 
     let weak = app.as_weak();
-    let compose_picker = picker.clone();
-    send_ui.on_schedule_compose(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        open(
-            &app,
-            &compose_picker,
-            Picking::Compose,
-            send_presets(Local::now()),
-            false,
-        );
-    });
-
-    let weak = app.as_weak();
     let change_state = state.clone();
     let change_picker = picker.clone();
     send_ui.on_change_time(move || {
@@ -292,30 +328,12 @@ pub(super) fn register(
             return;
         };
         open(
-            &app,
+            &app.global::<WhenUi>(),
+            app.get_time_format_sample(),
             &change_picker,
             Picking::Reschedule(id),
             send_presets(Local::now()),
             false,
-        );
-    });
-
-    let weak = app.as_weak();
-    let remind_compose_picker = picker.clone();
-    reminder_ui.on_remind_compose(move || {
-        let Some(app) = weak.upgrade() else {
-            return;
-        };
-        let set = !app
-            .global::<ReminderUi>()
-            .get_compose_remind_time()
-            .is_empty();
-        open(
-            &app,
-            &remind_compose_picker,
-            Picking::RemindCompose,
-            remind_presets(Local::now()),
-            set,
         );
     });
 
@@ -331,7 +349,8 @@ pub(super) fn register(
         };
         let set = !app.global::<ReminderUi>().get_open_remind_time().is_empty();
         open(
-            &app,
+            &app.global::<WhenUi>(),
+            app.get_time_format_sample(),
             &remind_open_picker,
             Picking::RemindOpen(id),
             remind_presets(Local::now()),
@@ -388,41 +407,22 @@ pub(super) fn register(
     let choose_state = state.clone();
     let choose_runtime = runtime.clone();
     let choose_picker = picker.clone();
-    let choose_compose = compose.clone();
     when_ui.on_choose(move |index| {
         let Some(app) = weak.upgrade() else {
             return;
         };
-        let Picker { picking, presets } = std::mem::take(&mut *choose_picker.borrow_mut());
-        let Some(at) = usize::try_from(index)
-            .ok()
-            .and_then(|index| presets.get(index).copied())
-        else {
+        let Some((picking, at)) = chosen(&choose_picker, index) else {
             return;
         };
         match at {
-            Some(at) => picked_for(
-                &app,
-                &choose_state,
-                &choose_runtime,
-                &choose_compose,
-                picking,
-                at,
-            ),
-            None => dropped_for(
-                &app,
-                &choose_state,
-                &choose_runtime,
-                &choose_compose,
-                picking,
-            ),
+            Some(at) => picked_for(&app, &choose_state, &choose_runtime, picking, at),
+            None => dropped_for(&app, &choose_state, &choose_runtime, picking),
         }
     });
 
     let weak = app.as_weak();
     let custom_state = state.clone();
     let custom_runtime = runtime.clone();
-    let custom_compose = compose.clone();
     when_ui.on_choose_custom(move |date, time| {
         let Some(app) = weak.upgrade() else {
             return;
@@ -432,14 +432,7 @@ pub(super) fn register(
             Ok(at) => {
                 ui.set_open(false);
                 let Picker { picking, .. } = std::mem::take(&mut *picker.borrow_mut());
-                picked_for(
-                    &app,
-                    &custom_state,
-                    &custom_runtime,
-                    &custom_compose,
-                    picking,
-                    at,
-                );
+                picked_for(&app, &custom_state, &custom_runtime, picking, at);
             }
             Err(error) => ui.set_error(error.into()),
         }
@@ -519,11 +512,10 @@ fn dropped_for(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
-    compose: &ComposeTimes,
     picking: Picking,
 ) {
     match picking {
-        Picking::RemindCompose => compose.clear(app),
+        Picking::Composer(asking) => composer::answered(asking, None),
         Picking::RemindOpen(id) => {
             if let Some((core, row)) = row_by_id(state, id) {
                 dismiss_reminder(app, state, runtime, &core, &row);
@@ -538,44 +530,13 @@ fn picked_for(
     app: &AppWindow,
     state: &Rc<RefCell<InboxState>>,
     runtime: &tokio::runtime::Handle,
-    compose: &ComposeTimes,
     picking: Picking,
     at: chrono::DateTime<Local>,
 ) {
     match picking {
         Picking::Nothing => {}
         Picking::Snooze(ids) => snooze(app, state, &ids, Some(at)),
-        // The composer sends its message, at that time.
-        Picking::Compose => {
-            // A reminder at or before that time would come as it goes out.
-            if compose
-                .remind_at(app)
-                .is_some_and(|remind_at| remind_at <= at.timestamp_millis())
-            {
-                app.set_compose_notice(UiMessage::plain(
-                    "Choose a reminder after the time the message goes out.",
-                ));
-                app.set_compose_notice_is_error(true);
-                return;
-            }
-            compose.send_at.set(Some(at.timestamp_millis()));
-            app.invoke_save_compose(
-                app.get_compose_account_id(),
-                app.get_compose_to(),
-                app.get_compose_cc(),
-                app.get_compose_bcc(),
-                app.get_compose_subject(),
-                app.get_compose_body(),
-                true,
-            );
-            compose.send_at.set(None);
-        }
-        // The composer's message reminds the user once it went out.
-        Picking::RemindCompose => {
-            compose.remind_at.set(Some(at.timestamp_millis()));
-            app.global::<ReminderUi>()
-                .set_compose_remind_time(when_label(at, Local::now()).into());
-        }
+        Picking::Composer(asking) => composer::answered(asking, Some(at)),
         Picking::RemindOpen(id) => {
             let Some((core, row)) = row_by_id(state, id) else {
                 return;

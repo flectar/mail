@@ -6,6 +6,7 @@ import { ComposerFromRow, ComposerHeader, ComposerRecipients, ComposerSubject } 
 import { ComposerAttachments, ComposerFooter, ComposerNotice, ComposerToolbar, DiscardConfirmation, LinkEditor } from "composer-actions.slint";
 import { EmailTemplates } from "email-templates.slint";
 import { TypeScale } from "../typography.slint";
+import { IconButton } from "controls.slint";
 
 
 // cosmic-text owns visible layout, selection, hit-testing, and caret geometry.
@@ -13,6 +14,9 @@ import { TypeScale } from "../typography.slint";
 // integration; it never supplies coordinates for anything the user can see.
 export component EmailComposer inherits Rectangle {
     in property <bool> compact: false;
+    // In its own window: no frame of its own, and the window's title bar
+    // replaces the heading and its close button.
+    in property <bool> windowed: false;
     in property <bool> attachment-picker-supported: true;
     in property <bool> open: false;
     in property <string> mode: "new";
@@ -44,6 +48,16 @@ export component EmailComposer inherits Rectangle {
     in property <bool> strike-active: false;
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
+    in property <bool> can-pop-out: false;
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time: "";
+    // "reply" or "forward" when the original goes below the editor.
+    in property <string> quote: "";
+    in property <string> quote-text: "";
+    in-out property <bool> quote-expanded: false;
+    in property <[ComposeEditorTile]> quote-tiles: [];
+    in property <float> quote-height: 0;
 
     in property <color> background-color;
     in property <color> raised-color;
@@ -62,11 +76,22 @@ export component EmailComposer inherits Rectangle {
     out property <length> editor-viewport-height: max(1px, body-scroll.visible-height - 28px);
     out property <length> editor-scroll-y: max(0px, -body-scroll.content-y);
     out property <string> editor-preedit-text: body-input.preedit-text;
+    // Where the original starts below the editor, for the Rust layout.
+    out property <length> quote-top: 14px + root.editor-area-height + 48px;
+    // A message carrying the original keeps a few lines for the reply
+    // above it rather than the whole viewport.
+    private property <length> editor-area-height: root.quote == ""
+        ? max(root.editor-viewport-height, root.editor-content-height * 1px)
+        : max(96px, root.editor-content-height * 1px + 8px);
 
     callback close;
+    callback pop-out;
     callback back-requested;
     callback submit(bool);
     callback pick-attachments;
+    // Pick when the message goes out, or reminds the user.
+    callback schedule-send;
+    callback remind;
     callback remove-attachment(int);
     callback format-requested(string, string, int, int);
     callback link-requested(string, string, int, int);
@@ -82,6 +107,8 @@ export component EmailComposer inherits Rectangle {
     callback use-template(int) -> bool;
     callback save-template(int, string, string, string, string) -> bool;
     callback delete-template(int) -> bool;
+    callback edit-quote();
+    callback remove-quote();
 
     private property <bool> confirm-discard: false;
     private property <bool> link-editor-open: false;
@@ -95,8 +122,8 @@ export component EmailComposer inherits Rectangle {
     private property <length> input-caret-x: 0px;
     private property <length> input-caret-y: 0px;
     private property <bool> has-content: root.to != "" || root.cc != "" || root.bcc != ""
-        || root.subject != "" || root.body != "" || root.attachments.length > 0;
-    private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && root.body != "" && AccountMailPreferences.composer-preferences-ready;
+        || root.subject != "" || root.body != "" || root.attachments.length > 0 || root.quote != "";
+    private property <bool> can-send: !root.sending && root.selected-account-id > 0 && root.to != "" && (root.body != "" || root.quote != "") && AccountMailPreferences.composer-preferences-ready;
 
     function apply-format(kind: string) {
         if (kind == "link") {
@@ -158,12 +185,26 @@ export component EmailComposer inherits Rectangle {
             root.confirm-discard = false;
             root.templates-open = false;
         } else {
+            // The typing proxy starts where the visible caret is.
+            body-input.set-selection-offsets(root.selection-start, root.selection-end);
             root.editor-layout-changed();
+            // The recipients' row takes focus only while it is empty.
+            if root.to != "" {
+                body-input.focus();
+            }
         }
     }
     changed editor-width => { root.editor-layout-changed(); }
     changed editor-viewport-height => { root.editor-layout-changed(); }
-    changed editor-scroll-y => { editor-scroll-layout-timer.restart(); }
+    // `restart` alone only re-arms a timer that has run before, so without
+    // `start` nothing drew the text scrolled into view.
+    changed editor-scroll-y => {
+        editor-scroll-layout-timer.start();
+        editor-scroll-layout-timer.restart();
+    }
+    changed quote-expanded => { root.editor-layout-changed(); }
+    changed quote-top => { root.editor-layout-changed(); }
+    changed quote => { root.editor-layout-changed(); }
     changed editor-preedit-text => {
         if (root.editor-preedit-text != "") {
             root.ime-edit-pending = true;
@@ -197,21 +238,25 @@ export component EmailComposer inherits Rectangle {
         triggered => { root.caret-visible = !root.caret-visible; }
     }
 
+    private property <bool> framed: !root.compact && !root.windowed;
+
     background: root.background-color;
-    border-radius: root.compact ? 0px : 12px;
-    border-width: root.compact ? 0px : 1px;
+    border-radius: root.framed ? 12px : 0px;
+    border-width: root.framed ? 1px : 0px;
     border-color: root.frame-border-color;
-    drop-shadow-blur: root.compact ? 0px : 24px;
-    drop-shadow-offset-y: root.compact ? 0px : 6px;
-    drop-shadow-color: root.compact ? transparent : #00000035;
+    drop-shadow-blur: root.framed ? 24px : 0px;
+    drop-shadow-offset-y: root.framed ? 6px : 0px;
+    drop-shadow-color: root.framed ? #00000035 : transparent;
     clip: true;
 
     VerticalBox {
         spacing: 0px;
 
-        ComposerHeader {
+        if !root.windowed : ComposerHeader {
             compact: root.compact;
             mode: root.mode;
+            can-pop-out: root.can-pop-out && !root.sending;
+            pop-out => { root.pop-out(); }
             control-hover-color: root.control-hover-color;
             muted-color: root.muted-color;
             raised-color: root.raised-color;
@@ -316,6 +361,8 @@ export component EmailComposer inherits Rectangle {
             can-link: root.selection-start != root.selection-end;
             apply-format(kind) => { root.apply-format(kind); }
             open-templates => { root.templates-open = true; }
+            remind-time: root.remind-time;
+            remind => { root.remind(); }
             undo => {
                 root.history-requested("undo");
                 body-input.set-selection-offsets(root.selection-start, root.selection-end);
@@ -340,7 +387,9 @@ export component EmailComposer inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 content-width: self.visible-width;
-                content-height: max(self.visible-height, root.editor-content-height * 1px + 32px);
+                content-height: root.quote == ""
+                    ? max(self.visible-height, root.editor-content-height * 1px + 32px)
+                    : max(self.visible-height, root.quote-top + (root.quote-expanded ? root.quote-height * 1px + 16px : 0px));
                 horizontal-scrollbar-policy: always-off;
                 mouse-drag-pan-enabled: root.compact;
 
@@ -374,7 +423,7 @@ export component EmailComposer inherits Rectangle {
                     x: 18px + root.editor-caret-x * 1px - root.input-caret-x;
                     y: 14px + root.editor-caret-y * 1px - root.input-caret-y;
                     width: root.editor-width;
-                    height: max(root.editor-viewport-height, root.editor-content-height * 1px);
+                    height: root.editor-area-height;
                     text <=> root.body;
                     color: transparent;
                     selection-background-color: transparent;
@@ -444,11 +493,16 @@ export component EmailComposer inherits Rectangle {
                         root.input-caret-x = position.x;
                         root.input-caret-y = position.y;
                         root.caret-visible = true;
-                        root.selection-changed(
-                            self.text,
-                            self.anchor-position-byte-offset,
-                            self.cursor-position_byte_offset,
-                        );
+                        // Only a focused proxy moves the caret for the user.
+                        // Unfocused it follows the document, and a new window's
+                        // would report the start as where the user is typing.
+                        if (self.has-focus) {
+                            root.selection-changed(
+                                self.text,
+                                self.anchor-position-byte-offset,
+                                self.cursor-position_byte_offset,
+                            );
+                        }
                         root.reveal-editor-caret();
                     }
                 }
@@ -457,7 +511,7 @@ export component EmailComposer inherits Rectangle {
                     x: 18px;
                     y: 14px;
                     width: root.editor-width;
-                    height: max(root.editor-viewport-height, root.editor-content-height * 1px);
+                    height: root.editor-area-height;
                     mouse-cursor: text;
 
                     pointer-event(event) => {
@@ -477,6 +531,89 @@ export component EmailComposer inherits Rectangle {
                             body-input.set-selection-offsets(root.selection-start, root.selection-end);
                         }
                     }
+                }
+
+                if root.quote != "" : Rectangle {
+                    x: 18px;
+                    y: root.quote-top - 40px;
+                    width: root.editor-width;
+                    height: 32px;
+
+                    quote-toggle := TouchArea {
+                        width: parent.width - 80px;
+                        mouse-cursor: pointer;
+                        clicked => { root.quote-expanded = !root.quote-expanded; }
+                    }
+
+                    Image {
+                        x: 0px;
+                        y: (parent.height - 16px) / 2;
+                        width: 16px;
+                        height: 16px;
+                        source: root.quote-expanded
+                            ? @image-url("../icons/lucide/outline/chevron-down.svg")
+                            : @image-url("../icons/lucide/outline/chevron-right.svg");
+                        colorize: root.secondary-color;
+                    }
+
+                    Text {
+                        x: 22px;
+                        width: parent.width - 102px;
+                        height: parent.height;
+                        text: root.quote == "forward" ? @tr("Forwarded message") : @tr("Quoted text");
+                        color: quote-toggle.has-hover ? root.body-color : root.secondary-color;
+                        font-size: TypeScale.body;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        accessible-role: button;
+                        accessible-label: root.quote-expanded ? @tr("Hide the quoted message") : @tr("Show the quoted message");
+                        accessible-action-default => { root.quote-expanded = !root.quote-expanded; }
+                    }
+
+                    IconButton {
+                        x: parent.width - 72px;
+                        width: 32px;
+                        height: 32px;
+                        icon: @image-url("../icons/lucide/outline/pencil.svg");
+                        icon-color: root.secondary-color;
+                        hover-background: root.control-hover-color;
+                        tooltip-text: @tr("Edit the quoted message as text");
+                        clicked => { root.edit-quote(); }
+                    }
+
+                    IconButton {
+                        x: parent.width - 36px;
+                        width: 32px;
+                        height: 32px;
+                        icon: @image-url("../icons/lucide/outline/x.svg");
+                        icon-color: root.secondary-color;
+                        hover-background: root.control-hover-color;
+                        tooltip-text: root.quote == "forward" ? @tr("Remove the forwarded message") : @tr("Remove the quoted message");
+                        clicked => { root.remove-quote(); }
+                    }
+                }
+
+                for tile in root.quote-tiles : Image {
+                    x: 18px;
+                    y: root.quote-top + tile.y * 1px;
+                    width: root.editor-width;
+                    height: tile.height * 1px;
+                    source: tile.image;
+                    image-fit: fill;
+                    image-rendering: smooth;
+                    visible: root.quote-expanded;
+                    accessible-role: none;
+                }
+
+                // The drawn original reads out as its text, as the reader's
+                // message does.
+                if root.quote != "" && root.quote-expanded : Rectangle {
+                    x: 18px;
+                    y: root.quote-top;
+                    width: root.editor-width;
+                    height: root.quote-height * 1px;
+                    accessible-role: text;
+                    accessible-label: root.quote-text;
                 }
 
                 Rectangle {
@@ -525,6 +662,7 @@ export component EmailComposer inherits Rectangle {
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
             submit(send-now) => { root.submit(send-now); }
+            schedule-send => { root.schedule-send(); }
             pick-attachments => { root.pick-attachments(); }
             request-close => { root.request-close(); }
         }

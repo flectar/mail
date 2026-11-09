@@ -1,90 +1,19 @@
-import { AccountRow, ComposeAttachment, ComposeContact, ComposeEditorTile, EmailTemplateRow } from "../models.slint";
-import { EmailComposer } from "../components/email-composer.slint";
+import { AppTheme } from "../design-system.slint";
+import { BoundComposer, ComposerUi } from "../components/composer-ui.slint";
 import { WindowChrome } from "../window-chrome.slint";
 
-// Window-level placement and application callbacks stay here; the reusable
-// EmailComposer owns recipient fields, rich-text controls, attachments, and
-// discard confirmation.
+// The composer inside the main window, where every message starts. On the
+// desktop it can move into a ComposerWindow of its own.
 export component ComposeDialog inherits Rectangle {
     in property <bool> compact: false;
     in property <bool> attachment-picker-supported: true;
-    in property <color> accent;
-    in property <color> accent-soft;
-    in property <color> body-text;
-    in property <color> border;
-    in property <color> border-subtle;
-    in property <color> control-bg;
-    in property <color> muted-control-bg;
-    in property <color> muted-text;
-    in property <color> secondary-text;
-    in property <color> surface;
-    in property <color> surface-raised;
-    in property <color> title-color;
-    in-out property <bool> compose_open: false;
-    in property <string> compose_mode: "new";
-    in-out property <string> compose_to: "";
-    in-out property <string> compose_cc: "";
-    in-out property <string> compose_bcc: "";
-    in-out property <string> compose_subject: "";
-    in-out property <string> compose_body: "";
-    in property <bool> compose_sending: false;
-    in property <[AccountRow]> compose_accounts: [];
-    in-out property <int> compose_account_id: -1;
-    in property <[ComposeContact]> compose_contact_suggestions: [];
-    in property <[ComposeAttachment]> compose_attachments: [];
-    in property <[EmailTemplateRow]> compose_templates: [];
-    in property <string> compose_attachment_summary: "";
-    in-out property <string> compose_from_label: @tr("No connected account");
-    in property <string> compose_notice: "";
-    in property <bool> compose_notice_is_error: false;
-    in property <int> compose_selection_start: 0;
-    in property <int> compose_selection_end: 0;
-    in property <[ComposeEditorTile]> compose_editor_tiles: [];
-    in property <float> compose_editor_content_height: 18;
-    in property <float> compose_editor_caret_x: 0;
-    in property <float> compose_editor_caret_y: 0;
-    in property <float> compose_editor_caret_height: 18;
-    in property <bool> compose_bold_active: false;
-    in property <bool> compose_italic_active: false;
-    in property <bool> compose_underline_active: false;
-    in property <bool> compose_strike_active: false;
-    in property <bool> compose_code_active: false;
-    in property <string> compose_active_link_url: "";
-    callback close_compose();
+    in property <string> notice;
     callback back-requested();
-    callback save_compose(int, string, string, string, string, string, bool);
-    callback pick_compose_attachments();
-    callback remove_compose_attachment(int);
-    callback format_compose(string, string, int, int);
-    callback link_compose(string, string, int, int);
-    callback edit_compose_body(string, int, int, string);
-    callback update_compose_selection(string, int, int);
-    callback compose_history(string);
-    callback compose_editor_pointer_event(float, float, string, bool, bool, bool, bool);
-    callback compose_editor_key_event(string, bool, bool, bool, bool) -> bool;
-    callback compose_editor_layout_changed(length, length, length, string);
-    callback search_compose_contacts(string, int);
-    callback select_compose_contact(int, string) -> string;
-    callback refresh_email_templates();
-    callback use_email_template(int) -> bool;
-    callback save_email_template(int, string, string, string, string) -> bool;
-    callback delete_email_template(int) -> bool;
 
     back-requested => { composer.back-requested(); }
 
-    // A conditional component's initial layout is not a property *change*.
-    // Publish it once after instantiation as well as on subsequent resizes.
-    Timer {
-        interval: 1ms;
-        running: true;
-        triggered => {
-            self.running = false;
-            root.compose_editor_layout_changed(composer.editor-width, composer.editor-viewport-height, composer.editor-scroll-y, composer.editor-preedit-text);
-        }
-    }
-
-    visible: root.compose_open;
-    background: root.compact ? root.surface : #00000066;
+    visible: ComposerUi.open;
+    background: root.compact ? AppTheme.surface : #00000066;
     z: 9000;
 
     // Keep the workspace visible for context, but make the composer modal so
@@ -94,90 +23,13 @@ export component ComposeDialog inherits Rectangle {
     // The desktop panel stays below integrated window controls.
     private property <length> controls-inset: WindowChrome.controls-visible ? WindowChrome.band-height : 0px;
 
-    composer := EmailComposer {
+    composer := BoundComposer {
         x: root.compact ? 0px : (parent.width - self.width) / 2;
         y: root.compact ? 0px : root.controls-inset + (parent.height - root.controls-inset - self.height) / 2;
         width: root.compact ? parent.width : min(820px, parent.width - 64px);
         height: root.compact ? parent.height : min(700px, parent.height - root.controls-inset - 64px);
         compact: root.compact;
         attachment-picker-supported: root.attachment-picker-supported;
-        open: root.compose_open;
-        mode: root.compose_mode;
-        to <=> root.compose_to;
-        cc <=> root.compose_cc;
-        bcc <=> root.compose_bcc;
-        subject <=> root.compose_subject;
-        body <=> root.compose_body;
-        sending: root.compose_sending;
-        accounts: root.compose_accounts;
-        selected-account-id <=> root.compose_account_id;
-        contact-suggestions: root.compose_contact_suggestions;
-        attachments: root.compose_attachments;
-        templates: root.compose_templates;
-        attachment-summary: root.compose_attachment_summary;
-        from-label <=> root.compose_from_label;
-        notice: root.compose_notice;
-        notice-is-error: root.compose_notice_is_error;
-        selection-start: root.compose_selection_start;
-        selection-end: root.compose_selection_end;
-        editor-tiles: root.compose_editor_tiles;
-        editor-content-height: root.compose_editor_content_height;
-        editor-caret-x: root.compose_editor_caret_x;
-        editor-caret-y: root.compose_editor_caret_y;
-        editor-caret-height: root.compose_editor_caret_height;
-        bold-active: root.compose_bold_active;
-        italic-active: root.compose_italic_active;
-        underline-active: root.compose_underline_active;
-        strike-active: root.compose_strike_active;
-        code-active: root.compose_code_active;
-        active-link-url: root.compose_active_link_url;
-        background-color: root.surface;
-        raised-color: root.surface-raised;
-        control-color: root.control-bg;
-        control-hover-color: root.muted-control-bg;
-        frame-border-color: root.border;
-        subtle-border-color: root.border-subtle;
-        title-color: root.title-color;
-        body-color: root.body-text;
-        secondary-color: root.secondary-text;
-        muted-color: root.muted-text;
-        accent-color: root.accent;
-        accent-background: root.accent-soft;
-        close => { root.close_compose(); }
-        submit(send-now) => {
-            root.save_compose(
-                root.compose_account_id,
-                root.compose_to,
-                root.compose_cc,
-                root.compose_bcc,
-                root.compose_subject,
-                root.compose_body,
-                send-now,
-            );
-        }
-        pick-attachments => { root.pick_compose_attachments(); }
-        remove-attachment(index) => { root.remove_compose_attachment(index); }
-        format-requested(kind, body, anchor, cursor) => {
-            root.format_compose(kind, body, anchor, cursor);
-        }
-        link-requested(url, body, anchor, cursor) => {
-            root.link_compose(url, body, anchor, cursor);
-        }
-        body-edited(body, anchor, cursor, key-text) => { root.edit_compose_body(body, anchor, cursor, key-text); }
-        selection-changed(body, anchor, cursor) => { root.update_compose_selection(body, anchor, cursor); }
-        history-requested(direction) => { root.compose_history(direction); }
-        editor-pointer-event(x, y, kind, control, shift, alt, meta) => {
-            root.compose_editor_pointer_event(x, y, kind, control, shift, alt, meta);
-        }
-        editor-key-event(key, control, shift, alt, meta) => {
-            root.compose_editor_key_event(key, control, shift, alt, meta)
-        }
-        editor-layout-changed => { root.compose_editor_layout_changed(composer.editor-width, composer.editor-viewport-height, composer.editor-scroll-y, composer.editor-preedit-text); }
-        search-contacts(query, account-id) => { root.search_compose_contacts(query, account-id); }
-        select-contact(index, recipients) => root.select_compose_contact(index, recipients);
-        refresh-templates => { root.refresh_email_templates(); }
-        use-template(id) => root.use_email_template(id);
-        save-template(id, name, shortcut, subject, body) => root.save_email_template(id, name, shortcut, subject, body);
-        delete-template(id) => root.delete_email_template(id);
+        notice: root.notice;
     }
 }

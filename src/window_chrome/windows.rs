@@ -48,6 +48,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 /// Window class that identifies the main window during creation.
 const CLASS_NAME: &str = "FlectarMailWindow";
+/// Window class of composer windows.
+const COMPOSER_CLASS_NAME: &str = "FlectarMailComposer";
 /// Winit's class for windows created without the attributes hook.
 const WINIT_CLASS_NAME: &str = "Window Class";
 const SUBCLASS_ID: usize = 0x464d_6169; // "FMai"
@@ -117,6 +119,12 @@ thread_local! {
 
 pub(super) fn window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     attributes.with_class_name(CLASS_NAME)
+}
+
+/// Composer windows have their own class, so the creation hook never takes
+/// one for the main window.
+pub(super) fn composer_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
+    attributes.with_class_name(COMPOSER_CLASS_NAME)
 }
 
 pub(super) fn prepare(startup: WindowFrame) {

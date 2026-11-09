@@ -390,6 +390,87 @@ pub fn export_html(html: &str, print: bool) -> String {
     output
 }
 
+/// A message's body as it goes inside a reply or forward: what lies within
+/// `<body>`, without the head, style sheets, scripts or event handlers, which
+/// would otherwise restyle or act in the message quoting it.
+pub fn quoted_body(html: &str) -> String {
+    struct Quote {
+        output: String,
+        in_head: bool,
+        skipped: Option<html5ever::LocalName>,
+    }
+    struct QuoteSink(RefCell<Quote>);
+    impl TokenSink for QuoteSink {
+        type Handle = ();
+        fn process_token(&self, token: Token, _: u64) -> TokenSinkResult<()> {
+            let mut quote = self.0.borrow_mut();
+            match token {
+                Token::TagToken(tag) => {
+                    let name = tag.name.as_str();
+                    if tag.kind == TagKind::EndTag {
+                        if quote.skipped.as_ref() == Some(&tag.name) {
+                            quote.skipped = None;
+                        } else if name == "head" {
+                            quote.in_head = false;
+                        } else if !quote.in_head
+                            && !matches!(name, "html" | "body" | "meta" | "base" | "link")
+                        {
+                            quote.output.push_str("</");
+                            quote.output.push_str(name);
+                            quote.output.push('>');
+                        }
+                        return TokenSinkResult::Continue;
+                    }
+                    if matches!(name, "style" | "script" | "title" | "noscript") {
+                        quote.skipped = Some(tag.name.clone());
+                        return TokenSinkResult::RawData(
+                            html5ever::tokenizer::states::RawKind::Rawtext,
+                        );
+                    }
+                    match name {
+                        "head" => quote.in_head = true,
+                        "body" => quote.in_head = false,
+                        "html" | "meta" | "base" | "link" => {}
+                        _ if quote.in_head => {}
+                        _ => {
+                            quote.output.push('<');
+                            quote.output.push_str(name);
+                            for attribute in &tag.attrs {
+                                let attribute_name = attribute.name.local.as_str();
+                                if attribute_name.starts_with("on") || attribute_name == "srcdoc" {
+                                    continue;
+                                }
+                                quote.output.push(' ');
+                                quote.output.push_str(attribute_name);
+                                quote.output.push_str("=\"");
+                                append_escaped(&mut quote.output, &attribute.value);
+                                quote.output.push('"');
+                            }
+                            quote.output.push('>');
+                        }
+                    }
+                }
+                Token::CharacterTokens(text) if quote.skipped.is_none() && !quote.in_head => {
+                    append_escaped(&mut quote.output, &text);
+                }
+                _ => {}
+            }
+            TokenSinkResult::Continue
+        }
+    }
+    let sink = QuoteSink(RefCell::new(Quote {
+        output: String::with_capacity(html.len()),
+        in_head: false,
+        skipped: None,
+    }));
+    let tokenizer = Tokenizer::new(sink, Default::default());
+    let input = BufferQueue::default();
+    input.push_back(html[..html.floor_char_boundary(html.len().min(MAX_HTML_BYTES))].into());
+    let _ = tokenizer.feed(&input);
+    tokenizer.end();
+    tokenizer.sink.0.into_inner().output
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,6 +510,21 @@ mod tests {
                         || old.contains('\\'))
             );
         }
+    }
+    #[test]
+    fn quoted_bodies_keep_the_body_without_head_styles_or_handlers() {
+        let html = "<!doctype html><html><head><title>Sale</title><style>p{color:red}</style>\
+            <meta charset=utf-8></head><body style=\"margin:0\"><p class=\"lead\" onclick=\"x()\">\
+            Hello &amp; <b>welcome</b></p><style>.x{}</style><img src=\"data:image/png;base64,AA\" alt=\"a&quot;b\">\
+            <script>alert(1)</script><br></body></html>";
+        assert_eq!(
+            quoted_body(html),
+            "<p class=\"lead\">Hello &amp; <b>welcome</b></p><img src=\"data:image/png;base64,AA\" alt=\"a&quot;b\"><br>"
+        );
+        assert_eq!(
+            quoted_body("<div>Fragment</div> text"),
+            "<div>Fragment</div> text"
+        );
     }
     #[test]
     fn escaping_reserves_only_the_final_unicode_output() {

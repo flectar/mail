@@ -66,8 +66,6 @@ export global SendLaterUi {
     in property <string> open-send-time;
     // The open draft's send failed: why.
     in property <string> open-send-error;
-    // Schedule the message in the composer.
-    callback schedule-compose();
     // The open scheduled draft: pick another time, send it now, or make it
     // a plain draft again.
     callback change-time();
@@ -79,16 +77,12 @@ export global SendLaterUi {
 // the conversation comes back to the top of the inbox, on every device with
 // Flectar Mail Sync.
 export global ReminderUi {
-    // When the composer's message reminds the user, as shown, or empty.
-    in property <string> compose-remind-time;
     // The open conversation's reminder, as shown, or empty; whether its time
     // came with no reply; and whether it has mail the user sent, which a
     // reminder can wait on.
     in property <string> open-remind-time;
     in property <bool> open-due;
     in property <bool> can-remind;
-    // Pick when the composer's message reminds the user.
-    callback remind-compose();
     // Pick when the open conversation reminds the user.
     callback remind-open();
     // End the open conversation's reminder: done waiting, or no longer

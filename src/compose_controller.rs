@@ -30,8 +30,21 @@ pub(super) struct PreparedMessageCompose {
     pub to: String,
     pub cc: String,
     pub subject: String,
+    /// What the editor starts with.
     pub body: String,
+    /// A message edited as new keeps its formatting when this is its own.
+    pub saved: Option<SavedBody>,
+    /// The original a reply or forward carries below the editor.
+    pub quote: Option<ComposeQuote>,
     pub intent: ComposeIntent,
+}
+
+/// A message as it was sent: its HTML, and the plain text that has to say
+/// the same for the HTML's formatting to be kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SavedBody {
+    pub html: String,
+    pub text: String,
 }
 
 /// Prepares a reply or forward, or a message edited as new. `translate`
@@ -77,16 +90,20 @@ pub(super) fn prepare_message_compose(
             cc: join_addresses(&source.cc),
             subject: source.subject.clone(),
             body: original_body.trim_end().to_owned(),
+            saved: source.html_body.clone().map(|html| SavedBody {
+                html,
+                text: source.text_body.clone(),
+            }),
+            quote: None,
             intent: ComposeIntent::default(),
         });
     }
 
     if action == "forward" {
-        let original_body = original_body.trim_end();
-        let mut header = format!(
-            "\n\n---------- {} ----------\n",
+        let mut header = vec![format!(
+            "---------- {} ----------",
             translate(UiMessage::plain("Forwarded message"))
-        );
+        )];
         let lines = [
             Some(UiMessage::detail("From: {}", &sender)),
             sent_at
@@ -95,14 +112,8 @@ pub(super) fn prepare_message_compose(
             Some(UiMessage::detail("Subject: {}", &source.subject)),
             Some(UiMessage::detail("To: {}", join_addresses(&source.to))),
         ];
-        for line in lines.into_iter().flatten() {
-            header.push_str(&translate(line));
-            header.push('\n');
-        }
-        header.push('\n');
-        let mut body = String::with_capacity(header.len() + original_body.len());
-        body.push_str(&header);
-        body.push_str(original_body);
+        header.extend(lines.into_iter().flatten().map(&translate));
+        let quote = ComposeQuote::forward(&header, original_body, source.html_body.as_deref());
         // Like a reply, forward from the address the message reached.
         let sender_email = reply_sender(
             &source.sender_identities,
@@ -115,7 +126,9 @@ pub(super) fn prepare_message_compose(
             to: String::new(),
             cc: String::new(),
             subject: prefixed_subject(&source.subject, "Fwd"),
-            body,
+            body: String::new(),
+            saved: None,
+            quote: Some(quote),
             intent: ComposeIntent {
                 mode: "forward".to_owned(),
                 in_reply_to_message_id: None,
@@ -148,27 +161,11 @@ pub(super) fn prepare_message_compose(
     } else {
         String::new()
     };
-    let text = original_body.trim_end();
-    let quoted_len = text
-        .lines()
-        .map(|line| line.len() + 3)
-        .sum::<usize>()
-        .saturating_sub(usize::from(!text.is_empty()));
     let attribution = translate(match &sent_at {
         Some(sent_at) => UiMessage::arguments("On {}, {} wrote:", sent_at, &sender),
         None => UiMessage::detail("{} wrote:", &sender),
     });
-    let mut body = String::with_capacity(attribution.len() + 3 + quoted_len);
-    body.push_str("\n\n");
-    body.push_str(&attribution);
-    body.push('\n');
-    for (index, line) in text.lines().enumerate() {
-        if index > 0 {
-            body.push('\n');
-        }
-        body.push_str("> ");
-        body.push_str(line);
-    }
+    let quote = ComposeQuote::reply(&attribution, original_body, source.html_body.as_deref());
 
     Ok(PreparedMessageCompose {
         account_id: source.account_id,
@@ -176,7 +173,9 @@ pub(super) fn prepare_message_compose(
         to: format_address(primary),
         cc,
         subject: prefixed_subject(&source.subject, "Re"),
-        body,
+        body: String::new(),
+        saved: None,
+        quote: Some(quote),
         intent: ComposeIntent {
             mode: action.to_owned(),
             in_reply_to_message_id: Some(source.message_id),
@@ -334,7 +333,7 @@ pub(super) fn format_file_size(size: u64) -> String {
     }
 }
 
-pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
+pub(super) fn apply_compose_files(ui: &ComposerUi<'_>, files: &[ComposeFile]) {
     let rows = files
         .iter()
         .map(|file| {
@@ -352,8 +351,8 @@ pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
         })
         .collect::<Vec<_>>();
     let total = files.iter().map(|file| file.size).sum::<u64>();
-    app.set_compose_attachments(ModelRc::new(VecModel::from(rows)));
-    app.set_compose_attachment_summary(
+    ui.set_attachments(ModelRc::new(VecModel::from(rows)));
+    ui.set_attachment_summary(
         if files.is_empty() {
             "".to_owned()
         } else {
@@ -368,28 +367,37 @@ pub(super) fn apply_compose_files(app: &AppWindow, files: &[ComposeFile]) {
     );
 }
 
+/// Where a composer is shown: its window's `ComposerUi`, the window itself
+/// for the scale factor, and whether that window paints at all.
+pub(super) struct ComposeView<'a> {
+    pub(super) ui: ComposerUi<'a>,
+    pub(super) window: &'a slint::Window,
+    pub(super) suspended: bool,
+}
+
 pub(super) fn apply_rich_compose(
-    app: &AppWindow,
+    view: &ComposeView<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
     editor: &mut LazyComposeEditor,
 ) {
-    app.set_compose_body(document.text().into());
-    apply_rich_compose_state(app, document, selection);
-    apply_compose_editor_surface(app, document, selection, editor);
+    view.ui.set_body(document.text().into());
+    apply_rich_compose_state(&view.ui, document, selection);
+    apply_compose_editor_surface(view, document, selection, editor);
 }
 
 pub(super) fn apply_compose_editor_surface(
-    app: &AppWindow,
+    view: &ComposeView<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
     editor: &mut LazyComposeEditor,
 ) {
-    if app.get_render_suspended() || !app.get_compose_open() {
+    let ui = &view.ui;
+    if view.suspended || !ui.get_open() {
         return;
     }
-    let width = app.get_compose_editor_width().max(1.0);
-    let viewport_height = app.get_compose_editor_viewport_height().max(1.0);
+    let width = ui.get_editor_width().max(1.0);
+    let viewport_height = ui.get_editor_viewport_height().max(1.0);
     let (width, viewport_height) = if width <= 1.0 || viewport_height <= 1.0 {
         (640.0, 360.0)
     } else {
@@ -400,15 +408,15 @@ pub(super) fn apply_compose_editor_surface(
         selection,
         width,
         viewport_height,
-        app.get_compose_editor_scroll_y().max(0.0),
-        app.window().scale_factor(),
-        compose_editor_style(app),
-        app.get_compose_editor_preedit_text().as_str(),
+        ui.get_editor_scroll_y().max(0.0),
+        view.window.scale_factor(),
+        compose_editor_style(ui),
+        ui.get_editor_preedit_text().as_str(),
     );
-    apply_rendered_compose_editor(app, rendered);
+    apply_rendered_compose_editor(ui, rendered);
 }
 
-pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedComposeEditor) {
+pub(super) fn apply_rendered_compose_editor(ui: &ComposerUi<'_>, rendered: RenderedComposeEditor) {
     let started = crate::renderer::render_timings_enabled().then(std::time::Instant::now);
     let tiles = rendered
         .tiles
@@ -420,7 +428,7 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
         })
         .collect::<Vec<_>>();
     let tile_count = tiles.len();
-    let retained = app.get_compose_editor_tiles();
+    let retained = ui.get_editor_tiles();
     let replaced_model = if let Some(model) = retained
         .as_any()
         .downcast_ref::<VecModel<ComposeEditorTile>>()
@@ -428,13 +436,13 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
         crate::reconcile_model_rows_by(model, tiles, |tile| tile.y.to_bits(), PartialEq::eq);
         false
     } else {
-        app.set_compose_editor_tiles(ModelRc::new(VecModel::from(tiles)));
+        ui.set_editor_tiles(ModelRc::new(VecModel::from(tiles)));
         true
     };
-    app.set_compose_editor_content_height(rendered.content_height);
-    app.set_compose_editor_caret_x(rendered.caret_x);
-    app.set_compose_editor_caret_y(rendered.caret_y);
-    app.set_compose_editor_caret_height(rendered.caret_height);
+    ui.set_editor_content_height(rendered.content_height);
+    ui.set_editor_caret_x(rendered.caret_x);
+    ui.set_editor_caret_y(rendered.caret_y);
+    ui.set_editor_caret_height(rendered.caret_height);
     if let Some(started) = started {
         eprintln!(
             "compose Slint model update: {:.2}ms tiles={tile_count} replaced_model={replaced_model}",
@@ -443,39 +451,39 @@ pub(super) fn apply_rendered_compose_editor(app: &AppWindow, rendered: RenderedC
     }
 }
 
-pub(super) fn compose_editor_style(app: &AppWindow) -> ComposeEditorStyle {
-    let selection = app.get_compose_editor_selection_color();
+pub(super) fn compose_editor_style(ui: &ComposerUi<'_>) -> ComposeEditorStyle {
+    let selection = ui.get_editor_selection_color();
     ComposeEditorStyle {
-        text: app.get_compose_editor_text_color(),
-        link: app.get_compose_editor_link_color(),
+        text: ui.get_editor_text_color(),
+        link: ui.get_editor_link_color(),
         selection: slint::Color::from_argb_u8(
             140,
             selection.red(),
             selection.green(),
             selection.blue(),
         ),
-        selected_text: app.get_compose_editor_selected_text_color(),
+        selected_text: ui.get_editor_selected_text_color(),
     }
 }
 
 pub(super) fn apply_rich_compose_state(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     document: &RichComposeDocument,
     selection: ComposeSelection,
 ) {
     let active = document.active_marks();
-    app.set_compose_selection_start(selection.start);
-    app.set_compose_selection_end(selection.end);
-    app.set_compose_bold_active(active.bold);
-    app.set_compose_italic_active(active.italic);
-    app.set_compose_underline_active(active.underline);
-    app.set_compose_strike_active(active.strike);
-    app.set_compose_code_active(active.code);
-    app.set_compose_active_link_url(document.active_link().unwrap_or_default().into());
+    ui.set_selection_start(selection.start);
+    ui.set_selection_end(selection.end);
+    ui.set_bold_active(active.bold);
+    ui.set_italic_active(active.italic);
+    ui.set_underline_active(active.underline);
+    ui.set_strike_active(active.strike);
+    ui.set_code_active(active.code);
+    ui.set_active_link_url(document.active_link().unwrap_or_default().into());
 }
 
 pub(super) fn apply_compose_contacts(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     contacts: &[flectar_mail_core::models::Address],
 ) {
     let rows = contacts
@@ -486,11 +494,11 @@ pub(super) fn apply_compose_contacts(
             initials: contact_initials(contact).into(),
         })
         .collect::<Vec<_>>();
-    app.set_compose_contact_suggestions(ModelRc::new(VecModel::from(rows)));
+    ui.set_contact_suggestions(ModelRc::new(VecModel::from(rows)));
 }
 
 pub(super) fn apply_email_templates(
-    app: &AppWindow,
+    ui: &ComposerUi<'_>,
     templates: &[flectar_mail_core::models::Snippet],
 ) {
     let rows = templates
@@ -505,7 +513,7 @@ pub(super) fn apply_email_templates(
             })
         })
         .collect::<Vec<_>>();
-    app.set_compose_templates(ModelRc::new(VecModel::from(rows)));
+    ui.set_templates(ModelRc::new(VecModel::from(rows)));
 }
 
 pub(super) fn contact_initials(contact: &flectar_mail_core::models::Address) -> String {
@@ -568,127 +576,6 @@ pub(super) fn complete_compose_recipient(
 
 /// The original's files once fetched: each one's path, name and size, or
 /// why it could not be had.
-type FetchedFiles = Vec<Result<(PathBuf, String, u64), String>>;
-
-/// Attaches a forwarded or edited message's files once they are here, the
-/// way the attachment picker adds files, unless the composer was sent,
-/// discarded or replaced meanwhile.
-pub(super) fn attach_original_files(
-    app: &AppWindow,
-    files: &Rc<RefCell<Vec<ComposeFile>>>,
-    session: &Rc<Cell<u64>>,
-    runtime: &tokio::runtime::Handle,
-    core: CoreMailSource,
-    attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
-) {
-    if attachments.is_empty() {
-        return;
-    }
-    let started_in = session.get();
-    app.set_compose_notice(UiMessage::plain("Attaching the original's files…"));
-    app.set_compose_notice_is_error(false);
-    let request: documents::DocumentFuture<FetchedFiles> = Box::pin(async move {
-        let mut fetched = Vec::with_capacity(attachments.len());
-        for attachment in attachments {
-            let name = attachment
-                .filename
-                .clone()
-                .unwrap_or_else(|| "attachment".into());
-            fetched.push(match core.attachment_path(attachment.id).await {
-                Ok(path) => {
-                    let size = tokio::fs::metadata(&path)
-                        .await
-                        .map(|metadata| metadata.len())
-                        .unwrap_or_default();
-                    Ok((PathBuf::from(path), name, size))
-                }
-                Err(error) => Err(format!("{name}: {error}")),
-            });
-        }
-        Ok(fetched)
-    });
-    let app_weak = app.as_weak();
-    let files = Rc::clone(files);
-    let session = Rc::clone(session);
-    documents::run_request(runtime, request, move |fetched| {
-        let Some(app) = app_weak.upgrade() else {
-            return;
-        };
-        if session.get() != started_in {
-            return;
-        }
-        let mut compose_files = files.borrow_mut();
-        let mut total_size = compose_files.iter().map(|file| file.size).sum::<u64>();
-        let mut failure = None;
-        let mut too_large = false;
-        for file in fetched.unwrap_or_else(|error| vec![Err(error)]) {
-            match file {
-                Ok((path, filename, size)) => {
-                    if total_size.saturating_add(size) > MAX_COMPOSE_ATTACHMENT_BYTES {
-                        too_large = true;
-                        continue;
-                    }
-                    total_size += size;
-                    compose_files.push(ComposeFile {
-                        path,
-                        filename,
-                        size,
-                        _import: None,
-                    });
-                }
-                Err(error) => {
-                    failure.get_or_insert(error);
-                }
-            }
-        }
-        apply_compose_files(&app, &compose_files);
-        let notice = match failure {
-            Some(error) => UiMessage::detail("Could not attach the original's files: {}", error),
-            None if too_large => UiMessage::plain(
-                "Some of the original's files are over the 25 MB limit for attachments.",
-            ),
-            None => UiMessage::EMPTY,
-        };
-        app.set_compose_notice_is_error(notice != UiMessage::EMPTY);
-        app.set_compose_notice(notice);
-    });
-}
-
-pub(super) fn clear_compose(
-    app: &AppWindow,
-    files: &Rc<RefCell<Vec<ComposeFile>>>,
-    session: &Cell<u64>,
-    document: &Rc<RefCell<RichComposeDocument>>,
-    editor: &Rc<RefCell<LazyComposeEditor>>,
-    contacts: &Rc<RefCell<Vec<flectar_mail_core::models::Address>>>,
-) {
-    files.borrow_mut().clear();
-    // A picker still open for this composer must not attach to the next one.
-    session.set(session.get().wrapping_add(1));
-    // Nor does its reply reminder carry over.
-    app.global::<ReminderUi>()
-        .set_compose_remind_time(Default::default());
-    app.global::<AccountMailPreferences>()
-        .invoke_composer_reset();
-    document.borrow_mut().reset();
-    editor.borrow_mut().release();
-    app.set_compose_editor_tiles(ModelRc::default());
-    contacts.borrow_mut().clear();
-    apply_compose_files(app, &[]);
-    apply_compose_contacts(app, &[]);
-    app.set_compose_sending(false);
-    app.set_compose_open(false);
-    app.set_compose_mode("new".into());
-    app.set_compose_to("".into());
-    app.set_compose_cc("".into());
-    app.set_compose_bcc("".into());
-    app.set_compose_subject("".into());
-    app.set_compose_body("".into());
-    app.set_compose_notice(UiMessage::EMPTY);
-    app.set_compose_notice_is_error(false);
-    apply_rich_compose_state(app, &document.borrow(), ComposeSelection::default());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,6 +632,7 @@ mod tests {
             subject: "Launch plan".to_owned(),
             date: 1_777_000_000_000,
             text_body: "First line\nSecond line".to_owned(),
+            html_body: None,
             attachments: Vec::new(),
         }
     }
@@ -761,7 +649,14 @@ mod tests {
             "Jon <jon@example.com>, Lena <lena@example.com>"
         );
         assert_eq!(prepared.subject, "Re: Launch plan");
-        assert!(prepared.body.contains("> First line\n> Second line"));
+        assert!(prepared.body.is_empty(), "the reply starts empty");
+        assert!(
+            prepared
+                .quote
+                .unwrap()
+                .plain
+                .ends_with("wrote:\n> First line\n> Second line")
+        );
         assert_eq!(prepared.intent.in_reply_to_message_id, Some(91));
     }
 
@@ -820,12 +715,14 @@ mod tests {
         assert!(prepared.to.is_empty());
         assert!(prepared.cc.is_empty());
         assert_eq!(prepared.subject, "Fwd: Launch plan");
+        let quote = prepared.quote.unwrap();
+        assert!(quote.forward);
         assert!(
-            prepared
-                .body
-                .contains("---------- Forwarded message ----------")
+            quote
+                .plain
+                .starts_with("---------- Forwarded message ----------")
         );
-        assert!(prepared.body.ends_with("Rendered body"));
+        assert!(quote.plain.ends_with("Rendered body"));
         assert_eq!(prepared.intent.mode, "forward");
         assert_eq!(prepared.intent.in_reply_to_message_id, None);
     }
@@ -857,6 +754,17 @@ mod tests {
         let prepared = prepare_message_compose(&sent, "edit_as_new", "", english).unwrap();
         assert_eq!(prepared.sender_email, "work@example.net");
         assert_eq!(prepared.body, "First line\nSecond line");
+        assert!(prepared.saved.is_none(), "no HTML to keep");
+
+        // Its HTML comes with the plain text it was sent with, which the
+        // HTML has to match for its formatting to be kept.
+        sent.html_body = Some("<div>First line</div><div>Second line</div>".to_owned());
+        let prepared =
+            prepare_message_compose(&sent, "edit_as_new", "Rendered body", english).unwrap();
+        let saved = prepared.saved.unwrap();
+        assert_eq!(saved.html, "<div>First line</div><div>Second line</div>");
+        assert_eq!(saved.text, sent.text_body);
+        assert_eq!(prepared.body, "Rendered body");
     }
 
     #[test]
@@ -870,17 +778,15 @@ mod tests {
         );
         let reply = prepare_message_compose(&source(), "reply", "", english).unwrap();
         assert_eq!(
-            reply.body,
-            format!(
-                "\n\nOn {sent_at}, Maya <maya@example.com> wrote:\n> First line\n> Second line"
-            )
+            reply.quote.unwrap().plain,
+            format!("On {sent_at}, Maya <maya@example.com> wrote:\n> First line\n> Second line")
         );
 
         let forward = prepare_message_compose(&source(), "forward", "", english).unwrap();
         assert_eq!(
-            forward.body,
+            forward.quote.unwrap().plain,
             format!(
-                "\n\n---------- Forwarded message ----------\nFrom: Maya <maya@example.com>\n\
+                "---------- Forwarded message ----------\nFrom: Maya <maya@example.com>\n\
                  Date: {sent_at}\nSubject: Launch plan\n\
                  To: Alex <alex@example.com>, Jon <jon@example.com>\n\nFirst line\nSecond line"
             )
@@ -888,16 +794,30 @@ mod tests {
 
         let shouted = |message: UiMessage| message.english().to_uppercase();
         let forward = prepare_message_compose(&source(), "forward", "", shouted).unwrap();
-        assert!(forward.body.starts_with(
-            "\n\n---------- FORWARDED MESSAGE ----------\nFROM: MAYA <MAYA@EXAMPLE.COM>\nDATE: "
+        assert!(forward.quote.unwrap().plain.starts_with(
+            "---------- FORWARDED MESSAGE ----------\nFROM: MAYA <MAYA@EXAMPLE.COM>\nDATE: "
         ));
         let mut undated = source();
         undated.date = i64::MAX;
         let reply = prepare_message_compose(&undated, "reply", "", english).unwrap();
         assert!(
             reply
-                .body
-                .starts_with("\n\nMaya <maya@example.com> wrote:\n> First line")
+                .quote
+                .unwrap()
+                .plain
+                .starts_with("Maya <maya@example.com> wrote:\n> First line")
+        );
+
+        // An HTML original is quoted as HTML.
+        let mut html = source();
+        html.html_body = Some("<body><p>First <b>line</b></p></body>".to_owned());
+        let reply = prepare_message_compose(&html, "reply", "", english).unwrap();
+        assert!(
+            reply
+                .quote
+                .unwrap()
+                .html
+                .contains("<p>First <b>line</b></p></blockquote>")
         );
     }
 

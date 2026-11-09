@@ -19,6 +19,11 @@ use flectar_mail_core::{
 use pulldown_cmark::{Event, Tag, TagEnd};
 use pulldown_cmark::{Options, Parser, html};
 use std::sync::Arc;
+use std::time::Duration;
+
+/// How long opening a reply or forward waits for the original's own images
+/// to download, so they go along with it; the thread's copy serves after.
+const COMPOSE_IMAGES_WAIT: Duration = Duration::from_secs(3);
 
 #[cfg(test)]
 #[derive(serde::Deserialize)]
@@ -217,6 +222,9 @@ pub struct ComposeSource {
     pub subject: String,
     pub date: i64,
     pub text_body: String,
+    /// The HTML the reader shows, inline images as `data:` URIs, which a
+    /// reply quotes and a forward carries.
+    pub html_body: Option<String>,
     /// The message's files, for a forward or an edited copy to carry along.
     pub attachments: Vec<flectar_mail_core::models::AttachmentMeta>,
 }
@@ -1038,6 +1046,16 @@ impl CoreMailSource {
             .await
             .map_err(|error| error.to_string())?
             .email;
+        // The original's own images come inline, fetched now if they weren't
+        // yet: the thread leaves those still downloading as cid: links, which
+        // a reply or forward could not carry.
+        let html_body =
+            match tokio::time::timeout(COMPOSE_IMAGES_WAIT, self.core.get_body(message.id)).await {
+                Ok(Ok(detail)) => detail.html_body,
+                _ => None,
+            }
+            .or_else(|| message.html_body.clone())
+            .filter(|html| !html.trim().is_empty());
 
         Ok(ComposeSource {
             message_id: message.id,
@@ -1055,6 +1073,7 @@ impl CoreMailSource {
                 .clone()
                 .filter(|body| !body.trim().is_empty())
                 .unwrap_or_else(|| message.snippet.clone()),
+            html_body,
             // Images shown in the text are part of it, not files.
             attachments: message
                 .attachments

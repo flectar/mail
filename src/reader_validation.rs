@@ -93,7 +93,7 @@ fn automatic_selection_hydrates_and_reader_controls_are_responsive_and_keyboard_
         "mailto:person+list@example.com?subject=Hello+there%21&bcc=hidden@example.com".into(),
     );
     assert_eq!(opened_urls.lock().unwrap().len(), 1);
-    assert!(!app.get_compose_open());
+    assert!(!app.global::<ComposerUi>().get_open());
     let requests = Rc::new(RefCell::new(Vec::new()));
     let requests2 = requests.clone();
     app.global::<EmailReader>()
@@ -791,53 +791,41 @@ fn mailto_links_open_without_losing_the_draft(
         server_keeps_mail_days: None,
     }];
     app.set_compose_account_id(1);
-    let weak = app.as_weak();
-    app.on_open_compose(move || weak.unwrap().set_compose_open(true));
-    let saved = Rc::new(RefCell::new(Vec::new()));
-    let weak = app.as_weak();
-    let recorded = saved.clone();
-    app.on_save_compose(move |_, to, _, _, subject, _, send| {
-        assert!(!send, "a link must never send");
-        recorded
-            .borrow_mut()
-            .push((to.to_string(), subject.to_string()));
-        let app = weak.unwrap();
-        for clear in [
-            AppWindow::set_compose_to,
-            AppWindow::set_compose_cc,
-            AppWindow::set_compose_bcc,
-            AppWindow::set_compose_subject,
-            AppWindow::set_compose_body,
-        ] {
-            clear(&app, "".into());
-        }
-        app.set_compose_open(false);
-    });
     let frame = || {
         slint::platform::update_timers_and_animations();
         let _ = app.window().size();
     };
 
-    mailto_links::install(
+    // A phone writes one message at a time inside the main window.
+    let composers = composer::install(
         app,
-        mailto_links::Composer {
-            state: Rc::clone(state),
-            runtime: runtime.clone(),
-            intent: Rc::new(RefCell::new(ComposeIntent::default())),
-            document: Rc::new(RefCell::new(RichComposeDocument::default())),
-            editor: Rc::new(RefCell::new(LazyComposeEditor::default())),
-        },
+        state,
+        runtime,
+        crate::documents::default_provider(),
+        false,
     );
+    mailto_links::install(app, composers);
     frame();
-    assert!(app.get_compose_open(), "the waiting link opens once it can");
-    assert_eq!(app.get_compose_to(), "person+list@example.com");
-    assert_eq!(app.get_compose_subject(), "Hello+there!");
-    assert_eq!(app.get_compose_bcc(), "hidden@example.com");
+    let ui = app.global::<ComposerUi>();
+    assert!(ui.get_open(), "the waiting link opens once it can");
+    assert_eq!(ui.get_to(), "person+list@example.com");
+    assert_eq!(ui.get_subject(), "Hello+there!");
+    assert_eq!(ui.get_bcc(), "hidden@example.com");
 
     // The message's sender identity has loaded, so it can be saved.
     app.global::<AccountMailPreferences>()
         .set_composer_sender_email("me@example.test".into());
-    app.set_compose_subject("My own subject".into());
+    ui.set_subject("My own subject".into());
+    let saved = Rc::new(RefCell::new(Vec::new()));
+    let weak = app.as_weak();
+    let recorded = saved.clone();
+    ui.on_save(move |_, to, _, _, subject, _, send| {
+        assert!(!send, "a link must never send");
+        recorded
+            .borrow_mut()
+            .push((to.to_string(), subject.to_string()));
+        weak.unwrap().global::<ComposerUi>().invoke_close();
+    });
     // The reader's link handler was replaced by a recorder above; open the
     // link the way it does.
     mailto_links::open(
@@ -854,15 +842,15 @@ fn mailto_links_open_without_losing_the_draft(
         )],
         "what the user wrote is saved to Drafts before the next link opens"
     );
-    assert!(app.get_compose_open());
-    assert_eq!(app.get_compose_to(), "second@example.com");
-    assert_eq!(app.get_compose_bcc(), "");
+    assert!(ui.get_open());
+    assert_eq!(ui.get_to(), "second@example.com");
+    assert_eq!(ui.get_bcc(), "");
     assert_eq!(
-        app.get_compose_message().key,
+        ui.get_message().key,
         "Files from links are never attached for you. Attach them yourself if you trust them: {}"
     );
-    assert_eq!(app.get_compose_message().argument, "/etc/passwd");
-    assert!(app.get_compose_attachments().row_count() == 0);
+    assert_eq!(ui.get_message().argument, "/etc/passwd");
+    assert!(ui.get_attachments().row_count() == 0);
 }
 
 /// The desktop mail view at scale 2, drawn by Slint's software renderer like

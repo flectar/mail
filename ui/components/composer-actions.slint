@@ -4,7 +4,6 @@ import { Button } from "button.slint";
 import { IconButton } from "controls.slint";
 import { TypeScale } from "../typography.slint";
 import { LayoutMetrics } from "../design-system.slint";
-import { ReminderUi, SendLaterUi } from "../dialogs/when-dialog.slint";
 
 export component ComposerToolbar inherits Rectangle {
     in property <bool> compact: false;
@@ -24,6 +23,10 @@ export component ComposerToolbar inherits Rectangle {
     in property <bool> can-link: false;
     callback apply-format(string);
     callback open-templates();
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time;
+    callback remind();
     callback undo();
     callback redo();
 
@@ -67,15 +70,15 @@ export component ComposerToolbar inherits Rectangle {
             IconButton { icon: @image-url("../icons/lucide/outline/book.svg"); icon-color: root.secondary-color; hover-background: root.control-hover-color; tooltip-text: @tr("Email templates"); clicked => { root.open-templates(); } }
             // "Remind me if no reply", for the message being written.
             IconButton {
-                icon: ReminderUi.compose-remind-time != "" ? @image-url("../icons/lucide/filled/bell.svg") : @image-url("../icons/lucide/outline/bell.svg");
-                icon-color: ReminderUi.compose-remind-time != "" ? root.accent-color : root.secondary-color;
-                active: ReminderUi.compose-remind-time != "";
+                icon: root.remind-time != "" ? @image-url("../icons/lucide/filled/bell.svg") : @image-url("../icons/lucide/outline/bell.svg");
+                icon-color: root.remind-time != "" ? root.accent-color : root.secondary-color;
+                active: root.remind-time != "";
                 hover-background: root.control-hover-color;
                 active-background: root.accent-background;
-                tooltip-text: ReminderUi.compose-remind-time != ""
-                    ? @tr("Reminds you {} if nobody replies", ReminderUi.compose-remind-time)
+                tooltip-text: root.remind-time != ""
+                    ? @tr("Reminds you {} if nobody replies", root.remind-time)
                     : @tr("Remind me if no reply");
-                clicked => { ReminderUi.remind-compose(); }
+                clicked => { root.remind(); }
             }
 
             Rectangle { horizontal-stretch: 1; }
@@ -219,6 +222,8 @@ export component ComposerFooter inherits Rectangle {
     in property <color> secondary-color;
     in property <color> subtle-border-color;
     callback submit(bool);
+    // Pick when the message goes out.
+    callback schedule-send();
     callback pick-attachments();
     callback request-close();
 
@@ -258,7 +263,7 @@ export component ComposerFooter inherits Rectangle {
                 hover-background: root.control-hover-color;
                 interactive: root.can-send && !root.sending;
                 tooltip-text: @tr("Schedule send");
-                clicked => { SendLaterUi.schedule-compose(); }
+                clicked => { root.schedule-send(); }
             }
 
             attach-button := IconButton {
@@ -458,7 +463,9 @@ export component DiscardConfirmation inherits Rectangle {
 
     visible: root.open;
     background: #00000066;
-    z: 5000;
+    // Above the link editor and the templates, which a window's own close
+    // button can leave open.
+    z: 8000;
     TouchArea { }
 
         Rectangle {
