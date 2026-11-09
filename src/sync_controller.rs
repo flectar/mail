@@ -111,6 +111,7 @@ impl SyncController {
         ui.on_reset_recovery(move || reset.reset_recovery());
         let save = actions.clone();
         ui.on_save_recovery_code(move |text| save.save_recovery_code(text.to_string()));
+        ui.on_copy_secret(|text| crate::reader_clipboard::set_secret(&text));
         let turn_off = actions.clone();
         ui.on_turn_off(move || turn_off.turn_off());
         let delete = actions.clone();

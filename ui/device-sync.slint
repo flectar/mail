@@ -117,6 +117,9 @@ export global SyncUi {
     callback reset-recovery();
     // Save the recovery code as a text file where the user picks.
     callback save-recovery-code(string /* the file's text */);
+    // Copy a secret the way the system keeps out of clipboard history and
+    // takes off again later; false where only a plain copy can.
+    callback copy-secret(string) -> bool;
     callback turn-off();
     callback delete-everywhere();
     callback set-sync-sign-ins(bool /* on */);
@@ -1198,10 +1201,12 @@ export component RecoveryWordsDialog inherits SyncModal {
                 icon: root.copied ? @image-url("icons/lucide/outline/check.svg") : @image-url("icons/lucide/outline/copy.svg");
                 has-icon: true;
                 clicked => {
-                    words-clipboard.text = SyncUi.recovery-text;
-                    words-clipboard.select-all();
-                    words-clipboard.copy();
-                    words-clipboard.text = "";
+                    if (!SyncUi.copy-secret(SyncUi.recovery-text)) {
+                        words-clipboard.text = SyncUi.recovery-text;
+                        words-clipboard.select-all();
+                        words-clipboard.copy();
+                        words-clipboard.text = "";
+                    }
                     root.copied = true;
                 }
             }
