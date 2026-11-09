@@ -14,6 +14,26 @@ pub(crate) const STRIKE: u8 = 1 << 3;
 pub(crate) const CODE: u8 = 1 << 4;
 /// What starts each line of a quote block in the document's text.
 pub(crate) const QUOTE_MARKER: &str = "│ ";
+
+/// `text` with its quote blocks written as plain-text mail quotes, in lines
+/// that start with `>`, for the plain-text part of a message being sent.
+pub(crate) fn with_plain_text_quotes(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    for (index, line) in text.split('\n').enumerate() {
+        if index > 0 {
+            plain.push('\n');
+        }
+        match line.strip_prefix(QUOTE_MARKER) {
+            Some("") => plain.push('>'),
+            Some(rest) => {
+                plain.push_str("> ");
+                plain.push_str(rest);
+            }
+            None => plain.push_str(line),
+        }
+    }
+    plain
+}
 const MAX_HISTORY: usize = 128;
 // The most recent edit remains undoable even when one transaction exceeds this limit.
 const MAX_HISTORY_BYTES: usize = 32 * 1024 * 1024;
@@ -2882,6 +2902,15 @@ mod tests {
         assert_eq!(reopened.body_html(), document.body_html());
         assert_style_coverage(&reopened);
         assert_eq!(reopened.history("undo"), None);
+    }
+
+    #[test]
+    fn quote_blocks_are_sent_as_plain_text_quotes() {
+        assert_eq!(
+            with_plain_text_quotes("Thanks\n\nPat wrote:\n│ Hello\n│ \n│ > earlier\nBye"),
+            "Thanks\n\nPat wrote:\n> Hello\n>\n> > earlier\nBye"
+        );
+        assert_eq!(with_plain_text_quotes("No quotes"), "No quotes");
     }
 
     #[test]

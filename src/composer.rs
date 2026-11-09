@@ -1962,6 +1962,13 @@ impl ComposeSession {
             }
             None => (body.to_owned(), body_html),
         };
+        // Recipients reading plain text see quote blocks as quotes; a draft
+        // keeps them as the editor writes them, to reopen as blocks.
+        let body = if send {
+            crate::rich_compose::with_plain_text_quotes(&body)
+        } else {
+            body
+        };
         let body = body.as_str();
         let intent = self.intent.borrow().clone();
         let sender_email = preferences.get_composer_sender_email();
