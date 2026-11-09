@@ -117,10 +117,26 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
 /// own billing for in-app purchases.
 pub(crate) const SELLS_SYNC: bool = true;
 
-/// How this device appears in Flectar Mail Sync's device list.
+/// How this device appears in Flectar Mail Sync's device list: by its model,
+/// such as "Pixel 8", as Chrome names Android devices. Android has no host
+/// name for it, and the name the user gave the phone needs the Java APIs.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
     flectar_mail_core::device_sync::DeviceDescription {
+        name: system_property(c"ro.product.model").unwrap_or_default(),
         platform: "android".to_owned(),
-        ..Default::default()
     }
+}
+
+/// A read-only system property, if set.
+fn system_property(name: &std::ffi::CStr) -> Option<String> {
+    let mut value = [0 as std::ffi::c_char; libc::PROP_VALUE_MAX as usize];
+    // SAFETY: `value` holds PROP_VALUE_MAX bytes, the most the call writes,
+    // and it ends them with a NUL.
+    let length = unsafe { libc::__system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+    if length <= 0 {
+        return None;
+    }
+    // SAFETY: the call wrote a NUL-terminated string into `value`.
+    let value = unsafe { std::ffi::CStr::from_ptr(value.as_ptr()) };
+    Some(value.to_string_lossy().trim().to_owned()).filter(|value| !value.is_empty())
 }

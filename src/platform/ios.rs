@@ -129,10 +129,50 @@ pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
 /// purchases.
 pub(crate) const SELLS_SYNC: bool = true;
 
-/// How this device appears in Flectar Mail Sync's device list.
+/// How this device appears in Flectar Mail Sync's device list: "iPhone" or
+/// "iPad". iOS reports no host name, and the name the user gave the device
+/// needs an entitlement Apple grants case by case.
 pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
     flectar_mail_core::device_sync::DeviceDescription {
+        name: device_family().unwrap_or_default(),
         platform: "ios".to_owned(),
-        ..Default::default()
     }
+}
+
+/// The kind of device, from its hardware model such as "iPhone16,1".
+fn device_family() -> Option<String> {
+    let name = c"hw.machine";
+    let mut size = 0;
+    // SAFETY: a null buffer asks only for the size.
+    let sized = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if sized != 0 || size == 0 {
+        return None;
+    }
+    let mut buffer = vec![0u8; size];
+    // SAFETY: `buffer` holds `size` bytes, as the call asked.
+    let read = unsafe {
+        libc::sysctlbyname(
+            name.as_ptr(),
+            buffer.as_mut_ptr().cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if read != 0 {
+        return None;
+    }
+    let machine = CStr::from_bytes_until_nul(&buffer).ok()?.to_str().ok()?;
+    let family = machine.trim_end_matches(|c: char| c.is_ascii_digit() || c == ',');
+    ["iPhone", "iPad", "iPod"]
+        .contains(&family)
+        .then(|| family.to_owned())
 }
