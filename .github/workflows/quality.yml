@@ -154,6 +154,10 @@ jobs:
           python3 scripts/test-android-signing.py
       - name: Validate Android workspace lockfile
         run: cargo metadata --manifest-path platform/android/Cargo.toml --locked --format-version 1 > /dev/null
+      # The Flatpak builds offline from these sources, so a git dependency
+      # pinned elsewhere than they say would only fail there.
+      - name: Check the Flatpak cargo sources
+        run: python3 scripts/update-flatpak-cargo-sources.py --check
       - name: Reject unused direct dependencies
         run: |
           cargo install cargo-machete --locked --version 0.9.2
