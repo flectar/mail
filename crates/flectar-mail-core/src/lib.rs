@@ -5627,12 +5627,28 @@ impl Core {
 
     pub async fn queue_send(&self, args: QueueSendArgs) -> Result<QueueSendResult> {
         let draft_id = args.draft_id;
-        // Moved, or sent now: the mail server's hold on it ends first.
+        // Moved, or sent now: the mail server's hold on it ends first. The
+        // message it held goes out as it is, never rebuilt from this
+        // device's copy: held by another device, that copy lacks the
+        // attachments. Editing a draft ends its schedule first, so the held
+        // message is the draft as it stands.
+        let mut held_email = None;
         if let Some(action) = self
             .db
             .read(move |conn| repo::actions::held_send_of(conn, draft_id))
             .await?
         {
+            held_email = self
+                .db
+                .read(move |conn| {
+                    Ok(conn.query_row(
+                        "SELECT json_extract(payload, '$.jmapHeld.emailId')
+                         FROM pending_actions WHERE id = ?1",
+                        [action],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?)
+                })
+                .await?;
             self.unhold_send(action).await?;
         }
         let (policy, sender, recipients, protocol) = self
@@ -5685,8 +5701,13 @@ impl Core {
             _ => false,
         };
         let share_as = match protocol {
+            // A held message stays this device's send: shared, it would be
+            // uploaded again from this device's copy.
             MailProtocol::Gmail | MailProtocol::Jmap
-                if args.send_at.is_some() && !policy.enabled() && !server_hold =>
+                if args.send_at.is_some()
+                    && !policy.enabled()
+                    && !server_hold
+                    && held_email.is_none() =>
             {
                 self.shared_send_device()
             }
@@ -5740,6 +5761,9 @@ impl Core {
                     "mailSecurity": policy,
                     "scheduled": scheduled,
                 });
+                if let Some(email) = &held_email {
+                    payload["jmapPreparedEmailId"] = serde_json::json!(email);
+                }
                 // Handed to the JMAP server at once, it waits there.
                 let not_before = if server_hold {
                     payload["serverHold"] = serde_json::Value::Bool(true);
