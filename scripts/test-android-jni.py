@@ -38,12 +38,14 @@ class JniExportsTests(unittest.TestCase):
         return library.read_bytes()
 
     def test_every_native_declaration_is_required(self):
-        activity = (Path(__file__).resolve().parents[1] / "platform/android/gradle/app/src/main"
-                    / "java/com/flectar/mail/FlectarActivity.java")
-        declared = set(re.findall(r"\bnative\s+\w+\s+(\w+)\s*\(", activity.read_text()))
-        prefix = "Java_com_flectar_mail_FlectarActivity_"
-        required = {name.removeprefix(prefix) for name in native.REQUIRED_EXPORTS
-                    if name.startswith(prefix)}
+        package = (Path(__file__).resolve().parents[1] / "platform/android/gradle/app/src/main"
+                   / "java/com/flectar/mail")
+        declared = {
+            f"Java_com_flectar_mail_{source.stem}_{method}"
+            for source in package.glob("*.java")
+            for method in re.findall(r"\bnative\s+\w+\s+(\w+)\s*\(", source.read_text())
+        }
+        required = {name for name in native.REQUIRED_EXPORTS if name.startswith("Java_")}
         self.assertEqual(declared, required)
 
     def test_release_stripping_preserves_required_dynamic_exports(self):

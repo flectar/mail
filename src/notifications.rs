@@ -164,6 +164,9 @@ impl Default for Controls {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Alert {
     pub id: AlertId,
+    /// How many new messages it tells of: one, or as many as a summary sums
+    /// up.
+    pub count: u32,
     /// The sender for new mail; "N new messages" for a summary.
     pub title: String,
     /// The subject for new mail; who wrote for a summary.
@@ -1069,6 +1072,7 @@ async fn present(
             }
             Plan::Summary {
                 account_id,
+                count,
                 indices,
                 ..
             } => {
@@ -1079,6 +1083,7 @@ async fn present(
                     .max_by_key(|mail| mail.received_at);
                 alerts.push(Alert {
                     id: AlertId::Summary { account_id },
+                    count,
                     title,
                     body,
                     preview: None,
@@ -1166,6 +1171,7 @@ fn message_alert(mail: &NewMailNotification, words: &FixedWords) -> Alert {
             account_id: mail.account_id,
             message_id: mail.message_id,
         },
+        count: 1,
         title: if sender.is_empty() {
             words.new_message.clone()
         } else {
@@ -1641,6 +1647,7 @@ mod tests {
         let shown = host.shown();
         assert_eq!(shown.len(), 2);
         assert_eq!(shown[0].id, AlertId::Summary { account_id: 1 });
+        assert_eq!(shown[0].count, 4);
         assert_eq!(shown[0].title, "4 new");
         // The newest sender first.
         assert_eq!(shown[0].body, "Ann, Bo");
@@ -1656,6 +1663,7 @@ mod tests {
         // The only mail from a person rings, in the account's own notification.
         assert!(!shown[0].sound);
         assert!(shown[1].sound);
+        assert_eq!(shown[1].count, 1);
     }
 
     #[tokio::test]
@@ -1665,6 +1673,7 @@ mod tests {
         batch.summarized.insert(1, 2);
         let outcomes = present(&host, &NO_SCREEN, batch).await;
         assert_eq!(outcomes, vec![NotificationOutcome::ShownInSummary]);
+        assert_eq!(host.shown()[0].count, 3);
         assert_eq!(host.shown()[0].title, "3 new");
     }
 

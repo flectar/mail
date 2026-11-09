@@ -76,6 +76,33 @@ public final class NativeCallbacksTest {
     }
 
     @Test
+    public void activityLifecycleCallbacksResolve() throws Throwable {
+        // Without the window there is no mail store to tell; nothing waits.
+        invoke("nativeResumed", new Class<?>[]{});
+        invoke("nativePaused", new Class<?>[]{});
+    }
+
+    @Test
+    public void notificationCallbacksResolve() throws Throwable {
+        // A tap waits for a window this test never starts, and a request
+        // that isn't a notification's is ignored.
+        invoke("nativeNotificationOpened", new Class<?>[]{String.class},
+                "flectar-mail-notification:1;open;1;7;42");
+        invoke("nativeNotificationOpened", new Class<?>[]{String.class}, "unknown");
+        invoke("nativeNotificationPermissionAnswered", new Class<?>[]{});
+        // Google's answer to a request made without the activity, which
+        // FlectarActivity's class has loaded the library for by now.
+        Method result = GoogleAuthorization.class.getDeclaredMethod(
+                "nativeResult", long.class, String.class, long.class, String.class);
+        result.setAccessible(true);
+        try {
+            result.invoke(null, UNKNOWN_REQUEST, "", 0L, "test authorization failure");
+        } catch (InvocationTargetException error) {
+            throw error.getCause();
+        }
+    }
+
+    @Test
     public void everyNativeDeclarationHasACallbackTest() {
         Set<String> declarations = new HashSet<>();
         for (Method method : FlectarActivity.class.getDeclaredMethods()) {
@@ -91,6 +118,10 @@ public final class NativeCallbacksTest {
         tested.add("nativeDocumentsResult");
         tested.add("nativeSuspendPdfPreview");
         tested.add("nativeTrimMemory");
+        tested.add("nativeResumed");
+        tested.add("nativePaused");
+        tested.add("nativeNotificationOpened");
+        tested.add("nativeNotificationPermissionAnswered");
         assertEquals("Add a JNI invocation test when adding a native callback", tested, declarations);
     }
 }
