@@ -66,6 +66,15 @@ mod platform {
 #[cfg(desktop)]
 pub(crate) use platform::{host, launched_for_click};
 
+/// Whether the system started this process with `argument` to deliver a
+/// click on a notification. Only Windows passes arguments of its own.
+#[cfg(target_os = "windows")]
+pub(crate) use platform::click_argument;
+#[cfg(all(desktop, not(target_os = "windows")))]
+pub(crate) fn click_argument(_argument: &std::ffi::OsStr) -> bool {
+    false
+}
+
 /// A future a [`NotificationHost`] returns.
 pub type HostFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 

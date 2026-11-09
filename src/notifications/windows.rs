@@ -122,6 +122,14 @@ pub(crate) fn launched_for_click() -> bool {
         .any(|argument| argument == ACTIVATION_ARGUMENT)
 }
 
+/// Whether COM passed `argument` to start the app for a click: ours, or its
+/// own `-Embedding`.
+pub(crate) fn click_argument(argument: &std::ffi::OsStr) -> bool {
+    argument == ACTIVATION_ARGUMENT
+        || argument.eq_ignore_ascii_case("-Embedding")
+        || argument.eq_ignore_ascii_case("/Embedding")
+}
+
 pub(crate) fn host() -> Option<Arc<dyn NotificationHost>> {
     let install = Install::of_this_process();
     if !matches!(install, Install::Packaged { .. }) {
