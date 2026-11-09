@@ -1,21 +1,29 @@
 diff --git a/crates/blitz-dom/src/config.rs b/crates/blitz-dom/src/config.rs
-index f1a9a5e..cd6d9d0 100644
+index 4686b12..f6ad6a0 100644
 --- a/crates/blitz-dom/src/config.rs
 +++ b/crates/blitz-dom/src/config.rs
-@@ -31,6 +31,8 @@ pub enum StyleThreading {
+@@ -30,6 +30,8 @@ pub enum StyleThreading {
+ 
  /// Options used when constructing a [`BaseDocument`](crate::BaseDocument)
- #[derive(Default)]
  pub struct DocumentConfig {
 +    /// Optional bounded raster decoding for untrusted email content.
 +    pub image_decode_limits: Option<crate::net::ImageDecodeLimits>,
      /// The initial `Viewport`
      pub viewport: Option<Viewport>,
      /// The base url which relative URLs are resolved against
+@@ -73,6 +75,7 @@ pub struct DocumentConfig {
+ impl Default for DocumentConfig {
+     fn default() -> Self {
+         Self {
++            image_decode_limits: None,
+             viewport: None,
+             base_url: None,
+             ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 1db0b4d..e301989 100644
+index 20273dd..3ed8c1c 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
-@@ -194,7 +194,31 @@ pub enum DocumentEvent {
+@@ -230,7 +230,31 @@ pub enum DocumentEvent {
      },
  }
  
@@ -47,7 +55,7 @@ index 1db0b4d..e301989 100644
      /// ID of the document
      id: usize,
  
-@@ -440,6 +464,7 @@ impl BaseDocument {
+@@ -473,6 +497,7 @@ impl BaseDocument {
          let (tx, rx) = sync_channel(DOCUMENT_EVENT_QUEUE_CAPACITY);
  
          let mut doc = Self {
@@ -55,7 +63,7 @@ index 1db0b4d..e301989 100644
              id,
              tx,
              rx: Some(rx),
-@@ -1231,16 +1256,58 @@ impl BaseDocument {
+@@ -1262,16 +1287,58 @@ impl BaseDocument {
      }
  
      pub fn handle_messages(&mut self) {
@@ -114,7 +122,7 @@ index 1db0b4d..e301989 100644
      }
  
      pub fn handle_message(&mut self, msg: DocumentEvent) {
-@@ -1283,6 +1350,11 @@ impl BaseDocument {
+@@ -1314,6 +1381,11 @@ impl BaseDocument {
          };
  
          match resource {
@@ -126,7 +134,7 @@ index 1db0b4d..e301989 100644
              Resource::Css(css) => {
                  let node_id = res.node_id.unwrap();
                  self.add_stylesheet_for_node(css, node_id);
-@@ -1390,6 +1462,7 @@ impl BaseDocument {
+@@ -1421,6 +1493,7 @@ impl BaseDocument {
  
              match image_type {
                  ImageType::Image => {
@@ -134,7 +142,7 @@ index 1db0b4d..e301989 100644
                      let element = node.element_data_mut().unwrap();
                      #[cfg(feature = "custom-widget")]
                      if element.custom_widget_data().is_some() {
-@@ -1398,8 +1471,10 @@ impl BaseDocument {
+@@ -1429,8 +1502,10 @@ impl BaseDocument {
                      element.special_data = SpecialElementData::Image(Box::new(image.clone()));
  
                      // Clear layout cache
@@ -147,7 +155,7 @@ index 1db0b4d..e301989 100644
                  }
                  ImageType::Background(idx) | ImageType::Mask(idx) => {
                      let layer_image = node.element_data_mut().and_then(|el| {
-@@ -2620,9 +2695,11 @@ impl BaseDocument {
+@@ -2651,9 +2726,11 @@ impl BaseDocument {
              }
  
              if !result.is_empty() {
@@ -162,7 +170,7 @@ index 1db0b4d..e301989 100644
  
          if result.is_empty() {
 diff --git a/crates/blitz-dom/src/iframe.rs b/crates/blitz-dom/src/iframe.rs
-index 6fa0f02..03520ae 100644
+index c6fe58e..bf25f74 100644
 --- a/crates/blitz-dom/src/iframe.rs
 +++ b/crates/blitz-dom/src/iframe.rs
 @@ -55,6 +55,7 @@ impl BaseDocument {
@@ -172,7 +180,7 @@ index 6fa0f02..03520ae 100644
 +            image_decode_limits: self.image_decode_limits,
              viewport: None,
              base_url,
-             ua_stylesheets: None,
+             ua_stylesheets: vec![UserAgentStylesheet::default_sheet()],
 diff --git a/crates/blitz-dom/src/layout/damage.rs b/crates/blitz-dom/src/layout/damage.rs
 index aaa5f5e..a48384e 100644
 --- a/crates/blitz-dom/src/layout/damage.rs
@@ -188,10 +196,10 @@ index aaa5f5e..a48384e 100644
                          );
  
 diff --git a/crates/blitz-dom/src/mutator.rs b/crates/blitz-dom/src/mutator.rs
-index 8bd4f9f..2cb27d4 100644
+index feac670..7427db4 100644
 --- a/crates/blitz-dom/src/mutator.rs
 +++ b/crates/blitz-dom/src/mutator.rs
-@@ -1192,7 +1192,8 @@ impl<'doc> DocumentMutator<'doc> {
+@@ -1194,7 +1194,8 @@ impl<'doc> DocumentMutator<'doc> {
                          self.doc.id(),
                          None, // Don't pass node_id, we'll handle it via pending_images
                          self.doc.shell_provider.clone(),

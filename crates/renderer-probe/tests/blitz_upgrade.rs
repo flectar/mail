@@ -182,3 +182,32 @@ fn rtl_collapsed_edges_keep_individual_colors_and_hidden_precedence() {
     assert!(colors.contains(&[255, 0, 0, 255]));
     assert!(colors.contains(&[0, 0, 255, 255]));
 }
+
+#[test]
+fn scrolled_offscreen_elements_are_not_painted() {
+    // The cull box must apply each element's position once. Otherwise blocks far
+    // above the viewport still reach the scene after scrolling.
+    let blocks = "<div style='height:100px;background:#c00'></div>".repeat(60);
+    for scale in [1.0_f32, 2.0] {
+        let (width, height) = ((400.0 * scale) as u32, (300.0 * scale) as u32);
+        let mut doc = HtmlDocument::from_html(
+            &format!("<style>body{{margin:0}}</style>{blocks}"),
+            DocumentConfig {
+                viewport: Some(Viewport::new(width, height, scale, ColorScheme::Light)),
+                ..Default::default()
+            },
+        );
+        doc.resolve(0.0);
+        // Scroll as the reader does for each tile: the viewport shows the last
+        // three blocks.
+        doc.set_viewport_scroll(blitz_dom::Point { x: 0.0, y: 5700.0 });
+        let mut scene = anyrender::Scene::default();
+        blitz_paint::paint_scene(&mut scene, &mut doc, scale.into(), width, height, 0, 0);
+        let fills = scene
+            .commands
+            .iter()
+            .filter(|command| matches!(command, anyrender::recording::RenderCommand::Fill(_)))
+            .count();
+        assert!(fills <= 6, "scale {scale}: {fills} fills");
+    }
+}

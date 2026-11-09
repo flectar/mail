@@ -1451,3 +1451,20 @@ fn notification_table_keeps_name_and_heading_readable() {
         heading.final_layout().size.width
     );
 }
+
+#[test]
+fn relative_resource_urls_do_not_fail_the_message() {
+    // The reader has no base URL, so relative image and @import URLs cannot be
+    // resolved. They are skipped like failed loads; the message still renders.
+    let html = r#"<html><head><style>@import url(fonts/brand.css); p { color: #123456 }</style></head>
+        <body><img src="images/logo.png" alt="Logo" width="120" height="40"><p>Order shipped</p></body></html>"#;
+    let renderer = GpuEmailRenderer::default();
+    for html in [
+        html.to_owned(),
+        flectar_mail_core::mime::sanitize_html(html),
+    ] {
+        let prepared = renderer.prepare_email_html(&html, false).unwrap();
+        assert!(prepared.notice.is_none());
+        assert!(prepared.plain_text.contains("Order shipped"));
+    }
+}

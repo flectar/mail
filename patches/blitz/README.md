@@ -1,7 +1,7 @@
 # Blitz patch maintenance
 
-The vendored crates are the published **0.3.0-beta.3** archives at revision
-`5890fab3afb087d8c0c5b0652b8b635f161f3a13`, plus the ordered patches in
+The vendored crates are the published **0.3.0-beta.4** archives at revision
+`92b11f1bd8ab7975411328b0406a95a09445b4e7`, plus the ordered patches in
 [`series`](series). Archive SHA-256 checksums are in [`upstream.toml`](upstream.toml).
 Do not edit the vendored code without regenerating its patch.
 
@@ -12,52 +12,57 @@ bash scripts/blitz-patches.sh stage NEW_VERSION
 
 Verification downloads and checks both archives, checks their source revision,
 applies every patch without rejects, and compares every file with the vendored
-trees. It also checks the application/probe pins, float feature, desktop/Android
-patch wiring, and both resolved lockfiles.
+trees. It also checks the application/probe pins, float feature,
+desktop/Android/OpenHarmony patch wiring, and all three resolved lockfiles.
 
-## Beta.3 audit
+## Patches
 
-The beta.2 queue contained eleven patches, including three successive rewrites
-of table layout. Beta.3 changes the table collector, lazy layout styles,
-out-of-flow layout, font loading, and text metrics. The queue is consolidated
-into six patches so it no longer applies and then replaces intermediate table
-implementations.
-
-| Previous patch | Beta.3 disposition |
+| Patch | Purpose |
 | --- | --- |
-| 0001 bounded event queue | Retained as 0001; also bounds the new `fetch_font_face_rules` sender used by CSSOM. |
-| 0002 table layout/borders | Consolidated into 0003/0005. Upstream handles invisible border widths, but still uses the first cell's border for the entire grid; per-edge conflict resolution, cell alignment, and anonymous cells remain local. |
-| 0003 inline ancestor backgrounds | Retained in 0005; ancestor backgrounds still need the local traversal. |
-| 0004 repository integration | Retained in 0006: objc2 dependency-scanner exception, unused paint euclid removal, and bounded JPEG decoder dependency. |
-| 0005 reader selection/resources | Retained in 0002/0003. The image clone removal is already upstream and is dropped. Selection range checks, paragraph separators, resource notifications, visibility export, and clipping remain local. |
-| 0006 floats-disabled line breaking | Retained in 0004; upstream still creates custom float boxes without a float-aware line breaker. |
-| 0007 inline floats | Retained in 0004, adapted to lazy style access: bounded float width, correct margin basis, and non-looping height-limit failure. |
-| 0008 image/painting performance | Retained in 0002/0003/0005/0006: decode limits and native JPEG scaling, separate intrinsic/pixel sizes, fixed-image paint invalidation, bounded line cache and conservative culling. |
-| 0009 font hinting | Retained in 0005; uses Parley 0.12 font metrics and casts normalized coordinates as required by the new API. |
-| 0010 automatic table sizing | Consolidated into 0003; content minimums, proportional authored columns, and wrapping remain necessary. |
-| 0011 presentational hints/table fidelity | Consolidated into 0003/0005; retains cached legacy hints, rowspan handling, collapsed edges, and cell alignment. Preserves beta.3 language hints, column sizing, row-group order/backgrounds, height distribution, and positioned descendants. |
+| 0001 bounded event queue | Bounds resource completions waiting for the UI, including the CSSOM `fetch_font_face_rules` sender. |
+| 0002 reader resources and images | Decode limits with native JPEG scaling and EXIF orientation, separate intrinsic/pixel sizes, paint-only updates for fixed-size images, resource notifications, selection paragraph separators and range checks. |
+| 0003 email tables and presentational hints | Table collector and automatic sizing (content minimums, proportional authored columns, wrapping), rowspan handling, collapsed edges, cell alignment, cached legacy hints, visibility export and clip-aware hit testing. |
+| 0004 inline floats | Floats-disabled line breaking, bounded float width, the float's own margin basis, and a non-looping height-limit failure. |
+| 0005 email painting and cache | Per-edge collapsed table borders, inline ancestor backgrounds, fixed-image paint invalidation, a bounded line cache with conservative culling, and unhinted email glyphs. |
+| 0006 repository integration | objc2 dependency-scanner exception, removal of paint's unused `euclid` and `usvg`, and the bounded JPEG decoder dependency. |
+| 0007 unresolvable resource URLs | Skips images, stylesheets, form actions and `@import` rules whose URL cannot be resolved instead of panicking. The reader has no base URL, so a relative `<img src>` failed the whole message. |
+| 0008 offscreen culling bounds | Builds each element's cull box at its own origin, like its scaled scrollable overflow. Tiles far down a message no longer paint the elements above them. |
+
+0001–0006 are not upstream yet. Upstream main adds `cellspacing` and
+`cellpadding` hints (#1366), which overlap 0003. 0007 backports upstream #1374
+and the `<link>` part of #1318; its `@import` change is local. 0008 backports
+upstream #1342, keeping beta.4's element transform. Drop the backported parts
+when a release contains them.
 
 Table-cell layout adjustments use temporary computed-style overrides. They do
 not mutate the author's primary style or its shared hint blocks. Each call
 restores the previous override; table reconstruction refreshes cached styles.
 
-Beta.3 requires Stylo 0.22, cssparser 0.38, html5ever 0.40, Taffy 0.15,
-Parley/Fontique 0.12, and AnyRender 0.14. The CPU/GPU backends move to
-AnyRender Vello CPU 0.18 and Vello 0.15 respectively (Vello 0.11/WGPU 30).
-Slint 1.18.1 supports WGPU 30. Its Fontique 0.11 and Blitz's Fontique 0.12
-both enable dynamic Fontconfig loading.
-
-Beta.3 also removes the implicit available-width clamp on replaced elements.
-The reader now supplies `img { max-width: 100% }` in its user-agent stylesheet
-to preserve fitted images. Sender CSS can override that default. The existing
-JPEG/PNG downsampling regression checks intrinsic dimensions, fitted layout,
-and background-image scaling together.
+Beta.3 removed the implicit available-width clamp on replaced elements. The
+reader supplies `img { max-width: 100% }` in its user-agent stylesheet to
+preserve fitted images. Sender CSS can override that default.
 
 Parley 0.12's published `parley_engine` includes the emoji-presentation state
-machine previously backported locally. The application regressions for missing
-fonts, plain digits, real emoji, and authored families remain the compatibility
-gate. Slint still depends on Parley 0.11.1, so its existing backport and verifier
-remain in place until Slint adopts a fixed version too.
+machine previously backported locally. Slint still depends on Parley 0.11.1, so
+its existing backport and verifier remain in place until Slint adopts a fixed
+version too.
+
+## Beta.4 rebase
+
+Beta.4 keeps Stylo 0.22, cssparser 0.38, html5ever 0.40, Taffy 0.15,
+Parley/Fontique 0.12 and AnyRender 0.14. All six patches were retained; only
+their context changed:
+
+- `DocumentConfig` has a hand-written `Default`, which 0002 extends with
+  `image_decode_limits: None`.
+- The `std::sync` import and the keyboard-types 0.8 manifest line moved.
+- blitz-paint no longer names `usvg`, so 0006 drops it with `euclid`. blitz-dom
+  still enables it with the same features.
+
+User-agent stylesheets are now parsed `UserAgentStylesheet` values. The reader
+passes Blitz's default sheet and its own, each parsed once, so its documents
+also share Stylo's user-agent cascade data. Keys use keyboard-types 0.8
+(`Key::Named`).
 
 ## Upgrade validation
 
@@ -71,6 +76,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo test -p blitz-dom --lib --locked
 cargo metadata --manifest-path platform/android/Cargo.toml --locked --format-version 1 > /dev/null
+cargo metadata --manifest-path platform/ohos/Cargo.toml --locked --format-version 1 > /dev/null
 # With the NDK compiler environment used by scripts/build-android-test-apk.sh:
 cargo check --manifest-path platform/android/Cargo.toml --target aarch64-linux-android --locked
 # Requires a working WGPU adapter:
@@ -82,9 +88,7 @@ overlap and locale-sensitive text. Application renderer tests cover float
 wrapping, selection, image invalidation, caching, backgrounds, and emoji.
 Refresh Flatpak's `cargo-sources.json` whenever the root lockfile changes.
 
-The beta.3 upgrade passed all commands above on Linux, including the WGPU
-rendering test and Android arm64 compilation. The Blitz library suite passed
-86 tests; the focused upgrade suite passed eight. Formatting, patch reproduction,
-Parley source verification, and Flatpak source/lockfile consistency also passed.
-Android reports an unused `Command::key` method in unchanged `src/tabs.rs`;
-the desktop Clippy check passed with warnings denied.
+On Linux, the beta.4 queue passed the Blitz library suite (88 tests), the
+focused upgrade suite (nine tests), patch reproduction, all three locked
+metadata checks and the Flatpak source check. The application crate is
+validated by CI.

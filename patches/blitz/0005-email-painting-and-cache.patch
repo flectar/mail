@@ -87,7 +87,7 @@ index afae3e2..9705020 100644
  
      // println!(
 diff --git a/crates/blitz-paint/src/render.rs b/crates/blitz-paint/src/render.rs
-index f1ff10d..237a30d 100644
+index 407fd1a..bd70c0e 100644
 --- a/crates/blitz-paint/src/render.rs
 +++ b/crates/blitz-paint/src/render.rs
 @@ -45,65 +45,10 @@ use peniko::{self, Fill, ImageData, ImageSampler};
@@ -185,7 +185,7 @@ index f1ff10d..237a30d 100644
                          // Overlay scrollbars, drawn unscrolled above the
                          // clipped content.
                          #[cfg(feature = "scrollbars")]
-@@ -675,8 +625,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
+@@ -685,8 +635,8 @@ fn to_peniko_image(image: &RasterImageData, quality: peniko::ImageQuality) -> pe
          image: ImageData {
              data: image.data.clone(),
              format: peniko::ImageFormat::Rgba8,
@@ -196,7 +196,7 @@ index f1ff10d..237a30d 100644
              alpha_type: peniko::ImageAlphaType::Alpha,
          },
          sampler: ImageSampler {
-@@ -853,16 +803,79 @@ impl ElementCx<'_, '_> {
+@@ -863,16 +813,79 @@ impl ElementCx<'_, '_> {
              let transform =
                  self.transform * Affine::translate((pos.x * self.scale, pos.y * self.scale));
  
@@ -280,7 +280,7 @@ index f1ff10d..237a30d 100644
              // Render text selection highlight (if any) using cached selection ranges
              if let Some(&(sel_start, sel_end)) = self.context.selection_ranges.get(&self.node.id) {
                  crate::text::draw_text_selection(
-@@ -874,16 +887,16 @@ impl ElementCx<'_, '_> {
+@@ -884,16 +897,16 @@ impl ElementCx<'_, '_> {
                  );
              }
  
@@ -299,7 +299,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -950,6 +963,7 @@ impl ElementCx<'_, '_> {
+@@ -960,6 +973,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -307,7 +307,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -1005,6 +1019,7 @@ impl ElementCx<'_, '_> {
+@@ -1015,6 +1029,7 @@ impl ElementCx<'_, '_> {
                  self.scale,
                  self.node.id,
                  &mut draw_text_context,
@@ -315,7 +315,7 @@ index f1ff10d..237a30d 100644
              );
          }
      }
-@@ -1157,8 +1172,8 @@ impl ElementCx<'_, '_> {
+@@ -1206,8 +1221,8 @@ impl ElementCx<'_, '_> {
              let x = x + x_offset.px() as f64;
              let y = y + y_offset.px() as f64;
  
@@ -327,7 +327,7 @@ index f1ff10d..237a30d 100644
                  .transform
                  .pre_translate(Vec2 { x, y })
 diff --git a/crates/blitz-paint/src/render/background.rs b/crates/blitz-paint/src/render/background.rs
-index ba7e5b0..7099236 100644
+index e5e048e..446fef7 100644
 --- a/crates/blitz-paint/src/render/background.rs
 +++ b/crates/blitz-paint/src/render/background.rs
 @@ -255,16 +255,13 @@ impl ElementCx<'_, '_> {
@@ -354,7 +354,7 @@ index ba7e5b0..7099236 100644
          let has_color =
              |colors: &[[Option<Color>; 2]]| colors.iter().flatten().any(Option::is_some);
          if !has_color(&column_colors) && !has_color(&row_colors) {
-@@ -529,7 +526,10 @@ impl ElementCx<'_, '_> {
+@@ -528,7 +525,10 @@ impl ElementCx<'_, '_> {
                      peniko::Fill::NonZero,
                      transform,
                      to_peniko_image(image_data, quality).as_ref(),

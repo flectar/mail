@@ -8,14 +8,14 @@ use crate::message_appearance::{AppearanceDocument, EmailAppearance};
 use anyrender::ImageRenderer;
 #[cfg(test)]
 use anyrender::render_to_buffer;
-use blitz_dom::{Document, DocumentConfig, Point as DomPoint, local_name};
+use blitz_dom::{Document, DocumentConfig, Point as DomPoint, UserAgentStylesheet, local_name};
 use blitz_html::HtmlDocument;
 #[cfg(test)]
 use blitz_paint::paint_scene;
 use blitz_paint::{PaintCache, paint_scene_cached};
 use blitz_traits::net::NetWaker;
 use blitz_traits::{SmolStr, net::NetProvider, node_id::NodeId, shell::Viewport};
-use keyboard_types::Key;
+use keyboard_types::{Key, NamedKey};
 use parley::layout::PositionedLayoutItem;
 use semantics::*;
 #[cfg(feature = "gpu-renderer")]
@@ -23,7 +23,7 @@ use slint::wgpu_30::wgpu;
 use std::{
     collections::BTreeMap,
     sync::{
-        Arc,
+        Arc, LazyLock,
         atomic::{AtomicU8, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -69,6 +69,14 @@ const EMAIL_USER_AGENT_STYLE: &str = r#"
      by default; authored max-width rules still override this reader default. */
   img { max-width: 100%; }
 "#;
+
+/// Blitz's default sheet followed by ours, each parsed once. Documents with the
+/// same user-agent sheets also share Stylo's user-agent cascade data.
+fn email_user_agent_sheets() -> Vec<UserAgentStylesheet> {
+    static EMAIL: LazyLock<UserAgentStylesheet> =
+        LazyLock::new(|| UserAgentStylesheet::parse(EMAIL_USER_AGENT_STYLE));
+    vec![UserAgentStylesheet::default_sheet(), EMAIL.clone()]
+}
 
 pub(crate) fn render_timings_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -1321,30 +1329,26 @@ impl GpuEmailRenderer {
 
 fn slint_key_to_blitz_key(text: &str) -> (Key, Option<SmolStr>) {
     let key = match text.chars().next() {
-        Some('\u{0008}') => Key::Backspace,
-        Some('\u{0009}') => Key::Tab,
-        Some('\u{000a}') => Key::Enter,
-        Some('\u{001b}') => Key::Escape,
-        Some('\u{007f}') => Key::Delete,
-        Some('\u{0010}') => Key::Shift,
-        Some('\u{0011}') => Key::Control,
-        Some('\u{0012}') => Key::Alt,
-        Some('\u{0017}') | Some('\u{0018}') => Key::Meta,
-        Some('\u{f700}') => Key::ArrowUp,
-        Some('\u{f701}') => Key::ArrowDown,
-        Some('\u{f702}') => Key::ArrowLeft,
-        Some('\u{f703}') => Key::ArrowRight,
-        Some('\u{f729}') => Key::Home,
-        Some('\u{f72b}') => Key::End,
-        Some('\u{f72c}') => Key::PageUp,
-        Some('\u{f72d}') => Key::PageDown,
-        _ => Key::Character(text.to_owned()),
+        Some('\u{0008}') => NamedKey::Backspace,
+        Some('\u{0009}') => NamedKey::Tab,
+        Some('\u{000a}') => NamedKey::Enter,
+        Some('\u{001b}') => NamedKey::Escape,
+        Some('\u{007f}') => NamedKey::Delete,
+        Some('\u{0010}') => NamedKey::Shift,
+        Some('\u{0011}') => NamedKey::Control,
+        Some('\u{0012}') => NamedKey::Alt,
+        Some('\u{0017}') | Some('\u{0018}') => NamedKey::Meta,
+        Some('\u{f700}') => NamedKey::ArrowUp,
+        Some('\u{f701}') => NamedKey::ArrowDown,
+        Some('\u{f702}') => NamedKey::ArrowLeft,
+        Some('\u{f703}') => NamedKey::ArrowRight,
+        Some('\u{f729}') => NamedKey::Home,
+        Some('\u{f72b}') => NamedKey::End,
+        Some('\u{f72c}') => NamedKey::PageUp,
+        Some('\u{f72d}') => NamedKey::PageDown,
+        _ => return (Key::Character(text.to_owned()), Some(text.into())),
     };
-    let text_value = match &key {
-        Key::Character(value) => Some(value.as_str().into()),
-        _ => None,
-    };
-    (key, text_value)
+    (Key::Named(key), None)
 }
 
 #[cfg(test)]
@@ -1964,13 +1968,13 @@ fn prepare_email_html_at_with_font_ctx(
         DocumentConfig {
             image_decode_limits: Some(crate::remote::image_decode_limits()),
             viewport: Some(Viewport::new(width, height, scale, appearance.scheme())),
+            ua_stylesheets: email_user_agent_sheets(),
             net_provider,
             abort_signal: Some(abort.0.as_ref().unwrap().signal.clone()),
             font_ctx: Some(font_ctx),
             ..Default::default()
         },
     );
-    document.add_user_agent_stylesheet(EMAIL_USER_AGENT_STYLE);
 
     let mut stack = vec![(document.root_node().id, 0usize)];
     let mut count = 0usize;

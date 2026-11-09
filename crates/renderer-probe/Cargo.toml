@@ -8,10 +8,10 @@ license = "AGPL-3.0-only"
 [dependencies]
 anyrender = "0.14"
 anyrender_vello_cpu = "0.18"
-blitz-dom = { version = "=0.3.0-beta.3", features = ["floats"] }
-blitz-html = "=0.3.0-beta.3"
-blitz-paint = "=0.3.0-beta.3"
-blitz-traits = "=0.3.0-beta.3"
+blitz-dom = { version = "=0.3.0-beta.4", features = ["floats"] }
+blitz-html = "=0.3.0-beta.4"
+blitz-paint = "=0.3.0-beta.4"
+blitz-traits = "=0.3.0-beta.4"
 image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
 
 [[bin]]

@@ -1,5 +1,5 @@
 diff --git a/crates/blitz-dom/src/document.rs b/crates/blitz-dom/src/document.rs
-index 5331a89..1db0b4d 100644
+index 96d7ed0..20273dd 100644
 --- a/crates/blitz-dom/src/document.rs
 +++ b/crates/blitz-dom/src/document.rs
 @@ -38,7 +38,7 @@ use std::ops::{Deref, DerefMut};
@@ -8,7 +8,7 @@ index 5331a89..1db0b4d 100644
  use std::sync::atomic::{AtomicUsize, Ordering};
 -use std::sync::mpsc::{Receiver, Sender, channel};
 +use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
- use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
+ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
  use std::task::{Context as TaskContext, Waker};
  use style::Atom;
 @@ -69,6 +69,11 @@ use thin_vec::ThinVec;
@@ -23,7 +23,7 @@ index 5331a89..1db0b4d 100644
  #[cfg(feature = "parallel-construct")]
  use thread_local::ThreadLocal;
  
-@@ -217,7 +222,7 @@ pub struct BaseDocument {
+@@ -253,7 +258,7 @@ pub struct BaseDocument {
      pub(crate) subdocument_depth: usize,
  
      // Events
@@ -32,7 +32,7 @@ index 5331a89..1db0b4d 100644
      // rx will always be Some, except temporarily while processing events
      pub(crate) rx: Option<Receiver<DocumentEvent>>,
  
-@@ -432,7 +437,7 @@ impl BaseDocument {
+@@ -465,7 +470,7 @@ impl BaseDocument {
              .html_parser_provider
              .unwrap_or_else(|| Arc::new(DummyHtmlParserProvider));
  
@@ -42,7 +42,7 @@ index 5331a89..1db0b4d 100644
          let mut doc = Self {
              id,
 diff --git a/crates/blitz-dom/src/iframe.rs b/crates/blitz-dom/src/iframe.rs
-index 801366d..6fa0f02 100644
+index c439fa8..c6fe58e 100644
 --- a/crates/blitz-dom/src/iframe.rs
 +++ b/crates/blitz-dom/src/iframe.rs
 @@ -1,7 +1,7 @@
