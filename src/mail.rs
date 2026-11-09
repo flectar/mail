@@ -1155,13 +1155,10 @@ impl CoreMailSource {
             .scheduled_send_of(row)
             .await?
             .ok_or_else(|| "this message is not scheduled".to_owned())?;
-        self.queue_send(QueueSendArgs {
-            draft_id: send.draft_id,
-            send_at: Some(send_at),
-            remind_at: None,
-        })
-        .await
-        .map(|_| ())
+        self.core
+            .reschedule_send(send.action_id, send.draft_id, send_at)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     pub async fn load_draft(&self, row: &MailMessage) -> Result<SaveDraftArgs, String> {

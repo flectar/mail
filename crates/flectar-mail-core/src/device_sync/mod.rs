@@ -1240,6 +1240,12 @@ impl Core {
 
     /// This device's id in hex, when a send it schedules now can be shared
     /// with the user's other devices: sync is on, and the group may upload.
+    /// This device's id in its sync group (hex), while sync is on.
+    pub(crate) fn sync_device(&self) -> Option<String> {
+        let client = self.sync_service().client()?;
+        Some(hex(&client.identity().device_id()))
+    }
+
     pub(crate) fn shared_send_device(&self) -> Option<String> {
         let service = self.sync_service();
         let client = service.client()?;

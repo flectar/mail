@@ -4892,10 +4892,59 @@ impl Core {
         Ok(cancelled)
     }
 
+    /// Move a scheduled send to `send_at`. Another device's message changes
+    /// only its time, through its record: this device's copy of it may lack
+    /// what only that device has, such as attachments.
+    pub async fn reschedule_send(&self, action_id: i64, draft_id: i64, send_at: i64) -> Result<()> {
+        if self.retime_others_send(action_id, send_at).await? {
+            return Ok(());
+        }
+        self.queue_send(QueueSendArgs {
+            draft_id,
+            send_at: Some(send_at),
+            remind_at: None,
+        })
+        .await
+        .map(|_| ())
+    }
+
+    /// Change when another device's shared send goes out, through its
+    /// record. Returns whether `action_id` was one.
+    async fn retime_others_send(&self, action_id: i64, send_at: i64) -> Result<bool> {
+        let Some(me) = self.sync_device() else {
+            return Ok(false);
+        };
+        let changed = self
+            .db
+            .write(move |conn| {
+                let Some(send) = repo::synced_sends::by_action(conn, action_id)?.filter(|send| {
+                    send.state == repo::synced_sends::SCHEDULED && send.origin != me
+                }) else {
+                    return Ok(false);
+                };
+                repo::synced_sends::reschedule(conn, &send.sync_id, send_at, now_ms())?;
+                conn.execute(
+                    "UPDATE pending_actions SET payload = json_set(payload, '$.sendAt', ?2)
+                     WHERE id = ?1 AND state = 'pending'",
+                    rusqlite::params![action_id, send_at],
+                )?;
+                Ok(true)
+            })
+            .await?;
+        if changed {
+            self.device_sync_now();
+        }
+        Ok(changed)
+    }
+
     /// "Send now": make a queued send due immediately (skip the remaining undo
     /// window) and nudge its actor. Returns false if it was already sent or
     /// cancelled.
     pub async fn send_now(&self, action_id: i64) -> Result<bool> {
+        // Another device's message goes out from there, as it is.
+        if self.retime_others_send(action_id, now_ms()).await? {
+            return Ok(true);
+        }
         // One the mail server holds is taken back, then sent now.
         let held = self
             .db

@@ -925,12 +925,61 @@ async fn an_imap_message_scheduled_on_one_device_waits_on_the_other() {
     assert_eq!(subject, "Monday plans");
     assert!(bcc.contains("boss@example.com"), "{bcc}");
 
+    // Moved on the phone: only its time changes. The laptop's message goes
+    // out then, not the phone's copy of it.
+    let (phone_action, phone_draft): (i64, i64) = phone
+        .db
+        .read(|conn| {
+            Ok(conn.query_row(
+                "SELECT id, message_id FROM pending_actions
+                 WHERE kind = 'send' ORDER BY id DESC LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    let moved = send_at + 3_600_000;
+    phone
+        .reschedule_send(phone_action, phone_draft, moved)
+        .await
+        .unwrap();
+    phone.device_sync_run().await.unwrap();
+    laptop.device_sync_run().await.unwrap();
+    assert_eq!(laptop.scheduled_sends().await.unwrap()[0].send_at, moved);
+    let laptop_id = laptop
+        .device_sync_status()
+        .devices
+        .into_iter()
+        .find(|device| device.this_device)
+        .unwrap()
+        .id;
+    let origin: String = phone
+        .db
+        .read(|conn| Ok(conn.query_row("SELECT origin FROM synced_sends", [], |row| row.get(0))?))
+        .await
+        .unwrap();
+    assert_eq!(origin, laptop_id, "it stays the laptop's message");
+    let payload: String = phone
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT payload FROM pending_actions WHERE id = ?1",
+                [phone_action],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(payload["asIs"], true, "sent as the laptop made it");
+
     // Sync turned off on the laptop: the message goes out from there at its
     // time, and the phone forgets it.
     laptop.device_sync_turn_off().await.unwrap();
     assert_eq!(
         send_of(&laptop).await.unwrap(),
-        ("pending".to_owned(), send_at)
+        ("pending".to_owned(), moved)
     );
     phone.device_sync_run().await.unwrap();
     assert!(phone.scheduled_sends().await.unwrap().is_empty());
