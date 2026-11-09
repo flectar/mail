@@ -9,7 +9,7 @@ export { WindowChrome } from "window-chrome.slint";
 export { AppIcon, AppIconVariant } from "app-icon.slint";
 export { DefaultEmailApp } from "default-email-app.slint";
 export { SystemNotifications } from "system-notifications.slint";
-import { AppIcon } from "app-icon.slint";
+import { AppIcon, AppIconVariant } from "app-icon.slint";
 import { WindowChrome, WindowControls, WindowDragArea } from "window-chrome.slint";
 // Bundled once at compile time and used throughout the application chrome.
 // Rust registers the separate Noto Emoji face before constructing this window.
@@ -35,6 +35,9 @@ import { TabOverview } from "components/tab-overview.slint";
 import { WorkspaceFrame } from "components/workspace-layout.slint";
 import { CalendarEventDialog } from "dialogs/calendar-event-dialog.slint";
 import { ComposeDialog } from "dialogs/compose-dialog.slint";
+import { BoundComposer, ComposerUi } from "components/composer-ui.slint";
+import { ComposerText } from "components/composer-fields.slint";
+export { ComposerUi } from "components/composer-ui.slint";
 import { FolderDialog } from "dialogs/folder-dialog.slint";
 export { MovePickerUi, MoveTargetRow } from "dialogs/move-dialog.slint";
 import { MoveDialog, MovePickerUi } from "dialogs/move-dialog.slint";
@@ -649,6 +652,64 @@ export global I18n {
     }
 }
 
+// Everything a composer window copies from the main window's look.
+struct Appearance {
+    mode: string,
+    preset: string,
+    icon: AppIconVariant,
+    light_primary: color,
+    light_page: color,
+    light_surface: color,
+    light_text: color,
+    light_border: color,
+    dark_primary: color,
+    dark_page: color,
+    dark_surface: color,
+    dark_text: color,
+    dark_border: color,
+}
+
+// A message moved into its own window on the desktop. Each window has its
+// own ComposerUi, so several messages can be open at once while the main
+// window stays free to read mail or start another.
+export component ComposerWindow inherits Window {
+    // "light", "dark" or "system": the main window's theme-mode.
+    in property <string> theme: "system";
+    in property <bool> attachment-picker-supported: true;
+    // The window's close button asks the composer, which protects a
+    // message with content behind its discard confirmation.
+    callback request-close();
+    // Minimized: the composer keeps no pixels until it is shown again.
+    in-out property <bool> render-suspended: false;
+
+    title: ComposerUi.subject != "" ? ComposerUi.subject : ComposerText.mode-title(ComposerUi.mode);
+    icon: AppIcon.window-image(AppIcon.variant);
+    default-font-family: "Google Sans Flex";
+    preferred-width: 760px;
+    preferred-height: 720px;
+    min-width: 420px;
+    min-height: 480px;
+    background: AppTheme.surface;
+
+    init => { root.apply-theme(); }
+    changed theme => { root.apply-theme(); }
+    request-close => { composer.back-requested(); }
+
+    function apply-theme() {
+        Palette.color-scheme = root.theme == "dark" ? ColorScheme.dark
+            : root.theme == "light" ? ColorScheme.light
+            : ColorScheme.unknown;
+    }
+
+    composer := BoundComposer {
+        width: parent.width;
+        height: parent.height;
+        windowed: true;
+        attachment-picker-supported: root.attachment-picker-supported;
+        notice: I18n.ui-message(ComposerUi.message.key, ComposerUi.message.argument, ComposerUi.message.second_argument, ComposerUi.message.third_argument);
+    }
+}
+
 export component AppWindow inherits Window {
     title: @tr("Flectar Mail");
     icon: AppIcon.window-image(AppIcon.variant);
@@ -729,25 +790,8 @@ export component AppWindow inherits Window {
     callback clear_contact_suggestions() -> bool;
     callback set_close_to_tray(bool);
     callback set_launch_at_login(bool);
-    callback open_compose();
-    callback close_compose();
-    callback save_compose(int, string, string, string, string, string, bool);
-    callback pick_compose_attachments();
-    callback remove_compose_attachment(int);
-    callback format_compose(string, string, int, int);
-    callback link_compose(string, string, int, int);
-    callback edit_compose_body(string, int, int, string);
-    callback update_compose_selection(string, int, int);
-    callback compose_history(string);
-    callback compose_editor_pointer_event(float, float, string, bool, bool, bool, bool);
-    callback compose_editor_key_event(string, bool, bool, bool, bool) -> bool;
-    callback compose_editor_layout_changed();
-    callback search_compose_contacts(string, int);
-    callback select_compose_contact(int, string) -> string;
-    callback refresh_email_templates();
-    callback use_email_template(int) -> bool;
-    callback save_email_template(int, string, string, string, string) -> bool;
-    callback delete_email_template(int) -> bool;
+    // A new message, to the recipients given, if any.
+    callback open_compose(string);
     callback add_password_account(string, string, string, string, string, string, string, string, string);
     callback suggest_account_settings(string);
     callback start_oauth(string);
@@ -841,7 +885,6 @@ export component AppWindow inherits Window {
 
     in property <[EmailRow]> emails: [];
     in property <[MailListEntry]> mail_list_entries: [];
-    in property <[EmailTemplateRow]> compose_templates: [];
     in property <[ThreadMessageRow]> thread_messages: [];
     in property <int> selected_thread_index: 0;
     in property <[SidebarRow]> sidebar_rows: [];
@@ -1086,43 +1129,9 @@ export component AppWindow inherits Window {
     in property <bool> remote-images-available: true;
     in-out property <bool> remote-images-enabled: false;
     in property <bool> remote-images-blocked: false;
-    in-out property <bool> compose_open: false;
-    in property <string> compose_mode: "new";
-    in-out property <string> compose_to: "";
-    in-out property <string> compose_cc: "";
-    in-out property <string> compose_bcc: "";
-    in-out property <string> compose_subject: "";
-    in-out property <string> compose_body: "";
-    in property <bool> compose_sending: false;
+    // The account a new message is written from: one the mail view shows.
     in-out property <int> compose_account_id: -1;
-    in property <[ComposeContact]> compose_contact_suggestions: [];
-    in property <[ComposeAttachment]> compose_attachments: [];
-    in property <string> compose_attachment_summary: "";
     in-out property <string> compose_from_label: @tr("No connected account");
-    in property <LocalizedMessage> compose-message;
-    property <string> compose_notice: I18n.ui-message(root.compose-message.key, root.compose-message.argument, root.compose-message.second_argument, root.compose-message.third_argument);
-    in property <bool> compose_notice_is_error: false;
-    in property <int> compose_selection_start: 0;
-    in property <int> compose_selection_end: 0;
-    in property <[ComposeEditorTile]> compose_editor_tiles: [];
-    in property <float> compose_editor_content_height: 18;
-    in property <float> compose_editor_caret_x: 0;
-    in property <float> compose_editor_caret_y: 0;
-    in property <float> compose_editor_caret_height: 18;
-    in property <bool> compose_bold_active: false;
-    in property <bool> compose_italic_active: false;
-    in property <bool> compose_underline_active: false;
-    in property <bool> compose_strike_active: false;
-    in property <bool> compose_code_active: false;
-    in property <string> compose_active_link_url: "";
-    in-out property <length> compose_editor_width;
-    in-out property <length> compose_editor_viewport_height;
-    in-out property <length> compose_editor_scroll_y;
-    in-out property <string> compose_editor_preedit_text;
-    out property <color> compose_editor_text_color: root.body-text;
-    out property <color> compose_editor_link_color: root.accent;
-    out property <color> compose_editor_selection_color: root.accent;
-    out property <color> compose_editor_selected_text_color: white;
     in-out property <string> account_email: "";
     in-out property <string> account_username: "";
     in-out property <string> account_password: "";
@@ -1245,7 +1254,7 @@ export component AppWindow inherits Window {
     // window outline that the window manager would otherwise draw.
     private property <bool> client-frame: root.no-frame && !root.maximized && !root.full-screen;
     private property <bool> compact-primary-nav-visible: root.compact-layout
-        && !root.compose_open && !root.calendar_editor_open
+        && !ComposerUi.open && !root.calendar_editor_open
         && !(root.active_view == "mail" && root.mail-compact-page == "message")
         && !(root.active_view == "mail" && root.mail-folders-open)
         && !(root.active_view == "contacts" && root.contacts-detail-visible)
@@ -1380,7 +1389,7 @@ export component AppWindow inherits Window {
             TabsUi.overview-open = false;
             return true;
         }
-        if (root.compose_open) {
+        if (ComposerUi.open) {
             root.compose-back-request += 1;
             return true;
         }
@@ -1408,11 +1417,12 @@ export component AppWindow inherits Window {
         return false;
     }
 
-    changed compose_open => {
-        if (!root.compose_open) {
+    private property <bool> composer-open: ComposerUi.open;
+    changed composer-open => {
+        if (!root.composer-open) {
             root.compose-back-request = 0;
-            root.compose_editor_scroll_y = 0px;
-            root.compose_editor_preedit_text = "";
+            ComposerUi.editor-scroll-y = 0px;
+            ComposerUi.editor-preedit-text = "";
         }
     }
 
@@ -1421,6 +1431,19 @@ export component AppWindow inherits Window {
             : root.theme-mode == "light" ? ColorScheme.light
             : ColorScheme.unknown;
     }
+
+    // Composer windows have their own globals and follow this window's
+    // appearance through Rust.
+    callback appearance-changed();
+    private property <Appearance> appearance: {
+        mode: root.theme-mode, preset: AppTheme.preset, icon: AppIcon.variant,
+        light_primary: AppTheme.custom-light-primary, light_page: AppTheme.custom-light-page-bg,
+        light_surface: AppTheme.custom-light-surface, light_text: AppTheme.custom-light-text,
+        light_border: AppTheme.custom-light-border, dark_primary: AppTheme.custom-dark-primary,
+        dark_page: AppTheme.custom-dark-page-bg, dark_surface: AppTheme.custom-dark-surface,
+        dark_text: AppTheme.custom-dark-text, dark_border: AppTheme.custom-dark-border,
+    };
+    changed appearance => { root.appearance-changed(); }
 
     changed width => { root.sync-window-chrome(); }
     changed full-screen => { root.sync-window-chrome(); }
@@ -1687,7 +1710,7 @@ export component AppWindow inherits Window {
             close_preview => { root.close_preview(); }
             print_message => { root.print_message(); }
             open_message_in_browser => { root.open_message_in_browser(); }
-            open_compose => { root.open_compose(); }
+            open_compose => { root.open_compose(""); }
             open_email_link(url) => { root.open_email_link(url); }
             copy_email_status(status) => { root.copy_email_status(status); }
             report_rendering_issue => { root.report_rendering_issue(); }
@@ -1859,8 +1882,7 @@ export component AppWindow inherits Window {
             usable-email(email) => { root.usable-contact-email(email) }
             compose-to-contact(email) => {
                 if root.usable-contact-email(email) {
-                    root.compose_to = email;
-                    root.open_compose();
+                    root.open_compose(email);
                 }
             }
         }
@@ -2172,92 +2194,17 @@ export component AppWindow inherits Window {
         }
         }
 
-        if root.compose_open : ComposeDialog {
+        if ComposerUi.open : ComposeDialog {
 
             in property <int> back-request: root.compose-back-request;
             changed back-request => { if (self.back-request > 0) { self.back-requested(); } }
             compact: root.compact-layout;
             attachment-picker-supported: root.document_apis_supported;
+            notice: I18n.ui-message(ComposerUi.message.key, ComposerUi.message.argument, ComposerUi.message.second_argument, ComposerUi.message.third_argument);
             x: 0px;
             y: 0px;
             width: parent.width;
             height: parent.height;
-            accent: root.accent;
-            accent-soft: root.accent-soft;
-            body-text: root.body-text;
-            border: root.border;
-            border-subtle: root.border-subtle;
-            control-bg: root.control-bg;
-            muted-control-bg: root.muted-control-bg;
-            muted-text: root.muted-text;
-            secondary-text: root.secondary-text;
-            surface: root.surface;
-            surface-raised: root.surface-raised;
-            title-color: root.title-color;
-            compose_open <=> root.compose_open;
-            compose_mode: root.compose_mode;
-            compose_to <=> root.compose_to;
-            compose_cc <=> root.compose_cc;
-            compose_bcc <=> root.compose_bcc;
-            compose_subject <=> root.compose_subject;
-            compose_body <=> root.compose_body;
-            compose_sending: root.compose_sending;
-            compose_accounts: root.connected_accounts;
-            compose_account_id <=> root.compose_account_id;
-            compose_contact_suggestions: root.compose_contact_suggestions;
-            compose_attachments: root.compose_attachments;
-            compose_templates: root.compose_templates;
-            compose_attachment_summary: root.compose_attachment_summary;
-            compose_from_label <=> root.compose_from_label;
-            compose_notice: root.compose_notice;
-            compose_notice_is_error: root.compose_notice_is_error;
-            compose_selection_start: root.compose_selection_start;
-            compose_selection_end: root.compose_selection_end;
-            compose_editor_tiles: root.compose_editor_tiles;
-            compose_editor_content_height: root.compose_editor_content_height;
-            compose_editor_caret_x: root.compose_editor_caret_x;
-            compose_editor_caret_y: root.compose_editor_caret_y;
-            compose_editor_caret_height: root.compose_editor_caret_height;
-            compose_bold_active: root.compose_bold_active;
-            compose_italic_active: root.compose_italic_active;
-            compose_underline_active: root.compose_underline_active;
-            compose_strike_active: root.compose_strike_active;
-            compose_code_active: root.compose_code_active;
-            compose_active_link_url: root.compose_active_link_url;
-            close_compose => { root.close_compose(); }
-            save_compose(account-id, to, cc, bcc, subject, body, send-now) => {
-                root.save_compose(account-id, to, cc, bcc, subject, body, send-now);
-            }
-            pick_compose_attachments => { root.pick_compose_attachments(); }
-            remove_compose_attachment(index) => { root.remove_compose_attachment(index); }
-            format_compose(kind, body, anchor, cursor) => {
-                root.format_compose(kind, body, anchor, cursor);
-            }
-            link_compose(url, body, anchor, cursor) => {
-                root.link_compose(url, body, anchor, cursor);
-            }
-            edit_compose_body(body, anchor, cursor, key-text) => { root.edit_compose_body(body, anchor, cursor, key-text); }
-            update_compose_selection(body, anchor, cursor) => { root.update_compose_selection(body, anchor, cursor); }
-            compose_history(direction) => { root.compose_history(direction); }
-            compose_editor_pointer_event(x, y, kind, control, shift, alt, meta) => {
-                root.compose_editor_pointer_event(x, y, kind, control, shift, alt, meta);
-            }
-            compose_editor_key_event(key, control, shift, alt, meta) => {
-                root.compose_editor_key_event(key, control, shift, alt, meta)
-            }
-            compose_editor_layout_changed(width, height, scroll-y, preedit) => {
-                root.compose_editor_width = width;
-                root.compose_editor_viewport_height = height;
-                root.compose_editor_scroll_y = scroll-y;
-                root.compose_editor_preedit_text = preedit;
-                root.compose_editor_layout_changed();
-            }
-            search_compose_contacts(query, account-id) => { root.search_compose_contacts(query, account-id); }
-            select_compose_contact(index, recipients) => root.select_compose_contact(index, recipients);
-            refresh_email_templates => { root.refresh_email_templates(); }
-            use_email_template(id) => root.use_email_template(id);
-            save_email_template(id, name, shortcut, subject, body) => root.save_email_template(id, name, shortcut, subject, body);
-            delete_email_template(id) => root.delete_email_template(id);
         }
 
         // The rail width comes from the shared workspace geometry. Its hover label is

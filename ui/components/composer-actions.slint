@@ -430,7 +430,9 @@ export component DiscardConfirmation inherits Rectangle {
 
     visible: root.open;
     background: #00000066;
-    z: 5000;
+    // Above the link editor and the templates, which a window's own close
+    // button can leave open.
+    z: 8000;
     TouchArea { }
 
         Rectangle {

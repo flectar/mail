@@ -7,9 +7,23 @@ import { ComposerContactMenu } from "composer-contact-menu.slint";
 import { TypeScale } from "../typography.slint";
 import { WindowControlsClearance } from "../window-chrome.slint";
 
+// What a composer is for: its heading, and its window's title.
+export global ComposerText {
+    public pure function mode-title(mode: string) -> string {
+        return mode == "reply" ? @tr("Reply")
+            : mode == "reply_all" ? @tr("Reply all")
+            : mode == "forward" ? @tr("Forward")
+            : mode == "draft" ? @tr("Edit draft")
+            : mode == "edit_as_new" ? @tr("Edit as new")
+            : @tr("New message");
+    }
+}
+
 export component ComposerHeader inherits Rectangle {
     in property <bool> compact: false;
     in property <string> mode: "new";
+    // On the desktop: move the message into a window of its own.
+    in property <bool> can-pop-out: false;
     in property <color> control-hover-color;
     in property <color> muted-color;
     in property <color> raised-color;
@@ -17,6 +31,7 @@ export component ComposerHeader inherits Rectangle {
     in property <color> subtle-border-color;
     in property <color> title-color;
     callback request-close();
+    callback pop-out();
 
             height: 52px;
             background: root.raised-color;
@@ -34,18 +49,25 @@ export component ComposerHeader inherits Rectangle {
 
             Text {
                 x: max(18px, header-clearance.leading);
-                width: parent.width - self.x - 102px - header-clearance.trailing;
+                width: parent.width - self.x - (root.can-pop-out ? 142px : 102px) - header-clearance.trailing;
                 height: parent.height;
-                text: root.mode == "reply" ? @tr("Reply")
-                    : root.mode == "reply_all" ? @tr("Reply all")
-                    : root.mode == "forward" ? @tr("Forward")
-                    : root.mode == "draft" ? @tr("Edit draft")
-                    : root.mode == "edit_as_new" ? @tr("Edit as new")
-                    : @tr("New message");
+                text: ComposerText.mode-title(root.mode);
                 color: root.title-color;
                 font-size: TypeScale.heading-small;
                 font-weight: 700;
                 vertical-alignment: center;
+            }
+
+            if root.can-pop-out : IconButton {
+                x: parent.width - (root.compact ? 100px : 78px) - header-clearance.trailing;
+                y: root.compact ? 4px : 10px;
+                width: root.compact ? 44px : 32px;
+                height: root.compact ? 44px : 32px;
+                icon: @image-url("../icons/lucide/outline/external-link.svg");
+                icon-color: root.secondary-color;
+                hover-background: root.control-hover-color;
+                tooltip-text: @tr("Open in a new window");
+                clicked => { root.pop-out(); }
             }
 
             IconButton {
@@ -323,7 +345,11 @@ export component ComposerRecipients inherits Rectangle {
 
     changed open => {
         if root.open {
-            to-row.focus();
+            // A message that already has recipients, such as a reply, a
+            // draft or one moved into its own window, goes on in its body.
+            if root.to == "" {
+                to-row.focus();
+            }
         } else {
             contact-popup.close();
         }

@@ -84,22 +84,44 @@ pub(crate) const PLATFORM: &str = if cfg!(target_os = "windows") {
 
 thread_local! {
     static STARTUP_FRAME: Cell<WindowFrame> = const { Cell::new(WindowFrame::System) };
+    /// Set while a composer window is being created.
+    #[cfg(desktop)]
+    static CREATING_COMPOSER: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Native window attributes for the main window, applied by the backend
-/// selector before the window is created.
+/// selector before the window is created. Composer windows keep the
+/// platform's own frame.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[cfg_attr(target_os = "windows", allow(unused_variables))]
 pub(crate) fn window_attributes(
     startup: WindowFrame,
 ) -> impl Fn(winit::window::WindowAttributes) -> winit::window::WindowAttributes + 'static {
     move |attributes| {
+        if CREATING_COMPOSER.get() {
+            #[cfg(target_os = "windows")]
+            let attributes = windows::composer_window_attributes(attributes);
+            return attributes;
+        }
         #[cfg(target_os = "windows")]
         let attributes = windows::window_attributes(attributes);
         #[cfg(target_os = "macos")]
         let attributes = macos::window_attributes(attributes, startup);
         attributes
     }
+}
+
+/// Create a composer window. The winit backend applies the attributes hook
+/// while the component creates its window, so the hook can tell the two
+/// kinds apart: only the main window gets the integrated frame.
+#[cfg(desktop)]
+pub(crate) fn composer_window<T>(
+    create: impl FnOnce() -> Result<T, slint::PlatformError>,
+) -> Result<T, slint::PlatformError> {
+    CREATING_COMPOSER.set(true);
+    let window = create();
+    CREATING_COMPOSER.set(false);
+    window
 }
 
 /// Prepare platform hooks that must observe native window creation. Call
@@ -194,7 +216,7 @@ fn register_desktop_events(app: &AppWindow) {
                 if event.state.is_pressed()
                     && !event.repeat
                     && is_quit(&event.logical_key, modifiers.get())
-                    && !app.get_compose_open()
+                    && !app.global::<crate::ComposerUi>().get_open()
                     && !app.get_calendar_editor_open() =>
             {
                 crate::window_controller::quit(&app);
@@ -205,7 +227,7 @@ fn register_desktop_events(app: &AppWindow) {
             winit::event::WindowEvent::KeyboardInput { event, .. }
                 if event.state.is_pressed()
                     && app.global::<crate::TabsUi>().get_enabled()
-                    && !app.get_compose_open()
+                    && !app.global::<crate::ComposerUi>().get_open()
                     && !app.get_calendar_editor_open() =>
             {
                 if let Some(command) = crate::tabs::shortcut(&event.logical_key, modifiers.get()) {
