@@ -31,6 +31,11 @@ pub use ohos::*;
 #[cfg(any(test, target_os = "android", target_env = "ohos"))]
 mod memory_levels;
 
+/// How this copy is installed on Windows, whose command parsing every
+/// platform tests.
+#[cfg(any(test, target_os = "windows"))]
+pub(crate) mod windows_install;
+
 /// Fonts a host without Fontconfig hands to the email (Blitz/Parley) renderer
 /// and the composer: the platform font directory, and the fallback policy the
 /// host applies to its own UI, so mail content falls back the same way.

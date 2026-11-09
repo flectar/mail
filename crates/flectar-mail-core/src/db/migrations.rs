@@ -47,15 +47,16 @@ const MIGRATIONS: &[Migration] = &[
     Migration::Plain(include_str!("migrations/028_folder_move_recency.sql")),
     Migration::Plain(include_str!("migrations/029_mail_transfers.sql")),
     Migration::Plain(include_str!("migrations/030_folder_server_only_unseen.sql")),
-    Migration::Plain(include_str!("migrations/031_device_sync.sql")),
-    Migration::Plain(include_str!("migrations/032_synced_templates.sql")),
-    Migration::Plain(include_str!("migrations/033_synced_snoozes.sql")),
-    Migration::Plain(include_str!("migrations/034_synced_sends.sql")),
-    Migration::Plain(include_str!("migrations/035_reply_reminders.sql")),
-    Migration::Plain(include_str!("migrations/036_shared_send_messages.sql")),
-    Migration::Plain(include_str!("migrations/037_shared_send_files.sql")),
-    Migration::Plain(include_str!("migrations/038_jmap_delayed_send.sql")),
-    Migration::Plain(include_str!("migrations/039_sign_in_sync.sql")),
+    Migration::Plain(include_str!("migrations/031_notification_tracking.sql")),
+    Migration::Plain(include_str!("migrations/032_device_sync.sql")),
+    Migration::Plain(include_str!("migrations/033_synced_templates.sql")),
+    Migration::Plain(include_str!("migrations/034_synced_snoozes.sql")),
+    Migration::Plain(include_str!("migrations/035_synced_sends.sql")),
+    Migration::Plain(include_str!("migrations/036_reply_reminders.sql")),
+    Migration::Plain(include_str!("migrations/037_shared_send_messages.sql")),
+    Migration::Plain(include_str!("migrations/038_shared_send_files.sql")),
+    Migration::Plain(include_str!("migrations/039_jmap_delayed_send.sql")),
+    Migration::Plain(include_str!("migrations/040_sign_in_sync.sql")),
 ];
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -66,7 +67,7 @@ fn convert(conn: &Connection, version: i64) -> Result<()> {
         13 => super::repo::contact_entries::migrate(conn),
         19 => clean_snippets(conn),
         21 => find_verification_codes(conn),
-        33 => sync_existing_snoozes(conn),
+        34 => sync_existing_snoozes(conn),
         _ => Ok(()),
     }
 }

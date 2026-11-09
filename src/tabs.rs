@@ -2628,11 +2628,12 @@ mod tests {
         }
     }
 
-    // Settings lists the tab keys from ui/shortcuts.slint, but `shortcut`
-    // handles them; the two must agree.
+    // Settings lists these keys from ui/shortcuts.slint, but Rust handles
+    // them: the tab keys here, and the quit key in src/window_chrome.rs. The
+    // two must agree.
     #[cfg(desktop)]
     #[test]
-    fn listed_tab_shortcuts_are_the_handled_ones() {
+    fn listed_shortcuts_are_the_handled_ones() {
         use listed::{ShortcutList, Shortcuts};
         use slint::ComponentHandle;
         use slint::platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType};
@@ -2658,7 +2659,7 @@ mod tests {
         } else {
             (ModifiersState::CONTROL, ModifiersState::SUPER)
         };
-        let handled = |keys: slint::Keys| {
+        let chord = |keys: slint::Keys| {
             let mut modifiers = ModifiersState::empty();
             let mut key = None;
             for part in keys.to_parts() {
@@ -2672,7 +2673,11 @@ mod tests {
                     text => key = Some(Key::Character(text.into())),
                 }
             }
-            shortcut(&key.unwrap(), modifiers)
+            (key.unwrap(), modifiers)
+        };
+        let handled = |keys: slint::Keys| {
+            let (key, modifiers) = chord(keys);
+            shortcut(&key, modifiers)
         };
         let list = ShortcutList::new().unwrap();
         let listed = list.global::<Shortcuts>();
@@ -2684,5 +2689,10 @@ mod tests {
         assert_eq!(handled(listed.get_first_tab()), Some(Command::Select(0)));
         assert_eq!(handled(listed.get_eighth_tab()), Some(Command::Select(7)));
         assert_eq!(handled(listed.get_last_tab()), Some(Command::Last));
+        #[cfg(linux_desktop)]
+        {
+            let (key, modifiers) = chord(listed.get_quit());
+            assert!(crate::window_chrome::is_quit(&key, modifiers));
+        }
     }
 }

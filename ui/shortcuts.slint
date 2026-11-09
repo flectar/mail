@@ -49,4 +49,8 @@ export global Shortcuts {
     out property <keys> first-tab: @keys(Control + Digit1);
     out property <keys> eighth-tab: @keys(Control + Digit8);
     out property <keys> last-tab: @keys(Control + Digit9);
+
+    // GNOME's and KDE's key for quitting. src/window_chrome.rs handles it on
+    // Linux desktops, and Settings lists it only there.
+    out property <keys> quit: @keys(Control + Q);
 }

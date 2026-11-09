@@ -69,12 +69,13 @@ pub(crate) async fn run(ctx: SyncCtx, mut config: AccountConfig, mut inputs: Inp
     let mut next_sync = Some(Instant::now());
     let mut backoff = Duration::from_secs(1);
     let mut unexplained_refusal = false;
+    let mut catch_up = None;
     loop {
         if let Err(error) = super::complete_device_actions(&ctx, account_id).await {
             tracing::warn!(account_id, %error, "completing local POP3 actions failed");
         }
         if next_sync.is_some_and(|at| at <= Instant::now()) {
-            next_sync = match sync(&ctx, &config).await {
+            next_sync = match sync(&ctx, &config, &mut catch_up).await {
                 Ok(synced) => {
                     backoff = Duration::from_secs(1);
                     unexplained_refusal = false;
@@ -375,7 +376,15 @@ enum Synced {
     NotBefore(i64),
 }
 
-async fn sync(ctx: &SyncCtx, config: &AccountConfig) -> std::result::Result<Synced, Failure> {
+/// `catch_up` holds the UIDLs the server listed when this worker first
+/// reached it: mail that came in while Flectar Mail wasn't following the
+/// account. Catching up with it stays silent, as IMAP's Inbox baseline and the
+/// Gmail and JMAP live cutoffs keep it.
+async fn sync(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    catch_up: &mut Option<HashSet<String>>,
+) -> std::result::Result<Synced, Failure> {
     let account_id = config.id;
     let state = ctx
         .db
@@ -404,12 +413,19 @@ async fn sync(ctx: &SyncCtx, config: &AccountConfig) -> std::result::Result<Sync
         .await?;
 
     let listing = list(&mut session, config).await?;
+    let catch_up = catch_up
+        .get_or_insert_with(|| listing.iter().map(|message| message.uidl.clone()).collect());
     let known = ctx
         .db
         .read(move |conn| repo::pop3::known_uidls(conn, account_id))
         .await?;
     let cutoff = config.settings.mail_history.cutoff_ms_at(signed_in_at);
-    let planned = plan(&listing, &known, cutoff, signed_in_at);
+    let mut planned = plan(&listing, &known, cutoff, signed_in_at);
+    // Mail found by the first complete download is history, not news.
+    let first_synced = state.first_synced_at.is_some();
+    for candidate in &mut planned {
+        candidate.live = first_synced && !catch_up.contains(&candidate.uidl);
+    }
     let listed: HashSet<String> = listing.iter().map(|message| message.uidl.clone()).collect();
     ctx.db
         .write(move |conn| {
@@ -418,9 +434,7 @@ async fn sync(ctx: &SyncCtx, config: &AccountConfig) -> std::result::Result<Sync
         })
         .await?;
 
-    // Mail found by the first complete download is history, not news.
-    let live = state.first_synced_at.is_some();
-    let downloaded = download(ctx, config, &mut session, planned, cutoff, live).await?;
+    let downloaded = download(ctx, config, &mut session, planned, cutoff).await?;
     if downloaded == Downloaded::All {
         ctx.db
             .write(move |conn| repo::pop3::record_first_sync(conn, account_id, now_ms()))
@@ -488,6 +502,9 @@ struct Candidate {
     /// The message's date, when already known.
     sent_at: Option<i64>,
     attempts: i64,
+    /// Whether it arrived while Flectar Mail followed the account, so that
+    /// it may notify. The session settles it.
+    live: bool,
 }
 
 /// The listed messages to download, newest first. A server numbers its
@@ -534,6 +551,7 @@ fn plan(
             size: message.size,
             sent_at,
             attempts,
+            live: false,
         });
     }
     candidates
@@ -557,7 +575,6 @@ async fn download(
     session: &mut pop3::Session,
     candidates: Vec<Candidate>,
     cutoff: Option<i64>,
-    live: bool,
 ) -> std::result::Result<Downloaded, Failure> {
     let account_id = config.id;
     let deadline = Instant::now() + SESSION_BUDGET;
@@ -588,7 +605,7 @@ async fn download(
                     .await?;
                 continue;
             }
-            match retrieve(ctx, config, session, candidate, live).await? {
+            match retrieve(ctx, config, session, candidate).await? {
                 Retrieved::Stored => downloaded += 1,
                 Retrieved::Deferred => {}
                 Retrieved::SessionEnded => return Ok(Downloaded::Ended),
@@ -649,7 +666,6 @@ async fn retrieve(
     config: &AccountConfig,
     session: &mut pop3::Session,
     candidate: &Candidate,
-    live: bool,
 ) -> std::result::Result<Retrieved, Failure> {
     let limit = crate::MAX_CACHED_MESSAGE_BYTES;
     let too_large = format!(
@@ -683,7 +699,7 @@ async fn retrieve(
         }
         Err(error) => return Err(failure(config, error)),
     };
-    store(ctx, config.id, candidate, raw, live)
+    store(ctx, config.id, candidate, raw)
         .await
         .map_err(|error| {
             Failure::Other(CoreError::Other(format!(
@@ -788,13 +804,7 @@ fn new_original_path(ctx: &SyncCtx, account_id: i64) -> std::path::PathBuf {
 
 /// Keep a retrieved message: its original on stable storage first, then one
 /// durable transaction that makes it part of the account.
-async fn store(
-    ctx: &SyncCtx,
-    account_id: i64,
-    candidate: &Candidate,
-    raw: Vec<u8>,
-    live: bool,
-) -> Result<()> {
+async fn store(ctx: &SyncCtx, account_id: i64, candidate: &Candidate, raw: Vec<u8>) -> Result<()> {
     let (parsed, raw) = tokio::task::spawn_blocking(move || (ingest::parse_or_text(&raw), raw))
         .await
         .map_err(|error| CoreError::Other(error.to_string()))?;
@@ -805,6 +815,7 @@ async fn store(
     let path_string = path.to_string_lossy().into_owned();
     let uidl = candidate.uidl.clone();
     let size = candidate.size;
+    let live = candidate.live;
     let committed = ctx
         .db
         .write_durable(move |tx| {

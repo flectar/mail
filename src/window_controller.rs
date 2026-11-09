@@ -41,14 +41,19 @@ struct Lifecycle {
 
 pub(super) fn create_and_register_window_lifecycle(
     app: &AppWindow,
+    #[cfg_attr(not(feature = "flatpak"), allow(unused_variables))] runtime: &tokio::runtime::Handle,
 ) -> Result<Option<FlectarTray>, slint::PlatformError> {
     #[cfg(not(any(mobile, feature = "flatpak")))]
     let tray = Some(FlectarTray::new()?);
     #[cfg(any(mobile, feature = "flatpak"))]
     let tray: Option<FlectarTray> = None;
 
-    #[cfg(any(mobile, feature = "flatpak"))]
+    #[cfg(mobile)]
     app.set_close_to_tray(false);
+    // The Flatpak has no tray icon: closing keeps it running in the
+    // background, and Settings says so.
+    #[cfg(feature = "flatpak")]
+    app.set_tray_supported(false);
 
     if let Some(tray) = tray.as_ref() {
         tray.set_enabled(app.get_close_to_tray());
@@ -61,11 +66,11 @@ pub(super) fn create_and_register_window_lifecycle(
             }
         });
         let app_for_tray_quit = app.as_weak();
-        tray.on_quit_app(move || {
-            if let Some(app) = app_for_tray_quit.upgrade() {
-                let _ = app.hide();
+        tray.on_quit_app(move || match app_for_tray_quit.upgrade() {
+            Some(app) => quit(&app),
+            None => {
+                let _ = slint::quit_event_loop();
             }
-            let _ = slint::quit_event_loop();
         });
     }
 
@@ -83,6 +88,8 @@ pub(super) fn create_and_register_window_lifecycle(
     }
 
     let app_for_close = app.as_weak();
+    #[cfg(feature = "flatpak")]
+    let runtime = runtime.clone();
     app.window().on_close_requested(move || {
         let Some(app) = app_for_close.upgrade() else {
             return slint::CloseRequestResponse::HideWindow;
@@ -92,6 +99,8 @@ pub(super) fn create_and_register_window_lifecycle(
         }
         if app.get_close_to_tray() {
             prepare_for_tray(&app);
+            #[cfg(feature = "flatpak")]
+            describe_background(&app, &runtime);
             slint::CloseRequestResponse::HideWindow
         } else {
             let _ = slint::quit_event_loop();
@@ -100,6 +109,21 @@ pub(super) fn create_and_register_window_lifecycle(
     });
 
     Ok(tray)
+}
+
+/// End the app, as Quit in the tray menu or a desktop's background-apps list
+/// asks.
+pub(super) fn quit(app: &AppWindow) {
+    let _ = app.hide();
+    let _ = slint::quit_event_loop();
+}
+
+/// Tell the desktop, in the current language, what the Flatpak does while
+/// its window is closed: GNOME lists it under Background Apps with this line.
+#[cfg(feature = "flatpak")]
+pub(super) fn describe_background(app: &AppWindow, runtime: &tokio::runtime::Handle) {
+    let status = app.global::<I18n>().invoke_background_status().to_string();
+    runtime.spawn(crate::autostart::set_background_status(status));
 }
 
 pub(super) fn prepare_for_tray(app: &AppWindow) {
@@ -252,13 +276,15 @@ pub(crate) fn reported_minimized() -> bool {
     LIFECYCLE.with(|lifecycle| lifecycle.minimized.get())
 }
 
-/// Whether a background start can rely on a tray icon to bring the window
-/// back. Linux needs a StatusNotifier host, which some desktops (GNOME without
-/// an extension) do not provide; Windows and macOS always have one.
+/// Whether a background start leaves the user a way back to the window. A
+/// tray icon is one: Linux needs a StatusNotifier host for it, which some
+/// desktops (GNOME without an extension) do not provide, while Windows and
+/// macOS always have one. The Flatpak has no tray icon; opening it again
+/// brings the window back, and GNOME lists it under Background Apps meanwhile.
 #[cfg(desktop)]
-pub(super) fn tray_host_available(runtime: &tokio::runtime::Handle) -> bool {
+pub(super) fn can_start_hidden(runtime: &tokio::runtime::Handle) -> bool {
     if cfg!(feature = "flatpak") {
-        return false;
+        return true;
     }
     #[cfg(linux_desktop)]
     return runtime.block_on(status_notifier_host_registered());
@@ -369,7 +395,7 @@ pub(super) fn register_window_preference_callbacks(
         let Some(app) = app_weak.upgrade() else {
             return;
         };
-        if cfg!(any(mobile, feature = "flatpak")) {
+        if cfg!(mobile) {
             app.set_close_to_tray(false);
             app.set_sync_status(UiMessage::plain(
                 "System tray behavior is unavailable in this package.",
@@ -384,52 +410,85 @@ pub(super) fn register_window_preference_callbacks(
             tray.set_enabled(enabled);
         }
 
-        let Some(core) = state_for_close_setting.borrow().core.clone() else {
-            app.set_sync_status(UiMessage::plain(
-                "Close-to-tray is active for this session.",
-            ));
-            return;
-        };
+        let core = state_for_close_setting.borrow().core.clone();
         app.set_sync_status(UiMessage::plain("Saving close behavior…"));
         let updates = ui_task_tx_for_close_setting.clone();
         runtime_for_close_setting.spawn(async move {
-            let update = match core.set_close_to_tray(enabled).await {
-                Ok(()) => UiTaskUpdate {
-                    message: if enabled {
-                        UiMessage::plain(
-                            "Closing the window will now keep Flectar Mail in the tray.",
-                        )
-                    } else {
-                        UiMessage::plain("Closing the window will now quit Flectar Mail.")
-                    },
-                    accounts: None,
-                    calendar_connections: None,
-                    carddav_connections: None,
-                    calendar_error: None,
-                    account_removal: None,
-                    clear_account_form: false,
-                    finishes_oauth: false,
-                    finishes_account_setup: false,
-                    close_to_tray: None,
-                },
-                Err(error) => UiTaskUpdate {
-                    message: UiMessage::detail("Could not save close behavior: {}", error),
-                    accounts: None,
-                    calendar_connections: None,
-                    carddav_connections: None,
-                    calendar_error: None,
-                    account_removal: None,
-                    clear_account_form: false,
-                    finishes_oauth: false,
-                    finishes_account_setup: false,
+            // The Flatpak may run with its window closed only while the
+            // desktop allows it; a refusal turns the switch back off.
+            #[cfg(feature = "flatpak")]
+            if enabled && let Some(message) = background_refusal().await {
+                let _ = updates
+                    .send(close_behavior_update(message, Some(false)))
+                    .await;
+                return;
+            }
+            let update = match core {
+                None => close_behavior_update(
+                    UiMessage::plain("Close-to-tray is active for this session."),
+                    None,
+                ),
+                Some(core) => match core.set_close_to_tray(enabled).await {
+                    Ok(()) => close_behavior_update(close_behavior_saved(enabled), None),
                     // Restore both the setting and tray visibility if the
                     // preference could not be persisted.
-                    close_to_tray: Some(!enabled),
+                    Err(error) => close_behavior_update(
+                        UiMessage::detail("Could not save close behavior: {}", error),
+                        Some(!enabled),
+                    ),
                 },
             };
             let _ = updates.send(update).await;
         });
     });
+}
+
+/// Ask the desktop to let the Flatpak run with its window closed; what to
+/// tell the user when it does not.
+#[cfg(feature = "flatpak")]
+async fn background_refusal() -> Option<UiMessage> {
+    match tokio::task::spawn_blocking(crate::autostart::allow_background).await {
+        Ok(Ok(true)) => None,
+        Ok(Ok(false)) => Some(UiMessage::plain(
+            "Your desktop did not allow Flectar Mail to run in the background.",
+        )),
+        Ok(Err(error)) => Some(UiMessage::detail(
+            "Could not save close behavior: {}",
+            error,
+        )),
+        Err(error) => Some(UiMessage::detail(
+            "Could not save close behavior: {}",
+            error,
+        )),
+    }
+}
+
+/// What closing the window does now.
+fn close_behavior_saved(enabled: bool) -> UiMessage {
+    if !enabled {
+        UiMessage::plain("Closing the window will now quit Flectar Mail.")
+    } else if cfg!(feature = "flatpak") {
+        UiMessage::plain("Closing the window will now keep Flectar Mail running in the background.")
+    } else {
+        UiMessage::plain("Closing the window will now keep Flectar Mail in the tray.")
+    }
+}
+
+/// A close-behavior result for the window: what to tell the user, and the
+/// switch to restore when the change did not take.
+fn close_behavior_update(message: UiMessage, close_to_tray: Option<bool>) -> UiTaskUpdate {
+    UiTaskUpdate {
+        message,
+        accounts: None,
+        calendar_connections: None,
+        carddav_connections: None,
+        calendar_error: None,
+        account_removal: None,
+        clear_account_form: false,
+        finishes_oauth: false,
+        finishes_account_setup: false,
+        close_to_tray,
+    }
 }
 
 /// The "Start automatically" switch. The operating system's startup list is

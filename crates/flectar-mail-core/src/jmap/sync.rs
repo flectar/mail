@@ -81,6 +81,8 @@ async fn actor(
     let mut waiters = Vec::new();
     let mut retry = 1u64;
     let mut identities_synced_at: Option<std::time::Instant> = None;
+    // Mail that came in before this worker started is caught up on silently.
+    let live_since = crate::sync::ingest::live_since(now_ms());
     let mut listing_bytes = ATTACHMENT_LISTING_BYTES;
     // Kept from one sync to the next, with its connection. A failed sync or a
     // changed Session makes the next one connect again.
@@ -122,7 +124,7 @@ async fn actor(
             }
             set_state(&ctx, config.id, "syncing").await;
             sync_mailboxes(&ctx, config.id, &connected).await?;
-            sync_emails(&ctx, &config, &connected).await?;
+            sync_emails(&ctx, &config, &connected, live_since).await?;
             execute_actions(&ctx, &config, &connected).await?;
             // Scheduled mail the server holds: released, cancelled
             // elsewhere, or new from another device. Never fails a sync.
@@ -928,7 +930,14 @@ fn automated_email(email: &Email) -> bool {
         })
 }
 
-async fn sync_emails(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient) -> Result<()> {
+/// `live_since` is the receipt time from which new mail counts as arriving
+/// live (see [`crate::sync::ingest::live_since`]); only that notifies.
+async fn sync_emails(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    live_since: i64,
+) -> Result<()> {
     let account_id = config.id;
     let (ids, mut destroyed, checkpoint_state, full) =
         match unfinished_full_sync(ctx, account_id).await? {
@@ -998,7 +1007,7 @@ async fn sync_emails(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedClient)
         );
         let (next, persisted) = tokio::join!(
             pages.next(c),
-            persist_emails(ctx, config, emails, full, insert_after)
+            persist_emails(ctx, config, emails, full, insert_after, live_since)
         );
         persisted?;
         fetched = next?;
@@ -1092,9 +1101,10 @@ async fn persist_emails(
     emails: Vec<Email>,
     full_sync: bool,
     insert_after: Option<i64>,
+    live_since: i64,
 ) -> Result<()> {
     let account_id = config.id;
-    let (thread_ids, stale_paths) = ctx
+    let (thread_ids, notified_threads, stale_paths) = ctx
         .db
         .write(move |conn| {
             let tx = conn.transaction()?;
@@ -1103,6 +1113,8 @@ async fn persist_emails(
                 repo::contacts::learning_boundaries(&tx, account_id, now_ms())?;
             let account_emails = repo::sender_identities::own_addresses(&tx, account_id)?;
             let mut changed_threads = HashSet::new();
+            // Threads queued for a new-mail notification, once each.
+            let mut notified_threads = Vec::new();
             let mut stale_paths = Vec::new();
 
             for email in emails {
@@ -1346,6 +1358,10 @@ async fn persist_emails(
                         )?;
                     }
                 } else {
+                    let from_email = from
+                        .as_ref()
+                        .map(|sender| sender.email.to_ascii_lowercase())
+                        .unwrap_or_default();
                     let new = NewMessage {
                         account_id,
                         folder_id: primary_folder.id,
@@ -1381,6 +1397,26 @@ async fn persist_emails(
                         &remote_id,
                         blob_id.as_deref(),
                     )?;
+                    // Mail the server received after this worker started, in
+                    // the Inbox, is new; what a sync catches up on isn't.
+                    let in_inbox = folders
+                        .iter()
+                        .any(|folder| folder.role.as_deref() == Some(roles::INBOX));
+                    if in_inbox
+                        && !is_draft
+                        && crate::sync::ingest::arrival_eligible(
+                            date >= live_since,
+                            is_read,
+                            is_outgoing,
+                            date,
+                            now_ms(),
+                        )
+                        && !notified_threads.contains(&thread_id)
+                    {
+                        let audible = crate::sync::ingest::chime_worthy(is_automated, &from_email);
+                        repo::notifications::enqueue(&tx, local_id, audible)?;
+                        notified_threads.push(thread_id);
+                    }
                 }
                 if !pending_mailboxes {
                     repo::gmail::set_message_folders(&tx, local_id, &folder_ids)?;
@@ -1396,10 +1432,20 @@ async fn persist_emails(
                 repo::threads::recompute(&tx, *thread_id)?;
             }
             tx.commit()?;
-            Ok((changed_threads.into_iter().collect::<Vec<_>>(), stale_paths))
+            Ok((
+                changed_threads.into_iter().collect::<Vec<_>>(),
+                notified_threads,
+                stale_paths,
+            ))
         })
         .await?;
     publish_changes(ctx, thread_ids, stale_paths).await;
+    if !notified_threads.is_empty() {
+        ctx.bus.emit(CoreEvent::MailNew {
+            account_id,
+            thread_ids: notified_threads,
+        });
+    }
     Ok(())
 }
 

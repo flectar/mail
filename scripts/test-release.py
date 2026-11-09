@@ -444,6 +444,42 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(exec_lines, [f'Exec="{installed}" %U', f'Exec="{installed}" mailto:'])
             self.assertIn("MimeType=x-scheme-handler/mailto;\n", desktop)
 
+    def test_windows_notifications_use_the_identity_the_app_knows(self):
+        # Clicks on toasts reach the app through the COM class each kind of
+        # copy registers, started with the argument the app recognizes, and
+        # the installed copy's Start menu shortcut names its app id.
+        root = SCRIPTS.parent
+        source = (root / "src/notifications/windows.rs").read_text()
+
+        def constant(name):
+            return re.search(rf'const {name}: &str = "([^"]+)"', source).group(1)
+
+        def class_id(name):
+            digits = re.search(rf"const {name}: GUID = GUID::from_u128\(0x([0-9A-F_]+)\)", source)
+            return digits.group(1).replace("_", "-")
+
+        argument = constant("ACTIVATION_ARGUMENT")
+        installed = class_id("INSTALLED_ACTIVATOR")
+        installer = (root / "platform/windows/installer.iss").read_text()
+        shortcut = next(line for line in installer.splitlines() if line.startswith('Name: "{userprograms}'))
+        self.assertIn(f'AppUserModelID: "{constant("INSTALLED_AUMID")}"', shortcut)
+        self.assertIn(f'AppUserModelToastActivatorCLSID: "{installed}"', shortcut)
+        self.assertIn(
+            rf'Subkey: "Software\Classes\CLSID\{{{{{installed}}}\LocalServer32"; ValueType: string; '
+            rf'ValueName: ""; ValueData: """{{app}}\flectar-mail.exe"" {argument}"',
+            installer,
+        )
+        manifest = ET.parse(root / "platform/windows/msix/AppxManifest.xml.in").getroot()
+        com = "{http://schemas.microsoft.com/appx/manifest/com/windows10}"
+        desktop = "{http://schemas.microsoft.com/appx/manifest/desktop/windows10}"
+        server = manifest.find(f".//{com}ExeServer")
+        activation = manifest.find(f".//{desktop}ToastNotificationActivation")
+        self.assertEqual(server.get("Arguments"), argument)
+        self.assertEqual(server.find(f"{com}Class").get("Id"), class_id("PACKAGED_ACTIVATOR"))
+        self.assertEqual(activation.get("ToastActivatorCLSID"), class_id("PACKAGED_ACTIVATOR"))
+        self.assertNotEqual(class_id("PACKAGED_ACTIVATOR"), installed)
+        self.assertNotEqual(class_id("PORTABLE_ACTIVATOR"), installed)
+
     def test_windows_installer_registers_the_mail_link_handler_the_app_knows(self):
         # The installer registers the installed copy; the app finds that
         # registration, opens its Default apps page and writes the same

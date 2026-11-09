@@ -139,9 +139,26 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
-# The Microsoft Store build's startup task is a WinRT API. Slint and wgpu
-# already build this version of the crate.
-windows = { version = "0.62", default-features = false, features = ["std", "ApplicationModel"] }
+# The Microsoft Store build's startup task and new-mail toasts are WinRT
+# APIs; the toast activator is a COM server. Slint and wgpu already build
+# this version of the crate.
+windows = { version = "0.62", default-features = false, features = [
+    "std",
+    "ApplicationModel",
+    "Data_Xml_Dom",
+    "Foundation",
+    "Foundation_Collections",
+    "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Notifications",
+    "Win32_UI_Shell",
+] }
+# `windows::core::implement` expands to paths in this crate.
+windows-core = { version = "0.62", default-features = false, features = ["std"] }
+# A portable copy registers its toast identity; already in the build through
+# the `windows` crate's dependents.
+windows-registry = "0.6"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -152,6 +169,10 @@ libc = "0.2"
 # zbus 5's `tokio` feature on, the tray connection's driver thread starts
 # a Tokio runtime with one idle worker per CPU.
 ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
+# The Flatpak serves `org.freedesktop.Application` for notification clicks
+# with zbus's interface macro, which looks the crate up by name. The same
+# version and backend as ashpd's.
+zbus = { version = "5", default-features = false, features = ["async-io"] }
 landlock = "0.4.7"
 seccompiler = "0.5"
 slint = { version = "1.18.1", default-features = false, features = ["backend-winit", "unstable-winit-030"] }
@@ -177,11 +198,13 @@ slint = { version = "1.18.1", default-features = false, features = ["backend-win
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-core-foundation", "NSApplication", "NSButton", "NSControl", "NSImage", "NSResponder", "NSRunningApplication", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSBundle", "NSData", "NSError", "NSGeometry", "NSNotification", "NSString", "NSURL", "NSUserDefaults"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSAppleEventManager", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSSet", "NSString", "NSURL", "NSUserDefaults"] }
 # Launch Services reports a default email app change through a block.
 block2 = { version = "0.6", default-features = false, features = ["std"] }
 # Registers the bundled sign-in agent with Login Items (macOS 13+).
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-foundation", "SMAppService"] }
+# New-mail notifications.
+objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "bitflags", "block2", "UNNotification", "UNNotificationAction", "UNNotificationCategory", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationSettings", "UNNotificationSound", "UNNotificationTrigger", "UNUserNotificationCenter", "UNError"] }
 
 # Account secrets live in the iOS Keychain (src/platform/ios/security.rs), and
 # sign-in uses the core's async OAuth broker trait (src/platform/web_authentication.rs).
@@ -216,10 +239,12 @@ auto_link_exclude_list = [
 # `wayland_client::backend`; the direct dependency guarantees its
 # `client_system` feature, which attaching to winit's display requires.
 # `slint-build`, iOS-only `cc`, and Windows-only `winresource` are consumed by build.rs.
+# Windows-only `windows-core` is named only by what `windows::core::implement`
+# expands to.
 # These do not appear as normal Rust paths on every host, so dependency
 # scanners need the explicit exceptions.
 [package.metadata.cargo-machete]
-ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases"]
+ignored = ["fontique_0_11", "fontique_0_12", "wayland-backend", "slint-build", "winresource", "cc", "cfg_aliases", "windows-core"]
 
 # tests/text_fit.rs measures laid-out text through Slint's item tree, which
 # only the internal crate exposes. It must stay on the version `slint` uses.

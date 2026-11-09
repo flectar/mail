@@ -2,6 +2,8 @@ def favicon_path(address):
   ($favicon_dir + "/" + (address | split("@") | last | ascii_downcase) + ".png");
 .theme_mode = $theme
 | .["MotionSettings.enabled"] = false
+# Notifications show, as on a desktop that allows them.
+| .["SystemNotifications.availability"] = "allowed"
 | .workspace_layout = $workspace_layout
 | .screenshot_theme_preset = $theme_preset
 | .active_view = $active_view
