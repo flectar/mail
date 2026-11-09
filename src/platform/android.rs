@@ -111,3 +111,41 @@ pub(crate) fn show_app_icon(icon: AppIcon) {
 pub(crate) fn email_fonts() -> Option<&'static super::EmailFonts> {
     None
 }
+
+static SELLS_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether this copy may send people to the web checkout for Flectar Mail
+/// Sync. The APKs on GitHub may. One Google Play installed must not: Play
+/// requires its own billing for in-app purchases.
+pub(crate) fn sells_sync() -> bool {
+    SELLS_SYNC.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Say whether Google Play installed this copy, before the app starts.
+pub fn installed_by_play(play: bool) {
+    SELLS_SYNC.store(!play, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How this device appears in Flectar Mail Sync's device list: by its model,
+/// such as "Pixel 8", as Chrome names Android devices. Android has no host
+/// name for it, and the name the user gave the phone needs the Java APIs.
+pub(crate) fn device_description() -> flectar_mail_core::device_sync::DeviceDescription {
+    flectar_mail_core::device_sync::DeviceDescription {
+        name: system_property(c"ro.product.model").unwrap_or_default(),
+        platform: "android".to_owned(),
+    }
+}
+
+/// A read-only system property, if set.
+fn system_property(name: &std::ffi::CStr) -> Option<String> {
+    let mut value = [0 as std::ffi::c_char; libc::PROP_VALUE_MAX as usize];
+    // SAFETY: `value` holds PROP_VALUE_MAX bytes, the most the call writes,
+    // and it ends them with a NUL.
+    let length = unsafe { libc::__system_property_get(name.as_ptr(), value.as_mut_ptr()) };
+    if length <= 0 {
+        return None;
+    }
+    // SAFETY: the call wrote a NUL-terminated string into `value`.
+    let value = unsafe { std::ffi::CStr::from_ptr(value.as_ptr()) };
+    Some(value.to_string_lossy().trim().to_owned()).filter(|value| !value.is_empty())
+}

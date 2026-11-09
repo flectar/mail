@@ -622,6 +622,32 @@ fn make_sidebar_rows(
             let (local, mut rows): (Vec<_>, Vec<_>) = accounts
                 .into_iter()
                 .partition(|row| Some(row.mailbox.account_id) == local_mail);
+            // Snoozed follows the account's Starred and Scheduled its Sent,
+            // as in the unified list.
+            let after = |rows: &[SidebarRow], suffix: &str| {
+                rows.iter()
+                    .position(|row| row.mailbox.scope.ends_with(suffix))
+                    .map(|found| found + 1)
+            };
+            // Without a Starred row, they lead the account's own rows,
+            // under its header.
+            let header = rows
+                .iter()
+                .position(|row| row.mailbox.is_account)
+                .map_or(0, |found| found + 1);
+            // They are the account's rows: a collapsed account hides them.
+            let open = rows
+                .iter()
+                .find(|row| row.mailbox.is_account)
+                .is_none_or(|account| {
+                    !collapsed.contains(&format!("account:{}", account.mailbox.account_id))
+                });
+            if open {
+                let snoozed = after(&rows, ":Starred").unwrap_or(header);
+                rows.insert(snoozed, row(SidebarRowKind::Snoozed, "snoozed"));
+                let scheduled = after(&rows, ":Sent").unwrap_or(snoozed + 1);
+                rows.insert(scheduled, row(SidebarRowKind::Scheduled, "scheduled"));
+            }
             rows.extend(shared);
             rows.extend(local);
             rows
@@ -635,11 +661,21 @@ fn unified_rows(unified: Vec<MailboxRow>) -> Vec<SidebarRow> {
         row(Kind::UnifiedHeading, "unified-heading"),
         row(Kind::UnifiedInbox, "unified-inbox"),
     ];
-    rows.extend(unified.into_iter().map(|mailbox| SidebarRow {
-        key: format!("unified:{}", mailbox.scope).into(),
-        mailbox,
-        ..row(Kind::UnifiedMailbox, "")
-    }));
+    for mailbox in unified {
+        let follower = match mailbox.scope.as_str() {
+            // Snoozed mail of every account after Starred, and mail waiting
+            // to be sent after Sent, as in Gmail.
+            "Unified Starred" => Some(row(Kind::Snoozed, "snoozed")),
+            "Unified Sent" => Some(row(Kind::Scheduled, "scheduled")),
+            _ => None,
+        };
+        rows.push(SidebarRow {
+            key: format!("unified:{}", mailbox.scope).into(),
+            mailbox,
+            ..row(Kind::UnifiedMailbox, "")
+        });
+        rows.extend(follower);
+    }
     rows
 }
 
@@ -903,6 +939,32 @@ mod tests {
             make_filtered_sidebar_rows(mailboxes.clone(), Vec::new(), "folder", &HashSet::new());
         assert_eq!(filtered[0].kind, Kind::Account);
         assert_eq!(filtered[0].mailbox.count, "");
+    }
+
+    #[test]
+    fn a_collapsed_single_account_hides_its_snoozed_and_scheduled_too() {
+        let mailboxes = accounts(1, 7);
+        let account = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.is_account)
+            .unwrap()
+            .account_id;
+        let shown = |collapsed: HashSet<String>| {
+            make_sidebar_rows(
+                SidebarLayout::SingleAccount,
+                accounts(1, 7),
+                vec![],
+                vec![],
+                &HashSet::new(),
+                &collapsed,
+                None,
+            )
+            .iter()
+            .filter(|row| matches!(row.kind, Kind::Snoozed | Kind::Scheduled))
+            .count()
+        };
+        assert_eq!(shown(HashSet::new()), 2);
+        assert_eq!(shown(HashSet::from([format!("account:{account}")])), 0);
     }
 
     #[test]

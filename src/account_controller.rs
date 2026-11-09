@@ -59,6 +59,97 @@ pub(super) struct AccountRemovalUpdate {
     pub calendar_sources: Option<Vec<calendar::LocalCalendarSource>>,
 }
 
+/// What the window showed as an account went away, read on the UI thread.
+pub(super) struct RemovalView {
+    scope: Scope,
+    query: String,
+    limit: i64,
+    profile: Option<Vec<i64>>,
+    calendar_month: NaiveDate,
+}
+
+impl RemovalView {
+    /// The view of `state` as `account_id` goes. A selection inside the
+    /// account falls back to the unified inbox.
+    pub(super) fn of(state: &InboxState, account_id: i64, calendar_month: NaiveDate) -> Self {
+        Self {
+            scope: if account_owns_scope(state, account_id) {
+                Scope::UNIFIED_INBOX
+            } else {
+                state.scope
+            },
+            query: state.query.clone(),
+            // Keep a surviving selection reachable after browsing past the
+            // first page, including when deleting from a unified scope.
+            limit: state.messages.len().max(PAGE_SIZE) as i64,
+            profile: state.profile_accounts.clone(),
+            calendar_month,
+        }
+    }
+}
+
+/// Reads what the window shows once `account_id` is gone: the mail page and
+/// counts without it, and the calendars that remain. `accounts` are the ones
+/// left, read after the removal.
+pub(super) async fn read_account_removal(
+    core: &CoreMailSource,
+    account_id: i64,
+    removed: bool,
+    accounts: Option<&mail::AccountSnapshot>,
+    view: RemovalView,
+) -> AccountRemovalUpdate {
+    // Match the selection `reconcile_removed_account` will leave.
+    let scope = accounts.map_or(view.scope, |snapshot| {
+        let shown = snapshot
+            .accounts
+            .iter()
+            .filter(|account| {
+                view.profile
+                    .as_ref()
+                    .is_none_or(|accounts| accounts.binary_search(&account.id).is_ok())
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        view.scope.visible_for(&shown)
+    });
+    let (metadata, page) = if removed {
+        let (metadata, page) = tokio::join!(
+            core.load_mail_metadata(scope),
+            core.load_page(scope, &view.query, None, view.limit, false)
+        );
+        (metadata.ok(), page.ok())
+    } else {
+        (None, None)
+    };
+    let calendar_sources = core
+        .load_calendars(None)
+        .await
+        .ok()
+        .map(calendar::calendar_sources);
+    let calendar_events =
+        if let Ok((start, end)) = calendar::calendar_range_millis(view.calendar_month) {
+            core.load_events(start, end).await.ok().map(|events| {
+                events
+                    .into_iter()
+                    .map(calendar::core_calendar_event)
+                    .collect()
+            })
+        } else {
+            None
+        };
+    AccountRemovalUpdate {
+        account_id,
+        removed,
+        scope,
+        query: view.query,
+        metadata,
+        page,
+        calendar_month: view.calendar_month,
+        calendar_events,
+        calendar_sources,
+    }
+}
+
 pub(super) fn account_was_removed(
     account_id: i64,
     result: &Result<(), String>,
@@ -100,7 +191,9 @@ pub(super) fn scope_owned_by(state: &InboxState, scope: Scope, account_id: i64) 
             .labels
             .iter()
             .any(|label| label.id == id && label.owner_account_id == Some(account_id)),
-        Scope::Unified(_) | Scope::Important | Scope::Other => false,
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            false
+        }
     }
 }
 

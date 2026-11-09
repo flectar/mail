@@ -78,6 +78,30 @@ impl ConnectedClient {
         advertised_request(&self.client)
     }
 
+    /// The longest the server holds the account's submissions, in seconds,
+    /// from the Session as the server sends it: jmap-client reads
+    /// `submissionExtensions` as a list, while RFC 8621 makes it an object,
+    /// so the capability it parses loses `maxDelayedSend`. 0 when unknown.
+    pub async fn max_delayed_send(&self) -> u64 {
+        let session = async {
+            self.http
+                .get(self.client.session_url())
+                .timeout(self.timeout)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<serde_json::Value>()
+                .await
+        };
+        match session.await {
+            Ok(session) => submission_delay(&session, &self.account_id),
+            Err(error) => {
+                tracing::debug!(%error, "could not read the JMAP session's delayed send");
+                0
+            }
+        }
+    }
+
     pub async fn email_changes(
         &self,
         since_state: impl Into<String>,
@@ -477,6 +501,12 @@ pub async fn connect_with(
     })
 }
 
+fn submission_delay(session: &serde_json::Value, account_id: &str) -> u64 {
+    session["accounts"][account_id]["accountCapabilities"][SUBMISSION_CAPABILITY]["maxDelayedSend"]
+        .as_u64()
+        .unwrap_or(0)
+}
+
 fn authentication_schemes() -> &'static Mutex<HashMap<String, AuthenticationScheme>> {
     AUTHENTICATION_SCHEMES.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -736,6 +766,24 @@ pub fn supports_mail(client: &Client) -> bool {
 pub(crate) mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn the_longest_hold_comes_from_the_account_capability() {
+        // RFC 8621 and Fastmail: extensions as an object, which jmap-client
+        // cannot read.
+        let session = serde_json::json!({
+            "accounts": {"u1": {"accountCapabilities": {SUBMISSION_CAPABILITY: {
+                "maxDelayedSend": 44_236_800,
+                "submissionExtensions": {"futurerelease": [], "size": ["50000000"]}
+            }}}}
+        });
+        assert_eq!(submission_delay(&session, "u1"), 44_236_800);
+        assert_eq!(submission_delay(&session, "u2"), 0);
+        let none = serde_json::json!({"accounts": {"u1": {"accountCapabilities": {
+            SUBMISSION_CAPABILITY: {"maxDelayedSend": 0, "submissionExtensions": {}}
+        }}}});
+        assert_eq!(submission_delay(&none, "u1"), 0);
+    }
 
     async fn read_request_head(stream: &mut tokio::net::TcpStream) -> String {
         let mut request = Vec::with_capacity(1024);

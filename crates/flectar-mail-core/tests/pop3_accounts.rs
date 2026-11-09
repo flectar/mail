@@ -1,5 +1,6 @@
 //! POP3 accounts through the public API, against in-process POP3 and SMTP
-//! servers: setup, download, local folders and actions, and sending.
+//! servers: setup, download, local folders and actions, and sending, also
+//! of a message another device scheduled.
 
 use flectar_mail_core::Core;
 use flectar_mail_core::accounts::credentials::DevelopmentFileCredentialStore;
@@ -332,6 +333,7 @@ async fn a_pop3_account_downloads_files_and_sends_mail_on_this_device() {
         .queue_send(QueueSendArgs {
             draft_id,
             send_at: Some(now_ms()),
+            remind_at: None,
         })
         .await
         .unwrap();
@@ -474,4 +476,118 @@ async fn interrupted_mail_writes_are_removed_at_startup() {
     assert!(!partial.exists());
     assert!(!orphan.exists());
     assert!(cache.exists());
+}
+
+/// Another device scheduled a message from the account, and Flectar Mail
+/// Sync carried it here, where it waits as a draft: it goes out as that
+/// device built it, dated when it goes, without its Bcc header.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_another_device_scheduled_goes_out_from_here_as_it_is() {
+    let (pop3_port, _) = pop3_server(Vec::new()).await;
+    let (smtp_port, mut delivered) = smtp_server().await;
+    let temp = tempfile::tempdir().unwrap();
+    let credentials = Arc::new(DevelopmentFileCredentialStore::new(
+        temp.path().join("credentials.json"),
+    ));
+    let core = Core::start_mail_ui_with_credentials(Paths::for_tests(temp.path()), credentials)
+        .await
+        .unwrap();
+    let account = core
+        .add_account_password(pop3_args(pop3_port, smtp_port))
+        .await
+        .unwrap();
+    let account_id = account.id;
+    let mime = b"Message-ID: <later@example.com>\r\nFrom: Me <me@example.com>\r\n\
+        To: friend@example.com\r\nBcc: boss@example.com\r\nSubject: Written yesterday\r\n\
+        Date: Mon, 2 Nov 2026 09:00:00 +0000\r\n\r\nSent from the phone.\r\n";
+    let (draft_id, action_id) = core
+        .db
+        .write(move |conn| {
+            use flectar_mail_core::db::repo::{self, synced_sends};
+            let drafts =
+                repo::folders::by_role(conn, account_id, roles::DRAFTS)?.expect("a Drafts folder");
+            conn.execute(
+                "INSERT INTO messages (account_id, folder_id, message_id, subject, from_addr,
+                                       date, is_read, is_draft, is_outgoing)
+                 VALUES (?1, ?2, 'later@example.com', 'Written yesterday', 'me@example.com',
+                         1, 1, 1, 1)",
+                rusqlite::params![account_id, drafts.id],
+            )?;
+            let draft_id = conn.last_insert_rowid();
+            let sync_id = "fedcba9876543210fedcba9876543210";
+            synced_sends::put_shared(
+                conn,
+                sync_id,
+                &synced_sends::Shared {
+                    account_id,
+                    message_id: "later@example.com",
+                    send_at: now_ms(),
+                    origin: "aa",
+                    draft_ref: Some("v1"),
+                    state: synced_sends::SCHEDULED,
+                    error: None,
+                    claimed_by: Some("bb"),
+                    claim_until: Some(now_ms() + 15 * 60_000),
+                },
+                now_ms(),
+            )?;
+            synced_sends::put_mime(conn, sync_id, Some(mime))?;
+            synced_sends::set_shadow(conn, sync_id, Some(draft_id))?;
+            // This device's claim holds.
+            synced_sends::set_may_send_until(conn, sync_id, Some(now_ms() + 15 * 60_000))?;
+            let action_id = repo::actions::enqueue(
+                conn,
+                account_id,
+                "send",
+                Some(draft_id),
+                None,
+                &serde_json::json!({
+                    "draftId": draft_id,
+                    "asIs": true,
+                    "syncedSend": sync_id,
+                    "scheduled": true,
+                    "sendAt": now_ms(),
+                }),
+                Some(now_ms()),
+            )?;
+            synced_sends::set_action(conn, sync_id, Some(action_id))?;
+            Ok((draft_id, action_id))
+        })
+        .await
+        .unwrap();
+    core.send_now(action_id).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), core.wait_for_send(action_id))
+        .await
+        .unwrap()
+        .unwrap();
+    let message = tokio::time::timeout(Duration::from_secs(5), delivered.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        message.contains("Message-ID: <later@example.com>"),
+        "{message}"
+    );
+    assert!(message.contains("Subject: Written yesterday"), "{message}");
+    assert!(message.contains("Sent from the phone."), "{message}");
+    assert!(!message.contains("Bcc:"), "{message}");
+    assert!(
+        !message.contains("2 Nov 2026"),
+        "dated when it went: {message}"
+    );
+    // The draft kept here became the sent message, in the local Sent folder.
+    let (is_draft, role): (bool, String) = core
+        .db
+        .read(move |conn| {
+            Ok(conn.query_row(
+                "SELECT m.is_draft, f.role FROM messages m JOIN folders f ON f.id = m.folder_id
+                 WHERE m.id = ?1",
+                [draft_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert!(!is_draft);
+    assert_eq!(role, roles::SENT);
 }

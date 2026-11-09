@@ -525,6 +525,7 @@ pub(super) fn render_current(
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     app.set_trash_view(is_trash_scope(scope));
+    app.global::<SnoozeUi>().set_view(scope == Scope::Snoozed);
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -553,10 +554,20 @@ pub(super) fn render_current(
     if let Some(email) = selected_email {
         let email_id = email.id;
         let thread_subject = email.subject.clone();
-        let (mut display_email, conversation_ready, conversation_selected_index) = {
+        let (mut display_email, conversation_ready, conversation_selected_index, sent_here) = {
             let state = state.borrow();
             let conversation_ready = state.conversation_owner_id == Some(email_id)
                 && !state.conversation_messages.is_empty();
+            // A reply reminder waits on mail the user sent in the
+            // conversation.
+            let sent_here = if conversation_ready {
+                state
+                    .conversation_messages
+                    .iter()
+                    .any(|message| message.is_outgoing)
+            } else {
+                email.is_outgoing || email.has_replied
+            };
             let display_email = conversation_ready
                 .then(|| {
                     state
@@ -582,6 +593,7 @@ pub(super) fn render_current(
                 display_email,
                 conversation_ready,
                 state.conversation_selected_index,
+                sent_here,
             )
         };
         if conversation_ready {
@@ -603,6 +615,16 @@ pub(super) fn render_current(
                 });
         }
         apply_selected_favicon(app, favicon_icons.get(&display_email.domain));
+        let reminder = app.global::<ReminderUi>();
+        reminder.set_open_remind_time(
+            display_email
+                .reply_reminder_at
+                .map(|at| upcoming_time(at, &Local::now()))
+                .unwrap_or_default()
+                .into(),
+        );
+        reminder.set_open_due(display_email.reply_reminder_due);
+        reminder.set_can_remind(sent_here);
         apply_email(
             app,
             display_email,
@@ -919,7 +941,9 @@ pub(super) fn scope_matches(email: &MailMessage, scope: Scope) -> bool {
         // These scopes are filtered by the core query before projection. Their
         // stable route/folder ids are intentionally not duplicated in every UI
         // row.
-        Scope::Important | Scope::Other | Scope::Folder(_) => true,
+        Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled | Scope::Folder(_) => {
+            true
+        }
     }
 }
 
@@ -994,11 +1018,18 @@ pub(super) fn make_rows<M: std::borrow::Borrow<MailMessage>>(
                 has_favicon: favicon.is_some(),
                 subject: email.subject.clone().into(),
                 preview: display_preview(&email.preview).into(),
-                time: mail_list_time(email.date_ms, &now).into(),
+                // In the Snoozed view, when it comes back; in the Scheduled
+                // view, when it goes out.
+                time: match email.snoozed_until.or(email.send_at) {
+                    Some(upcoming) => upcoming_time(upcoming, &now),
+                    None => mail_list_time(email.date_ms, &now),
+                }
+                .into(),
                 unread: email.unread,
                 starred: email.starred,
                 has_attachments: email.has_attachments,
                 has_replied: email.has_replied,
+                reply_due: email.reply_reminder_due,
                 message_count: i32::try_from(email.message_count)
                     .unwrap_or(i32::MAX)
                     .max(1),
@@ -1035,6 +1066,33 @@ fn spelled(code: &str) -> String {
 /// too, since the list's date sections name the day.
 fn mail_list_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
     message_time_label(date_ms, now, false)
+}
+
+/// When snoozed mail comes back or a scheduled draft goes out, short enough
+/// for a list row: a time today, a weekday and a time within the week, and
+/// otherwise a date and a time, with the year once it is another.
+pub(super) fn upcoming_time(at_ms: i64, now: &chrono::DateTime<Local>) -> String {
+    let Some(at) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(at_ms)
+        .map(|at| at.with_timezone(&Local))
+    else {
+        return String::new();
+    };
+    let formats = date_format::current();
+    let days = at
+        .date_naive()
+        .signed_duration_since(now.date_naive())
+        .num_days();
+    match days {
+        0 => formats.time(at.hour(), at.minute()),
+        1..=6 => formats.day_at_time(
+            formats.weekday(at.weekday().num_days_from_monday(), true),
+            &formats.time(at.hour(), at.minute()),
+        ),
+        _ if at.year() == now.year() => {
+            formats.date_time(DateStyle::ShortDayMonth, at.naive_local())
+        }
+        _ => formats.date_time(DateStyle::Short, at.naive_local()),
+    }
 }
 
 /// The time or date in a conversation's message headers.
@@ -1354,6 +1412,7 @@ pub(super) fn refresh_list_metadata(app: &AppWindow, state: &Rc<RefCell<InboxSta
     refresh_sidebar(state);
     app.set_selected_scope_title(mailbox_scope_title(scope, &mailboxes, &labels).into());
     app.set_trash_view(is_trash_scope(scope));
+    app.global::<SnoozeUi>().set_view(scope == Scope::Snoozed);
     app.set_selected_scope(scope.into());
     app.set_search_query(query.clone().into());
     app.set_unified_count(sidebar_badge_text(inbox_count).into());
@@ -1665,7 +1724,9 @@ fn mailbox_scope_title(
             .find(|mailbox| mailbox.scope == Some(scope))
     };
     match scope {
-        Scope::Unified(_) | Scope::Important | Scope::Other => scope.to_string(),
+        Scope::Unified(_) | Scope::Important | Scope::Other | Scope::Snoozed | Scope::Scheduled => {
+            scope.to_string()
+        }
         Scope::Folder(_) => mailbox().map_or_else(|| "Folder".into(), |mailbox| mailbox.label.clone()),
         Scope::Label { id, .. } => labels
             .iter()
@@ -1719,6 +1780,26 @@ mod tests {
         assert_eq!(message_time(today, &now), "12:00");
         assert_eq!(message_time(yesterday, &now), "Yesterday");
         assert_eq!(message_time(last_year, &now), "Dec 20, 2025");
+    }
+
+    #[test]
+    fn times_ahead_name_the_year_once_it_is_another() {
+        let at = |year, month, day, hour| {
+            let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(hour, 0, 0)
+                .unwrap();
+            Local.from_local_datetime(&naive).single().unwrap()
+        };
+        let now = at(2026, 12, 20, 12);
+        let ahead = |year, month, day, hour| {
+            upcoming_time(at(year, month, day, hour).timestamp_millis(), &now)
+        };
+        assert_eq!(ahead(2026, 12, 20, 18), "18:00");
+        assert!(ahead(2026, 12, 30, 8).starts_with("Dec 30"));
+        assert!(!ahead(2026, 12, 30, 8).contains("2026"));
+        let next_year = ahead(2027, 1, 13, 8);
+        assert!(next_year.contains("2027"), "{next_year}");
     }
 
     #[test]
@@ -1857,6 +1938,11 @@ mod tests {
             subject: String::new(),
             preview: String::new(),
             date_ms: 0,
+            snoozed_until: None,
+            send_at: None,
+            send_error: None,
+            reply_reminder_at: None,
+            reply_reminder_due: false,
             to: String::new(),
             label: String::new(),
             unread: false,

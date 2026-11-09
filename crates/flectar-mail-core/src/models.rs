@@ -934,6 +934,8 @@ pub enum View {
     Starred,
     Snoozed,
     Sent,
+    /// Drafts waiting to be sent at a time the user chose.
+    Scheduled,
     Drafts,
     Done,
     Trash,
@@ -960,6 +962,10 @@ pub struct ThreadSummary {
     pub has_attachments: bool,
     pub has_replied: bool,
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     /// Ids of labels present on any message in the thread.
     pub labels: Vec<i64>,
     /// The one-time code the newest message asks its reader to enter.
@@ -1007,6 +1013,10 @@ pub struct MessageSummary {
     pub has_replied: bool,
     /// When the message's conversation is snoozed until.
     pub snoozed_until: Option<i64>,
+    /// When the user asked to be reminded unless someone replies.
+    pub reply_reminder_at: Option<i64>,
+    /// That time came with no reply: the conversation waits for one.
+    pub reply_reminder_due: bool,
     pub labels: Vec<i64>,
     pub verification_code: Option<String>,
     /// The message's first file. Inline images are not files.
@@ -1360,6 +1370,25 @@ pub struct SaveDraftArgs {
 pub struct QueueSendArgs {
     pub draft_id: i64,
     pub send_at: Option<i64>,
+    /// Remind the user at this time unless someone replies by then.
+    #[serde(default)]
+    pub remind_at: Option<i64>,
+}
+
+/// A draft waiting to be sent at a time the user chose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledSend {
+    pub action_id: i64,
+    pub draft_id: i64,
+    /// The draft's conversation.
+    pub thread_id: Option<i64>,
+    pub account_id: i64,
+    /// When it goes out, in ms since the epoch.
+    pub send_at: i64,
+    /// `pending`, `inflight`, or `failed` and waiting for the user.
+    pub state: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2013,6 +2042,10 @@ pub struct Settings {
     /// Show which account each mail-list row belongs to with a color marker.
     #[serde(default)]
     pub show_account_badges: bool,
+    /// Flectar Mail Sync carries passwords and sign-ins between the user's
+    /// devices too, end-to-end encrypted, so accounts arrive signed in.
+    #[serde(default = "default_true")]
+    pub sync_sign_ins: bool,
     /// Per-account marker color (hex), keyed by stringified account id.
     /// Missing = the UI derives a stable hue from the address.
     #[serde(default)]
@@ -2208,6 +2241,7 @@ impl Default for Settings {
             signature_defaults: std::collections::HashMap::new(),
             account_themes: std::collections::HashMap::new(),
             show_account_badges: false,
+            sync_sign_ins: true,
             account_colors: std::collections::HashMap::new(),
             account_short_names: std::collections::HashMap::new(),
             mail_profiles: Vec::new(),
@@ -2446,6 +2480,8 @@ pub mod roles {
     pub const SPAM: &str = "spam";
     pub const ALL: &str = "all";
     pub const SNOOZED: &str = "snoozed";
+    /// Where a JMAP server keeps a message it holds to send later.
+    pub const SCHEDULED: &str = "scheduled";
 }
 
 pub fn now_ms() -> i64 {

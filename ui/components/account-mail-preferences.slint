@@ -166,7 +166,7 @@ export component AccountMailPreferencesPanel inherits OnScreenSurface {
                         min-height: self.preferred-height; vertical-stretch: 0; color: AppTheme.secondary; wrap: word-wrap;
                         text: AccountMailPreferences.sender-identity-policy == "wildcard"
                             ? @tr("Your server lets you send from any address at the domains shown as wildcards. Add the addresses you want to choose from.")
-                            : @tr("Add an alias or another address your mail server lets you send from. The server decides when you send; Flectar shows whether it accepted the last message.");
+                            : @tr("Add an alias or another address your mail server lets you send from. The server decides when you send; Flectar Mail shows whether it accepted the last message.");
                     }
                     LineEdit { text <=> AccountMailPreferences.sender-form-email; input-label: @tr("Email address"); placeholder-text: @tr("alias@example.com"); read-only: AccountMailPreferences.sender-form-editing; enabled: !AccountMailPreferences.busy; }
                     LineEdit { text <=> AccountMailPreferences.sender-form-name; input-label: @tr("Sender name"); placeholder-text: @tr("Name shown to recipients (optional)"); enabled: !AccountMailPreferences.busy; }

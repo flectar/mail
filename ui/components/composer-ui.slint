@@ -39,6 +39,9 @@ export global ComposerUi {
     in property <string> active-link-url: "";
     // On the desktop a message can move into a window of its own.
     in property <bool> can-pop-out: false;
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time: "";
     // "reply" or "forward" while the message carries the original below the
     // editor; empty otherwise.
     in property <string> quote: "";
@@ -63,6 +66,9 @@ export global ComposerUi {
     callback pop-out();
     callback save(int, string, string, string, string, string, bool);
     callback pick-attachments();
+    // Pick when the message goes out, or reminds the user, in this window.
+    callback schedule-send();
+    callback remind();
     callback remove-attachment(int);
     callback format(string, string, int, int);
     callback link(string, string, int, int);
@@ -114,6 +120,7 @@ export component BoundComposer inherits EmailComposer {
     code-active: ComposerUi.code-active;
     active-link-url: ComposerUi.active-link-url;
     can-pop-out: ComposerUi.can-pop-out;
+    remind-time: ComposerUi.remind-time;
     quote: ComposerUi.quote;
     quote-text: ComposerUi.quote-text;
     quote-expanded <=> ComposerUi.quote-expanded;
@@ -145,6 +152,8 @@ export component BoundComposer inherits EmailComposer {
             send-now,
         );
     }
+    schedule-send => { ComposerUi.schedule-send(); }
+    remind => { ComposerUi.remind(); }
     pick-attachments => { ComposerUi.pick-attachments(); }
     remove-attachment(index) => { ComposerUi.remove-attachment(index); }
     format-requested(kind, body, anchor, cursor) => { ComposerUi.format(kind, body, anchor, cursor); }

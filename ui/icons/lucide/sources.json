@@ -1,5 +1,8 @@
 {
   "outlines": {
+    "alarm-clock.svg": {
+      "source": "alarm-clock"
+    },
     "alert.svg": {
       "source": "triangle-alert"
     },
@@ -8,6 +11,9 @@
     },
     "arrow-left.svg": {
       "source": "arrow-left"
+    },
+    "bell.svg": {
+      "source": "bell"
     },
     "bold.svg": {
       "source": "bold"
@@ -39,6 +45,9 @@
     "chevron-up.svg": {
       "source": "chevron-up"
     },
+    "clock.svg": {
+      "source": "clock"
+    },
     "code.svg": {
       "source": "code-xml"
     },
@@ -53,6 +62,9 @@
     },
     "copy.svg": {
       "source": "copy"
+    },
+    "credit-card.svg": {
+      "source": "credit-card"
     },
     "dash.svg": {
       "source": "minus"
@@ -110,6 +122,9 @@
     },
     "kebab-horizontal.svg": {
       "source": "ellipsis"
+    },
+    "key.svg": {
+      "source": "key-round"
     },
     "link.svg": {
       "source": "link-2"
@@ -215,6 +230,10 @@
     }
   },
   "sources": {
+    "alarm-clock": {
+      "path": "sources/alarm-clock.svg",
+      "sha256": "901741da7decdfddfd35e3bb55939b7dde33407a90b3df6ad87584476c0cbbc1"
+    },
     "app-window": {
       "path": "sources/app-window.svg",
       "sha256": "54dd72c452605d058e4ea053f5ca479e03c97a101aca0c7257dbd737ca8e0ae0"
@@ -279,6 +298,10 @@
       "path": "sources/circle-user-round.svg",
       "sha256": "820f25212c6bdad7af60a9a05f4d0c1f926bc70ee5819b1495897b2ba3db65bd"
     },
+    "clock": {
+      "path": "sources/clock.svg",
+      "sha256": "35d53f97cd90c61d03dc44dc3066e18459b40452710252005e0680d8e7743c17"
+    },
     "cloud": {
       "path": "sources/cloud.svg",
       "sha256": "5c524665cb2b0b662f7b78a883a620826ddb42071689d0f468940b1a909081d9"
@@ -302,6 +325,10 @@
     "copy": {
       "path": "sources/copy.svg",
       "sha256": "268d1ef461571f0df4e32b0068e6d3d0d73d016d2166d3bb9d0849edc48e736c"
+    },
+    "credit-card": {
+      "path": "sources/credit-card.svg",
+      "sha256": "7b3268db7b3d52be668cf02b5a30a76b99caf7338a552298250f43163c5240f4"
     },
     "database": {
       "path": "sources/database.svg",

@@ -101,7 +101,7 @@ fn validate_oauth_credentials(credentials: &OAuthCredentialBundle) -> Result<()>
 }
 
 fn is_missing_credential(error: &CoreError) -> bool {
-    matches!(error, CoreError::Auth(message) if message == "no stored credential")
+    crate::accounts::credentials::is_missing(error)
 }
 
 pub fn platform_google_marker(scopes: &[&str]) -> std::result::Result<String, &'static str> {
@@ -112,6 +112,13 @@ pub fn platform_google_marker(scopes: &[&str]) -> std::result::Result<String, &'
         "{PLATFORM_GOOGLE_PREFIX}{}",
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(scopes.join("\n"))
     ))
+}
+
+/// Whether a stored OAuth bundle holds a Play services marker instead of a
+/// refresh token: it names no account and works only where it was made.
+pub(crate) fn is_platform_managed(bundle: &str) -> bool {
+    serde_json::from_str::<OAuthCredentialBundle>(bundle)
+        .is_ok_and(|bundle| bundle.refresh_token.starts_with(PLATFORM_GOOGLE_PREFIX))
 }
 
 fn platform_google_scopes(marker: &str) -> Option<Vec<String>> {

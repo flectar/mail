@@ -16,13 +16,16 @@ pub mod local;
 pub mod messages;
 pub mod notifications;
 pub mod pop3;
+pub mod reply_reminders;
 pub mod search;
 pub mod sender_identities;
 pub mod settings;
+pub mod sign_ins;
 pub mod snippets;
 pub mod snoozes;
 pub mod splits;
 pub mod sync_failures;
+pub mod synced_sends;
 pub mod threads;
 pub mod transfers;
 

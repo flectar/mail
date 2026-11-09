@@ -1,0 +1,1920 @@
+//! Flectar Mail Sync (issue #39) keeps this device's setup the same on the user's
+//! other devices: accounts with their per-account preferences, the synced
+//! preferences, signatures and mail profiles. It goes through an end-to-end
+//! encrypted server that cannot read it. Mail, contacts and calendars keep
+//! syncing with the mail provider, and credentials stay on each device.
+//!
+//! The protocol and client live in `flectar/mail-sync`. This module keeps
+//! the client's state in the mail database and the device's keys in the
+//! platform credential store, turns the app's items into records and back
+//! (`collections`), and runs the sync loop.
+
+mod collections;
+pub(crate) use collections::synced_settings_changed;
+mod merge;
+mod scheduled;
+mod sign_ins;
+mod store;
+
+use crate::Core;
+use crate::accounts::credentials::{self, Slot};
+use crate::error::{CoreError, Result};
+use crate::events::CoreEvent;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use collections::{FollowUp, Names};
+use flectar_mail_sync_client::{
+    Billing, BillingStatus, Clock, Entry, Error as SyncError, Event, Http, Invitation, JoinAttempt,
+    Joining, Plan, Secrets, SyncClient,
+};
+use futures::StreamExt;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+use store::RecordId;
+use tokio::sync::{Notify, oneshot};
+use tokio::task::JoinHandle;
+
+/// Flectar's sync server. A device can use another; the address travels to
+/// new devices when they pair.
+pub const DEFAULT_SERVER_URL: &str = "https://mail-sync.flectar.com";
+
+/// How often a device that syncs looks for local changes. Uploads follow
+/// within this time even when no part of the app asks for a sync.
+const CHECK_INTERVAL: Duration = Duration::from_secs(30);
+/// How often it reads the server even without a live event.
+const PULL_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// The longest wait between attempts to reconnect the live event stream.
+const MAX_EVENTS_BACKOFF: Duration = Duration::from_secs(5 * 60);
+/// The longest wait before trying a sync again after runs that failed.
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(15 * 60);
+
+/// How long to wait before syncing again after `failures` runs in a row
+/// failed: none after a run that worked, then a check's interval, doubled
+/// each time, up to a quarter of an hour. A server that is down, or turns
+/// this device away, isn't asked every half minute.
+fn retry_backoff(failures: u32) -> Duration {
+    if failures == 0 {
+        return Duration::ZERO;
+    }
+    CHECK_INTERVAL
+        .saturating_mul(2u32.saturating_pow(failures - 1))
+        .min(MAX_RETRY_BACKOFF)
+}
+/// How long what the group pays is shown before the server is asked again.
+/// Uploads the server refuses, and leaving that state, ask at once.
+const BILLING_REFRESH: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Where sync stands on this device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceSyncState {
+    Off,
+    Idle,
+    Syncing,
+    /// The last attempt failed; the loop tries again.
+    Error(String),
+    /// Another device removed this one from the group.
+    Removed,
+    /// The group was deleted from another device.
+    Deleted,
+    /// The free trial or subscription ended on a server that charges. This
+    /// device still downloads; its changes wait for a payment.
+    PaymentRequired,
+}
+
+/// A device of the group.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncDevice {
+    /// Hex device id.
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+    pub this_device: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceSyncStatus {
+    pub state: DeviceSyncState,
+    pub server_url: Option<String>,
+    pub last_synced_at: Option<i64>,
+    pub devices: Vec<SyncDevice>,
+    /// What the group pays. `None` on a server that doesn't charge, or
+    /// before the server was asked.
+    pub billing: Option<SyncBilling>,
+}
+
+impl Default for DeviceSyncStatus {
+    fn default() -> Self {
+        Self {
+            state: DeviceSyncState::Off,
+            server_url: None,
+            last_synced_at: None,
+            devices: Vec::new(),
+            billing: None,
+        }
+    }
+}
+
+/// What the group pays on a server that charges, as Flectar's does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncBilling {
+    pub status: SyncBillingStatus,
+    /// End of the free trial, in milliseconds since the Unix epoch.
+    pub trial_ends_at: Option<i64>,
+    /// End of the last paid period, in milliseconds since the Unix epoch.
+    pub paid_until: Option<i64>,
+    /// End of the free period that redeemed codes gave the group, in
+    /// milliseconds since the Unix epoch.
+    pub free_until: Option<i64>,
+    /// The subscription renews at `paid_until`.
+    pub renews: bool,
+    pub plans: Vec<SyncPlan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncBillingStatus {
+    Trial,
+    Active,
+    /// A renewal payment failed and is being retried.
+    PastDue,
+    /// Free until `free_until`, through a redeemed code.
+    Granted,
+    /// The trial, paid or free period ended: uploads wait for a payment.
+    Expired,
+    /// A status this version doesn't know.
+    Unknown,
+}
+
+/// A subscription plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncPlan {
+    /// What a checkout names it by, such as "monthly" or "yearly".
+    pub id: String,
+    /// Price per period in the currency's smallest unit, such as cents.
+    pub amount: u64,
+    /// ISO 4217 code, lowercase.
+    pub currency: String,
+    /// "month" or "year".
+    pub interval: String,
+    /// `amount` includes tax; otherwise tax is added where it applies.
+    pub tax_included: bool,
+}
+
+/// What redeeming a code did. A code that doesn't work isn't an error: the
+/// user typed it, and is told why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncCodeOutcome {
+    /// The group syncs for free for the code's days; the status says until
+    /// when.
+    Redeemed,
+    /// No such code: mistyped, or never made.
+    Unknown,
+    /// The code was redeemed already.
+    Used,
+    /// The code was not redeemed in time.
+    Expired,
+}
+
+/// What a server that charges offers before sync is turned on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncOffer {
+    pub trial_days: u32,
+    pub plans: Vec<SyncPlan>,
+}
+
+fn sync_plan(plan: Plan) -> SyncPlan {
+    SyncPlan {
+        id: plan.id,
+        amount: plan.amount,
+        currency: plan.currency,
+        interval: plan.interval,
+        tax_included: plan.tax_included,
+    }
+}
+
+/// The servers this device had a free trial on: none when nothing is
+/// stored, an error when the store or what it holds can't be read.
+async fn trial_servers(store: &credentials::CredentialStoreHandle) -> Result<Vec<String>> {
+    match credentials::load_async(store.clone(), 0, Slot::SyncTrial).await {
+        Ok(text) => Ok(serde_json::from_str(&text)?),
+        Err(error) if credentials::is_missing(&error) => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether sync waits for a payment: the server refused this device's last
+/// uploads, or the group's trial or paid period ended. A device with nothing
+/// to upload never hears the refusal, so what the group pays counts too.
+fn waits_for_payment(refused: bool, billing: Option<&SyncBilling>) -> bool {
+    refused || billing.is_some_and(|billing| billing.status == SyncBillingStatus::Expired)
+}
+
+fn sync_billing(billing: Billing) -> Option<SyncBilling> {
+    if !billing.enabled {
+        return None;
+    }
+    Some(SyncBilling {
+        status: match billing.status {
+            BillingStatus::Trial => SyncBillingStatus::Trial,
+            BillingStatus::Active => SyncBillingStatus::Active,
+            BillingStatus::PastDue => SyncBillingStatus::PastDue,
+            BillingStatus::Granted => SyncBillingStatus::Granted,
+            BillingStatus::Expired => SyncBillingStatus::Expired,
+            _ => SyncBillingStatus::Unknown,
+        },
+        trial_ends_at: billing.trial_ends_at,
+        paid_until: billing.paid_until,
+        free_until: billing.free_until,
+        renews: billing.renews,
+        plans: billing.plans.into_iter().map(sync_plan).collect(),
+    })
+}
+
+/// What a device that invites another, or asks to join, shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PairingCode {
+    /// The pairing it starts; its events carry the same number.
+    pub pairing: u64,
+    /// A QR code for the other device to scan.
+    pub qr: Option<String>,
+    /// Eight digits for the other device to type instead.
+    pub code: Option<String>,
+}
+
+/// Progress of adding a device, on either side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PairingEvent {
+    /// A new device asks to join. With a short code, accept only if its
+    /// screen shows the same words.
+    Request {
+        words: Vec<String>,
+    },
+    /// This device asked to join; the other device shows these words.
+    Waiting {
+        words: Vec<String>,
+    },
+    /// This device joined the group.
+    Joined,
+    /// The new device was added.
+    Added,
+    Declined,
+    Expired,
+    Failed(String),
+}
+
+/// What the user decided about a join request.
+enum Decision {
+    Accept,
+    Decline,
+}
+
+/// The pairing in progress on this device.
+struct Pairing {
+    id: u64,
+    task: JoinHandle<()>,
+    /// Set once a join request waits for the user, so a decision can only
+    /// ever answer a request the user was shown.
+    decision: Arc<Mutex<Option<oneshot::Sender<Decision>>>>,
+}
+
+/// The sync service a [`Core`] holds.
+pub(crate) struct Service {
+    http: reqwest::Client,
+    client: Mutex<Option<Arc<SyncClient>>>,
+    wake: Notify,
+    run_lock: tokio::sync::Mutex<()>,
+    /// One share of scheduled messages at a time, so a message is never
+    /// stored twice. Apart from `run_lock`: an upload can take a while.
+    share_lock: tokio::sync::Mutex<()>,
+    names: tokio::sync::Mutex<Names>,
+    status: Mutex<DeviceSyncStatus>,
+    pairing: Mutex<Option<Pairing>>,
+    next_pairing: AtomicU64,
+    events_task: Mutex<Option<JoinHandle<()>>>,
+    device: Mutex<DeviceDescription>,
+    /// When the server was last asked what the group pays.
+    billing_checked: Mutex<Option<tokio::time::Instant>>,
+    /// Fired once the window has finished starting, like the accounts wait
+    /// for, so a keyring prompt never lands on top of the intro.
+    ui_ready: Notify,
+    /// Sync is on but its keys couldn't be read yet, say from a locked
+    /// keyring: the loop tries again.
+    resume_pending: AtomicBool,
+    /// The server refused this device's last uploads until the group pays.
+    refused_uploads: AtomicBool,
+}
+
+impl std::fmt::Debug for Service {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Service").finish_non_exhaustive()
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// How this device appears in the group's device list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceDescription {
+    pub name: String,
+    /// "linux", "windows", "macos", "android", "ios", "harmonyos", ...
+    pub platform: String,
+}
+
+impl Default for DeviceDescription {
+    /// The host name and the operating system Rust reports. The app's
+    /// platform layer names the device better through
+    /// [`Core::describe_device`].
+    fn default() -> Self {
+        let name = hostname::get()
+            .ok()
+            .and_then(|name| name.into_string().ok())
+            .filter(|name| !name.is_empty() && name != "localhost")
+            .unwrap_or_default();
+        Self {
+            name,
+            platform: std::env::consts::OS.to_owned(),
+        }
+    }
+}
+
+/// The client's errors as the app's. A code or recovery code that matches
+/// nothing is `NotFound`, so the app can say so; only failing to reach the
+/// server is a network error.
+fn sync_error(error: SyncError) -> CoreError {
+    let message = error.to_string();
+    match error {
+        SyncError::PairingExpired | SyncError::UnknownRecoveryCode | SyncError::NotAPairingCode => {
+            CoreError::NotFound(message)
+        }
+        SyncError::Network(_) => CoreError::Network(message),
+        _ => CoreError::Other(message),
+    }
+}
+
+impl Service {
+    pub(crate) fn new() -> Self {
+        let http = reqwest::Client::builder()
+            .user_agent(concat!("flectar-mail/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(15))
+            // No overall timeout: event streams stay open and pairing reads
+            // wait up to 25 s. Servers send a keep-alive every 15 s.
+            .read_timeout(Duration::from_secs(60))
+            .build()
+            .unwrap_or_default();
+        Self {
+            http,
+            client: Mutex::new(None),
+            wake: Notify::new(),
+            ui_ready: Notify::new(),
+            resume_pending: AtomicBool::new(false),
+            refused_uploads: AtomicBool::new(false),
+            run_lock: tokio::sync::Mutex::new(()),
+            share_lock: tokio::sync::Mutex::new(()),
+            names: tokio::sync::Mutex::new(Names::default()),
+            status: Mutex::new(DeviceSyncStatus::default()),
+            pairing: Mutex::new(None),
+            next_pairing: AtomicU64::new(1),
+            events_task: Mutex::new(None),
+            device: Mutex::new(DeviceDescription::default()),
+            billing_checked: Mutex::new(None),
+        }
+    }
+
+    fn client(&self) -> Option<Arc<SyncClient>> {
+        lock(&self.client).clone()
+    }
+
+    /// The window has finished starting.
+    pub(crate) fn notify_ui_ready(&self) {
+        self.ui_ready.notify_one();
+    }
+
+    fn require_client(&self) -> Result<Arc<SyncClient>> {
+        self.client()
+            .ok_or_else(|| CoreError::Other("Flectar Mail Sync is off on this device".into()))
+    }
+
+    fn end_pairing(&self) {
+        if let Some(pairing) = lock(&self.pairing).take() {
+            pairing.task.abort();
+        }
+    }
+
+    /// End the pairing in progress and number the next one.
+    fn next_pairing(&self) -> u64 {
+        self.end_pairing();
+        self.next_pairing.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn stop_events(&self) {
+        if let Some(task) = lock(&self.events_task).take() {
+            task.abort();
+        }
+    }
+}
+
+impl Core {
+    fn sync_service(&self) -> &Service {
+        &self.device_sync
+    }
+
+    fn emit_sync_status(&self) {
+        let status = lock(&self.sync_service().status).clone();
+        self.bus.emit(CoreEvent::DeviceSync(status));
+    }
+
+    fn set_sync_state(&self, state: DeviceSyncState) {
+        lock(&self.sync_service().status).state = state;
+        self.emit_sync_status();
+    }
+
+    fn emit_pairing(&self, pairing: u64, event: PairingEvent) {
+        self.bus
+            .emit(CoreEvent::DeviceSyncPairing { pairing, event });
+    }
+
+    /// Name this device in the group's device list. The platform layer
+    /// calls it at startup.
+    pub fn describe_device(&self, description: DeviceDescription) {
+        *lock(&self.sync_service().device) = description;
+    }
+
+    /// Where sync stands, as last reported.
+    pub fn device_sync_status(&self) -> DeviceSyncStatus {
+        lock(&self.sync_service().status).clone()
+    }
+
+    async fn store_sync_secrets(&self, secrets: &Secrets) -> Result<()> {
+        credentials::store_async(
+            self.credentials.clone(),
+            0,
+            Slot::DeviceSync,
+            STANDARD.encode(secrets.to_bytes().as_slice()),
+        )
+        .await
+    }
+
+    /// Start using `client`: keep its state, listen for live events, sync.
+    async fn adopt_client(&self, client: SyncClient, adopting: bool) -> Result<()> {
+        let secrets = client.secrets().await;
+        self.store_sync_secrets(&secrets).await?;
+        let server_url = client.identity().server_url().to_owned();
+        let chain = client.chain().await;
+        self.db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                store::create_row(&tx, &server_url, &chain, adopting, now_ms())?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await?;
+        let client = Arc::new(client);
+        *lock(&self.sync_service().client) = Some(Arc::clone(&client));
+        *self.sync_service().names.lock().await = Names::default();
+        {
+            let mut status = lock(&self.sync_service().status);
+            status.server_url = Some(client.identity().server_url().to_owned());
+            status.state = DeviceSyncState::Idle;
+        }
+        self.start_sync_events(client);
+        self.refresh_sync_devices().await;
+        self.sync_service().wake.notify_one();
+        Ok(())
+    }
+
+    /// Stop syncing on this device. The app's data stays; `departure` says
+    /// who sends this device's scheduled mail now. Waits for a run in
+    /// progress, so none records changes made after this.
+    async fn drop_sync_state(
+        &self,
+        state: DeviceSyncState,
+        departure: scheduled::Departure,
+    ) -> Result<()> {
+        let _run = self.sync_service().run_lock.lock().await;
+        self.drop_sync_state_locked(state, departure).await
+    }
+
+    /// [`Self::drop_sync_state`], from within a run.
+    async fn drop_sync_state_locked(
+        &self,
+        state: DeviceSyncState,
+        departure: scheduled::Departure,
+    ) -> Result<()> {
+        let service = self.sync_service();
+        service.end_pairing();
+        service.stop_events();
+        *lock(&service.client) = None;
+        *lock(&service.billing_checked) = None;
+        let threads = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let threads = scheduled::detach(&tx, departure, now_ms())?;
+                store::clear(&tx)?;
+                tx.commit()?;
+                Ok(threads)
+            })
+            .await?;
+        if !threads.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: threads,
+            });
+        }
+        let deleted =
+            credentials::delete_async(self.credentials.clone(), 0, Slot::DeviceSync).await;
+        // Off here either way: the page says so even if the keys stayed.
+        service.refused_uploads.store(false, Ordering::Relaxed);
+        *lock(&service.status) = DeviceSyncStatus {
+            state,
+            ..DeviceSyncStatus::default()
+        };
+        self.emit_sync_status();
+        deleted
+    }
+
+    /// Load this device's sync state at startup and run the loop.
+    pub(crate) async fn device_sync_loop(&self) {
+        // The keys come from the keyring, which may prompt: wait for the
+        // window, as the accounts do, and go on without one after a minute.
+        tokio::select! {
+            () = self.sync_service().ui_ready.notified() => {}
+            () = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+        }
+        self.try_resume_device_sync().await;
+        let mut last_pull = tokio::time::Instant::now() - PULL_INTERVAL;
+        // Runs that failed in a row, and when to try again: a change here,
+        // or Sync now, tries at once.
+        let mut failures: u32 = 0;
+        let mut retry_at = tokio::time::Instant::now();
+        loop {
+            let woken = tokio::select! {
+                () = self.sync_service().wake.notified() => true,
+                () = tokio::time::sleep(CHECK_INTERVAL) => false,
+            };
+            if self.sync_service().client().is_none() {
+                if self.sync_service().resume_pending.load(Ordering::Relaxed) {
+                    self.try_resume_device_sync().await;
+                }
+                continue;
+            }
+            if !woken && tokio::time::Instant::now() < retry_at {
+                continue;
+            }
+            let pull = woken || last_pull.elapsed() >= PULL_INTERVAL;
+            match self.run_device_sync(pull).await {
+                Ok(true) => last_pull = tokio::time::Instant::now(),
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::info!(%error, "Flectar Mail Sync run failed");
+                }
+            }
+            let failed = matches!(
+                lock(&self.sync_service().status).state,
+                DeviceSyncState::Error(_)
+            );
+            failures = if failed {
+                failures.saturating_add(1)
+            } else {
+                0
+            };
+            retry_at = tokio::time::Instant::now() + retry_backoff(failures);
+            self.drive_scheduled_sends().await;
+        }
+    }
+
+    /// Move the sends shared with the user's other devices along: claim the
+    /// ones coming due, send the ones this device holds the claim for, and
+    /// report how they went. A claim or result is uploaded at once, and the
+    /// server's answer acted on.
+    async fn drive_scheduled_sends(&self) {
+        let Some(client) = self.sync_service().client() else {
+            return;
+        };
+        let me = hex(&client.identity().device_id());
+        self.share_scheduled_messages(&me, &client).await;
+        self.remove_unneeded_files(&me, &client).await;
+        let members: std::collections::HashSet<String> = client
+            .state()
+            .await
+            .devices
+            .keys()
+            .map(|device| hex(device))
+            .collect();
+        for _ in 0..3 {
+            let reach = match lock(&self.sync_service().status).state {
+                DeviceSyncState::PaymentRequired => scheduled::Reach::PaymentRequired,
+                DeviceSyncState::Error(_) => scheduled::Reach::Unreachable,
+                _ => scheduled::Reach::Usable,
+            };
+            let driven = {
+                let _run = self.sync_service().run_lock.lock().await;
+                let me = me.clone();
+                let members = members.clone();
+                self.db
+                    .write(move |conn| {
+                        if !crate::db::repo::synced_sends::any(conn)? {
+                            return Ok(scheduled::Driven::default());
+                        }
+                        let tx = conn.transaction()?;
+                        let others_send =
+                            |send: &crate::db::repo::synced_sends::SyncedSend,
+                             protocol: Option<&str>| {
+                                scheduled::others_may_send(send, protocol, &members)
+                            };
+                        let driven = scheduled::drive(&tx, &me, now_ms(), reach, &others_send)?;
+                        tx.commit()?;
+                        Ok(driven)
+                    })
+                    .await
+            };
+            let driven = match driven {
+                Ok(driven) => driven,
+                Err(error) => {
+                    tracing::warn!(%error, "could not move scheduled sends along");
+                    return;
+                }
+            };
+            for account_id in &driven.nudge {
+                self.nudge(Some(*account_id), || {
+                    crate::sync::engine::SyncCmd::RunActions
+                })
+                .await;
+            }
+            if !driven.threads.is_empty() {
+                self.bus.emit(CoreEvent::MailUpdated {
+                    thread_ids: driven.threads,
+                });
+            }
+            // Another device's messages this device now sends: fetched
+            // first, then the next round lets their sends start.
+            let fetched = self.fetch_scheduled_files(&client, driven.fetch).await;
+            if (!driven.upload && !fetched) || reach != scheduled::Reach::Usable {
+                return;
+            }
+            // Another run may have uploaded it already; either way, act on
+            // what the server holds now.
+            if self.run_device_sync(false).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Download the files of shared sends this device holds the claim for.
+    /// Returns whether one arrived.
+    async fn fetch_scheduled_files(&self, client: &SyncClient, sync_ids: Vec<String>) -> bool {
+        let mut fetched = false;
+        for sync_id in sync_ids {
+            let id = sync_id.clone();
+            let file = self
+                .db
+                .read(move |conn| crate::db::repo::synced_sends::file(conn, &id))
+                .await
+                .ok()
+                .and_then(|(file, _)| file)
+                .and_then(|file| scheduled::FileRef::from_json(&file));
+            let Some(file) = file else {
+                continue;
+            };
+            let reference = flectar_mail_sync_client::FileRef {
+                id: file.id,
+                key: file.key,
+                size: file.size,
+            };
+            match client.download_file(&reference).await {
+                Ok(mime) => {
+                    fetched |= self
+                        .db
+                        .write(move |conn| {
+                            crate::db::repo::synced_sends::put_mime(conn, &sync_id, Some(&mime))
+                        })
+                        .await
+                        .is_ok();
+                }
+                Err(error) => {
+                    tracing::info!(%error, "could not fetch a scheduled message; trying again");
+                }
+            }
+        }
+        fetched
+    }
+
+    /// Remove from Flectar Mail Sync's storage the files this device stored
+    /// that nothing needs any more: their send went out, was cancelled or
+    /// forgotten, or its message was stored again.
+    async fn remove_unneeded_files(&self, me: &str, client: &SyncClient) {
+        let me = me.to_owned();
+        let found = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                let released = crate::db::repo::synced_sends::release_finished_files(&tx, &me)?;
+                let gone = crate::db::repo::synced_sends::files_gone(&tx, &me)?;
+                tx.commit()?;
+                Ok((released > 0, gone))
+            })
+            .await;
+        let Ok((released, gone)) = found else {
+            return;
+        };
+        for file in gone {
+            // Gone already counts: removed by an earlier try, or expired.
+            let removed = match scheduled::FileRef::from_json(&file) {
+                Some(reference) => client.delete_file(&reference.id).await.is_ok(),
+                None => true,
+            };
+            if removed {
+                let _ = self
+                    .db
+                    .write(move |conn| crate::db::repo::synced_sends::file_removed(conn, &file))
+                    .await;
+            }
+        }
+        // Their records no longer name them.
+        if released {
+            self.device_sync_now();
+        }
+    }
+
+    /// Share the IMAP and POP3 messages this device scheduled. Their drafts
+    /// stay on this device, so their records carry them for another device
+    /// to send. A message too large for a record goes into a file in Flectar
+    /// Mail Sync's storage, when the server keeps files; otherwise it goes
+    /// out from here alone.
+    async fn share_scheduled_messages(&self, me: &str, client: &SyncClient) {
+        // What waits is read under the lock: another share may have just
+        // stored it.
+        let _share = self.sync_service().share_lock.lock().await;
+        let origin = me.to_owned();
+        let waiting = self
+            .db
+            .read(move |conn| {
+                let mut statement = conn.prepare(
+                    "SELECT ss.sync_id, ss.account_id, MAX(m.id), ss.updated_at, ss.send_at
+                     FROM synced_sends ss
+                     JOIN accounts a ON a.id = ss.account_id
+                     JOIN messages m ON m.account_id = ss.account_id
+                       AND m.message_id = ss.message_id AND m.is_draft = 1
+                     WHERE ss.origin = ?1 AND ss.state = 'scheduled' AND ss.draft_ref IS NULL
+                       AND a.mail_protocol IN ('imap', 'pop3')
+                     GROUP BY ss.sync_id",
+                )?;
+                let rows = statement
+                    .query_map([&origin], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            crate::db::repo::synced_sends::AsSeen {
+                                updated_at: row.get(3)?,
+                                send_at: row.get(4)?,
+                            },
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await;
+        let Ok(waiting) = waiting else {
+            return;
+        };
+        let mut shared = false;
+        for (sync_id, account_id, draft_id, seen) in waiting {
+            // Signed and encrypted here, with this device's keys, if the
+            // account's mail security asks for it.
+            let built =
+                match crate::queue::build_outgoing(&self.db, &self.paths, account_id, draft_id)
+                    .await
+                {
+                    Ok(outgoing) => {
+                        crate::mail_security::protect_draft(
+                            &self.db,
+                            account_id,
+                            draft_id,
+                            outgoing.raw,
+                            outgoing.security_recipients,
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                };
+            let version = |raw: &[u8]| {
+                use sha2::Digest as _;
+                hex(&sha2::Sha256::digest(raw)[..8])
+            };
+            let (mime, file, version) = match built {
+                Ok(raw) if raw.len() <= scheduled::MAX_SHARED_MESSAGE_BYTES => {
+                    let version = version(&raw);
+                    (Some(raw), None, version)
+                }
+                Ok(raw) if raw.len() <= scheduled::MAX_FILE_MESSAGE_BYTES => {
+                    match self.store_scheduled_file(client, &raw).await {
+                        Ok(Some(file)) => (None, Some(file), version(&raw)),
+                        Ok(None) => (None, None, scheduled::LOCAL_ONLY.to_owned()),
+                        // Tried again on the next round.
+                        Err(error) => {
+                            tracing::info!(%error, "could not store a scheduled message yet");
+                            continue;
+                        }
+                    }
+                }
+                Ok(_) => (None, None, scheduled::LOCAL_ONLY.to_owned()),
+                Err(error) => {
+                    tracing::info!(%error, "a scheduled message goes out from this device alone");
+                    (None, None, scheduled::LOCAL_ONLY.to_owned())
+                }
+            };
+            let me = me.to_owned();
+            let written = self
+                .db
+                .write(move |conn| {
+                    let file_and_preview = file
+                        .as_ref()
+                        .map(|(file, preview)| (file.as_str(), preview.as_slice()));
+                    let taken = crate::db::repo::synced_sends::share(
+                        conn,
+                        &sync_id,
+                        &version,
+                        mime.as_deref(),
+                        file_and_preview,
+                        seen,
+                        now_ms(),
+                    )?;
+                    // It changed meanwhile, and is shared again as it is
+                    // now: the file stored for it goes.
+                    if !taken && let Some((file, _)) = &file {
+                        crate::db::repo::synced_sends::forget_file(conn, file, &me)?;
+                    }
+                    Ok(taken)
+                })
+                .await;
+            shared |= matches!(written, Ok(true));
+        }
+        if shared {
+            self.device_sync_now();
+        }
+    }
+
+    /// Store a message too large for its record as a file, and make its
+    /// preview. `Ok(None)` when the server keeps no files this large, so the
+    /// message goes out from this device alone.
+    async fn store_scheduled_file(
+        &self,
+        client: &SyncClient,
+        raw: &[u8],
+    ) -> std::result::Result<Option<(String, Vec<u8>)>, SyncError> {
+        let Some(files) = client.files().await? else {
+            return Ok(None);
+        };
+        // Sealing adds a version byte, a nonce and a tag.
+        let sealed = raw.len() as u64 + 41;
+        if sealed > files.max_file_bytes {
+            return Ok(None);
+        }
+        let file = match client.upload_file(raw).await {
+            Ok(file) => file,
+            Err(error) => {
+                return match error {
+                    // Nothing changes until the group pays, or has room.
+                    SyncError::PaymentRequired => Ok(None),
+                    SyncError::Server {
+                        status: 413 | 507, ..
+                    } => Ok(None),
+                    error => Err(error),
+                };
+            }
+        };
+        let reference = scheduled::FileRef {
+            id: file.id,
+            key: file.key,
+            size: file.size,
+        };
+        let text = crate::sync::ingest::parse_or_text(raw)
+            .text
+            .unwrap_or_default()
+            .chars()
+            .take(2000)
+            .collect::<String>();
+        Ok(Some((
+            reference.to_json(),
+            crate::mime::preview(raw, &text),
+        )))
+    }
+
+    async fn try_resume_device_sync(&self) {
+        let service = self.sync_service();
+        service.resume_pending.store(false, Ordering::Relaxed);
+        if let Err(error) = self.resume_device_sync().await {
+            tracing::warn!(%error, "could not resume Flectar Mail Sync");
+            // Everything stays as it was until the keys can be read.
+            service.resume_pending.store(true, Ordering::Relaxed);
+            self.set_sync_state(DeviceSyncState::Error(error.to_string()));
+        }
+    }
+
+    async fn resume_device_sync(&self) -> Result<()> {
+        let Some(row) = self.db.read(|conn| store::load_row(conn)).await? else {
+            return Ok(());
+        };
+        let secrets = match credentials::load_async(self.credentials.clone(), 0, Slot::DeviceSync)
+            .await
+        {
+            Ok(encoded) => STANDARD
+                .decode(encoded.trim())
+                .map_err(|_| CoreError::Other("stored Flectar Mail Sync keys are damaged".into()))
+                .and_then(|bytes| Secrets::from_bytes(&bytes).map_err(sync_error))?,
+            Err(error) if credentials::is_missing(&error) => {
+                // The keys are gone, so this device cannot sign in to its
+                // group again: it has to rejoin.
+                tracing::warn!("Flectar Mail Sync keys are missing; turning sync off");
+                self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
+                    .await?;
+                return Ok(());
+            }
+            // Locked or unreachable, such as a keyring not unlocked yet.
+            Err(error) => return Err(error),
+        };
+        let device = secrets.identity.device_id();
+        let floor = flectar_mail_sync_client::Stamp {
+            ms: row.clock.0,
+            counter: row.clock.1,
+            device,
+        };
+        let client = SyncClient::new(
+            self.sync_service().http.clone(),
+            secrets,
+            row.chain.clone(),
+            Some(floor),
+        )
+        .map_err(sync_error)?;
+        let client = Arc::new(client);
+        *lock(&self.sync_service().client) = Some(Arc::clone(&client));
+        {
+            let mut status = lock(&self.sync_service().status);
+            status.server_url = Some(row.server_url.clone());
+            status.last_synced_at = row.last_synced_at;
+            status.state = match row.last_error {
+                Some(error) => DeviceSyncState::Error(error),
+                None => DeviceSyncState::Idle,
+            };
+        }
+        self.start_sync_events(client);
+        self.refresh_sync_devices().await;
+        self.sync_service().wake.notify_one();
+        Ok(())
+    }
+
+    /// Listen to the group's live events and sync when another device
+    /// changes something.
+    fn start_sync_events(&self, client: Arc<SyncClient>) {
+        let core = self.clone();
+        let task = tokio::spawn(async move {
+            let mut backoff = Duration::from_secs(5);
+            loop {
+                match client.events().await {
+                    Ok(stream) => {
+                        backoff = Duration::from_secs(5);
+                        // A payment made while the stream was down, such as
+                        // in the browser while a phone kept the app in the
+                        // background, sent its event to nobody.
+                        core.check_billing().await;
+                        let mut stream = Box::pin(stream);
+                        while let Some(event) = stream.next().await {
+                            match event {
+                                // Every connection starts with the newest
+                                // number: a pull only when this device is
+                                // behind it.
+                                Ok(Event::Seq(high_seq)) => {
+                                    let behind =
+                                        match core.db.read(|conn| store::cursor(conn)).await {
+                                            Ok(Some(cursor)) => high_seq > cursor,
+                                            _ => true,
+                                        };
+                                    if behind {
+                                        core.sync_service().wake.notify_one();
+                                    }
+                                }
+                                Ok(Event::Chain(_)) => {
+                                    core.sync_service().wake.notify_one();
+                                }
+                                // A payment, a renewal or a cancellation:
+                                // show it, and upload what waited for it.
+                                Ok(Event::Billing) => {
+                                    core.check_billing().await;
+                                    core.sync_service().wake.notify_one();
+                                }
+                                Ok(_) => {}
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "Flectar Mail Sync events unavailable");
+                    }
+                }
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(MAX_EVENTS_BACKOFF);
+            }
+        });
+        if let Some(previous) = lock(&self.sync_service().events_task).replace(task) {
+            previous.abort();
+        }
+    }
+
+    /// One run: record local changes, then, if there are any or `pull`,
+    /// sync with the server and take on what other devices changed. Returns
+    /// whether it reached the server.
+    async fn run_device_sync(&self, pull: bool) -> Result<bool> {
+        let service = self.sync_service();
+        let _run = service.run_lock.lock().await;
+        let Some(client) = service.client() else {
+            return Ok(false);
+        };
+        // Passwords and sign-ins that changed here go up with this round.
+        self.share_sign_ins(&client).await;
+
+        let names = {
+            let settings = self.get_settings().await?;
+            let mut names = service.names.lock().await;
+            for name in collections::names_needed(&settings) {
+                if !names.contains(&name) {
+                    let id = client.named_record_id(&name).await;
+                    match id {
+                        Ok(id) => names.insert(name, id),
+                        // Offline before the first key fetch: try later.
+                        Err(error) => return self.sync_failed(error).await,
+                    }
+                }
+            }
+            names.clone()
+        };
+        let device_id = client.identity().device_id();
+        let description = lock(&service.device).clone();
+        let device_body = serde_json::json!({
+            "name": description.name,
+            "platform": description.platform,
+            "version": env!("CARGO_PKG_VERSION"),
+        });
+        let clock: Arc<Clock> = Arc::clone(client.clock());
+
+        // Most checks find nothing new. Look first on a reader, so the app's
+        // writer isn't held while every synced item is read and hashed.
+        if !pull {
+            let names = names.clone();
+            let device_body = device_body.clone();
+            let paused = lock(&service.status).state == DeviceSyncState::PaymentRequired;
+            let idle = self
+                .db
+                .read(move |conn| {
+                    if store::adopting(conn)? != Some(false) {
+                        return Ok(false);
+                    }
+                    let mirror = store::load_mirror(conn)?;
+                    let local =
+                        collections::snapshot(conn, &names, &mirror, (device_id, device_body))?;
+                    Ok(!store::untracked(conn, &local)?
+                        && (paused || store::outbox_is_empty(conn)?))
+                })
+                .await?;
+            if idle {
+                return Ok(false);
+            }
+        }
+
+        let (mut run, local_before, mirror_before, queued, adopting) = {
+            let names = names.clone();
+            let device_body = device_body.clone();
+            let clock = Arc::clone(&clock);
+            self.db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    let row = store::load_row(&tx)?
+                        .ok_or_else(|| CoreError::Other("Flectar Mail Sync is off".into()))?;
+                    let mirror = store::load_mirror(&tx)?;
+                    let local =
+                        collections::snapshot(&tx, &names, &mirror, (device_id, device_body))?;
+                    let queued = if row.adopting {
+                        0
+                    } else {
+                        store::track(&tx, &local, &clock)?
+                    };
+                    let run = store::RunStore::load(&tx, &row, clock)?;
+                    tx.commit()?;
+                    Ok((run, local, mirror, queued, row.adopting))
+                })
+                .await?
+        };
+        let was_paused = lock(&service.status).state == DeviceSyncState::PaymentRequired;
+        // Uploads the server refused wait for a pull or a new change, not
+        // the next check.
+        if !pull && queued == 0 && (run.outbox.is_empty() || was_paused) {
+            return Ok(false);
+        }
+
+        self.set_sync_state(DeviceSyncState::Syncing);
+        let report = match client.sync(&mut run).await {
+            Ok(report) => report,
+            Err(error) => return self.sync_failed(error).await,
+        };
+        tracing::debug!(?report, "Flectar Mail Sync run");
+
+        let secrets = run.secrets.take();
+        let applied = {
+            let clock = Arc::clone(&clock);
+            self.db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    // Against the same mirror as at the start: what the run
+                    // pulled must not look like an edit made here meanwhile.
+                    let local_now = collections::snapshot(
+                        &tx,
+                        &names,
+                        &mirror_before,
+                        (device_id, device_body.clone()),
+                    )?;
+                    run.save(&tx, &clock, now_ms())?;
+                    let hashes = store::load_local_hashes(&tx)?;
+                    let waiting: BTreeMap<RecordId, Entry> = run
+                        .mirror
+                        .iter()
+                        .filter(|(id, _)| {
+                            !hashes.contains_key(*id) && !run.outbox.contains_key(*id)
+                        })
+                        .filter_map(|(id, mirrored)| Some((*id, mirrored.entry.clone()?)))
+                        .collect();
+                    let applied = collections::apply(
+                        &tx,
+                        &run.incoming,
+                        &waiting,
+                        &local_before,
+                        &local_now,
+                    )?;
+                    let after =
+                        collections::snapshot(&tx, &names, &run.mirror, (device_id, device_body))?;
+                    collections::settle(&tx, &applied.settled, &after)?;
+                    if adopting {
+                        tx.execute("UPDATE device_sync SET adopting = 0 WHERE id = 1", [])?;
+                    }
+                    tx.commit()?;
+                    Ok(applied)
+                })
+                .await?
+        };
+        if let Some(secrets) = secrets
+            && let Err(error) = self.store_sync_secrets(&secrets).await
+        {
+            tracing::warn!(%error, "could not store new Flectar Mail Sync keys");
+        }
+
+        let mut removed = Vec::new();
+        for follow_up in applied.follow_ups {
+            let result = match follow_up {
+                FollowUp::RemoveAccount(account_id) => {
+                    removed.push(account_id);
+                    self.remove_account(account_id).await
+                }
+                FollowUp::RestartAccount(account_id) => {
+                    self.restart_actor(account_id).await;
+                    Ok(())
+                }
+            };
+            if let Err(error) = result {
+                tracing::warn!(%error, "could not apply an account change from another device");
+            }
+        }
+        if applied.accounts_changed {
+            self.bus.emit(CoreEvent::AccountsChanged { removed });
+        }
+        if applied.settings_changed {
+            self.bus.emit(CoreEvent::SettingsChanged);
+        }
+        if !applied.threads_changed.is_empty() {
+            self.bus.emit(CoreEvent::MailUpdated {
+                thread_ids: applied.threads_changed,
+            });
+        }
+
+        {
+            service
+                .refused_uploads
+                .store(report.payment_required, Ordering::Relaxed);
+            let mut status = lock(&service.status);
+            status.state = if waits_for_payment(report.payment_required, status.billing.as_ref()) {
+                DeviceSyncState::PaymentRequired
+            } else {
+                DeviceSyncState::Idle
+            };
+            status.last_synced_at = Some(now_ms());
+        }
+        self.refresh_sync_devices().await;
+        // Accounts other devices shared a sign-in for start syncing here.
+        self.install_sign_ins(&client).await;
+        let billing_due = lock(&service.billing_checked)
+            .is_none_or(|checked| checked.elapsed() >= BILLING_REFRESH);
+        if billing_due || report.payment_required != was_paused {
+            self.check_billing().await;
+        }
+        if adopting {
+            // Upload what only this device had, now that it has the group's.
+            service.wake.notify_one();
+        }
+        Ok(true)
+    }
+
+    async fn sync_failed<T: Default>(&self, error: SyncError) -> Result<T> {
+        match error {
+            // The group goes on without this device, and keeps its
+            // scheduled mail. A login the server refused for another
+            // reason, such as a changed server address, is an error: the
+            // keys stay, and a later sync tries again.
+            SyncError::Removed => {
+                self.drop_sync_state_locked(DeviceSyncState::Removed, scheduled::Departure::Kept)
+                    .await?;
+            }
+            SyncError::GroupDeleted => {
+                self.drop_sync_state_locked(DeviceSyncState::Deleted, scheduled::Departure::Alone)
+                    .await?;
+            }
+            SyncError::PaymentRequired => {
+                self.sync_service()
+                    .refused_uploads
+                    .store(true, Ordering::Relaxed);
+                self.set_sync_state(DeviceSyncState::PaymentRequired);
+                self.check_billing().await;
+            }
+            error => {
+                let message = error.to_string();
+                let stored = message.clone();
+                let _ = self
+                    .db
+                    .write(move |conn| store::set_error(conn, Some(&stored)))
+                    .await;
+                self.set_sync_state(DeviceSyncState::Error(message));
+            }
+        }
+        Ok(T::default())
+    }
+
+    /// Ask the server what the group pays, for the status. Failing to reach
+    /// it keeps what was known.
+    async fn check_billing(&self) {
+        if let Err(error) = self.device_sync_refresh_billing().await {
+            tracing::debug!(%error, "could not read Flectar Mail Sync billing");
+        }
+    }
+
+    /// The group's devices, named by their own records.
+    async fn refresh_sync_devices(&self) {
+        let Some(client) = self.sync_service().client() else {
+            return;
+        };
+        let state = client.state().await;
+        let mirror = self
+            .db
+            .read(|conn| store::load_mirror(conn))
+            .await
+            .unwrap_or_default();
+        let entries: BTreeMap<RecordId, Entry> = mirror
+            .into_iter()
+            .filter_map(|(id, mirrored)| Some((id, mirrored.entry?)))
+            .collect();
+        let records = collections::device_records(&entries);
+        let this = client.identity().device_id();
+        let description = lock(&self.sync_service().device).clone();
+        let mut devices: Vec<SyncDevice> = state
+            .devices
+            .keys()
+            .map(|id| {
+                let record = records.get(id);
+                let field = |name: &str| {
+                    record
+                        .and_then(|record| record.get(name))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                };
+                SyncDevice {
+                    id: hex(id),
+                    name: if *id == this {
+                        description.name.clone()
+                    } else {
+                        field("name").unwrap_or_default()
+                    },
+                    platform: if *id == this {
+                        description.platform.clone()
+                    } else {
+                        field("platform").unwrap_or_default()
+                    },
+                    this_device: *id == this,
+                }
+            })
+            .collect();
+        devices.sort_by(|a, b| b.this_device.cmp(&a.this_device).then(a.name.cmp(&b.name)));
+        lock(&self.sync_service().status).devices = devices;
+        self.emit_sync_status();
+    }
+
+    /// This device's id in its sync group (hex), while sync is on.
+    pub(crate) fn sync_device(&self) -> Option<String> {
+        let client = self.sync_service().client()?;
+        Some(hex(&client.identity().device_id()))
+    }
+
+    /// This device's id in hex, when a send it schedules now can be shared
+    /// with the user's other devices: sync is on, and the group may upload.
+    pub(crate) fn shared_send_device(&self) -> Option<String> {
+        let service = self.sync_service();
+        let client = service.client()?;
+        if lock(&service.status).state == DeviceSyncState::PaymentRequired {
+            return None;
+        }
+        Some(hex(&client.identity().device_id()))
+    }
+
+    /// Sync now, for example when the app comes to the foreground.
+    pub fn device_sync_now(&self) {
+        self.sync_service().wake.notify_one();
+    }
+
+    /// Run one sync to the end, and move the shared scheduled sends along.
+    /// Returns whether it reached the server.
+    pub async fn device_sync_run(&self) -> Result<bool> {
+        let reached = self.run_device_sync(true).await;
+        self.drive_scheduled_sends().await;
+        reached
+    }
+
+    /// What `server_url`, Flectar's by default, charges for syncing, to show
+    /// before sync is turned on. `None` when it is free.
+    pub async fn device_sync_offer(&self, server_url: Option<String>) -> Result<Option<SyncOffer>> {
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let info = Http::new(self.sync_service().http.clone(), &server_url)
+            .info()
+            .await
+            .map_err(sync_error)?;
+        // A device that had a free trial there starts without one.
+        let had_trial = self.had_trial(&server_url).await;
+        Ok(info.billing.map(|offer| SyncOffer {
+            trial_days: if had_trial { 0 } else { offer.trial_days },
+            plans: offer.plans.into_iter().map(sync_plan).collect(),
+        }))
+    }
+
+    /// Ask the server what the group pays, and report it in the status.
+    pub async fn device_sync_refresh_billing(&self) -> Result<()> {
+        let service = self.sync_service();
+        let client = service.require_client()?;
+        let billing = client.billing().await.map_err(sync_error)?;
+        if billing.enabled {
+            // Whichever device starts a group there next, it had its trial.
+            self.remember_trial(client.identity().server_url()).await;
+        }
+        *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
+        {
+            let mut status = lock(&service.status);
+            status.billing = sync_billing(billing);
+            // A trial or paid period that ended pauses sync, and a payment
+            // ends the pause, between runs too.
+            if matches!(
+                status.state,
+                DeviceSyncState::Idle | DeviceSyncState::PaymentRequired
+            ) {
+                let refused = service.refused_uploads.load(Ordering::Relaxed);
+                status.state = if waits_for_payment(refused, status.billing.as_ref()) {
+                    DeviceSyncState::PaymentRequired
+                } else {
+                    DeviceSyncState::Idle
+                };
+            }
+        }
+        self.emit_sync_status();
+        Ok(())
+    }
+
+    /// Whether this device had a free trial on `server_url`.
+    async fn had_trial(&self, server_url: &str) -> bool {
+        let server_url = server_url.trim().trim_end_matches('/');
+        trial_servers(&self.credentials)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|known| known == server_url)
+    }
+
+    /// Remember that this device had a free trial on `server_url`, so a
+    /// group it starts there again begins without one. Kept in the
+    /// credential store, which outlives the app's own data where the
+    /// platform allows. A store that can't keep it only loses the reminder.
+    async fn remember_trial(&self, server_url: &str) {
+        let server_url = server_url.trim().trim_end_matches('/');
+        // A list that can't be read now is left as it is, not replaced.
+        let Ok(mut servers) = trial_servers(&self.credentials).await else {
+            return;
+        };
+        if servers.iter().any(|known| known == server_url) {
+            return;
+        }
+        servers.push(server_url.to_owned());
+        let text = serde_json::to_string(&servers).unwrap_or_default();
+        if let Err(error) =
+            credentials::store_async(self.credentials.clone(), 0, Slot::SyncTrial, text).await
+        {
+            tracing::warn!(%error, "could not remember the Flectar Mail Sync trial");
+        }
+    }
+
+    /// A checkout page for subscribing the group to `plan`, to open in the
+    /// browser. A group that has a subscription already, perhaps one still
+    /// waiting for its first payment, gets the page that manages it instead;
+    /// `None` when there is none to open, and the status says so.
+    pub async fn device_sync_checkout(&self, plan: String) -> Result<Option<String>> {
+        let client = self.sync_service().require_client()?;
+        match client.checkout(&plan).await {
+            Ok(url) => Ok(Some(url)),
+            Err(SyncError::AlreadySubscribed) => {
+                self.device_sync_refresh_billing().await?;
+                Ok(self.device_sync_manage_billing().await.ok())
+            }
+            Err(error) => Err(sync_error(error)),
+        }
+    }
+
+    /// Redeem a code that makes syncing free for a while, as the user typed
+    /// it. Changes that waited for a payment upload right after.
+    pub async fn device_sync_redeem_code(&self, code: String) -> Result<SyncCodeOutcome> {
+        let service = self.sync_service();
+        let client = service.require_client()?;
+        // As typed or pasted, with spaces around it.
+        let billing = match client.redeem_code(code.trim()).await {
+            Ok(billing) => billing,
+            Err(SyncError::CodeUnknown) => return Ok(SyncCodeOutcome::Unknown),
+            Err(SyncError::CodeUsed) => return Ok(SyncCodeOutcome::Used),
+            Err(SyncError::CodeExpired) => return Ok(SyncCodeOutcome::Expired),
+            Err(error) => return Err(sync_error(error)),
+        };
+        *lock(&service.billing_checked) = Some(tokio::time::Instant::now());
+        lock(&service.status).billing = sync_billing(billing);
+        self.emit_sync_status();
+        self.device_sync_now();
+        Ok(SyncCodeOutcome::Redeemed)
+    }
+
+    /// The page that changes or cancels the subscription and lists its
+    /// invoices, to open in the browser.
+    pub async fn device_sync_manage_billing(&self) -> Result<String> {
+        let client = self.sync_service().require_client()?;
+        client.manage_billing().await.map_err(sync_error)
+    }
+
+    /// Start a group with this device. Returns the 24 recovery words to show
+    /// the user once.
+    pub async fn device_sync_turn_on(&self, server_url: Option<String>) -> Result<String> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let http = self.sync_service().http.clone();
+        // Starting over doesn't bring another free trial.
+        let (client, code) = if self.had_trial(&server_url).await {
+            SyncClient::create_group_without_trial(http, &server_url).await
+        } else {
+            SyncClient::create_group(http, &server_url).await
+        }
+        .map_err(sync_error)?;
+        self.adopt_client(client, false).await?;
+        // Learn at once whether the server charges, which remembers the
+        // trial before anything could start the group over.
+        self.check_billing().await;
+        Ok(code.to_words())
+    }
+
+    /// Join the group of a recovery code, when no other device is at hand.
+    pub async fn device_sync_recover(
+        &self,
+        server_url: Option<String>,
+        words: String,
+    ) -> Result<()> {
+        if flectar_mail_sync_client::RecoveryCode::from_words(&words).is_err() {
+            // A mistyped word, caught before asking the server.
+            return Err(sync_error(SyncError::UnknownRecoveryCode));
+        }
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let client = SyncClient::recover(self.sync_service().http.clone(), &server_url, &words)
+            .await
+            .map_err(sync_error)?;
+        self.adopt_client(client, true).await
+    }
+
+    /// Invite a new device. Show the code it returns; its pairing then
+    /// emits [`PairingEvent::Request`] when the device asks to join.
+    pub async fn device_sync_invite(&self, with_code: bool) -> Result<PairingCode> {
+        let client = self.sync_service().require_client()?;
+        let invitation = if with_code {
+            client.invite_with_code().await
+        } else {
+            client.invite_with_qr().await
+        }
+        .map_err(sync_error)?;
+        let code = PairingCode {
+            pairing: self.sync_service().next_pairing(),
+            qr: invitation.qr_code(),
+            code: invitation.short_code().map(str::to_owned),
+        };
+        self.await_join_request(code.pairing, client, invitation);
+        Ok(code)
+    }
+
+    /// Answer the QR code a new device shows. Returns the pairing, which
+    /// emits [`PairingEvent::Request`] when the device's request arrives.
+    pub async fn device_sync_answer_code(&self, qr_code: String) -> Result<u64> {
+        let client = self.sync_service().require_client()?;
+        let invitation = client.invite_scanned(&qr_code).await.map_err(sync_error)?;
+        let pairing = self.sync_service().next_pairing();
+        self.await_join_request(pairing, client, invitation);
+        Ok(pairing)
+    }
+
+    fn await_join_request(&self, pairing: u64, client: Arc<SyncClient>, invitation: Invitation) {
+        let decision_slot: Arc<Mutex<Option<oneshot::Sender<Decision>>>> = Arc::default();
+        let waiting = Arc::clone(&decision_slot);
+        let core = self.clone();
+        let task = tokio::spawn(async move {
+            let emit = |event| core.emit_pairing(pairing, event);
+            let attempt: JoinAttempt = match invitation.wait_for_request().await {
+                Ok(attempt) => attempt,
+                Err(SyncError::PairingExpired) => return emit(PairingEvent::Expired),
+                Err(error) => return emit(PairingEvent::Failed(error.to_string())),
+            };
+            let (decide, decision) = oneshot::channel();
+            *lock(&waiting) = Some(decide);
+            emit(PairingEvent::Request {
+                words: attempt
+                    .approval_words()
+                    .iter()
+                    .map(|w| (*w).to_owned())
+                    .collect(),
+            });
+            match decision.await {
+                Ok(Decision::Accept) => match client.accept(&invitation, &attempt).await {
+                    Ok(()) => {
+                        emit(PairingEvent::Added);
+                        core.refresh_sync_devices().await;
+                        core.sync_service().wake.notify_one();
+                    }
+                    Err(error) => emit(PairingEvent::Failed(error.to_string())),
+                },
+                Ok(Decision::Decline) | Err(_) => {
+                    let _ = client.decline(&invitation).await;
+                    emit(PairingEvent::Declined);
+                }
+            }
+        });
+        *lock(&self.sync_service().pairing) = Some(Pairing {
+            id: pairing,
+            task,
+            decision: decision_slot,
+        });
+    }
+
+    /// Add the device that asked to join `pairing`. Does nothing unless its
+    /// request is waiting.
+    pub fn device_sync_accept(&self, pairing: u64) {
+        self.decide(pairing, Decision::Accept);
+    }
+
+    /// Turn down the device that asked to join `pairing`.
+    pub fn device_sync_decline(&self, pairing: u64) {
+        self.decide(pairing, Decision::Decline);
+    }
+
+    fn decide(&self, pairing: u64, decision: Decision) {
+        let sender = lock(&self.sync_service().pairing)
+            .as_ref()
+            .filter(|current| current.id == pairing)
+            .and_then(|current| lock(&current.decision).take());
+        if let Some(sender) = sender {
+            let _ = sender.send(decision);
+        }
+    }
+
+    /// Stop adding a device in `pairing`, on either side. A newer pairing
+    /// carries on.
+    pub fn device_sync_cancel_pairing(&self, pairing: u64) {
+        let ended = {
+            let mut current = lock(&self.sync_service().pairing);
+            if current
+                .as_ref()
+                .is_some_and(|current| current.id == pairing)
+            {
+                current.take()
+            } else {
+                None
+            }
+        };
+        if let Some(ended) = ended {
+            ended.task.abort();
+        }
+    }
+
+    /// Join with the QR code an existing device shows. Returns the pairing,
+    /// which emits [`PairingEvent::Waiting`] and then how it ended.
+    pub async fn device_sync_join_scanned(&self, qr_code: String) -> Result<u64> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let joining =
+            Joining::scanned(self.sync_service().http.clone(), &qr_code).map_err(sync_error)?;
+        Ok(self.finish_join(joining))
+    }
+
+    /// Join with the short code an existing device shows. Returns the
+    /// pairing, which emits [`PairingEvent::Waiting`] and then how it ended.
+    pub async fn device_sync_join_with_code(
+        &self,
+        server_url: Option<String>,
+        code: String,
+    ) -> Result<u64> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let joining = Joining::with_code(self.sync_service().http.clone(), &server_url, &code)
+            .await
+            .map_err(sync_error)?;
+        Ok(self.finish_join(joining))
+    }
+
+    /// A QR code for an existing device to scan. Its pairing emits
+    /// [`PairingEvent::Waiting`] once scanned, and then how it ended.
+    pub async fn device_sync_join_show_code(
+        &self,
+        server_url: Option<String>,
+    ) -> Result<PairingCode> {
+        // The keys go into the credential store: a store that can't hold
+        // them must fail here, before the server knows of this device.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let server_url = server_url.unwrap_or_else(|| DEFAULT_SERVER_URL.to_owned());
+        let (joining, qr) = Joining::show_qr_code(self.sync_service().http.clone(), &server_url)
+            .await
+            .map_err(sync_error)?;
+        Ok(PairingCode {
+            pairing: self.finish_join(joining),
+            qr: Some(qr),
+            code: None,
+        })
+    }
+
+    fn finish_join(&self, mut joining: Joining) -> u64 {
+        let pairing = self.sync_service().next_pairing();
+        let core = self.clone();
+        let task = tokio::spawn(async move {
+            let emit = |event| core.emit_pairing(pairing, event);
+            let words = match joining.request().await {
+                Ok(words) => words,
+                Err(SyncError::PairingExpired) => return emit(PairingEvent::Expired),
+                Err(error) => return emit(PairingEvent::Failed(error.to_string())),
+            };
+            emit(PairingEvent::Waiting {
+                words: words.iter().map(|w| (*w).to_owned()).collect(),
+            });
+            match joining.finish().await {
+                Ok(client) => match core.adopt_client(client, true).await {
+                    Ok(()) => emit(PairingEvent::Joined),
+                    Err(error) => emit(PairingEvent::Failed(error.to_string())),
+                },
+                Err(SyncError::Declined) => emit(PairingEvent::Declined),
+                Err(SyncError::PairingExpired) => emit(PairingEvent::Expired),
+                Err(error) => emit(PairingEvent::Failed(error.to_string())),
+            }
+        });
+        *lock(&self.sync_service().pairing) = Some(Pairing {
+            id: pairing,
+            task,
+            decision: Arc::default(),
+        });
+        pairing
+    }
+
+    /// Remove another device from the group; the others move to a new key
+    /// it cannot read.
+    pub async fn device_sync_remove_device(&self, device_id: String) -> Result<()> {
+        let client = self.sync_service().require_client()?;
+        let id: RecordId = (0..16)
+            .map(|index| {
+                device_id
+                    .get(index * 2..index * 2 + 2)
+                    .and_then(|b| u8::from_str_radix(b, 16).ok())
+            })
+            .collect::<Option<Vec<u8>>>()
+            .and_then(|bytes| bytes.try_into().ok())
+            .ok_or_else(|| CoreError::Other("invalid device id".into()))?;
+        client.remove_device(id).await.map_err(sync_error)?;
+        self.refresh_sync_devices().await;
+        Ok(())
+    }
+
+    /// Replace the recovery code; the old one stops working at once. Returns
+    /// the new 24 words to show the user.
+    pub async fn device_sync_reset_recovery(&self) -> Result<String> {
+        let client = self.sync_service().require_client()?;
+        let code = client.reset_recovery().await.map_err(sync_error)?;
+        Ok(code.to_words())
+    }
+
+    /// Stop syncing on this device and leave the group. The app's data
+    /// stays here; the other devices keep syncing.
+    /// Sync passwords and sign-ins, or stop, on every device of the group:
+    /// the setting syncs too. Off, their records go from the server; on,
+    /// each device reads its credential store again and shares them.
+    pub async fn device_sync_set_sign_ins(&self, on: bool) -> Result<()> {
+        let mut settings = self.get_settings().await?;
+        if settings.sync_sign_ins == on {
+            return Ok(());
+        }
+        settings.sync_sign_ins = on;
+        self.set_settings(settings).await?;
+        if on {
+            self.db
+                .write(|conn| crate::db::repo::sign_ins::recheck_all(conn))
+                .await?;
+        }
+        self.device_sync_now();
+        Ok(())
+    }
+
+    pub async fn device_sync_turn_off(&self) -> Result<()> {
+        // The keys go too: a store that can't change now, such as a locked
+        // keyring, leaves everything as it is.
+        credentials::check_available_async(self.credentials.clone()).await?;
+        let mut departure = scheduled::Departure::Alone;
+        if let Some(client) = self.sync_service().client() {
+            departure = self.take_back_scheduled_sends(&client).await;
+            let own = client.identity().device_id();
+            if let Err(error) = client.remove_device(own).await {
+                // The other devices can still remove this one themselves.
+                tracing::warn!(%error, "could not leave the Flectar Mail Sync group");
+            }
+        }
+        self.drop_sync_state(DeviceSyncState::Off, departure).await
+    }
+
+    /// Leave the group before this device's data is deleted, so nothing
+    /// deleted here reaches the other devices. They keep the scheduled mail
+    /// they can send.
+    pub(crate) async fn device_sync_leave_for_reset(&self) -> Result<()> {
+        if let Some(client) = self.sync_service().client() {
+            let own = client.identity().device_id();
+            if let Err(error) = client.remove_device(own).await {
+                // The other devices can still remove this one themselves.
+                tracing::warn!(%error, "could not leave the Flectar Mail Sync group");
+            }
+        }
+        self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Kept)
+            .await
+    }
+
+    /// Before this device leaves the group, take its scheduled mail back:
+    /// the other devices forget it, and it goes out from here. When they
+    /// cannot hear of it, they keep it, and send what they can.
+    async fn take_back_scheduled_sends(&self, client: &SyncClient) -> scheduled::Departure {
+        let own = client.identity().device_id();
+        // Without another device, or a payment, none sends this device's.
+        let others = client
+            .state()
+            .await
+            .devices
+            .keys()
+            .any(|device| *device != own);
+        let paused = lock(&self.sync_service().status).state == DeviceSyncState::PaymentRequired;
+        if !others || paused {
+            return scheduled::Departure::Alone;
+        }
+        let me = hex(&own);
+        let taken = {
+            let me = me.clone();
+            self.db
+                .write(move |conn| {
+                    let tx = conn.transaction()?;
+                    let taken = scheduled::take_back(&tx, &me, now_ms())?;
+                    tx.commit()?;
+                    Ok(taken)
+                })
+                .await
+        };
+        let Ok(taken) = taken else {
+            return scheduled::Departure::Kept;
+        };
+        if taken.is_empty() {
+            return scheduled::Departure::TakenBack;
+        }
+        let reached = matches!(self.run_device_sync(true).await, Ok(true));
+        let ids: Vec<RecordId> = taken
+            .iter()
+            .filter_map(|send| collections::sync_id_bytes(send.sync_id()))
+            .collect();
+        let heard = reached
+            && self
+                .db
+                .read(move |conn| {
+                    for id in &ids {
+                        if store::has_pending(conn, id)? {
+                            return Ok(false);
+                        }
+                    }
+                    Ok(true)
+                })
+                .await
+                .unwrap_or(false);
+        if heard {
+            // Their files go too.
+            self.remove_unneeded_files(&me, client).await;
+            return scheduled::Departure::TakenBack;
+        }
+        let given_back = self
+            .db
+            .write(move |conn| {
+                let tx = conn.transaction()?;
+                scheduled::give_back(&tx, &taken, now_ms())?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+        match given_back {
+            Ok(()) => scheduled::Departure::Kept,
+            // They go out from here, as taken back.
+            Err(error) => {
+                tracing::warn!(%error, "could not leave scheduled mail to the other devices");
+                scheduled::Departure::TakenBack
+            }
+        }
+    }
+
+    /// Delete the group and everything the server holds for it, for every
+    /// device. Each device keeps its own data.
+    pub async fn device_sync_delete_everywhere(&self) -> Result<()> {
+        let client = self.sync_service().require_client()?;
+        client.delete_group().await.map_err(sync_error)?;
+        self.drop_sync_state(DeviceSyncState::Off, scheduled::Departure::Alone)
+            .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn billing(status: SyncBillingStatus) -> SyncBilling {
+        SyncBilling {
+            status,
+            trial_ends_at: None,
+            paid_until: None,
+            free_until: None,
+            renews: false,
+            plans: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn failed_runs_wait_longer_each_time_up_to_a_quarter_of_an_hour() {
+        // A run that worked: the next check comes as usual.
+        assert_eq!(retry_backoff(0), Duration::ZERO);
+        assert_eq!(retry_backoff(1), CHECK_INTERVAL);
+        assert_eq!(retry_backoff(2), CHECK_INTERVAL * 2);
+        assert_eq!(retry_backoff(5), CHECK_INTERVAL * 16);
+        assert_eq!(retry_backoff(6), MAX_RETRY_BACKOFF);
+        assert_eq!(retry_backoff(u32::MAX), MAX_RETRY_BACKOFF);
+    }
+
+    #[test]
+    fn sync_waits_for_payment_once_the_trial_ends_even_with_nothing_to_upload() {
+        let expired = billing(SyncBillingStatus::Expired);
+        assert!(waits_for_payment(false, Some(&expired)));
+        // A refusal stands until a run gets through.
+        assert!(waits_for_payment(
+            true,
+            Some(&billing(SyncBillingStatus::Active))
+        ));
+        for status in [
+            SyncBillingStatus::Trial,
+            SyncBillingStatus::Active,
+            SyncBillingStatus::PastDue,
+            SyncBillingStatus::Granted,
+        ] {
+            assert!(!waits_for_payment(false, Some(&billing(status))));
+        }
+        // A server that doesn't charge.
+        assert!(!waits_for_payment(false, None));
+    }
+}

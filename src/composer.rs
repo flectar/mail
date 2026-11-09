@@ -63,6 +63,41 @@ pub(super) struct ComposeSession {
     preferences_generation: Cell<u64>,
     /// Closed, and waiting for the event loop to let its window go.
     disposed: Cell<bool>,
+    /// When the message goes out, once Schedule send picked a time; taken
+    /// by the save that schedules it.
+    send_at: Cell<Option<i64>>,
+    /// When the message reminds the user unless someone replies.
+    remind_at: Cell<Option<i64>>,
+    /// The picker of the message's window of its own, which asks there.
+    #[cfg(desktop)]
+    window_picker: RefCell<Option<when_picker::PickerState>>,
+}
+
+/// What a composer asks the picker: when its message goes out, or when it
+/// reminds the user unless someone replies.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TimeFor {
+    Send,
+    Remind,
+}
+
+/// A composer's question to the picker, answered in the window it asked in.
+pub(super) struct Asking {
+    session: SessionRef,
+    what: TimeFor,
+}
+
+impl Asking {
+    pub(super) fn reminds(&self) -> bool {
+        self.what == TimeFor::Remind
+    }
+}
+
+/// The picker's answer to `asking`: a time, or "Don't remind me" as `None`.
+pub(super) fn answered(asking: Asking, at: Option<chrono::DateTime<chrono::Local>>) {
+    if let Some(session) = asking.session.upgrade() {
+        session.time_picked(asking.what, at);
+    }
 }
 
 enum Host {
@@ -412,6 +447,7 @@ fn copy_composer(from: &ComposerUi<'_>, to: &ComposerUi<'_>) {
     to.set_quote_text(from.get_quote_text());
     to.set_quote_expanded(from.get_quote_expanded());
     to.set_quote_height(from.get_quote_height());
+    to.set_remind_time(from.get_remind_time());
 }
 
 /// The sender and signature a message chose, for it moving to another window.
@@ -517,6 +553,10 @@ impl Composers {
             signatures: RefCell::default(),
             preferences_generation: Cell::new(0),
             disposed: Cell::new(false),
+            send_at: Cell::new(None),
+            remind_at: Cell::new(None),
+            #[cfg(desktop)]
+            window_picker: RefCell::default(),
         });
         session.connect();
         let host = session.host()?;
@@ -688,10 +728,59 @@ impl Composers {
     }
 
     fn open_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
-        if row.folder != "Drafts" && row.label != "DRAFT" {
+        if row.folder != "Drafts" && row.send_at.is_none() && row.label != "DRAFT" {
             app.set_render_status(UiMessage::plain("Only drafts can be reopened for editing."));
             return;
         }
+        if row.send_at.is_none() {
+            self.load_draft(app, core, row);
+            return;
+        }
+        // Editing a scheduled draft cancels its send first, as in Gmail. The
+        // mail server may be holding it, so the window keeps going while the
+        // server lets go, and the draft opens after.
+        if !self.state.borrow_mut().start_send_change() {
+            return;
+        }
+        let cancel: documents::DocumentFuture<bool> = {
+            let (core, row) = (core.clone(), row.clone());
+            Box::pin(async move { core.cancel_scheduled_row(&row).await })
+        };
+        let composers = Rc::downgrade(self);
+        let state = Rc::clone(&self.state);
+        let (core, row) = (core.clone(), row.clone());
+        documents::run_request(&self.runtime, cancel, move |cancelled| {
+            state.borrow_mut().changing_send = false;
+            let Some(composers) = composers.upgrade() else {
+                return;
+            };
+            let Some(app) = composers.app.upgrade() else {
+                return;
+            };
+            match cancelled {
+                Ok(true) => {
+                    app.set_render_status(UiMessage::plain(
+                        "Send cancelled. The message is a draft again.",
+                    ));
+                    // A message the user started meanwhile stays in the
+                    // composer.
+                    if composers.in_app().is_none_or(|open| open.is_blank()) {
+                        composers.load_draft(&app, &core, &row);
+                    }
+                }
+                // It went out, or is going out, meanwhile.
+                Ok(false) => {
+                    app.set_render_status(UiMessage::plain("This message is no longer scheduled."))
+                }
+                Err(error) => {
+                    app.set_render_status(UiMessage::detail("Could not cancel the send: {}", error))
+                }
+            }
+        });
+    }
+
+    /// Open the draft in the main window's composer.
+    fn load_draft(self: &Rc<Self>, app: &AppWindow, core: &CoreMailSource, row: &MailMessage) {
         let draft = match self.runtime.block_on(core.load_draft(row)) {
             Ok(draft) => draft,
             Err(error) => {
@@ -1071,6 +1160,7 @@ impl ComposeSession {
         ui.set_quote_expanded(false);
         ui.set_quote_tiles(ModelRc::default());
         ui.set_quote_height(0.0);
+        ui.set_remind_time("".into());
         ui.set_notice(UiMessage::EMPTY, false);
         apply_rich_compose_state(&ui, &self.document.borrow(), ComposeSelection::default());
     }
@@ -1266,6 +1356,101 @@ impl ComposeSession {
             .is_ok_and(|rest| rest.trim().is_empty())
     }
 
+    /// Ask when the message goes out, or when it reminds the user, in the
+    /// window that shows it.
+    fn ask_time(self: &Rc<Self>, what: TimeFor) {
+        let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
+            return;
+        };
+        let Some(app) = composers.app.upgrade() else {
+            return;
+        };
+        if self.send_action.get().is_some() {
+            return;
+        }
+        let asking = Asking {
+            session: self.reference(),
+            what,
+        };
+        // "Don't remind me" ends a reminder already set.
+        let droppable = what == TimeFor::Remind && self.remind_at.get().is_some();
+        let placeholder = app.get_time_format_sample();
+        match &host {
+            HostRef::Main(main) => {
+                if let Some(picker) = when_picker::main_picker() {
+                    when_picker::ask(
+                        &main.global::<WhenUi>(),
+                        placeholder,
+                        &picker,
+                        asking,
+                        droppable,
+                    );
+                }
+            }
+            #[cfg(desktop)]
+            HostRef::Window(window) => {
+                if let Some(picker) = self.window_picker.borrow().as_ref() {
+                    when_picker::ask(
+                        &window.global::<WhenUi>(),
+                        placeholder,
+                        picker,
+                        asking,
+                        droppable,
+                    );
+                }
+            }
+        }
+    }
+
+    /// The picker's answer for this message.
+    fn time_picked(self: &Rc<Self>, what: TimeFor, at: Option<chrono::DateTime<chrono::Local>>) {
+        if self.disposed.get() {
+            return;
+        }
+        let Some(host) = self.host() else {
+            return;
+        };
+        let ui = host.ui();
+        match (what, at) {
+            // The message reminds the user once it went out.
+            (TimeFor::Remind, Some(at)) => {
+                self.remind_at.set(Some(at.timestamp_millis()));
+                ui.set_remind_time(when_picker::when_label(at, chrono::Local::now()).into());
+            }
+            (TimeFor::Remind, None) => {
+                self.remind_at.set(None);
+                ui.set_remind_time("".into());
+            }
+            // The message goes out at that time.
+            (TimeFor::Send, Some(at)) => {
+                // A reminder at or before then would come as it goes out.
+                if self
+                    .remind_at
+                    .get()
+                    .is_some_and(|remind_at| remind_at <= at.timestamp_millis())
+                {
+                    ui.set_notice(
+                        UiMessage::plain("Choose a reminder after the time the message goes out."),
+                        true,
+                    );
+                    return;
+                }
+                self.send_at.set(Some(at.timestamp_millis()));
+                self.save(
+                    ui.get_account_id(),
+                    &ui.get_to(),
+                    &ui.get_cc(),
+                    &ui.get_bcc(),
+                    &ui.get_subject(),
+                    &ui.get_body(),
+                    true,
+                );
+                self.send_at.set(None);
+            }
+            (TimeFor::Send, None) => {}
+        }
+    }
+
     /// Connect this composer's window to the session.
     fn connect(self: &Rc<Self>) {
         let Some(host) = self.host() else {
@@ -1290,6 +1475,23 @@ impl ComposeSession {
                 session.save(account_id, &to, &cc, &bcc, &subject, &body, send);
             }
         });
+        let weak = self.reference();
+        ui.on_schedule_send(move || {
+            if let Some(session) = weak.upgrade() {
+                session.ask_time(TimeFor::Send);
+            }
+        });
+        let weak = self.reference();
+        ui.on_remind(move || {
+            if let Some(session) = weak.upgrade() {
+                session.ask_time(TimeFor::Remind);
+            }
+        });
+        // A message in a window of its own asks there.
+        #[cfg(desktop)]
+        if let HostRef::Window(window) = &host {
+            *self.window_picker.borrow_mut() = Some(when_picker::attach(window));
+        }
         let weak = self.reference();
         ui.on_pick_attachments(move || {
             if let Some(session) = weak.upgrade() {
@@ -1912,6 +2114,8 @@ impl ComposeSession {
         body: &str,
         send: bool,
     ) {
+        // Set by Schedule send just before, for this save alone.
+        let send_at = self.send_at.take().filter(|_| send);
         let (Some(composers), Some(host)) = (self.composers(), self.host()) else {
             return;
         };
@@ -2001,8 +2205,35 @@ impl ComposeSession {
             in_reply_to_message_id: intent.in_reply_to_message_id,
             in_reply_to_header: intent.in_reply_to_header.as_deref(),
         };
+        let remind_at = self.remind_at.get();
+        if let Some(send_at) = send_at {
+            match composers
+                .runtime
+                .block_on(core.schedule_new_message(message, send_at, remind_at))
+            {
+                Ok(_) => {
+                    self.dispose();
+                    app.set_sync_status(UiMessage::detail(
+                        "Scheduled to send {}",
+                        mail_view_model::upcoming_time(send_at, &chrono::Local::now()),
+                    ));
+                    let _ =
+                        refresh_from_source(&app, &composers.state, &composers.runtime, true, &[]);
+                    mailto_links::open_pending_soon(&app);
+                }
+                Err(error) => {
+                    let message = UiMessage::detail("Could not schedule the message: {}", error);
+                    ui.set_notice(message.clone(), true);
+                    app.set_sync_status(message);
+                }
+            }
+            return;
+        }
         if send {
-            match composers.runtime.block_on(core.send_new_message(message)) {
+            match composers
+                .runtime
+                .block_on(core.send_new_message(message, remind_at))
+            {
                 Ok(queued) => {
                     // Keep the exact saved draft attached to this composer so
                     // a failed submission can be edited and retried in place.
@@ -2627,6 +2858,77 @@ mod tests {
         slint::platform::update_timers_and_animations();
         assert_eq!(composers.sessions.borrow().len(), 1);
         assert!(Rc::ptr_eq(&composers.sessions.borrow()[0], &first));
+    }
+
+    #[test]
+    fn a_message_asks_for_its_times_in_the_window_that_shows_it() {
+        let Setup {
+            app,
+            composers,
+            _runtime,
+            _dir,
+        } = setup();
+        when_picker::register(&app, &composers.state, &composers.runtime);
+        let main = app.global::<ComposerUi>();
+        let main_picker = app.global::<WhenUi>();
+        // The dialog shuts itself before it answers, as a click does.
+        let choose = |picker: &WhenUi<'_>, index: usize| {
+            picker.set_open(false);
+            picker.invoke_choose(i32::try_from(index).unwrap());
+        };
+
+        // A message in the main window asks there.
+        app.invoke_open_compose("first@example.com".into());
+        let first = composers.in_app().unwrap();
+        main.invoke_remind();
+        assert!(main_picker.get_open());
+        assert_eq!(main_picker.get_purpose(), "remind");
+        choose(&main_picker, 0);
+        let reminds = main.get_remind_time();
+        assert_ne!(reminds, "");
+        assert!(first.remind_at.get().is_some());
+
+        // In a window of its own, it keeps its reminder and asks there; the
+        // main window's picker stays shut.
+        main.invoke_pop_out();
+        assert_eq!(
+            main.get_remind_time(),
+            "",
+            "the main window's composer is free"
+        );
+        let popped = first.host().unwrap();
+        let HostRef::Window(window) = &popped else {
+            panic!("the message has a window of its own");
+        };
+        let picker = window.global::<WhenUi>();
+        assert_eq!(popped.ui().get_remind_time(), reminds);
+        popped.ui().invoke_remind();
+        assert!(picker.get_open());
+        assert!(!main_picker.get_open());
+
+        // "Don't remind me" comes last, and ends the reminder.
+        let choices = picker.get_choices();
+        let last = choices.row_count() - 1;
+        assert_eq!(choices.row_data(last).unwrap().kind, "none");
+        choose(&picker, last);
+        assert_eq!(popped.ui().get_remind_time(), "");
+        assert!(first.remind_at.get().is_none());
+
+        // Schedule send asks there too, and refuses a time that a reminder
+        // would come before: tomorrow at eight both times.
+        popped.ui().invoke_remind();
+        choose(&picker, 0);
+        popped.ui().invoke_schedule_send();
+        assert!(picker.get_open());
+        assert_eq!(picker.get_purpose(), "send");
+        choose(&picker, 0);
+        assert_eq!(
+            popped.ui().get_message().key,
+            "Choose a reminder after the time the message goes out."
+        );
+        assert!(popped.ui().get_notice_is_error());
+        assert!(popped.ui().get_open(), "the message stays to choose again");
+        assert!(first.send_at.get().is_none());
     }
 
     #[test]

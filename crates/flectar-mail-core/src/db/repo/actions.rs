@@ -4,6 +4,14 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::parse_json_column;
 
+/// `not_before` of a send held for Flectar Mail Sync: it never comes due on
+/// its own, and goes out only once this device's claim on it holds.
+pub const HELD: i64 = i64::MAX;
+
+/// How long before its claim ends a device stops starting a synced send, so
+/// the next device that claims it never sends at the same time.
+pub const CLAIM_MARGIN_MS: i64 = 60_000;
+
 #[derive(Debug, Clone)]
 pub struct PendingAction {
     pub id: i64,
@@ -187,21 +195,89 @@ pub fn next_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
             "SELECT MIN(not_before) FROM pending_actions
-             WHERE state = 'pending' AND not_before IS NOT NULL",
-            [],
+             WHERE state = 'pending' AND not_before IS NOT NULL AND not_before < ?1",
+            params![HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
         .flatten())
 }
 
+/// Drafts waiting to be sent at a time the user chose, soonest first.
+pub fn scheduled_sends(conn: &Connection) -> Result<Vec<crate::models::ScheduledSend>> {
+    let mut statement = conn.prepare(
+        "SELECT pa.id, pa.message_id, m.thread_id, pa.account_id,
+                COALESCE(json_extract(pa.payload, '$.sendAt'), pa.not_before) AS send_at,
+                pa.state, pa.last_error
+         FROM pending_actions pa LEFT JOIN messages m ON m.id = pa.message_id
+         WHERE pa.kind = 'send' AND pa.message_id IS NOT NULL
+           AND pa.state IN ('pending', 'inflight', 'failed')
+           AND json_extract(pa.payload, '$.scheduled') = 1
+         ORDER BY send_at",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(crate::models::ScheduledSend {
+            action_id: row.get(0)?,
+            draft_id: row.get(1)?,
+            thread_id: row.get(2)?,
+            account_id: row.get(3)?,
+            send_at: row.get::<_, Option<i64>>(4)?.unwrap_or_default(),
+            state: row.get(5)?,
+            error: row.get(6)?,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Stop the draft's waiting or failed send. Returns the action it stopped.
+pub fn cancel_draft_send(conn: &Connection, draft_id: i64, now_ms: i64) -> Result<Option<i64>> {
+    let action: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM pending_actions
+             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'failed')
+             ORDER BY id DESC LIMIT 1",
+            params![draft_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(action) = action {
+        conn.execute(
+            "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2 WHERE id = ?1",
+            params![action, now_ms],
+        )?;
+    }
+    Ok(action)
+}
+
+/// Whether a timed mail action came due after `after`, up to `until`.
+pub fn mail_due_between(conn: &Connection, after: i64, until: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE state = 'pending' AND not_before > ?1 AND not_before <= ?2
+             AND kind NOT LIKE 'cal!_%' ESCAPE '!')",
+        params![after, until],
+        |row| row.get(0),
+    )?)
+}
+
+/// Whether a timed action of the calendar store came due after `after`, up
+/// to `until`.
+pub fn due_between(conn: &Connection, after: i64, until: i64) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE state = 'pending' AND not_before > ?1 AND not_before <= ?2)",
+        params![after, until],
+        |row| row.get(0),
+    )?)
+}
+
 pub fn next_mail_due_at(conn: &Connection) -> Result<Option<i64>> {
     Ok(conn
         .query_row(
             "SELECT MIN(not_before) FROM pending_actions
-             WHERE state = 'pending' AND not_before IS NOT NULL
+             WHERE state = 'pending' AND not_before IS NOT NULL AND not_before < ?1
                AND kind NOT LIKE 'cal!_%' ESCAPE '!'",
-            [],
+            params![HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -212,8 +288,9 @@ pub fn next_send_due_at(conn: &Connection, account_id: i64) -> Result<Option<i64
     Ok(conn
         .query_row(
             "SELECT MIN(COALESCE(not_before, created_at)) FROM pending_actions
-             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'",
-            params![account_id],
+             WHERE account_id = ?1 AND state = 'pending' AND kind = 'send'
+               AND COALESCE(not_before, 0) < ?2",
+            params![account_id, HELD],
             |r| r.get::<_, Option<i64>>(0),
         )
         .optional()?
@@ -250,7 +327,32 @@ pub fn set_payload(conn: &Connection, id: i64, payload: &serde_json::Value) -> R
 /// Atomically claim a pending action for execution. Returns false if it was
 /// cancelled (or otherwise transitioned) since being read - the executor must
 /// skip it in that case.
+///
+/// A send shared through Flectar Mail Sync goes out only while this device
+/// may send it; otherwise it is held again until its claim holds. Sends
+/// live in the mail database only: the calendar store's own queue has no
+/// shared sends to check.
 pub fn try_claim(conn: &Connection, id: i64) -> Result<bool> {
+    let send: bool = conn
+        .query_row(
+            "SELECT kind = 'send' FROM pending_actions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if send
+        && conn.execute(
+            "UPDATE pending_actions SET not_before = ?2
+             WHERE id = ?1 AND state = 'pending' AND EXISTS (
+               SELECT 1 FROM synced_sends s
+               WHERE s.action_id = ?1
+                 AND NOT (s.state = 'scheduled' AND COALESCE(s.may_send_until, 0) > ?3))",
+            params![id, HELD, now_ms().saturating_add(CLAIM_MARGIN_MS)],
+        )? > 0
+    {
+        return Ok(false);
+    }
     let n = conn.execute(
         "UPDATE pending_actions SET state = 'inflight' WHERE id = ?1 AND state = 'pending'",
         params![id],
@@ -293,6 +395,170 @@ pub fn expedite(conn: &Connection, id: i64) -> Result<Option<i64>> {
 }
 
 /// Transition pending -> cancelled; returns false if it was no longer pending.
+/// A send the account's JMAP server holds to release at its time: the
+/// EmailSubmission it made, and the Email it sends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldSubmission {
+    pub action_id: i64,
+    pub draft_id: Option<i64>,
+    pub submission_id: String,
+    pub email_id: String,
+    pub send_at: i64,
+    /// The user asked to cancel it.
+    pub unsend: bool,
+}
+
+/// The server holds the send now: it waits, held, until the server
+/// releases it or it is cancelled.
+pub fn hold_on_server(
+    conn: &Connection,
+    id: i64,
+    submission_id: &str,
+    email_id: &str,
+) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions
+         SET state = 'pending', not_before = ?4, attempts = 0, last_error = NULL,
+             payload = json_set(json_remove(payload, '$.serverHold', '$.unsend'),
+                                '$.jmapHeld',
+                                json_object('submissionId', ?2, 'emailId', ?3))
+         WHERE id = ?1",
+        params![id, submission_id, email_id, HELD],
+    )?;
+    Ok(())
+}
+
+/// The server cannot hold the send after all: this device sends it at its
+/// time.
+pub fn hold_on_device(conn: &Connection, id: i64, send_at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE pending_actions
+         SET state = 'pending', not_before = ?2, payload = json_remove(payload, '$.serverHold')
+         WHERE id = ?1",
+        params![id, send_at],
+    )?;
+    Ok(())
+}
+
+/// The account's sends its JMAP server holds, as this device knows them.
+pub fn held_submissions(conn: &Connection, account_id: i64) -> Result<Vec<HeldSubmission>> {
+    let mut statement = conn.prepare(
+        "SELECT id, message_id, json_extract(payload, '$.jmapHeld.submissionId'),
+                json_extract(payload, '$.jmapHeld.emailId'),
+                COALESCE(json_extract(payload, '$.sendAt'), 0),
+                COALESCE(json_extract(payload, '$.unsend'), 0)
+         FROM pending_actions
+         WHERE account_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight')
+           AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+         ORDER BY id",
+    )?;
+    let held = statement
+        .query_map(params![account_id], |row| {
+            Ok(HeldSubmission {
+                action_id: row.get(0)?,
+                draft_id: row.get(1)?,
+                submission_id: row.get(2)?,
+                email_id: row.get(3)?,
+                send_at: row.get(4)?,
+                unsend: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(held)
+}
+
+/// The waiting send of a draft its account's JMAP server holds, if any.
+pub fn held_send_of(conn: &Connection, draft_id: i64) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT id FROM pending_actions
+             WHERE message_id = ?1 AND kind = 'send' AND state IN ('pending', 'inflight')
+               AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+             ORDER BY id DESC LIMIT 1",
+            params![draft_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// Whether the action is a send its account's JMAP server holds.
+pub fn is_held_on_server(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL
+             FROM pending_actions WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// A submission another device or app made: the message waits here as a
+/// send the server holds too. Returns the new send, unless one is here
+/// already.
+pub fn mirror_held(
+    conn: &Connection,
+    account_id: i64,
+    draft_id: i64,
+    thread_id: Option<i64>,
+    send_at: i64,
+    submission_id: &str,
+    email_id: &str,
+) -> Result<Option<i64>> {
+    let known: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pending_actions
+           WHERE account_id = ?1 AND kind = 'send'
+             AND (json_extract(payload, '$.jmapHeld.submissionId') = ?2
+                  OR (message_id = ?3 AND state IN ('pending', 'inflight'))))",
+        params![account_id, submission_id, draft_id],
+        |row| row.get(0),
+    )?;
+    if known {
+        return Ok(None);
+    }
+    let payload = serde_json::json!({
+        "draftId": draft_id,
+        "scheduled": true,
+        "sendAt": send_at,
+        "jmapHeld": {"submissionId": submission_id, "emailId": email_id},
+    });
+    Ok(Some(enqueue(
+        conn,
+        account_id,
+        "send",
+        Some(draft_id),
+        thread_id,
+        &payload,
+        Some(HELD),
+    )?))
+}
+
+/// Ask for a held send to be cancelled: it comes due at once for the
+/// account's JMAP actor, which cancels it on the server. Returns whether it
+/// was waiting.
+pub fn request_unsend(conn: &Connection, id: i64, now_ms: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE pending_actions
+         SET payload = json_set(payload, '$.unsend', json('true')), not_before = ?2,
+             attempts = 0, last_error = NULL
+         WHERE id = ?1 AND state = 'pending'
+           AND json_extract(payload, '$.jmapHeld.submissionId') IS NOT NULL",
+        params![id, now_ms],
+    )? == 1)
+}
+
+/// The cancel did not reach the server: the send stays held. Returns whether
+/// it was still waiting to be cancelled.
+pub fn withdraw_unsend(conn: &Connection, id: i64) -> Result<bool> {
+    Ok(conn.execute(
+        "UPDATE pending_actions
+         SET payload = json_remove(payload, '$.unsend'), not_before = ?2
+         WHERE id = ?1 AND state = 'pending' AND json_extract(payload, '$.unsend') = 1",
+        params![id, HELD],
+    )? == 1)
+}
+
 pub fn try_cancel(conn: &Connection, id: i64) -> Result<bool> {
     let n = conn.execute(
         "UPDATE pending_actions SET state = 'cancelled', finished_at = ?2
@@ -437,6 +703,67 @@ pub fn gc(conn: &Connection, older_than_ms: i64) -> Result<()> {
 mod tests {
     use super::*;
     use crate::db::testutil;
+
+    #[test]
+    fn a_cancel_the_server_never_heard_of_leaves_the_send_held() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let send = enqueue(
+            &conn,
+            1,
+            "send",
+            None,
+            None,
+            &serde_json::json!({"draftId": 9, "scheduled": true, "sendAt": 5_000}),
+            Some(1_000),
+        )
+        .unwrap();
+        // Not held by the server yet: nothing to cancel there.
+        assert!(!request_unsend(&conn, send, 2_000).unwrap());
+        hold_on_server(&conn, send, "S1", "E1").unwrap();
+        assert!(is_held_on_server(&conn, send).unwrap());
+        assert_eq!(held_submissions(&conn, 1).unwrap()[0].send_at, 5_000);
+
+        assert!(request_unsend(&conn, send, 2_000).unwrap());
+        let held = &held_submissions(&conn, 1).unwrap()[0];
+        assert!(held.unsend);
+        assert_eq!(due(&conn, 1, 2_000, 10).unwrap().len(), 1, "due at once");
+
+        assert!(withdraw_unsend(&conn, send).unwrap());
+        assert!(!held_submissions(&conn, 1).unwrap()[0].unsend);
+        assert!(
+            due(&conn, 1, i64::MAX - 1, 10).unwrap().is_empty(),
+            "held again"
+        );
+        assert!(!withdraw_unsend(&conn, send).unwrap());
+    }
+
+    #[test]
+    fn the_calendar_store_claims_its_actions() {
+        // Its own queue, without the mail database's shared sends.
+        let conn = testutil::calendar_conn();
+        conn.execute(
+            "INSERT INTO pending_actions (id, account_id, kind, created_at)
+             VALUES (1, 1, 'cal_put', 0)",
+            [],
+        )
+        .unwrap();
+        assert!(try_claim(&conn, 1).unwrap());
+    }
+
+    #[test]
+    fn an_action_stuck_in_the_past_does_not_hide_later_ones() {
+        let conn = testutil::conn();
+        testutil::seed_account(&conn);
+        let empty = serde_json::json!({});
+        // Due long ago, on an account that cannot run it.
+        enqueue(&conn, 1, "mark_read", None, None, &empty, Some(100)).unwrap();
+        enqueue(&conn, 1, "send", None, None, &empty, Some(5_000)).unwrap();
+        assert!(mail_due_between(&conn, 0, 200).unwrap());
+        // Nudged for it already: nothing new until the send comes due.
+        assert!(!mail_due_between(&conn, 200, 4_000).unwrap());
+        assert!(mail_due_between(&conn, 4_000, 6_000).unwrap());
+    }
 
     #[test]
     fn due_is_stable_and_has_due_ignores_future_and_calendar_actions() {

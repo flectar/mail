@@ -221,6 +221,7 @@ async fn offline_actions_queue_locally_and_survive_restart() {
     core.queue_send(QueueSendArgs {
         draft_id,
         send_at: Some(now_ms()),
+        remind_at: None,
     })
     .await
     .expect("queue send offline");

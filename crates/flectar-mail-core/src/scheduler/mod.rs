@@ -1,4 +1,5 @@
-//! Wakes snoozed threads and nudges account actors when timed actions
+//! Wakes snoozed threads, brings back conversations nobody replied to in
+//! time, and nudges account actors when timed actions
 //! (send-later, undo-send windows) come due. Timers are app-local: anything
 //! past due fires on the next tick or at launch.
 
@@ -14,6 +15,13 @@ use crate::caldav::task::CalTaskHandle;
 use crate::sync::engine::{AccountHandle, SyncCmd};
 
 const TICK_SECS: u64 = 5;
+/// How often reply reminders are checked.
+const REMINDER_CHECK_MS: i64 = 30_000;
+/// A reply reminder whose message never arrived on this device is
+/// forgotten this long after its time: long enough that a device that never
+/// gets the message, such as one without a POP3 account's Sent copy,
+/// doesn't end the reminder for the device that sent it.
+const REMINDER_STALE_MS: i64 = 365 * 24 * 60 * 60_000;
 
 pub fn spawn(
     db: Db,
@@ -25,6 +33,7 @@ pub fn spawn(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut nudged_until: i64 = 0;
+        let mut reminders_checked_at: i64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(TICK_SECS)).await;
             // An empty welcome has nothing timed to dispatch. Waiting here
@@ -40,49 +49,88 @@ pub fn spawn(
             }
             let now = now_ms();
 
-            // 1. Wake snoozed threads.
+            // 1. Wake snoozed threads, on every device: the shared snooze
+            // goes too.
             let woken = db.read(move |conn| repo::snoozes::woken(conn, now)).await;
             if let Ok(woken) = woken {
-                for thread_id in woken {
+                let mut shown = Vec::new();
+                for (thread_id, wake_at) in woken {
                     let res = db
                         .write(move |conn| {
                             repo::snoozes::clear(conn, thread_id)?;
-                            // Mark latest message unread so the thread pops.
-                            conn.execute(
-                                "UPDATE messages SET is_read = 0 WHERE id =
-                                   (SELECT id FROM messages WHERE thread_id = ?1
-                                    ORDER BY date DESC LIMIT 1)",
-                                rusqlite::params![thread_id],
-                            )?;
-                            repo::threads::recompute(conn, thread_id)?;
-                            Ok(())
+                            repo::snoozes::mark_woken(conn, thread_id, wake_at)
                         })
                         .await;
                     if res.is_ok() {
                         bus.emit(CoreEvent::ThreadWoke { thread_id });
+                        shown.push(thread_id);
                     }
+                }
+                if !shown.is_empty() {
+                    bus.emit(CoreEvent::MailUpdated { thread_ids: shown });
+                }
+            }
+            // Written only when there is something to drop: the writer
+            // stays closed while the user is elsewhere in the app.
+            if db
+                .read(move |conn| repo::snoozes::any_expired(conn, now))
+                .await
+                .unwrap_or(false)
+            {
+                let _ = db
+                    .write(move |conn| repo::snoozes::drop_expired(conn, now))
+                    .await;
+            }
+
+            // 1b. Reply reminders: a conversation nobody replied to in time
+            // comes back to the top of the inbox, and a reply ends its
+            // reminder. Only reminders whose time has passed are looked at,
+            // twice a minute.
+            let check_reminders = now - reminders_checked_at >= REMINDER_CHECK_MS;
+            if check_reminders {
+                reminders_checked_at = now;
+            }
+            let reminders_due =
+                check_reminders
+                    && db
+                        .read(move |conn| {
+                            Ok(repo::reply_reminders::next_remind_at(conn)?
+                                .is_some_and(|at| at <= now)
+                                || repo::reply_reminders::any_due(conn)?)
+                        })
+                        .await
+                        .unwrap_or(false);
+            if reminders_due
+                && let Ok(checked) = db
+                    .write(move |conn| {
+                        let checked = repo::reply_reminders::check(conn, now)?;
+                        repo::reply_reminders::drop_stale(conn, now - REMINDER_STALE_MS)?;
+                        Ok(checked)
+                    })
+                    .await
+            {
+                let mut shown = checked.due;
+                shown.extend(checked.replied);
+                if !shown.is_empty() {
+                    bus.emit(CoreEvent::MailUpdated { thread_ids: shown });
                 }
             }
 
-            // 2. Nudge actors when a timed pending action becomes due.
+            // 2. Nudge actors when a timed pending action has come due
+            // since the last nudge. Asking for anything due since then, not
+            // for the oldest due action, keeps one action that cannot run,
+            // such as on an offline account, from holding back later ones.
+            let since = nudged_until;
             let mail_due = db
-                .read(|conn| repo::actions::next_mail_due_at(conn))
+                .read(move |conn| repo::actions::mail_due_between(conn, since, now))
                 .await
-                .ok()
-                .flatten();
-            let calendar_due = if calendar_db.is_open() {
-                calendar_db
-                    .read(|conn| repo::actions::next_due_at(conn))
+                .unwrap_or(false);
+            let calendar_due = calendar_db.is_open()
+                && calendar_db
+                    .read(move |conn| repo::actions::due_between(conn, since, now))
                     .await
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            if let Some(due_at) = mail_due.into_iter().chain(calendar_due).min()
-                && due_at <= now
-                && due_at > nudged_until - 60_000
-            {
+                    .unwrap_or(false);
+            if mail_due || calendar_due {
                 nudged_until = now;
                 for handle in handles.read().await.values() {
                     handle.send(SyncCmd::RunActions);

@@ -137,6 +137,23 @@ pub enum CoreEvent {
     ContactsUpdated {
         account_id: i64,
     },
+    /// Settings changed outside the settings screens, such as by another
+    /// device through Flectar Mail Sync.
+    SettingsChanged,
+    /// Accounts were added, changed or removed outside the account screens,
+    /// such as by another device through Flectar Mail Sync. `removed` lists the
+    /// accounts whose removal was attempted; one may remain if it failed.
+    AccountsChanged {
+        removed: Vec<i64>,
+    },
+    /// Where Flectar Mail Sync stands on this device.
+    DeviceSync(crate::device_sync::DeviceSyncStatus),
+    /// Progress of adding a device to Flectar Mail Sync, in the pairing the call
+    /// that started it returned.
+    DeviceSyncPairing {
+        pairing: u64,
+        event: crate::device_sync::PairingEvent,
+    },
 }
 
 #[derive(Clone)]

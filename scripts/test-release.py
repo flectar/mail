@@ -41,6 +41,21 @@ ios_release = load_script("ios-release")
 stage_linux_metadata = linux_metadata.stage
 
 
+def workspace_keys(manifest):
+    """Keys of a parsed Cargo manifest still taken from a workspace."""
+    found = []
+
+    def walk(path, value):
+        if isinstance(value, dict):
+            if value.get("workspace") is True:
+                found.append(".".join(path))
+            for key, item in value.items():
+                walk([*path, key], item)
+
+    walk([], manifest)
+    return found
+
+
 class ReleaseTests(unittest.TestCase):
     def test_android_ci_never_generates_a_release_key(self):
         for ci_variable in ("CI", "GITHUB_ACTIONS"):
@@ -202,10 +217,26 @@ class ReleaseTests(unittest.TestCase):
             for package in packages
             if package.get("source", "").startswith("registry+")
         }
+        # Git dependencies: one checkout per repository and commit, each of
+        # its crates copied into the vendor directory under its name.
+        git_packages = {
+            f"cargo/vendor/{package['name']}": package
+            for package in packages
+            if package.get("source", "").startswith("git+")
+        }
+        repositories = {}
+        for package in git_packages.values():
+            source = package["source"].removeprefix("git+")
+            url, _, commit = source.partition("#")
+            repository, _, query = url.partition("?")
+            repositories[(repository, commit)] = query
         sources = json.loads(
             (project / "packaging/flatpak/cargo-sources.json").read_text()
         )
-        self.assertEqual(len(sources), len(expected) * 2 + 1)
+        self.assertEqual(
+            len(sources),
+            len(expected) * 2 + len(repositories) + len(git_packages) * 3 + 1,
+        )
 
         archives = {source["dest"]: source for source in sources if source["type"] == "archive"}
         checksums = {
@@ -216,7 +247,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(set(archives), set(expected))
         self.assertEqual(
             checksums,
-            {destination: package["checksum"] for destination, package in expected.items()},
+            {destination: package["checksum"] for destination, package in expected.items()}
+            | {destination: None for destination in git_packages},
         )
         for destination, package in expected.items():
             name = package["name"]
@@ -228,16 +260,58 @@ class ReleaseTests(unittest.TestCase):
                 source["url"],
                 f"https://static.crates.io/crates/{name}/{name}-{version}.crate",
             )
+
+        checkouts = {
+            (source["url"], source["commit"]): source["dest"]
+            for source in sources
+            if source["type"] == "git"
+        }
+        self.assertEqual(set(checkouts), set(repositories))
+        for (repository, commit), destination in checkouts.items():
+            name = repository.rstrip("/").rsplit("/", 1)[-1]
+            self.assertEqual(destination, f"flatpak-cargo/git/{name}-{commit[:7]}")
+        copies = [
+            command
+            for source in sources
+            if source["type"] == "shell"
+            for command in source["commands"]
+        ]
+        self.assertEqual(
+            sorted(command.rsplit(" ", 1)[-1].strip('"') for command in copies),
+            sorted(git_packages),
+        )
+        manifests = {
+            source["dest"]: tomllib.loads(source["contents"])
+            for source in sources
+            if source["type"] == "inline" and source.get("dest-filename") == "Cargo.toml"
+        }
+        self.assertEqual(set(manifests), set(git_packages))
+        for destination, package in git_packages.items():
+            # Written out without workspace settings, which the copied crate
+            # can no longer reach.
+            self.assertEqual(manifests[destination]["package"]["name"], package["name"])
+            self.assertEqual(manifests[destination]["package"]["version"], package["version"])
+            self.assertEqual(workspace_keys(manifests[destination]), [])
+
+        config = (
+            '[source.vendored-sources]\n'
+            'directory = "cargo/vendor"\n\n'
+            '[source.crates-io]\n'
+            'replace-with = "vendored-sources"\n'
+        )
+        for (repository, commit), query in sorted(repositories.items()):
+            key, _, value = query.partition("=")
+            config += (
+                f'\n[source."{repository}"]\n'
+                f'git = "{repository}"\n'
+                'replace-with = "vendored-sources"\n'
+                f'{key} = "{value}"\n'
+            )
         self.assertEqual(
             sources[-1],
             {
                 "type": "inline",
-                "contents": (
-                    '[source.vendored-sources]\n'
-                    'directory = "cargo/vendor"\n\n'
-                    '[source.crates-io]\n'
-                    'replace-with = "vendored-sources"\n'
-                ),
+                "contents": config,
                 "dest": "cargo",
                 "dest-filename": "config",
             },

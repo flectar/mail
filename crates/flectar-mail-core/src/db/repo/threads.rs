@@ -20,6 +20,8 @@ fn summary_from_row(row: &Row) -> rusqlite::Result<ThreadSummary> {
         has_attachments: row.get::<_, i64>("attachment_count")? > 0,
         has_replied: row.get::<_, i64>("has_replied")? > 0,
         snoozed_until: row.get("snoozed_until")?,
+        reply_reminder_at: row.get("reply_reminder_at")?,
+        reply_reminder_due: row.get::<_, i64>("reply_reminder_due")? != 0,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
                 .unwrap_or_default(),
@@ -68,6 +70,10 @@ const SUMMARY_SELECT: &str = "
                  AND reply.is_draft = 0
            ) AS has_replied,
            s.wake_at AS snoozed_until,
+           (SELECT MIN(rr.remind_at) FROM reply_reminders rr WHERE rr.thread_id = t.id)
+             AS reply_reminder_at,
+           EXISTS (SELECT 1 FROM reply_reminders rr
+                   WHERE rr.thread_id = t.id AND rr.due_at IS NOT NULL) AS reply_reminder_due,
            (SELECT group_concat(DISTINCT ml.label_id) FROM message_labels ml
               JOIN messages ml_m ON ml_m.id = ml.message_id
               WHERE ml_m.thread_id = t.id) AS label_ids,
@@ -185,6 +191,28 @@ pub fn by_subject(
         .optional()?)
 }
 
+/// Bring a conversation back to the top of its lists, as if its newest
+/// message arrived at `at`: a snooze ended, or nobody replied in time.
+pub fn resurface(conn: &Connection, thread_id: i64, at: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE threads SET resurfaced_at = MAX(COALESCE(resurfaced_at, 0), ?2) WHERE id = ?1",
+        params![thread_id, at],
+    )?;
+    recompute(conn, thread_id)
+}
+
+/// Put a conversation that came back where its own mail places it again.
+pub fn settle(conn: &Connection, thread_id: i64) -> Result<()> {
+    let changed = conn.execute(
+        "UPDATE threads SET resurfaced_at = NULL WHERE id = ?1 AND resurfaced_at IS NOT NULL",
+        params![thread_id],
+    )?;
+    if changed > 0 {
+        recompute(conn, thread_id)?;
+    }
+    Ok(())
+}
+
 /// Recompute a thread's denormalized aggregates from its messages.
 pub fn recompute(conn: &Connection, thread_id: i64) -> Result<()> {
     let exists: Option<i64> = conn
@@ -200,7 +228,8 @@ pub fn recompute(conn: &Connection, thread_id: i64) -> Result<()> {
     }
     conn.execute(
         "UPDATE threads SET
-            last_message_at = (SELECT COALESCE(MAX(date),0) FROM messages WHERE thread_id = ?1),
+            last_message_at = MAX((SELECT COALESCE(MAX(date),0) FROM messages WHERE thread_id = ?1),
+                                  COALESCE(resurfaced_at, 0)),
             message_count   = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1),
             unread_count    = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_read = 0 AND is_draft = 0),
             starred_count   = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1 AND is_starred = 1),
@@ -303,6 +332,11 @@ const AUTO_BUCKET: &str = "(SELECT m.is_automated FROM messages m
 /// their messages does; messages match on their own folders, flags and labels.
 /// Snooze and tab routing belong to the conversation in both groupings, so a
 /// message list joins each message's thread as `t`.
+/// A send queued for a time the user chose, not just the undo-send window:
+/// waiting, under way, or failed and waiting for the user.
+const SCHEDULED_SEND: &str = "pa.kind = 'send' AND pa.state IN ('pending', 'inflight', 'failed')
+    AND json_extract(pa.payload, '$.scheduled') = 1";
+
 fn build_filter(
     args: &ListArgs,
     grouping: MailGrouping,
@@ -340,33 +374,64 @@ fn build_filter(
     };
 
     match args.view {
+        // A conversation nobody replied to in time is back in the inbox.
+        View::Inbox if messages => {
+            let c = role_exists(roles::INBOX, &mut bind);
+            where_clauses.push(format!(
+                "({c} OR EXISTS (SELECT 1 FROM reply_reminders rr
+                   WHERE rr.account_id = m.account_id AND rr.message_id = m.message_id
+                     AND rr.due_at IS NOT NULL))"
+            ));
+            where_clauses.push("s.thread_id IS NULL".into());
+        }
         View::Inbox => {
             let c = role_exists(roles::INBOX, &mut bind);
-            where_clauses.push(c);
+            where_clauses.push(format!(
+                "({c} OR EXISTS (SELECT 1 FROM reply_reminders rr
+                   WHERE rr.thread_id = t.id AND rr.due_at IS NOT NULL))"
+            ));
             where_clauses.push("s.thread_id IS NULL".into());
         }
         View::Starred if messages => where_clauses.push("m.is_starred = 1".into()),
         View::Starred => where_clauses.push("t.starred_count > 0".into()),
         View::Snoozed => where_clauses.push("s.thread_id IS NOT NULL".into()),
+        // From the few scheduled sends, rather than every conversation.
+        View::Scheduled if messages => where_clauses.push(format!(
+            "m.is_draft = 1 AND m.id IN (SELECT pa.message_id FROM pending_actions pa
+               WHERE {SCHEDULED_SEND})"
+        )),
+        View::Scheduled => where_clauses.push(format!(
+            "t.id IN (SELECT m.thread_id FROM pending_actions pa
+               JOIN messages m ON m.id = pa.message_id
+               WHERE m.is_draft = 1 AND {SCHEDULED_SEND})"
+        )),
         View::Sent => {
             let c = role_exists(roles::SENT, &mut bind);
             where_clauses.push(c);
         }
+        // A scheduled draft waits in Scheduled instead, as in Gmail.
         View::Drafts if messages => {
             let c = role_exists(roles::DRAFTS, &mut bind);
-            where_clauses.push(format!("m.is_draft = 1 AND {c}"));
+            where_clauses.push(format!(
+                "m.is_draft = 1 AND {c} AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                   WHERE pa.message_id = m.id AND {SCHEDULED_SEND})"
+            ));
         }
         View::Drafts => {
             bind.push(Box::new(roles::DRAFTS.to_string()));
             where_clauses.push(format!(
                 "(EXISTS (SELECT 1 FROM messages m JOIN folders f ON f.id = m.folder_id
-                          WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0})
+                          WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0}
+                            AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                                  WHERE pa.message_id = m.id AND {SCHEDULED_SEND}))
                   OR EXISTS (
                        SELECT 1 FROM messages m
                        JOIN accounts ma ON ma.id = m.account_id AND ma.provider = 'gmail'
                        JOIN message_folders mf ON mf.message_id = m.id
                        JOIN folders f ON f.id = mf.folder_id
                        WHERE m.thread_id = t.id AND m.is_draft = 1 AND f.role = ?{0}
+                         AND NOT EXISTS (SELECT 1 FROM pending_actions pa
+                               WHERE pa.message_id = m.id AND {SCHEDULED_SEND})
                   ))",
                 bind.len()
             ));
@@ -576,6 +641,8 @@ fn message_summary_from_row(row: &Row) -> rusqlite::Result<MessageSummary> {
         has_attachments: row.get::<_, i64>("has_attachments")? != 0,
         has_replied: row.get::<_, i64>("has_replied")? != 0,
         snoozed_until: row.get("snoozed_until")?,
+        reply_reminder_at: row.get("reply_reminder_at")?,
+        reply_reminder_due: row.get::<_, i64>("reply_reminder_due")? != 0,
         labels: parse_id_list(
             &row.get::<_, Option<String>>("label_ids")?
                 .unwrap_or_default(),
@@ -619,6 +686,12 @@ const MESSAGE_SUMMARY_SELECT: &str = "
                  AND reply.is_draft = 0
            )) AS has_replied,
            s.wake_at AS snoozed_until,
+           (SELECT rr.remind_at FROM reply_reminders rr
+              WHERE rr.account_id = m.account_id AND rr.message_id = m.message_id)
+             AS reply_reminder_at,
+           EXISTS (SELECT 1 FROM reply_reminders rr
+                   WHERE rr.account_id = m.account_id AND rr.message_id = m.message_id
+                     AND rr.due_at IS NOT NULL) AS reply_reminder_due,
            (SELECT group_concat(ml.label_id) FROM message_labels ml
               WHERE ml.message_id = m.id) AS label_ids,
            m.verification_code,

@@ -50,6 +50,9 @@ pub(super) enum Operation {
         folder_id: i64,
         other_account: bool,
     },
+    /// Snoozes the conversation until a time (ms since the epoch), or ends
+    /// its snooze.
+    Snooze(Option<i64>),
 }
 impl Operation {
     /// Whether it starts moving (`true`) or copying mail to another
@@ -73,6 +76,11 @@ impl Operation {
         }
     }
 
+    /// Said what it does when asked for, as a snooze with its time does.
+    fn reports_itself(&self) -> bool {
+        matches!(self, Self::Snooze(Some(_)))
+    }
+
     fn moves(&self) -> bool {
         match self {
             Self::Action(a) => matches!(
@@ -80,6 +88,8 @@ impl Operation {
                 "archive" | "spam" | "trash" | "not_spam" | "unarchive"
             ),
             Self::EmptyTrash(_) => false,
+            // Snoozed mail leaves the inbox; unsnoozed mail leaves Snoozed.
+            Self::Snooze(_) => true,
             Self::Drop(MailDropDestination::Folder(_)) => true,
             Self::Drop(MailDropDestination::Action(a)) => Self::Action((*a).into()).moves(),
             _ => false,
@@ -111,6 +121,7 @@ impl Operation {
             Self::Drop(MailDropDestination::Route(tab)) => {
                 core.route_to_tab(target, tab.clone()).await
             }
+            Self::Snooze(wake_at) => core.snooze(target, *wake_at).await,
         }
     }
 }
@@ -129,6 +140,9 @@ struct ActionResult {
     /// Mail started on its way to another account, moving (`true`) or
     /// being copied.
     transfer_started: Option<bool>,
+    /// Every action said what it does when it was asked for, as a snooze
+    /// says when its mail comes back: the status line keeps that.
+    reported: bool,
 }
 
 pub(super) fn register(
@@ -322,6 +336,7 @@ pub(super) fn register(
                 None if result.deletion_queued => app.set_render_status(UiMessage::plain(
                     "Permanent deletion queued. Mail will disappear after the server confirms.",
                 )),
+                None if result.reported => {}
                 None => app.set_render_status(UiMessage::plain("Message action completed.")),
             }
         }
@@ -488,8 +503,10 @@ where
         error: None,
         deletion_queued: false,
         transfer_started: None,
+        reported: true,
     };
     for (id, target, operation) in operations {
+        result.reported &= operation.reports_itself();
         let deletion = operation.queues_permanent_deletion();
         let transfer = operation.starts_transfer();
         result.ids.push(id);
@@ -601,6 +618,24 @@ mod tests {
         assert_eq!(result.moved, vec![1]);
         assert_eq!(result.error.as_deref(), Some("database busy"));
         assert_eq!(*calls.borrow(), vec![101, 102, 103]);
+    }
+
+    #[tokio::test]
+    async fn a_snooze_keeps_the_time_it_reported() {
+        let snooze = |at| vec![(1, MailTarget::Thread(101), Operation::Snooze(at))];
+        let result = collect_results(0, snooze(Some(5_000)), |_, _| async { Ok(()) }).await;
+        assert!(result.reported);
+        // Unsnoozing says nothing of its own.
+        let result = collect_results(0, snooze(None), |_, _| async { Ok(()) }).await;
+        assert!(!result.reported);
+        let mut mixed = snooze(Some(5_000));
+        mixed.push((
+            2,
+            MailTarget::Thread(102),
+            Operation::Action("archive".into()),
+        ));
+        let result = collect_results(0, mixed, |_, _| async { Ok(()) }).await;
+        assert!(!result.reported);
     }
 
     #[tokio::test]

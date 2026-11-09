@@ -1942,6 +1942,79 @@ fn parse_headers(msg: &mail_parser::Message) -> ParsedHeaders {
 }
 
 /// Parse a full raw RFC 5322 message.
+/// The message with its Date header set to `date`. A message that goes out
+/// later than it was written says when it went: recipients sort mail by it.
+pub fn with_date(raw: &[u8], date: &str) -> Vec<u8> {
+    // The header block ends at the first empty line.
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|at| at + 2)
+        .or_else(|| {
+            raw.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|at| at + 1)
+        })
+        .unwrap_or(raw.len());
+    let (head, rest) = raw.split_at(end);
+    let line = format!("Date: {date}\r\n");
+    let mut out = Vec::with_capacity(raw.len() + line.len());
+    let mut replaced = false;
+    let mut skipping = false;
+    for header in head.split_inclusive(|byte| *byte == b'\n') {
+        // A folded header continues on lines that start with blank space.
+        let continuation = matches!(header.first(), Some(b' ' | b'\t'));
+        if skipping && continuation {
+            continue;
+        }
+        skipping = false;
+        if !continuation && header.len() >= 5 && header[..5].eq_ignore_ascii_case(b"date:") {
+            if !replaced {
+                out.extend_from_slice(line.as_bytes());
+                replaced = true;
+            }
+            skipping = true;
+            continue;
+        }
+        out.extend_from_slice(header);
+    }
+    if !replaced {
+        out.splice(0..0, line.bytes());
+    }
+    out.extend_from_slice(rest);
+    out
+}
+
+/// A short stand-in for a message: its own headers, as encoded, and the
+/// start of its text, without attachments. Other devices show it while the
+/// message itself waits in storage.
+pub fn preview(raw: &[u8], text: &str) -> Vec<u8> {
+    let end = raw
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|at| at + 2)
+        .or_else(|| {
+            raw.windows(2)
+                .position(|window| window == b"\n\n")
+                .map(|at| at + 1)
+        })
+        .unwrap_or(raw.len());
+    let mut out = Vec::with_capacity(end + text.len() + 64);
+    let mut content = false;
+    for header in raw[..end].split_inclusive(|byte| *byte == b'\n') {
+        if !matches!(header.first(), Some(b' ' | b'\t')) {
+            content = header.len() >= 8 && header[..8].eq_ignore_ascii_case(b"content-");
+        }
+        if !content {
+            out.extend_from_slice(header);
+        }
+    }
+    out.extend_from_slice(b"Content-Type: text/plain; charset=utf-8\r\n");
+    out.extend_from_slice(b"Content-Transfer-Encoding: 8bit\r\n\r\n");
+    out.extend_from_slice(text.as_bytes());
+    out
+}
+
 pub fn parse_message(raw: &[u8]) -> Result<ParsedBody> {
     let msg = mail_parser::MessageParser::default()
         .parse(raw)
@@ -2345,6 +2418,39 @@ pub fn normalize_subject(subject: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_preview_keeps_the_headers_and_the_start_of_the_text() {
+        let raw = b"Message-ID: <big@example.test>\r\nSubject: =?utf-8?q?Caf=C3=A9?=\r\n\
+            Content-Type: multipart/mixed;\r\n boundary=\"x\"\r\nTo: a@example.test\r\n\r\n\
+            --x\r\nContent-Type: text/plain\r\n\r\nHello\r\n--x--\r\n";
+        let preview = preview(raw, "Hello");
+        let parsed = parse_message(&preview).unwrap();
+        assert_eq!(
+            parsed.headers.message_id.as_deref(),
+            Some("big@example.test")
+        );
+        assert_eq!(parsed.headers.subject, "Café");
+        assert_eq!(parsed.headers.to[0].email, "a@example.test");
+        assert_eq!(parsed.text.as_deref().map(str::trim), Some("Hello"));
+        assert!(parsed.attachments.is_empty());
+        assert!(!String::from_utf8_lossy(&preview).contains("boundary"));
+    }
+
+    #[test]
+    fn a_message_sent_later_says_when_it_went() {
+        let raw = b"From: a@example.test\r\nDate: Mon, 2 Nov 2026 09:00:00 +0100\r\n\tfolded\r\nSubject: Hi\r\n\r\nDate: in the body stays\r\n";
+        let dated = with_date(raw, "Sun, 8 Nov 2026 08:00:00 +0100");
+        assert_eq!(
+            dated,
+            b"From: a@example.test\r\nDate: Sun, 8 Nov 2026 08:00:00 +0100\r\nSubject: Hi\r\n\r\nDate: in the body stays\r\n"
+        );
+        // A message without a date gains one.
+        assert_eq!(
+            with_date(b"Subject: Hi\n\nBody", "Sun, 8 Nov 2026 08:00:00 +0100"),
+            b"Date: Sun, 8 Nov 2026 08:00:00 +0100\r\nSubject: Hi\n\nBody"
+        );
+    }
+
     use super::*;
 
     #[test]

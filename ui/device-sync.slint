@@ -1,0 +1,1526 @@
+// Flectar Mail Sync: this device's setup kept the same on the user's other
+// devices. Rust keeps `SyncUi` up to date and handles its callbacks.
+
+import { HorizontalBox, ScrollView, VerticalBox } from "std-widgets.slint";
+import { Button } from "components/button.slint";
+import { LineEdit, Switch } from "components/controls.slint";
+import { FocusVisibleScope } from "components/focus-visible-scope.slint";
+import { SettingsCard } from "components/settings-components.slint";
+import { AppTheme, LayoutMetrics } from "design-system.slint";
+import { TypeScale } from "typography.slint";
+
+export struct SyncDeviceRow {
+    id: string,
+    name: string,
+    platform: string,
+    this-device: bool,
+}
+
+export global SyncUi {
+    // "off", "idle", "syncing", "error", "removed", "deleted", or "payment"
+    // when the subscription ended and changes wait to upload.
+    in property <string> state: "off";
+    // Why the last sync failed, while the state is "error".
+    in property <string> error;
+    // When this device last synced: a time of day when it was today, else a
+    // date. Empty before the first sync.
+    in property <string> last-synced;
+    in property <bool> last-synced-today;
+    in property <string> server-url;
+    in property <[SyncDeviceRow]> devices;
+    // A request is running; its buttons wait.
+    in property <bool> busy;
+    // The action that failed last: "turn-on", "server", "remove", "reset",
+    // "turn-off", "delete", "sign-ins", "subscribe" or "manage", and why.
+    // Empty when the last one worked.
+    in property <string> failed-action;
+    in property <string> failure;
+
+    // The server address typed for turning sync on or connecting this
+    // device. Empty for Flectar's server.
+    in-out property <string> server;
+
+    // The 24 words to show once: after turning sync on or replacing them.
+    in-out property <[string]> recovery-words;
+    // The same words on one line, for copying.
+    in-out property <string> recovery-text;
+    // The words went into a file the user picked.
+    in-out property <bool> recovery-saved;
+    // Why saving them as a file failed. Empty when it didn't.
+    in-out property <string> recovery-save-error;
+
+    // The open dialog: "", "join", "invite" or "redeem".
+    in-out property <string> dialog;
+    // How the join dialog connects: "code", "qr", "scan" or "recovery".
+    in-out property <string> join-method: "code";
+    // This device can scan QR codes with its camera.
+    in property <bool> can-scan;
+    // Passwords and sign-ins sync too, on every device of the group.
+    in-out property <bool> sync-sign-ins: true;
+
+    // What Flectar's server charges, shown while sync is off: the days of
+    // free trial, and the monthly and yearly prices, such as "€4". Empty
+    // prices when it doesn't charge.
+    in property <int> offer-trial-days;
+    in property <string> offer-monthly;
+    in property <string> offer-yearly;
+    // What the group pays: "" on a server that doesn't charge, "trial",
+    // "active", "past-due", "free" (a code made it free), "trial-ended",
+    // "ended", "free-ended" or "unknown".
+    in property <string> billing;
+    // When the trial, paid or free period ends, or the subscription renews.
+    in property <string> billing-date;
+    in property <bool> billing-renews;
+    // When the free period from codes ends, such as "Nov 8, 2027". Empty
+    // without one still to come.
+    in property <string> free-until;
+    // Redeeming a code: "", "redeemed", "unknown", "used", "expired" or
+    // "failed", with why in `redeem-failure`.
+    in-out property <string> redeem-stage;
+    in property <string> redeem-failure;
+    // The prices of the group's plans; empty without such a plan.
+    in property <string> monthly-price;
+    in property <string> yearly-price;
+    // The yearly plan's price per month, such as "€3.33", and what it saves
+    // against twelve monthly payments, in percent.
+    in property <string> yearly-monthly-price;
+    in property <int> yearly-saving;
+    // The prices include tax; otherwise tax is added where it applies.
+    in property <bool> tax-included;
+    // This build may send people to the web checkout. Builds sold through a
+    // store that requires its own in-app purchases only show the state.
+    in property <bool> can-buy: true;
+
+    // Adding a device: "", "starting", "code", "request", "waiting", "added",
+    // "joined", "declined", "expired", "not-found" (the code or recovery
+    // code matches nothing), "server" (the address is not valid) or
+    // "failed".
+    in property <string> pairing-stage;
+    in property <image> pairing-qr;
+    in property <bool> pairing-has-qr;
+    in property <string> pairing-code;
+    in property <[string]> pairing-words;
+    in property <string> pairing-error;
+
+    callback turn-on();
+    callback join-with-code(string /* code */);
+    callback join-show-qr();
+    callback recover(string /* words */);
+    // Scan another device's QR code: to join its sync, or, when this device
+    // syncs, to add that device.
+    callback scan();
+    callback invite(bool /* with a short code */);
+    callback accept();
+    callback decline();
+    callback cancel-pairing();
+    callback remove-device(string /* id */);
+    callback reset-recovery();
+    // Save the recovery code as a text file where the user picks.
+    callback save-recovery-code(string /* the file's text */);
+    // Copy a secret the way the system keeps out of clipboard history and
+    // takes off again later; false where only a plain copy can.
+    callback copy-secret(string) -> bool;
+    callback turn-off();
+    callback delete-everywhere();
+    callback set-sync-sign-ins(bool /* on */);
+    callback sync-now();
+    // The settings page opened.
+    callback opened();
+    // Open the checkout for "monthly" or "yearly" in the browser.
+    callback subscribe(string /* plan */);
+    callback manage-subscription();
+    // Redeem a code that makes syncing free for a while.
+    callback redeem-code(string /* code */);
+}
+
+component DeviceRow inherits Rectangle {
+    in property <SyncDeviceRow> device;
+    in property <bool> busy;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> accent;
+    in property <color> accent-soft;
+    in property <color> separator;
+    callback remove();
+
+    height: 52px;
+
+    function platform-name(platform: string) -> string {
+        return platform == "linux" ? "Linux"
+            : platform == "windows" ? "Windows"
+            : platform == "macos" ? "macOS"
+            : platform == "android" ? "Android"
+            : platform == "ios" ? "iOS"
+            : platform == "harmonyos" ? "HarmonyOS"
+            : platform;
+    }
+
+    Rectangle { y: 0px; height: 1px; background: root.separator; }
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 12px;
+        alignment: stretch;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Text {
+                    text: root.device.name != "" ? root.device.name : @tr("Unnamed device");
+                    color: root.body-text;
+                    font-size: TypeScale.secondary;
+                    font-weight: 600;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                if root.device.this-device : Rectangle {
+                    width: this-label.preferred-width + 14px;
+                    height: 18px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 9px;
+                    background: root.accent-soft;
+                    this-label := Text {
+                        text: @tr("This device");
+                        color: root.accent;
+                        font-size: TypeScale.caption;
+                        font-weight: 600;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+            Text {
+                text: root.platform-name(root.device.platform);
+                color: root.secondary-text;
+                font-size: TypeScale.caption;
+                overflow: elide;
+            }
+        }
+        if !root.device.this-device : Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            y: (parent.height - self.height) / 2;
+            text: @tr("Remove");
+            icon: @image-url("icons/lucide/outline/trash.svg");
+            has-icon: true;
+            enabled: !root.busy;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+// A card with an icon, a note and buttons on the right, or below the note
+// when compact, like the other settings pages' cards.
+component ActionCard inherits Rectangle {
+    in property <bool> compact;
+    in property <string> title;
+    in property <string> description;
+    in property <string> note;
+    in property <image> icon;
+    in property <color> icon-color;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    // Width of the buttons area beside the note, when not compact.
+    in property <length> actions-width: 190px;
+    // Height of the buttons area: one row, or a stack below a compact note.
+    in property <length> actions-height: 32px;
+
+    height: note-text.y + note-text.height + (root.compact ? root.actions-height + 42px : 22px);
+    vertical-stretch: 0;
+
+    card := SettingsCard {
+        title: root.title;
+        description: root.description;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.faint-text;
+    }
+    Image {
+        x: 20px;
+        y: note-text.y + (note-text.height - self.height) / 2;
+        width: LayoutMetrics.icon-size;
+        height: LayoutMetrics.icon-size;
+        source: root.icon;
+        colorize: root.icon-color;
+        image-fit: contain;
+        accessible-role: none;
+    }
+    note-text := Text {
+        x: 48px;
+        y: card.content-y + 14px;
+        width: root.compact ? parent.width - 68px : parent.width - root.actions-width - 90px;
+        height: max(42px, self.preferred-height);
+        text: root.note;
+        color: root.secondary-text;
+        font-size: TypeScale.caption;
+        wrap: word-wrap;
+        vertical-alignment: center;
+    }
+    HorizontalLayout {
+        x: root.compact ? 20px : parent.width - self.width - 20px;
+        y: root.compact ? note-text.y + note-text.height + 25px : note-text.y + (note-text.height - self.height) / 2;
+        width: root.compact ? parent.width - 40px : root.actions-width;
+        height: root.actions-height;
+        spacing: 8px;
+        @children
+    }
+}
+
+// One side of the monthly/yearly switch.
+component PeriodChoice inherits FocusVisibleScope {
+    in property <string> label;
+    in property <string> badge;
+    in property <bool> selected;
+    callback chosen;
+
+    focus-on-click: true;
+    accessible-role: radio-button;
+    accessible-label: root.badge == "" ? root.label : root.label + ", " + root.badge;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.chosen(); }
+    key-pressed(event) => {
+        if event.text == Key.Return || event.text == Key.Space {
+            root.chosen();
+            return accept;
+        }
+        reject
+    }
+
+    Rectangle {
+        border-radius: 15px;
+        background: root.selected ? AppTheme.surface : transparent;
+        border-width: root.focus-visible ? 2px : root.selected ? 1px : 0px;
+        border-color: root.focus-visible ? AppTheme.accent : AppTheme.border;
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: root.badge == "" ? 16px : 6px;
+            spacing: 8px;
+            Text {
+                text: root.label;
+                color: root.selected ? AppTheme.title : AppTheme.secondary;
+                font-size: TypeScale.caption;
+                font-weight: root.selected ? 600 : 500;
+                vertical-alignment: center;
+            }
+            if root.badge != "" : VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 20px;
+                    border-radius: 10px;
+                    background: AppTheme.accent-soft;
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        Text {
+                            text: root.badge;
+                            color: AppTheme.accent;
+                            font-size: TypeScale.micro;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.pointer-activated();
+                root.chosen();
+            }
+        }
+    }
+}
+
+// Pay monthly or yearly, as one control with two sides.
+component PeriodSwitch inherits Rectangle {
+    in property <bool> yearly;
+    in property <string> saving;
+    callback choose(bool /* yearly */);
+
+    height: 36px;
+    border-radius: 18px;
+    background: AppTheme.control-bg;
+    border-width: 1px;
+    border-color: AppTheme.border-subtle;
+    HorizontalLayout {
+        padding: 2px;
+        spacing: 2px;
+        PeriodChoice {
+            label: @tr("Monthly");
+            selected: !root.yearly;
+            chosen => { root.choose(false); }
+        }
+        PeriodChoice {
+            label: @tr("Yearly");
+            badge: root.saving;
+            selected: root.yearly;
+            chosen => { root.choose(true); }
+        }
+    }
+}
+
+// The plan, as a pricing card: price, what it includes, and the button.
+component PricingCard inherits Rectangle {
+    in property <string> price;
+    in property <string> period;
+    in property <string> detail;
+    in property <string> fine-print;
+    in property <bool> busy;
+    callback subscribe();
+
+    border-radius: 12px;
+    border-width: 2px;
+    border-color: AppTheme.accent;
+    background: AppTheme.surface-raised;
+    VerticalLayout {
+        padding: 22px;
+        spacing: 10px;
+        Text {
+            text: @tr("Flectar Mail Sync");
+            color: AppTheme.accent;
+            font-size: TypeScale.secondary;
+            font-weight: 700;
+        }
+        HorizontalLayout {
+            alignment: start;
+            spacing: 6px;
+            Text {
+                text: root.price;
+                color: AppTheme.title;
+                font-size: TypeScale.display-large;
+                font-weight: 700;
+                letter-spacing: -0.5px;
+                vertical-alignment: bottom;
+            }
+            VerticalLayout {
+                alignment: end;
+                padding-bottom: 4px;
+                Text {
+                    text: root.period;
+                    color: AppTheme.secondary;
+                    font-size: TypeScale.body;
+                }
+            }
+        }
+        Text {
+            text: root.detail;
+            color: AppTheme.secondary;
+            font-size: TypeScale.caption;
+        }
+        Rectangle {
+            height: 1px;
+            background: AppTheme.border-subtle;
+        }
+        for feature in [
+            @tr("All your devices, one subscription"),
+            @tr("Scheduled emails go out from any of your devices"),
+            @tr("Snoozes, reply reminders and templates on every device"),
+            @tr("Accounts, sign-ins, signatures, profiles and preferences"),
+            @tr("End-to-end encrypted: not even Flectar Mail can read it"),
+        ] : Rectangle {
+            // Sized from the text at its width, so lines that wrap on a
+            // narrow phone make the card taller.
+            height: feature-text.height;
+            Image {
+                x: 0px;
+                y: 1px;
+                width: 16px;
+                height: 16px;
+                source: @image-url("icons/lucide/outline/check.svg");
+                colorize: AppTheme.accent;
+                accessible-role: none;
+            }
+            feature-text := Text {
+                x: 26px;
+                width: parent.width - 26px;
+                height: self.preferred-height;
+                text: feature;
+                color: AppTheme.body;
+                font-size: TypeScale.caption;
+                wrap: word-wrap;
+            }
+        }
+        Rectangle { height: 4px; }
+        Button {
+            height: 36px;
+            text: @tr("Subscribe");
+            primary: true;
+            enabled: !root.busy;
+            clicked => { root.subscribe(); }
+        }
+        Text {
+            text: root.fine-print;
+            color: AppTheme.faint;
+            font-size: TypeScale.micro;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
+
+// The subscription card while the group can subscribe: the period switch
+// above the pricing card.
+component SubscriptionOffer inherits Rectangle {
+    in property <string> description;
+    in property <string> note;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in-out property <bool> yearly: true;
+
+    private property <bool> both: SyncUi.monthly-price != "" && SyncUi.yearly-price != "";
+    private property <bool> showing-yearly: SyncUi.yearly-price != "" && (root.yearly || SyncUi.monthly-price == "");
+
+    height: offer.y + offer.height + 24px;
+    vertical-stretch: 0;
+
+    card := SettingsCard {
+        title: @tr("Subscription");
+        description: root.description;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.faint-text;
+    }
+    offer := VerticalLayout {
+        x: 20px;
+        y: card.content-y + 16px;
+        width: parent.width - 40px;
+        height: self.preferred-height;
+        spacing: 16px;
+        if root.note != "" : Text {
+            text: root.note;
+            color: root.secondary-text;
+            font-size: TypeScale.caption;
+            wrap: word-wrap;
+        }
+        if root.both : HorizontalLayout {
+            alignment: center;
+            PeriodSwitch {
+                yearly: root.yearly;
+                saving: SyncUi.yearly-saving > 0 ? @tr("Save {}%", SyncUi.yearly-saving) : "";
+                choose(yearly) => { root.yearly = yearly; }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            PricingCard {
+                width: min(parent.width, 380px);
+                price: root.showing-yearly ? SyncUi.yearly-price : SyncUi.monthly-price;
+                period: root.showing-yearly ? @tr("/ year") : @tr("/ month");
+                detail: !root.showing-yearly ? @tr("Billed monthly")
+                    : SyncUi.yearly-monthly-price != "" ? @tr("{} a month, billed yearly", SyncUi.yearly-monthly-price)
+                    : @tr("Billed yearly");
+                fine-print: SyncUi.tax-included ? @tr("Includes tax. Cancel any time.") : @tr("Tax is added where it applies. Cancel any time.");
+                busy: SyncUi.busy;
+                subscribe => { SyncUi.subscribe(root.showing-yearly ? "yearly" : "monthly"); }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            Button {
+                width: max(130px, self.content-width);
+                height: 32px;
+                text: @tr("Redeem a code");
+                enabled: !SyncUi.busy;
+                clicked => { SyncUi.dialog = "redeem"; }
+            }
+        }
+    }
+}
+
+// A message above the cards.
+component Notice inherits Rectangle {
+    in property <string> text;
+    in property <color> body-text;
+    in property <color> fill;
+
+    height: notice-text.preferred-height + 28px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: root.fill;
+    notice-text := Text {
+        x: 16px;
+        width: parent.width - 32px;
+        text: root.text;
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+        vertical-alignment: center;
+    }
+}
+
+// The settings page. Placed in the settings dialog's content area.
+export component SyncSettingsPage inherits VerticalBox {
+    in property <bool> compact;
+    // The Sync tab is the one shown: only then does the page ask the server
+    // what sync costs or where it stands.
+    in property <bool> shown: true;
+    in property <color> surface;
+    in property <color> card-border-color;
+    in property <color> heading;
+    in property <color> title-color;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> faint-text;
+    in property <color> accent;
+    in property <color> accent-soft;
+    callback confirm-delete();
+
+    private property <bool> on: SyncUi.state == "idle" || SyncUi.state == "syncing" || SyncUi.state == "error" || SyncUi.state == "payment";
+    private property <bool> paused: SyncUi.state == "payment";
+    // The offer applies to Flectar's server, not to one typed in.
+    private property <bool> offered: SyncUi.can-buy && SyncUi.server == "" && (SyncUi.offer-monthly != "" || SyncUi.offer-yearly != "");
+    private property <bool> can-subscribe: SyncUi.can-buy && (SyncUi.billing == "trial" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended");
+    // The subscription card shows the page that manages a subscription.
+    private property <bool> can-manage: SyncUi.can-buy && !root.can-subscribe && SyncUi.billing != "free";
+    private property <bool> priced: SyncUi.monthly-price != "" || SyncUi.yearly-price != "";
+    // The group can subscribe here: the pricing card shows.
+    private property <bool> offering: root.can-subscribe && root.priced;
+
+    // "€4 a month or €40 a year", from the plans there are.
+    function prices(monthly: string, yearly: string) -> string {
+        return monthly != "" && yearly != "" ? @tr("{} a month or {} a year", monthly, yearly)
+            : monthly != "" ? @tr("{} a month", monthly)
+            : @tr("{} a year", yearly);
+    }
+
+    init => {
+        if root.shown {
+            SyncUi.opened();
+        }
+    }
+    changed shown => {
+        if root.shown {
+            SyncUi.opened();
+        }
+    }
+
+    function open-join(method: string) {
+        SyncUi.join-method = method;
+        SyncUi.dialog = "join";
+        if method == "qr" {
+            SyncUi.join-show-qr();
+        } else if method == "scan" {
+            SyncUi.scan();
+        }
+    }
+
+    padding-top: root.compact ? LayoutMetrics.compact-header-height + 16px : 28px;
+    padding-bottom: 32px;
+    spacing: 10px;
+
+    Text {
+        height: max(36px, self.preferred-height);
+        text: @tr("Sync");
+        color: root.title-color;
+        font-size: TypeScale.display;
+        font-weight: 600;
+        letter-spacing: -0.5px;
+        vertical-alignment: center;
+    }
+    Text {
+        height: max(root.compact ? 51px : 34px, self.preferred-height);
+        text: @tr("Keep your accounts and their sign-ins, preferences, templates, snoozes and reply reminders the same on all your devices, and let any of them send your scheduled emails. Everything is end-to-end encrypted, so not even Flectar Mail can read it. Your mail, contacts and calendars keep syncing with your mail provider.");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+
+    if SyncUi.state == "removed" || SyncUi.state == "deleted" : Notice {
+        text: SyncUi.state == "removed"
+            ? @tr("This device was removed from sync on another device. Its accounts and settings stay here. Set up sync again to reconnect it.")
+            : @tr("Sync was deleted on another device. This device keeps its accounts and settings. Turn sync on again to start over.");
+        body-text: root.body-text;
+        fill: root.accent-soft;
+    }
+
+    if SyncUi.failed-action != "" : Notice {
+        text: SyncUi.failed-action == "turn-on" ? @tr("Could not turn on sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "server" ? @tr("Enter the sync server's address, such as https://sync.example.com.")
+            : SyncUi.failed-action == "remove" ? @tr("Could not remove the device: {}", SyncUi.failure)
+            : SyncUi.failed-action == "reset" ? @tr("Could not replace the recovery code: {}", SyncUi.failure)
+            : SyncUi.failed-action == "turn-off" ? @tr("Could not turn off sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "delete" ? @tr("Could not delete sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "sign-ins" ? @tr("Could not change password and sign-in sync: {}", SyncUi.failure)
+            : SyncUi.failed-action == "subscribe" ? @tr("Could not open the checkout: {}", SyncUi.failure)
+            : SyncUi.failed-action == "manage" ? @tr("Could not open the subscription page: {}", SyncUi.failure)
+            : SyncUi.failure;
+        body-text: root.body-text;
+        fill: AppTheme.destructive.with-alpha(0.12);
+    }
+
+    if !root.on : ActionCard {
+        compact: root.compact;
+        title: @tr("Start syncing");
+        description: !root.offered ? @tr("Sync this device's setup to your other devices.")
+            : SyncUi.offer-trial-days > 0 ? @tr("Free for {n} day, then {}." | "Free for {n} days, then {}." % SyncUi.offer-trial-days, root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly))
+            : @tr("the price of sync, as a sentence" => "{}.", root.prices(SyncUi.offer-monthly, SyncUi.offer-yearly));
+        note: @tr("You get a recovery code to keep somewhere safe. Your passwords and sign-ins sync too, so your other devices are ready at once.");
+        icon: @image-url("icons/lucide/filled/cloud-sync.svg");
+        icon-color: root.accent;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Button {
+            text: @tr("Turn on sync");
+            primary: true;
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.turn-on(); }
+        }
+    }
+
+    if !root.on : ActionCard {
+        compact: root.compact;
+        title: @tr("Connect this device");
+        description: @tr("Already syncing on another device? Add this one to it.");
+        note: SyncUi.can-scan
+            ? @tr("Scan the QR code your other device shows, enter its code, or use your recovery code.")
+            : @tr("Show a QR code for your phone to scan, enter the code your other device shows, or use your recovery code.");
+        icon: @image-url("icons/lucide/outline/link.svg");
+        icon-color: root.accent;
+        actions-width: 430px;
+        // Three labels don't fit side by side on a phone.
+        actions-height: root.compact ? 3 * 32px + 2 * 8px : 32px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        if root.compact : VerticalLayout {
+            spacing: 8px;
+            Button { height: 32px; text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
+            if SyncUi.can-scan : Button { height: 32px; text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
+            if !SyncUi.can-scan : Button { height: 32px; text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+            Button { height: 32px; text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
+        }
+        if !root.compact : Button { text: @tr("Enter code"); enabled: !SyncUi.busy; clicked => { root.open-join("code"); } }
+        if !root.compact && SyncUi.can-scan : Button { text: @tr("Scan QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("scan"); } }
+        if !root.compact && !SyncUi.can-scan : Button { text: @tr("QR code"); enabled: !SyncUi.busy; clicked => { root.open-join("qr"); } }
+        if !root.compact : Button { text: @tr("Recovery code"); enabled: !SyncUi.busy; clicked => { root.open-join("recovery"); } }
+    }
+
+    if !root.on : Rectangle {
+        height: server-field.y + server-field.height + 18px;
+        vertical-stretch: 0;
+        server-card := SettingsCard {
+            title: @tr("Sync server");
+            description: @tr("Leave empty to use Flectar Mail Sync, or enter your own server.");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            secondary-text: root.faint-text;
+        }
+        server-field := LineEdit {
+            x: 20px;
+            y: server-card.content-y + 12px;
+            width: parent.width - 40px;
+            height: 36px;
+            placeholder-text: "https://mail-sync.flectar.com";
+            input-label: @tr("Sync server");
+            text <=> SyncUi.server;
+        }
+    }
+
+    if root.on : ActionCard {
+        compact: root.compact;
+        title: root.paused ? @tr("Sync is paused") : @tr("Sync is on");
+        description: SyncUi.state == "error"
+            ? @tr("Sync could not finish and will try again.")
+            : root.paused ? @tr("Changes made here wait to upload; nothing is lost.")
+            : SyncUi.server-url != "" ? @tr("Syncing with {}", SyncUi.server-url) : "";
+        note: SyncUi.state == "syncing" ? @tr("Syncing…")
+            : SyncUi.state == "error" ? SyncUi.error
+            : SyncUi.last-synced == "" ? @tr("Not synced yet.")
+            : SyncUi.last-synced-today ? @tr("Last synced at {}.", SyncUi.last-synced)
+            : @tr("Last synced on {}.", SyncUi.last-synced);
+        icon: SyncUi.state == "error" || root.paused ? @image-url("icons/lucide/outline/alert.svg") : @image-url("icons/lucide/filled/cloud-sync.svg");
+        icon-color: SyncUi.state == "error" ? AppTheme.destructive : root.accent;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Button {
+            text: @tr("Sync now");
+            icon: @image-url("icons/lucide/outline/sync.svg");
+            has-icon: true;
+            enabled: SyncUi.state != "syncing";
+            clicked => { SyncUi.sync-now(); }
+        }
+    }
+
+    if root.on && root.offering : SubscriptionOffer {
+        description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
+            : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
+            : SyncUi.billing == "free-ended" ? @tr("Your free period has ended.")
+            : @tr("Your subscription has ended.");
+        note: SyncUi.billing == "trial" ? "" : @tr("Until you subscribe, changes wait on each device; nothing is lost.");
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+    }
+
+    if root.on && SyncUi.billing != "" && !root.offering : ActionCard {
+        compact: root.compact;
+        title: @tr("Subscription");
+        description: SyncUi.billing == "trial" ? @tr("Free trial until {}.", SyncUi.billing-date)
+            : SyncUi.billing == "active" && SyncUi.billing-renews ? @tr("Renews on {}.", SyncUi.billing-date)
+            : SyncUi.billing == "active" ? @tr("Ends on {}.", SyncUi.billing-date)
+            : SyncUi.billing == "past-due" ? @tr("The last payment didn't go through.")
+            : SyncUi.billing == "free" ? @tr("Free until {}.", SyncUi.billing-date)
+            : SyncUi.billing == "trial-ended" ? @tr("Your free trial has ended.")
+            : SyncUi.billing == "ended" ? @tr("Your subscription has ended.")
+            : SyncUi.billing == "free-ended" ? @tr("Your free period has ended.")
+            : "";
+        note: SyncUi.billing == "trial" ? ""
+            : SyncUi.billing == "free" ? @tr("Your code makes sync free on all your devices.")
+            : SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended" ? @tr("Changes wait on each device; nothing is lost.")
+            : SyncUi.billing == "active" && SyncUi.free-until != "" && SyncUi.billing-renews && SyncUi.can-buy ? @tr("A code makes sync free until {}. Turn off renewal in Manage so you aren't charged before then.", SyncUi.free-until)
+            : SyncUi.billing == "active" && SyncUi.free-until != "" ? @tr("Then free until {}, with your code.", SyncUi.free-until)
+            : SyncUi.billing == "past-due"
+                ? (SyncUi.can-buy ? @tr("Sync keeps going while the payment is tried again. Update your payment method to keep it.") : @tr("Sync keeps going while the payment is tried again."))
+            : SyncUi.can-buy && SyncUi.billing == "active" && !SyncUi.billing-renews ? @tr("Turn renewal back on, or see invoices.")
+            : SyncUi.can-buy ? @tr("Change your plan or payment method, see invoices, or cancel.")
+            : "";
+        icon: @image-url("icons/lucide/outline/credit-card.svg");
+        icon-color: SyncUi.billing == "past-due" || SyncUi.billing == "trial-ended" || SyncUi.billing == "ended" || SyncUi.billing == "free-ended" ? AppTheme.destructive : root.accent;
+        actions-width: root.can-manage ? 290px : 150px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        if SyncUi.can-buy : Button {
+            text: @tr("Redeem a code");
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.dialog = "redeem"; }
+        }
+        if root.can-manage : Button {
+            text: @tr("Manage");
+            primary: SyncUi.billing == "past-due";
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.manage-subscription(); }
+        }
+    }
+
+    if root.on : Rectangle {
+        height: devices-list.y + devices-list.height + (root.compact ? 64px : 16px);
+        vertical-stretch: 0;
+        devices-card := SettingsCard {
+            title: @tr("Devices");
+            description: @tr("Removing a device stops it from reading anything new.");
+            surface: root.surface;
+            card-border-color: root.card-border-color;
+            heading: root.heading;
+            secondary-text: root.faint-text;
+        }
+        if !root.compact : Button {
+            x: parent.width - self.width - 20px;
+            y: 17px;
+            width: max(150px, self.content-width);
+            height: 32px;
+            text: @tr("Add a device");
+            icon: @image-url("icons/lucide/outline/plus.svg");
+            has-icon: true;
+            primary: true;
+            enabled: !SyncUi.busy;
+            clicked => {
+                SyncUi.dialog = "invite";
+                SyncUi.invite(false);
+            }
+        }
+        devices-list := VerticalLayout {
+            y: devices-card.content-y + 12px;
+            width: parent.width;
+            height: SyncUi.devices.length * 52px;
+            for device in SyncUi.devices : DeviceRow {
+                device: device;
+                busy: SyncUi.busy;
+                body-text: root.body-text;
+                secondary-text: root.secondary-text;
+                accent: root.accent;
+                accent-soft: root.accent-soft;
+                separator: root.card-border-color;
+                remove => { SyncUi.remove-device(device.id); }
+            }
+        }
+        if root.compact : Button {
+            x: 20px;
+            y: devices-list.y + devices-list.height + 16px;
+            width: parent.width - 40px;
+            height: 32px;
+            text: @tr("Add a device");
+            icon: @image-url("icons/lucide/outline/plus.svg");
+            has-icon: true;
+            primary: true;
+            enabled: !SyncUi.busy;
+            clicked => {
+                SyncUi.dialog = "invite";
+                SyncUi.invite(false);
+            }
+        }
+    }
+
+    if root.on : ActionCard {
+        compact: root.compact;
+        title: @tr("Recovery code");
+        description: @tr("Brings your sync back if you lose all your devices.");
+        note: @tr("Replace it if someone else may have seen it. The old code stops working at once.");
+        icon: @image-url("icons/lucide/outline/lock.svg");
+        icon-color: root.accent;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Button {
+            text: @tr("Replace code");
+            enabled: !SyncUi.busy;
+            clicked => { SyncUi.reset-recovery(); }
+        }
+    }
+
+    if root.on : ActionCard {
+        compact: root.compact;
+        title: @tr("Passwords and sign-ins");
+        description: @tr("Your other devices are signed in to your accounts at once.");
+        note: @tr("End-to-end encrypted, for all your devices. Anyone with your recovery code can sign in to your accounts.");
+        icon: @image-url("icons/lucide/outline/key.svg");
+        icon-color: root.accent;
+        actions-width: 38px;
+        actions-height: 22px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Switch {
+            checked <=> SyncUi.sync-sign-ins;
+            enabled: !SyncUi.busy;
+            control-label: @tr("Sync passwords and sign-ins");
+            toggled => { SyncUi.set-sync-sign-ins(SyncUi.sync-sign-ins); }
+        }
+    }
+
+    if root.on : ActionCard {
+        compact: root.compact;
+        title: @tr("Turn off sync");
+        description: @tr("Stop syncing on this device, or delete sync for every device.");
+        note: @tr("Turning off keeps this device's accounts and settings. Deleting also removes the encrypted copy from the server; each device keeps its own.");
+        icon: @image-url("icons/lucide/outline/trash.svg");
+        icon-color: AppTheme.destructive;
+        actions-width: 264px;
+        surface: root.surface;
+        card-border-color: root.card-border-color;
+        heading: root.heading;
+        secondary-text: root.secondary-text;
+        faint-text: root.faint-text;
+        Button { text: @tr("Turn off"); enabled: !SyncUi.busy; clicked => { SyncUi.turn-off(); } }
+        Button { text: @tr("Delete…"); destructive: true; enabled: !SyncUi.busy; clicked => { root.confirm-delete(); } }
+    }
+}
+
+// A modal panel over the settings dialog, like ConfirmationDialog.
+component SyncModal inherits Rectangle {
+    in property <bool> open;
+    in property <string> title;
+    in property <color> surface;
+    in property <color> panel-border-color;
+    in property <color> title-color;
+    in property <length> panel-width: 480px;
+    // Phones pan the content by dragging where it is taller than the screen.
+    in property <bool> compact;
+    callback dismissed();
+
+    visible: root.open;
+    background: #00000088;
+    z: 1000;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    TouchArea { enabled: root.open; }
+
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: min(root.panel-width, parent.width - 32px);
+        height: min(content.preferred-height, parent.height - 32px);
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: root.panel-border-color;
+        background: root.surface;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #00000055;
+
+        FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    root.dismissed();
+                    return accept;
+                }
+                reject
+            }
+            // Scrolls on a screen too short for it, such as a small phone.
+            scroll := ScrollView {
+                width: parent.width;
+                height: parent.height;
+                content-width: self.visible-width;
+                content-height: content.preferred-height;
+                mouse-drag-pan-enabled: root.compact;
+                content := VerticalBox {
+                    width: scroll.visible-width;
+                    padding: 22px;
+                    spacing: 14px;
+                    Text {
+                        text: root.title;
+                        color: root.title-color;
+                        font-size: TypeScale.title;
+                        font-weight: 600;
+                        wrap: word-wrap;
+                    }
+                    @children
+                }
+            }
+        }
+    }
+}
+
+component WordGrid inherits Rectangle {
+    in property <[string]> words;
+    // The most columns: fewer where they would cut words short.
+    in property <int> columns: 4;
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> fill;
+
+    // Room for a number and the widest word of the list at the grid's
+    // font, so a larger text size gets fewer columns too.
+    private property <length> cell-width: 22px + 6px + widest.preferred-width + 2px;
+    private property <int> shown-columns: max(1, min(root.columns, floor((root.width - 24px) / root.cell-width)));
+
+    height: (ceil(root.words.length / root.shown-columns) * 30px) + 20px;
+    border-radius: 8px;
+    background: root.fill;
+
+    // The list's widest word in the app's font.
+    widest := Text {
+        visible: false;
+        text: "mushroom";
+        font-size: TypeScale.secondary;
+        font-weight: 600;
+        accessible-role: none;
+    }
+
+    for word[index] in root.words : HorizontalLayout {
+        x: 12px + mod(index, root.shown-columns) * ((root.width - 24px) / root.shown-columns);
+        y: 10px + floor(index / root.shown-columns) * 30px;
+        width: (root.width - 24px) / root.shown-columns;
+        height: 30px;
+        spacing: 6px;
+        Text {
+            width: 22px;
+            text: index + 1;
+            color: root.secondary-text;
+            font-size: TypeScale.caption;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        Text {
+            text: word;
+            color: root.body-text;
+            font-size: TypeScale.secondary;
+            font-weight: 600;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
+
+// A QR code on white, with room for the quiet zone it carries.
+component QrCode inherits Rectangle {
+    in property <image> source;
+    in property <string> label;
+
+    height: 232px;
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        width: 232px;
+        height: 232px;
+        border-radius: 8px;
+        background: white;
+        Image {
+            x: 8px;
+            y: 8px;
+            width: 216px;
+            height: 216px;
+            source: root.source;
+            image-rendering: pixelated;
+            accessible-label: root.label;
+        }
+    }
+}
+
+// What a pairing that ended without joining ran into.
+component PairingOutcome inherits Text {
+    in property <color> body-text;
+    // Shown when the other device turned this one down.
+    in property <string> declined-text;
+    in property <string> expired-text;
+    // Shown when the code or recovery code matches nothing.
+    in property <string> not-found-text;
+
+    text: SyncUi.pairing-stage == "declined" ? root.declined-text
+        : SyncUi.pairing-stage == "expired" ? root.expired-text
+        : SyncUi.pairing-stage == "not-found" ? root.not-found-text
+        : SyncUi.pairing-stage == "server" ? @tr("Enter the sync server's address, such as https://sync.example.com.")
+        : SyncUi.pairing-error;
+    color: root.body-text;
+    font-size: TypeScale.secondary;
+    wrap: word-wrap;
+}
+
+// Redeeming a code that makes syncing free for a while, such as a year for
+// someone who contributed to Flectar Mail.
+export component RedeemCodeDialog inherits SyncModal {
+    in property <color> body-text;
+    in property <color> secondary-text;
+    callback closed();
+
+    private property <string> code;
+    private property <bool> redeemed: SyncUi.redeem-stage == "redeemed";
+
+    open: SyncUi.dialog == "redeem";
+    title: root.redeemed ? @tr("Code redeemed") : @tr("Redeem a code");
+    panel-width: 440px;
+    dismissed => { root.closed(); }
+    // A typed code doesn't outlive the dialog.
+    changed open => {
+        root.code = "";
+        SyncUi.redeem-stage = "";
+    }
+
+    Text {
+        text: !root.redeemed ? @tr("Enter the code you were given. Flectar Mail Sync is then free on all your devices for the time the code covers.")
+            : SyncUi.billing == "free" ? @tr("Flectar Mail Sync is free until {} on all your devices.", SyncUi.billing-date)
+            : SyncUi.free-until != "" ? @tr("Flectar Mail Sync is free until {} on all your devices.", SyncUi.free-until)
+            : @tr("Flectar Mail Sync is free on all your devices for the time the code covers.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if !root.redeemed : LineEdit {
+        height: 40px;
+        placeholder-text: "XXXX-XXXX-XXXX-XXXX";
+        input-label: @tr("Code");
+        text <=> root.code;
+        edited => { SyncUi.redeem-stage = ""; }
+        accepted => {
+            if !SyncUi.busy && root.code != "" {
+                SyncUi.redeem-code(root.code);
+            }
+        }
+    }
+    if SyncUi.redeem-stage != "" && !root.redeemed : Text {
+        text: SyncUi.redeem-stage == "unknown" ? @tr("That code doesn't exist. Check it and try again.")
+            : SyncUi.redeem-stage == "used" ? @tr("That code was already used.")
+            : SyncUi.redeem-stage == "expired" ? @tr("That code has expired. Ask whoever gave it to you for a new one.")
+            : @tr("Could not redeem the code: {}", SyncUi.redeem-failure);
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            text: root.redeemed ? @tr("Done") : @tr("Cancel");
+            primary: root.redeemed;
+            clicked => { root.closed(); }
+        }
+        if !root.redeemed : Button {
+            width: max(120px, self.content-width);
+            height: 32px;
+            text: @tr("Redeem");
+            primary: true;
+            enabled: !SyncUi.busy && root.code != "";
+            clicked => { SyncUi.redeem-code(root.code); }
+        }
+    }
+}
+
+// Shown once after turning sync on or replacing the recovery code.
+export component RecoveryWordsDialog inherits SyncModal {
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> fill;
+    callback done();
+
+    private property <bool> copied;
+    // The saved file: the words on one line, as Copy puts them, so they
+    // paste into another device's recovery code field.
+    private property <string> file-text: @tr("Flectar Mail Sync recovery code") + "\n\n"
+        + SyncUi.recovery-text + "\n\n"
+        + @tr("On a new device, open Settings in Flectar Mail, then Sync, choose Recovery code and enter these 24 words in order.") + "\n\n"
+        + @tr("Anyone who has these words can restore your Flectar Mail Sync, with the accounts, passwords and sign-ins it carries. Keep this file somewhere only you can reach, such as a password manager or a USB drive.") + "\n";
+
+    open: SyncUi.recovery-words.length > 0;
+    title: @tr("Save your recovery code");
+    dismissed => { root.done(); }
+    changed open => { root.copied = false; }
+
+    Text {
+        text: SyncUi.sync-sign-ins
+            ? @tr("If you lose all your devices, these 24 words bring everything back, signed in. Anyone who has them can read your mail and send as you, so write them down or save them somewhere only you can reach, such as a password manager. Flectar Mail cannot show them again.")
+            : @tr("If you lose all your devices, these 24 words bring your sync back. Anyone who has them can read your synced setup, so write them down or save them somewhere only you can reach, such as a password manager. Flectar Mail cannot show them again.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    WordGrid {
+        words: SyncUi.recovery-words;
+        body-text: root.body-text;
+        secondary-text: root.secondary-text;
+        fill: root.fill;
+    }
+    // Ways to keep the words, below them, as GitHub and Element place theirs.
+    Rectangle {
+        height: 32px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            Button {
+                width: max(110px, self.content-width);
+                height: 32px;
+                text: root.copied ? @tr("Copied") : @tr("Copy");
+                icon: root.copied ? @image-url("icons/lucide/outline/check.svg") : @image-url("icons/lucide/outline/copy.svg");
+                has-icon: true;
+                clicked => {
+                    if (!SyncUi.copy-secret(SyncUi.recovery-text)) {
+                        words-clipboard.text = SyncUi.recovery-text;
+                        words-clipboard.select-all();
+                        words-clipboard.copy();
+                        words-clipboard.text = "";
+                    }
+                    root.copied = true;
+                }
+            }
+            Button {
+                width: max(130px, self.content-width);
+                height: 32px;
+                text: SyncUi.recovery-saved ? @tr("Saved") : @tr("Save as file");
+                icon: SyncUi.recovery-saved ? @image-url("icons/lucide/outline/check.svg") : @image-url("icons/lucide/outline/download.svg");
+                has-icon: true;
+                clicked => { SyncUi.save-recovery-code(root.file-text); }
+            }
+        }
+        words-clipboard := TextInput {
+            x: -10000px;
+            y: -10000px;
+            width: 1px;
+            height: 1px;
+            visible: false;
+            enabled: false;
+            read-only: true;
+            accessible-role: none;
+        }
+    }
+    if SyncUi.recovery-save-error != "" : Notice {
+        text: @tr("Could not save the file: {}", SyncUi.recovery-save-error);
+        body-text: root.body-text;
+        fill: root.fill;
+    }
+    HorizontalLayout {
+        alignment: end;
+        Button {
+            width: max(130px, self.content-width);
+            height: 32px;
+            text: @tr("I saved it");
+            primary: true;
+            clicked => { root.done(); }
+        }
+    }
+}
+
+// Adding a device from this one: a QR code or short code to show, or a QR
+// code to scan, then the new device's request.
+export component InviteDeviceDialog inherits SyncModal {
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> fill;
+    in property <color> accent;
+    in-out property <bool> with-code: false;
+    callback closed();
+
+    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "failed";
+
+    open: SyncUi.dialog == "invite";
+    title: SyncUi.pairing-stage == "request" ? @tr("Add this device?")
+        : SyncUi.pairing-stage == "added" ? @tr("Device added")
+        : @tr("Add a device");
+    dismissed => { root.closed(); }
+
+    if SyncUi.pairing-stage == "" || SyncUi.pairing-stage == "starting" : Text {
+        text: @tr("Getting a code…");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if SyncUi.pairing-stage == "code" && !root.with-code : Text {
+        text: @tr("On your phone or other device, open Flectar Mail, go to Settings → Sync → Connect this device, and scan this code.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if SyncUi.pairing-stage == "code" && !root.with-code && SyncUi.pairing-has-qr : QrCode {
+        source: SyncUi.pairing-qr;
+        label: @tr("QR code for adding a device");
+    }
+    if SyncUi.pairing-stage == "code" && root.with-code : Text {
+        text: @tr("On your other device, open Flectar Mail, go to Settings → Sync → Connect this device → Enter code, and type:");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if SyncUi.pairing-stage == "code" && root.with-code : Rectangle {
+        height: 64px;
+        border-radius: 8px;
+        background: root.fill;
+        Text {
+            text: SyncUi.pairing-code;
+            color: root.body-text;
+            font-size: TypeScale.display;
+            font-weight: 600;
+            letter-spacing: 6px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    if SyncUi.pairing-stage == "request" : Text {
+        text: root.with-code
+            ? @tr("Check that the new device shows these same words. Add it only if they match.")
+            : @tr("A new device asks to join. Add it if it's yours.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if SyncUi.pairing-stage == "request" && root.with-code : WordGrid {
+        words: SyncUi.pairing-words;
+        columns: 3;
+        body-text: root.body-text;
+        secondary-text: root.secondary-text;
+        fill: root.fill;
+    }
+    if SyncUi.pairing-stage == "added" : Text {
+        text: SyncUi.sync-sign-ins
+            ? @tr("The device is joining. Your accounts will be ready there in a moment.")
+            : @tr("The device is joining. It will ask you to sign in to your accounts once.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if root.ended : PairingOutcome {
+        body-text: root.body-text;
+        declined-text: @tr("The device was not added.");
+        expired-text: @tr("The code expired. Start again to get a new one.");
+        not-found-text: @tr("That QR code isn't for Flectar Mail Sync, or it expired.");
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        if SyncUi.pairing-stage == "code" && SyncUi.can-scan : Button {
+            width: max(130px, self.content-width);
+            height: 32px;
+            text: @tr("Scan QR code");
+            clicked => {
+                root.with-code = false;
+                SyncUi.scan();
+            }
+        }
+        if SyncUi.pairing-stage == "code" : Button {
+            width: max(130px, self.content-width);
+            height: 32px;
+            text: root.with-code ? @tr("Show QR code") : @tr("Use a code");
+            clicked => {
+                root.with-code = !root.with-code;
+                SyncUi.invite(root.with-code);
+            }
+        }
+        if SyncUi.pairing-stage == "request" : Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            text: @tr("Decline");
+            clicked => { SyncUi.decline(); }
+        }
+        if SyncUi.pairing-stage == "request" : Button {
+            width: max(130px, self.content-width);
+            height: 32px;
+            text: @tr("Add device");
+            primary: true;
+            clicked => { SyncUi.accept(); }
+        }
+        if SyncUi.pairing-stage != "request" : Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            text: SyncUi.pairing-stage == "added" || root.ended ? @tr("Close") : @tr("Cancel");
+            primary: SyncUi.pairing-stage == "added";
+            clicked => { root.closed(); }
+        }
+    }
+}
+
+// Connecting this device to an existing sync: a code, a QR code to show or
+// scan, or the recovery code.
+export component JoinDeviceDialog inherits SyncModal {
+    in property <color> body-text;
+    in property <color> secondary-text;
+    in property <color> fill;
+    callback closed();
+
+    private property <string> method: SyncUi.join-method;
+    private property <string> code;
+    private property <string> words;
+    private property <bool> ended: SyncUi.pairing-stage == "declined" || SyncUi.pairing-stage == "expired" || SyncUi.pairing-stage == "not-found" || SyncUi.pairing-stage == "server" || SyncUi.pairing-stage == "failed";
+    // Typing a code or the recovery words: before connecting, or again after
+    // an attempt failed.
+    private property <bool> typing: (root.method == "code" || root.method == "recovery")
+        && (SyncUi.pairing-stage == "" || root.ended);
+
+    open: SyncUi.dialog == "join";
+    title: SyncUi.pairing-stage == "joined" ? @tr("This device is connected")
+        : root.method == "recovery" ? @tr("Use your recovery code")
+        : @tr("Connect this device");
+    panel-width: 520px;
+    dismissed => { root.closed(); }
+    // Typed codes and words don't outlive the dialog.
+    changed open => {
+        root.code = "";
+        root.words = "";
+    }
+
+    if root.typing && root.method == "code" : Text {
+        text: @tr("On your other device, go to Settings → Sync → Add a device → Use a code. Enter the code it shows:");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if root.typing && root.method == "code" : LineEdit {
+        height: 40px;
+        placeholder-text: "1234 5678";
+        input-label: @tr("Code");
+        text <=> root.code;
+        accepted => {
+            if !SyncUi.busy && root.code != "" {
+                SyncUi.join-with-code(root.code);
+            }
+        }
+    }
+    if root.typing && root.method == "recovery" : Text {
+        text: @tr("Type the 24 words of your recovery code, in order. Use this when no other device is at hand.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if root.typing && root.method == "recovery" : LineEdit {
+        height: 40px;
+        placeholder-text: @tr("24 words, separated by spaces");
+        input-label: @tr("Recovery code");
+        text <=> root.words;
+        accepted => {
+            if !SyncUi.busy && root.words != "" {
+                SyncUi.recover(root.words);
+            }
+        }
+    }
+    if root.ended : PairingOutcome {
+        body-text: root.body-text;
+        declined-text: @tr("Your other device did not add this one.");
+        expired-text: @tr("The code expired. Get a new one on your other device.");
+        not-found-text: root.method == "recovery" ? @tr("No sync on this server uses these words. Check each word, and the server address.")
+            : root.method == "code" ? @tr("That code didn't work. Check it, or get a new one on your other device.")
+            : @tr("That QR code isn't for Flectar Mail Sync, or it expired.");
+    }
+    if (SyncUi.pairing-stage == "" && !root.typing) || SyncUi.pairing-stage == "starting" : Text {
+        text: root.method == "qr" ? @tr("Getting a code…")
+            : root.method == "scan" && SyncUi.pairing-stage == "" ? @tr("Scan the QR code your other device shows.")
+            : @tr("Connecting…");
+        color: root.secondary-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if root.method == "qr" && SyncUi.pairing-stage == "code" : Text {
+        text: @tr("On your phone, go to Settings → Sync → Add a device → Scan QR code, and scan this code.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if root.method == "qr" && SyncUi.pairing-stage == "code" && SyncUi.pairing-has-qr : QrCode {
+        source: SyncUi.pairing-qr;
+        label: @tr("QR code for connecting this device");
+    }
+    if SyncUi.pairing-stage == "waiting" : Text {
+        text: root.method == "code"
+            ? @tr("Approve this device on your other one. It shows these same words:")
+            : @tr("Approve this device on your other one.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    if SyncUi.pairing-stage == "waiting" && root.method == "code" : WordGrid {
+        words: SyncUi.pairing-words;
+        columns: 3;
+        body-text: root.body-text;
+        secondary-text: root.secondary-text;
+        fill: root.fill;
+    }
+    if SyncUi.pairing-stage == "joined" : Text {
+        text: @tr("Your accounts, signatures and preferences arrive in a moment. Accounts added on other devices ask you to sign in once.");
+        color: root.body-text;
+        font-size: TypeScale.secondary;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: end;
+        Button {
+            width: max(110px, self.content-width);
+            height: 32px;
+            text: SyncUi.pairing-stage == "joined" ? @tr("Done") : @tr("Cancel");
+            primary: SyncUi.pairing-stage == "joined";
+            clicked => { root.closed(); }
+        }
+        if root.typing && root.method == "code" : Button {
+            width: max(120px, self.content-width);
+            height: 32px;
+            text: @tr("Connect");
+            primary: true;
+            enabled: !SyncUi.busy && root.code != "";
+            clicked => { SyncUi.join-with-code(root.code); }
+        }
+        if root.typing && root.method == "recovery" : Button {
+            width: max(120px, self.content-width);
+            height: 32px;
+            text: @tr("Connect");
+            primary: true;
+            enabled: !SyncUi.busy && root.words != "";
+            clicked => { SyncUi.recover(root.words); }
+        }
+    }
+}

@@ -126,6 +126,11 @@ async fn actor(
             sync_mailboxes(&ctx, config.id, &connected).await?;
             sync_emails(&ctx, &config, &connected, live_since).await?;
             execute_actions(&ctx, &config, &connected).await?;
+            // Scheduled mail the server holds: released, cancelled
+            // elsewhere, or new from another device. Never fails a sync.
+            if let Err(error) = super::held::reconcile(&ctx, &config, &connected).await {
+                tracing::warn!(account_id = config.id, %error, "JMAP held sends could not be followed");
+            }
             // The counts only explain the badges, so they never fail a sync.
             if let Err(error) = sync_mailbox_counts(&ctx, config.id, &connected).await {
                 tracing::warn!(account_id = config.id, %error, "JMAP mailbox counts failed");
@@ -294,13 +299,21 @@ pub(crate) async fn persist_session(
     let url = connected.base_url.clone();
     let remote = connected.account_id.clone();
     let can_create_top_level_mailbox = connected.may_create_top_level_mailbox;
+    let max_delayed_send = i64::try_from(connected.max_delayed_send().await).unwrap_or(i64::MAX);
     ctx.db
         .write(move |conn| {
             conn.execute(
                 "UPDATE accounts
-                 SET jmap_url=?2, jmap_account_id=?3, can_create_top_level_mailbox=?4
+                 SET jmap_url=?2, jmap_account_id=?3, can_create_top_level_mailbox=?4,
+                     jmap_max_delayed_send=?5
                  WHERE id=?1",
-                params![id, url, remote, can_create_top_level_mailbox],
+                params![
+                    id,
+                    url,
+                    remote,
+                    can_create_top_level_mailbox,
+                    max_delayed_send
+                ],
             )?;
             Ok(())
         })
@@ -315,6 +328,7 @@ fn role(value: Role) -> Option<&'static str> {
         Role::Sent => Some(roles::SENT),
         Role::Trash => Some(roles::TRASH),
         Role::Junk => Some(roles::SPAM),
+        Role::Other(other) if other == roles::SCHEDULED => Some(roles::SCHEDULED),
         _ => None,
     }
 }
@@ -1769,15 +1783,34 @@ async fn execute_actions(ctx: &SyncCtx, config: &AccountConfig, c: &ConnectedCli
         {
             continue;
         }
-        let outcome = execute_action(ctx, config, c, &action).await;
+        // A send can end held or cancelled, not only done.
+        let outcome = if action.kind == "send" {
+            super::held::send(ctx, config, c, &action).await
+        } else {
+            execute_action(ctx, config, c, &action)
+                .await
+                .map(|()| super::held::Finish::Done)
+        };
         match outcome {
-            Ok(()) => {
+            Ok(super::held::Finish::Done) => {
                 ctx.db
                     .write(move |conn| repo::actions::set_state(conn, action_id, "done", None))
                     .await?;
                 ctx.bus.emit(CoreEvent::ActionState {
                     action_id,
                     state: "done".into(),
+                    error: None,
+                });
+            }
+            // Held by the server, or for its time here: it says so itself.
+            Ok(super::held::Finish::Waiting) => {}
+            Ok(super::held::Finish::Cancelled) => {
+                ctx.db
+                    .write(move |conn| repo::actions::set_state(conn, action_id, "cancelled", None))
+                    .await?;
+                ctx.bus.emit(CoreEvent::ActionState {
+                    action_id,
+                    state: "cancelled".into(),
                     error: None,
                 });
             }
@@ -2003,7 +2036,6 @@ async fn execute_action(
                 .ok_or_else(|| CoreError::Jmap("draft deletion has no JMAP Email id".into()))?;
             destroy_email_if_present(c, remote_id).await
         }
-        "send" => send_action(ctx, config, c, action).await,
         "snooze" | "unsnooze" => Ok(()),
         other => Err(CoreError::Jmap(format!(
             "unsupported queued JMAP action: {other}"
@@ -2401,7 +2433,7 @@ async fn action_is_inflight(ctx: &SyncCtx, action_id: i64) -> Result<bool> {
         .await
 }
 
-async fn send_action(
+pub(super) async fn send_action(
     ctx: &SyncCtx,
     config: &AccountConfig,
     c: &ConnectedClient,
@@ -2418,83 +2450,20 @@ async fn send_action(
     let submission_accepted = action.payload["jmapSubmissionAccepted"]
         .as_bool()
         .unwrap_or(false);
-    let remote_email = if let Some(remote) = action.payload["jmapPreparedEmailId"].as_str() {
-        remote.to_owned()
-    } else if submission_accepted {
-        // Compatibility with an action persisted after confirmation by an
-        // older build, before the local draft was finalized.
-        ctx.db
-            .read(move |conn| {
-                Ok(repo::messages::get_row(conn, draft_id)?.and_then(|row| row.jmap_id))
-            })
-            .await?
-            .ok_or_else(|| {
-                CoreError::SendUncertain(
-                    "submission was accepted but its prepared Email id is unavailable; check Sent"
-                        .into(),
-                )
-            })?
-    } else {
-        // First make the current local content a remote draft, then durably
-        // pin the exact Email id before submission. A retry after a crash must
-        // query that same EmailSubmission, never replace a possibly-sent Email.
-        save_draft_action(ctx, config, c, action).await?;
-        let remote = ctx
-            .db
-            .read(move |conn| {
-                Ok(repo::messages::get_row(conn, draft_id)?.and_then(|row| row.jmap_id))
-            })
-            .await?
-            .ok_or_else(|| CoreError::Jmap("prepared JMAP draft has no remote Email id".into()))?;
-        mark_send_prepared(ctx, action, &remote).await?;
-        remote
-    };
+    let remote_email =
+        prepared_email(ctx, config, c, action, draft_id, submission_accepted).await?;
     let sent_mailbox =
         ensure_role_mailbox(ctx, config.id, c, roles::SENT, "Sent", Role::Sent).await?;
 
-    // A lost response must not cause a duplicate submission on retry.
+    // A lost response must not cause a duplicate submission on retry. A
+    // cancelled one, as when the server's hold was taken back, never went
+    // out.
     let already_submitted = submission_accepted
-        || !c
-            .email_submission_query(jmap_client::email_submission::query::Filter::email_ids([
-                remote_email.clone(),
-            ]))
-            .await
-            .map_err(client::map_error)?
-            .ids()
-            .is_empty();
+        || super::held::live_submission(c, &remote_email)
+            .await?
+            .is_some();
     if !already_submitted {
-        let sender_email = ctx
-            .db
-            .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
-            .await?;
-        let mut identity_request = c.request();
-        identity_request.get_identity().account_id(&c.account_id);
-        let identities = c
-            .send_single::<IdentityGetResponse>(identity_request)
-            .await
-            .map_err(client::map_error)?
-            .take_list();
-        // RFC 8621 §6: an exact identity is more specific than `*@domain`.
-        let identity_id = identities
-            .iter()
-            .filter(|identity| {
-                identity
-                    .email()
-                    .is_some_and(|email| identity_matches(email, &sender_email))
-            })
-            .min_by_key(|identity| {
-                identity
-                    .email()
-                    .is_some_and(|email| email.starts_with("*@"))
-            })
-            .and_then(|identity| identity.id())
-            .ok_or_else(|| {
-                CoreError::Jmap(format!(
-                    "server has no JMAP sending identity for {}",
-                    sender_email
-                ))
-            })?
-            .to_owned();
+        let (sender_email, identity_id) = sending_identity(ctx, c, draft_id).await?;
         let (request, create_id) =
             submission_request(c, &remote_email, identity_id, sent_mailbox.clone());
         let mut response = c
@@ -2551,6 +2520,102 @@ async fn send_action(
     }
     ensure_submitted_email_state(c, &remote_email, &sent_mailbox).await?;
 
+    finish_sent_locally(ctx, config, draft_id).await
+}
+
+/// The server's Email for the draft a send action sends: made from the
+/// current local content once, then pinned, so a retry after a crash finds
+/// the same EmailSubmission instead of replacing a possibly sent Email.
+pub(super) async fn prepared_email(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    c: &ConnectedClient,
+    action: &repo::actions::PendingAction,
+    draft_id: i64,
+    submission_accepted: bool,
+) -> Result<String> {
+    let remote_email = if let Some(remote) = action.payload["jmapPreparedEmailId"].as_str() {
+        remote.to_owned()
+    } else if submission_accepted {
+        // Compatibility with an action persisted after confirmation by an
+        // older build, before the local draft was finalized.
+        ctx.db
+            .read(move |conn| {
+                Ok(repo::messages::get_row(conn, draft_id)?.and_then(|row| row.jmap_id))
+            })
+            .await?
+            .ok_or_else(|| {
+                CoreError::SendUncertain(
+                    "submission was accepted but its prepared Email id is unavailable; check Sent"
+                        .into(),
+                )
+            })?
+    } else {
+        // First make the current local content a remote draft, then durably
+        // pin the exact Email id before submission. A retry after a crash must
+        // query that same EmailSubmission, never replace a possibly-sent Email.
+        save_draft_action(ctx, config, c, action).await?;
+        let remote = ctx
+            .db
+            .read(move |conn| {
+                Ok(repo::messages::get_row(conn, draft_id)?.and_then(|row| row.jmap_id))
+            })
+            .await?
+            .ok_or_else(|| CoreError::Jmap("prepared JMAP draft has no remote Email id".into()))?;
+        mark_send_prepared(ctx, action, &remote).await?;
+        remote
+    };
+    Ok(remote_email)
+}
+
+/// The sender of a draft and the server's identity that sends as it: an
+/// exact identity before a `*@domain` one (RFC 8621 §6).
+pub(super) async fn sending_identity(
+    ctx: &SyncCtx,
+    c: &ConnectedClient,
+    draft_id: i64,
+) -> Result<(String, String)> {
+    let sender_email = ctx
+        .db
+        .read(move |conn| Ok(repo::messages::detail(conn, draft_id)?.from.email))
+        .await?;
+    let mut identity_request = c.request();
+    identity_request.get_identity().account_id(&c.account_id);
+    let identities = c
+        .send_single::<IdentityGetResponse>(identity_request)
+        .await
+        .map_err(client::map_error)?
+        .take_list();
+    // RFC 8621 §6: an exact identity is more specific than `*@domain`.
+    let identity_id = identities
+        .iter()
+        .filter(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| identity_matches(email, &sender_email))
+        })
+        .min_by_key(|identity| {
+            identity
+                .email()
+                .is_some_and(|email| email.starts_with("*@"))
+        })
+        .and_then(|identity| identity.id())
+        .ok_or_else(|| {
+            CoreError::Jmap(format!(
+                "server has no JMAP sending identity for {}",
+                sender_email
+            ))
+        })?
+        .to_owned();
+    Ok((sender_email, identity_id))
+}
+
+/// Show a draft the server sent as sent: in Sent, no longer a draft.
+pub(super) async fn finish_sent_locally(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    draft_id: i64,
+) -> Result<()> {
     let sent_folder_id = ctx
         .db
         .read({
@@ -2600,7 +2665,7 @@ async fn send_action(
     Ok(())
 }
 
-async fn ensure_role_mailbox(
+pub(super) async fn ensure_role_mailbox(
     ctx: &SyncCtx,
     account_id: i64,
     c: &ConnectedClient,
@@ -2658,7 +2723,7 @@ fn submission_request<'a>(
     (request, create_id)
 }
 
-async fn ensure_submitted_email_state(
+pub(super) async fn ensure_submitted_email_state(
     c: &ConnectedClient,
     remote_email: &str,
     sent_mailbox: &str,
@@ -2692,7 +2757,7 @@ fn identity_matches(identity: &str, from: &str) -> bool {
     identity_local == "*" && identity_domain.eq_ignore_ascii_case(from_domain)
 }
 
-fn map_submission_error(error: jmap_client::Error) -> CoreError {
+pub(super) fn map_submission_error(error: jmap_client::Error) -> CoreError {
     let uncertain = match &error {
         jmap_client::Error::Transport(_) | jmap_client::Error::Parse(_) => true,
         jmap_client::Error::Internal(_) => true,

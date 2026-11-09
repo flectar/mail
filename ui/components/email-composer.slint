@@ -49,6 +49,9 @@ export component EmailComposer inherits Rectangle {
     in property <bool> code-active: false;
     in property <string> active-link-url: "";
     in property <bool> can-pop-out: false;
+    // When the message reminds the user unless someone replies, as shown,
+    // or empty.
+    in property <string> remind-time: "";
     // "reply" or "forward" when the original goes below the editor.
     in property <string> quote: "";
     in property <string> quote-text: "";
@@ -86,6 +89,9 @@ export component EmailComposer inherits Rectangle {
     callback back-requested;
     callback submit(bool);
     callback pick-attachments;
+    // Pick when the message goes out, or reminds the user.
+    callback schedule-send;
+    callback remind;
     callback remove-attachment(int);
     callback format-requested(string, string, int, int);
     callback link-requested(string, string, int, int);
@@ -355,6 +361,8 @@ export component EmailComposer inherits Rectangle {
             can-link: root.selection-start != root.selection-end;
             apply-format(kind) => { root.apply-format(kind); }
             open-templates => { root.templates-open = true; }
+            remind-time: root.remind-time;
+            remind => { root.remind(); }
             undo => {
                 root.history-requested("undo");
                 body-input.set-selection-offsets(root.selection-start, root.selection-end);
@@ -654,6 +662,7 @@ export component EmailComposer inherits Rectangle {
             secondary-color: root.secondary-color;
             subtle-border-color: root.subtle-border-color;
             submit(send-now) => { root.submit(send-now); }
+            schedule-send => { root.schedule-send(); }
             pick-attachments => { root.pick-attachments(); }
             request-close => { root.request-close(); }
         }

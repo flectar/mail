@@ -3215,6 +3215,62 @@ async fn send_remote_draft(
     finalize_sent_draft(ctx, config, draft_id, sent, &prepared.message_id).await
 }
 
+/// Send a draft another of the user's devices scheduled, as Gmail keeps it:
+/// this device may hold neither its whole body nor its attachments.
+async fn send_draft_as_is(
+    ctx: &SyncCtx,
+    config: &AccountConfig,
+    api: &GmailApi,
+    draft_id: i64,
+) -> Result<()> {
+    let (provider_draft_id, message_id) = ctx
+        .db
+        .read(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT gmail_draft_id, message_id FROM messages WHERE id = ?1 AND is_draft = 1",
+                    params![draft_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                        ))
+                    },
+                )
+                .optional()?)
+        })
+        .await?
+        .ok_or_else(|| CoreError::NotFound(format!("draft {draft_id}")))?;
+    let message_id = message_id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| CoreError::NotFound("the draft's Message-ID".into()))?;
+    if let Some(sent) = api.find_sent_by_message_id(&message_id).await? {
+        return finalize_sent_draft(ctx, config, draft_id, sent, &message_id).await;
+    }
+    let provider_draft_id =
+        provider_draft_id.ok_or_else(|| CoreError::NotFound("Gmail draft".into()))?;
+    let sent = match api.send_draft(&provider_draft_id).await {
+        Ok(sent) => sent,
+        Err(error) => {
+            let ambiguous = matches!(
+                &error,
+                CoreError::Offline
+                    | CoreError::Network(_)
+                    | CoreError::ResponseTooLarge { .. }
+                    | CoreError::NotFound(_)
+            );
+            if !ambiguous {
+                return Err(error);
+            }
+            match api.find_sent_by_message_id(&message_id).await? {
+                Some(sent) => sent,
+                None => return Err(error),
+            }
+        }
+    };
+    finalize_sent_draft(ctx, config, draft_id, sent, &message_id).await
+}
+
 async fn finalize_sent_draft(
     ctx: &SyncCtx,
     config: &AccountConfig,
@@ -3401,6 +3457,9 @@ async fn apply_action(
             let draft_id = action.payload["draftId"]
                 .as_i64()
                 .ok_or_else(|| CoreError::Other("send omitted draftId".into()))?;
+            if action.payload["asIs"].as_bool() == Some(true) {
+                return send_draft_as_is(ctx, config, api, draft_id).await;
+            }
             return send_remote_draft(ctx, config, api, draft_id).await;
         }
         "gmail_label_create" => {
