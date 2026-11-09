@@ -1070,7 +1070,7 @@ fn mail_list_time(date_ms: i64, now: &chrono::DateTime<Local>) -> String {
 
 /// When snoozed mail comes back or a scheduled draft goes out, short enough
 /// for a list row: a time today, a weekday and a time within the week, and
-/// otherwise a date and a time.
+/// otherwise a date and a time, with the year once it is another.
 pub(super) fn upcoming_time(at_ms: i64, now: &chrono::DateTime<Local>) -> String {
     let Some(at) = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(at_ms)
         .map(|at| at.with_timezone(&Local))
@@ -1088,7 +1088,10 @@ pub(super) fn upcoming_time(at_ms: i64, now: &chrono::DateTime<Local>) -> String
             formats.weekday(at.weekday().num_days_from_monday(), true),
             &formats.time(at.hour(), at.minute()),
         ),
-        _ => formats.date_time(DateStyle::ShortDayMonth, at.naive_local()),
+        _ if at.year() == now.year() => {
+            formats.date_time(DateStyle::ShortDayMonth, at.naive_local())
+        }
+        _ => formats.date_time(DateStyle::Short, at.naive_local()),
     }
 }
 
@@ -1777,6 +1780,26 @@ mod tests {
         assert_eq!(message_time(today, &now), "12:00");
         assert_eq!(message_time(yesterday, &now), "Yesterday");
         assert_eq!(message_time(last_year, &now), "Dec 20, 2025");
+    }
+
+    #[test]
+    fn times_ahead_name_the_year_once_it_is_another() {
+        let at = |year, month, day, hour| {
+            let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
+                .unwrap()
+                .and_hms_opt(hour, 0, 0)
+                .unwrap();
+            Local.from_local_datetime(&naive).single().unwrap()
+        };
+        let now = at(2026, 12, 20, 12);
+        let ahead = |year, month, day, hour| {
+            upcoming_time(at(year, month, day, hour).timestamp_millis(), &now)
+        };
+        assert_eq!(ahead(2026, 12, 20, 18), "18:00");
+        assert!(ahead(2026, 12, 30, 8).starts_with("Dec 30"));
+        assert!(!ahead(2026, 12, 30, 8).contains("2026"));
+        let next_year = ahead(2027, 1, 13, 8);
+        assert!(next_year.contains("2027"), "{next_year}");
     }
 
     #[test]
