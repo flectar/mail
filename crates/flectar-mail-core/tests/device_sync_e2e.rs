@@ -579,6 +579,50 @@ async fn the_same_mailbox_over_two_protocols_settles() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_device_that_rejoins_drops_what_was_deleted_meanwhile() {
+    let Some(server) = start_server().await else {
+        return;
+    };
+    let laptop_dir = tempfile::tempdir().unwrap();
+    let phone_dir = tempfile::tempdir().unwrap();
+    let laptop = start_core(laptop_dir.path()).await;
+    let phone = start_core(phone_dir.path()).await;
+    laptop
+        .save_snippet(
+            None,
+            "Thanks".into(),
+            Some("ty".into()),
+            None,
+            "Thanks!".into(),
+        )
+        .await
+        .unwrap();
+    laptop
+        .device_sync_turn_on(Some(server.url.clone()))
+        .await
+        .unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+    join_with_code(&laptop, &phone, &server.url).await;
+    assert!(phone.device_sync_run().await.unwrap());
+    assert_eq!(phone.list_snippets().await.unwrap().len(), 1);
+
+    // The phone leaves, and the template goes while it is away.
+    phone.device_sync_turn_off().await.unwrap();
+    let template = laptop.list_snippets().await.unwrap()[0].id;
+    laptop.delete_snippet(template).await.unwrap();
+    assert!(laptop.device_sync_run().await.unwrap());
+
+    // Back in the group, the phone drops it too, and it never comes back.
+    join_with_code(&laptop, &phone, &server.url).await;
+    for _ in 0..2 {
+        phone.device_sync_run().await.unwrap();
+        laptop.device_sync_run().await.unwrap();
+    }
+    assert!(phone.list_snippets().await.unwrap().is_empty());
+    assert!(laptop.list_snippets().await.unwrap().is_empty());
+}
+
 #[test]
 fn a_locked_keyring_at_startup_keeps_sync_on() {
     let credentials = Arc::new(MemoryCredentials::default());

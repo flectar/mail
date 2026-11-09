@@ -548,7 +548,14 @@ pub(crate) fn apply(
                 apply_delete(conn, &mut settings, &id, previous, &mut applied)?;
                 Outcome::Applied
             }
-            (None, None) => Outcome::Applied,
+            // Deleted while this device was out of the group: its own copy
+            // goes too, rather than coming back for every device.
+            (None, None) => {
+                if let Some(own) = local_before.get(&id) {
+                    apply_delete(conn, &mut settings, &id, own, &mut applied)?;
+                }
+                Outcome::Applied
+            }
         };
         match outcome {
             Outcome::Applied => set_local_hash(conn, &id, next.map(body_hash))?,
