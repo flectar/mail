@@ -219,12 +219,32 @@ pub(super) fn open_windows() -> usize {
     .unwrap_or_default()
 }
 
-/// Composers list the accounts the main window lists.
+/// Composers list the accounts the main window lists. A message whose
+/// account was removed moves to the one new mail starts from.
 pub(super) fn accounts_changed(app: &AppWindow) {
     with_composers(|composers| {
-        for session in composers.sessions.borrow().iter() {
-            if let Some(host) = session.host() {
-                host.ui().set_accounts(app.get_connected_accounts());
+        let sessions = composers.sessions.borrow().clone();
+        for session in sessions {
+            let Some(host) = session.host() else {
+                continue;
+            };
+            let ui = host.ui();
+            let accounts = app.get_connected_accounts();
+            let kept = (0..accounts.row_count())
+                .filter_map(|index| accounts.row_data(index))
+                .any(|account| account.id == ui.get_account_id());
+            ui.set_accounts(accounts);
+            if kept || session.disposed.get() {
+                continue;
+            }
+            let account_id = app.get_compose_account_id();
+            ui.set_account_id(account_id);
+            ui.set_from_label(app.get_compose_from_label());
+            if account_id > 0 {
+                host.preferences()
+                    .invoke_composer_account_changed(account_id);
+            } else {
+                session.reset_preferences();
             }
         }
     });
@@ -1045,7 +1065,7 @@ impl ComposeSession {
         let weak = self.reference();
         preferences.on_composer_account_changed(move |account_id| {
             if let Some(session) = weak.upgrade() {
-                session.load_preferences(account_id);
+                session.account_chosen(account_id);
             }
         });
         let weak = self.reference();
@@ -1810,6 +1830,18 @@ impl ComposeSession {
         preferences.set_composer_preferences_ready(false);
     }
 
+    /// The message is sent from `account_id` now. The next new message
+    /// starts from it too, as the last account mail was written from.
+    fn account_chosen(self: &Rc<Self>, account_id: i32) {
+        if let Some(app) = self
+            .composers()
+            .and_then(|composers| composers.app.upgrade())
+        {
+            account_controller::remember_compose_account(&app, account_id);
+        }
+        self.load_preferences(account_id);
+    }
+
     /// Load the sending account's identities and signatures, then choose
     /// the sender and insert the default signature.
     fn load_preferences(self: &Rc<Self>, account_id: i32) {
@@ -2123,6 +2155,24 @@ mod tests {
         ])));
         accounts_changed(&app);
         assert_eq!(second.ui().get_accounts().row_count(), 2);
+
+        // The account a message is written from is where the next new one
+        // starts, wherever the message is.
+        popped.preferences().invoke_composer_account_changed(2);
+        assert_eq!(app.get_compose_account_id(), 2);
+
+        // A message whose account is removed moves to the account new mail
+        // starts from.
+        second.ui().set_account_id(2);
+        app.set_compose_account_id(1);
+        app.set_connected_accounts(ModelRc::new(VecModel::from(vec![AccountRow {
+            id: 1,
+            ..Default::default()
+        }])));
+        accounts_changed(&app);
+        assert_eq!(second.ui().get_account_id(), 1);
+        assert_eq!(second.ui().get_accounts().row_count(), 1);
+        assert_eq!(popped.ui().get_account_id(), 1);
 
         // The close button keeps a message with content behind the discard
         // confirmation.

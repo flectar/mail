@@ -544,6 +544,19 @@ pub(super) fn apply_connected_account_rows(app: &AppWindow, rows: Vec<AccountRow
     composer::accounts_changed(app);
 }
 
+/// New mail starts from the account the last message was written from.
+pub(super) fn remember_compose_account(app: &AppWindow, account_id: i32) {
+    if app.get_compose_account_id() == account_id {
+        return;
+    }
+    if let Some(account) = connected_account_rows(app)
+        .iter()
+        .find(|account| account.id == account_id)
+    {
+        set_compose_account(app, Some(account));
+    }
+}
+
 fn set_compose_account(app: &AppWindow, account: Option<&AccountRow>) {
     if let Some(account) = account {
         app.set_compose_account_id(account.id);
